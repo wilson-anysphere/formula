@@ -631,6 +631,31 @@ pub struct MacroRunResult {
     pub error: Option<MacroError>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct VbaReferenceSummary {
+    pub name: Option<String>,
+    pub guid: Option<String>,
+    pub major: Option<u16>,
+    pub minor: Option<u16>,
+    pub path: Option<String>,
+    pub raw: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct VbaModuleSummary {
+    pub name: String,
+    pub module_type: String,
+    pub code: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct VbaProjectSummary {
+    pub name: Option<String>,
+    pub constants: Option<String>,
+    pub references: Vec<VbaReferenceSummary>,
+    pub modules: Vec<VbaModuleSummary>,
+}
+
 #[cfg(feature = "desktop")]
 fn build_vba_program(state: &AppState) -> Result<formula_vba_runtime::VbaProgram, String> {
     let workbook = state.get_workbook().map_err(app_error)?;
@@ -647,6 +672,47 @@ fn build_vba_program(state: &AppState) -> Result<formula_vba_runtime::VbaProgram
         .join("\n\n");
 
     formula_vba_runtime::parse_program(&combined).map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn get_vba_project(
+    workbook_id: Option<String>,
+    state: State<'_, SharedAppState>,
+) -> Result<Option<VbaProjectSummary>, String> {
+    let _ = workbook_id;
+    let state = state.inner().lock().unwrap();
+    let workbook = state.get_workbook().map_err(app_error)?;
+    let Some(vba_bin) = workbook.vba_project_bin.as_ref() else {
+        return Ok(None);
+    };
+
+    let project = formula_vba::VBAProject::parse(vba_bin).map_err(|e| e.to_string())?;
+    Ok(Some(VbaProjectSummary {
+        name: project.name,
+        constants: project.constants,
+        references: project
+            .references
+            .into_iter()
+            .map(|r| VbaReferenceSummary {
+                name: r.name,
+                guid: r.guid,
+                major: r.major,
+                minor: r.minor,
+                path: r.path,
+                raw: r.raw,
+            })
+            .collect(),
+        modules: project
+            .modules
+            .into_iter()
+            .map(|m| VbaModuleSummary {
+                name: m.name,
+                module_type: format!("{:?}", m.module_type),
+                code: m.code,
+            })
+            .collect(),
+    }))
 }
 
 #[cfg(feature = "desktop")]
