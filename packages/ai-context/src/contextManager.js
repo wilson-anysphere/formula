@@ -128,6 +128,7 @@ export class ContextManager {
 
     const [queryVector] = await embedder.embedTexts([params.query]);
     const hits = await vectorStore.query(queryVector, topK, {
+      workbookId: params.workbook.id,
       filter: (metadata) => metadata && metadata.workbookId === params.workbook.id,
     });
 

@@ -4,10 +4,10 @@ export { OpenAIEmbedder } from "./embedding/openaiEmbedder.js";
 
 export { InMemoryVectorStore } from "./store/inMemoryVectorStore.js";
 export { JsonFileVectorStore } from "./store/jsonFileVectorStore.js";
+export { SqliteVectorStore } from "./store/sqliteVectorStore.js";
 
 export { chunkWorkbook } from "./workbook/chunkWorkbook.js";
 export { chunkToText } from "./workbook/chunkToText.js";
 export { rectToA1 } from "./workbook/rect.js";
 
 export { indexWorkbook, approximateTokenCount } from "./pipeline/indexWorkbook.js";
-

@@ -1,0 +1,326 @@
+import { createRequire } from "node:module";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+import { normalizeL2, toFloat32Array } from "./vectorMath.js";
+
+function locateSqlJsFile(file) {
+  try {
+    const require = createRequire(import.meta.url);
+    return require.resolve(`sql.js/dist/${file}`);
+  } catch {
+    return file;
+  }
+}
+
+let sqlJsPromise;
+async function getSqlJs() {
+  if (!sqlJsPromise) {
+    sqlJsPromise = import("sql.js").then((mod) => {
+      const initSqlJs = mod.default ?? mod;
+      return initSqlJs({ locateFile: locateSqlJsFile });
+    });
+  }
+  return sqlJsPromise;
+}
+
+function blobToFloat32(blob) {
+  if (!(blob instanceof Uint8Array)) {
+    throw new Error("Expected SQLite BLOB to be Uint8Array");
+  }
+  if (blob.byteLength % 4 !== 0) {
+    throw new Error(`Invalid vector blob length: ${blob.byteLength}`);
+  }
+  return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+}
+
+function float32ToBlob(vec) {
+  const v = vec instanceof Float32Array ? vec : Float32Array.from(vec);
+  return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+}
+
+/**
+ * A persistent vector store backed by sql.js (SQLite compiled to WASM).
+ *
+ * Notes:
+ * - Vectors are stored as Float32Array BLOBs (L2-normalized at write time).
+ * - Query uses a custom SQLite scalar function `dot(vectorBlob, queryBlob)` and
+ *   `ORDER BY dot(...) DESC LIMIT topK`.
+ * - This is still an O(n) scan inside SQLite; it provides persistence and
+ *   reasonable workbook-scale performance. If we later add a true ANN extension
+ *   (e.g. sqlite-vss) the interface stays the same.
+ */
+export class SqliteVectorStore {
+  /**
+   * @param {any} db
+   * @param {{ filePath?: string|null, dimension: number, autoSave: boolean }} opts
+   */
+  constructor(db, opts) {
+    this._db = db;
+    this._filePath = opts.filePath ?? null;
+    this._dimension = opts.dimension;
+    this._autoSave = opts.autoSave;
+
+    this._ensureSchema();
+    this._registerFunctions();
+  }
+
+  static async create(opts) {
+    if (!opts || !Number.isFinite(opts.dimension) || opts.dimension <= 0) {
+      throw new Error("SqliteVectorStore requires a positive dimension");
+    }
+
+    const SQL = await getSqlJs();
+    let existing = null;
+
+    if (opts.filePath) {
+      try {
+        const buffer = await readFile(opts.filePath);
+        existing = new Uint8Array(buffer);
+      } catch (err) {
+        if (err && err.code !== "ENOENT") throw err;
+      }
+    }
+
+    const db = existing ? new SQL.Database(existing) : new SQL.Database();
+    const store = new SqliteVectorStore(db, {
+      filePath: opts.filePath ?? null,
+      dimension: opts.dimension,
+      autoSave: opts.autoSave ?? true,
+    });
+
+    store._ensureMeta(opts.dimension);
+    return store;
+  }
+
+  get dimension() {
+    return this._dimension;
+  }
+
+  _ensureSchema() {
+    this._db.run(`
+      CREATE TABLE IF NOT EXISTS vector_store_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS vectors (
+        id TEXT PRIMARY KEY,
+        workbook_id TEXT,
+        vector BLOB NOT NULL,
+        metadata_json TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vectors_workbook_id ON vectors(workbook_id);
+    `);
+  }
+
+  /**
+   * @param {number} dimension
+   */
+  _ensureMeta(dimension) {
+    const stmt = this._db.prepare("SELECT value FROM vector_store_meta WHERE key = 'dimension' LIMIT 1;");
+    const hasRow = stmt.step();
+    const existing = hasRow ? stmt.get()[0] : null;
+    stmt.free();
+
+    if (existing == null) {
+      const insert = this._db.prepare("INSERT INTO vector_store_meta (key, value) VALUES ('dimension', ?);");
+      insert.run([String(dimension)]);
+      insert.free();
+      return;
+    }
+
+    const existingDim = Number(existing);
+    if (existingDim !== dimension) {
+      throw new Error(
+        `SqliteVectorStore dimension mismatch: db has ${existingDim}, requested ${dimension}`
+      );
+    }
+  }
+
+  _registerFunctions() {
+    // sql.js exposes create_function(name, fn)
+    // eslint-disable-next-line no-underscore-dangle
+    this._db.create_function("dot", (a, b) => {
+      const va = blobToFloat32(a);
+      const vb = blobToFloat32(b);
+      const len = Math.min(va.length, vb.length);
+      let dot = 0;
+      for (let i = 0; i < len; i += 1) dot += va[i] * vb[i];
+      return dot;
+    });
+  }
+
+  async _persist() {
+    if (!this._filePath) return;
+    const dir = path.dirname(this._filePath);
+    await mkdir(dir, { recursive: true });
+    const data = this._db.export();
+    const tmp = `${this._filePath}.tmp`;
+    await writeFile(tmp, data);
+    await rename(tmp, this._filePath);
+  }
+
+  /**
+   * @param {{ id: string, vector: ArrayLike<number>, metadata: any }[]} records
+   */
+  async upsert(records) {
+    if (!records.length) return;
+
+    const stmt = this._db.prepare(`
+      INSERT INTO vectors (id, workbook_id, vector, metadata_json)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        workbook_id = excluded.workbook_id,
+        vector = excluded.vector,
+        metadata_json = excluded.metadata_json;
+    `);
+
+    this._db.run("BEGIN;");
+    try {
+      for (const r of records) {
+        const vec = toFloat32Array(r.vector);
+        if (vec.length !== this._dimension) {
+          throw new Error(
+            `Vector dimension mismatch for id=${r.id}: expected ${this._dimension}, got ${vec.length}`
+          );
+        }
+        const norm = normalizeL2(vec);
+        const blob = float32ToBlob(norm);
+        const meta = r.metadata ?? {};
+        const workbookId = meta.workbookId ?? null;
+        stmt.run([r.id, workbookId, blob, JSON.stringify(meta)]);
+      }
+      this._db.run("COMMIT;");
+    } catch (err) {
+      this._db.run("ROLLBACK;");
+      throw err;
+    } finally {
+      stmt.free();
+    }
+
+    if (this._autoSave) await this._persist();
+  }
+
+  /**
+   * @param {string[]} ids
+   */
+  async delete(ids) {
+    if (!ids.length) return;
+    const stmt = this._db.prepare("DELETE FROM vectors WHERE id = ?;");
+    this._db.run("BEGIN;");
+    try {
+      for (const id of ids) stmt.run([id]);
+      this._db.run("COMMIT;");
+    } catch (err) {
+      this._db.run("ROLLBACK;");
+      throw err;
+    } finally {
+      stmt.free();
+    }
+    if (this._autoSave) await this._persist();
+  }
+
+  /**
+   * @param {string} id
+   */
+  async get(id) {
+    const stmt = this._db.prepare("SELECT vector, metadata_json FROM vectors WHERE id = ? LIMIT 1;");
+    stmt.bind([id]);
+    if (!stmt.step()) {
+      stmt.free();
+      return null;
+    }
+    const row = stmt.get();
+    stmt.free();
+
+    const vec = blobToFloat32(row[0]);
+    const metadata = JSON.parse(row[1]);
+    return { id, vector: new Float32Array(vec), metadata };
+  }
+
+  /**
+   * @param {{
+   *   filter?: (metadata: any, id: string) => boolean,
+   *   workbookId?: string,
+   *   includeVector?: boolean
+   * }} [opts]
+   */
+  async list(opts) {
+    const filter = opts?.filter;
+    const workbookId = opts?.workbookId;
+    const includeVector = opts?.includeVector ?? true;
+
+    const sql = workbookId
+      ? `SELECT id, ${includeVector ? "vector," : ""} metadata_json FROM vectors WHERE workbook_id = ?`
+      : `SELECT id, ${includeVector ? "vector," : ""} metadata_json FROM vectors`;
+    const stmt = this._db.prepare(sql);
+    if (workbookId) stmt.bind([workbookId]);
+
+    const out = [];
+    while (stmt.step()) {
+      const row = stmt.get();
+      const id = row[0];
+      const vecBlob = includeVector ? row[1] : null;
+      const metaJson = includeVector ? row[2] : row[1];
+      const metadata = JSON.parse(metaJson);
+      if (filter && !filter(metadata, id)) continue;
+      out.push({
+        id,
+        vector: includeVector ? new Float32Array(blobToFloat32(vecBlob)) : undefined,
+        metadata,
+      });
+    }
+    stmt.free();
+    return out;
+  }
+
+  /**
+   * @param {ArrayLike<number>} vector
+   * @param {number} topK
+   * @param {{ filter?: (metadata: any, id: string) => boolean, workbookId?: string }} [opts]
+   */
+  async query(vector, topK, opts) {
+    const filter = opts?.filter;
+    const workbookId = opts?.workbookId;
+    const q = normalizeL2(vector);
+    const qBlob = float32ToBlob(q);
+
+    const sql = workbookId
+      ? `
+        SELECT id, metadata_json, dot(vector, ?) AS score
+        FROM vectors
+        WHERE workbook_id = ?
+        ORDER BY score DESC
+        LIMIT ?;
+      `
+      : `
+        SELECT id, metadata_json, dot(vector, ?) AS score
+        FROM vectors
+        ORDER BY score DESC
+        LIMIT ?;
+      `;
+
+    const stmt = this._db.prepare(sql);
+    if (workbookId) stmt.bind([qBlob, workbookId, topK]);
+    else stmt.bind([qBlob, topK]);
+
+    const out = [];
+    while (stmt.step()) {
+      const row = stmt.get();
+      const id = row[0];
+      const metadata = JSON.parse(row[1]);
+      if (filter && !filter(metadata, id)) continue;
+      const score = Number(row[2]);
+      out.push({ id, score, metadata });
+    }
+    stmt.free();
+    return out;
+  }
+
+  async close() {
+    await this._persist();
+    this._db.close();
+  }
+}

@@ -26,6 +26,14 @@ export async function indexWorkbook(params) {
   const sampleRows = params.sampleRows ?? 5;
   const chunks = chunkWorkbook(workbook);
 
+  const existingForWorkbook = await vectorStore.list({
+    workbookId: workbook.id,
+    includeVector: false,
+  });
+  const existingHashes = new Map(
+    existingForWorkbook.map((r) => [r.id, r.metadata?.contentHash])
+  );
+
   const currentIds = new Set();
   /** @type {{ id: string, text: string, metadata: any }[]} */
   const toUpsert = [];
@@ -35,8 +43,7 @@ export async function indexWorkbook(params) {
     const contentHash = sha256Hex(text);
     currentIds.add(chunk.id);
 
-    const existing = await vectorStore.get(chunk.id);
-    if (existing?.metadata?.contentHash === contentHash) continue;
+    if (existingHashes.get(chunk.id) === contentHash) continue;
 
     toUpsert.push({
       id: chunk.id,
@@ -57,19 +64,20 @@ export async function indexWorkbook(params) {
   const vectors =
     toUpsert.length > 0 ? await embedder.embedTexts(toUpsert.map((r) => r.text)) : [];
 
-  await vectorStore.upsert(
-    toUpsert.map((r, i) => ({
-      id: r.id,
-      vector: vectors[i],
-      metadata: r.metadata,
-    }))
-  );
+  if (toUpsert.length) {
+    await vectorStore.upsert(
+      toUpsert.map((r, i) => ({
+        id: r.id,
+        vector: vectors[i],
+        metadata: r.metadata,
+      }))
+    );
+  }
 
   // Delete stale records for this workbook.
-  const existing = await vectorStore.list({
-    filter: (metadata) => metadata && metadata.workbookId === workbook.id,
-  });
-  const staleIds = existing.map((r) => r.id).filter((id) => !currentIds.has(id));
+  const staleIds = existingForWorkbook
+    .map((r) => r.id)
+    .filter((id) => !currentIds.has(id));
   if (staleIds.length) await vectorStore.delete(staleIds);
 
   return {

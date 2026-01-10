@@ -1,5 +1,5 @@
 import { extractCells } from "./extractCells.js";
-import { rectIntersectionArea, rectSize } from "./rect.js";
+import { rectIntersectionArea, rectSize, rectToA1 } from "./rect.js";
 import { getSheetMatrix, normalizeCell } from "./normalizeCell.js";
 
 function isNonEmptyCell(cell) {
@@ -168,16 +168,15 @@ function chunkWorkbook(workbook) {
     const dataRegions = detectRegions(sheet, isNonEmptyCell).filter(
       (rect) => !overlapsExisting(rect, existingRects)
     );
-    let idx = 0;
     for (const rect of dataRegions) {
-      const id = `${workbook.id}::${sheet.name}::dataRegion::${idx}`;
-      idx += 1;
+      const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
+      const id = `${workbook.id}::${sheet.name}::dataRegion::${coordKey}`;
       chunks.push({
         id,
         workbookId: workbook.id,
         sheetName: sheet.name,
         kind: "dataRegion",
-        title: `Data region ${idx}`,
+        title: `Data region ${rectToA1(rect)}`,
         rect,
         cells: extractCells(sheet, rect),
       });
@@ -186,16 +185,15 @@ function chunkWorkbook(workbook) {
     const formulaRegions = detectRegions(sheet, isFormulaCell).filter(
       (rect) => !overlapsExisting(rect, existingRects)
     );
-    let fidx = 0;
     for (const rect of formulaRegions) {
-      const id = `${workbook.id}::${sheet.name}::formulaRegion::${fidx}`;
-      fidx += 1;
+      const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
+      const id = `${workbook.id}::${sheet.name}::formulaRegion::${coordKey}`;
       chunks.push({
         id,
         workbookId: workbook.id,
         sheetName: sheet.name,
         kind: "formulaRegion",
-        title: `Formula region ${fidx}`,
+        title: `Formula region ${rectToA1(rect)}`,
         rect,
         cells: extractCells(sheet, rect),
       });

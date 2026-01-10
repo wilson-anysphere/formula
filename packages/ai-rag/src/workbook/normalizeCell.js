@@ -7,6 +7,12 @@ export function normalizeCell(raw) {
     if (Object.prototype.hasOwnProperty.call(raw, "v") || Object.prototype.hasOwnProperty.call(raw, "f")) {
       return raw;
     }
+
+    // Treat `{}` as an empty cell; it's a common sparse representation.
+    if (raw.constructor === Object && Object.keys(raw).length === 0) return {};
+
+    // Preserve rich object values (e.g. Date, structured types) as the cell value.
+    if (raw instanceof Date) return { v: raw };
   }
 
   if (typeof raw === "string") {
@@ -27,4 +33,3 @@ export function normalizeCell(raw) {
 export function getSheetMatrix(sheet) {
   return sheet?.cells ?? sheet?.values ?? [];
 }
-

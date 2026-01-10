@@ -65,14 +65,21 @@ export class InMemoryVectorStore {
   }
 
   /**
-   * @param {{ filter?: (metadata: any, id: string) => boolean }} [opts]
+   * @param {{
+   *   filter?: (metadata: any, id: string) => boolean,
+   *   workbookId?: string,
+   *   includeVector?: boolean
+   * }} [opts]
    */
   async list(opts) {
     const filter = opts?.filter;
+    const workbookId = opts?.workbookId;
+    const includeVector = opts?.includeVector ?? true;
     const out = [];
     for (const [id, rec] of this._records) {
+      if (workbookId && rec.metadata?.workbookId !== workbookId) continue;
       if (filter && !filter(rec.metadata, id)) continue;
-      out.push({ id, vector: rec.vector, metadata: rec.metadata });
+      out.push({ id, vector: includeVector ? rec.vector : undefined, metadata: rec.metadata });
     }
     return out;
   }
@@ -80,15 +87,17 @@ export class InMemoryVectorStore {
   /**
    * @param {ArrayLike<number>} vector
    * @param {number} topK
-   * @param {{ filter?: (metadata: any, id: string) => boolean }} [opts]
+   * @param {{ filter?: (metadata: any, id: string) => boolean, workbookId?: string }} [opts]
    * @returns {Promise<VectorSearchResult[]>}
    */
   async query(vector, topK, opts) {
     const filter = opts?.filter;
+    const workbookId = opts?.workbookId;
     const q = normalizeL2(vector);
     /** @type {VectorSearchResult[]} */
     const scored = [];
     for (const [id, rec] of this._records) {
+      if (workbookId && rec.metadata?.workbookId !== workbookId) continue;
       if (filter && !filter(rec.metadata, id)) continue;
       const score = cosineSimilarity(q, rec.vector);
       scored.push({ id, score, metadata: rec.metadata });
