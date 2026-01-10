@@ -1204,6 +1204,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             "IFERROR" => self.fn_iferror(args),
             "ISERROR" => self.fn_iserror(args),
             "SUM" => self.fn_sum(args),
+            "VLOOKUP" => self.fn_vlookup(args),
             _ => (Value::Error(ErrorKind::Name), Vec::new()),
         }
     }
@@ -1291,6 +1292,116 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         }
 
         (Value::Number(acc), traces)
+    }
+
+    fn fn_vlookup(&self, args: &[SpannedExpr<usize>]) -> (Value, Vec<TraceNode>) {
+        if args.len() < 3 || args.len() > 4 {
+            return (Value::Error(ErrorKind::Value), Vec::new());
+        }
+
+        let mut traces = Vec::new();
+
+        let (lookup_value, lookup_trace) = self.eval_scalar(&args[0]);
+        traces.push(lookup_trace);
+        if let Value::Error(e) = lookup_value {
+            return (Value::Error(e), traces);
+        }
+
+        let (table_ev, table_trace) = self.eval_value(&args[1]);
+        traces.push(table_trace);
+        let table_range = match table_ev {
+            EvalValue::Reference(range) => range.normalized(),
+            EvalValue::Scalar(Value::Error(e)) => return (Value::Error(e), traces),
+            EvalValue::Scalar(_) => return (Value::Error(ErrorKind::Value), traces),
+        };
+
+        let (col_index_val, col_trace) = self.eval_scalar(&args[2]);
+        traces.push(col_trace);
+        if let Value::Error(e) = col_index_val {
+            return (Value::Error(e), traces);
+        }
+        let col_index_num = match coerce_to_number(&col_index_val) {
+            Ok(n) => n,
+            Err(e) => return (Value::Error(e), traces),
+        };
+        let col_index = col_index_num as i64;
+        if col_index <= 0 {
+            return (Value::Error(ErrorKind::Value), traces);
+        }
+
+        // Optional `range_lookup` argument. Excel defaults to TRUE (approx match).
+        let range_lookup = if args.len() == 4 {
+            let (v, trace) = self.eval_scalar(&args[3]);
+            traces.push(trace);
+            if let Value::Error(e) = v {
+                return (Value::Error(e), traces);
+            }
+            match coerce_to_bool(&v) {
+                Ok(b) => b,
+                Err(e) => return (Value::Error(e), traces),
+            }
+        } else {
+            true
+        };
+        let exact = !range_lookup;
+
+        let width = (table_range.end.col - table_range.start.col + 1) as i64;
+        if col_index > width {
+            return (Value::Error(ErrorKind::Ref), traces);
+        }
+        let target_col = table_range.start.col + (col_index as u32) - 1;
+
+        if exact {
+            for row in table_range.start.row..=table_range.end.row {
+                let key = CellAddr {
+                    row,
+                    col: table_range.start.col,
+                };
+                let candidate = self.resolver.get_cell_value(table_range.sheet_id, key);
+                if matches!(candidate, Value::Error(_)) {
+                    continue;
+                }
+                let is_match = excel_order(&candidate, &lookup_value)
+                    .map(|o| o == Ordering::Equal)
+                    .unwrap_or(false);
+                if is_match {
+                    let result_addr = CellAddr { row, col: target_col };
+                    return (
+                        self.resolver.get_cell_value(table_range.sheet_id, result_addr),
+                        traces,
+                    );
+                }
+            }
+            (Value::Error(ErrorKind::NA), traces)
+        } else {
+            let mut best_row: Option<u32> = None;
+            for row in table_range.start.row..=table_range.end.row {
+                let key = CellAddr {
+                    row,
+                    col: table_range.start.col,
+                };
+                let candidate = self.resolver.get_cell_value(table_range.sheet_id, key);
+                if matches!(candidate, Value::Error(_)) {
+                    continue;
+                }
+                let ord = match excel_order(&candidate, &lookup_value) {
+                    Ok(o) => o,
+                    Err(_) => continue,
+                };
+                if ord != Ordering::Greater {
+                    best_row = Some(row);
+                }
+            }
+            if let Some(row) = best_row {
+                let result_addr = CellAddr { row, col: target_col };
+                (
+                    self.resolver.get_cell_value(table_range.sheet_id, result_addr),
+                    traces,
+                )
+            } else {
+                (Value::Error(ErrorKind::NA), traces)
+            }
+        }
     }
 }
 

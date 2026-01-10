@@ -1561,6 +1561,7 @@ fn is_known_thread_safe_function(name: &str) -> bool {
             | "IFERROR"
             | "ISERROR"
             | "SUM"
+            | "VLOOKUP"
             | "PV"
             | "FV"
             | "PMT"

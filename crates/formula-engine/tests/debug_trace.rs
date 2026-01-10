@@ -67,3 +67,51 @@ fn trace_preserves_reference_context_for_sum() {
     );
 }
 
+#[test]
+fn debug_trace_for_vlookup_includes_reference_arg_and_matches_result() {
+    let mut engine = Engine::new();
+    // Lookup key.
+    engine
+        .set_cell_value("Sheet1", "A1", "Key-123")
+        .unwrap();
+
+    // Table: B1:C2
+    engine
+        .set_cell_value("Sheet1", "B1", "Key-123")
+        .unwrap();
+    engine.set_cell_value("Sheet1", "C1", 19.99).unwrap();
+    engine
+        .set_cell_value("Sheet1", "B2", "Key-456")
+        .unwrap();
+    engine.set_cell_value("Sheet1", "C2", 29.99).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=VLOOKUP(A1,B1:C2,2,FALSE)")
+        .unwrap();
+    engine.recalculate();
+
+    let dbg = engine.debug_evaluate("Sheet1", "D1").unwrap();
+    assert_eq!(dbg.value, Value::Number(19.99));
+
+    assert_eq!(
+        slice(&dbg.formula, dbg.trace.span),
+        "VLOOKUP(A1,B1:C2,2,FALSE)"
+    );
+    assert!(matches!(
+        dbg.trace.kind,
+        TraceKind::FunctionCall { ref name } if name == "VLOOKUP"
+    ));
+    assert_eq!(dbg.trace.children.len(), 4);
+
+    // The lookup value dereferences A1 and keeps the cell reference metadata.
+    let lookup_node = &dbg.trace.children[0];
+    assert_eq!(slice(&dbg.formula, lookup_node.span), "A1");
+    assert_eq!(lookup_node.value, Value::Text("Key-123".to_string()));
+    assert!(matches!(lookup_node.reference, Some(TraceRef::Cell { .. })));
+
+    // The table array is evaluated as a reference (not spilled/dereferenced).
+    let table_node = &dbg.trace.children[1];
+    assert_eq!(slice(&dbg.formula, table_node.span), "B1:C2");
+    assert_eq!(table_node.value, Value::Blank);
+    assert!(matches!(table_node.reference, Some(TraceRef::Range { .. })));
+}

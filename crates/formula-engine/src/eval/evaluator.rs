@@ -264,6 +264,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             "IFERROR" => self.fn_iferror(args),
             "ISERROR" => self.fn_iserror(args),
             "SUM" => self.fn_sum(args),
+            "VLOOKUP" => self.fn_vlookup(args),
             "PV" => self.fn_pv(args),
             "FV" => self.fn_fv(args),
             "PMT" => self.fn_pmt(args),
@@ -359,6 +360,105 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
 
         Value::Number(acc)
+    }
+
+    fn fn_vlookup(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() < 3 || args.len() > 4 {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let lookup_value = self.eval_scalar(&args[0]);
+        if let Value::Error(e) = lookup_value {
+            return Value::Error(e);
+        }
+
+        let table = self.eval_value(&args[1]);
+        let table_range = match table {
+            EvalValue::Reference(range) => range.normalized(),
+            EvalValue::Scalar(Value::Error(e)) => return Value::Error(e),
+            EvalValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+        };
+
+        let col_index_val = self.eval_scalar(&args[2]);
+        if let Value::Error(e) = col_index_val {
+            return Value::Error(e);
+        }
+        let col_index_num = match coerce_to_number(&col_index_val) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let col_index = col_index_num as i64;
+        if col_index <= 0 {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        // Optional `range_lookup` argument. Excel defaults to TRUE (approx match).
+        let range_lookup = if args.len() == 4 {
+            let v = self.eval_scalar(&args[3]);
+            if let Value::Error(e) = v {
+                return Value::Error(e);
+            }
+            match coerce_to_bool(&v) {
+                Ok(b) => b,
+                Err(e) => return Value::Error(e),
+            }
+        } else {
+            true
+        };
+        let exact = !range_lookup;
+
+        let width = (table_range.end.col - table_range.start.col + 1) as i64;
+        if col_index > width {
+            return Value::Error(ErrorKind::Ref);
+        }
+        let target_col = table_range.start.col + (col_index as u32) - 1;
+
+        if exact {
+            for row in table_range.start.row..=table_range.end.row {
+                let key = CellAddr {
+                    row,
+                    col: table_range.start.col,
+                };
+                let candidate = self.resolver.get_cell_value(table_range.sheet_id, key);
+                if matches!(candidate, Value::Error(_)) {
+                    continue;
+                }
+                let is_match = excel_order(&candidate, &lookup_value)
+                    .map(|o| o == Ordering::Equal)
+                    .unwrap_or(false);
+                if is_match {
+                    let result_addr = CellAddr { row, col: target_col };
+                    return self.resolver.get_cell_value(table_range.sheet_id, result_addr);
+                }
+            }
+            Value::Error(ErrorKind::NA)
+        } else {
+            // Approximate match: return the last row where first-column value <= lookup_value.
+            let mut best_row: Option<u32> = None;
+            for row in table_range.start.row..=table_range.end.row {
+                let key = CellAddr {
+                    row,
+                    col: table_range.start.col,
+                };
+                let candidate = self.resolver.get_cell_value(table_range.sheet_id, key);
+                if matches!(candidate, Value::Error(_)) {
+                    continue;
+                }
+                let ord = match excel_order(&candidate, &lookup_value) {
+                    Ok(o) => o,
+                    Err(_) => continue,
+                };
+                if ord != Ordering::Greater {
+                    best_row = Some(row);
+                }
+            }
+            if let Some(row) = best_row {
+                let result_addr = CellAddr { row, col: target_col };
+                self.resolver.get_cell_value(table_range.sheet_id, result_addr)
+            } else {
+                Value::Error(ErrorKind::NA)
+            }
+        }
     }
 
     fn eval_number_arg(&self, expr: &CompiledExpr) -> Result<f64, ErrorKind> {
