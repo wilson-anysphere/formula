@@ -35,6 +35,7 @@ enum Token {
     Minus,
     Star,
     Slash,
+    Caret,
     Eq,
     Ne,
     Lt,
@@ -132,6 +133,22 @@ impl ParserImpl {
         Ok(left)
     }
 
+    fn parse_power(&mut self) -> Result<ParsedExpr, FormulaParseError> {
+        let left = self.parse_primary()?;
+        if *self.peek() == Token::Caret {
+            self.next();
+            // Excel's exponentiation is right-associative and binds tighter than unary
+            // operators (e.g. `-2^2` == `-(2^2)`).
+            let right = self.parse_unary()?;
+            return Ok(Expr::Binary {
+                op: BinaryOp::Pow,
+                left: Box::new(left),
+                right: Box::new(right),
+            });
+        }
+        Ok(left)
+    }
+
     fn parse_unary(&mut self) -> Result<ParsedExpr, FormulaParseError> {
         match self.peek() {
             Token::Plus => {
@@ -154,7 +171,7 @@ impl ParserImpl {
                     self.parse_unary()?,
                 )))
             }
-            _ => self.parse_primary(),
+            _ => self.parse_power(),
         }
     }
 
@@ -410,6 +427,10 @@ impl<'a> Lexer<'a> {
                 '/' => {
                     self.pos += 1;
                     Token::Slash
+                }
+                '^' => {
+                    self.pos += 1;
+                    Token::Caret
                 }
                 '=' => {
                     self.pos += 1;

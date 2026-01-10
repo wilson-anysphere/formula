@@ -260,3 +260,20 @@ fn iserror_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     Value::Bool(matches!(v, Value::Error(_)))
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "NA",
+        min_args: 0,
+        max_args: 0,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Any,
+        arg_types: &[],
+        implementation: na_fn,
+    }
+}
+
+fn na_fn(_ctx: &dyn FunctionContext, _args: &[CompiledExpr]) -> Value {
+    Value::Error(ErrorKind::NA)
+}

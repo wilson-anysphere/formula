@@ -1,4 +1,5 @@
 use crate::eval::{parse_a1, CellAddr, CompareOp, EvalContext, FormulaParseError, SheetReference, UnaryOp};
+use crate::error::ExcelError;
 use crate::value::{ErrorKind, Value};
 use std::cmp::Ordering;
 
@@ -183,6 +184,7 @@ enum TokenKind {
     Minus,
     Star,
     Slash,
+    Caret,
     Eq,
     Ne,
     Lt,
@@ -262,6 +264,10 @@ impl<'a> Lexer<'a> {
                 '/' => {
                     self.pos += 1;
                     TokenKind::Slash
+                }
+                '^' => {
+                    self.pos += 1;
+                    TokenKind::Caret
                 }
                 '=' => {
                     self.pos += 1;
@@ -521,6 +527,25 @@ impl ParserImpl {
         Ok(left)
     }
 
+    fn parse_power(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
+        let left = self.parse_primary()?;
+        if matches!(self.peek().kind, TokenKind::Caret) {
+            self.next();
+            // Excel exponentiation is right-associative and binds tighter than unary.
+            let right = self.parse_unary()?;
+            let span = Span::new(left.span.start, right.span.end);
+            return Ok(SpannedExpr {
+                span,
+                kind: SpannedExprKind::Binary {
+                    op: crate::eval::BinaryOp::Pow,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+            });
+        }
+        Ok(left)
+    }
+
     fn parse_unary(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
         match self.peek().kind {
             TokenKind::Plus => {
@@ -553,7 +578,7 @@ impl ParserImpl {
                     kind: SpannedExprKind::ImplicitIntersection(Box::new(expr)),
                 })
             }
-            _ => self.parse_primary(),
+            _ => self.parse_power(),
         }
     }
 
@@ -1061,6 +1086,14 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                             Value::Number(ln / rn)
                         }
                     }
+                    crate::eval::BinaryOp::Pow => match crate::functions::math::power(ln, rn) {
+                        Ok(n) => Value::Number(n),
+                        Err(e) => Value::Error(match e {
+                            ExcelError::Div0 => ErrorKind::Div0,
+                            ExcelError::Value => ErrorKind::Value,
+                            ExcelError::Num => ErrorKind::Num,
+                        }),
+                    },
                 };
                 (
                     EvalValue::Scalar(out.clone()),

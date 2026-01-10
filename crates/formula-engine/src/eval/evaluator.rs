@@ -1,5 +1,6 @@
 use crate::eval::address::CellAddr;
 use crate::eval::ast::{BinaryOp, CompiledExpr, CompareOp, Expr, SheetReference, UnaryOp};
+use crate::error::ExcelError;
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference};
 use crate::value::{ErrorKind, Value};
 use std::cmp::Ordering;
@@ -150,6 +151,14 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                             Value::Number(ln / rn)
                         }
                     }
+                    BinaryOp::Pow => match crate::functions::math::power(ln, rn) {
+                        Ok(n) => Value::Number(n),
+                        Err(e) => Value::Error(match e {
+                            ExcelError::Div0 => ErrorKind::Div0,
+                            ExcelError::Value => ErrorKind::Value,
+                            ExcelError::Num => ErrorKind::Num,
+                        }),
+                    },
                 };
                 EvalValue::Scalar(out)
             }

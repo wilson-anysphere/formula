@@ -69,6 +69,12 @@ fn iferror_and_ifna() {
 }
 
 #[test]
+fn na_function_returns_na_error() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(sheet.eval("=NA()"), Value::Error(ErrorKind::NA));
+}
+
+#[test]
 fn function_lookup_is_case_insensitive() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=sUm(1,2,3)"), 6.0);

@@ -83,3 +83,10 @@ fn int_abs_mod() {
     assert_eq!(sheet.eval("=MOD(5,0)"), Value::Error(ErrorKind::Div0));
 }
 
+#[test]
+fn sign_returns_expected_signum() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=SIGN(-2)"), -1.0);
+    assert_number(&sheet.eval("=SIGN(0)"), 0.0);
+    assert_number(&sheet.eval("=SIGN(2)"), 1.0);
+}

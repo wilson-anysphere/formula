@@ -1,4 +1,5 @@
 use crate::eval::CompiledExpr;
+use crate::error::ExcelError;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
@@ -488,3 +489,85 @@ fn round_with_mode(n: f64, digits: i32, mode: RoundMode) -> f64 {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "SIGN",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: sign_fn,
+    }
+}
+
+fn sign_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let number = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    if !number.is_finite() {
+        return Value::Error(ErrorKind::Num);
+    }
+    if number > 0.0 {
+        Value::Number(1.0)
+    } else if number < 0.0 {
+        Value::Number(-1.0)
+    } else {
+        Value::Number(0.0)
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "RAND",
+        min_args: 0,
+        max_args: 0,
+        volatility: Volatility::Volatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[],
+        implementation: rand_fn,
+    }
+}
+
+fn rand_fn(_ctx: &dyn FunctionContext, _args: &[CompiledExpr]) -> Value {
+    Value::Number(crate::functions::math::rand())
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "RANDBETWEEN",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::Volatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number],
+        implementation: randbetween_fn,
+    }
+}
+
+fn randbetween_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let bottom = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let top = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+
+    match crate::functions::math::randbetween(bottom, top) {
+        Ok(n) => Value::Number(n as f64),
+        Err(e) => Value::Error(match e {
+            ExcelError::Div0 => ErrorKind::Div0,
+            ExcelError::Value => ErrorKind::Value,
+            ExcelError::Num => ErrorKind::Num,
+        }),
+    }
+}

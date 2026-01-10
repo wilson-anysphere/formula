@@ -313,3 +313,20 @@ fn npv_preserves_period_index_for_blank_cells_in_ranges() {
         "expected {expected}, got {result}"
     );
 }
+
+#[test]
+fn exponentiation_operator_matches_excel_precedence_and_associativity() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_formula("Sheet1", "A1", "=2^3").unwrap();
+    engine.set_cell_formula("Sheet1", "A2", "=-2^2").unwrap();
+    engine.set_cell_formula("Sheet1", "A3", "=(-2)^2").unwrap();
+    engine.set_cell_formula("Sheet1", "A4", "=2^3^2").unwrap();
+
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(8.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(-4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Number(512.0));
+}
