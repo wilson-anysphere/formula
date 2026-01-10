@@ -69,6 +69,7 @@ if (-not $EngineCommand) {
     "run",
     "-p", "formula-excel-oracle",
     "--quiet",
+    "--locked",
     "--",
     "--cases", $CasesPath,
     "--out", $OutPath

@@ -70,6 +70,31 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Compute effective filters (tags + thresholds)
+        shell: powershell
+        run: |
+          $include = $env:INCLUDE_TAGS
+          $exclude = $env:EXCLUDE_TAGS
+          $maxRate = $env:MAX_MISMATCH_RATE
+
+          if ([string]::IsNullOrWhiteSpace($maxRate)) {
+            # On push/PR we default to a modest threshold so the job is useful
+            # early in development while still catching large regressions.
+            $maxRate = "0.01"
+          }
+
+          if ($env:GITHUB_EVENT_NAME -ne "workflow_dispatch") {
+            # Default filter for push/PR: restrict to currently implemented
+            # core operators + a few baseline functions.
+            if ([string]::IsNullOrWhiteSpace($include)) {
+              $include = "add,sub,mul,div,cmp,SUM,IF,IFERROR,ISERROR,error"
+            }
+          }
+
+          "EFFECTIVE_INCLUDE_TAGS=$include" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "EFFECTIVE_EXCLUDE_TAGS=$exclude" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "EFFECTIVE_MAX_MISMATCH_RATE=$maxRate" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Generate case corpus (deterministic)
         run: python tools/excel-oracle/generate_cases.py --out tests/compatibility/excel-oracle/cases.json
 
@@ -113,8 +138,8 @@ jobs:
         shell: powershell
         run: |
           $max = [int]"${{ env.MAX_CASES }}"
-          $includeTags = $env:INCLUDE_TAGS
-          $excludeTags = $env:EXCLUDE_TAGS
+          $includeTags = $env:EFFECTIVE_INCLUDE_TAGS
+          $excludeTags = $env:EFFECTIVE_EXCLUDE_TAGS
           $args = @(
             "-CasesPath", "tests/compatibility/excel-oracle/cases.json",
             "-OutPath", "${{ steps.expected.outputs.path }}"
@@ -138,8 +163,8 @@ jobs:
         run: |
           $max = [int]"${{ env.MAX_CASES }}"
           $engineCmd = "${{ env.ENGINE_CMD }}"
-          $includeTags = $env:INCLUDE_TAGS
-          $excludeTags = $env:EXCLUDE_TAGS
+          $includeTags = $env:EFFECTIVE_INCLUDE_TAGS
+          $excludeTags = $env:EFFECTIVE_EXCLUDE_TAGS
           $args = @(
             "-CasesPath", "tests/compatibility/excel-oracle/cases.json",
             "-OutPath", "tests/compatibility/excel-oracle/datasets/engine-results.json"
@@ -160,22 +185,9 @@ jobs:
         if: ${{ env.MODE == 'validate-engine' }}
         shell: powershell
         run: |
-          $maxRate = $env:MAX_MISMATCH_RATE
-          if ([string]::IsNullOrWhiteSpace($maxRate)) {
-            # On push/PR we default to a modest threshold so the job is useful
-            # early in development while still catching large regressions.
-            $maxRate = "0.01"
-          }
-
-          $include = $env:INCLUDE_TAGS
-          $exclude = $env:EXCLUDE_TAGS
-          if ($env:GITHUB_EVENT_NAME -ne "workflow_dispatch") {
-            # Default filter for push/PR: restrict to currently implemented
-            # core operators + a few baseline functions.
-            if ([string]::IsNullOrWhiteSpace($include)) {
-              $include = "add,sub,mul,div,cmp,SUM,IF,IFERROR,ISERROR,error"
-            }
-          }
+          $maxRate = $env:EFFECTIVE_MAX_MISMATCH_RATE
+          $include = $env:EFFECTIVE_INCLUDE_TAGS
+          $exclude = $env:EFFECTIVE_EXCLUDE_TAGS
 
           $args = @(
             "tools/excel-oracle/compare.py",
