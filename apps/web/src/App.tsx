@@ -1,10 +1,11 @@
 import { createEngineClient } from "@formula/engine";
-import { CanvasGrid, MockCellProvider } from "@formula/grid";
+import { CanvasGrid, GridPlaceholder, MockCellProvider } from "@formula/grid";
 import { useEffect, useMemo, useState } from "react";
 
 export function App() {
   const engine = useMemo(() => createEngineClient(), []);
   const [engineStatus, setEngineStatus] = useState("starting…");
+  const [engineReady, setEngineReady] = useState(false);
 
   const rowCount = 1_000_000;
   const colCount = 100;
@@ -17,7 +18,10 @@ export function App() {
       try {
         await engine.init();
         const pong = await engine.ping();
-        if (!cancelled) setEngineStatus(`ready (${pong})`);
+        if (!cancelled) {
+          setEngineStatus(`ready (${pong})`);
+          setEngineReady(true);
+        }
       } catch (error) {
         if (!cancelled)
           setEngineStatus(
@@ -41,7 +45,11 @@ export function App() {
         Engine: <strong>{engineStatus}</strong>
       </p>
       <div style={{ marginTop: 16, height: 560 }}>
-        <CanvasGrid provider={provider} rowCount={rowCount} colCount={colCount} frozenRows={1} frozenCols={1} />
+        {engineReady ? (
+          <CanvasGrid provider={provider} rowCount={rowCount} colCount={colCount} frozenRows={1} frozenCols={1} />
+        ) : (
+          <GridPlaceholder />
+        )}
       </div>
     </div>
   );
