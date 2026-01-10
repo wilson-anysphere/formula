@@ -3,6 +3,7 @@ use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_xlsb::{CellValue as XlsbCellValue, XlsbWorkbook};
+use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
 use formula_xlsx::drawingml::PreservedDrawingParts;
 use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
@@ -10,6 +11,7 @@ use formula_xlsx::print::{
 use formula_xlsx::XlsxPackage;
 use rust_xlsxwriter::{Workbook as XlsxWorkbook, XlsxError};
 use std::collections::HashMap;
+use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
 #[cfg(feature = "desktop")]
@@ -257,6 +259,14 @@ pub async fn read_xlsx(path: impl Into<PathBuf> + Send + 'static) -> anyhow::Res
         .map_err(|e| anyhow::anyhow!(e.to_string()))?
 }
 
+#[cfg(feature = "desktop")]
+pub async fn read_csv(path: impl Into<PathBuf> + Send + 'static) -> anyhow::Result<Workbook> {
+    let path = path.into();
+    tauri::async_runtime::spawn_blocking(move || read_csv_blocking(&path))
+        .await
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?
+}
+
 pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     let extension = path
         .extension()
@@ -380,6 +390,34 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         out.sheets.push(sheet);
     }
 
+    out.ensure_sheet_ids();
+    Ok(out)
+}
+
+pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    let file = std::fs::File::open(path).with_context(|| format!("open csv {:?}", path))?;
+    let reader = BufReader::new(file);
+    let table = import_csv_to_columnar_table(reader, CsvOptions::default())
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+        .with_context(|| format!("import csv {:?}", path))?;
+
+    let sheet_name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("Sheet1")
+        .to_string();
+    let mut sheet = Sheet::new(sheet_name.clone(), sheet_name);
+    sheet.set_columnar_table(Arc::new(table));
+
+    let mut out = Workbook {
+        path: Some(path.to_string_lossy().to_string()),
+        origin_path: Some(path.to_string_lossy().to_string()),
+        vba_project_bin: None,
+        preserved_drawing_parts: None,
+        sheets: vec![sheet],
+        print_settings: WorkbookPrintSettings::default(),
+    };
     out.ensure_sheet_ids();
     Ok(out)
 }
@@ -583,6 +621,23 @@ mod tests {
         assert_eq!(sheet.get_cell(0, 1).computed_value, CellScalar::Number(42.5));
         assert_eq!(sheet.get_cell(0, 2).computed_value, CellScalar::Number(85.0));
         assert_eq!(sheet.get_cell(0, 2).formula.as_deref(), Some("=A1+B1"));
+    }
+
+    #[test]
+    fn reads_csv_into_columnar_backed_sheet() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = tmp.path().join("data.csv");
+        std::fs::write(&path, "id,name\n1,hello\n2,world\n").expect("write csv");
+
+        let workbook = read_csv_blocking(&path).expect("read csv");
+        assert_eq!(workbook.sheets.len(), 1);
+        let sheet = &workbook.sheets[0];
+
+        assert_eq!(sheet.get_cell(0, 0).computed_value, CellScalar::Number(1.0));
+        assert_eq!(
+            sheet.get_cell(1, 1).computed_value,
+            CellScalar::Text("world".to_string())
+        );
     }
 
     #[test]

@@ -705,14 +705,20 @@ impl AppState {
         let sheet = workbook
             .sheet(sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
-        let cell = sheet.get_cell(row, col);
+        // Only snapshot the sparse overlay. Columnar-backed sheets can materialize
+        // a temporary `Cell` for read access; treating those as stored values would
+        // make undo/redo persist a full copy of the columnar data in the overlay.
+        let (value, formula) = match sheet.cells.get(&(row, col)) {
+            Some(cell) => (cell.input_value.clone(), cell.formula.clone()),
+            None => (None, None),
+        };
 
         Ok(CellInputSnapshot {
             sheet_id: sheet_id.to_string(),
             row,
             col,
-            value: cell.input_value,
-            formula: cell.formula,
+            value,
+            formula,
         })
     }
 

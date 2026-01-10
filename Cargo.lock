@@ -1100,6 +1100,7 @@ dependencies = [
  "calamine 0.26.1",
  "formula-columnar",
  "formula-engine",
+ "formula-model",
  "formula-vba",
  "formula-vba-runtime",
  "formula-xlsb",

@@ -120,7 +120,7 @@ pub struct RangeCellEdit {
 }
 
 #[cfg(feature = "desktop")]
-use crate::file_io::{read_xlsx, write_xlsx};
+use crate::file_io::{read_csv, read_xlsx, write_xlsx};
 #[cfg(feature = "desktop")]
 use crate::state::{AppState, AppStateError, CellUpdateData, SharedAppState};
 #[cfg(feature = "desktop")]
@@ -139,7 +139,7 @@ fn coerce_save_path_to_xlsx(path: &str) -> String {
     if buf
         .extension()
         .and_then(|s| s.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("xls"))
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("xls") || ext.eq_ignore_ascii_case("csv"))
     {
         buf.set_extension("xlsx");
         return buf.to_string_lossy().to_string();
@@ -181,7 +181,15 @@ pub async fn open_workbook(
     path: String,
     state: State<'_, SharedAppState>,
 ) -> Result<WorkbookInfo, String> {
-    let workbook = read_xlsx(path.clone()).await.map_err(|e| e.to_string())?;
+    let ext = PathBuf::from(&path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let workbook = match ext.as_str() {
+        "csv" => read_csv(path.clone()).await.map_err(|e| e.to_string())?,
+        _ => read_xlsx(path.clone()).await.map_err(|e| e.to_string())?,
+    };
     let shared = state.inner().clone();
     let info = tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
