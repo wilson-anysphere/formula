@@ -51,6 +51,18 @@ fn scientific_notation() {
 }
 
 #[test]
+fn fractions() {
+    let options = FormatOptions::default();
+
+    assert_eq!(
+        format_value(Value::Number(1.5), Some("# ?/?"), &options).text,
+        "1 1/2"
+    );
+    assert_eq!(format_value(Value::Number(0.5), Some("# ?/?"), &options).text, "1/2");
+    assert_eq!(format_value(Value::Number(2.0), Some("# ?/?"), &options).text, "2");
+}
+
+#[test]
 fn dates_1900_system_lotus_bug() {
     let options = FormatOptions {
         locale: Locale::en_us(),

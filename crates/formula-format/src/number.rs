@@ -51,7 +51,14 @@ pub(crate) fn format_number(value: f64, pattern: &str, auto_negative_sign: bool,
         return s;
     }
 
-    // Fraction (optional): currently not implemented; fall back to fixed number formatting.
+    if let Some(spec) = parse_fraction(number_raw) {
+        let out = format_fraction(v, &spec, options);
+        let mut s = format!("{prefix}{out}{suffix}");
+        if value < 0.0 && auto_negative_sign {
+            s.insert(0, '-');
+        }
+        return s;
+    }
 
     let spec = parse_fixed(number_raw);
     let out = format_fixed(v, &spec, options);
@@ -420,4 +427,180 @@ fn format_exponent(exp: i32, spec: &ScientificSpec, _options: &FormatOptions) ->
     let abs = exp.abs();
     let digits = format!("{:0width$}", abs, width = spec.exp_width);
     format!("{sign}{digits}")
+}
+
+#[derive(Debug, Clone)]
+struct FractionSpec {
+    int_spec: FixedSpec,
+    int_has_sep: bool,
+    num_width: usize,
+    den_width: usize,
+    den_fixed: Option<i64>,
+}
+
+fn parse_fraction(number_raw: &str) -> Option<FractionSpec> {
+    // Find a `/` outside quotes and bracket tokens.
+    let mut in_quotes = false;
+    let mut escape = false;
+    let mut in_brackets = false;
+    let mut slash_idx: Option<usize> = None;
+
+    for (idx, ch) in number_raw.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_quotes {
+            if ch == '"' {
+                in_quotes = false;
+            }
+            continue;
+        }
+        if in_brackets {
+            if ch == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_quotes = true,
+            '\\' => escape = true,
+            '[' => in_brackets = true,
+            '/' => {
+                slash_idx = Some(idx);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let slash_idx = slash_idx?;
+    let left = &number_raw[..slash_idx];
+    let right = &number_raw[slash_idx + 1..];
+
+    let den_width = right.chars().filter(|c| matches!(c, '0' | '#' | '?')).count();
+    let den_fixed = if den_width == 0 {
+        right.trim().parse::<i64>().ok()
+    } else {
+        None
+    };
+    if den_width == 0 && den_fixed.is_none() {
+        return None;
+    }
+
+    // Split left into integer + numerator by finding the last space before the slash.
+    let (int_part, num_part, int_has_sep) = if let Some(space_idx) = left.rfind(' ') {
+        let num_candidate = &left[space_idx + 1..];
+        if num_candidate.chars().any(|c| matches!(c, '0' | '#' | '?')) {
+            (&left[..space_idx], num_candidate, true)
+        } else {
+            ("", left, false)
+        }
+    } else {
+        ("", left, false)
+    };
+
+    let num_width = num_part.chars().filter(|c| matches!(c, '0' | '#' | '?')).count();
+    if num_width == 0 {
+        return None;
+    }
+
+    Some(FractionSpec {
+        int_spec: parse_fixed(int_part.trim()),
+        int_has_sep,
+        num_width,
+        den_width,
+        den_fixed,
+    })
+}
+
+fn format_fraction(value: f64, spec: &FractionSpec, options: &FormatOptions) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+
+    let int_value = value.floor();
+    let frac = value - int_value;
+    let mut int_i64 = int_value as i64;
+
+    let (mut num, mut den) = if let Some(fixed) = spec.den_fixed {
+        let d = fixed.max(1);
+        let n = (frac * d as f64).round() as i64;
+        (n, d)
+    } else {
+        let max_den = 10_i64.pow(spec.den_width as u32) - 1;
+        let max_den = max_den.max(1).min(10_000); // avoid pathological scans
+
+        let mut best_n = 0_i64;
+        let mut best_d = 1_i64;
+        let mut best_err = f64::INFINITY;
+        for d in 1..=max_den {
+            let n = (frac * d as f64).round() as i64;
+            let err = (frac - (n as f64) / (d as f64)).abs();
+            if err < best_err {
+                best_err = err;
+                best_n = n;
+                best_d = d;
+                if err == 0.0 {
+                    break;
+                }
+            }
+        }
+        (best_n, best_d)
+    };
+
+    if num == 0 {
+        let int_str = format_fixed(int_value, &spec.int_spec, options);
+        return if int_str.is_empty() {
+            "0".to_string()
+        } else {
+            int_str
+        };
+    }
+
+    if num == den {
+        int_i64 += 1;
+        num = 0;
+    }
+
+    if num == 0 {
+        let int_str = format_fixed(int_i64 as f64, &spec.int_spec, options);
+        return if int_str.is_empty() {
+            "0".to_string()
+        } else {
+            int_str
+        };
+    }
+
+    let g = gcd(num.abs(), den);
+    num /= g;
+    den /= g;
+
+    let int_str = format_fixed(int_i64 as f64, &spec.int_spec, options);
+    let num_str = pad_left(num.to_string(), spec.num_width, ' ');
+    let den_str = pad_left(den.to_string(), spec.den_width.max(den.to_string().len()), ' ');
+
+    if int_str.is_empty() {
+        format!("{num_str}/{den_str}")
+    } else if spec.int_has_sep {
+        format!("{int_str} {num_str}/{den_str}")
+    } else {
+        format!("{int_str}{num_str}/{den_str}")
+    }
+}
+
+fn pad_left(mut s: String, width: usize, pad: char) -> String {
+    while s.len() < width {
+        s.insert(0, pad);
+    }
+    s
+}
+
+fn gcd(mut a: i64, mut b: i64) -> i64 {
+    while b != 0 {
+        let r = a % b;
+        a = b;
+        b = r;
+    }
+    a.abs().max(1)
 }
