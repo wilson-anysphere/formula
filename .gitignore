@@ -1,8 +1,20 @@
-/target/
-**/target/
-**/*.rs.bk
 node_modules/
 **/node_modules/
 dist/
 **/dist/
+coverage/
 .DS_Store
+
+# Local secrets
+.env
+.env.*
+
+# Local-only agent files (never commit)
+scratchpad.md
+handoff.md
+
+*.log
+
+/target/
+**/target/
+**/*.rs.bk
