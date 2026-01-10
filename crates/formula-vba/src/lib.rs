@@ -9,9 +9,7 @@ mod compression;
 mod dir;
 mod ole;
 
-use std::collections::HashMap;
-
-pub use compression::{decompress_container, CompressionError};
+pub use compression::{compress_container, decompress_container, CompressionError};
 pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
 pub use ole::{OleError, OleFile};
 
@@ -26,9 +24,6 @@ pub struct VBAProject {
     pub constants: Option<String>,
     pub references: Vec<VBAReference>,
     pub modules: Vec<VBAModule>,
-    /// Raw bytes of streams we don't currently interpret but may be useful for
-    /// future analysis/debugging.
-    pub raw_streams: HashMap<String, Vec<u8>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,17 +104,6 @@ impl VBAProject {
             });
         }
 
-        let mut raw_streams = HashMap::new();
-        for path in ole.list_streams()? {
-            if path == "VBA/dir" {
-                continue;
-            }
-            if path.starts_with("VBA/") {
-                // module streams can be large; keep for debugging but only if not already.
-                raw_streams.entry(path.clone()).or_insert_with(|| Vec::new());
-            }
-        }
-
         Ok(Self {
             name: dir_stream
                 .project_name
@@ -128,7 +112,6 @@ impl VBAProject {
             constants: dir_stream.constants.clone(),
             references,
             modules,
-            raw_streams,
         })
     }
 }
@@ -221,5 +204,16 @@ mod tests {
         let out = decompress_container(&container).expect("decompress");
         assert_eq!(&out, b"ABCABCABC");
     }
-}
 
+    #[test]
+    fn compresses_and_decompresses_roundtrip() {
+        let data = b"ABCABCABCABCABCABCABCABCABCABC";
+        let compressed = compress_container(data);
+        // The first chunk should be marked as compressed for this highly repetitive input.
+        let header = u16::from_le_bytes([compressed[1], compressed[2]]);
+        assert_ne!(header & 0x8000, 0);
+
+        let out = decompress_container(&compressed).expect("decompress");
+        assert_eq!(&out, data);
+    }
+}
