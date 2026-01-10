@@ -133,10 +133,12 @@ impl ScenarioManager {
             .cloned()
             .ok_or_else(|| WhatIfError::InvalidParams("scenario not found"))?;
 
-        // Capture base values once, from the changing cells of the scenario
-        // being applied first.
-        if self.base_values.is_empty() {
-            for cell in &scenario.changing_cells {
+        // Capture base values for any changing cells we haven't seen yet.
+        //
+        // Scenarios may have different changing cell sets, so the base snapshot
+        // needs to be the union of inputs across all applied scenarios.
+        for cell in &scenario.changing_cells {
+            if !self.base_values.contains_key(cell) {
                 let base = model.get_cell_value(cell)?;
                 self.base_values.insert(cell.clone(), base);
             }
@@ -196,5 +198,73 @@ impl ScenarioManager {
             result_cells,
             results,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::what_if::{CellValue, InMemoryModel, WhatIfModel};
+
+    #[test]
+    fn restore_base_covers_union_of_changing_cells_across_scenarios() {
+        let mut model = InMemoryModel::new()
+            .with_value("A1", CellValue::Number(10.0))
+            .with_value("B1", CellValue::Number(20.0))
+            .with_value("C1", CellValue::Number(30.0));
+
+        let mut manager = ScenarioManager::new();
+
+        let s1 = manager
+            .create_scenario(
+                "S1",
+                vec![CellRef::from("A1"), CellRef::from("B1")],
+                vec![CellValue::Number(1.0), CellValue::Number(2.0)],
+                "tester",
+                None,
+            )
+            .unwrap();
+
+        let s2 = manager
+            .create_scenario(
+                "S2",
+                vec![CellRef::from("B1"), CellRef::from("C1")],
+                vec![CellValue::Number(200.0), CellValue::Number(300.0)],
+                "tester",
+                None,
+            )
+            .unwrap();
+
+        manager.apply_scenario(&mut model, s1).unwrap();
+        manager.apply_scenario(&mut model, s2).unwrap();
+
+        // Scenario 2 doesn't touch A1, so it retains scenario 1's value.
+        assert_eq!(
+            model.get_cell_value(&CellRef::from("A1")).unwrap(),
+            CellValue::Number(1.0)
+        );
+        assert_eq!(
+            model.get_cell_value(&CellRef::from("B1")).unwrap(),
+            CellValue::Number(200.0)
+        );
+        assert_eq!(
+            model.get_cell_value(&CellRef::from("C1")).unwrap(),
+            CellValue::Number(300.0)
+        );
+
+        manager.restore_base(&mut model).unwrap();
+
+        assert_eq!(
+            model.get_cell_value(&CellRef::from("A1")).unwrap(),
+            CellValue::Number(10.0)
+        );
+        assert_eq!(
+            model.get_cell_value(&CellRef::from("B1")).unwrap(),
+            CellValue::Number(20.0)
+        );
+        assert_eq!(
+            model.get_cell_value(&CellRef::from("C1")).unwrap(),
+            CellValue::Number(30.0)
+        );
     }
 }
