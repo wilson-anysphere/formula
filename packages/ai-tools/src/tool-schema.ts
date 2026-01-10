@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { columnLabelToIndex, parseA1Cell, parseA1Range, rangeSize } from "./spreadsheet/a1.js";
+import type { CellScalar } from "./spreadsheet/types.js";
 
 export type ToolName =
   | "read_range"
@@ -29,8 +30,6 @@ export const ToolNameSchema = z.enum([
   "compute_statistics",
   "fetch_external_data"
 ]);
-
-export type CellScalar = string | number | boolean | null;
 
 const CellScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 
@@ -502,6 +501,96 @@ export const SPREADSHEET_TOOL_DEFINITIONS: ToolDefinition[] = Object.values(TOOL
 export function validateToolCall(call: UnknownToolCall): ToolCall {
   const name = ToolNameSchema.parse(call.name);
   const entry = TOOL_REGISTRY[name];
-  const parameters = entry.paramsSchema.parse(call.parameters);
+  const normalized = normalizeToolParameters(name, call.parameters);
+  const parameters = entry.paramsSchema.parse(normalized);
   return { name, parameters } as ToolCall;
+}
+
+function normalizeToolParameters(name: ToolName, parameters: unknown): unknown {
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return parameters;
+
+  const params = { ...(parameters as Record<string, unknown>) } as Record<string, any>;
+
+  switch (name) {
+    case "read_range":
+      if (params.include_formulas === undefined && params.includeFormulas !== undefined) {
+        params.include_formulas = params.includeFormulas;
+      }
+      break;
+    case "write_cell":
+      if (params.is_formula === undefined && params.isFormula !== undefined) {
+        params.is_formula = params.isFormula;
+      }
+      break;
+    case "set_range":
+      if (params.interpret_as === undefined && params.interpretAs !== undefined) {
+        params.interpret_as = params.interpretAs;
+      }
+      break;
+    case "apply_formula_column":
+      if (params.formula_template === undefined && params.formulaTemplate !== undefined) {
+        params.formula_template = params.formulaTemplate;
+      }
+      if (params.start_row === undefined && params.startRow !== undefined) {
+        params.start_row = params.startRow;
+      }
+      if (params.end_row === undefined && params.endRow !== undefined) {
+        params.end_row = params.endRow;
+      }
+      break;
+    case "create_pivot_table":
+      if (params.source_range === undefined && params.sourceRange !== undefined) {
+        params.source_range = params.sourceRange;
+      }
+      break;
+    case "create_chart":
+      if (params.chart_type === undefined && params.chartType !== undefined) {
+        params.chart_type = params.chartType;
+      }
+      if (params.data_range === undefined && params.dataRange !== undefined) {
+        params.data_range = params.dataRange;
+      }
+      break;
+    case "sort_range":
+      if (params.sort_by === undefined && params.sortBy !== undefined) {
+        params.sort_by = params.sortBy;
+      }
+      if (params.has_header === undefined && params.hasHeader !== undefined) {
+        params.has_header = params.hasHeader;
+      }
+      break;
+    case "filter_range":
+      if (params.has_header === undefined && params.hasHeader !== undefined) {
+        params.has_header = params.hasHeader;
+      }
+      break;
+    case "apply_formatting":
+      if (params.format && typeof params.format === "object" && !Array.isArray(params.format)) {
+        const fmt = { ...(params.format as Record<string, unknown>) } as Record<string, any>;
+        if (fmt.font_size === undefined && fmt.fontSize !== undefined) fmt.font_size = fmt.fontSize;
+        if (fmt.font_color === undefined && fmt.fontColor !== undefined) fmt.font_color = fmt.fontColor;
+        if (fmt.background_color === undefined && fmt.backgroundColor !== undefined) fmt.background_color = fmt.backgroundColor;
+        if (fmt.number_format === undefined && fmt.numberFormat !== undefined) fmt.number_format = fmt.numberFormat;
+        if (fmt.horizontal_align === undefined && fmt.horizontalAlign !== undefined) fmt.horizontal_align = fmt.horizontalAlign;
+        params.format = fmt;
+      }
+      break;
+    case "detect_anomalies":
+      // No aliases currently.
+      break;
+    case "compute_statistics":
+      // No aliases currently.
+      break;
+    case "fetch_external_data":
+      if (params.source_type === undefined && params.sourceType !== undefined) {
+        params.source_type = params.sourceType;
+      }
+      break;
+    default: {
+      const exhaustive: never = name;
+      return parameters;
+    }
+  }
+
+  return params;
 }

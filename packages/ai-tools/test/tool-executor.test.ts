@@ -83,6 +83,24 @@ describe("ToolExecutor", () => {
     expect(workbook.getCell(parseA1Cell("Sheet1!C3")).formula).toBe("=A3*2");
   });
 
+  it("accepts camelCase parameter aliases from docs examples", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "Sheet1!A1", value: 5 }
+    });
+
+    const result = await executor.execute({
+      name: "apply_formula_column",
+      parameters: { column: "B", formulaTemplate: "=A{row}*10", startRow: 1, endRow: 1 }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(workbook.getCell(parseA1Cell("Sheet1!B1")).formula).toBe("=A1*10");
+  });
+
   it("returns validation_error for invalid A1 references", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
