@@ -26,4 +26,4 @@ mod engine;
 
 pub use engine::{Engine, EngineError, RecalcMode};
 pub use value::{ErrorKind, Value};
-
+pub mod debug;

@@ -123,46 +123,16 @@ impl DependencyGraph {
         self.volatile_cells.remove(&cell);
     }
 
-    fn mark_dirty_dependents(&self, from: CellKey, dirty: &mut HashSet<CellKey>) {
-        let mut queue = VecDeque::new();
-        if let Some(deps) = self.dependents.get(&from) {
-            for &d in deps {
-                queue.push_back(d);
-            }
-        }
-
-        while let Some(cell) = queue.pop_front() {
-            if !dirty.insert(cell) {
-                continue;
-            }
-            if let Some(deps) = self.dependents.get(&cell) {
-                for &d in deps {
-                    queue.push_back(d);
-                }
-            }
-        }
-    }
-
-    fn mark_dirty_including_self(&self, from: CellKey, dirty: &mut HashSet<CellKey>) {
-        let mut queue = VecDeque::new();
-        queue.push_back(from);
-        while let Some(cell) = queue.pop_front() {
-            if !dirty.insert(cell) {
-                continue;
-            }
-            if let Some(deps) = self.dependents.get(&cell) {
-                for &d in deps {
-                    queue.push_back(d);
-                }
-            }
-        }
-    }
+    // Dirty-marking with reason tracking is implemented in `Engine` (where we can
+    // store the predecessor edge used for diagnostics). The graph itself only
+    // maintains adjacency lists.
 }
 
 pub struct Engine {
     workbook: Workbook,
     graph: DependencyGraph,
     dirty: HashSet<CellKey>,
+    dirty_reasons: HashMap<CellKey, CellKey>,
 }
 
 impl Default for Engine {
@@ -177,6 +147,7 @@ impl Engine {
             workbook: Workbook::default(),
             graph: DependencyGraph::default(),
             dirty: HashSet::new(),
+            dirty_reasons: HashMap::new(),
         }
     }
 
@@ -193,6 +164,7 @@ impl Engine {
         // Replace any existing formula and dependencies.
         self.graph.clear_cell(key);
         self.dirty.remove(&key);
+        self.dirty_reasons.remove(&key);
 
         let cell = self.workbook.get_or_create_cell_mut(key);
         cell.value = value.into();
@@ -202,7 +174,7 @@ impl Engine {
         cell.thread_safe = true;
 
         // Mark downstream dependents dirty.
-        self.graph.mark_dirty_dependents(key, &mut self.dirty);
+        self.mark_dirty_dependents_with_reasons(key);
         Ok(())
     }
 
@@ -235,8 +207,7 @@ impl Engine {
         cell.thread_safe = thread_safe;
 
         // Recalculate this cell and anything depending on it.
-        self.graph
-            .mark_dirty_including_self(key, &mut self.dirty);
+        self.mark_dirty_including_self_with_reasons(key);
         Ok(())
     }
 
@@ -292,7 +263,7 @@ impl Engine {
         // Volatile formulas recalculate every time, and so do their dependents.
         let volatile_cells: Vec<CellKey> = self.graph.volatile_cells.iter().copied().collect();
         for cell in volatile_cells {
-            self.graph.mark_dirty_including_self(cell, &mut self.dirty);
+            self.mark_dirty_including_self_with_reasons(cell);
         }
 
         if self.dirty.is_empty() {
@@ -370,6 +341,7 @@ impl Engine {
             for &k in &level {
                 processed.insert(k);
                 self.dirty.remove(&k);
+                self.dirty_reasons.remove(&k);
                 if let Some(deps) = self.graph.dependents.get(&k) {
                     for &d in deps {
                         if !dirty_cells.contains(&d) {
@@ -391,6 +363,7 @@ impl Engine {
             let c = self.workbook.get_or_create_cell_mut(cell);
             c.value = Value::Error(ErrorKind::Calc);
             self.dirty.remove(&cell);
+            self.dirty_reasons.remove(&cell);
         }
     }
 
@@ -402,6 +375,236 @@ impl Engine {
         };
         expr.map_sheets(&mut map)
     }
+
+    /// Returns whether a cell is currently marked dirty (needs recalculation).
+    pub fn is_dirty(&self, sheet: &str, addr: &str) -> bool {
+        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
+            return false;
+        };
+        let Ok(addr) = parse_a1(addr) else {
+            return false;
+        };
+        self.dirty.contains(&CellKey { sheet: sheet_id, addr })
+    }
+
+    /// Direct precedents (cells referenced by the formula in `cell`).
+    pub fn precedents(
+        &self,
+        sheet: &str,
+        addr: &str,
+    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+        self.precedents_impl(sheet, addr, false)
+    }
+
+    /// Transitive precedents (all cells that can influence `cell`).
+    pub fn precedents_transitive(
+        &self,
+        sheet: &str,
+        addr: &str,
+    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+        self.precedents_impl(sheet, addr, true)
+    }
+
+    /// Direct dependents (cells whose formulas reference `cell`).
+    pub fn dependents(
+        &self,
+        sheet: &str,
+        addr: &str,
+    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+        self.dependents_impl(sheet, addr, false)
+    }
+
+    /// Transitive dependents (all downstream cells that are affected by `cell`).
+    pub fn dependents_transitive(
+        &self,
+        sheet: &str,
+        addr: &str,
+    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+        self.dependents_impl(sheet, addr, true)
+    }
+
+    /// Returns a dependency path explaining why `cell` is currently dirty.
+    ///
+    /// The returned vector is ordered from the root cause (usually an edited
+    /// input cell) to the provided `cell`.
+    pub fn dirty_dependency_path(
+        &self,
+        sheet: &str,
+        addr: &str,
+    ) -> Option<Vec<(SheetId, CellAddr)>> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        let addr = parse_a1(addr).ok()?;
+        let key = CellKey { sheet: sheet_id, addr };
+        if !self.dirty.contains(&key) {
+            return None;
+        }
+
+        let mut path = vec![key];
+        let mut current = key;
+        let mut guard = 0usize;
+        while let Some(prev) = self.dirty_reasons.get(&current).copied() {
+            path.push(prev);
+            current = prev;
+            guard += 1;
+            if guard > 10_000 {
+                break;
+            }
+        }
+        path.reverse();
+        Some(path.into_iter().map(|k| (k.sheet, k.addr)).collect())
+    }
+
+    /// Deterministically evaluates a cell's formula while capturing a per-node trace.
+    ///
+    /// This is intended for on-demand debugging and does **not** mutate engine state.
+    pub fn debug_evaluate(
+        &self,
+        sheet: &str,
+        addr: &str,
+    ) -> Result<crate::debug::DebugEvaluation, EngineError> {
+        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
+            return Err(EngineError::Parse(FormulaParseError::UnexpectedToken(format!(
+                "unknown sheet '{sheet}'"
+            ))));
+        };
+        let addr = parse_a1(addr)?;
+        let key = CellKey { sheet: sheet_id, addr };
+        let cell = self.workbook.get_cell(key);
+        let Some(formula) = cell.and_then(|c| c.formula.as_deref()) else {
+            return Err(EngineError::Parse(FormulaParseError::UnexpectedToken(
+                "cell has no formula".to_string(),
+            )));
+        };
+
+        let snapshot = Snapshot::from_workbook(&self.workbook);
+        let ctx = crate::eval::EvalContext {
+            current_sheet: sheet_id,
+            current_cell: addr,
+        };
+
+        // Parse with spans, compile sheet references without mutating the workbook,
+        // then evaluate with tracing.
+        let parsed = crate::debug::parse_spanned_formula(formula)?;
+        let mut map = |sref: &SheetReference<String>| match sref {
+            SheetReference::Current => SheetReference::Current,
+            SheetReference::Sheet(name) => self
+                .workbook
+                .sheet_id(name)
+                .map(SheetReference::Sheet)
+                .unwrap_or_else(|| SheetReference::External(name.clone())),
+            SheetReference::External(wb) => SheetReference::External(wb.clone()),
+        };
+        let compiled = parsed.map_sheets(&mut map);
+
+        let (value, trace) = crate::debug::evaluate_with_trace(&snapshot, ctx, &compiled);
+
+        Ok(crate::debug::DebugEvaluation {
+            formula: formula.to_string(),
+            value,
+            trace,
+        })
+    }
+
+    fn precedents_impl(
+        &self,
+        sheet: &str,
+        addr: &str,
+        transitive: bool,
+    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
+            return Ok(Vec::new());
+        };
+        let addr = parse_a1(addr)?;
+        let key = CellKey { sheet: sheet_id, addr };
+        let nodes = if transitive {
+            collect_transitive(&self.graph.precedents, key)
+        } else {
+            self.graph
+                .precedents
+                .get(&key)
+                .map(|s| sorted_cell_keys(s))
+                .unwrap_or_default()
+        };
+        Ok(nodes.into_iter().map(|k| (k.sheet, k.addr)).collect())
+    }
+
+    fn dependents_impl(
+        &self,
+        sheet: &str,
+        addr: &str,
+        transitive: bool,
+    ) -> Result<Vec<(SheetId, CellAddr)>, EngineError> {
+        let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
+            return Ok(Vec::new());
+        };
+        let addr = parse_a1(addr)?;
+        let key = CellKey { sheet: sheet_id, addr };
+        let nodes = if transitive {
+            collect_transitive(&self.graph.dependents, key)
+        } else {
+            self.graph
+                .dependents
+                .get(&key)
+                .map(|s| sorted_cell_keys(s))
+                .unwrap_or_default()
+        };
+        Ok(nodes.into_iter().map(|k| (k.sheet, k.addr)).collect())
+    }
+
+    fn mark_dirty_including_self_with_reasons(&mut self, from: CellKey) {
+        self.dirty.insert(from);
+        self.dirty_reasons.remove(&from);
+        self.mark_dirty_dependents_with_reasons(from);
+    }
+
+    fn mark_dirty_dependents_with_reasons(&mut self, from: CellKey) {
+        let mut queue: VecDeque<(CellKey, CellKey)> = VecDeque::new();
+        if let Some(deps) = self.graph.dependents.get(&from) {
+            for dep in sorted_cell_keys(deps) {
+                queue.push_back((from, dep));
+            }
+        }
+
+        while let Some((cause, cell)) = queue.pop_front() {
+            if !self.dirty.insert(cell) {
+                continue;
+            }
+            self.dirty_reasons.entry(cell).or_insert(cause);
+            if let Some(deps) = self.graph.dependents.get(&cell) {
+                for dep in sorted_cell_keys(deps) {
+                    queue.push_back((cell, dep));
+                }
+            }
+        }
+    }
+}
+
+fn sorted_cell_keys(set: &HashSet<CellKey>) -> Vec<CellKey> {
+    let mut out: Vec<CellKey> = set.iter().copied().collect();
+    out.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
+    out
+}
+
+fn collect_transitive(map: &HashMap<CellKey, HashSet<CellKey>>, start: CellKey) -> Vec<CellKey> {
+    let mut visited: HashSet<CellKey> = HashSet::new();
+    let mut out: Vec<CellKey> = Vec::new();
+    let mut queue = VecDeque::new();
+
+    visited.insert(start);
+    queue.push_back(start);
+
+    while let Some(cell) = queue.pop_front() {
+        let neighbors = map.get(&cell).map(sorted_cell_keys).unwrap_or_default();
+        for n in neighbors {
+            if visited.insert(n) {
+                out.push(n);
+                queue.push_back(n);
+            }
+        }
+    }
+
+    out.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
+    out
 }
 
 #[derive(Debug)]
