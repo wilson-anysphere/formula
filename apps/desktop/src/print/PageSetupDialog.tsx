@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import type { PageMarginsInches, PageSetup, Scaling } from "./types";
+import { t } from "../i18n/index.js";
 
 type Props = {
   value: PageSetup;
@@ -21,36 +22,36 @@ export function PageSetupDialog({ value, onChange, onClose }: Props) {
 
   return (
     <div style={{ padding: 12, width: 420 }}>
-      <h3 style={{ marginTop: 0 }}>Page Setup</h3>
+      <h3 style={{ marginTop: 0 }}>{t("print.pageSetup.title")}</h3>
 
       <label style={{ display: "block", marginBottom: 8 }}>
-        Orientation
+        {t("print.pageSetup.orientation.label")}
         <select
           value={value.orientation}
           onChange={(e) =>
             onChange({ ...value, orientation: e.target.value as any })
           }
-          style={{ marginLeft: 8 }}
+          style={{ marginInlineStart: 8 }}
         >
-          <option value="portrait">Portrait</option>
-          <option value="landscape">Landscape</option>
+          <option value="portrait">{t("print.pageSetup.orientation.portrait")}</option>
+          <option value="landscape">{t("print.pageSetup.orientation.landscape")}</option>
         </select>
       </label>
 
       <label style={{ display: "block", marginBottom: 8 }}>
-        Paper size (OpenXML code)
+        {t("print.pageSetup.paperSize.label")}
         <input
           type="number"
           value={value.paperSize}
           onChange={(e) =>
             onChange({ ...value, paperSize: Number(e.target.value) })
           }
-          style={{ marginLeft: 8, width: 100 }}
+          style={{ marginInlineStart: 8, width: 100 }}
         />
       </label>
 
       <fieldset style={{ border: "1px solid var(--dialog-border)", padding: 8 }}>
-        <legend>Scaling</legend>
+        <legend>{t("print.pageSetup.scaling.legend")}</legend>
 
         <label style={{ display: "block", marginBottom: 6 }}>
           <input
@@ -58,7 +59,7 @@ export function PageSetupDialog({ value, onChange, onClose }: Props) {
             checked={value.scaling.kind === "percent"}
             onChange={() => setScaling({ kind: "percent", percent: 100 })}
           />{" "}
-          Adjust to:
+          {t("print.pageSetup.scaling.adjustTo")}
           <input
             type="number"
             min={10}
@@ -67,7 +68,7 @@ export function PageSetupDialog({ value, onChange, onClose }: Props) {
             onChange={(e) =>
               setScaling({ kind: "percent", percent: Number(e.target.value) })
             }
-            style={{ marginLeft: 8, width: 80 }}
+            style={{ marginInlineStart: 8, width: 80 }}
             disabled={value.scaling.kind !== "percent"}
           />
           %
@@ -79,7 +80,7 @@ export function PageSetupDialog({ value, onChange, onClose }: Props) {
             checked={value.scaling.kind === "fitTo"}
             onChange={() => setScaling({ kind: "fitTo", widthPages: 1, heightPages: 0 })}
           />{" "}
-          Fit to:
+          {t("print.pageSetup.scaling.fitTo")}
           <input
             type="number"
             min={0}
@@ -91,10 +92,10 @@ export function PageSetupDialog({ value, onChange, onClose }: Props) {
                 heightPages: value.scaling.kind === "fitTo" ? value.scaling.heightPages : 0,
               })
             }
-            style={{ marginLeft: 8, width: 60 }}
+            style={{ marginInlineStart: 8, width: 60 }}
             disabled={value.scaling.kind !== "fitTo"}
           />{" "}
-          pages wide ×{" "}
+          {t("print.pageSetup.scaling.pagesWide")}{" "}
           <input
             type="number"
             min={0}
@@ -109,16 +110,16 @@ export function PageSetupDialog({ value, onChange, onClose }: Props) {
             style={{ width: 60 }}
             disabled={value.scaling.kind !== "fitTo"}
           />{" "}
-          tall
+          {t("print.pageSetup.scaling.tall")}
         </label>
       </fieldset>
 
       <fieldset style={{ border: "1px solid var(--dialog-border)", padding: 8, marginTop: 10 }}>
-        <legend>Margins (in)</legend>
+        <legend>{t("print.pageSetup.margins.legend")}</legend>
 
         {(["left", "right", "top", "bottom"] as const).map((k) => (
-          <label key={k} style={{ display: "inline-block", marginRight: 10 }}>
-            {k}
+          <label key={k} style={{ display: "inline-block", marginInlineEnd: 10 }}>
+            {t(`print.pageSetup.margins.${k}`)}
             <input
               type="number"
               step={0.01}
@@ -129,14 +130,14 @@ export function PageSetupDialog({ value, onChange, onClose }: Props) {
                   margins: updateMargins(value.margins, k, Number(e.target.value)),
                 })
               }
-              style={{ marginLeft: 6, width: 80 }}
+              style={{ marginInlineStart: 6, width: 80 }}
             />
           </label>
         ))}
       </fieldset>
 
       <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={onClose}>Close</button>
+        <button onClick={onClose}>{t("print.pageSetup.close")}</button>
       </div>
     </div>
   );

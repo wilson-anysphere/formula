@@ -217,8 +217,12 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                 <div>
                   {t("whatIf.stats.minMax")}: {stats.min} / {stats.max}
                 </div>
-                <div>p5: {stats.percentiles["5"]}</div>
-                <div>p95: {stats.percentiles["95"]}</div>
+                <div>
+                  {tWithVars("whatIf.stats.percentile", { p: 5 })}: {stats.percentiles["5"]}
+                </div>
+                <div>
+                  {tWithVars("whatIf.stats.percentile", { p: 95 })}: {stats.percentiles["95"]}
+                </div>
               </div>
             </div>
           ))}

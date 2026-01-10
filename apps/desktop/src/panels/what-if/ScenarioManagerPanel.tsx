@@ -132,11 +132,11 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr>
-                <th style={{ textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+                <th style={{ textAlign: "start", borderBottom: "1px solid var(--border)" }}>
                   {t("whatIf.scenario.table.scenario")}
                 </th>
                 {report.resultCells.map((cell) => (
-                  <th key={cell} style={{ textAlign: "left", borderBottom: "1px solid var(--border)" }}>
+                  <th key={cell} style={{ textAlign: "start", borderBottom: "1px solid var(--border)" }}>
                     {cell}
                   </th>
                 ))}

@@ -1,4 +1,5 @@
 import { normalizeRange, parseA1, parseRangeA1 } from "../document/coords.js";
+import { t } from "../i18n/index.js";
 import { parseHtmlToCellGrid, serializeCellGridToHtml } from "./html.js";
 import { parseTsvToCellGrid, serializeCellGridToTsv } from "./tsv.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
@@ -126,6 +127,6 @@ export function pasteClipboardContent(doc, sheetId, start, content, options = {}
   );
 
   const startCoord = typeof start === "string" ? parseA1(start) : start;
-  doc.setRangeValues(sheetId, startCoord, values, { label: "Paste" });
+  doc.setRangeValues(sheetId, startCoord, values, { label: t("clipboard.paste") });
   return true;
 }

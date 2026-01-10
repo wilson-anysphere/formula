@@ -1,10 +1,11 @@
 import React from "react";
 
 import type { DataTable } from "../../../../../packages/power-query/src/table.js";
+import { t } from "../../../i18n/index.js";
 
 export function PreviewGrid(props: { table: DataTable | null }) {
   if (!props.table) {
-    return <div style={{ padding: 12, color: "var(--text-secondary)" }}>No preview available.</div>;
+    return <div style={{ padding: 12, color: "var(--text-secondary)" }}>{t("queryEditor.preview.none")}</div>;
   }
 
   const grid = props.table.toGrid({ includeHeader: true });

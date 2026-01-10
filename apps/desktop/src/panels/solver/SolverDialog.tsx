@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from "react";
 
+import { t } from "../../i18n/index.js";
+
 import type {
   ObjectiveKind,
   Relation,
@@ -74,26 +76,26 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
 
   return (
     <div className="solver-dialog">
-      <h2>Solver</h2>
+      <h2>{t("panels.solver.title")}</h2>
 
       <section>
         <label>
-          Solving method
+          {t("solver.dialog.solvingMethod")}
           <select
             value={method}
             onChange={(e) => setMethod(e.target.value as SolveMethod)}
           >
-            <option value="simplex">Simplex (Linear)</option>
-            <option value="grg">GRG (Nonlinear)</option>
-            <option value="evolutionary">Evolutionary (Genetic)</option>
+            <option value="simplex">{t("solver.dialog.method.simplex")}</option>
+            <option value="grg">{t("solver.dialog.method.grg")}</option>
+            <option value="evolutionary">{t("solver.dialog.method.evolutionary")}</option>
           </select>
         </label>
       </section>
 
       <section>
-        <h3>Objective</h3>
+        <h3>{t("solver.dialog.objective.title")}</h3>
         <label>
-          Set objective
+          {t("solver.dialog.objective.setObjective")}
           <input
             value={objectiveRef}
             onChange={(e) => setObjectiveRef(e.target.value)}
@@ -101,21 +103,21 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
         </label>
 
         <label>
-          To
+          {t("solver.dialog.objective.to")}
           <select
             value={objectiveKind}
             onChange={(e) => setObjectiveKind(e.target.value as ObjectiveKind)}
           >
-            <option value="maximize">Max</option>
-            <option value="minimize">Min</option>
-            <option value="target">Value Of</option>
+            <option value="maximize">{t("solver.dialog.objective.max")}</option>
+            <option value="minimize">{t("solver.dialog.objective.min")}</option>
+            <option value="target">{t("solver.dialog.objective.valueOf")}</option>
           </select>
         </label>
 
         {canTarget && (
           <div style={{ display: "flex", gap: 12 }}>
             <label>
-              Value
+              {t("solver.dialog.objective.value")}
               <input
                 type="number"
                 value={targetValue}
@@ -123,7 +125,7 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
               />
             </label>
             <label>
-              Tolerance
+              {t("solver.dialog.objective.tolerance")}
               <input
                 type="number"
                 value={targetTolerance}
@@ -135,13 +137,13 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
       </section>
 
       <section>
-        <h3>By Changing Variable Cells</h3>
+        <h3>{t("solver.dialog.variables.title")}</h3>
 
         <button
           type="button"
           onClick={() => setVariables((v) => [...v, DEFAULT_VARIABLE])}
         >
-          Add Variable
+          {t("solver.dialog.variables.addVariable")}
         </button>
 
         {variables.map((v, idx) => (
@@ -164,13 +166,13 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
                 )
               }
             >
-              <option value="continuous">Continuous</option>
-              <option value="integer">Integer</option>
-              <option value="binary">Binary</option>
+              <option value="continuous">{t("solver.dialog.variables.type.continuous")}</option>
+              <option value="integer">{t("solver.dialog.variables.type.integer")}</option>
+              <option value="binary">{t("solver.dialog.variables.type.binary")}</option>
             </select>
             <input
               type="number"
-              placeholder="Lower"
+              placeholder={t("solver.dialog.variables.lower")}
               value={v.lower ?? ""}
               onChange={(e) =>
                 setVariables((vars) =>
@@ -184,7 +186,7 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
             />
             <input
               type="number"
-              placeholder="Upper"
+              placeholder={t("solver.dialog.variables.upper")}
               value={v.upper ?? ""}
               onChange={(e) =>
                 setVariables((vars) =>
@@ -201,13 +203,13 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
       </section>
 
       <section>
-        <h3>Subject to the Constraints</h3>
+        <h3>{t("solver.dialog.constraints.title")}</h3>
 
         <button
           type="button"
           onClick={() => setConstraints((c) => [...c, DEFAULT_CONSTRAINT])}
         >
-          Add Constraint
+          {t("solver.dialog.constraints.addConstraint")}
         </button>
 
         {constraints.map((c, idx) => (
@@ -251,13 +253,12 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
 
       <footer style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
         <button type="button" onClick={onCancel}>
-          Cancel
+          {t("solver.dialog.cancel")}
         </button>
         <button type="button" onClick={() => onRun(config)}>
-          Solve
+          {t("solver.dialog.solve")}
         </button>
       </footer>
     </div>
   );
 }
-

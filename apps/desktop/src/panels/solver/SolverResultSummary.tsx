@@ -1,5 +1,7 @@
 import React from "react";
 
+import { t } from "../../i18n/index.js";
+
 import type { SolverOutcome } from "./types";
 
 type Props = {
@@ -11,28 +13,27 @@ type Props = {
 export function SolverResultSummary({ outcome, onKeep, onRestore }: Props) {
   return (
     <div className="solver-results">
-      <h3>Solver Results</h3>
+      <h3>{t("solver.results.title")}</h3>
 
       <dl>
-        <dt>Status</dt>
+        <dt>{t("solver.results.status")}</dt>
         <dd>{outcome.status}</dd>
-        <dt>Iterations</dt>
+        <dt>{t("solver.results.iterations")}</dt>
         <dd>{outcome.iterations}</dd>
-        <dt>Objective</dt>
+        <dt>{t("solver.results.objective")}</dt>
         <dd>{outcome.bestObjective}</dd>
-        <dt>Max constraint violation</dt>
+        <dt>{t("solver.results.maxConstraintViolation")}</dt>
         <dd>{outcome.maxConstraintViolation}</dd>
       </dl>
 
       <div style={{ display: "flex", gap: 12 }}>
         <button type="button" onClick={onKeep}>
-          Keep Solution
+          {t("solver.results.keepSolution")}
         </button>
         <button type="button" onClick={onRestore}>
-          Restore Original Values
+          {t("solver.results.restoreOriginalValues")}
         </button>
       </div>
     </div>
   );
 }
-

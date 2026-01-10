@@ -3,6 +3,8 @@
  * @typedef {{ mode: PasteSpecialMode, label: string }} PasteSpecialMenuItem
  */
 
+import { t } from "../i18n/index.js";
+
 /**
  * UI skeleton for Paste Special.
  *
@@ -14,9 +16,9 @@
  */
 export function getPasteSpecialMenuItems() {
   return [
-    { mode: "all", label: "Paste" },
-    { mode: "values", label: "Paste Values" },
-    { mode: "formulas", label: "Paste Formulas" },
-    { mode: "formats", label: "Paste Formats" },
+    { mode: "all", label: t("clipboard.pasteSpecial.paste") },
+    { mode: "values", label: t("clipboard.pasteSpecial.pasteValues") },
+    { mode: "formulas", label: t("clipboard.pasteSpecial.pasteFormulas") },
+    { mode: "formats", label: t("clipboard.pasteSpecial.pasteFormats") },
   ];
 }

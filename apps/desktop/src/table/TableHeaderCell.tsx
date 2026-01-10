@@ -1,5 +1,6 @@
 import React from "react";
 import type { Table } from "./tableTypes";
+import { tWithVars } from "../i18n/index.js";
 
 export interface TableHeaderCellProps {
   table: Table;
@@ -41,7 +42,7 @@ export function TableHeaderCell({
       {hasFilter ? (
         <button
           type="button"
-          aria-label={`Filter ${label}`}
+          aria-label={tWithVars("table.filter.ariaLabel", { column: label })}
           className="formula-table-filter-button"
           onClick={() => onOpenFilter?.(columnIndex)}
         >

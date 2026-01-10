@@ -57,7 +57,7 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", height: "100%" }}>
-      <div style={{ borderRight: "1px solid var(--border)", padding: 12, overflow: "auto" }}>
+      <div style={{ borderInlineEnd: "1px solid var(--border)", padding: 12, overflow: "auto" }}>
         <h3 style={{ marginTop: 0 }}>{props.query.name}</h3>
         <AddStepMenu
           onAddStep={(operation) => {

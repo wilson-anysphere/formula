@@ -8,6 +8,7 @@ import { navigateSelectionByKey } from "../selection/navigation";
 import { SelectionRenderer } from "../selection/renderer";
 import type { CellCoord, GridLimits, Range, SelectionState } from "../selection/types";
 import { resolveCssVar } from "../theme/cssVars.js";
+import { t, tWithVars } from "../i18n/index.js";
 import {
   DEFAULT_GRID_LIMITS,
   addCellToSelection,
@@ -75,7 +76,7 @@ export class SpreadsheetApp {
 
   private resizeObserver: ResizeObserver;
 
-  private readonly currentUser: CommentAuthor = { id: "local", name: "You" };
+  private readonly currentUser: CommentAuthor;
   private readonly commentsDoc = new Y.Doc();
   private readonly commentManager = new CommentManager(this.commentsDoc);
   private commentCells = new Set<string>();
@@ -95,6 +96,7 @@ export class SpreadsheetApp {
   ) {
     this.limits = opts.limits ?? { ...DEFAULT_GRID_LIMITS, maxRows: 10_000, maxCols: 200 };
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
+    this.currentUser = { id: "local", name: t("chat.role.user") };
 
     // Seed a simple outline group: rows 2-4 with a summary row at 5 (Excel 1-based indices).
     this.outline.groupRows(2, 4);
@@ -260,9 +262,9 @@ export class SpreadsheetApp {
     panel.style.height = "100%";
     panel.style.display = "none";
     panel.style.flexDirection = "column";
-    panel.style.background = "var(--bg-primary)";
-    panel.style.borderLeft = "1px solid var(--border)";
-    panel.style.boxShadow = "-2px 0 10px var(--border)";
+    panel.style.background = "var(--dialog-bg)";
+    panel.style.borderInlineStart = "1px solid var(--dialog-border)";
+    panel.style.boxShadow = "-2px 0 10px var(--dialog-border)";
     panel.style.zIndex = "20";
     panel.style.padding = "10px";
     panel.style.boxSizing = "border-box";
@@ -278,12 +280,12 @@ export class SpreadsheetApp {
     header.style.marginBottom = "8px";
 
     const title = document.createElement("div");
-    title.textContent = "Comments";
+    title.textContent = t("comments.title");
     title.style.fontWeight = "600";
 
     const closeButton = document.createElement("button");
     closeButton.textContent = "×";
-    closeButton.setAttribute("aria-label", "Close comments panel");
+    closeButton.setAttribute("aria-label", t("comments.closePanel"));
     closeButton.addEventListener("click", () => this.toggleCommentsPanel());
 
     header.appendChild(title);
@@ -314,12 +316,12 @@ export class SpreadsheetApp {
     this.newCommentInput = document.createElement("input");
     this.newCommentInput.dataset.testid = "new-comment-input";
     this.newCommentInput.type = "text";
-    this.newCommentInput.placeholder = "Add a comment…";
+    this.newCommentInput.placeholder = t("comments.new.placeholder");
     this.newCommentInput.style.flex = "1";
 
     const submit = document.createElement("button");
     submit.dataset.testid = "submit-comment";
-    submit.textContent = "Comment";
+    submit.textContent = t("comments.new.submit");
     submit.addEventListener("click", () => this.submitNewComment());
 
     footer.appendChild(this.newCommentInput);
@@ -338,6 +340,7 @@ export class SpreadsheetApp {
     tooltip.style.padding = "8px 10px";
     tooltip.style.background = "var(--bg-tertiary)";
     tooltip.style.color = "var(--text-primary)";
+    tooltip.style.border = "1px solid var(--border)";
     tooltip.style.fontSize = "12px";
     tooltip.style.borderRadius = "8px";
     tooltip.style.pointerEvents = "none";
@@ -361,14 +364,14 @@ export class SpreadsheetApp {
     if (!this.commentsPanelVisible) return;
 
     const cellRef = cellToA1(this.selection.active);
-    this.commentsPanelCell.textContent = `Cell ${cellRef}`;
+    this.commentsPanelCell.textContent = tWithVars("comments.cellLabel", { cellRef });
 
     const threads = this.commentManager.listForCell(cellRef);
     this.commentsPanelThreads.replaceChildren();
 
     if (threads.length === 0) {
       const empty = document.createElement("div");
-      empty.textContent = "No comments.";
+      empty.textContent = t("comments.none");
       empty.style.fontSize = "12px";
       empty.style.color = "var(--text-secondary)";
       this.commentsPanelThreads.appendChild(empty);
@@ -401,13 +404,13 @@ export class SpreadsheetApp {
     header.style.justifyContent = "space-between";
 
     const author = document.createElement("div");
-    author.textContent = comment.author.name || "Unknown";
+    author.textContent = comment.author.name || t("presence.anonymous");
     author.style.fontSize = "12px";
     author.style.fontWeight = "600";
 
     const resolve = document.createElement("button");
     resolve.dataset.testid = "resolve-comment";
-    resolve.textContent = comment.resolved ? "Unresolve" : "Resolve";
+    resolve.textContent = comment.resolved ? t("comments.unresolve") : t("comments.resolve");
     resolve.addEventListener("click", () => {
       this.commentManager.setResolved({
         commentId: comment.id,
@@ -427,11 +430,11 @@ export class SpreadsheetApp {
 
     for (const reply of comment.replies) {
       const replyEl = document.createElement("div");
-      replyEl.style.paddingLeft = "10px";
-      replyEl.style.borderLeft = "2px solid var(--border)";
+      replyEl.style.paddingInlineStart = "10px";
+      replyEl.style.borderInlineStart = "2px solid var(--border)";
 
       const replyAuthor = document.createElement("div");
-      replyAuthor.textContent = reply.author.name || "Unknown";
+      replyAuthor.textContent = reply.author.name || t("presence.anonymous");
       replyAuthor.style.fontSize = "12px";
       replyAuthor.style.fontWeight = "600";
 
@@ -453,12 +456,12 @@ export class SpreadsheetApp {
     const replyInput = document.createElement("input");
     replyInput.dataset.testid = "reply-input";
     replyInput.type = "text";
-    replyInput.placeholder = "Reply…";
+    replyInput.placeholder = t("comments.reply.placeholder");
     replyInput.style.flex = "1";
 
     const submitReply = document.createElement("button");
     submitReply.dataset.testid = "submit-reply";
-    submitReply.textContent = "Send";
+    submitReply.textContent = t("comments.reply.send");
     submitReply.addEventListener("click", () => {
       const content = replyInput.value.trim();
       if (!content) return;

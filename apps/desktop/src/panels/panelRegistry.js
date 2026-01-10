@@ -1,3 +1,5 @@
+import { t } from "../i18n/index.js";
+
 export const PanelIds = Object.freeze({
   AI_CHAT: "aiChat",
   VERSION_HISTORY: "versionHistory",
@@ -13,47 +15,47 @@ export const PanelIds = Object.freeze({
 
 export const PANEL_REGISTRY = Object.freeze({
   [PanelIds.AI_CHAT]: {
-    title: "AI Assistant",
+    titleKey: "chat.title",
     defaultDock: "right",
     defaultFloatingRect: { x: 120, y: 120, width: 480, height: 640 },
   },
   [PanelIds.VERSION_HISTORY]: {
-    title: "Version History",
+    titleKey: "panels.versionHistory.title",
     defaultDock: "right",
     defaultFloatingRect: { x: 160, y: 160, width: 480, height: 640 },
   },
   [PanelIds.FORMULA_DEBUGGER]: {
-    title: "Formula Debugger",
+    titleKey: "panels.formulaDebugger.title",
     defaultDock: "right",
     defaultFloatingRect: { x: 180, y: 180, width: 520, height: 640 },
   },
   [PanelIds.SCRIPT_EDITOR]: {
-    title: "Script Editor",
+    titleKey: "panels.scriptEditor.title",
     defaultDock: "bottom",
     defaultFloatingRect: { x: 140, y: 140, width: 720, height: 420 },
   },
   [PanelIds.PIVOT_BUILDER]: {
-    title: "Pivot Builder",
+    titleKey: "panels.pivotBuilder.title",
     defaultDock: "left",
     defaultFloatingRect: { x: 100, y: 100, width: 520, height: 640 },
   },
   [PanelIds.QUERY_EDITOR]: {
-    title: "Query Editor",
+    titleKey: "panels.queryEditor.title",
     defaultDock: "right",
     defaultFloatingRect: { x: 140, y: 140, width: 640, height: 720 },
   },
   [PanelIds.PYTHON]: {
-    title: "Python",
+    titleKey: "panels.python.title",
     defaultDock: "bottom",
     defaultFloatingRect: { x: 120, y: 120, width: 760, height: 460 },
   },
   [PanelIds.SOLVER]: {
-    title: "Solver",
+    titleKey: "panels.solver.title",
     defaultDock: "right",
     defaultFloatingRect: { x: 180, y: 160, width: 520, height: 640 },
   },
   [PanelIds.SCENARIO_MANAGER]: {
-    title: "Scenario Manager",
+    titleKey: "whatIf.scenario.title",
     defaultDock: "left",
     defaultFloatingRect: { x: 120, y: 160, width: 520, height: 640 },
   },
@@ -66,4 +68,10 @@ export const PANEL_REGISTRY = Object.freeze({
 
 export function isPanelId(panelId) {
   return Object.prototype.hasOwnProperty.call(PANEL_REGISTRY, panelId);
+}
+
+export function getPanelTitle(panelId) {
+  const def = PANEL_REGISTRY[panelId];
+  if (!def) return panelId;
+  return t(def.titleKey);
 }

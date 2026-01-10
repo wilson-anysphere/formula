@@ -1,5 +1,6 @@
 import { createDefaultLayout } from "./layoutState.js";
 import { deserializeLayout, serializeLayout } from "./layoutSerializer.js";
+import { t } from "../i18n/index.js";
 
 export class MemoryStorage {
   /** @type {Map<string, string>} */
@@ -193,7 +194,12 @@ export class LayoutWorkspaceManager {
   listWorkbookWorkspaces(workbookId) {
     const index = this.loadWorkbookWorkspaceIndex(workbookId);
     const list = [
-      { id: "default", name: "Default", active: index.activeWorkspaceId === "default", isDefault: true },
+      {
+        id: "default",
+        name: t("layout.workspace.default"),
+        active: index.activeWorkspaceId === "default",
+        isDefault: true,
+      },
       ...Object.entries(index.workspaces).map(([id, meta]) => ({
         id,
         name: meta.name,

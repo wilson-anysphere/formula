@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type { ColumnFilter } from "./types";
+import { t } from "../i18n/index.js";
 
 export type FilterDropdownProps = {
   columnName: string;
@@ -20,13 +21,13 @@ export function FilterDropdown(props: FilterDropdownProps) {
   return (
     <div style={{ width: 280, padding: 8 }}>
       <div style={{ fontWeight: 600, marginBottom: 8 }}>
-        {props.columnName} {props.isFiltered ? "(filtered)" : ""}
+        {props.columnName} {props.isFiltered ? t("filterDropdown.filtered") : ""}
       </div>
 
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search…"
+        placeholder={t("filterDropdown.search.placeholder")}
         style={{ width: "100%", marginBottom: 8 }}
       />
 
@@ -39,7 +40,7 @@ export function FilterDropdown(props: FilterDropdownProps) {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
-        <button onClick={() => props.onChange(undefined)}>Clear</button>
+        <button onClick={() => props.onChange(undefined)}>{t("filterDropdown.clear")}</button>
         <button
           onClick={() =>
             props.onChange({
@@ -48,7 +49,7 @@ export function FilterDropdown(props: FilterDropdownProps) {
             })
           }
         >
-          Apply
+          {t("filterDropdown.apply")}
         </button>
       </div>
     </div>

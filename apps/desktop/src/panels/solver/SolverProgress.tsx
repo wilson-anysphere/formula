@@ -1,5 +1,7 @@
 import React from "react";
 
+import { t } from "../../i18n/index.js";
+
 import type { SolverProgress } from "./types";
 
 type Props = {
@@ -10,26 +12,25 @@ type Props = {
 export function SolverProgressView({ progress, onCancel }: Props) {
   return (
     <div className="solver-progress">
-      <h3>Solving…</h3>
+      <h3>{t("solver.progress.title")}</h3>
       {progress ? (
         <dl>
-          <dt>Iteration</dt>
+          <dt>{t("solver.progress.iteration")}</dt>
           <dd>{progress.iteration}</dd>
-          <dt>Best objective</dt>
+          <dt>{t("solver.progress.bestObjective")}</dt>
           <dd>{progress.bestObjective}</dd>
-          <dt>Current objective</dt>
+          <dt>{t("solver.progress.currentObjective")}</dt>
           <dd>{progress.currentObjective}</dd>
-          <dt>Max constraint violation</dt>
+          <dt>{t("solver.progress.maxConstraintViolation")}</dt>
           <dd>{progress.maxConstraintViolation}</dd>
         </dl>
       ) : (
-        <p>Starting…</p>
+        <p>{t("solver.progress.starting")}</p>
       )}
 
       <button type="button" onClick={onCancel}>
-        Cancel
+        {t("solver.progress.cancel")}
       </button>
     </div>
   );
 }
-

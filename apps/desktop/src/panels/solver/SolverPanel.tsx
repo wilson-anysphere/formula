@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 
+import { t } from "../../i18n/index.js";
+
 import { runSolver } from "./api";
 import { SolverDialog } from "./SolverDialog";
 import { SolverProgressView } from "./SolverProgress";
@@ -63,9 +65,9 @@ export function SolverPanel() {
   return (
     <div className="solver-panel">
       <header style={{ display: "flex", justifyContent: "space-between" }}>
-        <h2>Solver</h2>
+        <h2>{t("panels.solver.title")}</h2>
         <button type="button" onClick={() => setShowDialog(true)}>
-          Configure…
+          {t("solver.configure")}
         </button>
       </header>
 
@@ -87,14 +89,13 @@ export function SolverPanel() {
 
       {error && (
         <div style={{ color: "crimson" }}>
-          <strong>Solver error:</strong> {error}
+          <strong>{t("solver.errorLabel")}</strong> {error}
         </div>
       )}
 
       {!running && !outcome && !error && !showDialog && (
-        <p>Configure and run Solver to optimize a worksheet model.</p>
+        <p>{t("solver.emptyState")}</p>
       )}
     </div>
   );
 }
-

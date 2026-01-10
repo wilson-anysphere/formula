@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
+import { t, tWithVars } from "../i18n/index.js";
 
 export interface CommentsPanelProps {
   cellRef: string | null;
@@ -24,15 +25,15 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ padding: 12, borderBottom: "1px solid var(--border)" }}>
-        <div style={{ fontWeight: 600 }}>Comments</div>
+        <div style={{ fontWeight: 600 }}>{t("comments.title")}</div>
         <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-          {props.cellRef ? `Cell ${props.cellRef}` : "Select a cell"}
+          {props.cellRef ? tWithVars("comments.cellLabel", { cellRef: props.cellRef }) : t("comments.selectCell")}
         </div>
       </div>
 
       <div style={{ flex: 1, overflow: "auto", padding: 12, gap: 12, display: "flex", flexDirection: "column" }}>
         {threads.length === 0 ? (
-          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>No comments.</div>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("comments.none")}</div>
         ) : (
           threads.map((comment) => (
             <div key={comment.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
@@ -42,7 +43,7 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
                   type="button"
                   onClick={() => props.onSetResolved({ commentId: comment.id, resolved: !comment.resolved })}
                 >
-                  {comment.resolved ? "Unresolve" : "Resolve"}
+                  {comment.resolved ? t("comments.unresolve") : t("comments.resolve")}
                 </button>
               </div>
 
@@ -53,7 +54,10 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
                   .slice()
                   .sort((a, b) => a.createdAt - b.createdAt)
                   .map((reply) => (
-                    <div key={reply.id} style={{ paddingLeft: 12, borderLeft: "2px solid var(--border)" }}>
+                    <div
+                      key={reply.id}
+                      style={{ paddingInlineStart: 12, borderInlineStart: "2px solid var(--border)" }}
+                    >
                       <div style={{ fontSize: 12, fontWeight: 600 }}>{reply.author.name}</div>
                       <div style={{ fontSize: 13, marginTop: 4, whiteSpace: "pre-wrap" }}>{reply.content}</div>
                     </div>
@@ -68,7 +72,7 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
                         [comment.id]: e.target.value,
                       }))
                     }
-                    placeholder="Reply…"
+                    placeholder={t("comments.reply.placeholder")}
                     style={{ flex: 1 }}
                   />
                   <button
@@ -80,7 +84,7 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
                       setReplyDrafts((drafts) => ({ ...drafts, [comment.id]: "" }));
                     }}
                   >
-                    Send
+                    {t("comments.reply.send")}
                   </button>
                 </div>
               </div>
@@ -94,7 +98,7 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
           <input
             value={newComment}
             onChange={(e) => setNewComment(e.target.value)}
-            placeholder="Add a comment…"
+            placeholder={t("comments.new.placeholder")}
             style={{ flex: 1 }}
             disabled={!props.cellRef}
           />
@@ -109,7 +113,7 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
               setNewComment("");
             }}
           >
-            Comment
+            {t("comments.new.submit")}
           </button>
         </div>
       </div>

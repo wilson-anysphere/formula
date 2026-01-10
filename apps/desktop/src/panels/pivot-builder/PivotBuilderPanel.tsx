@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 
+import { t, tWithVars } from "../../i18n/index.js";
+
 import type {
   AggregationType,
   PivotField,
@@ -38,7 +40,7 @@ function dedupeFields(fields: PivotField[]): PivotField[] {
 }
 
 function defaultValueField(field: string): ValueField {
-  return { sourceField: field, name: `Sum of ${field}`, aggregation: "sum" };
+  return { sourceField: field, name: tWithVars("pivotBuilder.valueField.sumOf", { field }), aggregation: "sum" };
 }
 
 export function PivotBuilderPanel({
@@ -129,7 +131,7 @@ export function PivotBuilderPanel({
   return (
     <div style={{ padding: 12, display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
       <section>
-        <h3 style={{ margin: "0 0 8px 0" }}>Fields</h3>
+        <h3 style={{ margin: "0 0 8px 0" }}>{t("pivotBuilder.fields.title")}</h3>
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 6 }}>
           {availableFields.map((f) => (
             <li
@@ -151,21 +153,21 @@ export function PivotBuilderPanel({
       </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <DropArea title="Rows" onDrop={(e) => onDrop("rows", e)} onDragOver={onDragOver}>
+        <DropArea title={t("pivotBuilder.dropArea.rows")} onDrop={(e) => onDrop("rows", e)} onDragOver={onDragOver}>
           {config.rowFields.map((f) => (
             <Pill key={f.sourceField} label={f.sourceField} />
           ))}
         </DropArea>
 
-        <DropArea title="Columns" onDrop={(e) => onDrop("columns", e)} onDragOver={onDragOver}>
+        <DropArea title={t("pivotBuilder.dropArea.columns")} onDrop={(e) => onDrop("columns", e)} onDragOver={onDragOver}>
           {config.columnFields.map((f) => (
             <Pill key={f.sourceField} label={f.sourceField} />
           ))}
         </DropArea>
 
-        <DropArea title="Values" onDrop={(e) => onDrop("values", e)} onDragOver={onDragOver}>
+        <DropArea title={t("pivotBuilder.dropArea.values")} onDrop={(e) => onDrop("values", e)} onDragOver={onDragOver}>
           {config.valueFields.length === 0 ? (
-            <div style={{ color: "var(--text-secondary)" }}>Drop a numeric field here</div>
+            <div style={{ color: "var(--text-secondary)" }}>{t("pivotBuilder.values.emptyHint")}</div>
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
               {config.valueFields.map((vf, idx) => (
@@ -181,18 +183,18 @@ export function PivotBuilderPanel({
                   }}
                 >
                   <div>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>Field</div>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.value.fieldLabel")}</div>
                     <div>{vf.sourceField}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>Aggregation</div>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.value.aggregationLabel")}</div>
                     <select
                       value={vf.aggregation}
                       onChange={(e) => updateValueField(idx, { aggregation: e.target.value as AggregationType })}
                     >
                       {aggregations.map((a) => (
                         <option key={a} value={a}>
-                          {a}
+                          {t(`pivotBuilder.aggregation.${a}`)}
                         </option>
                       ))}
                     </select>
@@ -203,7 +205,7 @@ export function PivotBuilderPanel({
           )}
         </DropArea>
 
-        <DropArea title="Filters" onDrop={(e) => onDrop("filters", e)} onDragOver={onDragOver}>
+        <DropArea title={t("pivotBuilder.dropArea.filters")} onDrop={(e) => onDrop("filters", e)} onDragOver={onDragOver}>
           {config.filterFields.map((f) => (
             <Pill key={f.sourceField} label={f.sourceField} />
           ))}
@@ -215,7 +217,7 @@ export function PivotBuilderPanel({
             type="button"
             style={{ padding: "6px 10px" }}
           >
-            Reset
+            {t("pivotBuilder.actions.reset")}
           </button>
           <button
             onClick={() => onCreate?.(config)}
@@ -223,7 +225,7 @@ export function PivotBuilderPanel({
             disabled={config.valueFields.length === 0}
             style={{ padding: "6px 10px" }}
           >
-            Create Pivot
+            {t("pivotBuilder.actions.create")}
           </button>
         </div>
       </section>

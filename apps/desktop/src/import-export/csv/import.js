@@ -1,4 +1,5 @@
 import { parseA1 } from "../../document/coords.js";
+import { t } from "../../i18n/index.js";
 import { parseCsv } from "./csv.js";
 import { inferColumnTypes, parseCellWithColumnType } from "./infer.js";
 
@@ -66,6 +67,6 @@ export function importCsvIntoDocument(doc, sheetId, start, csvText, options = {}
     })
   );
 
-  doc.setRangeValues(sheetId, startCoord, values, { label: "Import CSV" });
+  doc.setRangeValues(sheetId, startCoord, values, { label: t("importExport.importCsv") });
   return grid;
 }

@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
+import { t, tWithVars } from "../../i18n/index.js";
+
 /**
  * The desktop app wires this panel to the real document controller + branch
  * service. The implementation here is intentionally small and focused on the
@@ -60,11 +62,11 @@ export function BranchManagerPanel({
   const canManage = useMemo(() => actor.role === "owner" || actor.role === "admin", [actor.role]);
 
   return (
-      <div style={{ padding: 12, fontFamily: "system-ui, sans-serif" }}>
-        <h3>Branches</h3>
-        {!canManage && (
+    <div style={{ padding: 12, fontFamily: "system-ui, sans-serif" }}>
+      <h3>{t("branchManager.title")}</h3>
+      {!canManage && (
         <div style={{ color: "var(--text-secondary)", marginBottom: 8 }}>
-          Branch operations require owner/admin permissions.
+          {t("branchManager.permissionWarning")}
         </div>
       )}
       {error && (
@@ -77,7 +79,7 @@ export function BranchManagerPanel({
         <input
           value={newBranchName}
           onChange={(e) => setNewBranchName(e.target.value)}
-          placeholder="new branch name"
+          placeholder={t("branchManager.newBranch.placeholder")}
           disabled={!canManage}
         />
         <button
@@ -92,7 +94,7 @@ export function BranchManagerPanel({
             }
           }}
         >
-          Create
+          {t("branchManager.newBranch.create")}
         </button>
       </div>
 
@@ -116,7 +118,7 @@ export function BranchManagerPanel({
               <button
                 disabled={!canManage}
                 onClick={async () => {
-                  const newName = window.prompt("Rename branch", b.name);
+                  const newName = window.prompt(t("branchManager.prompt.rename"), b.name);
                   if (!newName || newName.trim() === b.name) return;
                   try {
                     await branchService.renameBranch(actor, { oldName: b.name, newName: newName.trim() });
@@ -126,7 +128,7 @@ export function BranchManagerPanel({
                   }
                 }}
               >
-                Rename
+                {t("branchManager.actions.rename")}
               </button>
               <button
                 disabled={!canManage}
@@ -139,12 +141,12 @@ export function BranchManagerPanel({
                   }
                 }}
               >
-                Switch
+                {t("branchManager.actions.switch")}
               </button>
               <button
                 disabled={!canManage || b.name === "main"}
                 onClick={async () => {
-                  if (!window.confirm(`Delete branch '${b.name}'?`)) return;
+                  if (!window.confirm(tWithVars("branchManager.confirm.delete", { name: b.name }))) return;
                   try {
                     await branchService.deleteBranch(actor, { name: b.name });
                     await reload();
@@ -153,13 +155,13 @@ export function BranchManagerPanel({
                   }
                 }}
               >
-                Delete
+                {t("branchManager.actions.delete")}
               </button>
               <button
                 disabled={!canManage}
                 onClick={() => onStartMerge(b.name)}
               >
-                Merge…
+                {t("branchManager.actions.merge")}
               </button>
             </div>
           </li>
