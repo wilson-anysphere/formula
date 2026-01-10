@@ -2,5 +2,8 @@ export { normalizeFormula } from "./formula/normalize.js";
 export { parseFormula } from "./formula/parse.js";
 export { semanticDiff, cellKey, parseCellKey } from "./diff/semanticDiff.js";
 export { FileVersionStore } from "./store/fileVersionStore.js";
+export { SQLiteVersionStore } from "./store/sqliteVersionStore.js";
 export { VersionManager } from "./versioning/versionManager.js";
-
+export { createYjsSpreadsheetDocAdapter } from "./yjs/yjsSpreadsheetDocAdapter.js";
+export { sheetStateFromYjsDoc, sheetStateFromYjsSnapshot } from "./yjs/sheetState.js";
+export { diffYjsSnapshots } from "./yjs/diffSnapshots.js";

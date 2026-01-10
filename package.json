@@ -2,8 +2,11 @@
   "name": "formula",
   "private": true,
   "type": "module",
+  "dependencies": {
+    "yjs": "^13.6.27"
+  },
   "scripts": {
-    "test": "node --test"
+    "test": "node --no-warnings --test"
   },
   "engines": {
     "node": ">=18"
