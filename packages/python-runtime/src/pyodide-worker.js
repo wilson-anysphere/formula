@@ -36,8 +36,10 @@ async function loadPyodideOnce({ indexURL } = {}) {
   });
 
   if (typeof SharedArrayBuffer !== "undefined" && typeof pyodide.setInterruptBuffer === "function") {
-    const interruptBuffer = new SharedArrayBuffer(4);
-    interruptView = new Int32Array(interruptBuffer);
+    // Follow Pyodide's recommended interrupt buffer format: a single byte that
+    // can be set to 2 to raise KeyboardInterrupt.
+    const interruptBuffer = new SharedArrayBuffer(1);
+    interruptView = new Uint8Array(interruptBuffer);
     pyodide.setInterruptBuffer(interruptView);
   }
 
@@ -182,7 +184,6 @@ async function runWithTimeout(runtime, code, timeoutMs) {
   interruptView[0] = 0;
   const timer = setTimeout(() => {
     interruptView[0] = 2;
-    Atomics.notify(interruptView, 0);
   }, timeoutMs);
 
   try {

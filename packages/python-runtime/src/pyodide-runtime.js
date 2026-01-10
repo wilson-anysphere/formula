@@ -38,6 +38,23 @@ export class PyodideRuntime {
     this.permissions = options.permissions ?? defaultPermissions();
     this.api = options.api;
     this.formulaFiles = options.formulaFiles ?? bundledFormulaFiles;
+    this.worker = null;
+    this._onRpcMessage = null;
+  }
+
+  destroy() {
+    if (!this.worker) return;
+    try {
+      if (this._onRpcMessage) {
+        this.worker.removeEventListener("message", this._onRpcMessage);
+      }
+      this.worker.terminate();
+    } catch {
+      // ignore
+    } finally {
+      this.worker = null;
+      this._onRpcMessage = null;
+    }
   }
 
   /**
@@ -58,6 +75,10 @@ export class PyodideRuntime {
 
     if (!this.formulaFiles) {
       throw new Error("PyodideRuntime.initialize requires { formulaFiles } to install the in-repo formula API");
+    }
+
+    if (this.worker) {
+      this.destroy();
     }
 
     // Pyodide's upstream loader is typically pulled in via `importScripts()`,
@@ -103,6 +124,7 @@ export class PyodideRuntime {
         if (event.data?.type === "ready") {
           this.worker.removeEventListener("message", onMessage);
           if (event.data?.error) {
+            this.destroy();
             reject(new Error(event.data.error));
           } else {
             resolve();
@@ -111,6 +133,7 @@ export class PyodideRuntime {
       };
       const onError = (err) => {
         this.worker.removeEventListener("message", onMessage);
+        this.destroy();
         reject(err);
       };
       this.worker.addEventListener("message", onMessage);
@@ -141,12 +164,13 @@ export class PyodideRuntime {
     const effectivePermissions = permissions ?? this.permissions;
 
     return await new Promise((resolve, reject) => {
+      const worker = this.worker;
       // The worker enforces the timeout as well (via Pyodide interrupts). This
       // timer is a last-resort failsafe in case the worker stops responding.
       const timer =
         Number.isFinite(effectiveTimeout) && effectiveTimeout > 0
           ? setTimeout(() => {
-              this.worker.terminate();
+              this.destroy();
               reject(new Error("Pyodide script timed out"));
             }, effectiveTimeout + 250)
           : null;
@@ -154,14 +178,32 @@ export class PyodideRuntime {
       const onMessage = (event) => {
         const msg = event.data;
         if (msg?.type !== "result" || msg?.requestId !== requestId) return;
-        this.worker.removeEventListener("message", onMessage);
+        worker.removeEventListener("message", onMessage);
+        worker.removeEventListener("error", onError);
         if (timer) clearTimeout(timer);
-        if (msg.success) resolve(msg);
-        else reject(new Error(msg.error || "Pyodide script failed"));
+        if (msg.success) {
+          resolve(msg);
+          return;
+        }
+
+        // If the worker exceeded memory limits, it's safer to reset the runtime.
+        if (typeof msg.error === "string" && msg.error.includes("Pyodide memory limit exceeded")) {
+          this.destroy();
+        }
+
+        reject(new Error(msg.error || "Pyodide script failed"));
       };
 
-      this.worker.addEventListener("message", onMessage);
-      this.worker.postMessage({
+      const onError = (err) => {
+        worker.removeEventListener("message", onMessage);
+        if (timer) clearTimeout(timer);
+        this.destroy();
+        reject(err);
+      };
+
+      worker.addEventListener("message", onMessage);
+      worker.addEventListener("error", onError, { once: true });
+      worker.postMessage({
         type: "execute",
         requestId,
         code,
