@@ -20,7 +20,9 @@
     "test:node": "node scripts/run-node-tests.mjs",
     "test:e2e": "pnpm -C apps/desktop test:e2e",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "bench:gpu-kernels": "node packages/gpu-kernels/bench/bench.mjs"
+    "bench:gpu-kernels": "node packages/gpu-kernels/bench/bench.mjs",
+    "benchmark": "node --experimental-strip-types apps/desktop/tests/performance/run.ts",
+    "test:perf": "pnpm benchmark"
   },
   "engines": {
     "node": ">=18"

@@ -8,6 +8,10 @@
 //! For editor workflows (syntax highlighting, autocomplete, shared formulas) the
 //! crate also exposes a syntax-only lexer/parser that produces a normalized AST via
 //! [`parse_formula`] and [`parser::parse_formula_partial`].
+//!
+//! Performance is a feature (see `docs/16-performance-targets.md`). This crate exposes a
+//! small benchmark harness via [`run_benchmarks`] so CI can detect regressions in the core
+//! parsing/evaluation/recalc paths as the engine evolves.
 
 pub mod date;
 pub mod display;
@@ -21,12 +25,12 @@ pub mod pivot;
 pub mod solver;
 pub mod what_if;
 pub mod value;
-
 pub mod debug;
 pub mod sort_filter;
 
-mod engine;
 pub mod structured_refs;
+mod engine;
+mod perf;
 
 mod ast;
 pub mod parser;
@@ -35,6 +39,7 @@ pub use ast::*;
 pub use crate::error::{ExcelError, ExcelResult};
 pub use editing::{CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange};
 pub use engine::{Engine, EngineError, RecalcMode};
+pub use perf::{run_benchmarks, BenchmarkResult};
 pub use parser::{
     lex, parse_formula_partial, FunctionContext, ParseContext, PartialParse, Token, TokenKind,
 };

@@ -59,6 +59,9 @@ services/sync-server/.sync-server-data/
 # Local-only agent files (never commit)
 scratchpad.md
 handoff.md
+# Benchmark outputs (generated locally/CI)
+benchmark-results.json
+benchmark-details.json
 
 # App artifacts
 .formula/
