@@ -49,3 +49,42 @@ test("LayoutWorkspaceManager falls back to global default layout when workbook h
   assert.deepEqual(getPanelPlacement(overridden, PanelIds.AI_CHAT), { kind: "docked", side: "right" });
   assert.deepEqual(getPanelPlacement(overridden, PanelIds.VERSION_HISTORY), { kind: "docked", side: "left" });
 });
+
+test("LayoutWorkspaceManager supports multiple named workspaces per workbook", () => {
+  const storage = new MemoryStorage();
+  const workbookId = "workbook-789";
+
+  const manager = new LayoutWorkspaceManager({ storage, panelRegistry: PANEL_REGISTRY });
+
+  let defaultLayout = manager.loadWorkbookLayout(workbookId, { primarySheetId: "Sheet1" });
+  defaultLayout = openPanel(defaultLayout, PanelIds.AI_CHAT, { panelRegistry: PANEL_REGISTRY });
+  defaultLayout = dockPanel(defaultLayout, PanelIds.AI_CHAT, "left");
+  manager.saveWorkbookLayout(workbookId, defaultLayout);
+
+  let analysisLayout = openPanel(defaultLayout, PanelIds.VERSION_HISTORY, { panelRegistry: PANEL_REGISTRY });
+  analysisLayout = dockPanel(analysisLayout, PanelIds.VERSION_HISTORY, "right");
+  manager.saveWorkbookWorkspace(workbookId, "analysis", { name: "Analysis", layout: analysisLayout, makeActive: true });
+
+  const fromAnalysis = manager.loadWorkbookLayout(workbookId, { primarySheetId: "Sheet1" });
+  assert.deepEqual(getPanelPlacement(fromAnalysis, PanelIds.VERSION_HISTORY), { kind: "docked", side: "right" });
+
+  manager.setActiveWorkbookWorkspace(workbookId, "default");
+  const fromDefault = manager.loadWorkbookLayout(workbookId, { primarySheetId: "Sheet1" });
+  assert.deepEqual(getPanelPlacement(fromDefault, PanelIds.AI_CHAT), { kind: "docked", side: "left" });
+  assert.deepEqual(getPanelPlacement(fromDefault, PanelIds.VERSION_HISTORY), { kind: "closed" });
+
+  const workspaces = manager.listWorkbookWorkspaces(workbookId);
+  assert.deepEqual(
+    workspaces.map((w) => ({ id: w.id, active: w.active })),
+    [
+      { id: "default", active: true },
+      { id: "analysis", active: false },
+    ],
+  );
+
+  manager.deleteWorkbookWorkspace(workbookId, "analysis");
+  assert.deepEqual(
+    manager.listWorkbookWorkspaces(workbookId).map((w) => w.id),
+    ["default"],
+  );
+});

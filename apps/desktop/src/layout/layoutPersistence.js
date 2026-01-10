@@ -26,6 +26,33 @@ function encodeKeyPart(value) {
   return encodeURIComponent(String(value));
 }
 
+function safeJsonParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeWorkspaceIndex(raw) {
+  const active = typeof raw?.activeWorkspaceId === "string" ? raw.activeWorkspaceId : "default";
+  const workspaces = raw?.workspaces && typeof raw.workspaces === "object" ? raw.workspaces : {};
+
+  /** @type {Record<string, { name: string }>} */
+  const normalizedWorkspaces = {};
+  for (const [id, meta] of Object.entries(workspaces)) {
+    if (typeof id !== "string" || id.length === 0 || id === "default") continue;
+    const name = typeof meta?.name === "string" && meta.name.trim().length > 0 ? meta.name.trim() : id;
+    normalizedWorkspaces[id] = { name };
+  }
+
+  const normalizedActive = active === "default" || Object.prototype.hasOwnProperty.call(normalizedWorkspaces, active)
+    ? active
+    : "default";
+
+  return { schemaVersion: 1, activeWorkspaceId: normalizedActive, workspaces: normalizedWorkspaces };
+}
+
 export class LayoutWorkspaceManager {
   /**
    * @param {{ storage: Pick<Storage, "getItem" | "setItem" | "removeItem">, panelRegistry?: Record<string, unknown>, keyPrefix?: string }} params
@@ -42,6 +69,14 @@ export class LayoutWorkspaceManager {
 
   workbookKey(workbookId) {
     return `${this.keyPrefix}.workbook.${encodeKeyPart(workbookId)}.v1`;
+  }
+
+  workbookWorkspaceIndexKey(workbookId) {
+    return `${this.keyPrefix}.workbook.${encodeKeyPart(workbookId)}.workspaces.v1`;
+  }
+
+  workbookWorkspaceKey(workbookId, workspaceId) {
+    return `${this.keyPrefix}.workbook.${encodeKeyPart(workbookId)}.workspace.${encodeKeyPart(workspaceId)}.v1`;
   }
 
   /**
@@ -66,9 +101,20 @@ export class LayoutWorkspaceManager {
    * @param {{ primarySheetId?: string | null }} [options]
    */
   loadWorkbookLayout(workbookId, options = {}) {
-    const raw = this.storage.getItem(this.workbookKey(workbookId));
+    const activeWorkspaceId = this.getActiveWorkbookWorkspaceId(workbookId);
+    const key = activeWorkspaceId === "default" ? this.workbookKey(workbookId) : this.workbookWorkspaceKey(workbookId, activeWorkspaceId);
+
+    const raw = this.storage.getItem(key);
     if (raw) {
       return deserializeLayout(raw, { panelRegistry: this.panelRegistry, primarySheetId: options.primarySheetId });
+    }
+
+    // If the active workspace isn't present yet (e.g. user deleted it), fall back to default workspace.
+    if (activeWorkspaceId !== "default") {
+      const fallbackRaw = this.storage.getItem(this.workbookKey(workbookId));
+      if (fallbackRaw) {
+        return deserializeLayout(fallbackRaw, { panelRegistry: this.panelRegistry, primarySheetId: options.primarySheetId });
+      }
     }
 
     const global = this.loadGlobalDefaultLayout({ primarySheetId: options.primarySheetId });
@@ -78,14 +124,131 @@ export class LayoutWorkspaceManager {
   }
 
   saveWorkbookLayout(workbookId, layout) {
-    this.storage.setItem(
-      this.workbookKey(workbookId),
-      serializeLayout(layout, { panelRegistry: this.panelRegistry }),
-    );
+    const activeWorkspaceId = this.getActiveWorkbookWorkspaceId(workbookId);
+    const key =
+      activeWorkspaceId === "default"
+        ? this.workbookKey(workbookId)
+        : this.workbookWorkspaceKey(workbookId, activeWorkspaceId);
+
+    this.storage.setItem(key, serializeLayout(layout, { panelRegistry: this.panelRegistry }));
   }
 
   deleteWorkbookLayout(workbookId) {
     this.storage.removeItem(this.workbookKey(workbookId));
   }
-}
 
+  loadWorkbookWorkspaceIndex(workbookId) {
+    const raw = this.storage.getItem(this.workbookWorkspaceIndexKey(workbookId));
+    if (!raw) return normalizeWorkspaceIndex(null);
+
+    return normalizeWorkspaceIndex(safeJsonParse(raw));
+  }
+
+  saveWorkbookWorkspaceIndex(workbookId, index) {
+    this.storage.setItem(this.workbookWorkspaceIndexKey(workbookId), JSON.stringify(normalizeWorkspaceIndex(index)));
+  }
+
+  getActiveWorkbookWorkspaceId(workbookId) {
+    return this.loadWorkbookWorkspaceIndex(workbookId).activeWorkspaceId;
+  }
+
+  /**
+   * @param {string} workbookId
+   * @returns {Array<{ id: string, name: string, active: boolean, isDefault: boolean }>}
+   */
+  listWorkbookWorkspaces(workbookId) {
+    const index = this.loadWorkbookWorkspaceIndex(workbookId);
+    const list = [
+      { id: "default", name: "Default", active: index.activeWorkspaceId === "default", isDefault: true },
+      ...Object.entries(index.workspaces).map(([id, meta]) => ({
+        id,
+        name: meta.name,
+        active: index.activeWorkspaceId === id,
+        isDefault: false,
+      })),
+    ];
+    return list;
+  }
+
+  /**
+   * Persist a named workspace layout for a workbook.
+   *
+   * @param {string} workbookId
+   * @param {string} workspaceId
+   * @param {{ name?: string, layout: any, makeActive?: boolean }} params
+   */
+  saveWorkbookWorkspace(workbookId, workspaceId, params) {
+    const name = typeof params.name === "string" && params.name.trim().length > 0 ? params.name.trim() : workspaceId;
+    const makeActive = Boolean(params.makeActive);
+
+    if (workspaceId === "default") {
+      this.storage.setItem(this.workbookKey(workbookId), serializeLayout(params.layout, { panelRegistry: this.panelRegistry }));
+      if (makeActive) this.setActiveWorkbookWorkspace(workbookId, "default");
+      return;
+    }
+
+    this.storage.setItem(
+      this.workbookWorkspaceKey(workbookId, workspaceId),
+      serializeLayout(params.layout, { panelRegistry: this.panelRegistry }),
+    );
+
+    const index = this.loadWorkbookWorkspaceIndex(workbookId);
+    index.workspaces[workspaceId] = { name };
+    if (makeActive) index.activeWorkspaceId = workspaceId;
+    this.saveWorkbookWorkspaceIndex(workbookId, index);
+  }
+
+  /**
+   * Load a named workspace layout.
+   *
+   * @param {string} workbookId
+   * @param {string} workspaceId
+   * @param {{ primarySheetId?: string | null }} [options]
+   */
+  loadWorkbookWorkspace(workbookId, workspaceId, options = {}) {
+    if (workspaceId === "default") {
+      const raw = this.storage.getItem(this.workbookKey(workbookId));
+      if (raw) {
+        return deserializeLayout(raw, { panelRegistry: this.panelRegistry, primarySheetId: options.primarySheetId });
+      }
+      return null;
+    }
+
+    const raw = this.storage.getItem(this.workbookWorkspaceKey(workbookId, workspaceId));
+    if (!raw) return null;
+    return deserializeLayout(raw, { panelRegistry: this.panelRegistry, primarySheetId: options.primarySheetId });
+  }
+
+  /**
+   * @param {string} workbookId
+   * @param {string} workspaceId
+   */
+  setActiveWorkbookWorkspace(workbookId, workspaceId) {
+    const index = this.loadWorkbookWorkspaceIndex(workbookId);
+
+    if (workspaceId !== "default" && !Object.prototype.hasOwnProperty.call(index.workspaces, workspaceId)) {
+      throw new Error(`Unknown workspace: ${workspaceId}`);
+    }
+
+    index.activeWorkspaceId = workspaceId;
+    this.saveWorkbookWorkspaceIndex(workbookId, index);
+  }
+
+  /**
+   * @param {string} workbookId
+   * @param {string} workspaceId
+   */
+  deleteWorkbookWorkspace(workbookId, workspaceId) {
+    if (workspaceId === "default") {
+      this.deleteWorkbookLayout(workbookId);
+      this.setActiveWorkbookWorkspace(workbookId, "default");
+      return;
+    }
+
+    this.storage.removeItem(this.workbookWorkspaceKey(workbookId, workspaceId));
+    const index = this.loadWorkbookWorkspaceIndex(workbookId);
+    delete index.workspaces[workspaceId];
+    if (index.activeWorkspaceId === workspaceId) index.activeWorkspaceId = "default";
+    this.saveWorkbookWorkspaceIndex(workbookId, index);
+  }
+}
