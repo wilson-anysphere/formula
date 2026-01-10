@@ -14,6 +14,7 @@ pub mod conditional_formatting;
 mod error;
 pub mod rich_text;
 mod outline;
+mod formula_rewrite;
 mod style;
 mod value;
 mod workbook;
@@ -26,13 +27,16 @@ pub use display::{format_cell_display, CellDisplay};
 pub use conditional_formatting::*;
 pub use error::ErrorValue;
 pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
+pub use formula_rewrite::rewrite_sheet_names_in_formula;
 pub use style::{
     Alignment, Border, BorderStyle, Color, Fill, Font, HorizontalAlignment, Style, StyleTable,
     VerticalAlignment,
 };
 pub use value::{ArrayValue, CellValue, RichText, SpillValue};
-pub use workbook::{Workbook, WorkbookId};
-pub use worksheet::{ColProperties, RowProperties, SheetVisibility, Worksheet, WorksheetId};
+pub use workbook::{RenameSheetError, Workbook, WorkbookId};
+pub use worksheet::{
+    ColProperties, RowProperties, SheetVisibility, TabColor, Worksheet, WorksheetId,
+};
 
 /// Current serialization schema version.
 ///

@@ -1,6 +1,11 @@
+use core::fmt;
+
 use serde::{Deserialize, Serialize};
 
-use crate::{Style, StyleTable, Worksheet, WorksheetId};
+use crate::{
+    rewrite_sheet_names_in_formula, SheetVisibility, Style, StyleTable, TabColor, Worksheet,
+    WorksheetId,
+};
 
 /// Identifier for a workbook.
 pub type WorkbookId = u32;
@@ -33,6 +38,26 @@ pub struct Workbook {
     next_sheet_id: WorksheetId,
 }
 
+/// Errors raised when renaming a worksheet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RenameSheetError {
+    SheetNotFound,
+    EmptyName,
+    DuplicateName,
+}
+
+impl fmt::Display for RenameSheetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RenameSheetError::SheetNotFound => f.write_str("sheet not found"),
+            RenameSheetError::EmptyName => f.write_str("sheet name cannot be empty"),
+            RenameSheetError::DuplicateName => f.write_str("sheet name already exists"),
+        }
+    }
+}
+
+impl std::error::Error for RenameSheetError {}
+
 impl Default for Workbook {
     fn default() -> Self {
         Self::new()
@@ -57,6 +82,80 @@ impl Workbook {
         self.next_sheet_id = self.next_sheet_id.wrapping_add(1);
         self.sheets.push(Worksheet::new(id, name));
         id
+    }
+
+    /// Rename a worksheet and rewrite formulas that reference it.
+    pub fn rename_sheet(
+        &mut self,
+        id: WorksheetId,
+        new_name: &str,
+    ) -> Result<(), RenameSheetError> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err(RenameSheetError::EmptyName);
+        }
+
+        let sheet_index = self
+            .sheets
+            .iter()
+            .position(|s| s.id == id)
+            .ok_or(RenameSheetError::SheetNotFound)?;
+
+        for sheet in &self.sheets {
+            if sheet.id != id && sheet.name.eq_ignore_ascii_case(new_name) {
+                return Err(RenameSheetError::DuplicateName);
+            }
+        }
+
+        let old_name = self.sheets[sheet_index].name.clone();
+
+        for sheet in &mut self.sheets {
+            for (_, cell) in sheet.iter_cells_mut() {
+                let Some(formula) = cell.formula.clone() else {
+                    continue;
+                };
+                cell.formula = Some(rewrite_sheet_names_in_formula(
+                    &formula, &old_name, new_name,
+                ));
+            }
+        }
+
+        self.sheets[sheet_index].name = new_name.to_string();
+        Ok(())
+    }
+
+    /// Reorder a worksheet within the workbook's sheet list.
+    pub fn reorder_sheet(&mut self, id: WorksheetId, new_index: usize) -> bool {
+        let Some(current) = self.sheets.iter().position(|s| s.id == id) else {
+            return false;
+        };
+        if new_index >= self.sheets.len() {
+            return false;
+        }
+        if current == new_index {
+            return true;
+        }
+        let sheet = self.sheets.remove(current);
+        self.sheets.insert(new_index, sheet);
+        true
+    }
+
+    /// Set sheet visibility.
+    pub fn set_sheet_visibility(&mut self, id: WorksheetId, visibility: SheetVisibility) -> bool {
+        let Some(sheet) = self.sheet_mut(id) else {
+            return false;
+        };
+        sheet.visibility = visibility;
+        true
+    }
+
+    /// Set sheet tab color.
+    pub fn set_sheet_tab_color(&mut self, id: WorksheetId, tab_color: Option<TabColor>) -> bool {
+        let Some(sheet) = self.sheet_mut(id) else {
+            return false;
+        };
+        sheet.tab_color = tab_color;
+        true
     }
 
     /// Get a sheet by id.

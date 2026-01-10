@@ -7,6 +7,35 @@ use crate::{A1ParseError, Cell, CellKey, CellRef, CellValue, Range};
 /// Identifier for a worksheet within a workbook.
 pub type WorksheetId = u32;
 
+/// Sheet tab color.
+///
+/// XLSX stores this as a `CT_Color` payload, which can be specified as:
+/// - `rgb` (ARGB hex)
+/// - `theme` + `tint`
+/// - `indexed`
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub struct TabColor {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rgb: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub indexed: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tint: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto: Option<bool>,
+}
+
+impl TabColor {
+    pub fn rgb(rgb: impl Into<String>) -> Self {
+        Self {
+            rgb: Some(rgb.into()),
+            ..Default::default()
+        }
+    }
+}
+
 fn default_row_count() -> u32 {
     crate::cell::EXCEL_MAX_ROWS
 }
@@ -80,6 +109,10 @@ pub struct Worksheet {
     #[serde(default, skip_serializing_if = "is_visible")]
     pub visibility: SheetVisibility,
 
+    /// Optional tab color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_color: Option<TabColor>,
+
     /// Sparse cell storage; only non-empty cells are stored.
     #[serde(default)]
     cells: HashMap<CellKey, Cell>,
@@ -124,6 +157,7 @@ impl Worksheet {
             id,
             name: name.into(),
             visibility: SheetVisibility::Visible,
+            tab_color: None,
             cells: HashMap::new(),
             used_range: None,
             row_count: default_row_count(),
@@ -488,6 +522,11 @@ impl Worksheet {
         self.used_range = compute_used_range(&self.cells);
     }
 
+    /// Iterate over all stored cells mutably.
+    pub fn iter_cells_mut(&mut self) -> impl Iterator<Item = (CellRef, &mut Cell)> {
+        self.cells.iter_mut().map(|(k, v)| (k.to_ref(), v))
+    }
+
     fn on_cell_inserted(&mut self, cell_ref: CellRef) {
         match self.used_range {
             None => self.used_range = Some(Range::new(cell_ref, cell_ref)),
@@ -536,6 +575,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             #[serde(default)]
             visibility: SheetVisibility,
             #[serde(default)]
+            tab_color: Option<TabColor>,
+            #[serde(default)]
             cells: HashMap<CellKey, Cell>,
             #[serde(default = "default_row_count")]
             row_count: u32,
@@ -560,6 +601,7 @@ impl<'de> Deserialize<'de> for Worksheet {
             id: helper.id,
             name: helper.name,
             visibility: helper.visibility,
+            tab_color: helper.tab_color,
             cells: helper.cells,
             used_range,
             row_count: helper.row_count,

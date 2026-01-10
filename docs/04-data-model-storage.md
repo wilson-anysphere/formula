@@ -403,6 +403,35 @@ const stockEntity: LinkedEntityValue = {
 
 ## Storage Layer
 
+### Workbook & Sheet Metadata
+
+Workbooks contain an **ordered list of sheets**. Each sheet has a **stable ID** (never changes on rename/reorder) and user-facing metadata used by the UI and XLSX round-tripping.
+
+```typescript
+type SheetVisibility = "visible" | "hidden" | "veryHidden";
+
+interface SheetMeta {
+  id: string;              // Stable internal ID (UUID)
+  name: string;            // Display name (unique, case-insensitive)
+  position: number;        // Ordering in workbook (0-based)
+  visibility: SheetVisibility;
+  tabColor?: string;       // Optional ARGB hex (e.g. "FFFF0000") or theme-based color in metadata
+  xlsxSheetId?: number;    // Preserve Excel's sheetId on round-trip
+  xlsxRelId?: string;      // Preserve workbook.xml relationship ID (r:id)
+}
+
+interface WorkbookMeta {
+  id: string;
+  name: string;
+  sheets: SheetMeta[];     // Ordered by position
+}
+```
+
+Key behaviors:
+- Reorder updates `position` (and must persist).
+- Rename updates `name` and rewrites formulas that reference the sheet.
+- `veryHidden` must be preserved from XLSX even if the UI doesn’t expose it directly.
+
 ### SQLite Schema
 
 ```sql
@@ -420,6 +449,10 @@ CREATE TABLE sheets (
   workbook_id TEXT REFERENCES workbooks(id),
   name TEXT NOT NULL,
   position INTEGER,
+  visibility TEXT NOT NULL DEFAULT 'visible' CHECK (visibility IN ('visible','hidden','veryHidden')),
+  tab_color TEXT, -- Optional ARGB hex (e.g. 'FFFF0000'); theme/indexed colors stored in metadata JSON if needed
+  xlsx_sheet_id INTEGER, -- Preserve the <sheet sheetId="..."> value for round-trip
+  xlsx_rel_id TEXT,      -- Preserve the <sheet r:id="..."> relationship ID for round-trip
   frozen_rows INTEGER DEFAULT 0,
   frozen_cols INTEGER DEFAULT 0,
   zoom REAL DEFAULT 1.0,

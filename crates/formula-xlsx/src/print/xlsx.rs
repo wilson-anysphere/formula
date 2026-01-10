@@ -110,14 +110,13 @@ pub fn write_workbook_print_settings(
     // Rewind zip to iterate entries again.
     let mut zip = ZipArchive::new(Cursor::new(xlsx_bytes))?;
     let mut out = ZipWriter::new(Cursor::new(Vec::new()));
-    let options =
-        FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)?;
         let name = entry.name().to_string();
         if entry.is_dir() {
-            out.add_directory(name, options)?;
+            out.add_directory(name, options.clone())?;
             continue;
         }
 
@@ -130,7 +129,7 @@ pub fn write_workbook_print_settings(
             updated_sheets.get(&name).cloned()
         };
 
-        out.start_file(name, options)?;
+        out.start_file(name, options.clone())?;
         out.write_all(replacement.as_deref().unwrap_or(&data))?;
     }
 

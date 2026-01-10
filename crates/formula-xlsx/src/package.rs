@@ -15,6 +15,12 @@ pub enum XlsxError {
     Xml(#[from] quick_xml::Error),
     #[error("utf-8 error: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
+    #[error("xml attribute error: {0}")]
+    Attr(#[from] quick_xml::events::attributes::AttrError),
+    #[error("missing required attribute: {0}")]
+    MissingAttr(&'static str),
+    #[error("invalid sheetId value")]
+    InvalidSheetId,
 }
 
 /// In-memory representation of an XLSX/XLSM package as a map of part name -> bytes.
@@ -151,9 +157,8 @@ fn ensure_workbook_rels_has_vba(parts: &mut BTreeMap<String, Vec<u8>>) -> Result
     }
 
     let next_rid = next_relationship_id(&xml);
-    let rel = format!(
-        r#"<Relationship Id="rId{next_rid}" Type="{rel_type}" Target="vbaProject.bin"/>"#
-    );
+    let rel =
+        format!(r#"<Relationship Id="rId{next_rid}" Type="{rel_type}" Target="vbaProject.bin"/>"#);
 
     if let Some(idx) = xml.rfind("</Relationships>") {
         xml.insert_str(idx, &rel);
@@ -226,8 +231,6 @@ mod tests {
         assert!(ct.contains("application/vnd.ms-office.vbaProject"));
 
         let rels = std::str::from_utf8(pkg2.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
-        assert!(rels.contains(
-            "http://schemas.microsoft.com/office/2006/relationships/vbaProject"
-        ));
+        assert!(rels.contains("http://schemas.microsoft.com/office/2006/relationships/vbaProject"));
     }
 }

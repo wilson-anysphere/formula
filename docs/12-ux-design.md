@@ -353,6 +353,58 @@ The context menu adapts to what's selected:
 
 ---
 
+## Sheet Tabs (Workbook Navigation)
+
+The workbook uses an Excel-style **sheet tab strip** at the bottom of the window (above the status bar). Tabs are the primary way to navigate and manage worksheets.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ◀ ▶  Sheet1   Sheet2   Sheet3   [+]                              ⋯         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Core Interactions (Excel-like)
+
+1. **Create sheet**: Click `+` to create a new sheet.
+   - Default naming: `Sheet1`, `Sheet2`, … using the next available number.
+   - Insert position: directly after the currently active sheet.
+
+2. **Rename sheet**: Double-click a tab (or `Rename` from context menu).
+   - Inline editing on the tab.
+   - Validation (match Excel constraints):
+     - Unique (case-insensitive) within the workbook.
+     - Max length: 31 characters.
+     - Disallow: `: \\ / ? * [ ]`.
+
+3. **Reorder sheets**: Drag tabs to reorder.
+   - Auto-scroll tab strip while dragging near edges.
+   - Reorder does not affect formulas (formulas reference sheets by name), but the new order must persist to storage and XLSX.
+
+4. **Delete sheet**: Context menu → `Delete`.
+   - Prevent deleting the last remaining sheet.
+   - If a deleted sheet is referenced by formulas, Excel turns those references into `#REF!` (behavior to emulate).
+
+5. **Hide / Unhide sheets**:
+   - Hide: Context menu → `Hide`.
+     - Prevent hiding the last *visible* sheet.
+   - Unhide: Context menu on the tab strip background → `Unhide…` (shows a list).
+     - Only `hidden` sheets appear.
+     - `veryHidden` sheets are preserved on XLSX round-trip but not exposed in the standard UI (Excel requires VBA).
+
+6. **Tab colors**:
+   - Show sheet color on the tab (underline or fill).
+   - Preserve colors from XLSX on load/save.
+   - Optional: context menu → `Tab Color…` for a picker/palette.
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+PgUp` | Activate previous visible sheet (wrap around) |
+| `Ctrl+PgDn` | Activate next visible sheet (wrap around) |
+
+---
+
 ## Status Bar
 
 ```

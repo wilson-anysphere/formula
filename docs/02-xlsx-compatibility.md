@@ -54,6 +54,48 @@ workbook.xlsx (ZIP archive)
 
 ## Key Components
 
+### Workbook Sheet List (Order / Name / Visibility)
+
+Sheet *tabs* come from `xl/workbook.xml`:
+
+```xml
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <!-- Sheet order is the tab order -->
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+    <sheet name="Hidden" sheetId="2" r:id="rId2" state="hidden"/>
+    <sheet name="VeryHidden" sheetId="3" r:id="rId3" state="veryHidden"/>
+  </sheets>
+</workbook>
+```
+
+Key rules for Excel-like behavior + safe round-trip:
+- **Order matters**: the order of `<sheet>` elements is the user-visible tab order.
+- **`sheetId` is stable**: do not renumber sheets when reordering; new sheets typically use `max(sheetId)+1`.
+- **Visibility**:
+  - Missing `state` ⇒ visible.
+  - `state="hidden"` ⇒ hidden (user can unhide).
+  - `state="veryHidden"` ⇒ very hidden (Excel UI does not offer unhide; only VBA).
+- **`r:id` must be preserved**: other parts refer to the worksheet via the relationship ID in `xl/_rels/workbook.xml.rels`.
+
+### Sheet Tab Color
+
+Tab color is stored per worksheet (not in `workbook.xml`) inside `xl/worksheets/sheetN.xml`:
+
+```xml
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetPr>
+    <tabColor rgb="FFFF0000"/>
+  </sheetPr>
+  <!-- ... -->
+</worksheet>
+```
+
+Notes:
+- Excel can store color as `rgb`, `theme`/`tint`, or `indexed`. We must parse and write these attributes without loss.
+- Missing `<tabColor>` means “no custom tab color”.
+
 ### Worksheet XML Structure
 
 ```xml

@@ -1,0 +1,412 @@
+use formula_model::{SheetVisibility, TabColor};
+use quick_xml::events::{BytesEnd, BytesStart, Event};
+use quick_xml::{Reader, Writer};
+
+use crate::XlsxError;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkbookSheetInfo {
+    pub name: String,
+    pub sheet_id: u32,
+    pub rel_id: String,
+    pub visibility: SheetVisibility,
+}
+
+pub fn parse_workbook_sheets(workbook_xml: &str) -> Result<Vec<WorkbookSheetInfo>, XlsxError> {
+    let mut reader = Reader::from_str(workbook_xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut sheets = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Empty(e) | Event::Start(e) => {
+                if e.local_name().as_ref() == b"sheet" {
+                    sheets.push(parse_sheet_element(&e)?);
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(sheets)
+}
+
+fn parse_sheet_element(e: &BytesStart<'_>) -> Result<WorkbookSheetInfo, XlsxError> {
+    let mut name: Option<String> = None;
+    let mut sheet_id: Option<u32> = None;
+    let mut rel_id: Option<String> = None;
+    let mut visibility = SheetVisibility::Visible;
+
+    for attr in e.attributes() {
+        let attr = attr?;
+        match attr.key.as_ref() {
+            b"name" => name = Some(attr.unescape_value()?.to_string()),
+            b"sheetId" => {
+                let v = attr.unescape_value()?;
+                sheet_id = Some(v.parse::<u32>().map_err(|_| XlsxError::InvalidSheetId)?);
+            }
+            b"state" => {
+                let v = attr.unescape_value()?;
+                visibility = match v.as_ref() {
+                    "hidden" => SheetVisibility::Hidden,
+                    "veryHidden" => SheetVisibility::VeryHidden,
+                    _ => SheetVisibility::Visible,
+                };
+            }
+            b"r:id" => rel_id = Some(attr.unescape_value()?.to_string()),
+            _ => {}
+        }
+    }
+
+    Ok(WorkbookSheetInfo {
+        name: name.ok_or(XlsxError::MissingAttr("name"))?,
+        sheet_id: sheet_id.ok_or(XlsxError::MissingAttr("sheetId"))?,
+        rel_id: rel_id.ok_or(XlsxError::MissingAttr("r:id"))?,
+        visibility,
+    })
+}
+
+pub fn write_workbook_sheets(
+    workbook_xml: &str,
+    sheets: &[WorkbookSheetInfo],
+) -> Result<String, XlsxError> {
+    let mut reader = Reader::from_str(workbook_xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new(Vec::new());
+    let mut buf = Vec::new();
+
+    let mut in_sheets = false;
+    let mut skip_depth: usize = 0;
+    let mut replaced_sheets = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e) if e.local_name().as_ref() == b"sheets" => {
+                in_sheets = true;
+                replaced_sheets = true;
+                writer.write_event(Event::Start(e.to_owned()))?;
+                for sheet in sheets {
+                    writer.write_event(Event::Empty(build_sheet_element(sheet)))?;
+                }
+            }
+            Event::Empty(ref e) if in_sheets && e.local_name().as_ref() == b"sheet" => {}
+            Event::Start(ref e) if in_sheets && e.local_name().as_ref() == b"sheet" => {
+                skip_depth = 1;
+            }
+            Event::End(ref e) if in_sheets && skip_depth > 0 => {
+                if e.local_name().as_ref() == b"sheet" {
+                    skip_depth = 0;
+                }
+            }
+            Event::End(ref e) if e.local_name().as_ref() == b"sheets" => {
+                in_sheets = false;
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+            _ => {
+                if skip_depth == 0 {
+                    writer.write_event(event.to_owned())?;
+                }
+            }
+        }
+        buf.clear();
+    }
+
+    if !replaced_sheets {
+        return Ok(workbook_xml.to_string());
+    }
+
+    Ok(String::from_utf8(writer.into_inner())?)
+}
+
+fn build_sheet_element(sheet: &WorkbookSheetInfo) -> BytesStart<'static> {
+    let mut elem = BytesStart::new("sheet");
+    elem.push_attribute(("name", sheet.name.as_str()));
+    elem.push_attribute(("sheetId", sheet.sheet_id.to_string().as_str()));
+    elem.push_attribute(("r:id", sheet.rel_id.as_str()));
+    match sheet.visibility {
+        SheetVisibility::Visible => {}
+        SheetVisibility::Hidden => elem.push_attribute(("state", "hidden")),
+        SheetVisibility::VeryHidden => elem.push_attribute(("state", "veryHidden")),
+    }
+    elem
+}
+
+pub fn parse_sheet_tab_color(worksheet_xml: &str) -> Result<Option<TabColor>, XlsxError> {
+    let mut reader = Reader::from_str(worksheet_xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut in_sheet_pr = false;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) if e.local_name().as_ref() == b"sheetPr" => {
+                in_sheet_pr = true;
+            }
+            Event::End(e) if e.local_name().as_ref() == b"sheetPr" => {
+                in_sheet_pr = false;
+            }
+            Event::Empty(e) | Event::Start(e)
+                if in_sheet_pr && e.local_name().as_ref() == b"tabColor" =>
+            {
+                return Ok(Some(parse_tab_color_element(&e)?));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(None)
+}
+
+fn parse_tab_color_element(e: &BytesStart<'_>) -> Result<TabColor, XlsxError> {
+    let mut color = TabColor::default();
+
+    for attr in e.attributes() {
+        let attr = attr?;
+        let value = attr.unescape_value()?.to_string();
+        match attr.key.as_ref() {
+            b"rgb" => color.rgb = Some(value),
+            b"theme" => color.theme = value.parse().ok(),
+            b"indexed" => color.indexed = value.parse().ok(),
+            b"tint" => color.tint = value.parse().ok(),
+            b"auto" => color.auto = value.parse::<u32>().ok().map(|v| v != 0),
+            _ => {}
+        }
+    }
+
+    Ok(color)
+}
+
+pub fn write_sheet_tab_color(
+    worksheet_xml: &str,
+    tab_color: Option<&TabColor>,
+) -> Result<String, XlsxError> {
+    let has_sheet_pr = worksheet_has_sheet_pr(worksheet_xml)?;
+
+    if tab_color.is_none() && !has_sheet_pr {
+        return Ok(worksheet_xml.to_string());
+    }
+
+    let mut reader = Reader::from_str(worksheet_xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new(Vec::new());
+    let mut buf = Vec::new();
+
+    let mut in_sheet_pr = false;
+    let mut tab_color_written = false;
+    let mut inserted_sheet_pr = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            Event::Empty(ref e) if e.local_name().as_ref() == b"worksheet" => {
+                if let Some(color) = tab_color {
+                    let start = e.to_owned();
+                    writer.write_event(Event::Start(start))?;
+                    writer.write_event(Event::Start(BytesStart::new("sheetPr")))?;
+                    writer.write_event(Event::Empty(build_tab_color_element(color)))?;
+                    writer.write_event(Event::End(BytesEnd::new("sheetPr")))?;
+                    writer.write_event(Event::End(BytesEnd::new("worksheet")))?;
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+                break;
+            }
+            Event::Start(ref e) if e.local_name().as_ref() == b"worksheet" => {
+                writer.write_event(Event::Start(e.to_owned()))?;
+                if tab_color.is_some() && !has_sheet_pr && !inserted_sheet_pr {
+                    writer.write_event(Event::Start(BytesStart::new("sheetPr")))?;
+                    writer.write_event(Event::Empty(build_tab_color_element(
+                        tab_color.expect("color present"),
+                    )))?;
+                    writer.write_event(Event::End(BytesEnd::new("sheetPr")))?;
+                    inserted_sheet_pr = true;
+                }
+            }
+            Event::Start(ref e) if e.local_name().as_ref() == b"sheetPr" => {
+                in_sheet_pr = true;
+                tab_color_written = false;
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"sheetPr" => {
+                if let Some(color) = tab_color {
+                    writer.write_event(Event::Start(BytesStart::new("sheetPr")))?;
+                    writer.write_event(Event::Empty(build_tab_color_element(color)))?;
+                    writer.write_event(Event::End(BytesEnd::new("sheetPr")))?;
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+            }
+            Event::End(ref e) if e.local_name().as_ref() == b"sheetPr" => {
+                if in_sheet_pr && tab_color.is_some() && !tab_color_written {
+                    writer.write_event(Event::Empty(build_tab_color_element(
+                        tab_color.expect("color present"),
+                    )))?;
+                }
+                in_sheet_pr = false;
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+            Event::Empty(ref e) | Event::Start(ref e)
+                if in_sheet_pr && e.local_name().as_ref() == b"tabColor" =>
+            {
+                if let Some(color) = tab_color {
+                    writer.write_event(Event::Empty(build_tab_color_element(color)))?;
+                    tab_color_written = true;
+                }
+            }
+            _ => {
+                writer.write_event(event.to_owned())?;
+            }
+        }
+        buf.clear();
+    }
+
+    Ok(String::from_utf8(writer.into_inner())?)
+}
+
+fn build_tab_color_element(color: &TabColor) -> BytesStart<'static> {
+    let mut elem = BytesStart::new("tabColor");
+    if let Some(rgb) = &color.rgb {
+        elem.push_attribute(("rgb", rgb.as_str()));
+    }
+    if let Some(theme) = color.theme {
+        elem.push_attribute(("theme", theme.to_string().as_str()));
+    }
+    if let Some(indexed) = color.indexed {
+        elem.push_attribute(("indexed", indexed.to_string().as_str()));
+    }
+    if let Some(tint) = color.tint {
+        elem.push_attribute(("tint", tint.to_string().as_str()));
+    }
+    if let Some(auto) = color.auto {
+        elem.push_attribute(("auto", if auto { "1" } else { "0" }));
+    }
+    elem
+}
+
+fn worksheet_has_sheet_pr(worksheet_xml: &str) -> Result<bool, XlsxError> {
+    let mut reader = Reader::from_str(worksheet_xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut in_worksheet = false;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) if e.local_name().as_ref() == b"worksheet" => {
+                in_worksheet = true;
+            }
+            Event::End(e) if e.local_name().as_ref() == b"worksheet" => break,
+            Event::Start(e) | Event::Empty(e)
+                if in_worksheet && e.local_name().as_ref() == b"sheetPr" =>
+            {
+                return Ok(true);
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn workbook_sheets_round_trip() {
+        let workbook_xml = r#"
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+    <sheet name="Hidden" sheetId="2" r:id="rId2" state="hidden"/>
+    <sheet name="VeryHidden" sheetId="3" r:id="rId3" state="veryHidden"/>
+  </sheets>
+</workbook>
+"#;
+
+        let sheets = parse_workbook_sheets(workbook_xml).unwrap();
+        assert_eq!(
+            sheets,
+            vec![
+                WorkbookSheetInfo {
+                    name: "Sheet1".to_string(),
+                    sheet_id: 1,
+                    rel_id: "rId1".to_string(),
+                    visibility: SheetVisibility::Visible,
+                },
+                WorkbookSheetInfo {
+                    name: "Hidden".to_string(),
+                    sheet_id: 2,
+                    rel_id: "rId2".to_string(),
+                    visibility: SheetVisibility::Hidden,
+                },
+                WorkbookSheetInfo {
+                    name: "VeryHidden".to_string(),
+                    sheet_id: 3,
+                    rel_id: "rId3".to_string(),
+                    visibility: SheetVisibility::VeryHidden,
+                },
+            ]
+        );
+
+        let mut updated = sheets.clone();
+        updated.swap(0, 2);
+        updated[0].name = "Renamed".to_string();
+        updated[0].visibility = SheetVisibility::Hidden;
+
+        let rewritten = write_workbook_sheets(workbook_xml, &updated).unwrap();
+        let reparsed = parse_workbook_sheets(&rewritten).unwrap();
+        assert_eq!(reparsed, updated);
+    }
+
+    #[test]
+    fn sheet_tab_color_round_trip() {
+        let sheet_xml = r#"
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetPr>
+    <tabColor rgb="FFFF0000"/>
+  </sheetPr>
+</worksheet>
+"#;
+
+        let color = parse_sheet_tab_color(sheet_xml).unwrap().unwrap();
+        assert_eq!(color.rgb.as_deref(), Some("FFFF0000"));
+
+        let new_color = TabColor::rgb("FF00FF00");
+        let rewritten = write_sheet_tab_color(sheet_xml, Some(&new_color)).unwrap();
+        let reparsed = parse_sheet_tab_color(&rewritten).unwrap().unwrap();
+        assert_eq!(reparsed.rgb.as_deref(), Some("FF00FF00"));
+    }
+
+    #[test]
+    fn remove_sheet_tab_color() {
+        let sheet_xml = r#"
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetPr>
+    <tabColor rgb="FFFF0000"/>
+  </sheetPr>
+</worksheet>
+"#;
+
+        let rewritten = write_sheet_tab_color(sheet_xml, None).unwrap();
+        assert_eq!(parse_sheet_tab_color(&rewritten).unwrap(), None);
+    }
+}

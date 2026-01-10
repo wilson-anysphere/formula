@@ -183,6 +183,31 @@ describe("Formula Parser", () => {
 });
 ```
 
+### Sheet Rename / Sheet Reference Rewrite Tests
+
+Sheet rename is a **structural edit** that must update formulas everywhere in the workbook. We need focused unit tests that validate the rewrite logic for the tricky Excel cases:
+- Unquoted vs quoted sheet names (`Sheet1!A1` vs `'My Sheet'!A1`)
+- Escaped apostrophes in quoted names (`'O''Brien'!A1`)
+- 3D references (`Sheet1:Sheet3!A1`)
+- External workbook prefixes (`'[Book1.xlsx]Sheet1'!A1`)
+- Ensure **string literals** are not modified (`="Sheet1!A1"`)
+
+```typescript
+describe("Sheet reference rewrite", () => {
+  it("rewrites a simple sheet reference", () => {
+    expect(rewriteSheetRefs("=Sheet1!A1", "Sheet1", "Data")).toBe("=Data!A1");
+  });
+
+  it("rewrites a quoted sheet reference", () => {
+    expect(rewriteSheetRefs("='Sheet 1'!A1", "Sheet 1", "My Sheet")).toBe("='My Sheet'!A1");
+  });
+
+  it("does not touch string literals", () => {
+    expect(rewriteSheetRefs('="Sheet1!A1"', "Sheet1", "Data")).toBe('="Sheet1!A1"');
+  });
+});
+```
+
 ### Dependency Graph Tests
 
 ```typescript
@@ -421,6 +446,38 @@ test.describe("User Flows", () => {
     // Verify
     expect(await page.textContent('[data-cell="A1"]')).toBe("Revenue");
     expect(await page.textContent('[data-cell="B1"]')).toBe("100");
+  });
+
+  test("manages sheets (add/rename/reorder) and keeps formulas correct", async ({ page }) => {
+    await page.goto("/");
+
+    // Create a second sheet
+    await page.click('[data-testid="sheet-add"]'); // "+" button in sheet tab strip
+    await expect(page.locator('[data-testid="sheet-tab-Sheet2"]')).toBeVisible();
+
+    // Put data on Sheet2
+    await page.click('[data-testid="sheet-tab-Sheet2"]');
+    await page.click('[data-cell="A1"]');
+    await page.keyboard.type("10");
+
+    // Reference Sheet2 from Sheet1
+    await page.click('[data-testid="sheet-tab-Sheet1"]');
+    await page.click('[data-cell="B1"]');
+    await page.keyboard.type("=Sheet2!A1+5");
+    await page.keyboard.press("Enter");
+    await expect(page.locator('[data-cell="B1"]')).toHaveText("15");
+
+    // Rename Sheet2 -> Data (double click)
+    await page.dblclick('[data-testid="sheet-tab-Sheet2"]');
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type("Data");
+    await page.keyboard.press("Enter");
+    await expect(page.locator('[data-testid="sheet-tab-Data"]')).toBeVisible();
+
+    // Formula should rewrite and still compute
+    await page.click('[data-cell="B1"]');
+    await expect(page.locator('[data-testid="formula-bar"]')).toHaveValue("=Data!A1+5");
+    await expect(page.locator('[data-cell="B1"]')).toHaveText("15");
   });
   
   test("opens Excel file and calculates", async ({ page }) => {
