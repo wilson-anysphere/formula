@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterable, Iterator
+
+
+def sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def ensure_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def load_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_json(path: Path, data: Any) -> None:
+    ensure_dir(path.parent)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+@dataclass(frozen=True)
+class WorkbookInput:
+    """A workbook blob plus a stable display name (no local paths)."""
+
+    display_name: str
+    data: bytes
+
+
+def read_workbook_input(path: Path, *, fernet_key: str | None = None) -> WorkbookInput:
+    """Read an XLSX blob from disk.
+
+    Supports:
+    - raw `.xlsx`/`.xlsm` files
+    - base64-encoded `*.xlsx.b64` (text) for embedding small public fixtures
+    - encrypted `*.enc` files (Fernet) for private corpus storage
+    """
+
+    data = path.read_bytes()
+    display_name = path.name
+
+    if display_name.endswith(".b64"):
+        # Base64 fixtures are stored as text so they can live in git.
+        # `validate=True` rejects whitespace/newlines, so strip them first to support
+        # checked-in fixtures with trailing newlines.
+        data = base64.b64decode(b"".join(data.split()), validate=True)
+        display_name = display_name[: -len(".b64")]
+
+    if display_name.endswith(".enc"):
+        if not fernet_key:
+            raise ValueError(
+                f"{path} looks encrypted ('.enc') but no `fernet_key` was provided."
+            )
+        from cryptography.fernet import Fernet  # local import to keep dependency optional
+
+        f = Fernet(fernet_key.encode("utf-8"))
+        data = f.decrypt(data)
+        display_name = display_name[: -len(".enc")]
+
+    return WorkbookInput(display_name=display_name, data=data)
+
+
+def iter_workbook_paths(corpus_dir: Path) -> Iterator[Path]:
+    """Yield candidate workbook paths under `corpus_dir`."""
+
+    for path in sorted(corpus_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        name = path.name.lower()
+        if name.endswith((".xlsx", ".xlsm", ".xlsx.b64", ".xlsm.b64", ".xlsx.enc", ".xlsm.enc")):
+            yield path
+
+
+def github_commit_sha() -> str | None:
+    sha = os.environ.get("GITHUB_SHA")
+    if sha:
+        return sha
+    return None
+
+
+def github_run_url() -> str | None:
+    server = os.environ.get("GITHUB_SERVER_URL")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    if server and repo and run_id:
+        return f"{server}/{repo}/actions/runs/{run_id}"
+    return None

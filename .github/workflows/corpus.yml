@@ -1,0 +1,95 @@
+name: corpus
+
+on:
+  pull_request:
+    paths:
+      - "tools/corpus/**"
+      - "docs/compatibility-corpus.md"
+  push:
+    branches: ["main"]
+    paths:
+      - "tools/corpus/**"
+      - "docs/compatibility-corpus.md"
+  schedule:
+    # Nightly full-corpus run (requires secrets)
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  public-corpus:
+    name: Public corpus triage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: python -m pip install --upgrade pip cryptography
+      - name: Run unit tests
+        run: python -m unittest discover -s tools/corpus/tests
+      - name: Run triage
+        run: |
+          python -m tools.corpus.triage \
+            --corpus-dir tools/corpus/public \
+            --out-dir tools/corpus/out/public \
+            --expectations tools/corpus/public/expectations.json
+      - name: Generate dashboard
+        run: python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
+      - name: Publish summary
+        run: cat tools/corpus/out/public/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: corpus-public-${{ github.sha }}
+          path: tools/corpus/out/public
+
+  private-corpus:
+    name: Private corpus triage (scheduled)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: python -m pip install --upgrade pip cryptography
+      - name: Materialize private corpus (optional)
+        env:
+          CORPUS_PRIVATE_TAR_B64: ${{ secrets.CORPUS_PRIVATE_TAR_B64 }}
+        run: |
+          if [ -z "$CORPUS_PRIVATE_TAR_B64" ]; then
+            echo "No CORPUS_PRIVATE_TAR_B64 configured; skipping private corpus."
+            exit 0
+          fi
+          mkdir -p tools/corpus/private
+          echo "$CORPUS_PRIVATE_TAR_B64" | base64 -d > /tmp/corpus.tar.gz
+          tar -xzf /tmp/corpus.tar.gz -C tools/corpus/private
+      - name: Run triage (private)
+        env:
+          CORPUS_ENCRYPTION_KEY: ${{ secrets.CORPUS_ENCRYPTION_KEY }}
+        run: |
+          if [ ! -d tools/corpus/private ]; then
+            echo "Private corpus directory missing; skipping."
+            exit 0
+          fi
+          python -m tools.corpus.triage \
+            --corpus-dir tools/corpus/private \
+            --out-dir tools/corpus/out/private
+      - name: Generate dashboard (private)
+        run: |
+          if [ ! -d tools/corpus/out/private ]; then
+            echo "No private triage output; skipping."
+            exit 0
+          fi
+          python -m tools.corpus.dashboard --triage-dir tools/corpus/out/private
+      - name: Publish summary (private)
+        run: |
+          if [ -f tools/corpus/out/private/summary.md ]; then
+            cat tools/corpus/out/private/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: corpus-private-${{ github.sha }}
+          path: tools/corpus/out/private

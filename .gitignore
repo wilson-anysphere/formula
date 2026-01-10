@@ -92,3 +92,7 @@ apps/desktop/.formula/
 
 # Test runtime artifacts
 .tmp/
+
+# Compatibility corpus local/private data
+tools/corpus/private/
+tools/corpus/out/
