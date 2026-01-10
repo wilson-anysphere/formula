@@ -42,3 +42,12 @@ The Excel oracle runner also records the **display text** Excel shows in the gri
 
 Comparisons should be done on the typed values above, not on display text (which can vary with locale and formatting).
 
+## Harness-level errors (`#ENGINE!`)
+
+When producing *engine* results (not Excel results), the harness may emit:
+
+```json
+{"t":"e","v":"#ENGINE!","detail":"..."}
+```
+
+This indicates the engine runner failed to evaluate a case (parse error, unsupported input value encoding, etc). The `detail` field is for debugging and is not emitted by the Excel oracle runner.
