@@ -1,0 +1,180 @@
+import initSqlJs from "sql.js";
+import { createRequire } from "node:module";
+import type { AIAuditEntry, AuditListFilters, TokenUsage, ToolCallLog, UserFeedback } from "./types.js";
+import type { AIAuditStore } from "./store.js";
+import type { SqliteBinaryStorage } from "./storage.js";
+import { InMemoryBinaryStorage } from "./storage.js";
+
+type SqlJsDatabase = any;
+
+export interface SqliteAIAuditStoreOptions {
+  storage?: SqliteBinaryStorage;
+}
+
+export class SqliteAIAuditStore implements AIAuditStore {
+  private readonly db: SqlJsDatabase;
+  private readonly storage: SqliteBinaryStorage;
+
+  private constructor(db: SqlJsDatabase, storage: SqliteBinaryStorage) {
+    this.db = db;
+    this.storage = storage;
+    this.ensureSchema();
+  }
+
+  static async create(options: SqliteAIAuditStoreOptions = {}): Promise<SqliteAIAuditStore> {
+    const storage = options.storage ?? new InMemoryBinaryStorage();
+    const SQL = await initSqlJs({ locateFile: locateSqlJsFile });
+    const existing = await storage.load();
+    const db = existing ? new SQL.Database(existing) : new SQL.Database();
+    return new SqliteAIAuditStore(db, storage);
+  }
+
+  async logEntry(entry: AIAuditEntry): Promise<void> {
+    const tokenUsage = normalizeTokenUsage(entry.token_usage);
+    const stmt = this.db.prepare(
+      `INSERT INTO ai_audit_log (
+        id,
+        timestamp_ms,
+        session_id,
+        user_id,
+        mode,
+        input_json,
+        model,
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        latency_ms,
+        tool_calls_json,
+        user_feedback
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+    );
+
+    stmt.run([
+      entry.id,
+      entry.timestamp_ms,
+      entry.session_id,
+      entry.user_id ?? null,
+      entry.mode,
+      JSON.stringify(entry.input ?? null),
+      entry.model,
+      tokenUsage?.prompt_tokens ?? null,
+      tokenUsage?.completion_tokens ?? null,
+      tokenUsage?.total_tokens ?? null,
+      entry.latency_ms ?? null,
+      JSON.stringify(entry.tool_calls ?? []),
+      entry.user_feedback ?? null
+    ]);
+    stmt.free();
+
+    await this.persist();
+  }
+
+  async listEntries(filters: AuditListFilters = {}): Promise<AIAuditEntry[]> {
+    const params: any[] = [];
+    let sql = "SELECT * FROM ai_audit_log";
+    if (filters.session_id) {
+      sql += " WHERE session_id = ?";
+      params.push(filters.session_id);
+    }
+    sql += " ORDER BY timestamp_ms DESC";
+    if (typeof filters.limit === "number") {
+      sql += " LIMIT ?";
+      params.push(filters.limit);
+    }
+
+    const stmt = this.db.prepare(sql);
+    stmt.bind(params);
+
+    const rows: AIAuditEntry[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject() as any;
+      rows.push(deserializeRow(row));
+    }
+    stmt.free();
+    return rows;
+  }
+
+  private ensureSchema(): void {
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS ai_audit_log (
+        id TEXT PRIMARY KEY,
+        timestamp_ms INTEGER NOT NULL,
+        session_id TEXT NOT NULL,
+        user_id TEXT,
+        mode TEXT NOT NULL,
+        input_json TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prompt_tokens INTEGER,
+        completion_tokens INTEGER,
+        total_tokens INTEGER,
+        latency_ms INTEGER,
+        tool_calls_json TEXT NOT NULL,
+        user_feedback TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ai_audit_log_session ON ai_audit_log(session_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_audit_log_timestamp ON ai_audit_log(timestamp_ms);
+    `);
+  }
+
+  private async persist(): Promise<void> {
+    const data = this.db.export() as Uint8Array;
+    await this.storage.save(data);
+  }
+}
+
+function locateSqlJsFile(file: string): string {
+  try {
+    const require = createRequire(import.meta.url);
+    return require.resolve(`sql.js/dist/${file}`);
+  } catch {
+    return file;
+  }
+}
+
+function normalizeTokenUsage(usage: TokenUsage | undefined): TokenUsage | undefined {
+  if (!usage) return undefined;
+  const total = usage.total_tokens ?? usage.prompt_tokens + usage.completion_tokens;
+  return { ...usage, total_tokens: total };
+}
+
+function deserializeRow(row: any): AIAuditEntry {
+  const token_usage = deserializeTokenUsage(row);
+  return {
+    id: String(row.id),
+    timestamp_ms: Number(row.timestamp_ms),
+    session_id: String(row.session_id),
+    user_id: row.user_id ? String(row.user_id) : undefined,
+    mode: row.mode as any,
+    input: row.input_json ? safeJsonParse(row.input_json) : null,
+    model: String(row.model),
+    token_usage,
+    latency_ms: row.latency_ms === null || row.latency_ms === undefined ? undefined : Number(row.latency_ms),
+    tool_calls: deserializeToolCalls(row.tool_calls_json),
+    user_feedback: row.user_feedback ? (row.user_feedback as UserFeedback) : undefined
+  };
+}
+
+function deserializeTokenUsage(row: any): TokenUsage | undefined {
+  if (row.prompt_tokens === null && row.completion_tokens === null && row.total_tokens === null) return undefined;
+  return {
+    prompt_tokens: row.prompt_tokens === null ? 0 : Number(row.prompt_tokens),
+    completion_tokens: row.completion_tokens === null ? 0 : Number(row.completion_tokens),
+    total_tokens: row.total_tokens === null ? undefined : Number(row.total_tokens)
+  };
+}
+
+function deserializeToolCalls(encoded: string): ToolCallLog[] {
+  const parsed = safeJsonParse(encoded);
+  if (!Array.isArray(parsed)) return [];
+  return parsed as ToolCallLog[];
+}
+
+function safeJsonParse(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
