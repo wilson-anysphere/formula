@@ -91,7 +91,7 @@ export class SpreadsheetApp {
       text: "Rich Bold",
       runs: [
         { start: 0, end: 5, style: {} },
-        { start: 5, end: 9, style: { bold: true, color: "#FFFF0000" } }
+        { start: 5, end: 9, style: { bold: true } }
       ]
     });
     this.document.setCellValue(this.sheetId, { row: 4, col: 3 }, "BottomRight");

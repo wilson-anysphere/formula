@@ -1,5 +1,10 @@
 /**
- * @typedef {string | number | boolean | null} CellValue
+ * @typedef {{
+ *   text: string,
+ *   runs?: Array<{ start: number, end: number, style?: Record<string, unknown> }>
+ * }} RichText
+ *
+ * @typedef {string | number | boolean | RichText | null} CellValue
  *
  * @typedef {Record<string, unknown>} CellFormat
  *
@@ -48,8 +53,14 @@ export function cloneCellState(cell) {
   const normalized = normalizeCellState(cell);
   const structuredCloneFn =
     typeof globalThis.structuredClone === "function" ? globalThis.structuredClone : null;
+  const clonedValue =
+    normalized.value != null && typeof normalized.value === "object"
+      ? structuredCloneFn
+        ? structuredCloneFn(normalized.value)
+        : JSON.parse(JSON.stringify(normalized.value))
+      : normalized.value;
   return {
-    value: normalized.value,
+    value: clonedValue,
     formula: normalized.formula,
     format:
       normalized.format == null
@@ -77,8 +88,15 @@ export function isCellStateEmpty(cell) {
 export function cellStateEquals(a, b) {
   const an = normalizeCellState(a);
   const bn = normalizeCellState(b);
+  const valuesEqual =
+    an.value === bn.value ||
+    (an.value != null &&
+      bn.value != null &&
+      typeof an.value === "object" &&
+      typeof bn.value === "object" &&
+      JSON.stringify(an.value) === JSON.stringify(bn.value));
   return (
-    an.value === bn.value &&
+    valuesEqual &&
     an.formula === bn.formula &&
     JSON.stringify(an.format) === JSON.stringify(bn.format)
   );
