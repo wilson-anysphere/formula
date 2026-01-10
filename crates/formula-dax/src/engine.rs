@@ -154,6 +154,17 @@ impl DaxEngine {
         Self
     }
 
+    pub fn evaluate(
+        &self,
+        model: &DataModel,
+        expression: &str,
+        filter: &FilterContext,
+        row_ctx: &RowContext,
+    ) -> DaxResult<Value> {
+        let parsed = crate::parser::parse(expression)?;
+        self.evaluate_expr(model, &parsed, filter, row_ctx)
+    }
+
     pub fn evaluate_expr(
         &self,
         model: &DataModel,
@@ -361,12 +372,18 @@ impl DaxEngine {
             })?;
 
         let mut sum = 0.0;
+        let mut count = 0usize;
         for row in rows {
             if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
                 sum += n.0;
+                count += 1;
             }
         }
-        Ok(Value::from(sum))
+        if count == 0 {
+            Ok(Value::Blank)
+        } else {
+            Ok(Value::from(sum))
+        }
     }
 
     fn eval_average(
@@ -428,7 +445,10 @@ impl DaxEngine {
             inner_ctx.push(&table_result.table, row);
             let value = self.eval_scalar(model, value_expr, filter, &inner_ctx)?;
             match (kind, value) {
-                (IteratorKind::Sum, Value::Number(n)) => sum += n.0,
+                (IteratorKind::Sum, Value::Number(n)) => {
+                    sum += n.0;
+                    count += 1;
+                }
                 (IteratorKind::Sum, Value::Blank) => {}
                 (IteratorKind::Average, Value::Number(n)) => {
                     sum += n.0;
@@ -444,7 +464,13 @@ impl DaxEngine {
         }
 
         match kind {
-            IteratorKind::Sum => Ok(Value::from(sum)),
+            IteratorKind::Sum => {
+                if count == 0 {
+                    Ok(Value::Blank)
+                } else {
+                    Ok(Value::from(sum))
+                }
+            }
             IteratorKind::Average => {
                 if count == 0 {
                     Ok(Value::Blank)
@@ -466,17 +492,27 @@ impl DaxEngine {
         let mut new_filter = filter.clone();
 
         for (table, row) in row_ctx.tables_with_current_rows() {
-            new_filter.clear_table_filters(table);
             let table_ref = model
                 .table(table)
                 .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+            let table_name = table.to_string();
 
             for (col_idx, column) in table_ref.columns().iter().enumerate() {
                 let value = table_ref
                     .value_by_idx(row, col_idx)
                     .cloned()
                     .unwrap_or(Value::Blank);
-                new_filter.set_column_equals(table, column, value);
+                let key = (table_name.clone(), column.clone());
+                match new_filter.column_filters.get_mut(&key) {
+                    Some(existing) => {
+                        existing.retain(|v| v == &value);
+                    }
+                    None => {
+                        new_filter
+                            .column_filters
+                            .insert(key, HashSet::from([value]));
+                    }
+                }
             }
         }
 

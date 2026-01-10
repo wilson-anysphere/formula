@@ -1,6 +1,6 @@
 use formula_dax::{
-    Cardinality, CrossFilterDirection, DataModel, DaxError, FilterContext, Relationship, Table,
-    Value,
+    Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext, Relationship,
+    RowContext, Table, Value,
 };
 use pretty_assertions::assert_eq;
 
@@ -202,4 +202,22 @@ fn insert_row_checks_referential_integrity_and_key_uniqueness() {
         )
         .unwrap_err();
     assert!(matches!(err, DaxError::NonUniqueKey { .. }));
+}
+
+#[test]
+fn calculate_context_transition_respects_existing_filter_context() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let filter = FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    let mut row_ctx = RowContext::default();
+    row_ctx.push("Customers", 1); // Bob (West)
+
+    let value = DaxEngine::new()
+        .evaluate(&model, "CALCULATE([Total Sales])", &filter, &row_ctx)
+        .unwrap();
+
+    assert_eq!(value, Value::Blank);
 }
