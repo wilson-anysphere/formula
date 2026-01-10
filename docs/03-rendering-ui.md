@@ -295,36 +295,41 @@ class CellRenderer {
     bounds: Rect,
     style: CellStyle
   ): void {
-    // Set font
-    ctx.font = this.buildFontString(style);
+    // Use the shared text layout engine to avoid per-frame `measureText` calls and
+    // to ensure wrapping works for complex scripts (RTL, combining marks, ligatures).
+    const engine = getSharedTextLayoutEngine();
+    const font = {
+      family: style.fontFamily,
+      sizePx: style.fontSize,
+      weight: style.fontWeight,
+    };
+    
+    const layout = engine.layout({
+      text,
+      font,
+      maxWidth: bounds.width - 8,
+      wrapMode: style.wrap ? "word" : "none",
+      align: style.horizontalAlign === "left"
+        ? "start"
+        : style.horizontalAlign === "right"
+          ? "end"
+          : "center",
+      direction: "auto",
+      lineHeightPx: Math.ceil(style.fontSize * 1.2),
+    });
+    
+    // Vertical centering.
+    const originX = bounds.x + 4;
+    const originY = bounds.y + (bounds.height - layout.height) / 2;
+    
+    ctx.save();
     ctx.fillStyle = style.color || "#000000";
+    ctx.beginPath();
+    ctx.rect(bounds.x, bounds.y, bounds.width, bounds.height);
+    ctx.clip();
     
-    // Measure and position
-    const metrics = ctx.measureText(text);
-    const textWidth = metrics.width;
-    const textHeight = style.fontSize;
-    
-    // Alignment
-    let x: number;
-    switch (style.horizontalAlign) {
-      case "left": x = bounds.x + 4; break;
-      case "center": x = bounds.x + (bounds.width - textWidth) / 2; break;
-      case "right": x = bounds.x + bounds.width - textWidth - 4; break;
-    }
-    
-    const y = bounds.y + (bounds.height + textHeight) / 2 - 2;
-    
-    // Clip if overflow hidden
-    if (textWidth > bounds.width - 8) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(bounds.x, bounds.y, bounds.width, bounds.height);
-      ctx.clip();
-      ctx.fillText(text, x, y);
-      ctx.restore();
-    } else {
-      ctx.fillText(text, x, y);
-    }
+    drawTextLayout(ctx, layout, originX, originY);
+    ctx.restore();
   }
 }
 ```
