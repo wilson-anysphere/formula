@@ -94,6 +94,23 @@ fn dates_1900_system_lotus_bug() {
 }
 
 #[test]
+fn dates_1904_system_epoch() {
+    let options = FormatOptions {
+        locale: Locale::en_us(),
+        date_system: DateSystem::Excel1904,
+    };
+
+    assert_eq!(
+        format_value(Value::Number(0.0), Some("m/d/yyyy"), &options).text,
+        "1/1/1904"
+    );
+    assert_eq!(
+        format_value(Value::Number(1.0), Some("m/d/yyyy"), &options).text,
+        "1/2/1904"
+    );
+}
+
+#[test]
 fn am_pm_time_formatting() {
     let options = FormatOptions {
         locale: Locale::en_us(),
@@ -142,6 +159,14 @@ fn conditional_sections_and_text() {
         format_value(Value::Text("hello"), Some(code), &options).text,
         "hello"
     );
+}
+
+#[test]
+fn error_values_align_center_like_excel() {
+    let options = FormatOptions::default();
+    let rendered = format_value(Value::Error("#DIV/0!"), None, &options);
+    assert_eq!(rendered.text, "#DIV/0!");
+    assert_eq!(rendered.alignment, formula_format::AlignmentHint::Center);
 }
 
 #[test]

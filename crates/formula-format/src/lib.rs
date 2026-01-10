@@ -98,7 +98,7 @@ pub struct FormattedValue {
 pub fn format_value(value: Value<'_>, format_code: Option<&str>, options: &FormatOptions) -> FormattedValue {
     let alignment = match value {
         Value::Number(_) => AlignmentHint::Right,
-        Value::Bool(_) => AlignmentHint::Center,
+        Value::Bool(_) | Value::Error(_) => AlignmentHint::Center,
         _ => AlignmentHint::Left,
     };
 
