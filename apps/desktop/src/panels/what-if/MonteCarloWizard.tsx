@@ -8,6 +8,7 @@ import type {
   SimulationResult,
   WhatIfApi,
 } from "./types";
+import { t, tWithVars } from "../../i18n/index.js";
 
 export interface MonteCarloWizardProps {
   api: WhatIfApi;
@@ -42,7 +43,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
     setProgress(null);
 
     if (!Number.isFinite(parsedIterations) || parsedIterations <= 0) {
-      setError("Iterations must be a positive number.");
+      setError(t("whatIf.monteCarlo.error.iterationsPositive"));
       return;
     }
 
@@ -52,7 +53,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
       .filter(Boolean);
 
     if (outputs.length === 0) {
-      setError("Enter at least one output cell.");
+      setError(t("whatIf.monteCarlo.error.enterOutputCell"));
       return;
     }
 
@@ -79,29 +80,29 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
 
   return (
     <div style={{ padding: 16, border: "1px solid #ccc", borderRadius: 8 }}>
-      <h3 style={{ marginTop: 0 }}>Monte Carlo Simulation</h3>
+      <h3 style={{ marginTop: 0 }}>{t("whatIf.monteCarlo.title")}</h3>
 
       {error ? <p style={{ color: "crimson" }}>{error}</p> : null}
 
       <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr 1fr", alignItems: "end" }}>
         <label style={{ display: "grid", gap: 4 }}>
-          <span>Iterations</span>
+          <span>{t("whatIf.monteCarlo.iterations")}</span>
           <input value={iterations} onChange={(e) => setIterations(e.target.value)} disabled={running} />
         </label>
 
         <label style={{ display: "grid", gap: 4 }}>
-          <span>Seed</span>
+          <span>{t("whatIf.monteCarlo.seed")}</span>
           <input value={seed} onChange={(e) => setSeed(e.target.value)} disabled={running} />
         </label>
 
         <label style={{ display: "grid", gap: 4 }}>
-          <span>Output cells</span>
+          <span>{t("whatIf.monteCarlo.outputCells")}</span>
           <input value={outputCells} onChange={(e) => setOutputCells(e.target.value)} disabled={running} />
         </label>
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <h4 style={{ margin: "8px 0" }}>Inputs</h4>
+        <h4 style={{ margin: "8px 0" }}>{t("whatIf.monteCarlo.inputs")}</h4>
         <div style={{ display: "grid", gap: 8 }}>
           {inputs.map((input, idx) => (
             <div
@@ -143,12 +144,12 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                 }}
                 disabled={running}
               >
-                <option value="normal">Normal</option>
-                <option value="uniform">Uniform</option>
-                <option value="triangular">Triangular</option>
-                <option value="lognormal">Lognormal</option>
-                <option value="exponential">Exponential</option>
-                <option value="poisson">Poisson</option>
+                <option value="normal">{t("whatIf.distribution.normal")}</option>
+                <option value="uniform">{t("whatIf.distribution.uniform")}</option>
+                <option value="triangular">{t("whatIf.distribution.triangular")}</option>
+                <option value="lognormal">{t("whatIf.distribution.lognormal")}</option>
+                <option value="exponential">{t("whatIf.distribution.exponential")}</option>
+                <option value="poisson">{t("whatIf.distribution.poisson")}</option>
               </select>
 
               <input
@@ -169,14 +170,14 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                 onClick={() => setInputs((prev) => prev.filter((_, i) => i !== idx))}
                 disabled={running || inputs.length <= 1}
               >
-                Remove
+                {t("whatIf.monteCarlo.remove")}
               </button>
             </div>
           ))}
 
           <div>
             <button onClick={() => setInputs((prev) => [...prev, defaultDistribution()])} disabled={running}>
-              Add input
+              {t("whatIf.monteCarlo.addInput")}
             </button>
           </div>
         </div>
@@ -184,28 +185,37 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
 
       <div style={{ marginTop: 16 }}>
         <button onClick={run} disabled={running}>
-          {running ? "Running…" : "Run simulation"}
+          {running ? t("whatIf.monteCarlo.running") : t("whatIf.monteCarlo.runSimulation")}
         </button>
       </div>
 
       {progress ? (
         <p style={{ marginTop: 12, fontFamily: "monospace", fontSize: 12 }}>
-          {progress.completedIterations}/{progress.totalIterations} iterations
+          {tWithVars("whatIf.monteCarlo.progressIterations", {
+            completed: progress.completedIterations,
+            total: progress.totalIterations,
+          })}
         </p>
       ) : null}
 
       {result ? (
         <div style={{ marginTop: 16 }}>
-          <h4 style={{ margin: "8px 0" }}>Results</h4>
+          <h4 style={{ margin: "8px 0" }}>{t("whatIf.monteCarlo.results")}</h4>
           {Object.entries(result.outputStats).map(([cell, stats]) => (
             <div key={cell} style={{ marginBottom: 12 }}>
               <strong>{cell}</strong>
               <div style={{ fontFamily: "monospace", fontSize: 12 }}>
-                <div>mean: {stats.mean}</div>
-                <div>median: {stats.median}</div>
-                <div>stdDev: {stats.stdDev}</div>
                 <div>
-                  min/max: {stats.min} / {stats.max}
+                  {t("whatIf.stats.mean")}: {stats.mean}
+                </div>
+                <div>
+                  {t("whatIf.stats.median")}: {stats.median}
+                </div>
+                <div>
+                  {t("whatIf.stats.stdDev")}: {stats.stdDev}
+                </div>
+                <div>
+                  {t("whatIf.stats.minMax")}: {stats.min} / {stats.max}
                 </div>
                 <div>p5: {stats.percentiles["5"]}</div>
                 <div>p95: {stats.percentiles["95"]}</div>
@@ -217,4 +227,3 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
     </div>
   );
 }
-

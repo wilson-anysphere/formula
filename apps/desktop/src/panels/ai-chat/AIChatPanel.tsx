@@ -3,6 +3,7 @@ import React, { useMemo, useState } from "react";
 import type { Attachment, ChatMessage } from "./types";
 import type { LLMClient, ToolCall, ToolExecutor } from "../../../../../packages/llm/src/types.js";
 import { runChatWithTools } from "../../../../../packages/llm/src/toolCalling.js";
+import { t, tWithVars } from "../../i18n/index.js";
 
 function formatAttachmentsForPrompt(attachments: Attachment[]) {
   return attachments
@@ -93,26 +94,32 @@ export function AIChatPanel(props: AIChatPanelProps) {
       const message = err instanceof Error ? err.message : String(err);
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: `Error: ${message}` },
+        { id: crypto.randomUUID(), role: "assistant", content: tWithVars("chat.errorWithMessage", { message }) },
       ]);
     }
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", borderLeft: "1px solid #d4d4d4" }}>
-      <div style={{ padding: "8px 12px", borderBottom: "1px solid #d4d4d4", fontWeight: 600 }}>AI Assistant</div>
+      <div style={{ padding: "8px 12px", borderBottom: "1px solid #d4d4d4", fontWeight: 600 }}>
+        {t("chat.title")}
+      </div>
       <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
         {messages.map((m) => (
           <div key={m.id} style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 12, opacity: 0.7 }}>
-              {m.role === "user" ? "You" : m.role === "assistant" ? "AI" : "Tool"}
-              {m.pending ? " (thinking…)" : ""}
-              {m.requiresApproval ? " (requires approval)" : ""}
+              {m.role === "user"
+                ? t("chat.role.user")
+                : m.role === "assistant"
+                  ? t("chat.role.assistant")
+                  : t("chat.role.tool")}
+              {m.pending ? t("chat.meta.thinking") : ""}
+              {m.requiresApproval ? t("chat.meta.requiresApproval") : ""}
             </div>
             <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
             {m.attachments?.length ? (
               <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
-                Attachments:
+                {t("chat.attachmentsLabel")}
                 <ul>
                   {m.attachments.map((a, i) => (
                     <li key={i}>
@@ -127,7 +134,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
       </div>
       {attachments.length ? (
         <div style={{ padding: "6px 12px", borderTop: "1px solid #d4d4d4", fontSize: 12 }}>
-          Pending attachments:{" "}
+          {t("chat.pendingAttachments")}{" "}
           {attachments.map((a) => (
             <span key={`${a.type}:${a.reference}`} style={{ marginRight: 8 }}>
               {a.type}:{a.reference}
@@ -138,7 +145,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
       <div style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid #d4d4d4" }}>
         <input
           style={{ flex: 1, padding: 8 }}
-          placeholder="Ask a question about your data…"
+          placeholder={t("chat.input.placeholder")}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -149,12 +156,11 @@ export function AIChatPanel(props: AIChatPanelProps) {
           }}
         />
         <button onClick={() => void send()} style={{ padding: "8px 12px" }}>
-          Send
+          {t("chat.send")}
         </button>
       </div>
       <div style={{ padding: "6px 12px", borderTop: "1px solid #d4d4d4", fontSize: 12, opacity: 0.7 }}>
-        Attachments API placeholder: this panel supports range/formula/table/chart references, but wiring to the selection
-        manager is pending.
+        {t("chat.attachmentsApiPlaceholder")}
         <button
           style={{ marginLeft: 8 }}
           onClick={() =>
@@ -164,7 +170,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
             ])
           }
         >
-          + Range (demo)
+          {t("chat.addRangeDemo")}
         </button>
       </div>
     </div>

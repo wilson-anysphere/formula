@@ -39,6 +39,21 @@ export function setLocale(locale) {
 export function t(key) {
   const active = LOCALES[currentLocale]?.messages ?? {};
   const fallback = LOCALES["en-US"]?.messages ?? {};
-  return active[key] ?? fallback[key] ?? key;
+  const template = active[key] ?? fallback[key] ?? key;
+  return template;
 }
 
+/**
+ * Translate a key with simple `{var}` interpolation.
+ *
+ * @param {string} key
+ * @param {Record<string, unknown>} vars
+ */
+export function tWithVars(key, vars) {
+  const template = t(key);
+  if (!vars) return template;
+  return template.replace(/\{(\w+)\}/g, (_, name) => {
+    const value = vars[name];
+    return value == null ? `{${name}}` : String(value);
+  });
+}

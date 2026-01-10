@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 import type { Scenario, SummaryReport, WhatIfApi } from "./types";
+import { t } from "../../i18n/index.js";
 
 export interface ScenarioManagerPanelProps {
   api: WhatIfApi;
@@ -61,7 +62,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
       .filter(Boolean);
 
     if (cells.length === 0) {
-      setError("Enter at least one result cell.");
+      setError(t("whatIf.scenario.error.enterResultCell"));
       return;
     }
 
@@ -76,7 +77,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
 
   return (
     <div style={{ padding: 16, border: "1px solid #ccc", borderRadius: 8 }}>
-      <h3 style={{ marginTop: 0 }}>Scenario Manager</h3>
+      <h3 style={{ marginTop: 0 }}>{t("whatIf.scenario.title")}</h3>
 
       {error ? <p style={{ color: "crimson" }}>{error}</p> : null}
 
@@ -85,7 +86,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
           value={selectedScenarioId ?? ""}
           onChange={(e) => setSelectedScenarioId(e.target.value ? Number(e.target.value) : null)}
         >
-          <option value="">Select a scenario…</option>
+          <option value="">{t("whatIf.scenario.selectPlaceholder")}</option>
           {scenarios.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -94,38 +95,46 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
         </select>
 
         <button onClick={applySelected} disabled={selectedScenarioId == null}>
-          Apply
+          {t("whatIf.scenario.apply")}
         </button>
       </div>
 
       {selectedScenario ? (
         <div style={{ marginTop: 8, fontSize: 12, color: "#444" }}>
-          <div>Changing cells: {selectedScenario.changingCells.join(", ") || "—"}</div>
-          {selectedScenario.comment ? <div>Comment: {selectedScenario.comment}</div> : null}
+          <div>
+            {t("whatIf.scenario.changingCells")}: {selectedScenario.changingCells.join(", ") || "—"}
+          </div>
+          {selectedScenario.comment ? (
+            <div>
+              {t("whatIf.scenario.comment")}: {selectedScenario.comment}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button onClick={restoreBase}>Restore Base</button>
+        <button onClick={restoreBase}>{t("whatIf.scenario.restoreBase")}</button>
         <button onClick={generateReport} disabled={scenarios.length === 0}>
-          Summary Report
+          {t("whatIf.scenario.summaryReport")}
         </button>
       </div>
 
       <div style={{ marginTop: 12 }}>
         <label style={{ display: "grid", gap: 4 }}>
-          <span>Result cells (comma-separated)</span>
+          <span>{t("whatIf.scenario.resultCellsLabel")}</span>
           <input value={resultCells} onChange={(e) => setResultCells(e.target.value)} />
         </label>
       </div>
 
       {report ? (
         <div style={{ marginTop: 16 }}>
-          <h4 style={{ margin: "8px 0" }}>Summary</h4>
+          <h4 style={{ margin: "8px 0" }}>{t("whatIf.scenario.summaryTitle")}</h4>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr>
-                <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>Scenario</th>
+                <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
+                  {t("whatIf.scenario.table.scenario")}
+                </th>
                 {report.resultCells.map((cell) => (
                   <th key={cell} style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
                     {cell}
@@ -151,4 +160,3 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
     </div>
   );
 }
-

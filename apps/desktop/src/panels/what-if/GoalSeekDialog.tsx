@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 
 import type { GoalSeekParams, GoalSeekProgress, GoalSeekResult, WhatIfApi } from "./types";
+import { t } from "../../i18n/index.js";
 
 export interface GoalSeekDialogProps {
   api: WhatIfApi;
@@ -26,7 +27,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
     setProgress(null);
 
     if (!Number.isFinite(parsedTargetValue)) {
-      setError("Target value must be a number.");
+      setError(t("whatIf.goalSeek.error.targetMustBeNumber"));
       return;
     }
 
@@ -52,30 +53,30 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
   return (
     <div style={{ padding: 16, border: "1px solid #ccc", borderRadius: 8, maxWidth: 420 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h3 style={{ margin: 0 }}>Goal Seek</h3>
+        <h3 style={{ margin: 0 }}>{t("whatIf.goalSeek.title")}</h3>
         <button onClick={onClose} disabled={running}>
-          Close
+          {t("whatIf.goalSeek.close")}
         </button>
       </div>
 
       <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
         <label style={{ display: "grid", gap: 4 }}>
-          <span>Set cell</span>
+          <span>{t("whatIf.goalSeek.setCell")}</span>
           <input value={targetCell} onChange={(e) => setTargetCell(e.target.value)} disabled={running} />
         </label>
 
         <label style={{ display: "grid", gap: 4 }}>
-          <span>To value</span>
+          <span>{t("whatIf.goalSeek.toValue")}</span>
           <input value={targetValue} onChange={(e) => setTargetValue(e.target.value)} disabled={running} />
         </label>
 
         <label style={{ display: "grid", gap: 4 }}>
-          <span>By changing cell</span>
+          <span>{t("whatIf.goalSeek.byChangingCell")}</span>
           <input value={changingCell} onChange={(e) => setChangingCell(e.target.value)} disabled={running} />
         </label>
 
         <button onClick={run} disabled={running}>
-          {running ? "Running…" : "Solve"}
+          {running ? t("whatIf.goalSeek.running") : t("whatIf.goalSeek.solve")}
         </button>
       </div>
 
@@ -83,26 +84,43 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
 
       {progress ? (
         <div style={{ marginTop: 12, fontFamily: "monospace", fontSize: 12 }}>
-          <div>Iteration: {progress.iteration}</div>
-          <div>Input: {progress.input}</div>
-          <div>Output: {progress.output}</div>
-          <div>Error: {progress.error}</div>
+          <div>
+            {t("whatIf.goalSeek.progress.iteration")}: {progress.iteration}
+          </div>
+          <div>
+            {t("whatIf.goalSeek.progress.input")}: {progress.input}
+          </div>
+          <div>
+            {t("whatIf.goalSeek.progress.output")}: {progress.output}
+          </div>
+          <div>
+            {t("whatIf.goalSeek.progress.error")}: {progress.error}
+          </div>
         </div>
       ) : null}
 
       {result ? (
         <div style={{ marginTop: 12 }}>
-          <h4 style={{ margin: "8px 0" }}>Result</h4>
+          <h4 style={{ margin: "8px 0" }}>{t("whatIf.goalSeek.result.title")}</h4>
           <div style={{ fontFamily: "monospace", fontSize: 12 }}>
-            <div>Status: {result.status}</div>
-            <div>Solution: {result.solution}</div>
-            <div>Iterations: {result.iterations}</div>
-            <div>Final output: {result.finalOutput}</div>
-            <div>Final error: {result.finalError}</div>
+            <div>
+              {t("whatIf.goalSeek.result.status")}: {t(`whatIf.goalSeek.status.${result.status}`)}
+            </div>
+            <div>
+              {t("whatIf.goalSeek.result.solution")}: {result.solution}
+            </div>
+            <div>
+              {t("whatIf.goalSeek.result.iterations")}: {result.iterations}
+            </div>
+            <div>
+              {t("whatIf.goalSeek.result.finalOutput")}: {result.finalOutput}
+            </div>
+            <div>
+              {t("whatIf.goalSeek.result.finalError")}: {result.finalError}
+            </div>
           </div>
         </div>
       ) : null}
     </div>
   );
 }
-
