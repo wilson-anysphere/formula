@@ -80,27 +80,35 @@ export function chunkToText(chunk, opts) {
   const rectA1 = rectToA1(chunk.rect);
   const cells = chunk.cells || [];
   const headerRow = inferHeaderRow(cells);
-  const colCount = cells[0]?.length ?? 0;
-  const rowCount = cells.length;
+  const sampledColCount = cells[0]?.length ?? 0;
+  const sampledRowCount = cells.length;
+  const fullColCount = chunk.rect.c1 - chunk.rect.c0 + 1;
+  const fullRowCount = chunk.rect.r1 - chunk.rect.r0 + 1;
   const formulaCount = countFormulas(cells);
 
   const lines = [];
   lines.push(
-    `${chunk.kind.toUpperCase()}: ${chunk.title} (sheet="${chunk.sheetName}", range="${rectA1}", size=${rowCount}x${colCount}, formulas=${formulaCount})`
+    `${chunk.kind.toUpperCase()}: ${chunk.title} (sheet="${chunk.sheetName}", range="${rectA1}", size=${fullRowCount}x${fullColCount}, formulas≈${formulaCount})`
   );
 
-  if (headerRow === 0 && colCount > 0) {
+  if (sampledRowCount < fullRowCount || sampledColCount < fullColCount) {
+    lines.push(
+      `NOTE: embedding uses a ${sampledRowCount}x${sampledColCount} cell sample (full range is ${fullRowCount}x${fullColCount}).`
+    );
+  }
+
+  if (headerRow === 0 && sampledColCount > 0) {
     const headers = [];
     const types = [];
-    for (let c = 0; c < colCount; c += 1) {
+    for (let c = 0; c < sampledColCount; c += 1) {
       const h = formatScalar(cells[0][c]?.v) || `Column${c + 1}`;
       headers.push(h);
       types.push(inferColumnType(cells, c, 0));
     }
     lines.push(`COLUMNS: ${headers.map((h, i) => `${h} (${types[i]})`).join(" | ")}`);
-  } else if (colCount > 0) {
+  } else if (sampledColCount > 0) {
     const types = [];
-    for (let c = 0; c < colCount; c += 1) types.push(inferColumnType(cells, c, -1));
+    for (let c = 0; c < sampledColCount; c += 1) types.push(inferColumnType(cells, c, -1));
     lines.push(`COLUMNS: ${types.map((t, i) => `Column${i + 1} (${t})`).join(" | ")}`);
   }
 
@@ -117,9 +125,9 @@ export function chunkToText(chunk, opts) {
   } else {
     const startRow = headerRow === 0 ? 1 : 0;
     const rows = [];
-    for (let r = startRow; r < Math.min(rowCount, startRow + sampleRows); r += 1) {
+    for (let r = startRow; r < Math.min(sampledRowCount, startRow + sampleRows); r += 1) {
       const row = [];
-      for (let c = 0; c < colCount; c += 1) {
+      for (let c = 0; c < sampledColCount; c += 1) {
         const cell = cells[r][c] || {};
         if (cell.f) row.push(`=${formatScalar(cell.f)}`);
         else row.push(formatScalar(cell.v));
