@@ -15,6 +15,13 @@ fn roundtrip_with_quoted_sheet_and_structured_refs() {
 }
 
 #[test]
+fn roundtrip_with_nested_structured_refs() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    roundtrip("=Table1[[#Headers],[Column]]+1", opts, ser);
+}
+
+#[test]
 fn roundtrip_with_external_ref_and_array_literal() {
     let opts = ParseOptions::default();
     let ser = SerializeOptions::default();

@@ -68,7 +68,7 @@ pub fn parse_formula(formula: &str, opts: ParseOptions) -> Result<Ast, ParseErro
     };
 
     let tokens = lex(expr_src, &opts.locale).map_err(|e| e.add_offset(span_offset))?;
-    let mut parser = Parser::new(expr_src, tokens, opts.locale.clone());
+    let mut parser = Parser::new(expr_src, tokens);
     let expr = parser
         .parse_expression(0)
         .map_err(|e| e.add_offset(span_offset))?;
@@ -126,7 +126,7 @@ pub fn parse_formula_partial(formula: &str, opts: ParseOptions) -> PartialParse 
         }
     };
 
-    let mut parser = Parser::new(expr_src, tokens, opts.locale.clone());
+    let mut parser = Parser::new(expr_src, tokens);
     let expr = parser.parse_expression_best_effort(0);
 
     let mut ast = Ast::new(has_equals, expr);
@@ -706,18 +706,16 @@ struct Parser<'a> {
     src: &'a str,
     tokens: Vec<Token>,
     pos: usize,
-    locale: LocaleConfig,
     func_stack: Vec<(String, usize)>,
     first_error: Option<ParseError>,
 }
 
 impl<'a> Parser<'a> {
-    fn new(src: &'a str, tokens: Vec<Token>, locale: LocaleConfig) -> Self {
+    fn new(src: &'a str, tokens: Vec<Token>) -> Self {
         Self {
             src,
             tokens,
             pos: 0,
-            locale,
             func_stack: Vec::new(),
             first_error: None,
         }
@@ -1517,71 +1515,38 @@ impl<'a> Parser<'a> {
         sheet: Option<String>,
         table: Option<String>,
     ) -> Result<Expr, ParseError> {
-        let spec = if matches!(self.peek_kind(), TokenKind::LBracket) {
-            self.next();
-            self.parse_bracket_spec()?
-        } else {
-            self.expect(TokenKind::LBracket)?;
-            self.parse_bracket_spec()?
-        };
-        Ok(Expr::StructuredRef(StructuredRef {
-            workbook,
-            sheet,
-            table,
-            spec,
-        }))
-    }
+        self.skip_trivia();
+        let open_span = self.current_span();
+        self.expect(TokenKind::LBracket)?;
 
-    fn parse_bracket_spec(&mut self) -> Result<String, ParseError> {
-        let mut spec = String::new();
-        loop {
+        let spec_start = open_span.end;
+        let mut depth: i32 = 1;
+        let mut spec_end: Option<usize> = None;
+
+        while depth > 0 {
             match self.peek_kind() {
+                TokenKind::LBracket => {
+                    depth += 1;
+                    self.next();
+                }
                 TokenKind::RBracket => {
+                    // Excel escapes ']' inside structured references as ']]'. When parsing the
+                    // *outermost* bracket, treat a double ']]' as a literal ']' rather than the
+                    // end of the structured ref.
+                    if depth == 1
+                        && matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::RBracket))
+                    {
+                        self.next();
+                        self.next();
+                        continue;
+                    }
+
+                    let close_span = self.current_span();
                     self.next();
-                    break;
-                }
-                TokenKind::At => {
-                    self.next();
-                    spec.push('@');
-                }
-                TokenKind::Ident(s) => {
-                    let s = s.clone();
-                    self.next();
-                    spec.push_str(&s);
-                }
-                TokenKind::QuotedIdent(s) => {
-                    let s = s.clone();
-                    self.next();
-                    spec.push('\'');
-                    spec.push_str(&s);
-                    spec.push('\'');
-                }
-                TokenKind::Whitespace(w) => {
-                    let w = w.clone();
-                    self.next();
-                    spec.push_str(&w);
-                }
-                TokenKind::Colon => {
-                    self.next();
-                    spec.push(':');
-                }
-                TokenKind::Union => {
-                    self.next();
-                    spec.push(self.locale.arg_separator);
-                }
-                TokenKind::ArgSep => {
-                    self.next();
-                    spec.push(self.locale.arg_separator);
-                }
-                TokenKind::Number(n) => {
-                    let n = n.clone();
-                    self.next();
-                    spec.push_str(&n);
-                }
-                TokenKind::Error(e) => {
-                    let e = e.clone();
-                    self.next();
-                    spec.push_str(&e);
+                    depth -= 1;
+                    if depth == 0 {
+                        spec_end = Some(close_span.start);
+                    }
                 }
                 TokenKind::Eof => {
                     return Err(ParseError::new(
@@ -1590,15 +1555,20 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 _ => {
-                    // Fallback: include raw source span of the token.
-                    let span = self.current_span();
-                    let raw = self.src[span.start..span.end].to_string();
                     self.next();
-                    spec.push_str(&raw);
                 }
             }
         }
-        Ok(spec)
+
+        let spec_end = spec_end.expect("loop should set spec_end when depth reaches zero");
+        let spec = self.src[spec_start..spec_end].to_string();
+
+        Ok(Expr::StructuredRef(StructuredRef {
+            workbook,
+            sheet,
+            table,
+            spec,
+        }))
     }
 
     fn take_name_token(&mut self) -> Result<String, ParseError> {
