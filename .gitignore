@@ -1,10 +1,15 @@
 /target/
 **/target/
+Cargo.lock
+
+apps/desktop/.turbo/
+
+# Rust editor backups / swap files
 **/*.rs.bk
 **/*.swp
 **/*.swo
 
-# Node
+# Node / web
 node_modules/
 **/node_modules/
 dist/
@@ -28,5 +33,6 @@ pnpm-debug.log*
 scratchpad.md
 handoff.md
 
+# Python
 __pycache__/
 *.pyc
