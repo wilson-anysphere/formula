@@ -379,36 +379,6 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
     }
 
-    fn sum_like_scalar_number(v: Value) -> Result<Option<f64>, ErrorKind> {
-        match v {
-            Value::Error(e) => Err(e),
-            Value::Number(n) => Ok(Some(n)),
-            Value::Bool(b) => Ok(Some(if b { 1.0 } else { 0.0 })),
-            Value::Blank => Ok(None),
-            Value::Text(s) => Ok(parse_number_from_text(&s)),
-        }
-    }
-
-    fn collect_sum_like_numbers_from_arg(&self, arg: &CompiledExpr) -> Result<Vec<f64>, ErrorKind> {
-        let ev = self.eval_value(arg);
-        match ev {
-            EvalValue::Scalar(v) => Ok(Self::sum_like_scalar_number(v)?.into_iter().collect()),
-            EvalValue::Reference(range) => {
-                let mut out = Vec::new();
-                for addr in range.iter_cells() {
-                    let v = self.resolver.get_cell_value(range.sheet_id, addr);
-                    match v {
-                        Value::Error(e) => return Err(e),
-                        Value::Number(n) => out.push(n),
-                        // Excel quirk: logicals/text/blanks in references are ignored.
-                        Value::Bool(_) | Value::Text(_) | Value::Blank => {}
-                    }
-                }
-                Ok(out)
-            }
-        }
-    }
-
     fn collect_numbers_strict_from_arg(&self, arg: &CompiledExpr) -> Result<Vec<f64>, ErrorKind> {
         let ev = self.eval_value(arg);
         match ev {
@@ -418,6 +388,35 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 for addr in range.iter_cells() {
                     let v = self.resolver.get_cell_value(range.sheet_id, addr);
                     out.push(coerce_to_number(&v)?);
+                }
+                Ok(out)
+            }
+        }
+    }
+
+    fn collect_npv_values_from_arg(&self, arg: &CompiledExpr) -> Result<Vec<f64>, ErrorKind> {
+        // NPV's discounting depends on the position of each cashflow. When values are
+        // supplied via references, Excel ignores non-numeric cells. For NPV we treat
+        // them as 0 so the period index is preserved (i.e. a blank cell represents a
+        // period with no cashflow rather than "removing" a period).
+        let ev = self.eval_value(arg);
+        match ev {
+            EvalValue::Scalar(v) => match v {
+                Value::Error(e) => Err(e),
+                Value::Number(n) => Ok(vec![n]),
+                Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }]),
+                Value::Blank => Ok(vec![0.0]),
+                Value::Text(s) => Ok(vec![parse_number_from_text(&s).unwrap_or(0.0)]),
+            },
+            EvalValue::Reference(range) => {
+                let mut out = Vec::new();
+                for addr in range.iter_cells() {
+                    let v = self.resolver.get_cell_value(range.sheet_id, addr);
+                    match v {
+                        Value::Error(e) => return Err(e),
+                        Value::Number(n) => out.push(n),
+                        Value::Bool(_) | Value::Text(_) | Value::Blank => out.push(0.0),
+                    }
                 }
                 Ok(out)
             }
@@ -731,7 +730,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
         let mut values = Vec::new();
         for arg in &args[1..] {
-            match self.collect_sum_like_numbers_from_arg(arg) {
+            match self.collect_npv_values_from_arg(arg) {
                 Ok(mut nums) => values.append(&mut nums),
                 Err(e) => return Value::Error(e),
             }

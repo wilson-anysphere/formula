@@ -285,3 +285,31 @@ fn irr_treats_non_numeric_cells_as_zero_in_ranges() {
         "expected {expected}, got {irr}"
     );
 }
+
+#[test]
+fn npv_preserves_period_index_for_blank_cells_in_ranges() {
+    let mut engine = Engine::new();
+
+    // Leaving a cell blank inside the values range should act like a 0 cashflow for
+    // that period (it should not "compress" subsequent cashflows earlier).
+    engine.set_cell_value("Sheet1", "A1", 100.0).unwrap();
+    // A2 intentionally left blank.
+    engine.set_cell_value("Sheet1", "A3", 100.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=NPV(0.1, A1:A3)")
+        .unwrap();
+
+    engine.recalculate();
+
+    let result = match engine.get_cell_value("Sheet1", "B1") {
+        Value::Number(n) => n,
+        other => panic!("expected NPV numeric result, got {other:?}"),
+    };
+
+    let expected = 100.0 / 1.1 + 0.0 / 1.1_f64.powi(2) + 100.0 / 1.1_f64.powi(3);
+    assert!(
+        (result - expected).abs() <= 1e-12,
+        "expected {expected}, got {result}"
+    );
+}
