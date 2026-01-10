@@ -75,7 +75,10 @@ fn parses_x14_and_merges_extensions() {
     assert_eq!(rule.schema, formula_model::CfRuleSchema::X14);
     match &rule.kind {
         formula_model::CfRuleKind::DataBar(db) => {
-            assert_eq!(format!("{:08X}", db.color.unwrap().argb), "FF638EC6");
+            assert_eq!(
+                format!("{:08X}", db.color.unwrap().argb().unwrap_or(0)),
+                "FF638EC6"
+            );
             assert_eq!(db.min_length, Some(0));
             assert_eq!(db.max_length, Some(100));
             assert_eq!(db.gradient, Some(false));

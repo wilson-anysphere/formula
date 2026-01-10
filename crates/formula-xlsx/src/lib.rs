@@ -12,6 +12,8 @@
 //!   [`formula_model::Workbook`] with preserved parts plus enough metadata to
 //!   rewrite core SpreadsheetML files without breaking relationship IDs or
 //!   cached values.
+//! - [`WorkbookPackage`]: a focused round-trip wrapper used by the style
+//!   pipeline (`styles.xml` + cell `s` indices).
 //!
 //! The module surface also contains focused parsers/writers for some other Excel
 //! parts (shared strings with rich text, sheet metadata for tab order/colors,
@@ -22,7 +24,9 @@ pub mod charts;
 pub mod comments;
 pub mod conditional_formatting;
 mod compare;
+mod model_package;
 mod openxml;
+mod xml;
 pub mod drawingml;
 pub mod drawings;
 pub mod hyperlinks;
@@ -53,6 +57,7 @@ pub use hyperlinks::{
     parse_worksheet_hyperlinks, update_worksheet_relationships, update_worksheet_xml,
 };
 pub use package::{XlsxError, XlsxPackage};
+pub use model_package::{WorkbookPackage, WorkbookPackageError};
 pub use pivots::{
     pivot_charts::PivotChartPart,
     slicers::{PivotSlicerParts, SlicerDefinition, TimelineDefinition},
@@ -68,6 +73,7 @@ pub use styles::*;
 pub use crate::minimal::write_minimal_xlsx;
 pub use workbook::ChartExtractionError;
 pub use writer::{write_workbook, write_workbook_to_writer, XlsxWriteError};
+pub use xml::XmlDomError;
 
 use formula_model::rich_text::RichText;
 use formula_model::{CellRef, Workbook, WorksheetId};

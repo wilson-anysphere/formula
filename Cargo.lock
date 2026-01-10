@@ -1254,6 +1254,7 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 1.0.69",
+ "xlsx-diff",
  "zip 2.4.2",
 ]
 

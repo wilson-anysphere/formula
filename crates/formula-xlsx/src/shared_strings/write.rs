@@ -97,7 +97,7 @@ fn write_rpr(
 
     if let Some(color) = style.color {
         let mut c = BytesStart::new("color");
-        let value = format!("{:08X}", color.argb);
+        let value = format!("{:08X}", color.argb().unwrap_or(0));
         c.push_attribute(("rgb", value.as_str()));
         writer.write_event(Event::Empty(c))?;
     }

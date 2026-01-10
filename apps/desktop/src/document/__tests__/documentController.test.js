@@ -95,11 +95,13 @@ test("setRangeFormat is undoable (formatting changes)", () => {
   const doc = new DocumentController();
 
   doc.setCellValue("Sheet1", "A1", 1);
-  doc.setRangeFormat("Sheet1", "A1", { bold: true });
-  assert.deepEqual(doc.getCell("Sheet1", "A1").format, { bold: true });
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+  const styled = doc.getCell("Sheet1", "A1");
+  assert.equal(styled.styleId, 1);
+  assert.deepEqual(doc.styleTable.get(styled.styleId), { font: { bold: true } });
 
   doc.undo();
-  assert.equal(doc.getCell("Sheet1", "A1").format, null);
+  assert.equal(doc.getCell("Sheet1", "A1").styleId, 0);
   assert.equal(doc.getCell("Sheet1", "A1").value, 1);
 });
 

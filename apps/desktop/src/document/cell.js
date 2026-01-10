@@ -6,20 +6,17 @@
  *
  * @typedef {string | number | boolean | RichText | null} CellValue
  *
- * @typedef {Record<string, unknown>} CellFormat
- *
  * Canonical cell state owned by the DocumentController.
  *
  * `value` is the literal user-entered value (non-formula). For formula cells, `formula`
  * holds the raw formula string (without leading "=" normalization).
  *
- * `format` is an optional style bag. It is intentionally un-opinionated so that a future
- * style system can grow without changing the undo/redo substrate.
+ * `styleId` references a deduplicated style table owned by the DocumentController.
  *
  * @typedef {{
  *   value: CellValue,
  *   formula: string | null,
- *   format: CellFormat | null
+ *   styleId: number
  * }} CellState
  */
 
@@ -27,7 +24,7 @@
  * @returns {CellState}
  */
 export function emptyCellState() {
-  return { value: null, formula: null, format: null };
+  return { value: null, formula: null, styleId: 0 };
 }
 
 /**
@@ -39,7 +36,7 @@ export function normalizeCellState(cell) {
   return {
     value: cell.value ?? null,
     formula: cell.formula ?? null,
-    format: cell.format ?? null,
+    styleId: typeof cell.styleId === "number" ? cell.styleId : 0,
   };
 }
 
@@ -62,12 +59,7 @@ export function cloneCellState(cell) {
   return {
     value: clonedValue,
     formula: normalized.formula,
-    format:
-      normalized.format == null
-        ? null
-        : structuredCloneFn
-          ? structuredCloneFn(normalized.format)
-          : JSON.parse(JSON.stringify(normalized.format)),
+    styleId: normalized.styleId,
   };
 }
 
@@ -77,7 +69,7 @@ export function cloneCellState(cell) {
  */
 export function isCellStateEmpty(cell) {
   const normalized = normalizeCellState(cell);
-  return normalized.value == null && normalized.formula == null && normalized.format == null;
+  return normalized.value == null && normalized.formula == null && normalized.styleId === 0;
 }
 
 /**
@@ -95,9 +87,5 @@ export function cellStateEquals(a, b) {
       typeof an.value === "object" &&
       typeof bn.value === "object" &&
       JSON.stringify(an.value) === JSON.stringify(bn.value));
-  return (
-    valuesEqual &&
-    an.formula === bn.formula &&
-    JSON.stringify(an.format) === JSON.stringify(bn.format)
-  );
+  return valuesEqual && an.formula === bn.formula && an.styleId === bn.styleId;
 }

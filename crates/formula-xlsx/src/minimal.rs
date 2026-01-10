@@ -150,6 +150,8 @@ fn alignment_xml(alignment: &Alignment) -> String {
             formula_model::HorizontalAlignment::Left => "left",
             formula_model::HorizontalAlignment::Center => "center",
             formula_model::HorizontalAlignment::Right => "right",
+            formula_model::HorizontalAlignment::Fill => "fill",
+            formula_model::HorizontalAlignment::Justify => "justify",
         };
         out.push_str(&format!(r#" horizontal="{}""#, h));
     }
@@ -164,8 +166,8 @@ fn alignment_xml(alignment: &Alignment) -> String {
     if alignment.wrap_text {
         out.push_str(r#" wrapText="1""#);
     }
-    if alignment.text_rotation != 0 {
-        out.push_str(&format!(r#" textRotation="{}""#, alignment.text_rotation));
+    if let Some(rotation) = alignment.rotation.filter(|v| *v != 0) {
+        out.push_str(&format!(r#" textRotation="{}""#, rotation));
     }
     out.push_str("/>");
     out

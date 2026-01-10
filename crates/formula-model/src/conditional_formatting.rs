@@ -51,7 +51,7 @@ pub fn parse_argb_hex_color(s: &str) -> Option<Color> {
 }
 
 fn color_to_argb_hex(color: Color) -> String {
-    format!("{:08X}", color.argb)
+    format!("{:08X}", color.argb().unwrap_or(0))
 }
 
 fn lerp_color(a: Color, b: Color, t: f32) -> Color {
@@ -66,8 +66,8 @@ fn lerp_color(a: Color, b: Color, t: f32) -> Color {
         )
     };
 
-    let (aa, ar, ag, ab) = split(a.argb);
-    let (ba, br, bg, bb) = split(b.argb);
+    let (aa, ar, ag, ab) = split(a.argb().unwrap_or(0));
+    let (ba, br, bg, bb) = split(b.argb().unwrap_or(0));
 
     let lerp_u8 = |x: u32, y: u32| -> u32 { (x as f32 + (y as f32 - x as f32) * t).round() as u32 };
 

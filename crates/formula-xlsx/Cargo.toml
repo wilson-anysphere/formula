@@ -23,3 +23,4 @@ insta = "1.46"
 rust_xlsxwriter = "0.64"
 formula-engine = { path = "../formula-engine" }
 tempfile = "3.10"
+xlsx-diff = { path = "../xlsx-diff" }

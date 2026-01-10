@@ -307,6 +307,99 @@ def styles_bold_cell_xml() -> str:
 """
 
 
+def styles_varied_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1">
+    <numFmt numFmtId="164" formatCode="#,##0.00"/>
+  </numFmts>
+  <fonts count="4">
+    <font>
+      <sz val="11"/>
+      <color theme="1"/>
+      <name val="Calibri"/>
+      <family val="2"/>
+      <scheme val="minor"/>
+    </font>
+    <font>
+      <b/>
+      <sz val="11"/>
+      <color theme="1"/>
+      <name val="Calibri"/>
+      <family val="2"/>
+      <scheme val="minor"/>
+    </font>
+    <font>
+      <i/>
+      <u/>
+      <sz val="14"/>
+      <color rgb="FFFF0000"/>
+      <name val="Calibri"/>
+      <family val="2"/>
+      <scheme val="minor"/>
+    </font>
+    <font>
+      <strike/>
+      <sz val="11"/>
+      <color rgb="FF00AA00"/>
+      <name val="Calibri"/>
+      <family val="2"/>
+      <scheme val="minor"/>
+    </font>
+  </fonts>
+  <fills count="4">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill>
+      <patternFill patternType="solid">
+        <fgColor rgb="FFFFFF00"/>
+        <bgColor indexed="64"/>
+      </patternFill>
+    </fill>
+    <fill>
+      <patternFill patternType="solid">
+        <fgColor rgb="FF00B0F0"/>
+        <bgColor indexed="64"/>
+      </patternFill>
+    </fill>
+  </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border>
+      <left style="thin"><color rgb="FF000000"/></left>
+      <right style="thin"><color rgb="FF000000"/></right>
+      <top style="thin"><color rgb="FF000000"/></top>
+      <bottom style="thin"><color rgb="FF000000"/></bottom>
+      <diagonal/>
+    </border>
+  </borders>
+  <cellStyleXfs count="1">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
+  </cellStyleXfs>
+  <cellXfs count="11">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+    <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+    <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+    <xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1">
+      <alignment horizontal="center" vertical="center" wrapText="1"/>
+    </xf>
+    <xf numFmtId="9" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="7" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+  </cellXfs>
+  <cellStyles count="1">
+    <cellStyle name="Normal" xfId="0" builtinId="0"/>
+  </cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>
+"""
+
+
 def sheet_basic_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -379,6 +472,26 @@ def sheet_shared_strings_xml() -> str:
 </worksheet>
 """
 
+
+def sheet_varied_styles_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" s="1" t="inlineStr"><is><t>Bold</t></is></c>
+      <c r="B1" s="2" t="inlineStr"><is><t>Italic+Underline</t></is></c>
+      <c r="C1" s="3" t="inlineStr"><is><t>Strike</t></is></c>
+      <c r="D1" s="4" t="inlineStr"><is><t>Fill</t></is></c>
+      <c r="E1" s="5" t="inlineStr"><is><t>Border</t></is></c>
+      <c r="F1" s="6" t="inlineStr"><is><t>Center Wrap</t></is></c>
+      <c r="G1" s="7"><v>0.25</v></c>
+      <c r="H1" s="8"><v>1234.5</v></c>
+      <c r="I1" s="9"><v>44927</v></c>
+      <c r="J1" s="10"><v>42.5</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
 
 def sheet_two_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -785,9 +898,14 @@ def main() -> None:
         [sheet_styles_xml()],
         styles_bold_cell_xml(),
     )
-    write_hyperlinks_xlsx(ROOT / "hyperlinks" / "hyperlinks.xlsx")
+    write_xlsx(
+        ROOT / "styles" / "varied_styles.xlsx",
+        [sheet_varied_styles_xml()],
+        styles_varied_xml(),
+    )
     write_chart_xlsx(ROOT / "charts" / "basic-chart.xlsx")
     write_image_xlsx(ROOT / "basic" / "image.xlsx")
+    write_hyperlinks_xlsx(ROOT / "hyperlinks" / "hyperlinks.xlsx")
 
     # Directory scaffold for future corpora (kept empty for now).
     for name in ["charts", "pivots", "macros"]:

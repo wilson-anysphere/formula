@@ -3,6 +3,9 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use roxmltree::Document;
 
+mod cell_styles;
+pub use cell_styles::{StylesPart, StylesPartError};
+
 #[derive(Debug, thiserror::Error)]
 pub enum StylesError {
     #[error("xml parse error: {0}")]
@@ -138,7 +141,11 @@ pub fn parse_cell_xfs_alignments(styles_xml: &str) -> Result<Vec<Alignment>, Sty
                                 xf.wrap_text = value == "1" || value.eq_ignore_ascii_case("true")
                             }
                             b"textRotation" => {
-                                xf.text_rotation = value.parse::<i16>().unwrap_or_default()
+                                let rotation = value.parse::<i16>().unwrap_or_default();
+                                xf.rotation = if rotation == 0 { None } else { Some(rotation) };
+                            }
+                            b"indent" => {
+                                xf.indent = value.parse::<u16>().ok();
                             }
                             _ => {}
                         }
@@ -159,6 +166,8 @@ fn parse_horizontal(value: &str) -> HorizontalAlignment {
         "left" => HorizontalAlignment::Left,
         "center" => HorizontalAlignment::Center,
         "right" => HorizontalAlignment::Right,
+        "fill" => HorizontalAlignment::Fill,
+        "justify" => HorizontalAlignment::Justify,
         _ => HorizontalAlignment::General,
     }
 }

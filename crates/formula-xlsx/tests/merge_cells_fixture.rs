@@ -46,7 +46,8 @@ fn parses_fixture_merge_cells_and_alignment() {
             horizontal: Some(HorizontalAlignment::Center),
             vertical: Some(VerticalAlignment::Center),
             wrap_text: true,
-            text_rotation: 45,
+            rotation: Some(45),
+            indent: None,
         }
     );
 }

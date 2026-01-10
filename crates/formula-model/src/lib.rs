@@ -38,8 +38,8 @@ pub use formula_rewrite::rewrite_sheet_names_in_formula;
 pub use merge::{MergeError, MergedRegion, MergedRegions};
 pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
 pub use style::{
-    Alignment, Border, BorderStyle, Color, Fill, Font, HorizontalAlignment, Style, StyleTable,
-    VerticalAlignment,
+    Alignment, Border, BorderEdge, BorderStyle, Color, Fill, FillPattern, Font,
+    HorizontalAlignment, Protection, Style, StyleTable, VerticalAlignment,
 };
 pub use table::{
     AutoFilter, FilterColumn, SortCondition, SortState, Table, TableArea, TableColumn, TableStyleInfo,
@@ -53,4 +53,4 @@ pub use worksheet::{
 /// Current serialization schema version.
 ///
 /// This is embedded into [`Workbook`] to enable forward-compatible IPC payloads.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;

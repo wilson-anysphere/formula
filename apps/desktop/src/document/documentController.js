@@ -1,10 +1,10 @@
 import { cellStateEquals, cloneCellState, emptyCellState, isCellStateEmpty } from "./cell.js";
 import { normalizeRange, parseA1, parseRangeA1 } from "./coords.js";
+import { applyStylePatch, StyleTable } from "../formatting/styleTable.js";
 
 /**
  * @typedef {import("./cell.js").CellState} CellState
  * @typedef {import("./cell.js").CellValue} CellValue
- * @typedef {import("./cell.js").CellFormat} CellFormat
  * @typedef {import("./coords.js").CellCoord} CellCoord
  * @typedef {import("./coords.js").CellRange} CellRange
  * @typedef {import("./engine.js").Engine} Engine
@@ -182,7 +182,7 @@ class WorkbookModel {
  * DocumentController is the authoritative state machine for a workbook.
  *
  * It owns:
- * - The canonical cell inputs (value/formula/format)
+ * - The canonical cell inputs (value/formula/styleId)
  * - Undo/redo stacks (with inversion)
  * - Dirty tracking since last save
  * - Optional integration hooks for an external calc engine and UI layers
@@ -204,6 +204,7 @@ export class DocumentController {
     this.canEditCell = typeof options.canEditCell === "function" ? options.canEditCell : null;
 
     this.model = new WorkbookModel();
+    this.styleTable = new StyleTable();
 
     /** @type {HistoryEntry[]} */
     this.history = [];
@@ -347,7 +348,7 @@ export class DocumentController {
   setCellValue(sheetId, coord, value, options = {}) {
     const c = typeof coord === "string" ? parseA1(coord) : coord;
     const before = this.model.getCell(sheetId, c.row, c.col);
-    const after = { value: value ?? null, formula: null, format: before.format };
+    const after = { value: value ?? null, formula: null, styleId: before.styleId };
     this.#applyUserDeltas([
       { sheetId, row: c.row, col: c.col, before, after: cloneCellState(after) },
     ], options);
@@ -362,7 +363,7 @@ export class DocumentController {
   setCellFormula(sheetId, coord, formula, options = {}) {
     const c = typeof coord === "string" ? parseA1(coord) : coord;
     const before = this.model.getCell(sheetId, c.row, c.col);
-    const after = { value: null, formula: formula ?? null, format: before.format };
+    const after = { value: null, formula: formula ?? null, styleId: before.styleId };
     this.#applyUserDeltas([
       { sheetId, row: c.row, col: c.col, before, after: cloneCellState(after) },
     ], options);
@@ -416,7 +417,7 @@ export class DocumentController {
     for (let row = r.start.row; row <= r.end.row; row++) {
       for (let col = r.start.col; col <= r.end.col; col++) {
         const before = this.model.getCell(sheetId, row, col);
-        const after = { value: null, formula: null, format: before.format };
+        const after = { value: null, formula: null, styleId: before.styleId };
         if (cellStateEquals(before, after)) continue;
         deltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
       }
@@ -480,21 +481,20 @@ export class DocumentController {
    *
    * @param {string} sheetId
    * @param {CellRange | string} range
-   * @param {CellFormat | null} formatPatch
+   * @param {Record<string, any> | null} stylePatch
    * @param {{ label?: string }} [options]
    */
-  setRangeFormat(sheetId, range, formatPatch, options = {}) {
+  setRangeFormat(sheetId, range, stylePatch, options = {}) {
     const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
     /** @type {CellDelta[]} */
     const deltas = [];
     for (let row = r.start.row; row <= r.end.row; row++) {
       for (let col = r.start.col; col <= r.end.col; col++) {
         const before = this.model.getCell(sheetId, row, col);
-        const afterFormat =
-          formatPatch == null
-            ? null
-            : { ...(before.format ?? {}), ...(/** @type {any} */ (formatPatch) ?? {}) };
-        const after = { value: before.value, formula: before.formula, format: afterFormat };
+        const baseStyle = this.styleTable.get(before.styleId);
+        const merged = applyStylePatch(baseStyle, stylePatch);
+        const afterStyleId = this.styleTable.intern(merged);
+        const after = { value: before.value, formula: before.formula, styleId: afterStyleId };
         if (cellStateEquals(before, after)) continue;
         deltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
       }
@@ -519,7 +519,7 @@ export class DocumentController {
       cells.set(semanticDiffCellKey(row, col), {
         value: cell.value ?? null,
         formula: cell.formula ?? null,
-        format: cell.format ?? null,
+        format: cell.styleId === 0 ? null : this.styleTable.get(cell.styleId),
       });
     }
     return { cells };
@@ -543,7 +543,7 @@ export class DocumentController {
           col,
           value: cell.value ?? null,
           formula: cell.formula ?? null,
-          format: cell.format ?? null,
+          format: cell.styleId === 0 ? null : this.styleTable.get(cell.styleId),
         };
       });
       cells.sort((a, b) => (a.row - b.row === 0 ? a.col - b.col : a.row - b.row));
@@ -577,10 +577,12 @@ export class DocumentController {
         const col = Number(entry?.col);
         if (!Number.isInteger(row) || row < 0) continue;
         if (!Number.isInteger(col) || col < 0) continue;
+        const format = entry?.format ?? null;
+        const styleId = format == null ? 0 : this.styleTable.intern(format);
         const cell = {
           value: entry?.value ?? null,
           formula: entry?.formula ?? null,
-          format: entry?.format ?? null,
+          styleId,
         };
         cellMap.set(`${row},${col}`, cloneCellState(cell));
       }
@@ -634,21 +636,25 @@ export class DocumentController {
    * @returns {CellState}
    */
   #normalizeCellInput(before, input) {
-    // Object form: { value?, formula?, format? }
+    // Object form: { value?, formula?, styleId?, format? }.
     if (
       input &&
       typeof input === "object" &&
-      ("formula" in input || "value" in input || "format" in input)
+      ("formula" in input || "value" in input || "styleId" in input || "format" in input)
     ) {
       /** @type {any} */
       const obj = input;
 
       let value = before.value;
       let formula = before.formula;
-      let format = before.format;
+      let styleId = before.styleId;
 
-      if ("format" in obj) {
-        format = obj.format ?? null;
+      if ("styleId" in obj) {
+        const next = Number(obj.styleId);
+        styleId = Number.isInteger(next) && next >= 0 ? next : 0;
+      } else if ("format" in obj) {
+        const format = obj.format ?? null;
+        styleId = format == null ? 0 : this.styleTable.intern(format);
       }
 
       if ("formula" in obj) {
@@ -665,23 +671,23 @@ export class DocumentController {
         formula = null;
       }
 
-      return { value, formula, format };
+      return { value, formula, styleId };
     }
 
     // String primitives: interpret leading "=" as a formula, and leading apostrophe as a literal.
     if (typeof input === "string") {
       if (input.startsWith("'")) {
-        return { value: input.slice(1), formula: null, format: before.format };
+        return { value: input.slice(1), formula: null, styleId: before.styleId };
       }
 
       const trimmed = input.trimStart();
       if (trimmed.startsWith("=") && trimmed.length > 1) {
-        return { value: null, formula: input, format: before.format };
+        return { value: null, formula: input, styleId: before.styleId };
       }
     }
 
-    // Primitive value (or null => clear); formats preserved.
-    return { value: input ?? null, formula: null, format: before.format };
+    // Primitive value (or null => clear); styles preserved.
+    return { value: input ?? null, formula: null, styleId: before.styleId };
   }
 
   /**

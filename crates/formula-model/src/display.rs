@@ -39,6 +39,8 @@ pub fn format_cell_display(
         Some(HorizontalAlignment::Left) => HorizontalAlignment::Left,
         Some(HorizontalAlignment::Center) => HorizontalAlignment::Center,
         Some(HorizontalAlignment::Right) => HorizontalAlignment::Right,
+        Some(HorizontalAlignment::Fill) => HorizontalAlignment::Fill,
+        Some(HorizontalAlignment::Justify) => HorizontalAlignment::Justify,
         Some(HorizontalAlignment::General) | None => match formatted.alignment {
             AlignmentHint::Left => HorizontalAlignment::Left,
             AlignmentHint::Center => HorizontalAlignment::Center,
