@@ -9,8 +9,18 @@ use serde::{Deserialize, Serialize};
 pub struct ScenarioId(u64);
 
 impl ScenarioId {
+    pub fn new(id: u64) -> Self {
+        Self(id)
+    }
+
     pub fn as_u64(&self) -> u64 {
         self.0
+    }
+}
+
+impl From<u64> for ScenarioId {
+    fn from(value: u64) -> Self {
+        ScenarioId::new(value)
     }
 }
 
@@ -35,7 +45,7 @@ pub struct SummaryReport {
     pub results: HashMap<String, HashMap<CellRef, CellValue>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ScenarioManager {
     scenarios: HashMap<ScenarioId, Scenario>,
     current_scenario: Option<ScenarioId>,
@@ -107,6 +117,10 @@ impl ScenarioManager {
 
     pub fn clear_base_values(&mut self) {
         self.base_values.clear();
+    }
+
+    pub fn base_values(&self) -> &HashMap<CellRef, CellValue> {
+        &self.base_values
     }
 
     pub fn restore_base<M: WhatIfModel>(

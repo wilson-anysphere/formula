@@ -30,12 +30,18 @@ export interface GoalSeekProgress {
   error: number;
 }
 
+export type WhatIfCellValue =
+  | { type: "number"; value: number }
+  | { type: "text"; value: string }
+  | { type: "bool"; value: boolean }
+  | { type: "blank" };
+
 // Scenario Manager
 export interface Scenario {
   id: number;
   name: string;
   changingCells: CellRef[];
-  values: Record<CellRef, unknown>;
+  values: Record<CellRef, WhatIfCellValue>;
   createdMs?: number;
   createdBy: string;
   comment?: string;
@@ -44,7 +50,7 @@ export interface Scenario {
 export interface SummaryReport {
   changingCells: CellRef[];
   resultCells: CellRef[];
-  results: Record<string, Record<CellRef, unknown>>;
+  results: Record<string, Record<CellRef, WhatIfCellValue>>;
 }
 
 // Monte Carlo

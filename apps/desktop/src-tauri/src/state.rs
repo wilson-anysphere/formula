@@ -2,9 +2,16 @@ use crate::file_io::Workbook;
 use formula_engine::eval::parse_a1;
 use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult};
 use formula_engine::what_if::monte_carlo::{MonteCarloEngine, SimulationConfig, SimulationResult};
-use formula_engine::what_if::{CellRef as WhatIfCellRef, CellValue as WhatIfCellValue, EngineWhatIfModel, WhatIfModel};
+use formula_engine::what_if::scenario_manager::{
+    Scenario, ScenarioId, ScenarioManager, SummaryReport,
+};
+use formula_engine::what_if::{
+    CellRef as WhatIfCellRef, CellValue as WhatIfCellValue, EngineWhatIfModel, WhatIfModel,
+};
 use formula_engine::{Engine as FormulaEngine, ErrorKind, RecalcMode, Value as EngineValue};
-use formula_xlsx::print::{CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings};
+use formula_xlsx::print::{
+    CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
+};
 use serde_json::Value as JsonValue;
 
 #[derive(Debug, thiserror::Error)]
@@ -164,6 +171,7 @@ pub struct AppState {
     dirty: bool,
     undo_stack: Vec<UndoEntry>,
     redo_stack: Vec<UndoEntry>,
+    scenario_manager: ScenarioManager,
 }
 
 impl Default for AppState {
@@ -180,6 +188,7 @@ impl AppState {
             dirty: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            scenario_manager: ScenarioManager::new(),
         }
     }
 
@@ -210,6 +219,7 @@ impl AppState {
         workbook.ensure_sheet_ids();
         self.workbook = Some(workbook);
         self.engine = FormulaEngine::new();
+        self.scenario_manager = ScenarioManager::new();
 
         // Best effort: rebuild and calculate. Unsupported formulas become #NAME? via the engine.
         let _ = self.rebuild_engine_from_workbook();
@@ -632,6 +642,272 @@ impl AppState {
         result.map_err(|e| AppStateError::WhatIf(e.to_string()))
     }
 
+    pub fn list_scenarios(&self) -> Vec<Scenario> {
+        self.scenario_manager.scenarios().cloned().collect()
+    }
+
+    pub fn create_scenario(
+        &mut self,
+        sheet_id: &str,
+        name: String,
+        changing_cells: Vec<WhatIfCellRef>,
+        created_by: String,
+        comment: Option<String>,
+    ) -> Result<Scenario, AppStateError> {
+        let workbook = self.get_workbook()?;
+        let default_sheet = workbook
+            .sheet(sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+
+        let mut cells = Vec::with_capacity(changing_cells.len());
+        let mut values = Vec::with_capacity(changing_cells.len());
+        for cell in changing_cells {
+            let (resolved_sheet_id, row, col) =
+                resolve_cell_ref(workbook, sheet_id, &default_sheet.name, &cell)?;
+            if workbook.cell_has_formula(&resolved_sheet_id, row, col) {
+                return Err(AppStateError::WhatIf(format!(
+                    "cannot create scenario: {cell} contains a formula"
+                )));
+            }
+
+            let scalar = workbook.cell_value(&resolved_sheet_id, row, col);
+            let sheet_name = workbook
+                .sheet(&resolved_sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(resolved_sheet_id.clone()))?
+                .name
+                .clone();
+            let canonical = WhatIfCellRef::new(format!(
+                "{}!{}",
+                quote_sheet_name(&sheet_name),
+                coord_to_a1(row, col)
+            ));
+
+            cells.push(canonical);
+            values.push(scalar_to_what_if_value(&scalar));
+        }
+
+        let id = self
+            .scenario_manager
+            .create_scenario(name, cells, values, created_by, comment)
+            .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+
+        self.scenario_manager
+            .get(id)
+            .cloned()
+            .ok_or_else(|| AppStateError::WhatIf("scenario not found after creation".to_string()))
+    }
+
+    pub fn apply_scenario(
+        &mut self,
+        sheet_id: &str,
+        scenario_id: ScenarioId,
+    ) -> Result<Vec<CellUpdateData>, AppStateError> {
+        if self.workbook.is_none() {
+            return Err(AppStateError::NoWorkbookLoaded);
+        }
+
+        let default_sheet_name = self
+            .get_workbook()?
+            .sheet(sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?
+            .name
+            .clone();
+
+        // First, update the scenario manager bookkeeping and engine values.
+        {
+            let mut model = EngineWhatIfModel::new(&mut self.engine, default_sheet_name.clone())
+                .with_recalc_mode(RecalcMode::SingleThreaded);
+            self.scenario_manager
+                .apply_scenario(&mut model, scenario_id)
+                .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+        }
+
+        let scenario = self
+            .scenario_manager
+            .get(scenario_id)
+            .cloned()
+            .ok_or_else(|| AppStateError::WhatIf("scenario not found".to_string()))?;
+
+        let workbook = self.get_workbook()?;
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        let mut touched = Vec::new();
+
+        for (cell, value) in scenario.values {
+            let (resolved_sheet_id, row, col) =
+                resolve_cell_ref(workbook, sheet_id, &default_sheet_name, &cell)?;
+
+            before.push(self.snapshot_cell(&resolved_sheet_id, row, col)?);
+            after.push(CellInputSnapshot {
+                sheet_id: resolved_sheet_id.clone(),
+                row,
+                col,
+                value: what_if_value_to_scalar(&value),
+                formula: None,
+            });
+            touched.push((resolved_sheet_id, row, col));
+        }
+
+        if after.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        self.apply_snapshots(&after)?;
+        self.engine.recalculate();
+        let mut updates = self.refresh_computed_values()?;
+
+        for (resolved_sheet_id, row, col) in touched {
+            if !updates
+                .iter()
+                .any(|u| u.sheet_id == resolved_sheet_id && u.row == row && u.col == col)
+            {
+                let cell = self.get_cell(&resolved_sheet_id, row, col)?;
+                updates.push(CellUpdateData {
+                    sheet_id: resolved_sheet_id,
+                    row,
+                    col,
+                    value: cell.value,
+                    formula: cell.formula,
+                });
+            }
+        }
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        self.undo_stack.push(UndoEntry { before, after });
+
+        Ok(updates)
+    }
+
+    pub fn restore_base_scenario(
+        &mut self,
+        sheet_id: &str,
+    ) -> Result<Vec<CellUpdateData>, AppStateError> {
+        if self.workbook.is_none() {
+            return Err(AppStateError::NoWorkbookLoaded);
+        }
+
+        let default_sheet_name = self
+            .get_workbook()?
+            .sheet(sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?
+            .name
+            .clone();
+
+        // First, restore the engine values and scenario manager bookkeeping.
+        {
+            let mut model = EngineWhatIfModel::new(&mut self.engine, default_sheet_name.clone())
+                .with_recalc_mode(RecalcMode::SingleThreaded);
+            self.scenario_manager
+                .restore_base(&mut model)
+                .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+        }
+
+        let base_values = self.scenario_manager.base_values().clone();
+        if base_values.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let workbook = self.get_workbook()?;
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        let mut touched = Vec::new();
+
+        for (cell, value) in base_values {
+            let (resolved_sheet_id, row, col) =
+                resolve_cell_ref(workbook, sheet_id, &default_sheet_name, &cell)?;
+
+            before.push(self.snapshot_cell(&resolved_sheet_id, row, col)?);
+            after.push(CellInputSnapshot {
+                sheet_id: resolved_sheet_id.clone(),
+                row,
+                col,
+                value: what_if_value_to_scalar(&value),
+                formula: None,
+            });
+            touched.push((resolved_sheet_id, row, col));
+        }
+
+        self.apply_snapshots(&after)?;
+        self.engine.recalculate();
+        let mut updates = self.refresh_computed_values()?;
+
+        for (resolved_sheet_id, row, col) in touched {
+            if !updates
+                .iter()
+                .any(|u| u.sheet_id == resolved_sheet_id && u.row == row && u.col == col)
+            {
+                let cell = self.get_cell(&resolved_sheet_id, row, col)?;
+                updates.push(CellUpdateData {
+                    sheet_id: resolved_sheet_id,
+                    row,
+                    col,
+                    value: cell.value,
+                    formula: cell.formula,
+                });
+            }
+        }
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        self.undo_stack.push(UndoEntry { before, after });
+
+        Ok(updates)
+    }
+
+    pub fn generate_summary_report(
+        &mut self,
+        sheet_id: &str,
+        result_cells: Vec<WhatIfCellRef>,
+        scenario_ids: Vec<ScenarioId>,
+    ) -> Result<SummaryReport, AppStateError> {
+        if self.workbook.is_none() {
+            return Err(AppStateError::NoWorkbookLoaded);
+        }
+
+        let default_sheet_name = self
+            .get_workbook()?
+            .sheet(sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?
+            .name
+            .clone();
+
+        // Snapshot current engine inputs for all scenario-changing cells so we
+        // can restore the engine state after report generation.
+        let mut cells_to_restore = std::collections::HashSet::<WhatIfCellRef>::new();
+        for id in &scenario_ids {
+            if let Some(s) = self.scenario_manager.get(*id) {
+                for cell in &s.changing_cells {
+                    cells_to_restore.insert(cell.clone());
+                }
+            }
+        }
+
+        let mut model = EngineWhatIfModel::new(&mut self.engine, default_sheet_name.clone())
+            .with_recalc_mode(RecalcMode::SingleThreaded);
+
+        let mut saved = std::collections::HashMap::<WhatIfCellRef, WhatIfCellValue>::new();
+        for cell in &cells_to_restore {
+            let value = model
+                .get_cell_value(cell)
+                .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+            saved.insert(cell.clone(), value);
+        }
+
+        let mut manager = self.scenario_manager.clone();
+        let report = manager
+            .generate_summary_report(&mut model, result_cells, scenario_ids)
+            .map_err(|e| AppStateError::WhatIf(e.to_string()));
+
+        // Always restore, even if report generation fails.
+        for (cell, value) in saved {
+            let _ = model.set_cell_value(&cell, value);
+        }
+        let _ = model.recalculate();
+
+        report
+    }
+
     pub fn undo(&mut self) -> Result<Vec<CellUpdateData>, AppStateError> {
         if self.workbook.is_none() {
             return Err(AppStateError::NoWorkbookLoaded);
@@ -839,11 +1115,15 @@ fn resolve_cell_ref(
     let (sheet_name, addr) = match raw.split_once('!') {
         Some((sheet_raw, addr_raw)) => {
             let sheet_raw = sheet_raw.trim();
-            let sheet_unquoted = sheet_raw
+            let sheet_name = if let Some(inner) = sheet_raw
                 .strip_prefix('\'')
                 .and_then(|s| s.strip_suffix('\''))
-                .unwrap_or(sheet_raw);
-            (sheet_unquoted.to_string(), addr_raw.trim().to_string())
+            {
+                inner.replace("''", "'")
+            } else {
+                sheet_raw.to_string()
+            };
+            (sheet_name, addr_raw.trim().to_string())
         }
         None => (default_sheet_name.to_string(), raw.to_string()),
     };
@@ -878,6 +1158,12 @@ fn coord_to_a1(row: usize, col: usize) -> String {
     format!("{}{}", col_index_to_letters(col), row + 1)
 }
 
+fn quote_sheet_name(name: &str) -> String {
+    // Excel escapes single quotes inside a quoted sheet name by doubling them.
+    let escaped = name.replace('\'', "''");
+    format!("'{escaped}'")
+}
+
 fn col_index_to_letters(mut col: usize) -> String {
     // Excel columns are base-26 with A=1..Z=26.
     col += 1;
@@ -888,6 +1174,25 @@ fn col_index_to_letters(mut col: usize) -> String {
         col = (col - 1) / 26;
     }
     letters.iter().rev().collect()
+}
+
+fn scalar_to_what_if_value(value: &CellScalar) -> WhatIfCellValue {
+    match value {
+        CellScalar::Empty => WhatIfCellValue::Blank,
+        CellScalar::Number(n) => WhatIfCellValue::Number(*n),
+        CellScalar::Text(s) => WhatIfCellValue::Text(s.clone()),
+        CellScalar::Bool(b) => WhatIfCellValue::Bool(*b),
+        CellScalar::Error(e) => WhatIfCellValue::Text(e.clone()),
+    }
+}
+
+fn what_if_value_to_scalar(value: &WhatIfCellValue) -> Option<CellScalar> {
+    match value {
+        WhatIfCellValue::Blank => None,
+        WhatIfCellValue::Number(n) => Some(CellScalar::Number(*n)),
+        WhatIfCellValue::Text(s) => Some(CellScalar::Text(s.clone())),
+        WhatIfCellValue::Bool(b) => Some(CellScalar::Bool(*b)),
+    }
 }
 
 fn scalar_to_engine_value(value: &CellScalar) -> EngineValue {
@@ -1025,10 +1330,11 @@ mod tests {
             0,
             Cell::from_literal(Some(CellScalar::Number(1.0))),
         );
-        workbook
-            .sheet_mut(&sheet_id)
-            .unwrap()
-            .set_cell(0, 1, Cell::from_formula("=A1*A1".to_string()));
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            1,
+            Cell::from_formula("=A1*A1".to_string()),
+        );
 
         let mut state = AppState::new();
         state.load_workbook(workbook);
@@ -1073,10 +1379,11 @@ mod tests {
             0,
             Cell::from_literal(Some(CellScalar::Number(0.0))),
         );
-        workbook
-            .sheet_mut(&sheet_id)
-            .unwrap()
-            .set_cell(0, 1, Cell::from_formula("=A1+1".to_string()));
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            1,
+            Cell::from_formula("=A1+1".to_string()),
+        );
 
         let mut state = AppState::new();
         state.load_workbook(workbook);
@@ -1103,6 +1410,113 @@ mod tests {
         assert_eq!(state.get_cell(&sheet_id, 0, 0).unwrap().value, before_a1);
         assert_eq!(state.get_cell(&sheet_id, 0, 1).unwrap().value, before_b1);
         assert!(!state.has_unsaved_changes());
+    }
+
+    #[test]
+    fn scenario_manager_apply_restore_and_summary_report() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(2.0))),
+        );
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            1,
+            Cell::from_formula("=A1*2".to_string()),
+        );
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        // Create scenario "Low" capturing A1=3.
+        state
+            .set_cell(&sheet_id, 0, 0, Some(JsonValue::from(3)), None)
+            .unwrap();
+        let low = state
+            .create_scenario(
+                &sheet_id,
+                "Low".to_string(),
+                vec![WhatIfCellRef::from("A1")],
+                "tester".to_string(),
+                None,
+            )
+            .unwrap();
+
+        // Create scenario "High" capturing A1=8.
+        state
+            .set_cell(&sheet_id, 0, 0, Some(JsonValue::from(8)), None)
+            .unwrap();
+        let high = state
+            .create_scenario(
+                &sheet_id,
+                "High".to_string(),
+                vec![WhatIfCellRef::from("A1")],
+                "tester".to_string(),
+                None,
+            )
+            .unwrap();
+
+        // Return to base (A1=2) before applying scenarios.
+        state
+            .set_cell(&sheet_id, 0, 0, Some(JsonValue::from(2)), None)
+            .unwrap();
+        assert_eq!(
+            state.get_cell(&sheet_id, 0, 1).unwrap().value,
+            CellScalar::Number(4.0)
+        );
+
+        state.apply_scenario(&sheet_id, low.id).unwrap();
+        assert_eq!(
+            state.get_cell(&sheet_id, 0, 1).unwrap().value,
+            CellScalar::Number(6.0)
+        );
+
+        state.restore_base_scenario(&sheet_id).unwrap();
+        assert_eq!(
+            state.get_cell(&sheet_id, 0, 1).unwrap().value,
+            CellScalar::Number(4.0)
+        );
+
+        let report = state
+            .generate_summary_report(
+                &sheet_id,
+                vec![WhatIfCellRef::from("B1")],
+                vec![low.id, high.id],
+            )
+            .unwrap();
+
+        let base = report.results.get("Base").unwrap();
+        assert_eq!(
+            base.get(&WhatIfCellRef::from("B1"))
+                .unwrap()
+                .as_number()
+                .unwrap(),
+            4.0
+        );
+
+        let low_row = report.results.get("Low").unwrap();
+        assert_eq!(
+            low_row
+                .get(&WhatIfCellRef::from("B1"))
+                .unwrap()
+                .as_number()
+                .unwrap(),
+            6.0
+        );
+
+        let high_row = report.results.get("High").unwrap();
+        assert_eq!(
+            high_row
+                .get(&WhatIfCellRef::from("B1"))
+                .unwrap()
+                .as_number()
+                .unwrap(),
+            16.0
+        );
     }
 
     #[test]

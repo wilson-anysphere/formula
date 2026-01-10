@@ -44,14 +44,21 @@ impl<'a> EngineWhatIfModel<'a> {
             let _ = parse_a1(addr)?;
 
             let sheet_raw = sheet_raw.trim();
-            let sheet_unquoted = sheet_raw
+            let sheet = if let Some(inner) = sheet_raw
                 .strip_prefix('\'')
                 .and_then(|s| s.strip_suffix('\''))
-                .unwrap_or(sheet_raw);
-            let sheet = if sheet_unquoted.is_empty() {
+            {
+                if inner.is_empty() {
+                    SheetRef::Default(default_sheet)
+                } else if inner.contains("''") {
+                    SheetRef::Owned(inner.replace("''", "'"))
+                } else {
+                    SheetRef::Explicit(inner)
+                }
+            } else if sheet_raw.is_empty() {
                 SheetRef::Default(default_sheet)
             } else {
-                SheetRef::Explicit(sheet_unquoted)
+                SheetRef::Explicit(sheet_raw)
             };
 
             Ok((sheet, addr))
@@ -84,12 +91,14 @@ impl<'a> EngineWhatIfModel<'a> {
 enum SheetRef<'a, 'b> {
     Default(&'a str),
     Explicit(&'b str),
+    Owned(String),
 }
 
 impl SheetRef<'_, '_> {
     fn as_str(&self) -> &str {
         match self {
             SheetRef::Default(v) | SheetRef::Explicit(v) => v,
+            SheetRef::Owned(v) => v.as_str(),
         }
     }
 }
