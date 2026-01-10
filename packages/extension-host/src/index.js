@@ -254,6 +254,111 @@ class ExtensionHost {
     return [...this._messages];
   }
 
+  listExtensions() {
+    return [...this._extensions.values()].map((ext) => ({
+      id: ext.id,
+      path: ext.path,
+      active: ext.active,
+      manifest: ext.manifest
+    }));
+  }
+
+  getContributedCommands() {
+    const out = [];
+    for (const extension of this._extensions.values()) {
+      for (const cmd of extension.manifest.contributes.commands ?? []) {
+        out.push({
+          extensionId: extension.id,
+          command: cmd.command,
+          title: cmd.title,
+          category: cmd.category ?? null,
+          icon: cmd.icon ?? null
+        });
+      }
+    }
+    return out;
+  }
+
+  getContributedPanels() {
+    const out = [];
+    for (const extension of this._extensions.values()) {
+      for (const panel of extension.manifest.contributes.panels ?? []) {
+        out.push({
+          extensionId: extension.id,
+          id: panel.id,
+          title: panel.title,
+          icon: panel.icon ?? null
+        });
+      }
+    }
+    return out;
+  }
+
+  getContributedKeybindings() {
+    const out = [];
+    for (const extension of this._extensions.values()) {
+      for (const kb of extension.manifest.contributes.keybindings ?? []) {
+        out.push({
+          extensionId: extension.id,
+          command: kb.command,
+          key: kb.key,
+          mac: kb.mac ?? null
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * @param {string} menuId
+   */
+  getContributedMenu(menuId) {
+    const id = String(menuId);
+    const out = [];
+    for (const extension of this._extensions.values()) {
+      const menus = extension.manifest.contributes.menus ?? {};
+      const items = menus[id] ?? [];
+      for (const item of items) {
+        out.push({
+          extensionId: extension.id,
+          command: item.command,
+          when: item.when ?? null,
+          group: item.group ?? null
+        });
+      }
+    }
+    return out;
+  }
+
+  getContributedCustomFunctions() {
+    const out = [];
+    for (const extension of this._extensions.values()) {
+      for (const fn of extension.manifest.contributes.customFunctions ?? []) {
+        out.push({
+          extensionId: extension.id,
+          name: fn.name,
+          description: fn.description ?? null
+        });
+      }
+    }
+    return out;
+  }
+
+  getContributedDataConnectors() {
+    const out = [];
+    for (const extension of this._extensions.values()) {
+      for (const connector of extension.manifest.contributes.dataConnectors ?? []) {
+        out.push({
+          extensionId: extension.id,
+          id: connector.id,
+          name: connector.name,
+          icon: connector.icon ?? null
+        });
+      }
+    }
+    return out;
+  }
+
   async dispose() {
     const extensions = [...this._extensions.values()];
     this._extensions.clear();
