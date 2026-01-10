@@ -24,8 +24,8 @@ import path from "node:path";
  * SQLite-backed version store.
  *
  * This aligns with the intended desktop persistence model (SQLite) while
- * keeping the implementation dependency-free by using Node's built-in
- * `node:sqlite` module.
+ * keeping the implementation dependency-light and Node>=18 compatible via
+ * `sql.js` (WASM SQLite) with file persistence.
  */
 export class SQLiteVersionStore {
   /**
