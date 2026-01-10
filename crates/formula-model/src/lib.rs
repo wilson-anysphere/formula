@@ -15,6 +15,7 @@ mod error;
 pub mod rich_text;
 mod outline;
 mod formula_rewrite;
+pub mod pivots;
 mod style;
 pub mod table;
 mod value;

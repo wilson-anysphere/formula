@@ -6,6 +6,9 @@ use quick_xml::Reader;
 
 use crate::XlsxError;
 
+pub mod pivot_charts;
+pub mod slicers;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PivotTablePart {
     pub path: String,

@@ -1,0 +1,441 @@
+use chrono::NaiveDate;
+use ordered_float::OrderedFloat;
+use std::collections::HashMap;
+use uuid::Uuid;
+
+pub mod slicers;
+
+pub type PivotTableId = Uuid;
+pub type PivotChartId = Uuid;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ScalarValue {
+    Text(String),
+    Number(OrderedFloat<f64>),
+    Date(NaiveDate),
+    Bool(bool),
+    Blank,
+}
+
+impl ScalarValue {
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            ScalarValue::Number(v) => Some(v.0),
+            _ => None,
+        }
+    }
+}
+
+impl From<&str> for ScalarValue {
+    fn from(value: &str) -> Self {
+        ScalarValue::Text(value.to_string())
+    }
+}
+
+impl From<String> for ScalarValue {
+    fn from(value: String) -> Self {
+        ScalarValue::Text(value)
+    }
+}
+
+impl From<f64> for ScalarValue {
+    fn from(value: f64) -> Self {
+        ScalarValue::Number(OrderedFloat(value))
+    }
+}
+
+impl From<NaiveDate> for ScalarValue {
+    fn from(value: NaiveDate) -> Self {
+        ScalarValue::Date(value)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DataTable {
+    headers: Vec<String>,
+    rows: Vec<Vec<ScalarValue>>,
+    header_index: HashMap<String, usize>,
+}
+
+impl DataTable {
+    pub fn new(headers: Vec<String>, rows: Vec<Vec<ScalarValue>>) -> Result<Self, String> {
+        let mut header_index = HashMap::with_capacity(headers.len());
+        for (idx, header) in headers.iter().enumerate() {
+            if header_index.insert(header.clone(), idx).is_some() {
+                return Err(format!("duplicate column header: {header}"));
+            }
+        }
+
+        for (row_idx, row) in rows.iter().enumerate() {
+            if row.len() != headers.len() {
+                return Err(format!(
+                    "row {row_idx} has {} cells but table has {} columns",
+                    row.len(),
+                    headers.len()
+                ));
+            }
+        }
+
+        Ok(Self {
+            headers,
+            rows,
+            header_index,
+        })
+    }
+
+    pub fn headers(&self) -> &[String] {
+        &self.headers
+    }
+
+    pub fn rows(&self) -> &[Vec<ScalarValue>] {
+        &self.rows
+    }
+
+    pub fn column_index(&self, header: &str) -> Option<usize> {
+        self.header_index.get(header).copied()
+    }
+
+    pub fn cell(&self, row: usize, column: &str) -> Option<&ScalarValue> {
+        let col_idx = self.column_index(column)?;
+        self.rows.get(row)?.get(col_idx)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PivotOutput {
+    pub headers: Vec<String>,
+    pub rows: Vec<Vec<ScalarValue>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PivotTable {
+    pub id: PivotTableId,
+    pub name: String,
+    source: DataTable,
+    row_fields: Vec<String>,
+    value_field: String,
+    output: PivotOutput,
+}
+
+impl PivotTable {
+    pub fn new(
+        name: impl Into<String>,
+        source: DataTable,
+        row_fields: Vec<String>,
+        value_field: impl Into<String>,
+    ) -> Result<Self, String> {
+        let name = name.into();
+        let value_field = value_field.into();
+        if row_fields.is_empty() {
+            return Err("pivot table must have at least one row field".to_string());
+        }
+        for field in row_fields.iter().chain(std::iter::once(&value_field)) {
+            if source.column_index(field).is_none() {
+                return Err(format!("pivot field {field} does not exist in source table"));
+            }
+        }
+
+        Ok(Self {
+            id: Uuid::new_v4(),
+            name,
+            source,
+            row_fields,
+            value_field,
+            output: PivotOutput {
+                headers: Vec::new(),
+                rows: Vec::new(),
+            },
+        })
+    }
+
+    pub fn refresh(&mut self, filters: &[slicers::RowFilter]) -> Result<(), String> {
+        let mut row_indices = Vec::with_capacity(self.row_fields.len());
+        for field in &self.row_fields {
+            row_indices.push(
+                self.source
+                    .column_index(field)
+                    .ok_or_else(|| format!("missing row field {field}"))?,
+            );
+        }
+        let value_idx = self
+            .source
+            .column_index(&self.value_field)
+            .ok_or_else(|| format!("missing value field {}", self.value_field))?;
+
+        let mut aggregates: HashMap<Vec<ScalarValue>, f64> = HashMap::new();
+        'rows: for row in self.source.rows() {
+            for filter in filters {
+                if !filter.matches(&self.source, row)? {
+                    continue 'rows;
+                }
+            }
+
+            let mut key = Vec::with_capacity(row_indices.len());
+            for idx in &row_indices {
+                key.push(row[*idx].clone());
+            }
+            let value = row[value_idx]
+                .as_f64()
+                .ok_or_else(|| format!("pivot value field {} must be numeric", self.value_field))?;
+            *aggregates.entry(key).or_insert(0.0) += value;
+        }
+
+        let mut rows: Vec<(Vec<ScalarValue>, f64)> = aggregates.into_iter().collect();
+        rows.sort_by(|(left_key, _), (right_key, _)| left_key.cmp(right_key));
+
+        let headers = self
+            .row_fields
+            .iter()
+            .cloned()
+            .chain(std::iter::once(self.value_field.clone()))
+            .collect::<Vec<_>>();
+        let mut output_rows = Vec::with_capacity(rows.len());
+        for (key, value) in rows {
+            let mut row = key;
+            row.push(ScalarValue::Number(OrderedFloat(value)));
+            output_rows.push(row);
+        }
+
+        self.output = PivotOutput {
+            headers,
+            rows: output_rows,
+        };
+        Ok(())
+    }
+
+    pub fn output(&self) -> &PivotOutput {
+        &self.output
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PivotChartData {
+    pub categories: Vec<Vec<ScalarValue>>,
+    pub values: Vec<f64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PivotChart {
+    pub id: PivotChartId,
+    pub name: String,
+    pub pivot_table_id: PivotTableId,
+    data: PivotChartData,
+}
+
+impl PivotChart {
+    pub fn new(name: impl Into<String>, pivot_table_id: PivotTableId) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            pivot_table_id,
+            data: PivotChartData {
+                categories: Vec::new(),
+                values: Vec::new(),
+            },
+        }
+    }
+
+    pub fn refresh_from_pivot(&mut self, pivot: &PivotTable) -> Result<(), String> {
+        if pivot.id != self.pivot_table_id {
+            return Err("pivot chart is bound to a different pivot table".to_string());
+        }
+
+        let output = pivot.output();
+        if output.headers.is_empty() {
+            self.data = PivotChartData {
+                categories: Vec::new(),
+                values: Vec::new(),
+            };
+            return Ok(());
+        }
+
+        let category_width = output.headers.len().saturating_sub(1);
+        let mut categories = Vec::with_capacity(output.rows.len());
+        let mut values = Vec::with_capacity(output.rows.len());
+        for row in &output.rows {
+            if row.len() != output.headers.len() {
+                return Err("pivot output row width mismatch".to_string());
+            }
+            categories.push(row[..category_width].to_vec());
+            let value = row[category_width]
+                .as_f64()
+                .ok_or_else(|| "pivot chart value must be numeric".to_string())?;
+            values.push(value);
+        }
+
+        self.data = PivotChartData { categories, values };
+        Ok(())
+    }
+
+    pub fn data(&self) -> &PivotChartData {
+        &self.data
+    }
+}
+
+#[derive(Default)]
+pub struct PivotManager {
+    pivots: HashMap<PivotTableId, PivotTable>,
+    slicers: HashMap<slicers::SlicerId, slicers::Slicer>,
+    timelines: HashMap<slicers::TimelineId, slicers::Timeline>,
+    charts: HashMap<PivotChartId, PivotChart>,
+}
+
+impl PivotManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_pivot_table(&mut self, pivot: PivotTable) -> PivotTableId {
+        let id = pivot.id;
+        self.pivots.insert(id, pivot);
+        id
+    }
+
+    pub fn create_pivot_table(
+        &mut self,
+        name: impl Into<String>,
+        source: DataTable,
+        row_fields: Vec<String>,
+        value_field: impl Into<String>,
+    ) -> Result<PivotTableId, String> {
+        let mut pivot = PivotTable::new(name, source, row_fields, value_field)?;
+        pivot.refresh(&[])?;
+        let id = pivot.id;
+        self.pivots.insert(id, pivot);
+        Ok(id)
+    }
+
+    pub fn create_pivot_chart(
+        &mut self,
+        pivot_table_id: PivotTableId,
+        name: impl Into<String>,
+    ) -> Result<PivotChartId, String> {
+        let pivot = self
+            .pivots
+            .get(&pivot_table_id)
+            .ok_or_else(|| "unknown pivot table".to_string())?;
+        let mut chart = PivotChart::new(name, pivot_table_id);
+        chart.refresh_from_pivot(pivot)?;
+        let id = chart.id;
+        self.charts.insert(id, chart);
+        Ok(id)
+    }
+
+    pub fn add_slicer_to_pivot(
+        &mut self,
+        pivot_table_id: PivotTableId,
+        slicer_name: impl Into<String>,
+        field: impl Into<String>,
+    ) -> Result<slicers::SlicerId, String> {
+        if !self.pivots.contains_key(&pivot_table_id) {
+            return Err("unknown pivot table".to_string());
+        }
+        let mut slicer = slicers::Slicer::new(slicer_name, field);
+        slicer.connect(pivot_table_id);
+        let id = slicer.id;
+        self.slicers.insert(id, slicer);
+        self.refresh_pivot_and_dependents(pivot_table_id)?;
+        Ok(id)
+    }
+
+    pub fn add_timeline_to_pivot(
+        &mut self,
+        pivot_table_id: PivotTableId,
+        timeline_name: impl Into<String>,
+        field: impl Into<String>,
+    ) -> Result<slicers::TimelineId, String> {
+        if !self.pivots.contains_key(&pivot_table_id) {
+            return Err("unknown pivot table".to_string());
+        }
+        let mut timeline = slicers::Timeline::new(timeline_name, field);
+        timeline.connect(pivot_table_id);
+        let id = timeline.id;
+        self.timelines.insert(id, timeline);
+        self.refresh_pivot_and_dependents(pivot_table_id)?;
+        Ok(id)
+    }
+
+    pub fn set_slicer_selection(
+        &mut self,
+        slicer_id: slicers::SlicerId,
+        selection: slicers::SlicerSelection,
+    ) -> Result<(), String> {
+        let pivot_ids = {
+            let slicer = self
+                .slicers
+                .get_mut(&slicer_id)
+                .ok_or_else(|| "unknown slicer".to_string())?;
+            slicer.selection = selection;
+            slicer.connected_pivots.iter().copied().collect::<Vec<_>>()
+        };
+
+        for pivot_id in pivot_ids {
+            self.refresh_pivot_and_dependents(pivot_id)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn set_timeline_selection(
+        &mut self,
+        timeline_id: slicers::TimelineId,
+        selection: slicers::TimelineSelection,
+    ) -> Result<(), String> {
+        let pivot_ids = {
+            let timeline = self
+                .timelines
+                .get_mut(&timeline_id)
+                .ok_or_else(|| "unknown timeline".to_string())?;
+            timeline.selection = selection;
+            timeline.connected_pivots.iter().copied().collect::<Vec<_>>()
+        };
+
+        for pivot_id in pivot_ids {
+            self.refresh_pivot_and_dependents(pivot_id)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn pivot_output(&self, pivot_table_id: PivotTableId) -> Option<&PivotOutput> {
+        self.pivots.get(&pivot_table_id).map(|pivot| pivot.output())
+    }
+
+    pub fn chart_data(&self, chart_id: PivotChartId) -> Option<&PivotChartData> {
+        self.charts.get(&chart_id).map(|chart| chart.data())
+    }
+
+    fn refresh_pivot_and_dependents(&mut self, pivot_table_id: PivotTableId) -> Result<(), String> {
+        let filters = self.filters_for_pivot(pivot_table_id);
+        let pivot = self
+            .pivots
+            .get_mut(&pivot_table_id)
+            .ok_or_else(|| "unknown pivot table".to_string())?;
+        pivot.refresh(&filters)?;
+
+        let pivot_snapshot = pivot.clone();
+        for chart in self.charts.values_mut() {
+            if chart.pivot_table_id == pivot_table_id {
+                chart.refresh_from_pivot(&pivot_snapshot)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn filters_for_pivot(&self, pivot_table_id: PivotTableId) -> Vec<slicers::RowFilter> {
+        let mut filters = Vec::new();
+        for slicer in self.slicers.values() {
+            if slicer.connected_pivots.contains(&pivot_table_id) {
+                filters.push(slicer.as_filter());
+            }
+        }
+        for timeline in self.timelines.values() {
+            if timeline.connected_pivots.contains(&pivot_table_id) {
+                filters.push(timeline.as_filter());
+            }
+        }
+        filters
+    }
+}
+

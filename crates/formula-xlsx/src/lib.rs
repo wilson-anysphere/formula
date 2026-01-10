@@ -22,6 +22,7 @@ pub mod charts;
 pub mod comments;
 pub mod conditional_formatting;
 mod compare;
+mod openxml;
 pub mod drawingml;
 pub mod outline;
 mod package;
@@ -45,7 +46,11 @@ use std::collections::{BTreeMap, HashMap};
 pub use compare::*;
 pub use conditional_formatting::*;
 pub use package::{XlsxError, XlsxPackage};
-pub use pivots::{PivotCacheDefinitionPart, PivotCacheRecordsPart, PivotTablePart, XlsxPivots};
+pub use pivots::{
+    pivot_charts::PivotChartPart,
+    slicers::{PivotSlicerParts, SlicerDefinition, TimelineDefinition},
+    PivotCacheDefinitionPart, PivotCacheRecordsPart, PivotTablePart, XlsxPivots,
+};
 pub use read::{load_from_bytes, load_from_path};
 pub use reader::{read_workbook, read_workbook_from_reader};
 pub use sheet_metadata::{
@@ -168,4 +173,3 @@ impl XlsxDocument {
         write::write_to_vec(self)
     }
 }
-
