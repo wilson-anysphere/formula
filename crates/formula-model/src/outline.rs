@@ -89,6 +89,45 @@ impl OutlineAxis {
         }
     }
 
+    /// Sets whether the row/column at `index` is hidden by an AutoFilter.
+    ///
+    /// This toggles only the `filter` hidden bit, preserving user/outline hidden state.
+    /// When clearing (`hidden = false`), the entry is removed entirely if it becomes
+    /// the default (no outline level, no hidden bits, not collapsed) to keep the
+    /// serialized representation compact.
+    pub fn set_filter_hidden(&mut self, index: u32, hidden: bool) {
+        if hidden {
+            self.entry_mut(index).hidden.filter = true;
+            return;
+        }
+
+        let Some(entry) = self.entries.get_mut(&index) else {
+            return;
+        };
+        entry.hidden.filter = false;
+        if *entry == OutlineEntry::default() {
+            self.entries.remove(&index);
+        }
+    }
+
+    /// Clears filter-hidden flags for any stored entries within `[start, end]`.
+    ///
+    /// This does not create new entries for rows/columns that were not previously
+    /// tracked in the outline map.
+    pub fn clear_filter_hidden_range(&mut self, start: u32, end: u32) {
+        if start > end {
+            return;
+        }
+        let keys: Vec<u32> = self
+            .entries
+            .range(start..=end)
+            .filter_map(|(k, v)| v.hidden.filter.then_some(*k))
+            .collect();
+        for key in keys {
+            self.set_filter_hidden(key, false);
+        }
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

@@ -1,7 +1,7 @@
 use crate::sort_filter::sort::{compute_header_rows, compute_row_permutation};
-use crate::sort_filter::{CellValue, RowPermutation, SortSpec};
+use crate::sort_filter::{apply_autofilter, AutoFilter, CellValue, FilterResult, RowPermutation, SortSpec};
 use crate::{parse_formula, CellAddr, LocaleConfig, ParseOptions, SerializeOptions};
-use formula_model::{CellRef, CellValue as ModelCellValue, Range, RowProperties, Worksheet};
+use formula_model::{CellRef, CellValue as ModelCellValue, Outline, Range, RowProperties, Worksheet};
 
 pub fn sort_worksheet_range(sheet: &mut Worksheet, range: Range, spec: &SortSpec) -> RowPermutation {
     let row_count = range.height() as usize;
@@ -73,6 +73,71 @@ pub fn sort_worksheet_range(sheet: &mut Worksheet, range: Range, spec: &SortSpec
     perm
 }
 
+pub fn apply_autofilter_to_outline(
+    sheet: &Worksheet,
+    outline: &mut Outline,
+    range: Range,
+    filter: Option<&AutoFilter>,
+) -> FilterResult {
+    let row_count = range.height() as usize;
+    let col_count = range.width() as usize;
+
+    if row_count == 0 || col_count == 0 {
+        return FilterResult {
+            visible_rows: Vec::new(),
+            hidden_sheet_rows: Vec::new(),
+        };
+    }
+
+    // Always clear any existing filter-hidden flags for the data rows within the range.
+    // AutoFilter treats the first row as the header row, so we never set filter hidden on it.
+    let header_row_1based = range.start.row + 1;
+    let data_start_row_1based = header_row_1based + 1;
+    let end_row_1based = range.end.row + 1;
+    if data_start_row_1based <= end_row_1based {
+        outline
+            .rows
+            .clear_filter_hidden_range(data_start_row_1based, end_row_1based);
+    }
+
+    let Some(filter) = filter else {
+        return FilterResult {
+            visible_rows: vec![true; row_count],
+            hidden_sheet_rows: Vec::new(),
+        };
+    };
+
+    let range_ref = crate::sort_filter::RangeRef {
+        start_row: range.start.row as usize,
+        start_col: range.start.col as usize,
+        end_row: range.end.row as usize,
+        end_col: range.end.col as usize,
+    };
+
+    let mut rows = Vec::with_capacity(row_count);
+    for local_row in 0..row_count {
+        let row_idx = range.start.row + local_row as u32;
+        let mut row = Vec::with_capacity(col_count);
+        for local_col in 0..col_count {
+            let col_idx = range.start.col + local_col as u32;
+            let value = sheet.value(CellRef::new(row_idx, col_idx));
+            row.push(model_cell_value_to_sort_value(&value));
+        }
+        rows.push(row);
+    }
+
+    let range_data = crate::sort_filter::RangeData::new(range_ref, rows)
+        .expect("worksheet range should always produce rectangular RangeData");
+
+    let result = apply_autofilter(&range_data, filter);
+
+    for hidden_row_0based in &result.hidden_sheet_rows {
+        outline.rows.set_filter_hidden((*hidden_row_0based as u32) + 1, true);
+    }
+
+    result
+}
+
 fn permute_row_properties(
     sheet: &mut Worksheet,
     start_row: u32,
@@ -129,4 +194,3 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
         ModelCellValue::Spill(_) => CellValue::Blank,
     }
 }
-

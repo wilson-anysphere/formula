@@ -14,3 +14,4 @@ pub use sort::{sort_range, RowPermutation, SortKey, SortOrder, SortSpec, SortVal
 pub use types::{CellValue, HeaderOption, RangeData, RangeDataError, RangeRef};
 pub use visibility::{HiddenRows, RowVisibility};
 pub use worksheet::sort_worksheet_range;
+pub use worksheet::apply_autofilter_to_outline;
