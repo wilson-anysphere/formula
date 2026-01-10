@@ -76,6 +76,7 @@ pub enum Expr<S> {
     },
     FunctionCall {
         name: String,
+        original_name: String,
         args: Vec<Expr<S>>,
     },
     /// Excel's implicit intersection operator (`@`).
@@ -117,8 +118,13 @@ impl<S: Clone> Expr<S> {
                 left: Box::new(left.map_sheets(f)),
                 right: Box::new(right.map_sheets(f)),
             },
-            Expr::FunctionCall { name, args } => Expr::FunctionCall {
+            Expr::FunctionCall {
+                name,
+                original_name,
+                args,
+            } => Expr::FunctionCall {
                 name: name.clone(),
+                original_name: original_name.clone(),
                 args: args.iter().map(|a| a.map_sheets(f)).collect(),
             },
             Expr::ImplicitIntersection(inner) => {

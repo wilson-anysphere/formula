@@ -1505,12 +1505,16 @@ fn walk_expr(
                 thread_safe,
             );
         }
-        Expr::FunctionCall { name, args } => {
-            if is_volatile_function(name) {
-                *volatile = true;
-            }
-            // Placeholder: treat unknown/UDFs as non-thread-safe.
-            if !is_known_thread_safe_function(name) {
+        Expr::FunctionCall { name, args, .. } => {
+            if let Some(spec) = crate::functions::lookup_function(name) {
+                if spec.volatility == crate::functions::Volatility::Volatile {
+                    *volatile = true;
+                }
+                if spec.thread_safety == crate::functions::ThreadSafety::NotThreadSafe {
+                    *thread_safe = false;
+                }
+            } else {
+                // Placeholder: treat unknown/UDFs as non-thread-safe.
                 *thread_safe = false;
             }
             for a in args {
@@ -1544,37 +1548,4 @@ fn resolve_sheet(sheet: &SheetReference<usize>, current_sheet: SheetId) -> Optio
         SheetReference::Sheet(id) => Some(*id),
         SheetReference::External(_) => None,
     }
-}
-
-fn is_volatile_function(name: &str) -> bool {
-    matches!(
-        name,
-        "NOW" | "TODAY" | "RAND" | "RANDBETWEEN" | "OFFSET" | "INDIRECT" | "INFO" | "CELL"
-    )
-}
-
-fn is_known_thread_safe_function(name: &str) -> bool {
-    // For now we only implement a small set of built-ins, all thread-safe.
-    matches!(
-        name,
-        "IF"
-            | "IFERROR"
-            | "ISERROR"
-            | "SUM"
-            | "VLOOKUP"
-            | "PV"
-            | "FV"
-            | "PMT"
-            | "NPER"
-            | "RATE"
-            | "IPMT"
-            | "PPMT"
-            | "SLN"
-            | "SYD"
-            | "DDB"
-            | "NPV"
-            | "IRR"
-            | "XNPV"
-            | "XIRR"
-    )
 }

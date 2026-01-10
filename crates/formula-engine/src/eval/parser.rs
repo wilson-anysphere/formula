@@ -223,8 +223,8 @@ impl ParserImpl {
     }
 
     fn parse_function_call(&mut self) -> Result<ParsedExpr, FormulaParseError> {
-        let name = match self.next() {
-            Token::Ident(s) => s.to_ascii_uppercase(),
+        let (name, original_name) = match self.next() {
+            Token::Ident(s) => (s.to_ascii_uppercase(), s),
             other => {
                 return Err(FormulaParseError::Expected {
                     expected: "identifier".to_string(),
@@ -245,7 +245,11 @@ impl ParserImpl {
             }
         }
         self.expect(Token::RParen)?;
-        Ok(Expr::FunctionCall { name, args })
+        Ok(Expr::FunctionCall {
+            name,
+            original_name,
+            args,
+        })
     }
 
     fn parse_sheet_ref(&mut self) -> Result<ParsedExpr, FormulaParseError> {

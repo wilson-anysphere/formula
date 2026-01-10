@@ -1,6 +1,8 @@
 use formula_engine::functions::text;
 use formula_engine::{ErrorKind, ExcelError, Value};
 
+use super::harness::TestSheet;
+
 #[test]
 fn exact_is_case_sensitive() {
     assert!(text::exact("Hello", "Hello"));
@@ -74,14 +76,8 @@ fn text_formats_numbers_with_simple_patterns() {
         text::text(&Value::Number(1234.567), "#,##0.00").unwrap(),
         "1,234.57"
     );
-    assert_eq!(
-        text::text(&Value::Number(1.23), "0%").unwrap(),
-        "123%"
-    );
-    assert_eq!(
-        text::text(&Value::Number(-1.0), "$0.00").unwrap(),
-        "-$1.00"
-    );
+    assert_eq!(text::text(&Value::Number(1.23), "0%").unwrap(), "123%");
+    assert_eq!(text::text(&Value::Number(-1.0), "$0.00").unwrap(), "-$1.00");
     assert_eq!(text::text(&Value::from("x"), "0.00").unwrap(), "x");
 }
 
@@ -90,3 +86,55 @@ fn textjoin_propagates_errors() {
     let values = vec![Value::from("a"), Value::Error(ErrorKind::Div0), Value::from("b")];
     assert_eq!(text::textjoin(",", true, &values).unwrap_err(), ErrorKind::Div0);
 }
+
+#[test]
+fn concat_and_concatenate_ranges() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Text("a".to_string()));
+    sheet.set("A2", Value::Text("b".to_string()));
+
+    assert_eq!(sheet.eval("=CONCAT(A1:A2, \"c\")"), Value::Text("abc".to_string()));
+    assert_eq!(
+        sheet.eval("=CONCATENATE(A1:A2, \"c\")"),
+        Value::Text("ac".to_string())
+    );
+}
+
+#[test]
+fn left_right_mid_len() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(sheet.eval("=LEFT(\"hello\",2)"), Value::Text("he".to_string()));
+    assert_eq!(sheet.eval("=LEFT(\"hello\")"), Value::Text("h".to_string()));
+    assert_eq!(sheet.eval("=LEFT(\"hello\",-1)"), Value::Error(ErrorKind::Value));
+
+    assert_eq!(sheet.eval("=RIGHT(\"hello\",3)"), Value::Text("llo".to_string()));
+
+    assert_eq!(sheet.eval("=MID(\"hello\",2,3)"), Value::Text("ell".to_string()));
+    assert_eq!(sheet.eval("=MID(\"hello\",6,3)"), Value::Text(String::new()));
+    assert_eq!(sheet.eval("=MID(\"hello\",0,1)"), Value::Error(ErrorKind::Value));
+
+    assert_eq!(sheet.eval("=LEN(\"hello\")"), Value::Number(5.0));
+}
+
+#[test]
+fn trim_upper_lower() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(sheet.eval("=TRIM(\"  a   b  \")"), Value::Text("a b".to_string()));
+    assert_eq!(sheet.eval("=TRIM(\"\ta  b\")"), Value::Text("\ta b".to_string()));
+    assert_eq!(sheet.eval("=UPPER(\"Abc\")"), Value::Text("ABC".to_string()));
+    assert_eq!(sheet.eval("=LOWER(\"AbC\")"), Value::Text("abc".to_string()));
+}
+
+#[test]
+fn find_and_search() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(sheet.eval("=FIND(\"b\",\"abc\")"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=FIND(\"B\",\"abc\")"), Value::Error(ErrorKind::Value));
+    assert_eq!(sheet.eval("=SEARCH(\"B\",\"abc\")"), Value::Number(2.0));
+
+    assert_eq!(sheet.eval("=SEARCH(\"a?c\",\"abc\")"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=SEARCH(\"a*c\",\"abbbbbc\")"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=SEARCH(\"~*\",\"a*b\")"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=SEARCH(\"b\",\"abc\",3)"), Value::Error(ErrorKind::Value));
+}
+

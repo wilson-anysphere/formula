@@ -1,7 +1,6 @@
-use crate::error::ExcelError;
 use crate::eval::address::CellAddr;
-use crate::eval::ast::{BinaryOp, CompareOp, CompiledExpr, Expr, SheetReference, UnaryOp};
-use crate::functions::financial;
+use crate::eval::ast::{BinaryOp, CompiledExpr, CompareOp, Expr, SheetReference, UnaryOp};
+use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference};
 use crate::value::{ErrorKind, Value};
 use std::cmp::Ordering;
 
@@ -49,13 +48,6 @@ impl ResolvedRange {
 
     fn is_single_cell(self) -> bool {
         self.start == self.end
-    }
-
-    fn iter_cells(self) -> impl Iterator<Item = CellAddr> {
-        let norm = self.normalized();
-        let rows = norm.start.row..=norm.end.row;
-        let cols = norm.start.col..=norm.end.col;
-        rows.flat_map(move |row| cols.clone().map(move |col| CellAddr { row, col }))
     }
 }
 
@@ -118,7 +110,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 match v {
                     Value::Error(e) => EvalValue::Scalar(Value::Error(e)),
                     other => {
-                        let n = match coerce_to_number(&other) {
+                        let n = match other.coerce_to_number() {
                             Ok(n) => n,
                             Err(e) => return EvalValue::Scalar(Value::Error(e)),
                         };
@@ -139,11 +131,11 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 if let Value::Error(e) = r {
                     return EvalValue::Scalar(Value::Error(e));
                 }
-                let ln = match coerce_to_number(&l) {
+                let ln = match l.coerce_to_number() {
                     Ok(n) => n,
                     Err(e) => return EvalValue::Scalar(Value::Error(e)),
                 };
-                let rn = match coerce_to_number(&r) {
+                let rn = match r.coerce_to_number() {
                     Ok(n) => n,
                     Err(e) => return EvalValue::Scalar(Value::Error(e)),
                 };
@@ -174,7 +166,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 let b = excel_compare(&l, &r, *op);
                 EvalValue::Scalar(b)
             }
-            Expr::FunctionCall { name, args } => EvalValue::Scalar(self.eval_function(name, args)),
+            Expr::FunctionCall { name, args, .. } => {
+                EvalValue::Scalar(crate::functions::call_function(self, name, args))
+            }
             Expr::ImplicitIntersection(inner) => {
                 let v = self.eval_value(inner);
                 match v {
@@ -223,25 +217,17 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         // 1D ranges intersect on the matching row/column.
         if range.start.col == range.end.col {
             if cur.row >= range.start.row && cur.row <= range.end.row {
-                return self.resolver.get_cell_value(
-                    range.sheet_id,
-                    CellAddr {
-                        row: cur.row,
-                        col: range.start.col,
-                    },
-                );
+                return self
+                    .resolver
+                    .get_cell_value(range.sheet_id, CellAddr { row: cur.row, col: range.start.col });
             }
             return Value::Error(ErrorKind::Value);
         }
         if range.start.row == range.end.row {
             if cur.col >= range.start.col && cur.col <= range.end.col {
-                return self.resolver.get_cell_value(
-                    range.sheet_id,
-                    CellAddr {
-                        row: range.start.row,
-                        col: cur.col,
-                    },
-                );
+                return self
+                    .resolver
+                    .get_cell_value(range.sheet_id, CellAddr { row: range.start.row, col: cur.col });
             }
             return Value::Error(ErrorKind::Value);
         }
@@ -258,695 +244,41 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         Value::Error(ErrorKind::Value)
     }
 
-    fn eval_function(&self, name: &str, args: &[CompiledExpr]) -> Value {
-        match name {
-            "IF" => self.fn_if(args),
-            "IFERROR" => self.fn_iferror(args),
-            "ISERROR" => self.fn_iserror(args),
-            "SUM" => self.fn_sum(args),
-            "VLOOKUP" => self.fn_vlookup(args),
-            "PV" => self.fn_pv(args),
-            "FV" => self.fn_fv(args),
-            "PMT" => self.fn_pmt(args),
-            "NPER" => self.fn_nper(args),
-            "RATE" => self.fn_rate(args),
-            "IPMT" => self.fn_ipmt(args),
-            "PPMT" => self.fn_ppmt(args),
-            "SLN" => self.fn_sln(args),
-            "SYD" => self.fn_syd(args),
-            "DDB" => self.fn_ddb(args),
-            "NPV" => self.fn_npv(args),
-            "IRR" => self.fn_irr(args),
-            "XNPV" => self.fn_xnpv(args),
-            "XIRR" => self.fn_xirr(args),
-            _ => Value::Error(ErrorKind::Name),
-        }
-    }
+    // Built-in functions are implemented in `crate::functions` and dispatched via
+    // `crate::functions::call_function`.
+}
 
-    fn fn_if(&self, args: &[CompiledExpr]) -> Value {
-        if args.is_empty() {
-            return Value::Error(ErrorKind::Value);
-        }
-        let cond_val = self.eval_scalar(&args[0]);
-        if let Value::Error(e) = cond_val {
-            return Value::Error(e);
-        }
-        let cond = match coerce_to_bool(&cond_val) {
-            Ok(b) => b,
-            Err(e) => return Value::Error(e),
-        };
-
-        if cond {
-            if args.len() >= 2 {
-                self.eval_scalar(&args[1])
-            } else {
-                Value::Bool(true)
-            }
-        } else if args.len() >= 3 {
-            self.eval_scalar(&args[2])
-        } else {
-            Value::Bool(false)
-        }
-    }
-
-    fn fn_iferror(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 2 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let first = self.eval_scalar(&args[0]);
-        match first {
-            Value::Error(_) => self.eval_scalar(&args[1]),
-            other => other,
-        }
-    }
-
-    fn fn_iserror(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() != 1 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let v = self.eval_scalar(&args[0]);
-        Value::Bool(matches!(v, Value::Error(_)))
-    }
-
-    fn fn_sum(&self, args: &[CompiledExpr]) -> Value {
-        let mut acc = 0.0;
-
-        for arg in args {
-            let ev = self.eval_value(arg);
-            match ev {
-                EvalValue::Scalar(v) => match v {
-                    Value::Error(e) => return Value::Error(e),
-                    Value::Number(n) => acc += n,
-                    Value::Bool(b) => acc += if b { 1.0 } else { 0.0 },
-                    Value::Blank => {}
-                    Value::Text(s) => {
-                        if let Some(n) = parse_number_from_text(&s) {
-                            acc += n;
-                        }
-                    }
-                },
-                EvalValue::Reference(range) => {
-                    for addr in range.iter_cells() {
-                        let v = self.resolver.get_cell_value(range.sheet_id, addr);
-                        match v {
-                            Value::Error(e) => return Value::Error(e),
-                            Value::Number(n) => acc += n,
-                            // Excel quirk: logicals/text in references are ignored by SUM.
-                            Value::Bool(_) | Value::Text(_) | Value::Blank => {}
-                        }
-                    }
-                }
-            }
-        }
-
-        Value::Number(acc)
-    }
-
-    fn fn_vlookup(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 3 || args.len() > 4 {
-            return Value::Error(ErrorKind::Value);
-        }
-
-        let lookup_value = self.eval_scalar(&args[0]);
-        if let Value::Error(e) = lookup_value {
-            return Value::Error(e);
-        }
-
-        let table = self.eval_value(&args[1]);
-        let table_range = match table {
-            EvalValue::Reference(range) => range.normalized(),
-            EvalValue::Scalar(Value::Error(e)) => return Value::Error(e),
-            EvalValue::Scalar(_) => return Value::Error(ErrorKind::Value),
-        };
-
-        let col_index_val = self.eval_scalar(&args[2]);
-        if let Value::Error(e) = col_index_val {
-            return Value::Error(e);
-        }
-        let col_index_num = match coerce_to_number(&col_index_val) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let col_index = col_index_num as i64;
-        if col_index <= 0 {
-            return Value::Error(ErrorKind::Value);
-        }
-
-        // Optional `range_lookup` argument. Excel defaults to TRUE (approx match).
-        let range_lookup = if args.len() == 4 {
-            let v = self.eval_scalar(&args[3]);
-            if let Value::Error(e) = v {
-                return Value::Error(e);
-            }
-            match coerce_to_bool(&v) {
-                Ok(b) => b,
-                Err(e) => return Value::Error(e),
-            }
-        } else {
-            true
-        };
-        let exact = !range_lookup;
-
-        let width = (table_range.end.col - table_range.start.col + 1) as i64;
-        if col_index > width {
-            return Value::Error(ErrorKind::Ref);
-        }
-        let target_col = table_range.start.col + (col_index as u32) - 1;
-
-        if exact {
-            for row in table_range.start.row..=table_range.end.row {
-                let key = CellAddr {
-                    row,
-                    col: table_range.start.col,
-                };
-                let candidate = self.resolver.get_cell_value(table_range.sheet_id, key);
-                if matches!(candidate, Value::Error(_)) {
-                    continue;
-                }
-                let is_match = excel_order(&candidate, &lookup_value)
-                    .map(|o| o == Ordering::Equal)
-                    .unwrap_or(false);
-                if is_match {
-                    let result_addr = CellAddr { row, col: target_col };
-                    return self.resolver.get_cell_value(table_range.sheet_id, result_addr);
-                }
-            }
-            Value::Error(ErrorKind::NA)
-        } else {
-            // Approximate match: return the last row where first-column value <= lookup_value.
-            let mut best_row: Option<u32> = None;
-            for row in table_range.start.row..=table_range.end.row {
-                let key = CellAddr {
-                    row,
-                    col: table_range.start.col,
-                };
-                let candidate = self.resolver.get_cell_value(table_range.sheet_id, key);
-                if matches!(candidate, Value::Error(_)) {
-                    continue;
-                }
-                let ord = match excel_order(&candidate, &lookup_value) {
-                    Ok(o) => o,
-                    Err(_) => continue,
-                };
-                if ord != Ordering::Greater {
-                    best_row = Some(row);
-                }
-            }
-            if let Some(row) = best_row {
-                let result_addr = CellAddr { row, col: target_col };
-                self.resolver.get_cell_value(table_range.sheet_id, result_addr)
-            } else {
-                Value::Error(ErrorKind::NA)
-            }
-        }
-    }
-
-    fn eval_number_arg(&self, expr: &CompiledExpr) -> Result<f64, ErrorKind> {
-        let v = self.eval_scalar(expr);
-        match v {
-            Value::Error(e) => Err(e),
-            other => coerce_to_number(&other),
-        }
-    }
-
-    fn eval_optional_number_arg(
-        &self,
-        expr: Option<&CompiledExpr>,
-    ) -> Result<Option<f64>, ErrorKind> {
-        match expr {
-            Some(e) => Ok(Some(self.eval_number_arg(e)?)),
-            None => Ok(None),
-        }
-    }
-
-    fn excel_result_number(res: Result<f64, ExcelError>) -> Value {
-        match res {
-            Ok(n) => Value::Number(n),
-            Err(e) => Value::Error(match e {
-                ExcelError::Div0 => ErrorKind::Div0,
-                ExcelError::Value => ErrorKind::Value,
-                ExcelError::Num => ErrorKind::Num,
+impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
+    fn eval_arg(&self, expr: &CompiledExpr) -> FnArgValue {
+        match self.eval_value(expr) {
+            EvalValue::Scalar(v) => FnArgValue::Scalar(v),
+            EvalValue::Reference(r) => FnArgValue::Reference(FnReference {
+                sheet_id: r.sheet_id,
+                start: r.start,
+                end: r.end,
             }),
         }
     }
 
-    fn collect_numbers_strict_from_arg(&self, arg: &CompiledExpr) -> Result<Vec<f64>, ErrorKind> {
-        let ev = self.eval_value(arg);
-        match ev {
-            EvalValue::Scalar(v) => Ok(vec![coerce_to_number(&v)?]),
-            EvalValue::Reference(range) => {
-                let mut out = Vec::new();
-                for addr in range.iter_cells() {
-                    let v = self.resolver.get_cell_value(range.sheet_id, addr);
-                    out.push(coerce_to_number(&v)?);
-                }
-                Ok(out)
-            }
-        }
+    fn eval_scalar(&self, expr: &CompiledExpr) -> Value {
+        Evaluator::eval_scalar(self, expr)
     }
 
-    fn collect_npv_values_from_arg(&self, arg: &CompiledExpr) -> Result<Vec<f64>, ErrorKind> {
-        // NPV's discounting depends on the position of each cashflow. When values are
-        // supplied via references, Excel ignores non-numeric cells. For NPV we treat
-        // them as 0 so the period index is preserved (i.e. a blank cell represents a
-        // period with no cashflow rather than "removing" a period).
-        let ev = self.eval_value(arg);
-        match ev {
-            EvalValue::Scalar(v) => match v {
-                Value::Error(e) => Err(e),
-                Value::Number(n) => Ok(vec![n]),
-                Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }]),
-                Value::Blank => Ok(vec![0.0]),
-                Value::Text(s) => Ok(vec![parse_number_from_text(&s).unwrap_or(0.0)]),
-            },
-            EvalValue::Reference(range) => {
-                let mut out = Vec::new();
-                for addr in range.iter_cells() {
-                    let v = self.resolver.get_cell_value(range.sheet_id, addr);
-                    match v {
-                        Value::Error(e) => return Err(e),
-                        Value::Number(n) => out.push(n),
-                        Value::Bool(_) | Value::Text(_) | Value::Blank => out.push(0.0),
-                    }
-                }
-                Ok(out)
-            }
-        }
+    fn apply_implicit_intersection(&self, reference: FnReference) -> Value {
+        let range = ResolvedRange {
+            sheet_id: reference.sheet_id,
+            start: reference.start,
+            end: reference.end,
+        };
+        Evaluator::apply_implicit_intersection(self, range)
     }
 
-    fn collect_irr_values_from_arg(&self, arg: &CompiledExpr) -> Result<Vec<f64>, ErrorKind> {
-        // Excel IRR accepts references that contain non-numeric cells; text/logical/blank
-        // entries are ignored (i.e. contribute 0) but their position still counts as a period.
-        // Errors propagate.
-        let ev = self.eval_value(arg);
-        match ev {
-            EvalValue::Scalar(v) => match v {
-                Value::Error(e) => Err(e),
-                Value::Number(n) => Ok(vec![n]),
-                Value::Bool(_) | Value::Text(_) | Value::Blank => Ok(vec![0.0]),
-            },
-            EvalValue::Reference(range) => {
-                let mut out = Vec::new();
-                for addr in range.iter_cells() {
-                    let v = self.resolver.get_cell_value(range.sheet_id, addr);
-                    match v {
-                        Value::Error(e) => return Err(e),
-                        Value::Number(n) => out.push(n),
-                        Value::Bool(_) | Value::Text(_) | Value::Blank => out.push(0.0),
-                    }
-                }
-                Ok(out)
-            }
-        }
+    fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value {
+        self.resolver.get_cell_value(sheet_id, addr)
     }
 
-    fn fn_pv(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 3 || args.len() > 5 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let rate = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let nper = match self.eval_number_arg(&args[1]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let pmt = match self.eval_number_arg(&args[2]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let fv = match self.eval_optional_number_arg(args.get(3)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let typ = match self.eval_optional_number_arg(args.get(4)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        Self::excel_result_number(financial::pv(rate, nper, pmt, fv, typ))
-    }
-
-    fn fn_fv(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 3 || args.len() > 5 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let rate = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let nper = match self.eval_number_arg(&args[1]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let pmt = match self.eval_number_arg(&args[2]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let pv = match self.eval_optional_number_arg(args.get(3)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let typ = match self.eval_optional_number_arg(args.get(4)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        Self::excel_result_number(financial::fv(rate, nper, pmt, pv, typ))
-    }
-
-    fn fn_pmt(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 3 || args.len() > 5 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let rate = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let nper = match self.eval_number_arg(&args[1]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let pv = match self.eval_number_arg(&args[2]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let fv = match self.eval_optional_number_arg(args.get(3)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let typ = match self.eval_optional_number_arg(args.get(4)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        Self::excel_result_number(financial::pmt(rate, nper, pv, fv, typ))
-    }
-
-    fn fn_nper(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 3 || args.len() > 5 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let rate = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let pmt = match self.eval_number_arg(&args[1]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let pv = match self.eval_number_arg(&args[2]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let fv = match self.eval_optional_number_arg(args.get(3)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let typ = match self.eval_optional_number_arg(args.get(4)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        Self::excel_result_number(financial::nper(rate, pmt, pv, fv, typ))
-    }
-
-    fn fn_rate(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 3 || args.len() > 6 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let nper = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let pmt = match self.eval_number_arg(&args[1]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let pv = match self.eval_number_arg(&args[2]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let fv = match self.eval_optional_number_arg(args.get(3)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let typ = match self.eval_optional_number_arg(args.get(4)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let guess = match self.eval_optional_number_arg(args.get(5)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        Self::excel_result_number(financial::rate(nper, pmt, pv, fv, typ, guess))
-    }
-
-    fn fn_ipmt(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 4 || args.len() > 6 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let rate = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let per = match self.eval_number_arg(&args[1]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let nper = match self.eval_number_arg(&args[2]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let pv = match self.eval_number_arg(&args[3]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let fv = match self.eval_optional_number_arg(args.get(4)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let typ = match self.eval_optional_number_arg(args.get(5)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        Self::excel_result_number(financial::ipmt(rate, per, nper, pv, fv, typ))
-    }
-
-    fn fn_ppmt(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 4 || args.len() > 6 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let rate = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let per = match self.eval_number_arg(&args[1]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let nper = match self.eval_number_arg(&args[2]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let pv = match self.eval_number_arg(&args[3]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let fv = match self.eval_optional_number_arg(args.get(4)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let typ = match self.eval_optional_number_arg(args.get(5)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        Self::excel_result_number(financial::ppmt(rate, per, nper, pv, fv, typ))
-    }
-
-    fn fn_sln(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() != 3 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let cost = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let salvage = match self.eval_number_arg(&args[1]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let life = match self.eval_number_arg(&args[2]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        Self::excel_result_number(financial::sln(cost, salvage, life))
-    }
-
-    fn fn_syd(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() != 4 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let cost = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let salvage = match self.eval_number_arg(&args[1]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let life = match self.eval_number_arg(&args[2]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let per = match self.eval_number_arg(&args[3]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        Self::excel_result_number(financial::syd(cost, salvage, life, per))
-    }
-
-    fn fn_ddb(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 4 || args.len() > 5 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let cost = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let salvage = match self.eval_number_arg(&args[1]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let life = match self.eval_number_arg(&args[2]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let period = match self.eval_number_arg(&args[3]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let factor = match self.eval_optional_number_arg(args.get(4)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        Self::excel_result_number(financial::ddb(cost, salvage, life, period, factor))
-    }
-
-    fn fn_npv(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 2 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let rate = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-
-        let mut values = Vec::new();
-        for arg in &args[1..] {
-            match self.collect_npv_values_from_arg(arg) {
-                Ok(mut nums) => values.append(&mut nums),
-                Err(e) => return Value::Error(e),
-            }
-        }
-
-        Self::excel_result_number(financial::npv(rate, &values))
-    }
-
-    fn fn_irr(&self, args: &[CompiledExpr]) -> Value {
-        if args.is_empty() || args.len() > 2 {
-            return Value::Error(ErrorKind::Value);
-        }
-
-        let values = match self.collect_irr_values_from_arg(&args[0]) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-
-        let guess = match self.eval_optional_number_arg(args.get(1)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-
-        Self::excel_result_number(financial::irr(&values, guess))
-    }
-
-    fn fn_xnpv(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() != 3 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let rate = match self.eval_number_arg(&args[0]) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-
-        let values = match self.collect_numbers_strict_from_arg(&args[1]) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let dates = match self.collect_numbers_strict_from_arg(&args[2]) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-
-        Self::excel_result_number(financial::xnpv(rate, &values, &dates))
-    }
-
-    fn fn_xirr(&self, args: &[CompiledExpr]) -> Value {
-        if args.len() < 2 || args.len() > 3 {
-            return Value::Error(ErrorKind::Value);
-        }
-        let values = match self.collect_numbers_strict_from_arg(&args[0]) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let dates = match self.collect_numbers_strict_from_arg(&args[1]) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-        let guess = match self.eval_optional_number_arg(args.get(2)) {
-            Ok(v) => v,
-            Err(e) => return Value::Error(e),
-        };
-
-        Self::excel_result_number(financial::xirr(&values, &dates, guess))
-    }
-}
-
-fn parse_number_from_text(s: &str) -> Option<f64> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    trimmed.parse::<f64>().ok()
-}
-
-fn coerce_to_number(v: &Value) -> Result<f64, ErrorKind> {
-    match v {
-        Value::Number(n) => Ok(*n),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Blank => Ok(0.0),
-        Value::Text(s) => parse_number_from_text(s).ok_or(ErrorKind::Value),
-        Value::Error(e) => Err(*e),
-    }
-}
-
-fn coerce_to_bool(v: &Value) -> Result<bool, ErrorKind> {
-    match v {
-        Value::Bool(b) => Ok(*b),
-        Value::Number(n) => Ok(*n != 0.0),
-        Value::Blank => Ok(false),
-        Value::Text(s) => {
-            let t = s.trim();
-            if t.eq_ignore_ascii_case("TRUE") {
-                return Ok(true);
-            }
-            if t.eq_ignore_ascii_case("FALSE") {
-                return Ok(false);
-            }
-            if let Some(n) = parse_number_from_text(t) {
-                return Ok(n != 0.0);
-            }
-            Err(ErrorKind::Value)
-        }
-        Value::Error(e) => Err(*e),
+    fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::Utc::now()
     }
 }
 
