@@ -12,6 +12,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Run fixture harness
-        run: cargo test -p xlsx-diff --test roundtrip_fixtures
-
+      - name: Run xlsx-diff tests (includes fixture harness)
+        run: cargo test -p xlsx-diff
