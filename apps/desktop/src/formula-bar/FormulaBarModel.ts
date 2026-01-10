@@ -1,0 +1,185 @@
+import { explainFormulaError, type ErrorExplanation } from "./errors.js";
+import { getFunctionHint, type FunctionHint } from "./highlight/functionContext.js";
+import { highlightFormula, type HighlightSpan } from "./highlight/highlightFormula.js";
+import { tokenizeFormula } from "./highlight/tokenizeFormula.js";
+import { parseA1Range, rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
+
+export type ActiveCellInfo = {
+  address: string;
+  input: string;
+  value: unknown;
+};
+
+export class FormulaBarModel {
+  #activeCell: ActiveCellInfo = { address: "A1", input: "", value: "" };
+  #draft: string = "";
+  #isEditing = false;
+  #cursorStart = 0;
+  #cursorEnd = 0;
+  #rangeInsertion: { start: number; end: number } | null = null;
+  #hoveredReference: RangeAddress | null = null;
+  #aiSuggestion: string | null = null;
+
+  setActiveCell(info: ActiveCellInfo): void {
+    this.#activeCell = { ...info };
+    this.#draft = info.input ?? "";
+    this.#isEditing = false;
+    this.#cursorStart = this.#draft.length;
+    this.#cursorEnd = this.#draft.length;
+    this.#rangeInsertion = null;
+    this.#hoveredReference = null;
+    this.#aiSuggestion = null;
+  }
+
+  get activeCell(): ActiveCellInfo {
+    return this.#activeCell;
+  }
+
+  get isEditing(): boolean {
+    return this.#isEditing;
+  }
+
+  get draft(): string {
+    return this.#draft;
+  }
+
+  get cursorStart(): number {
+    return this.#cursorStart;
+  }
+
+  get cursorEnd(): number {
+    return this.#cursorEnd;
+  }
+
+  beginEdit(): void {
+    this.#isEditing = true;
+  }
+
+  updateDraft(draft: string, cursorStart: number, cursorEnd: number): void {
+    this.#isEditing = true;
+    this.#draft = draft;
+    this.#cursorStart = Math.max(0, Math.min(cursorStart, draft.length));
+    this.#cursorEnd = Math.max(0, Math.min(cursorEnd, draft.length));
+    this.#rangeInsertion = null;
+    this.#aiSuggestion = null;
+    this.#updateHoverFromCursor();
+  }
+
+  commit(): string {
+    this.#isEditing = false;
+    this.#activeCell = { ...this.#activeCell, input: this.#draft };
+    this.#rangeInsertion = null;
+    this.#aiSuggestion = null;
+    return this.#draft;
+  }
+
+  cancel(): void {
+    this.#isEditing = false;
+    this.#draft = this.#activeCell.input;
+    this.#cursorStart = this.#draft.length;
+    this.#cursorEnd = this.#draft.length;
+    this.#rangeInsertion = null;
+    this.#aiSuggestion = null;
+    this.#hoveredReference = null;
+  }
+
+  highlightedSpans(): HighlightSpan[] {
+    return highlightFormula(this.#draft);
+  }
+
+  functionHint(): FunctionHint | null {
+    return getFunctionHint(this.#draft, this.#cursorStart);
+  }
+
+  errorExplanation(): ErrorExplanation | null {
+    return explainFormulaError(this.#activeCell.value);
+  }
+
+  setHoveredReference(referenceText: string | null): void {
+    if (!referenceText) {
+      this.#hoveredReference = null;
+      return;
+    }
+    const range = parseA1Range(referenceText);
+    this.#hoveredReference = range;
+  }
+
+  hoveredReference(): RangeAddress | null {
+    return this.#hoveredReference;
+  }
+
+  beginRangeSelection(range: RangeAddress): void {
+    if (!this.#isEditing) return;
+    this.#insertOrReplaceRange(rangeToA1(range), true);
+    this.#updateHoverFromCursor();
+  }
+
+  updateRangeSelection(range: RangeAddress): void {
+    if (!this.#isEditing) return;
+    this.#insertOrReplaceRange(rangeToA1(range), false);
+    this.#updateHoverFromCursor();
+  }
+
+  endRangeSelection(): void {
+    this.#rangeInsertion = null;
+  }
+
+  setAiSuggestion(suggestion: string | null): void {
+    this.#aiSuggestion = suggestion;
+  }
+
+  aiSuggestion(): string | null {
+    return this.#aiSuggestion;
+  }
+
+  acceptAiSuggestion(): boolean {
+    if (!this.#aiSuggestion) return false;
+    if (!this.#isEditing) return false;
+
+    const insert = this.#aiSuggestion;
+    const start = Math.min(this.#cursorStart, this.#cursorEnd);
+    const end = Math.max(this.#cursorStart, this.#cursorEnd);
+    this.#draft = this.#draft.slice(0, start) + insert + this.#draft.slice(end);
+    this.#cursorStart = start + insert.length;
+    this.#cursorEnd = this.#cursorStart;
+    this.#aiSuggestion = null;
+    this.#rangeInsertion = null;
+    this.#updateHoverFromCursor();
+    return true;
+  }
+
+  #insertOrReplaceRange(rangeText: string, isBegin: boolean): void {
+    if (!this.#rangeInsertion || isBegin) {
+      const start = Math.min(this.#cursorStart, this.#cursorEnd);
+      const end = Math.max(this.#cursorStart, this.#cursorEnd);
+      this.#draft = this.#draft.slice(0, start) + rangeText + this.#draft.slice(end);
+      this.#rangeInsertion = { start, end: start + rangeText.length };
+      this.#cursorStart = this.#rangeInsertion.end;
+      this.#cursorEnd = this.#rangeInsertion.end;
+      return;
+    }
+
+    const { start, end } = this.#rangeInsertion;
+    this.#draft = this.#draft.slice(0, start) + rangeText + this.#draft.slice(end);
+    this.#rangeInsertion = { start, end: start + rangeText.length };
+    this.#cursorStart = this.#rangeInsertion.end;
+    this.#cursorEnd = this.#rangeInsertion.end;
+  }
+
+  #updateHoverFromCursor(): void {
+    if (this.#cursorStart !== this.#cursorEnd) {
+      this.#hoveredReference = null;
+      return;
+    }
+
+    const cursor = this.#cursorStart;
+    const probe = cursor > 0 ? cursor - 1 : 0;
+    const token = tokenizeFormula(this.#draft).find((t) => t.start <= probe && probe < t.end);
+    if (!token || token.type !== "reference") {
+      this.#hoveredReference = null;
+      return;
+    }
+
+    this.#hoveredReference = parseA1Range(token.text);
+  }
+}
