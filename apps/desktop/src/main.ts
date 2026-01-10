@@ -136,6 +136,13 @@ if (dockLeft && dockRight && dockBottom && floatingRoot && workspaceRoot && open
     }
 
     controls.appendChild(
+      button("Float", "float-panel", () => {
+        const rect = (PANEL_REGISTRY as any)?.[active]?.defaultFloatingRect ?? { x: 80, y: 80, width: 420, height: 560 };
+        layoutController.floatPanel(active, rect);
+      }),
+    );
+
+    controls.appendChild(
       button("Close", active === PanelIds.AI_CHAT ? "close-ai-panel" : "close-panel", () => {
         layoutController.closePanel(active);
       }),
@@ -173,8 +180,52 @@ if (dockLeft && dockRight && dockBottom && floatingRoot && workspaceRoot && open
 
       const inner = document.createElement("div");
       inner.className = "dock-panel";
-      inner.dataset.testid = `floating-panel-${panelId}`;
-      inner.textContent = panelTitle(panelId);
+
+      const header = document.createElement("div");
+      header.className = "dock-panel__header";
+
+      const title = document.createElement("div");
+      title.className = "dock-panel__title";
+      title.textContent = panelTitle(panelId);
+
+      const controls = document.createElement("div");
+      controls.className = "dock-panel__controls";
+
+      const dockLeftBtn = document.createElement("button");
+      dockLeftBtn.type = "button";
+      dockLeftBtn.textContent = "Dock left";
+      dockLeftBtn.addEventListener("click", () => layoutController.dockPanel(panelId, "left"));
+
+      const dockRightBtn = document.createElement("button");
+      dockRightBtn.type = "button";
+      dockRightBtn.textContent = "Dock right";
+      dockRightBtn.addEventListener("click", () => layoutController.dockPanel(panelId, "right"));
+
+      const dockBottomBtn = document.createElement("button");
+      dockBottomBtn.type = "button";
+      dockBottomBtn.textContent = "Dock bottom";
+      dockBottomBtn.addEventListener("click", () => layoutController.dockPanel(panelId, "bottom"));
+
+      const closeBtn = document.createElement("button");
+      closeBtn.type = "button";
+      closeBtn.textContent = "Close";
+      closeBtn.addEventListener("click", () => layoutController.closePanel(panelId));
+
+      controls.appendChild(dockLeftBtn);
+      controls.appendChild(dockRightBtn);
+      controls.appendChild(dockBottomBtn);
+      controls.appendChild(closeBtn);
+
+      header.appendChild(title);
+      header.appendChild(controls);
+
+      const body = document.createElement("div");
+      body.className = "dock-panel__body";
+      body.textContent = `Floating panel: ${panelId}`;
+
+      inner.appendChild(header);
+      inner.appendChild(body);
+
       panel.appendChild(inner);
       floatingRoot.appendChild(panel);
     }
