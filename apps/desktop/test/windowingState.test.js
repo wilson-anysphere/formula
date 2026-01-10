@@ -9,6 +9,7 @@ import {
   openWorkbookWindow,
   setWindowBounds,
   setWindowMaximized,
+  setWindowWorkspace,
 } from "../src/layout/windowingState.js";
 
 test("windowing state round-trips through serialization", () => {
@@ -17,6 +18,7 @@ test("windowing state round-trips through serialization", () => {
   state = openWorkbookWindow(state, "workbook-b", { workspaceId: "analysis", bounds: { x: 30, y: 40, width: 800, height: 600 } });
   state = setWindowMaximized(state, state.windows[1].id, true);
   state = focusWindow(state, state.windows[0].id);
+  state = setWindowWorkspace(state, state.windows[0].id, "review");
 
   const serialized = serializeWindowingState(state);
   const restored = deserializeWindowingState(serialized);
@@ -41,4 +43,3 @@ test("windowing state handles close + focus updates", () => {
   state = setWindowBounds(state, secondId, { width: 300 });
   assert.equal(state.windows[0].bounds.width, 480); // clamped minimum
 });
-

@@ -21,6 +21,8 @@ test("WindowingController persists session state and restores on reload", () => 
   const controller2 = new WindowingController({ sessionManager });
   assert.equal(controller2.state.windows.length, 2);
   assert.equal(controller2.state.focusedWindowId, winA);
+  controller2.setWindowWorkspace(winB, "review");
+  assert.equal(controller2.getWindow(winB)?.workspaceId, "review");
 
   controller2.closeWindow(winA);
   assert.equal(controller2.state.windows.length, 1);
@@ -29,4 +31,3 @@ test("WindowingController persists session state and restores on reload", () => 
   const controller3 = new WindowingController({ sessionManager });
   assert.equal(controller3.state.windows.length, 1);
 });
-

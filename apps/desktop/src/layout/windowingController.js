@@ -7,6 +7,7 @@ import {
   openWorkbookWindow,
   setWindowBounds,
   setWindowMaximized,
+  setWindowWorkspace,
 } from "./windowingState.js";
 
 function clone(value) {
@@ -119,10 +120,17 @@ export class WindowingController {
 
   /**
    * @param {string} windowId
+   * @param {string} workspaceId
+   */
+  setWindowWorkspace(windowId, workspaceId) {
+    this.#commit(setWindowWorkspace(this.state, windowId, workspaceId));
+  }
+
+  /**
+   * @param {string} windowId
    */
   getWindow(windowId) {
     const win = getWindow(this.state, windowId);
     return win ? clone(win) : null;
   }
 }
-

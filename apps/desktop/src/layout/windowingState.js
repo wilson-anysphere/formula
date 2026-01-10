@@ -146,3 +146,22 @@ export function setWindowMaximized(state, windowId, maximized) {
   return next;
 }
 
+/**
+ * Update which workspace a window is showing for a workbook.
+ *
+ * @param {ReturnType<typeof createDefaultWindowingState>} state
+ * @param {string} windowId
+ * @param {string} workspaceId
+ */
+export function setWindowWorkspace(state, windowId, workspaceId) {
+  const existing = getWindow(state, windowId);
+  if (!existing) return state;
+
+  const id = typeof workspaceId === "string" && workspaceId.length > 0 ? workspaceId : "default";
+  if (existing.workspaceId === id) return state;
+
+  const next = clone(state);
+  const idx = next.windows.findIndex((w) => w.id === windowId);
+  next.windows[idx] = { ...next.windows[idx], workspaceId: id };
+  return next;
+}
