@@ -3,15 +3,35 @@
     windows_subsystem = "windows"
 )]
 
+mod shortcuts;
+mod tray;
+mod updater;
+
 use formula_desktop_tauri::commands;
 use formula_desktop_tauri::state::{AppState, SharedAppState};
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 fn main() {
     let state: SharedAppState = Arc::new(Mutex::new(AppState::new()));
 
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, _event| {
+                    match shortcut.to_string().as_str() {
+                        "CmdOrCtrl+Shift+O" => {
+                            let _ = app.emit("shortcut-quick-open", ());
+                        }
+                        "CmdOrCtrl+Shift+P" => {
+                            let _ = app.emit("shortcut-command-palette", ());
+                        }
+                        _ => {}
+                    }
+                })
+                .build(),
+        )
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::open_workbook,
@@ -28,22 +48,37 @@ fn main() {
             commands::set_sheet_print_area,
             commands::export_sheet_range_pdf,
         ])
-        .on_window_event(|event| match event.event() {
+        .setup(|app| {
+            tray::init(app)?;
+
+            // Register global shortcuts (handled by the frontend via the Tauri plugin).
+            shortcuts::register(app.handle())?;
+
+            // Auto-update is configured via `tauri.conf.json`. We do a lightweight startup check
+            // in release builds; users can also trigger checks from the tray menu.
+            #[cfg(not(debug_assertions))]
+            updater::spawn_update_check(app.handle());
+
+            Ok(())
+        })
+        .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                let state = event.window().state::<SharedAppState>();
+                let state = window.state::<SharedAppState>();
                 let state = state.lock().unwrap();
                 if state.has_unsaved_changes() {
                     api.prevent_close();
-                    let _ = event.window().emit("unsaved-changes", ());
+                    let _ = window.emit("unsaved-changes", ());
+                } else {
+                    // Keep the process alive so the tray icon stays available.
+                    api.prevent_close();
+                    let _ = window.hide();
                 }
             }
-            tauri::WindowEvent::FileDrop(file_drop) => {
-                if let tauri::FileDropEvent::Dropped(paths) = file_drop {
-                    let payload: Vec<String> = paths
-                        .iter()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .collect();
-                    let _ = event.window().emit("file-dropped", payload);
+            tauri::WindowEvent::DragDrop(drag_drop) => {
+                if let tauri::DragDropEvent::Drop { paths, .. } = drag_drop {
+                    let payload: Vec<String> =
+                        paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+                    let _ = window.emit("file-dropped", payload);
                 }
             }
             _ => {}

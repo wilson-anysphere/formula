@@ -2,6 +2,7 @@
 **/target/
 
 apps/desktop/.turbo/
+apps/**/src-tauri/gen/
 
 # Rust editor backups / swap files
 **/*.rs.bk

@@ -17,7 +17,12 @@ required-features = ["desktop"]
 default = []
 # Enable the full desktop (Tauri) shell. This pulls in the system WebView
 # toolchain on Linux (gtk/webkit), which isn't required for backend unit tests.
-desktop = ["dep:tauri", "dep:tauri-build"]
+desktop = [
+    "dep:tauri",
+    "dep:tauri-build",
+    "dep:tauri-plugin-global-shortcut",
+    "dep:tauri-plugin-updater",
+]
 
 [dependencies]
 anyhow = "1.0"
@@ -28,7 +33,9 @@ formula-xlsx = { path = "../../../crates/formula-xlsx" }
 rust_xlsxwriter = "0.79"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tauri = { version = "2.9", optional = true }
+tauri = { version = "2.9", optional = true, features = ["tray-icon"] }
+tauri-plugin-global-shortcut = { version = "2.3", optional = true }
+tauri-plugin-updater = { version = "2.9", optional = true }
 thiserror = "1.0"
 
 [dev-dependencies]

@@ -1,18 +1,16 @@
 {
+  "productName": "Formula",
+  "mainBinaryName": "formula-desktop",
+  "version": "0.1.0",
+  "identifier": "app.formula.desktop",
   "build": {
-    "beforeBuildCommand": "",
-    "beforeDevCommand": "",
-    "devPath": "http://localhost:5173",
-    "distDir": "../dist"
+    "beforeBuildCommand": "pnpm -C .. build",
+    "beforeDevCommand": "pnpm -C .. dev",
+    "devUrl": "http://localhost:4173",
+    "frontendDist": "../dist",
+    "features": ["desktop"]
   },
-  "package": {
-    "productName": "Formula",
-    "version": "0.1.0"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false
-    },
+  "app": {
     "security": {
       "csp": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'"
     },
@@ -21,8 +19,62 @@
         "title": "Formula",
         "width": 1280,
         "height": 800,
-        "fileDropEnabled": true
+        "dragDropEnabled": true
       }
     ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["xlsx"],
+        "name": "Excel Spreadsheet",
+        "role": "Editor"
+      },
+      {
+        "ext": ["xlsm"],
+        "name": "Excel Macro-Enabled Spreadsheet",
+        "role": "Editor"
+      },
+      {
+        "ext": ["csv"],
+        "name": "CSV File",
+        "role": "Editor"
+      }
+    ],
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libssl3"]
+      }
+    },
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "Developer ID Application"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "timestampUrl": "http://timestamp.digicert.com"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "endpoints": ["https://releases.formula.app/{{target}}/{{current_version}}"],
+      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
