@@ -6,9 +6,10 @@
 
 use std::path::{Path, PathBuf};
 
-use calamine::{open_workbook, Data, Reader, Xls};
+use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
-    CellRef, CellValue, ErrorValue, Range, Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    CellRef, CellValue, ErrorValue, Range, SheetVisibility, Workbook, EXCEL_MAX_COLS,
+    EXCEL_MAX_ROWS,
 };
 use thiserror::Error;
 
@@ -83,34 +84,52 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     let path = path.as_ref();
     let mut workbook: Xls<_> = open_workbook(path)?;
 
-    let sheet_names = workbook.sheet_names().to_owned();
+    // We need to snapshot metadata (names, visibility, type) up-front because we
+    // need mutable access to the workbook while iterating over ranges.
+    let sheets: Vec<Sheet> = workbook.sheets_metadata().to_vec();
 
     let mut out = Workbook::new();
     let mut warnings = Vec::new();
     let mut merged_ranges = Vec::new();
 
-    for sheet_name in sheet_names {
+    for sheet_meta in sheets {
+        let sheet_name = sheet_meta.name.clone();
         let sheet_id = out.add_sheet(sheet_name.clone());
         let sheet = out
             .sheet_mut(sheet_id)
             .expect("sheet id should exist immediately after add");
 
-        let range = workbook.worksheet_range(&sheet_name)?;
-        let range_start = range.start().unwrap_or((0, 0));
+        sheet.visibility = sheet_visible_to_visibility(sheet_meta.visible);
 
-        for (row, col, value) in range.used_cells() {
-            let Some(cell_ref) = to_cell_ref(range_start, row, col) else {
-                warnings.push(ImportWarning::new(format!(
-                    "skipping out-of-bounds cell in sheet `{sheet_name}` at ({row},{col})"
-                )));
-                continue;
-            };
+        if sheet_meta.typ != SheetType::WorkSheet {
+            warnings.push(ImportWarning::new(format!(
+                "sheet `{sheet_name}` has unsupported type {:?}; importing as worksheet",
+                sheet_meta.typ
+            )));
+        }
 
-            let Some(value) = convert_value(value) else {
-                continue;
-            };
+        match workbook.worksheet_range(&sheet_name) {
+            Ok(range) => {
+                let range_start = range.start().unwrap_or((0, 0));
 
-            sheet.set_value(cell_ref, value);
+                for (row, col, value) in range.used_cells() {
+                    let Some(cell_ref) = to_cell_ref(range_start, row, col) else {
+                        warnings.push(ImportWarning::new(format!(
+                            "skipping out-of-bounds cell in sheet `{sheet_name}` at ({row},{col})"
+                        )));
+                        continue;
+                    };
+
+                    let Some(value) = convert_value(value) else {
+                        continue;
+                    };
+
+                    sheet.set_value(cell_ref, value);
+                }
+            }
+            Err(err) => warnings.push(ImportWarning::new(format!(
+                "failed to read cell values for sheet `{sheet_name}`: {err}"
+            ))),
         }
 
         match workbook.worksheet_formula(&sheet_name) {
@@ -176,6 +195,14 @@ fn to_cell_ref(start: (u32, u32), row: usize, col: usize) -> Option<CellRef> {
     }
 
     Some(CellRef::new(row, col))
+}
+
+fn sheet_visible_to_visibility(visible: SheetVisible) -> SheetVisibility {
+    match visible {
+        SheetVisible::Visible => SheetVisibility::Visible,
+        SheetVisible::Hidden => SheetVisibility::Hidden,
+        SheetVisible::VeryHidden => SheetVisibility::VeryHidden,
+    }
 }
 
 fn normalize_formula(formula: &str) -> String {
