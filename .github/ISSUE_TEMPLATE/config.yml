@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/wilson-anysphere/formula-agents/security/policy
+    url: https://github.com/wilson-anysphere/formula/security/policy
     about: Please report security vulnerabilities via the security policy.
