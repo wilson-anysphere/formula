@@ -27,6 +27,7 @@ Tauri's updater verifies update artifacts using an Ed25519 signature.
 Run this from the Tauri crate directory (requires the Tauri CLI via `cargo tauri`):
 
 ```bash
+cargo install cargo-tauri --locked
 cd apps/desktop/src-tauri
 cargo tauri signer generate
 ```
