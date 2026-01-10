@@ -67,6 +67,77 @@ export async function parquetToArrowTable(parquetBytes, options) {
 }
 
 /**
+ * Read a Parquet File/Blob into an Arrow JS Table without first materializing the entire file into
+ * a single ArrayBuffer.
+ *
+ * Optionally emits grid batches as data is decoded so callers can progressively populate a
+ * cell-based UI while still building the final Arrow table.
+ *
+ * @param {Blob} handle
+ * @param {import('parquet-wasm').ReaderOptions & {
+ *   gridBatchSize?: number;
+ *   includeHeader?: boolean;
+ *   onGridBatch?: (batch: {rowOffset: number; values: any[][]}) => Promise<void> | void;
+ * }} [options]
+ */
+export async function parquetFileToArrowTable(handle, options = {}) {
+  const parquet = await getParquetWasm();
+  const parquetFile = await parquet.ParquetFile.fromFile(handle);
+
+  const {
+    gridBatchSize = 1024,
+    includeHeader = true,
+    onGridBatch,
+    ...readerOptions
+  } = options ?? {};
+
+  try {
+    let globalRowOffset = 0;
+    let emittedHeader = false;
+
+    if (onGridBatch && includeHeader) {
+      const wasmSchema = parquetFile.schema();
+      const schemaTable = arrow.tableFromIPC(wasmSchema.intoIPCStream());
+      const columnNames = schemaTable.schema.fields.map((field) => field.name);
+      await onGridBatch({ rowOffset: 0, values: [columnNames] });
+      emittedHeader = true;
+      globalRowOffset = 1;
+    }
+
+    const stream = await parquetFile.stream(readerOptions ?? null);
+
+    /** @type {import('apache-arrow').RecordBatch[]} */
+    const recordBatches = [];
+
+    for await (const wasmRecordBatch of stream) {
+      const table = arrow.tableFromIPC(wasmRecordBatch.intoIPCStream());
+      recordBatches.push(...table.batches);
+
+      if (onGridBatch) {
+        if (!emittedHeader && includeHeader) {
+          const columnNames = table.schema.fields.map((field) => field.name);
+          await onGridBatch({ rowOffset: 0, values: [columnNames] });
+          emittedHeader = true;
+          globalRowOffset = 1;
+        }
+
+        for await (const batch of arrowTableToGridBatches(table, {
+          batchSize: gridBatchSize,
+          includeHeader: false,
+        })) {
+          await onGridBatch({ rowOffset: globalRowOffset + batch.rowOffset, values: batch.values });
+        }
+        globalRowOffset += table.numRows;
+      }
+    }
+
+    return new arrow.Table(recordBatches);
+  } finally {
+    parquetFile.free();
+  }
+}
+
+/**
  * Write an Arrow JS Table into Parquet bytes.
  *
  * @param {arrow.Table} table

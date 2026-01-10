@@ -3,6 +3,7 @@ import {
   arrowTableFromColumns,
   arrowTableToGridBatches,
   arrowTableToParquet,
+  parquetFileToArrowTable,
   parquetToArrowTable,
 } from "@formula/data-io";
 import {
@@ -23,19 +24,13 @@ import {
  */
 export async function importParquetFile(file, options = {}) {
   const batchSize = options.batchSize ?? 1024;
-  const parquetBytes = new Uint8Array(await file.arrayBuffer());
-
-  const table = await parquetToArrowTable(parquetBytes, { batchSize });
+  const table = await parquetFileToArrowTable(file, {
+    batchSize,
+    gridBatchSize: batchSize,
+    includeHeader: Boolean(options.onBatch),
+    onGridBatch: options.onBatch,
+  });
   const sheet = new ArrowColumnarSheet(table);
-
-  if (options.onBatch) {
-    for await (const batch of arrowTableToGridBatches(table, {
-      batchSize,
-      includeHeader: true,
-    })) {
-      await options.onBatch(batch);
-    }
-  }
 
   return sheet;
 }
@@ -55,29 +50,51 @@ export async function importParquetFile(file, options = {}) {
 export async function importParquetIntoDocument(doc, sheetId, start, source, options = {}) {
   const batchSize = options.batchSize ?? 1024;
   const startCoord = typeof start === "string" ? parseA1(start) : start;
-  const parquetBytes = source instanceof Uint8Array ? source : new Uint8Array(await source.arrayBuffer());
+  const includeHeader = options.includeHeader ?? true;
 
-  const table = await parquetToArrowTable(parquetBytes, { batchSize });
-  const sheet = new ArrowColumnarSheet(table);
+  /** @type {import("apache-arrow").Table} */
+  let table;
 
   doc.beginBatch({ label: "Import Parquet" });
   try {
-    for await (const batch of arrowTableToGridBatches(table, {
-      batchSize,
-      includeHeader: options.includeHeader ?? true,
-    })) {
-      doc.setRangeValues(
-        sheetId,
-        { row: startCoord.row + batch.rowOffset, col: startCoord.col },
-        batch.values
-      );
-      if (options.onBatch) {
-        await options.onBatch(batch);
+    if (source instanceof Uint8Array) {
+      table = await parquetToArrowTable(source, { batchSize });
+
+      for await (const batch of arrowTableToGridBatches(table, {
+        batchSize,
+        includeHeader,
+      })) {
+        doc.setRangeValues(
+          sheetId,
+          { row: startCoord.row + batch.rowOffset, col: startCoord.col },
+          batch.values
+        );
+        if (options.onBatch) {
+          await options.onBatch(batch);
+        }
       }
+    } else {
+      table = await parquetFileToArrowTable(source, {
+        batchSize,
+        gridBatchSize: batchSize,
+        includeHeader,
+        onGridBatch: async (batch) => {
+          doc.setRangeValues(
+            sheetId,
+            { row: startCoord.row + batch.rowOffset, col: startCoord.col },
+            batch.values
+          );
+          if (options.onBatch) {
+            await options.onBatch(batch);
+          }
+        },
+      });
     }
   } finally {
     doc.endBatch();
   }
+
+  const sheet = new ArrowColumnarSheet(table);
 
   return sheet;
 }

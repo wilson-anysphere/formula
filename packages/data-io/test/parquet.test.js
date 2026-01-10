@@ -8,6 +8,7 @@ import {
   ArrowColumnarSheet,
   arrowTableToGridBatches,
   arrowTableToParquet,
+  parquetFileToArrowTable,
   parquetToArrowTable,
 } from '../src/index.js';
 
@@ -63,6 +64,30 @@ test('arrowTableToGridBatches can omit header row', async () => {
 
   assert.deepEqual(grid[0], [1, 'Alice', true, 1.5]);
   assert.deepEqual(grid[2], [3, 'Carla', true, 3.75]);
+});
+
+test('Parquet import from Blob streams and can emit grid batches', async () => {
+  const parquetPath = path.join(__dirname, 'fixtures', 'simple.parquet');
+  const parquetBytes = new Uint8Array(await readFile(parquetPath));
+
+  const blob = new Blob([parquetBytes]);
+
+  const grid = [];
+  const table = await parquetFileToArrowTable(blob, {
+    batchSize: 2,
+    gridBatchSize: 2,
+    includeHeader: true,
+    onGridBatch: async (batch) => {
+      for (let i = 0; i < batch.values.length; i++) {
+        grid[batch.rowOffset + i] = batch.values[i];
+      }
+    },
+  });
+
+  assert.equal(table.numRows, 3);
+  assert.deepEqual(grid[0], ['id', 'name', 'active', 'score']);
+  assert.deepEqual(grid[1], [1, 'Alice', true, 1.5]);
+  assert.deepEqual(grid[3], [3, 'Carla', true, 3.75]);
 });
 
 test('Parquet export produces a readable parquet file', async () => {
