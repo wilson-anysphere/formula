@@ -75,3 +75,12 @@ __pycache__/
 
 .idea/
 .vscode/
+
+# Marketplace service runtime state
+services/marketplace/data/
+
+# Desktop app runtime state
+apps/desktop/.formula/
+
+# Test runtime artifacts
+.tmp/

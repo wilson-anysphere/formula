@@ -1,0 +1,9 @@
+{
+  "name": "@formula/extension-publisher",
+  "private": true,
+  "type": "commonjs",
+  "bin": {
+    "formula-extension-publisher": "src/cli.js"
+  }
+}
+

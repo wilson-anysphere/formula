@@ -8,6 +8,7 @@ export const PanelIds = Object.freeze({
   PYTHON: "python",
   SOLVER: "solver",
   SCENARIO_MANAGER: "scenarioManager",
+  MARKETPLACE: "marketplace",
 });
 
 export const PANEL_REGISTRY = Object.freeze({
@@ -55,6 +56,11 @@ export const PANEL_REGISTRY = Object.freeze({
     title: "Scenario Manager",
     defaultDock: "left",
     defaultFloatingRect: { x: 120, y: 160, width: 520, height: 640 },
+  },
+  [PanelIds.MARKETPLACE]: {
+    title: "Marketplace",
+    defaultDock: "right",
+    defaultFloatingRect: { x: 160, y: 120, width: 560, height: 680 },
   },
 });
 

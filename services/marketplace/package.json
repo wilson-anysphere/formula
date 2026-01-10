@@ -1,0 +1,7 @@
+{
+  "name": "@formula/marketplace",
+  "private": true,
+  "main": "src/server.js",
+  "type": "commonjs"
+}
+
