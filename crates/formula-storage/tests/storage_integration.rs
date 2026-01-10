@@ -1,4 +1,8 @@
-use formula_storage::{AutoSaveConfig, AutoSaveManager, CellChange, CellData, CellRange, CellValue, Storage, Style};
+use formula_storage::{
+    AutoSaveConfig, AutoSaveManager, CellChange, CellData, CellRange, CellValue, SheetVisibility,
+    Storage, Style,
+};
+use formula_storage::storage::StorageError;
 use serde_json::json;
 use std::time::Duration;
 
@@ -244,4 +248,73 @@ async fn autosave_batches_changes() {
     assert_eq!(cells.len(), 2);
 
     autosave.shutdown().await.expect("shutdown");
+}
+
+#[test]
+fn sheet_metadata_persists_visibility_tab_color_and_xlsx_ids() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage.create_workbook("Book", None).expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Sheet1", 0, None)
+        .expect("create sheet");
+
+    storage
+        .set_sheet_visibility(sheet.id, SheetVisibility::Hidden)
+        .expect("set visibility");
+    storage
+        .set_sheet_tab_color(sheet.id, Some("FFFF0000"))
+        .expect("set tab color");
+    storage
+        .set_sheet_xlsx_metadata(sheet.id, Some(42), Some("rId7"))
+        .expect("set xlsx metadata");
+    storage.rename_sheet(sheet.id, "Renamed").expect("rename");
+
+    let loaded = storage.get_sheet_meta(sheet.id).expect("get sheet");
+    assert_eq!(loaded.name, "Renamed");
+    assert_eq!(loaded.visibility, SheetVisibility::Hidden);
+    assert_eq!(loaded.tab_color.as_deref(), Some("FFFF0000"));
+    assert_eq!(loaded.xlsx_sheet_id, Some(42));
+    assert_eq!(loaded.xlsx_rel_id.as_deref(), Some("rId7"));
+}
+
+#[test]
+fn sheet_reorder_and_delete_renormalize_positions() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage.create_workbook("Book", None).expect("create workbook");
+    let sheet_a = storage
+        .create_sheet(workbook.id, "SheetA", 0, None)
+        .expect("create sheet A");
+    let _sheet_b = storage
+        .create_sheet(workbook.id, "SheetB", 1, None)
+        .expect("create sheet B");
+    let sheet_c = storage
+        .create_sheet(workbook.id, "SheetC", 2, None)
+        .expect("create sheet C");
+
+    storage.reorder_sheet(sheet_c.id, 0).expect("reorder");
+    let sheets = storage.list_sheets(workbook.id).expect("list sheets");
+    assert_eq!(sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), vec!["SheetC", "SheetA", "SheetB"]);
+    assert_eq!(sheets.iter().map(|s| s.position).collect::<Vec<_>>(), vec![0, 1, 2]);
+
+    storage.delete_sheet(sheet_a.id).expect("delete");
+    let sheets = storage.list_sheets(workbook.id).expect("list after delete");
+    assert_eq!(sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), vec!["SheetC", "SheetB"]);
+    assert_eq!(sheets.iter().map(|s| s.position).collect::<Vec<_>>(), vec![0, 1]);
+}
+
+#[test]
+fn sheet_names_are_unique_case_insensitive() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage.create_workbook("Book", None).expect("create workbook");
+    storage
+        .create_sheet(workbook.id, "Sheet1", 0, None)
+        .expect("create sheet");
+    let err = storage
+        .create_sheet(workbook.id, "sheet1", 1, None)
+        .expect_err("duplicate");
+
+    match err {
+        StorageError::DuplicateSheetName(name) => assert_eq!(name, "sheet1"),
+        other => panic!("unexpected error: {other:?}"),
+    }
 }

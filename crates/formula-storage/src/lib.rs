@@ -20,7 +20,7 @@ pub use autosave::{AutoSaveConfig, AutoSaveManager};
 pub use cache::{MemoryManager, MemoryManagerConfig, SheetData};
 pub use storage::Storage;
 pub use types::{
-    CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, Style, WorkbookMeta,
+    CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, SheetVisibility, Style, WorkbookMeta,
 };
 
 pub use storage::{CellChange, CellRange};

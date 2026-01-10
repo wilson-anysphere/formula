@@ -20,6 +20,10 @@ pub(crate) fn init(conn: &Connection) -> rusqlite::Result<()> {
           workbook_id TEXT REFERENCES workbooks(id),
           name TEXT NOT NULL,
           position INTEGER,
+          visibility TEXT NOT NULL DEFAULT 'visible' CHECK (visibility IN ('visible','hidden','veryHidden')),
+          tab_color TEXT,
+          xlsx_sheet_id INTEGER,
+          xlsx_rel_id TEXT,
           frozen_rows INTEGER DEFAULT 0,
           frozen_cols INTEGER DEFAULT 0,
           zoom REAL DEFAULT 1.0,
@@ -92,6 +96,37 @@ pub(crate) fn init(conn: &Connection) -> rusqlite::Result<()> {
         "#,
     )?;
 
+    // Best-effort migrations for older databases that predate sheet tab metadata.
+    // SQLite only supports ADD COLUMN migrations, so we opportunistically add
+    // missing columns when opening an existing database.
+    ensure_sheet_columns(conn)?;
+
     Ok(())
 }
 
+fn ensure_sheet_columns(conn: &Connection) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(sheets)")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let mut existing = std::collections::HashSet::new();
+    for name in rows {
+        existing.insert(name?);
+    }
+
+    if !existing.contains("visibility") {
+        conn.execute(
+            "ALTER TABLE sheets ADD COLUMN visibility TEXT NOT NULL DEFAULT 'visible' CHECK (visibility IN ('visible','hidden','veryHidden'))",
+            [],
+        )?;
+    }
+    if !existing.contains("tab_color") {
+        conn.execute("ALTER TABLE sheets ADD COLUMN tab_color TEXT", [])?;
+    }
+    if !existing.contains("xlsx_sheet_id") {
+        conn.execute("ALTER TABLE sheets ADD COLUMN xlsx_sheet_id INTEGER", [])?;
+    }
+    if !existing.contains("xlsx_rel_id") {
+        conn.execute("ALTER TABLE sheets ADD COLUMN xlsx_rel_id TEXT", [])?;
+    }
+
+    Ok(())
+}

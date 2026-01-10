@@ -2,6 +2,38 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SheetVisibility {
+    Visible,
+    Hidden,
+    VeryHidden,
+}
+
+impl SheetVisibility {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SheetVisibility::Visible => "visible",
+            SheetVisibility::Hidden => "hidden",
+            SheetVisibility::VeryHidden => "veryHidden",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "hidden" => SheetVisibility::Hidden,
+            "veryHidden" => SheetVisibility::VeryHidden,
+            _ => SheetVisibility::Visible,
+        }
+    }
+}
+
+impl Default for SheetVisibility {
+    fn default() -> Self {
+        SheetVisibility::Visible
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkbookMeta {
     pub id: Uuid,
@@ -15,6 +47,11 @@ pub struct SheetMeta {
     pub workbook_id: Uuid,
     pub name: String,
     pub position: i64,
+    #[serde(default)]
+    pub visibility: SheetVisibility,
+    pub tab_color: Option<String>,
+    pub xlsx_sheet_id: Option<i64>,
+    pub xlsx_rel_id: Option<String>,
     pub frozen_rows: i64,
     pub frozen_cols: i64,
     pub zoom: f64,

@@ -1,5 +1,7 @@
 use crate::schema;
-use crate::types::{CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, Style, WorkbookMeta};
+use crate::types::{
+    CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, SheetVisibility, Style, WorkbookMeta,
+};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde_json::json;
 use std::path::Path;
@@ -18,6 +20,10 @@ pub enum StorageError {
     WorkbookNotFound(Uuid),
     #[error("sheet not found: {0}")]
     SheetNotFound(Uuid),
+    #[error("sheet name cannot be empty")]
+    EmptySheetName,
+    #[error("sheet name already exists: {0}")]
+    DuplicateSheetName(String),
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;
@@ -147,34 +153,75 @@ impl Storage {
         // Ensure workbook exists.
         self.get_workbook(workbook_id)?;
 
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(StorageError::EmptySheetName);
+        }
+
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let exists: Option<String> = conn
+            .query_row(
+                "SELECT id FROM sheets WHERE workbook_id = ?1 AND name = ?2 COLLATE NOCASE LIMIT 1",
+                params![workbook_id.to_string(), name],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if exists.is_some() {
+            return Err(StorageError::DuplicateSheetName(name.to_string()));
+        }
+
         let sheet = SheetMeta {
             id: Uuid::new_v4(),
             workbook_id,
             name: name.to_string(),
             position,
+            visibility: SheetVisibility::Visible,
+            tab_color: None,
+            xlsx_sheet_id: None,
+            xlsx_rel_id: None,
             frozen_rows: 0,
             frozen_cols: 0,
             zoom: 1.0,
             metadata,
         };
 
-        let conn = self.conn.lock().expect("storage mutex poisoned");
         conn.execute(
             r#"
             INSERT INTO sheets (
-              id, workbook_id, name, position, frozen_rows, frozen_cols, zoom, metadata
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+              id,
+              workbook_id,
+              name,
+              position,
+              visibility,
+              tab_color,
+              xlsx_sheet_id,
+              xlsx_rel_id,
+              frozen_rows,
+              frozen_cols,
+              zoom,
+              metadata
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             "#,
             params![
                 sheet.id.to_string(),
                 sheet.workbook_id.to_string(),
                 &sheet.name,
                 sheet.position,
+                sheet.visibility.as_str(),
+                sheet.tab_color.clone(),
+                sheet.xlsx_sheet_id,
+                sheet.xlsx_rel_id.clone(),
                 sheet.frozen_rows,
                 sheet.frozen_cols,
                 sheet.zoom,
                 sheet.metadata.clone()
             ],
+        )?;
+
+        // A new sheet changes workbook metadata.
+        conn.execute(
+            "UPDATE workbooks SET modified_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            params![sheet.workbook_id.to_string()],
         )?;
 
         Ok(sheet)
@@ -184,7 +231,19 @@ impl Storage {
         let conn = self.conn.lock().expect("storage mutex poisoned");
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, workbook_id, name, position, frozen_rows, frozen_cols, zoom, metadata
+            SELECT
+              id,
+              workbook_id,
+              name,
+              position,
+              visibility,
+              tab_color,
+              xlsx_sheet_id,
+              xlsx_rel_id,
+              frozen_rows,
+              frozen_cols,
+              zoom,
+              metadata
             FROM sheets
             WHERE workbook_id = ?1
             ORDER BY position
@@ -194,15 +253,20 @@ impl Storage {
         let rows = stmt.query_map(params![workbook_id.to_string()], |r| {
             let id: String = r.get(0)?;
             let workbook_id: String = r.get(1)?;
+            let visibility: String = r.get(4)?;
             Ok(SheetMeta {
                 id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
                 workbook_id: Uuid::parse_str(&workbook_id).map_err(|_| rusqlite::Error::InvalidQuery)?,
                 name: r.get(2)?,
                 position: r.get(3)?,
-                frozen_rows: r.get(4)?,
-                frozen_cols: r.get(5)?,
-                zoom: r.get(6)?,
-                metadata: r.get(7)?,
+                visibility: SheetVisibility::parse(&visibility),
+                tab_color: r.get(5)?,
+                xlsx_sheet_id: r.get(6)?,
+                xlsx_rel_id: r.get(7)?,
+                frozen_rows: r.get(8)?,
+                frozen_cols: r.get(9)?,
+                zoom: r.get(10)?,
+                metadata: r.get(11)?,
             })
         })?;
 
@@ -218,7 +282,19 @@ impl Storage {
         let row = conn
             .query_row(
                 r#"
-                SELECT id, workbook_id, name, position, frozen_rows, frozen_cols, zoom, metadata
+                SELECT
+                  id,
+                  workbook_id,
+                  name,
+                  position,
+                  visibility,
+                  tab_color,
+                  xlsx_sheet_id,
+                  xlsx_rel_id,
+                  frozen_rows,
+                  frozen_cols,
+                  zoom,
+                  metadata
                 FROM sheets
                 WHERE id = ?1
                 "#,
@@ -226,22 +302,172 @@ impl Storage {
                 |r| {
                     let id: String = r.get(0)?;
                     let workbook_id: String = r.get(1)?;
+                    let visibility: String = r.get(4)?;
                     Ok(SheetMeta {
                         id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
                         workbook_id: Uuid::parse_str(&workbook_id)
                             .map_err(|_| rusqlite::Error::InvalidQuery)?,
                         name: r.get(2)?,
                         position: r.get(3)?,
-                        frozen_rows: r.get(4)?,
-                        frozen_cols: r.get(5)?,
-                        zoom: r.get(6)?,
-                        metadata: r.get(7)?,
+                        visibility: SheetVisibility::parse(&visibility),
+                        tab_color: r.get(5)?,
+                        xlsx_sheet_id: r.get(6)?,
+                        xlsx_rel_id: r.get(7)?,
+                        frozen_rows: r.get(8)?,
+                        frozen_cols: r.get(9)?,
+                        zoom: r.get(10)?,
+                        metadata: r.get(11)?,
                     })
                 },
             )
             .optional()?;
 
         row.ok_or(StorageError::SheetNotFound(sheet_id))
+    }
+
+    /// Rename a worksheet.
+    pub fn rename_sheet(&self, sheet_id: Uuid, name: &str) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(StorageError::EmptySheetName);
+        }
+
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+
+        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+
+        // Enforce Excel-style uniqueness (case-insensitive) within the workbook.
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT id FROM sheets WHERE workbook_id = ?1 AND name = ?2 COLLATE NOCASE AND id != ?3 LIMIT 1",
+                params![meta.workbook_id.to_string(), name, sheet_id.to_string()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if existing.is_some() {
+            return Err(StorageError::DuplicateSheetName(name.to_string()));
+        }
+
+        tx.execute(
+            "UPDATE sheets SET name = ?1 WHERE id = ?2",
+            params![name, sheet_id.to_string()],
+        )?;
+
+        touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn set_sheet_visibility(&self, sheet_id: Uuid, visibility: SheetVisibility) -> Result<()> {
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+        tx.execute(
+            "UPDATE sheets SET visibility = ?1 WHERE id = ?2",
+            params![visibility.as_str(), sheet_id.to_string()],
+        )?;
+        touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn set_sheet_tab_color(&self, sheet_id: Uuid, tab_color: Option<&str>) -> Result<()> {
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+        tx.execute(
+            "UPDATE sheets SET tab_color = ?1 WHERE id = ?2",
+            params![tab_color, sheet_id.to_string()],
+        )?;
+        touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn set_sheet_xlsx_metadata(
+        &self,
+        sheet_id: Uuid,
+        xlsx_sheet_id: Option<i64>,
+        xlsx_rel_id: Option<&str>,
+    ) -> Result<()> {
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+        tx.execute(
+            "UPDATE sheets SET xlsx_sheet_id = ?1, xlsx_rel_id = ?2 WHERE id = ?3",
+            params![xlsx_sheet_id, xlsx_rel_id, sheet_id.to_string()],
+        )?;
+        touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Reorder a sheet within its workbook by setting its 0-based position.
+    ///
+    /// This renormalizes positions to be contiguous starting at 0.
+    pub fn reorder_sheet(&self, sheet_id: Uuid, new_position: i64) -> Result<()> {
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+
+        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+
+        let mut sheets = self.list_sheets_tx(&tx, meta.workbook_id)?;
+        if sheets.len() <= 1 {
+            return Ok(());
+        }
+
+        let current_index = sheets
+            .iter()
+            .position(|s| s.id == sheet_id)
+            .ok_or(StorageError::SheetNotFound(sheet_id))?;
+
+        let sheet = sheets.remove(current_index);
+        let clamped = new_position
+            .max(0)
+            .min(sheets.len() as i64) as usize;
+        sheets.insert(clamped, sheet);
+
+        for (idx, sheet) in sheets.iter().enumerate() {
+            tx.execute(
+                "UPDATE sheets SET position = ?1 WHERE id = ?2",
+                params![idx as i64, sheet.id.to_string()],
+            )?;
+        }
+
+        touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_sheet(&self, sheet_id: Uuid) -> Result<()> {
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+
+        let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+
+        tx.execute(
+            "DELETE FROM cells WHERE sheet_id = ?1",
+            params![sheet_id.to_string()],
+        )?;
+        tx.execute(
+            "DELETE FROM change_log WHERE sheet_id = ?1",
+            params![sheet_id.to_string()],
+        )?;
+        tx.execute("DELETE FROM sheets WHERE id = ?1", params![sheet_id.to_string()])?;
+
+        // Renormalize remaining sheet positions.
+        let sheets = self.list_sheets_tx(&tx, meta.workbook_id)?;
+        for (idx, sheet) in sheets.iter().enumerate() {
+            tx.execute(
+                "UPDATE sheets SET position = ?1 WHERE id = ?2",
+                params![idx as i64, sheet.id.to_string()],
+            )?;
+        }
+
+        touch_workbook_modified_at_by_workbook_id(&tx, meta.workbook_id)?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// Load all non-empty cells within an inclusive range.
@@ -414,6 +640,102 @@ impl Storage {
             ],
         )?;
         Ok(())
+    }
+
+    fn list_sheets_tx(&self, tx: &Transaction<'_>, workbook_id: Uuid) -> Result<Vec<SheetMeta>> {
+        let mut stmt = tx.prepare(
+            r#"
+            SELECT
+              id,
+              workbook_id,
+              name,
+              position,
+              visibility,
+              tab_color,
+              xlsx_sheet_id,
+              xlsx_rel_id,
+              frozen_rows,
+              frozen_cols,
+              zoom,
+              metadata
+            FROM sheets
+            WHERE workbook_id = ?1
+            ORDER BY position
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![workbook_id.to_string()], |r| {
+            let id: String = r.get(0)?;
+            let workbook_id: String = r.get(1)?;
+            let visibility: String = r.get(4)?;
+            Ok(SheetMeta {
+                id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                workbook_id: Uuid::parse_str(&workbook_id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                name: r.get(2)?,
+                position: r.get(3)?,
+                visibility: SheetVisibility::parse(&visibility),
+                tab_color: r.get(5)?,
+                xlsx_sheet_id: r.get(6)?,
+                xlsx_rel_id: r.get(7)?,
+                frozen_rows: r.get(8)?,
+                frozen_cols: r.get(9)?,
+                zoom: r.get(10)?,
+                metadata: r.get(11)?,
+            })
+        })?;
+
+        let mut sheets = Vec::new();
+        for sheet in rows {
+            sheets.push(sheet?);
+        }
+        Ok(sheets)
+    }
+
+    fn get_sheet_meta_tx(&self, tx: &Transaction<'_>, sheet_id: Uuid) -> Result<SheetMeta> {
+        let row = tx
+            .query_row(
+                r#"
+                SELECT
+                  id,
+                  workbook_id,
+                  name,
+                  position,
+                  visibility,
+                  tab_color,
+                  xlsx_sheet_id,
+                  xlsx_rel_id,
+                  frozen_rows,
+                  frozen_cols,
+                  zoom,
+                  metadata
+                FROM sheets
+                WHERE id = ?1
+                "#,
+                params![sheet_id.to_string()],
+                |r| {
+                    let id: String = r.get(0)?;
+                    let workbook_id: String = r.get(1)?;
+                    let visibility: String = r.get(4)?;
+                    Ok(SheetMeta {
+                        id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        workbook_id: Uuid::parse_str(&workbook_id)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        name: r.get(2)?,
+                        position: r.get(3)?,
+                        visibility: SheetVisibility::parse(&visibility),
+                        tab_color: r.get(5)?,
+                        xlsx_sheet_id: r.get(6)?,
+                        xlsx_rel_id: r.get(7)?,
+                        frozen_rows: r.get(8)?,
+                        frozen_cols: r.get(9)?,
+                        zoom: r.get(10)?,
+                        metadata: r.get(11)?,
+                    })
+                },
+            )
+            .optional()?;
+
+        row.ok_or(StorageError::SheetNotFound(sheet_id))
     }
 }
 
@@ -594,6 +916,14 @@ fn touch_workbook_modified_at(tx: &Transaction<'_>, sheet_id: Uuid) -> Result<()
         WHERE id = (SELECT workbook_id FROM sheets WHERE id = ?1)
         "#,
         params![sheet_id.to_string()],
+    )?;
+    Ok(())
+}
+
+fn touch_workbook_modified_at_by_workbook_id(tx: &Transaction<'_>, workbook_id: Uuid) -> Result<()> {
+    tx.execute(
+        "UPDATE workbooks SET modified_at = CURRENT_TIMESTAMP WHERE id = ?1",
+        params![workbook_id.to_string()],
     )?;
     Ok(())
 }

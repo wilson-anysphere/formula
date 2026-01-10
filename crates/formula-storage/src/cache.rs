@@ -40,6 +40,12 @@ impl SheetData {
 
         // Sheet metadata (names, etc).
         bytes += self.meta.name.len();
+        if let Some(tab_color) = &self.meta.tab_color {
+            bytes += tab_color.len();
+        }
+        if let Some(rel_id) = &self.meta.xlsx_rel_id {
+            bytes += rel_id.len();
+        }
         if let Some(metadata) = &self.meta.metadata {
             bytes += metadata.to_string().len();
         }
