@@ -12,6 +12,7 @@
   "activationEvents": [
     "onCommand:sampleHello.sumSelection",
     "onCommand:sampleHello.openPanel",
+    "onCommand:sampleHello.fetchText",
     "onCustomFunction:SAMPLEHELLO_DOUBLE"
   ],
   "contributes": {
@@ -24,6 +25,11 @@
       {
         "command": "sampleHello.openPanel",
         "title": "Open Sample Panel",
+        "category": "Sample Hello"
+      },
+      {
+        "command": "sampleHello.fetchText",
+        "title": "Fetch Text (Demo)",
         "category": "Sample Hello"
       }
     ],
@@ -54,6 +60,7 @@
     "cells.read",
     "cells.write",
     "ui.commands",
-    "ui.panels"
+    "ui.panels",
+    "network"
   ]
 }

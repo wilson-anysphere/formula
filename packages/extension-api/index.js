@@ -344,6 +344,44 @@ const config = {
   }
 };
 
+function createHeaders(entries) {
+  const map = new Map(Array.isArray(entries) ? entries : []);
+  return {
+    get(name) {
+      if (typeof name !== "string") return undefined;
+      return map.get(name.toLowerCase()) ?? map.get(name) ?? undefined;
+    }
+  };
+}
+
+function createFetchResponse(payload) {
+  const bodyText = String(payload?.bodyText ?? "");
+  const headers = createHeaders(
+    (payload?.headers ?? []).map(([k, v]) => [String(k).toLowerCase(), String(v)])
+  );
+
+  return {
+    ok: Boolean(payload?.ok),
+    status: Number(payload?.status ?? 0),
+    statusText: String(payload?.statusText ?? ""),
+    url: String(payload?.url ?? ""),
+    headers,
+    async text() {
+      return bodyText;
+    },
+    async json() {
+      return JSON.parse(bodyText);
+    }
+  };
+}
+
+const network = {
+  async fetch(url, init) {
+    const result = await rpcCall("network", "fetch", [String(url), init]);
+    return createFetchResponse(result);
+  }
+};
+
 const events = {
   onSelectionChanged(callback) {
     return addEventHandler("selectionChanged", callback);
@@ -370,6 +408,7 @@ module.exports = {
   cells,
   commands,
   functions,
+  network,
   ui,
   storage,
   config,

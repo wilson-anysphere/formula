@@ -28,6 +28,8 @@ const API_PERMISSIONS = {
   "functions.register": [],
   "functions.unregister": [],
 
+  "network.fetch": ["network"],
+
   "storage.get": ["storage"],
   "storage.set": ["storage"],
   "storage.delete": ["storage"],
@@ -385,6 +387,30 @@ class ExtensionHost {
         const fnName = String(args[0]);
         if (this._customFunctions.get(fnName) === extension.id) this._customFunctions.delete(fnName);
         return null;
+      }
+
+      case "network.fetch": {
+        if (typeof fetch !== "function") {
+          throw new Error("Network fetch is not available in this runtime");
+        }
+
+        const url = String(args[0]);
+        const init = args[1];
+        const response = await fetch(url, init);
+        const bodyText = await response.text();
+        const headers = [];
+        response.headers.forEach((value, key) => {
+          headers.push([key, value]);
+        });
+
+        return {
+          ok: response.ok,
+          status: response.status,
+          statusText: response.statusText,
+          url: response.url,
+          headers,
+          bodyText
+        };
       }
 
       case "storage.get": {

@@ -77,6 +77,22 @@ export namespace functions {
   function register(name: string, def: CustomFunctionDefinition): Promise<Disposable>;
 }
 
+export interface FetchResponse {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly statusText: string;
+  readonly url: string;
+  readonly headers: {
+    get(name: string): string | undefined;
+  };
+  text(): Promise<string>;
+  json<T = any>(): Promise<T>;
+}
+
+export namespace network {
+  function fetch(url: string, init?: any): Promise<FetchResponse>;
+}
+
 export namespace ui {
   type MessageType = "info" | "warning" | "error";
 

@@ -1,5 +1,6 @@
 const { parentPort, workerData } = require("node:worker_threads");
 const Module = require("node:module");
+const path = require("node:path");
 
 const formulaApi = require(workerData.apiModulePath);
 formulaApi.__setTransport({
@@ -10,12 +11,60 @@ formulaApi.__setContext({
   extensionPath: workerData.extensionPath
 });
 
+// Replace global fetch with a permission-gated proxy through the Formula API.
+// This provides a VS Code-like "declare + prompt" model for outbound network access.
+if (typeof globalThis.fetch === "function") {
+  globalThis.fetch = async (input, init) => {
+    return formulaApi.network.fetch(String(input), init);
+  };
+}
+
 // Provide a VS Code-like virtual module for extension authors.
 const originalLoad = Module._load;
+const extensionRoot = path.resolve(workerData.extensionPath);
+const deniedBuiltins = new Set([
+  "fs",
+  "child_process",
+  "worker_threads",
+  "cluster",
+  "net",
+  "tls",
+  "dgram",
+  "dns",
+  "http",
+  "https",
+  "module",
+  "vm"
+]);
+
 Module._load = function (request, parent, isMain) {
   if (request === "@formula/extension-api" || request === "formula") {
     return formulaApi;
   }
+
+  const parentFilename = parent?.filename ? path.resolve(parent.filename) : null;
+  const isExtensionRequest = parentFilename ? parentFilename.startsWith(extensionRoot + path.sep) : false;
+
+  if (isExtensionRequest) {
+    const normalized = typeof request === "string" && request.startsWith("node:")
+      ? request.slice("node:".length)
+      : request;
+
+    if (Module.builtinModules.includes(normalized) && deniedBuiltins.has(normalized)) {
+      throw new Error(`Access to Node builtin module '${normalized}' is not allowed in extensions`);
+    }
+
+    const resolved = Module._resolveFilename(request, parent, isMain);
+    if (typeof resolved === "string" && path.isAbsolute(resolved)) {
+      const resolvedPath = path.resolve(resolved);
+      if (!resolvedPath.startsWith(extensionRoot + path.sep)) {
+        throw new Error(
+          `Extensions cannot require modules outside their extension folder: '${request}' resolved to '${resolvedPath}'`
+        );
+      }
+    }
+  }
+
   return originalLoad.call(this, request, parent, isMain);
 };
 

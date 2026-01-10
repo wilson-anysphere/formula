@@ -55,7 +55,14 @@ async function activate(context) {
     return panel.id;
   });
 
-  context.subscriptions.push(doubleFn, sumCmd, panelCmd);
+  const fetchCmd = await formula.commands.registerCommand("sampleHello.fetchText", async (url) => {
+    const response = await fetch(String(url));
+    const text = await response.text();
+    await formula.ui.showMessage(`Fetched: ${text}`, "info");
+    return text;
+  });
+
+  context.subscriptions.push(doubleFn, sumCmd, panelCmd, fetchCmd);
 }
 
 module.exports = {
