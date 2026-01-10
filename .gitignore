@@ -4,24 +4,29 @@
 **/*.swp
 **/*.swo
 
+# Node
 node_modules/
 **/node_modules/
-
 dist/
 **/dist/
-
 coverage/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.log
+
 .DS_Store
+**/.DS_Store
 
 # Local secrets
 .env
 .env.*
+**/.env
+**/.env.*
 
 # Local-only agent files (never commit)
 scratchpad.md
 handoff.md
-
-*.log
 
 __pycache__/
 *.pyc

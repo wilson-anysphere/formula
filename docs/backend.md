@@ -1,0 +1,108 @@
+# Backend (API + Sync) local development
+
+This repo contains a minimal-but-extensible **enterprise/cloud backend foundation**:
+
+- `services/api`: Fastify + Postgres API service (auth, orgs, docs, RBAC, audit, sync token issuance)
+- `services/sync`: WebSocket sync gateway that validates short-lived collaboration tokens
+
+## Quickstart
+
+Prereqs:
+- Docker / docker-compose
+
+Start the local stack:
+
+```bash
+docker-compose up --build
+```
+
+Services:
+- API: http://localhost:3000
+- Sync WS: ws://localhost:1234
+- Postgres: localhost:5432 (user/pass/db = `postgres` / `postgres` / `formula`)
+
+The API automatically runs SQL migrations on startup.
+
+## API overview
+
+### Authentication
+
+- `POST /auth/register` → creates a user + a personal org + a session cookie
+- `POST /auth/login` → session cookie
+- `POST /auth/logout`
+- `GET /me` → current user + org memberships
+
+### Documents + RBAC
+
+- `POST /docs` (requires auth) → create a document in an org
+- `POST /docs/:docId/invite` → invite an existing user by email (document-level role)
+- `POST /docs/:docId/sync-token` → issue a short-lived collaboration token for the sync server
+
+Roles: `owner | admin | editor | commenter | viewer`
+
+### Audit logging
+
+- `GET /orgs/:orgId/audit` (org admin) → query audit events
+- `GET /orgs/:orgId/audit/export` (org admin) → NDJSON export
+
+### Retention / residency scaffolding
+
+Org settings include:
+- `dataResidencyRegion`
+- retention windows for audit log + document versions
+
+The API runs a periodic retention sweep (configurable via `RETENTION_SWEEP_INTERVAL_MS`).
+
+## Example: register → create doc → invite → sync token → connect
+
+1) Register two users:
+
+```bash
+curl -i http://localhost:3000/auth/register \
+  -H 'content-type: application/json' \
+  -d '{"email":"alice@example.com","password":"password1234","name":"Alice","orgName":"Acme"}'
+
+curl -i http://localhost:3000/auth/register \
+  -H 'content-type: application/json' \
+  -d '{"email":"bob@example.com","password":"password1234","name":"Bob"}'
+```
+
+2) Create a document (use Alice's `Set-Cookie` session):
+
+```bash
+curl -i http://localhost:3000/docs \
+  -H 'content-type: application/json' \
+  -H 'cookie: formula_session=...' \
+  -d '{"orgId":"<alice-org-id>","title":"Q1 Plan"}'
+```
+
+3) Invite Bob to the document:
+
+```bash
+curl -i http://localhost:3000/docs/<doc-id>/invite \
+  -H 'content-type: application/json' \
+  -H 'cookie: formula_session=...' \
+  -d '{"email":"bob@example.com","role":"editor"}'
+```
+
+4) Bob requests a sync token (use Bob's session cookie):
+
+```bash
+curl -s -X POST http://localhost:3000/docs/<doc-id>/sync-token \
+  -H 'content-type: application/json' \
+  -H 'cookie: formula_session=...'
+```
+
+5) Connect to the sync server with the token:
+
+```bash
+node - <<'NODE'
+const WebSocket = require('ws')
+const token = process.env.TOKEN
+const docId = process.env.DOC_ID
+const ws = new WebSocket(`ws://localhost:1234/${docId}?token=${encodeURIComponent(token)}`)
+ws.on('message', (m) => console.log('sync:', m.toString()))
+ws.on('open', () => console.log('connected'))
+ws.on('close', (c, r) => console.log('closed', c, r.toString()))
+NODE
+```

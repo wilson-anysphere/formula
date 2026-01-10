@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: formula
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ./services/api
+    environment:
+      PORT: "3000"
+      DATABASE_URL: postgres://postgres:postgres@db:5432/formula
+      SESSION_COOKIE_NAME: formula_session
+      SESSION_TTL_SECONDS: "86400"
+      COOKIE_SECURE: "false"
+      SYNC_TOKEN_SECRET: dev-sync-token-secret-change-me
+      SYNC_TOKEN_TTL_SECONDS: "300"
+      # Set to "0" to disable background retention sweeps.
+      RETENTION_SWEEP_INTERVAL_MS: "3600000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+
+  sync:
+    build:
+      context: ./services/sync
+    environment:
+      PORT: "1234"
+      SYNC_TOKEN_SECRET: dev-sync-token-secret-change-me
+    ports:
+      - "1234:1234"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+
