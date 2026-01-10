@@ -380,4 +380,70 @@ mod tests {
         let out = decompress_container(&compressed).expect("decompress");
         assert_eq!(&out, data);
     }
+
+    #[test]
+    fn respects_project_codepage_for_module_source() {
+        use std::io::{Cursor, Write};
+
+        let comment = "привет"; // "hello" in Russian
+        let code_utf8 = format!("Sub Hello()\r\n'{}\r\nEnd Sub\r\n", comment);
+        let (code_bytes, _, _) = WINDOWS_1251.encode(&code_utf8);
+
+        let module_container = compress_container(code_bytes.as_ref());
+
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            // PROJECTNAME
+            let (proj_name_bytes, _, _) = WINDOWS_1251.encode("Проект");
+            push_record(&mut out, 0x0004, proj_name_bytes.as_ref());
+
+            // MODULENAME
+            push_record(&mut out, 0x0019, b"Module1");
+            // MODULESTREAMNAME + reserved u16
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(b"Module1");
+            stream_name.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut out, 0x001A, &stream_name);
+
+            // MODULETYPE (standard)
+            push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+            // MODULETEXTOFFSET
+            push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+
+        let project_stream_text = "CodePage=1251\r\nName=\"VBAProject\"\r\nModule=Module1\r\n";
+        let (project_stream_bytes, _, _) = WINDOWS_1251.encode(project_stream_text);
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        {
+            let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+            s.write_all(project_stream_bytes.as_ref())
+                .expect("write PROJECT");
+        }
+        ole.create_storage("VBA").expect("VBA storage");
+        {
+            let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+            s.write_all(&dir_container).expect("write dir");
+        }
+        {
+            let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+            s.write_all(&module_container).expect("write module");
+        }
+
+        let vba_bin = ole.into_inner().into_inner();
+        let project = VBAProject::parse(&vba_bin).expect("parse");
+        assert_eq!(project.name.as_deref(), Some("Проект"));
+
+        let module = project.modules.iter().find(|m| m.name == "Module1").unwrap();
+        assert!(module.code.contains(comment));
+    }
+
+    fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(data);
+    }
 }
