@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { dispatchRpc } from "./rpc.js";
 
 function resolveRepoRoot() {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -17,16 +18,6 @@ function withPythonPath(env, formulaApiPath) {
   const existing = env.PYTHONPATH;
   const next = existing ? `${formulaApiPath}${path.delimiter}${existing}` : formulaApiPath;
   return { ...env, PYTHONPATH: next };
-}
-
-async function dispatchRpc(api, method, params) {
-  if (api && typeof api[method] === "function") {
-    return await api[method](params);
-  }
-  if (api && typeof api.call === "function") {
-    return await api.call(method, params);
-  }
-  throw new Error(`Spreadsheet API does not implement RPC method "${method}"`);
 }
 
 /**
@@ -171,4 +162,3 @@ export class NativePythonRuntime {
     }
   }
 }
-
