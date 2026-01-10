@@ -106,6 +106,22 @@ os.remove("some_file.txt")
     await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Filesystem access is not permitted/);
   });
 
+  it("blocks network imports by default (socket)", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import socket
+socket.socket()
+`;
+
+    await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Import of 'socket' is not permitted/);
+  });
+
   it("blocks obvious command execution escape hatches (os.system)", async () => {
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({
