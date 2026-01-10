@@ -20,6 +20,7 @@
 //! pivot table metadata, etc.).
 
 pub mod autofilter;
+pub mod calc_settings;
 pub mod charts;
 pub mod comments;
 pub mod conditional_formatting;
@@ -52,6 +53,7 @@ mod writer;
 use std::collections::{BTreeMap, HashMap};
 
 pub use compare::*;
+pub use calc_settings::CalcSettingsError;
 pub use conditional_formatting::*;
 pub use hyperlinks::{
     parse_worksheet_hyperlinks, update_worksheet_relationships, update_worksheet_xml,

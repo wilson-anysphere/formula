@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::drawings::ImageStore;
 use crate::{
-    rewrite_sheet_names_in_formula, SheetVisibility, Style, StyleTable, TabColor, Table, Worksheet,
-    WorksheetId,
+    rewrite_sheet_names_in_formula, CalcSettings, SheetVisibility, Style, StyleTable, TabColor,
+    Table, Worksheet, WorksheetId,
 };
 
 /// Identifier for a workbook.
@@ -38,6 +38,10 @@ pub struct Workbook {
     /// Workbook image store (shared across all sheets).
     #[serde(default)]
     pub images: ImageStore,
+
+    /// Workbook calculation options.
+    #[serde(default)]
+    pub calc_settings: CalcSettings,
 
     /// Next worksheet id to allocate (runtime-only).
     #[serde(skip)]
@@ -79,6 +83,7 @@ impl Workbook {
             sheets: Vec::new(),
             styles: StyleTable::new(),
             images: ImageStore::default(),
+            calc_settings: CalcSettings::default(),
             next_sheet_id: 1,
         }
     }
@@ -213,6 +218,8 @@ impl<'de> Deserialize<'de> for Workbook {
             styles: StyleTable,
             #[serde(default)]
             images: ImageStore,
+            #[serde(default)]
+            calc_settings: CalcSettings,
         }
 
         let helper = Helper::deserialize(deserializer)?;
@@ -239,8 +246,8 @@ impl<'de> Deserialize<'de> for Workbook {
             sheets: helper.sheets,
             styles: helper.styles,
             images: helper.images,
+            calc_settings: helper.calc_settings,
             next_sheet_id,
         })
     }
 }
-

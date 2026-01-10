@@ -13,6 +13,7 @@
 //! small benchmark harness via [`run_benchmarks`] so CI can detect regressions in the core
 //! parsing/evaluation/recalc paths as the engine evolves.
 
+pub mod calc_settings;
 pub mod date;
 pub mod display;
 pub mod editing;
@@ -20,6 +21,7 @@ pub mod error;
 pub mod eval;
 pub mod functions;
 pub mod graph;
+pub mod iterative;
 pub mod locale;
 pub mod pivot;
 pub mod solver;

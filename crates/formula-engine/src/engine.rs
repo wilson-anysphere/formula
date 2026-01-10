@@ -11,6 +11,8 @@ use crate::editing::rewrite::{
 use crate::graph::{CellDeps, DependencyGraph as CalcGraph, Precedent, SheetRange};
 use crate::locale::{canonicalize_formula, FormulaLocale};
 use crate::value::{ErrorKind, Value};
+use crate::calc_settings::{CalcSettings, CalculationMode};
+use crate::iterative;
 use formula_model::{CellId, CellRef, Range, Table};
 use rayon::prelude::*;
 use std::cmp::max;
@@ -33,10 +35,10 @@ pub enum RecalcMode {
     MultiThreaded,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct CellKey {
-    sheet: SheetId,
-    addr: CellAddr,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct CellKey {
+    pub(crate) sheet: SheetId,
+    pub(crate) addr: CellAddr,
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +161,8 @@ pub struct Engine {
     graph: AuditGraph,
     dirty: HashSet<CellKey>,
     dirty_reasons: HashMap<CellKey, CellKey>,
+    calc_settings: CalcSettings,
+    circular_references: HashSet<CellKey>,
 }
 
 impl Default for Engine {
@@ -175,7 +179,30 @@ impl Engine {
             graph: AuditGraph::default(),
             dirty: HashSet::new(),
             dirty_reasons: HashMap::new(),
+            // Default to manual calculation to preserve historical engine behavior; callers can
+            // opt into Excel-like automatic mode by setting `CalcSettings.calculation_mode`.
+            calc_settings: CalcSettings {
+                calculation_mode: CalculationMode::Manual,
+                ..CalcSettings::default()
+            },
+            circular_references: HashSet::new(),
         }
+    }
+
+    pub fn calc_settings(&self) -> &CalcSettings {
+        &self.calc_settings
+    }
+
+    pub fn set_calc_settings(&mut self, settings: CalcSettings) {
+        self.calc_settings = settings;
+    }
+
+    pub fn has_dirty_cells(&self) -> bool {
+        !self.dirty.is_empty()
+    }
+
+    pub fn circular_reference_count(&self) -> usize {
+        self.circular_references.len()
     }
 
     pub fn set_cell_value(
@@ -205,6 +232,9 @@ impl Engine {
         // Mark downstream dependents dirty.
         self.mark_dirty_dependents_with_reasons(key);
         self.calc_graph.mark_dirty(cell_id);
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
         Ok(())
     }
 
@@ -302,6 +332,9 @@ impl Engine {
         // Recalculate this cell and anything depending on it.
         self.mark_dirty_including_self_with_reasons(key);
         self.calc_graph.mark_dirty(cell_id);
+        if self.calc_settings.calculation_mode != CalculationMode::Manual {
+            self.recalculate();
+        }
         Ok(())
     }
 
@@ -623,7 +656,7 @@ impl Engine {
         let levels = match self.calc_graph.calc_levels_for_dirty() {
             Ok(levels) => levels,
             Err(_) => {
-                self.apply_cycle_error();
+                self.recalculate_with_cycles(mode);
                 return;
             }
         };
@@ -631,6 +664,8 @@ impl Engine {
         if levels.is_empty() {
             return;
         }
+
+        self.circular_references.clear();
 
         let mut snapshot = Snapshot::from_workbook(&self.workbook);
 
@@ -691,14 +726,124 @@ impl Engine {
         self.dirty_reasons.clear();
     }
 
-    fn apply_cycle_error(&mut self) {
-        let mut impacted: HashSet<CellId> = self.calc_graph.dirty_cells().into_iter().collect();
-        impacted.extend(self.calc_graph.volatile_cells());
+    fn recalculate_with_cycles(&mut self, _mode: RecalcMode) {
+        let mut impacted_ids: HashSet<CellId> = self.calc_graph.dirty_cells().into_iter().collect();
+        impacted_ids.extend(self.calc_graph.volatile_cells());
 
-        for cell_id in impacted {
-            let key = cell_key_from_id(cell_id);
-            let cell = self.workbook.get_or_create_cell_mut(key);
-            cell.value = Value::Error(ErrorKind::Calc);
+        if impacted_ids.is_empty() {
+            return;
+        }
+
+        self.circular_references.clear();
+
+        let mut impacted: Vec<CellKey> = impacted_ids
+            .into_iter()
+            .map(cell_key_from_id)
+            .collect();
+        impacted.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
+
+        let impacted_set: HashSet<CellKey> = impacted.iter().copied().collect();
+        let mut edges: HashMap<CellKey, Vec<CellKey>> = HashMap::new();
+        for &cell in &impacted {
+            let Some(deps) = self.graph.dependents.get(&cell) else {
+                continue;
+            };
+            let mut out: Vec<CellKey> = deps
+                .iter()
+                .copied()
+                .filter(|d| impacted_set.contains(d))
+                .collect();
+            if out.is_empty() {
+                continue;
+            }
+            out.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
+            edges.insert(cell, out);
+        }
+
+        let sccs = iterative::strongly_connected_components(&impacted, &edges);
+        let order = iterative::topo_sort_sccs(&sccs, &edges);
+
+        let mut snapshot = Snapshot::from_workbook(&self.workbook);
+
+        for scc_idx in order {
+            let mut scc = sccs[scc_idx].clone();
+            scc.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
+
+            let is_cycle = match scc.as_slice() {
+                [] => continue,
+                [only] => edges
+                    .get(only)
+                    .map(|deps| deps.contains(only))
+                    .unwrap_or(false),
+                _ => true,
+            };
+
+            if !is_cycle {
+                let k = scc[0];
+                let Some(expr) = self
+                    .workbook
+                    .get_cell(k)
+                    .and_then(|c| c.ast.clone())
+                else {
+                    continue;
+                };
+                let ctx = crate::eval::EvalContext {
+                    current_sheet: k.sheet,
+                    current_cell: k.addr,
+                };
+                let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
+                let v = evaluator.eval_formula(&expr);
+                let cell = self.workbook.get_or_create_cell_mut(k);
+                cell.value = v.clone();
+                snapshot.values.insert(k, v);
+                continue;
+            }
+
+            for &k in &scc {
+                self.circular_references.insert(k);
+            }
+
+            if !self.calc_settings.iterative.enabled {
+                for &k in &scc {
+                    let v = Value::Number(0.0);
+                    let cell = self.workbook.get_or_create_cell_mut(k);
+                    cell.value = v.clone();
+                    snapshot.values.insert(k, v);
+                }
+                continue;
+            }
+
+            let max_iters = max(1, self.calc_settings.iterative.max_iterations) as usize;
+            let tol = self.calc_settings.iterative.max_change.max(0.0);
+
+            for _ in 0..max_iters {
+                let mut max_delta: f64 = 0.0;
+                for &k in &scc {
+                    let Some(expr) = self
+                        .workbook
+                        .get_cell(k)
+                        .and_then(|c| c.ast.clone())
+                    else {
+                        continue;
+                    };
+                    let old = snapshot.values.get(&k).cloned().unwrap_or(Value::Blank);
+                    let ctx = crate::eval::EvalContext {
+                        current_sheet: k.sheet,
+                        current_cell: k.addr,
+                    };
+                    let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
+                    let new_val = evaluator.eval_formula(&expr);
+                    max_delta = max_delta.max(value_delta(&old, &new_val));
+
+                    let cell = self.workbook.get_or_create_cell_mut(k);
+                    cell.value = new_val.clone();
+                    snapshot.values.insert(k, new_val);
+                }
+
+                if max_delta <= tol {
+                    break;
+                }
+            }
         }
 
         self.calc_graph.clear_dirty();
@@ -1673,5 +1818,22 @@ fn cell_key_from_id(id: CellId) -> CellKey {
             row: id.cell.row,
             col: id.cell.col,
         },
+    }
+}
+
+fn value_delta(old: &Value, new: &Value) -> f64 {
+    match (numeric_value(old), numeric_value(new)) {
+        (Some(a), Some(b)) => (a - b).abs(),
+        _ if old == new => 0.0,
+        _ => f64::INFINITY,
+    }
+}
+
+fn numeric_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(n) => Some(*n),
+        Value::Blank => Some(0.0),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Text(_) | Value::Error(_) => None,
     }
 }

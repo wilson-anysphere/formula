@@ -157,7 +157,7 @@ impl SharedStringKey {
                     bold: run.style.bold,
                     italic: run.style.italic,
                     underline: run.style.underline.map(underline_key),
-                    color: run.style.color.map(|c| c.argb),
+                    color: run.style.color.and_then(|c| c.argb()),
                     font: run.style.font.clone(),
                     size_100pt: run.style.size_100pt,
                 },
@@ -313,9 +313,9 @@ fn write_shared_string_rpr(xml: &mut String, style: &formula_model::rich_text::R
         xml.push_str(r#""/>"#);
     }
 
-    if let Some(color) = style.color {
+    if let Some(color) = style.color.and_then(|c| c.argb()) {
         xml.push_str(r#"<color rgb=""#);
-        xml.push_str(&format!("{:08X}", color.argb));
+        xml.push_str(&format!("{:08X}", color));
         xml.push_str(r#""/>"#);
     }
 

@@ -6,6 +6,7 @@
 //! - Tauri/IPC and WASM boundaries via `serde` (JSON-safe schema)
 
 mod address;
+pub mod calc_settings;
 mod cell;
 pub mod charts;
 mod comments;
@@ -28,6 +29,7 @@ mod workbook;
 mod worksheet;
 
 pub use address::{A1ParseError, CellRef, Range, RangeIter, RangeParseError};
+pub use calc_settings::{CalcSettings, CalculationMode, IterativeCalculationSettings};
 pub use cell::{Cell, CellId, CellKey, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 pub use comments::{Comment, CommentAuthor, CommentKind, Mention, Reply, TimestampMs};
 pub use conditional_formatting::*;
