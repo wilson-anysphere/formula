@@ -1,0 +1,9 @@
+{
+  "name": "formula-desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
+

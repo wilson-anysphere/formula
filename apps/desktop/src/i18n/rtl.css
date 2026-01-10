@@ -1,0 +1,21 @@
+:root {
+  direction: ltr;
+}
+
+:root[dir="rtl"] {
+  direction: rtl;
+}
+
+/*
+  This file is intentionally small: it's a hook demonstrating how the UI can
+  become RTL-aware without rewriting components.
+
+  Prefer CSS logical properties so layout flips automatically when the root
+  `dir` attribute changes (set by `setLocale()`):
+
+    .toolbar {
+      padding-inline: 8px;
+      margin-inline-start: 4px;
+    }
+*/
+
