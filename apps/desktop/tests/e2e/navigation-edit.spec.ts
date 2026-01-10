@@ -17,6 +17,28 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("C2");
   });
 
+  test("typing begins in-place edit and commits", async ({ page }) => {
+    await page.goto("/");
+    await page.click("#grid", { position: { x: 5, y: 5 } });
+
+    const recalcBefore = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
+
+    // Type directly without pressing F2 first.
+    await page.keyboard.press("h");
+    const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+
+    await page.keyboard.type("ello");
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByTestId("active-cell")).toHaveText("A2");
+    const a1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1Value).toBe("hello");
+
+    const recalcAfter = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
+    expect(recalcAfter).toBeGreaterThan(recalcBefore);
+  });
+
   test("Ctrl+End jumps to last used cell", async ({ page, browserName }) => {
     // WebKit on Linux can be flaky with End/Home in headless; keep the coverage
     // focused on chromium/firefox in CI.
@@ -64,5 +86,15 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     const a2Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2"));
     expect(a2Value).toBe("");
     await expect(page.getByTestId("active-cell")).toHaveText("A2");
+
+    // Delete clears cell contents.
+    await page.keyboard.press("ArrowUp");
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    const recalcBeforeDelete = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
+    await page.keyboard.press("Delete");
+    const a1Cleared = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1Cleared).toBe("");
+    const recalcAfterDelete = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
+    expect(recalcAfterDelete).toBeGreaterThan(recalcBeforeDelete);
   });
 });

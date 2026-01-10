@@ -273,6 +273,15 @@ export class SpreadsheetApp {
 
     // Selection shortcuts
     const primary = e.ctrlKey || e.metaKey;
+    if (e.key === "Delete") {
+      e.preventDefault();
+      this.clearSelectionContents();
+      this.renderGrid();
+      this.renderSelection();
+      this.updateStatus();
+      return;
+    }
+
     if (primary && (e.key === "a" || e.key === "A")) {
       e.preventDefault();
       this.selection = selectAll(this.limits);
@@ -296,6 +305,16 @@ export class SpreadsheetApp {
       this.selection = selectRows(this.selection, this.selection.active.row, this.selection.active.row, {}, this.limits);
       this.renderSelection();
       this.updateStatus();
+      return;
+    }
+
+    // Excel-like "start typing to edit" behavior: any printable key begins edit
+    // mode and replaces the cell contents.
+    if (!primary && !e.altKey && e.key.length === 1) {
+      e.preventDefault();
+      const cell = this.selection.active;
+      const bounds = this.getCellRect(cell);
+      this.editor.open(cell, bounds, e.key, { cursor: "end" });
       return;
     }
 
@@ -372,6 +391,32 @@ export class SpreadsheetApp {
     if (!hasData) return null;
     return { startRow: minRow, startCol: minCol, endRow: maxRow, endCol: maxCol };
   }
+
+  private clearSelectionContents(): void {
+    const used = this.computeUsedRange();
+    if (!used) return;
+    for (const range of this.selection.ranges) {
+      const clipped = intersectRanges(range, used);
+      if (!clipped) continue;
+      this.document.clearRange(
+        this.sheetId,
+        {
+          start: { row: clipped.startRow, col: clipped.startCol },
+          end: { row: clipped.endRow, col: clipped.endCol }
+        },
+        { label: "Clear contents" }
+      );
+    }
+  }
+}
+
+function intersectRanges(a: Range, b: Range): Range | null {
+  const startRow = Math.max(a.startRow, b.startRow);
+  const endRow = Math.min(a.endRow, b.endRow);
+  const startCol = Math.max(a.startCol, b.startCol);
+  const endCol = Math.min(a.endCol, b.endCol);
+  if (startRow > endRow || startCol > endCol) return null;
+  return { startRow, endRow, startCol, endCol };
 }
 
 function parseA1(a1: string): CellCoord {

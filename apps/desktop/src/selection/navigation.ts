@@ -94,16 +94,19 @@ export function jumpToEdge(cell: CellCoord, direction: Direction, data: UsedRang
   if (!used) return cell;
 
   const { dRow, dCol } = directionToDelta(direction);
-  const minRow = used.startRow;
-  const maxRow = used.endRow;
-  const minCol = used.startCol;
-  const maxCol = used.endCol;
+  const start = clampCell(cell, limits);
+  const minRow = Math.max(0, Math.min(used.startRow, start.row));
+  const maxRow = Math.min(limits.maxRows - 1, Math.max(used.endRow, start.row));
+  const minCol = Math.max(0, Math.min(used.startCol, start.col));
+  const maxCol = Math.min(limits.maxCols - 1, Math.max(used.endCol, start.col));
 
   const isEmpty = (row: number, col: number) => data.isCellEmpty({ row, col });
 
-  // Clamp the starting point to the used range to guarantee termination.
-  let row = Math.max(minRow, Math.min(maxRow, cell.row));
-  let col = Math.max(minCol, Math.min(maxCol, cell.col));
+  // Use the current cell as the scan origin, but bound the scan window by the sheet's used
+  // range. This prevents Ctrl+Arrow from traversing an "infinite" sheet while still behaving
+  // sensibly when the active cell is outside the used range.
+  let row = start.row;
+  let col = start.col;
 
   if (dRow !== 0) {
     const limit = dRow > 0 ? maxRow : minRow;
