@@ -19,8 +19,8 @@ fixtures/xlsx/
   macros/
 ```
 
-`pivots/` is currently a scaffold for future expansion. `macros/` contains small
-`.xlsm` fixtures used to validate VBA project preservation.
+`charts/` and `pivots/` will expand over time as we add more complex corpora.
+`macros/` contains small `.xlsm` fixtures used to validate VBA project preservation.
 
 ## Notable fixtures
 
@@ -28,9 +28,18 @@ fixtures/xlsx/
   - `basic.xlsx` - minimal numeric + inline string.
   - `shared-strings.xlsx` - uses `xl/sharedStrings.xml`.
   - `multi-sheet.xlsx` - 2 worksheets.
+  - `comments.xlsx` - legacy comments parts.
+  - `grouped-rows.xlsx` - outline/grouped rows metadata.
+  - `print-settings.xlsx` - page setup + print titles/areas.
+- `formulas/`:
+  - `formulas.xlsx` - simple formula + cached result.
 - `styles/`:
   - `styles.xlsx` - simple bold cell style.
   - `rich-text-shared-strings.xlsx` - shared strings with rich-text runs.
+- `conditional-formatting/`:
+  - `conditional-formatting.xlsx` - simple `cfRule` example.
+  - `conditional-formatting-2007.xlsx` - Excel 2007-style conditional formatting.
+  - `conditional-formatting-x14.xlsx` - Excel 2010+ (`x14`) conditional formatting.
 - `pivots/`:
   - `pivot-fixture.xlsx` - minimal pivot table parts (cache definition/records + pivotTable).
 - `charts/`:
