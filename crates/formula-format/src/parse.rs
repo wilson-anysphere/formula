@@ -81,10 +81,16 @@ impl FormatCode {
 
     pub(crate) fn text_section(&self) -> Option<&str> {
         if self.sections.len() >= 4 {
-            Some(self.sections[3].raw.as_str())
-        } else {
-            None
+            return Some(self.sections[3].raw.as_str());
         }
+
+        // Excel's built-in Text format is `@` and has only one section.
+        // When a format code has no explicit 4th (text) section, Excel still
+        // treats sections containing `@` as eligible for text rendering.
+        self.sections
+            .iter()
+            .find(|s| contains_at_placeholder(&s.raw))
+            .map(|s| s.raw.as_str())
     }
 
     pub(crate) fn select_section_for_number(&self, v: f64) -> SelectedSection<'_> {
@@ -154,6 +160,43 @@ impl FormatCode {
             }
         }
     }
+}
+
+fn contains_at_placeholder(pattern: &str) -> bool {
+    let mut in_quotes = false;
+    let mut escape = false;
+    let mut in_brackets = false;
+
+    for ch in pattern.chars() {
+        if escape {
+            escape = false;
+            continue;
+        }
+
+        if in_quotes {
+            if ch == '"' {
+                in_quotes = false;
+            }
+            continue;
+        }
+
+        if in_brackets {
+            if ch == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_quotes = true,
+            '\\' => escape = true,
+            '[' => in_brackets = true,
+            '@' => return true,
+            _ => {}
+        }
+    }
+
+    false
 }
 
 fn split_sections(code: &str) -> Vec<String> {

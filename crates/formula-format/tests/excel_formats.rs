@@ -197,4 +197,7 @@ fn text_at_placeholder_formats_numbers_as_text_and_aligns_left() {
     let rendered = format_value(Value::Number(-12.5), Some("\"Value: \"@"), &options);
     assert_eq!(rendered.text, "Value: -12.5");
     assert_eq!(rendered.alignment, formula_format::AlignmentHint::Left);
+
+    let rendered = format_value(Value::Text("hello"), Some("\"Value: \"@"), &options);
+    assert_eq!(rendered.text, "Value: hello");
 }
