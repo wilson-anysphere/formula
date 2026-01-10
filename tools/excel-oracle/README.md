@@ -26,6 +26,8 @@ GitHub-hosted `windows-latest` runners typically **do not include Microsoft Exce
 
 If you commit a pinned oracle dataset (see below), CI can still validate the engine even when Excel is not available.
 
+See `tools/excel-oracle/self-hosted-runner.md` for notes on running Excel COM automation in CI.
+
 ## Case corpus
 
 The canonical case list lives at:
