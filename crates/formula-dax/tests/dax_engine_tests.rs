@@ -1,5 +1,6 @@
 use formula_dax::{
-    Cardinality, CrossFilterDirection, DataModel, FilterContext, Relationship, Table, Value,
+    Cardinality, CrossFilterDirection, DataModel, DaxError, FilterContext, Relationship, Table,
+    Value,
 };
 use pretty_assertions::assert_eq;
 
@@ -157,4 +158,48 @@ fn relatedtable_supports_iterators() {
         .collect();
 
     assert_eq!(values, vec![30.0.into(), 5.0.into(), 8.0.into()]);
+}
+
+#[test]
+fn calculate_transitions_row_context_to_filter_context_for_measures() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    model
+        .add_calculated_column(
+            "Customers",
+            "Sales via CALCULATE",
+            "CALCULATE([Total Sales])",
+        )
+        .unwrap();
+
+    let customers = model.table("Customers").unwrap();
+    let values: Vec<Value> = (0..customers.row_count())
+        .map(|row| customers.value(row, "Sales via CALCULATE").unwrap().clone())
+        .collect();
+
+    assert_eq!(values, vec![30.0.into(), 5.0.into(), 8.0.into()]);
+}
+
+#[test]
+fn insert_row_checks_referential_integrity_and_key_uniqueness() {
+    let mut model = build_model();
+
+    let err = model
+        .insert_row("Orders", vec![104.into(), 999.into(), 1.0.into()])
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        DaxError::ReferentialIntegrityViolation { .. }
+    ));
+
+    let err = model
+        .insert_row(
+            "Customers",
+            vec![1.into(), "Duplicate".into(), "East".into()],
+        )
+        .unwrap_err();
+    assert!(matches!(err, DaxError::NonUniqueKey { .. }));
 }

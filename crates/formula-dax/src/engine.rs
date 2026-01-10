@@ -106,11 +106,6 @@ impl FilterContext {
     fn set_row_filter(&mut self, table: &str, rows: HashSet<usize>) {
         self.row_filters.insert(table.to_string(), rows);
     }
-
-    fn set_row_equals(&mut self, table: &str, row: usize) {
-        self.row_filters
-            .insert(table.to_string(), HashSet::from([row]));
-    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -471,7 +466,18 @@ impl DaxEngine {
         let mut new_filter = filter.clone();
 
         for (table, row) in row_ctx.tables_with_current_rows() {
-            new_filter.set_row_equals(table, row);
+            new_filter.clear_table_filters(table);
+            let table_ref = model
+                .table(table)
+                .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+
+            for (col_idx, column) in table_ref.columns().iter().enumerate() {
+                let value = table_ref
+                    .value_by_idx(row, col_idx)
+                    .cloned()
+                    .unwrap_or(Value::Blank);
+                new_filter.set_column_equals(table, column, value);
+            }
         }
 
         for arg in filter_args {

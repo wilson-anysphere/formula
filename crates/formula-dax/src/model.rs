@@ -167,16 +167,95 @@ impl DataModel {
         self.tables.get(name)
     }
 
-    pub fn table_mut(&mut self, name: &str) -> Option<&mut Table> {
-        self.tables.get_mut(name)
-    }
-
     pub fn add_table(&mut self, table: Table) -> DaxResult<()> {
         let name = table.name.clone();
         if self.tables.contains_key(&name) {
             return Err(DaxError::DuplicateTable { table: name });
         }
         self.tables.insert(name, table);
+        Ok(())
+    }
+
+    pub fn insert_row(&mut self, table: &str, row: Vec<Value>) -> DaxResult<()> {
+        let (row_index, to_index_updates) = {
+            let table_ref = self
+                .tables
+                .get(table)
+                .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+
+            if row.len() != table_ref.columns.len() {
+                return Err(DaxError::SchemaMismatch {
+                    table: table_ref.name.clone(),
+                    expected: table_ref.columns.len(),
+                    actual: row.len(),
+                });
+            }
+
+            let row_index = table_ref.row_count();
+            let mut to_index_updates = Vec::new();
+
+            for (rel_idx, rel_info) in self.relationships.iter().enumerate() {
+                let rel = &rel_info.rel;
+
+                if rel.to_table == table {
+                    let to_idx = table_ref.column_idx(&rel.to_column).ok_or_else(|| {
+                        DaxError::UnknownColumn {
+                            table: rel.to_table.clone(),
+                            column: rel.to_column.clone(),
+                        }
+                    })?;
+                    let key = row[to_idx].clone();
+                    if rel_info.to_index.contains_key(&key) {
+                        return Err(DaxError::NonUniqueKey {
+                            table: rel.to_table.clone(),
+                            column: rel.to_column.clone(),
+                            value: key,
+                        });
+                    }
+                    to_index_updates.push((rel_idx, key));
+                }
+
+                if rel.from_table == table && rel.enforce_referential_integrity {
+                    let from_idx = table_ref.column_idx(&rel.from_column).ok_or_else(|| {
+                        DaxError::UnknownColumn {
+                            table: rel.from_table.clone(),
+                            column: rel.from_column.clone(),
+                        }
+                    })?;
+
+                    let key = row[from_idx].clone();
+                    if key.is_blank() {
+                        continue;
+                    }
+
+                    if !rel_info.to_index.contains_key(&key) {
+                        return Err(DaxError::ReferentialIntegrityViolation {
+                            relationship: rel.name.clone(),
+                            from_table: rel.from_table.clone(),
+                            from_column: rel.from_column.clone(),
+                            to_table: rel.to_table.clone(),
+                            to_column: rel.to_column.clone(),
+                            value: key,
+                        });
+                    }
+                }
+            }
+
+            (row_index, to_index_updates)
+        };
+
+        {
+            let table_mut = self
+                .tables
+                .get_mut(table)
+                .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+            table_mut.push_row(row)?;
+        }
+
+        for (rel_idx, key) in to_index_updates {
+            self.relationships[rel_idx].to_index.insert(key, row_index);
+        }
+
         Ok(())
     }
 
