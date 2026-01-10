@@ -21,6 +21,7 @@ test("Yjs + SQLite: checkpoint, edit, diff, restore (history preserved)", async 
   const ydoc = new Y.Doc();
   const sheets = ydoc.getArray("sheets");
   const cells = ydoc.getMap("cells");
+  const comments = ydoc.getArray("comments");
 
   // Minimal sheet metadata for realism.
   const sheet = new Y.Map();
@@ -33,6 +34,11 @@ test("Yjs + SQLite: checkpoint, edit, diff, restore (history preserved)", async 
     cell.set("value", "move-me");
     cell.set("formula", "=A1+B1");
     cells.set("sheet1:0:0", cell);
+
+    const comment = new Y.Map();
+    comment.set("id", "c1");
+    comment.set("text", "original");
+    comments.push([comment]);
   });
 
   const doc = createYjsSpreadsheetDocAdapter(ydoc);
@@ -53,6 +59,9 @@ test("Yjs + SQLite: checkpoint, edit, diff, restore (history preserved)", async 
     moved.set("value", "move-me");
     moved.set("formula", "=B1 + A1");
     cells.set("sheet1:2:3", moved);
+
+    const comment = comments.get(0);
+    if (comment) comment.set("text", "edited");
   });
   const snapshot = await vm.createSnapshot({ description: "after move" });
 
@@ -78,6 +87,7 @@ test("Yjs + SQLite: checkpoint, edit, diff, restore (history preserved)", async 
   const restoredCell = cells.get("sheet1:0:0");
   assert.ok(restoredCell);
   assert.equal(restoredCell.get("value"), "move-me");
+  assert.equal(comments.get(0)?.get("text"), "original");
 
   const versions = await vm.listVersions();
   assert.equal(versions.length, 3);
