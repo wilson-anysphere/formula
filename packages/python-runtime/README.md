@@ -28,6 +28,12 @@ sheet["A2"] = "=A1*2"
 );
 ```
 
+`execute()` resolves to an object with these additional fields:
+- `stdout: string` (always `""` for `NativePythonRuntime` — stdout is reserved for the JSON protocol stream)
+- `stderr: string` (captured user output; note that native Python redirects `sys.stdout` to `sys.stderr`)
+
+If execution fails, the thrown `Error` also includes `err.stdout` / `err.stderr` (when available).
+
 If you already use `apps/desktop`'s `DocumentController`, you can use the
 included adapter:
 

@@ -25,6 +25,46 @@ sheet["A2"] = "=A1*2"
   assert.equal(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 1, col: 0 }), 84);
 });
 
+test("native python runtime returns captured stderr output (print)", async () => {
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+print("hello from python")
+`;
+
+  const result = await runtime.execute(script, { api: workbook });
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /hello from python/);
+});
+
+test("native python runtime surfaces captured stderr on failure without losing traceback", async () => {
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+print("before boom")
+raise Exception("boom")
+`;
+
+  await assert.rejects(
+    () => runtime.execute(script, { api: workbook }),
+    (err) => {
+      assert.match(err.stack ?? "", /Traceback/);
+      assert.match(err.stderr ?? "", /before boom/);
+      return true;
+    },
+  );
+});
+
 test("native python sandbox blocks filesystem by default", async () => {
   const workbook = new MockWorkbook();
   const runtime = new NativePythonRuntime({

@@ -30,6 +30,35 @@ sheet["A2"] = "=A1*2"
     expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 1, col: 0 })).toBe(84);
   });
 
+  it("returns captured stderr output (print)", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const result = await runtime.execute(`print("hello from python")\n`, { api: workbook });
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("hello from python");
+  });
+
+  it("includes captured stderr on thrown errors while preserving the Python traceback", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    await expect(runtime.execute(`print("before boom")\nraise Exception("boom")\n`, { api: workbook })).rejects.toMatchObject(
+      {
+        stderr: expect.stringContaining("before boom"),
+        stack: expect.stringMatching(/Traceback/),
+      },
+    );
+  });
+
   it("supports 1D list assignment for single-row and single-column ranges", async () => {
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({

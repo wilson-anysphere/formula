@@ -57,6 +57,14 @@ export class NativePythonRuntime {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
+    // Stdout is reserved for protocol messages; user prints are redirected to
+    // stderr by the Python runner (see `formula.runtime.stdio_runner`).
+    let stderrText = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderrText += chunk;
+    });
+
     let timeoutId;
     let done = false;
     /** @type {((err: any) => void) | null} */
@@ -126,19 +134,18 @@ export class NativePythonRuntime {
 
       child.on("exit", (code, signal) => {
         if (done) return;
-        rejectOnce(new Error(`Python process exited unexpectedly (code=${code}, signal=${signal})`));
-      });
-
-      child.stderr.on("data", () => {
-        // Intentionally ignored by default; caller can attach their own listeners
-        // by overriding this class or spawning with stdio pipes.
+        const err = new Error(`Python process exited unexpectedly (code=${code}, signal=${signal})`);
+        err.stderr = stderrText;
+        rejectOnce(err);
       });
     });
 
     if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
       timeoutId = setTimeout(() => {
         if (done) return;
-        rejectPromise?.(new Error(`Python script timed out after ${timeoutMs}ms`));
+        const err = new Error(`Python script timed out after ${timeoutMs}ms`);
+        err.stderr = stderrText;
+        rejectPromise?.(err);
         killWith("SIGKILL");
       }, timeoutMs);
     }
@@ -157,10 +164,19 @@ export class NativePythonRuntime {
       const result = await resultPromise;
       if (!result.success) {
         const err = new Error(result.error || "Python script failed");
-        err.stack = result.traceback || err.stack;
+        const combinedStderr = result.stderr ?? stderrText;
+        if (typeof combinedStderr === "string" && combinedStderr.length > 0) {
+          err.stderr = combinedStderr;
+        }
+        if (result.traceback) {
+          err.stack =
+            typeof combinedStderr === "string" && combinedStderr.length > 0
+              ? `${result.traceback}\n\n--- Captured stderr ---\n${combinedStderr}`
+              : result.traceback;
+        }
         throw err;
       }
-      return result;
+      return { ...result, stdout: "", stderr: stderrText };
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
       killWith("SIGTERM");

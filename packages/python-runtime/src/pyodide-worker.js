@@ -20,6 +20,8 @@ const originalWebSocket = self.WebSocket;
 let rpcTimeoutMs = 2_000;
 let rpcBufferBytes = 256 * 1024;
 
+let executeQueue = Promise.resolve();
+
 async function loadPyodideOnce({ indexURL } = {}) {
   if (pyodide) return pyodide;
 
@@ -44,6 +46,74 @@ async function loadPyodideOnce({ indexURL } = {}) {
   }
 
   return pyodide;
+}
+
+function withCapturedOutput(runtime, fn) {
+  let stdout = "";
+  let stderr = "";
+
+  const canCapture = typeof runtime?.setStdout === "function" && typeof runtime?.setStderr === "function";
+  if (canCapture) {
+    try {
+      runtime.setStdout({ batched: (text) => (stdout += text) });
+    } catch {
+      try {
+        runtime.setStdout({ write: (text) => (stdout += text) });
+      } catch {
+        // Best-effort; if Pyodide doesn't support overriding streams in this build,
+        // we still run the script but return empty output.
+      }
+    }
+
+    try {
+      runtime.setStderr({ batched: (text) => (stderr += text) });
+    } catch {
+      try {
+        runtime.setStderr({ write: (text) => (stderr += text) });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const restore = () => {
+    if (!canCapture) return;
+    // Restore default behavior between executions to avoid output from one run
+    // being captured by the next. We intentionally route to console here.
+    try {
+      runtime.setStdout({ batched: (text) => console.log(text) });
+    } catch {
+      try {
+        runtime.setStdout({ write: (text) => console.log(text) });
+      } catch {
+        // ignore
+      }
+    }
+
+    try {
+      runtime.setStderr({ batched: (text) => console.error(text) });
+    } catch {
+      try {
+        runtime.setStderr({ write: (text) => console.error(text) });
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  return Promise.resolve()
+    .then(fn)
+    .then(
+      (value) => ({ value, stdout, stderr }),
+      (err) => {
+        if (err && (typeof err === "object" || typeof err === "function")) {
+          err.stdout = stdout;
+          err.stderr = stderr;
+        }
+        throw err;
+      },
+    )
+    .finally(restore);
 }
 
 function getWasmMemoryBytes(runtime) {
@@ -225,35 +295,54 @@ self.onmessage = async (event) => {
   }
 
   if (msg.type === "execute") {
-    const requestId = msg.requestId;
-    try {
-      const runtime = await loadPyodideOnce({ indexURL: msg.indexURL });
+    executeQueue = executeQueue.then(async () => {
+      const requestId = msg.requestId;
+      let stdout = "";
+      let stderr = "";
+      try {
+        const runtime = await loadPyodideOnce({ indexURL: msg.indexURL });
 
-      const permissions = msg.permissions ?? {};
-      applyNetworkSandbox(permissions);
-      await applyPythonSandbox(runtime, permissions);
+        const permissions = msg.permissions ?? {};
+        applyNetworkSandbox(permissions);
+        await applyPythonSandbox(runtime, permissions);
 
-      const maxMemoryBytes = msg.maxMemoryBytes;
-      const beforeMem = getWasmMemoryBytes(runtime);
+        const maxMemoryBytes = msg.maxMemoryBytes;
+        const beforeMem = getWasmMemoryBytes(runtime);
 
-      const result = await runWithTimeout(runtime, msg.code, msg.timeoutMs);
+        const { value: result, stdout: capturedStdout, stderr: capturedStderr } = await withCapturedOutput(runtime, () =>
+          runWithTimeout(runtime, msg.code, msg.timeoutMs),
+        );
+        stdout = capturedStdout;
+        stderr = capturedStderr;
 
-      const afterMem = getWasmMemoryBytes(runtime);
-      if (Number.isFinite(maxMemoryBytes) && maxMemoryBytes > 0 && afterMem != null && afterMem > maxMemoryBytes) {
-        throw new Error(`Pyodide memory limit exceeded: ${afterMem} bytes > ${maxMemoryBytes} bytes`);
+        const afterMem = getWasmMemoryBytes(runtime);
+        if (Number.isFinite(maxMemoryBytes) && maxMemoryBytes > 0 && afterMem != null && afterMem > maxMemoryBytes) {
+          throw new Error(`Pyodide memory limit exceeded: ${afterMem} bytes > ${maxMemoryBytes} bytes`);
+        }
+
+        // If memory grew substantially during the run, still return the result but
+        // include some debugging metadata.
+        self.postMessage({
+          type: "result",
+          requestId,
+          success: true,
+          result,
+          stdout,
+          stderr,
+          memory: { before: beforeMem, after: afterMem },
+        });
+      } catch (err) {
+        stdout = err?.stdout ?? stdout;
+        stderr = err?.stderr ?? stderr;
+        self.postMessage({
+          type: "result",
+          requestId,
+          success: false,
+          error: err?.message ?? String(err),
+          stdout,
+          stderr,
+        });
       }
-
-      // If memory grew substantially during the run, still return the result but
-      // include some debugging metadata.
-      self.postMessage({
-        type: "result",
-        requestId,
-        success: true,
-        result,
-        memory: { before: beforeMem, after: afterMem },
-      });
-    } catch (err) {
-      self.postMessage({ type: "result", requestId, success: false, error: err?.message ?? String(err) });
-    }
+    });
   }
 };

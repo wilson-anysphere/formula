@@ -200,7 +200,14 @@ export class PyodideRuntime {
           this.destroy();
         }
 
-        reject(new Error(msg.error || "Pyodide script failed"));
+        const err = new Error(msg.error || "Pyodide script failed");
+        if (typeof msg.stdout === "string" && msg.stdout.length > 0) {
+          err.stdout = msg.stdout;
+        }
+        if (typeof msg.stderr === "string" && msg.stderr.length > 0) {
+          err.stderr = msg.stderr;
+        }
+        reject(err);
       };
 
       const onError = (err) => {
