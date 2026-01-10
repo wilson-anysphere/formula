@@ -1,5 +1,9 @@
 use crate::file_io::Workbook;
-use formula_engine::{Engine as FormulaEngine, ErrorKind, Value as EngineValue};
+use formula_engine::eval::parse_a1;
+use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult};
+use formula_engine::what_if::monte_carlo::{MonteCarloEngine, SimulationConfig, SimulationResult};
+use formula_engine::what_if::{CellRef as WhatIfCellRef, CellValue as WhatIfCellValue, EngineWhatIfModel, WhatIfModel};
+use formula_engine::{Engine as FormulaEngine, ErrorKind, RecalcMode, Value as EngineValue};
 use formula_xlsx::print::{CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings};
 use serde_json::Value as JsonValue;
 
@@ -20,6 +24,8 @@ pub enum AppStateError {
         end_row: usize,
         end_col: usize,
     },
+    #[error("what-if analysis failed: {0}")]
+    WhatIf(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -550,6 +556,82 @@ impl AppState {
         self.refresh_computed_values()
     }
 
+    pub fn goal_seek(
+        &mut self,
+        sheet_id: &str,
+        params: GoalSeekParams,
+    ) -> Result<(GoalSeekResult, Vec<CellUpdateData>), AppStateError> {
+        let default_sheet_name = self
+            .get_workbook()?
+            .sheet(sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?
+            .name
+            .clone();
+
+        let (changing_sheet_id, changing_row, changing_col) = resolve_cell_ref(
+            self.get_workbook()?,
+            sheet_id,
+            &default_sheet_name,
+            &params.changing_cell,
+        )?;
+
+        let mut model = EngineWhatIfModel::new(&mut self.engine, default_sheet_name)
+            .with_recalc_mode(RecalcMode::SingleThreaded);
+
+        let result = GoalSeek::solve(&mut model, params)
+            .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+
+        let updates = self.set_cell(
+            &changing_sheet_id,
+            changing_row,
+            changing_col,
+            Some(JsonValue::from(result.solution)),
+            None,
+        )?;
+
+        Ok((result, updates))
+    }
+
+    pub fn run_monte_carlo(
+        &mut self,
+        sheet_id: &str,
+        config: SimulationConfig,
+    ) -> Result<SimulationResult, AppStateError> {
+        let default_sheet_name = self
+            .get_workbook()?
+            .sheet(sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?
+            .name
+            .clone();
+
+        let mut model = EngineWhatIfModel::new(&mut self.engine, default_sheet_name)
+            .with_recalc_mode(RecalcMode::SingleThreaded);
+
+        // Keep the engine consistent with the workbook after the simulation by
+        // restoring the original input values (the workbook state is not mutated
+        // during the simulation run).
+        let mut base_inputs = std::collections::HashMap::<WhatIfCellRef, WhatIfCellValue>::new();
+        for input in &config.input_distributions {
+            if base_inputs.contains_key(&input.cell) {
+                continue;
+            }
+            let base = model
+                .get_cell_value(&input.cell)
+                .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+            base_inputs.insert(input.cell.clone(), base);
+        }
+
+        let result = MonteCarloEngine::run_simulation(&mut model, config);
+
+        // Best-effort restore, even if the simulation fails.
+        for (cell, value) in base_inputs {
+            let _ = model.set_cell_value(&cell, value);
+        }
+        let _ = model.recalculate();
+
+        result.map_err(|e| AppStateError::WhatIf(e.to_string()))
+    }
+
     pub fn undo(&mut self) -> Result<Vec<CellUpdateData>, AppStateError> {
         if self.workbook.is_none() {
             return Err(AppStateError::NoWorkbookLoaded);
@@ -741,6 +823,40 @@ impl AppState {
     }
 }
 
+fn resolve_cell_ref(
+    workbook: &Workbook,
+    default_sheet_id: &str,
+    default_sheet_name: &str,
+    cell: &WhatIfCellRef,
+) -> Result<(String, usize, usize), AppStateError> {
+    let raw = cell.as_str().trim();
+    let (sheet_name, addr) = match raw.split_once('!') {
+        Some((sheet_raw, addr_raw)) => {
+            let sheet_raw = sheet_raw.trim();
+            let sheet_unquoted = sheet_raw
+                .strip_prefix('\'')
+                .and_then(|s| s.strip_suffix('\''))
+                .unwrap_or(sheet_raw);
+            (sheet_unquoted.to_string(), addr_raw.trim().to_string())
+        }
+        None => (default_sheet_name.to_string(), raw.to_string()),
+    };
+
+    let sheet_id = if sheet_name == default_sheet_name {
+        default_sheet_id.to_string()
+    } else {
+        workbook
+            .sheets
+            .iter()
+            .find(|s| s.name == sheet_name)
+            .map(|s| s.id.clone())
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_name.clone()))?
+    };
+
+    let addr = parse_a1(&addr).map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+    Ok((sheet_id, addr.row as usize, addr.col as usize))
+}
+
 fn normalize_formula(formula: Option<String>) -> Option<String> {
     let mut formula = formula?.trim().to_string();
     if formula.is_empty() {
@@ -857,6 +973,7 @@ fn ensure_sheet_print_settings<'a>(
 mod tests {
     use super::*;
     use crate::file_io::{read_xlsx_blocking, write_xlsx_blocking};
+    use formula_engine::what_if::monte_carlo::{Distribution, InputDistribution};
 
     #[test]
     fn set_cell_recalculates_dependents() {
@@ -889,6 +1006,97 @@ mod tests {
         let b1_after = state.get_cell(&sheet_id, 0, 1).unwrap();
         assert_eq!(b1_after.value, CellScalar::Number(11.0));
         assert!(state.has_unsaved_changes());
+    }
+
+    #[test]
+    fn goal_seek_commits_solution_and_can_be_undone() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(1.0))),
+        );
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 1, Cell::from_formula("=A1*A1".to_string()));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        assert!(!state.has_unsaved_changes());
+
+        let mut params = GoalSeekParams::new("B1", 9.0, "A1");
+        params.tolerance = 1e-9;
+        let (result, _updates) = state.goal_seek(&sheet_id, params).unwrap();
+        assert!(result.success(), "{result:?}");
+
+        let a1 = state.get_cell(&sheet_id, 0, 0).unwrap().value;
+        let b1 = state.get_cell(&sheet_id, 0, 1).unwrap().value;
+        match a1 {
+            CellScalar::Number(v) => assert!((v - 3.0).abs() < 1e-6, "A1 = {v}"),
+            other => panic!("expected numeric A1, got {other:?}"),
+        }
+        match b1 {
+            CellScalar::Number(v) => assert!((v - 9.0).abs() < 1e-6, "B1 = {v}"),
+            other => panic!("expected numeric B1, got {other:?}"),
+        }
+        assert!(state.has_unsaved_changes());
+
+        state.undo().unwrap();
+        assert_eq!(
+            state.get_cell(&sheet_id, 0, 0).unwrap().value,
+            CellScalar::Number(1.0)
+        );
+        assert_eq!(
+            state.get_cell(&sheet_id, 0, 1).unwrap().value,
+            CellScalar::Number(1.0)
+        );
+    }
+
+    #[test]
+    fn monte_carlo_does_not_mutate_workbook_inputs_or_dirty_flag() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(0.0))),
+        );
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 1, Cell::from_formula("=A1+1".to_string()));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        assert!(!state.has_unsaved_changes());
+
+        let before_a1 = state.get_cell(&sheet_id, 0, 0).unwrap().value;
+        let before_b1 = state.get_cell(&sheet_id, 0, 1).unwrap().value;
+
+        let mut config = SimulationConfig::new(2_000);
+        config.seed = 123;
+        config.input_distributions = vec![InputDistribution {
+            cell: WhatIfCellRef::from("A1"),
+            distribution: Distribution::Normal {
+                mean: 0.0,
+                std_dev: 1.0,
+            },
+        }];
+        config.output_cells = vec![WhatIfCellRef::from("B1")];
+
+        let result = state.run_monte_carlo(&sheet_id, config).unwrap();
+        let stats = result.output_stats.get(&WhatIfCellRef::from("B1")).unwrap();
+        assert!((stats.mean - 1.0).abs() < 0.05, "mean = {}", stats.mean);
+
+        assert_eq!(state.get_cell(&sheet_id, 0, 0).unwrap().value, before_a1);
+        assert_eq!(state.get_cell(&sheet_id, 0, 1).unwrap().value, before_b1);
+        assert!(!state.has_unsaved_changes());
     }
 
     #[test]
