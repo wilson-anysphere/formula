@@ -40,6 +40,41 @@ def apply_sandbox(permissions: Dict[str, Any]) -> None:
 
         builtins.open = blocked_open  # type: ignore[assignment]
 
+        # Avoid obvious command execution / filesystem escape hatches.
+        try:  # pragma: no cover - platform dependent
+            import os
+
+            def blocked_os(*_args: Any, **_kwargs: Any) -> Any:
+                raise PermissionError("Filesystem access is not permitted")
+
+            for attr in (
+                "system",
+                "popen",
+                "spawnl",
+                "spawnle",
+                "spawnlp",
+                "spawnlpe",
+                "spawnv",
+                "spawnve",
+                "spawnvp",
+                "spawnvpe",
+                "execl",
+                "execle",
+                "execlp",
+                "execlpe",
+                "execv",
+                "execve",
+                "execvp",
+                "execvpe",
+                "startfile",
+                "open",
+                "fdopen",
+            ):
+                if hasattr(os, attr):
+                    setattr(os, attr, blocked_os)
+        except Exception:
+            pass
+
     # Always block interactive input (native runtime stdin is used for RPC, and
     # Pyodide has no meaningful stdin).
     def blocked_input(*_args: Any, **_kwargs: Any) -> Any:
@@ -48,8 +83,9 @@ def apply_sandbox(permissions: Dict[str, Any]) -> None:
     builtins.input = blocked_input  # type: ignore[assignment]
 
     blocked_roots = set()
-    if filesystem == "none":
-        blocked_roots.update({"os", "pathlib", "shutil", "subprocess"})
+    # `subprocess` is an easy escape hatch for both filesystem and network access.
+    if filesystem == "none" or network == "none":
+        blocked_roots.add("subprocess")
     if network == "none":
         blocked_roots.update({"socket", "ssl", "http", "urllib", "requests"})
 
@@ -63,4 +99,3 @@ def apply_sandbox(permissions: Dict[str, Any]) -> None:
             return original_import(name, globals, locals, fromlist, level)
 
         builtins.__import__ = guarded_import  # type: ignore[assignment]
-

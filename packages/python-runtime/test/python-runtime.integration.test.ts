@@ -46,5 +46,36 @@ with open("some_file.txt", "w") as f:
 
     await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Filesystem access is not permitted/);
   });
-});
 
+  it("blocks obvious command execution escape hatches (os.system)", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import os
+os.system("echo should-not-run")
+`;
+
+    await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Filesystem access is not permitted/);
+  });
+
+  it("enforces script execution timeouts", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import time
+time.sleep(10)
+`;
+
+    await expect(runtime.execute(script, { api: workbook, timeoutMs: 50 })).rejects.toThrow(/timed out/i);
+  });
+});

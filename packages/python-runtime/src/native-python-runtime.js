@@ -58,6 +58,9 @@ export class NativePythonRuntime {
     });
 
     let timeoutId;
+    let done = false;
+    /** @type {((err: any) => void) | null} */
+    let rejectPromise = null;
     const killWith = (signal) => {
       try {
         child.kill(signal);
@@ -67,7 +70,12 @@ export class NativePythonRuntime {
     };
 
     const resultPromise = new Promise((resolve, reject) => {
-      let done = false;
+      let rejectOnce = (err) => {
+        if (done) return;
+        done = true;
+        reject(err);
+      };
+      rejectPromise = rejectOnce;
 
       const stdoutLines = createInterface({ input: child.stdout });
       stdoutLines.on("line", async (line) => {
@@ -78,8 +86,7 @@ export class NativePythonRuntime {
         try {
           msg = JSON.parse(line);
         } catch (err) {
-          done = true;
-          reject(new Error(`Python runtime protocol error (non-JSON line): ${line}`));
+          rejectOnce(new Error(`Python runtime protocol error (non-JSON line): ${line}`));
           killWith("SIGKILL");
           return;
         }
@@ -109,21 +116,17 @@ export class NativePythonRuntime {
           return;
         }
 
-        done = true;
-        reject(new Error(`Python runtime protocol error (unknown message type "${msg.type}")`));
+        rejectOnce(new Error(`Python runtime protocol error (unknown message type "${msg.type}")`));
         killWith("SIGKILL");
       });
 
       child.on("error", (err) => {
-        if (done) return;
-        done = true;
-        reject(err);
+        rejectOnce(err);
       });
 
       child.on("exit", (code, signal) => {
         if (done) return;
-        done = true;
-        reject(new Error(`Python process exited unexpectedly (code=${code}, signal=${signal})`));
+        rejectOnce(new Error(`Python process exited unexpectedly (code=${code}, signal=${signal})`));
       });
 
       child.stderr.on("data", () => {
@@ -134,6 +137,8 @@ export class NativePythonRuntime {
 
     if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
       timeoutId = setTimeout(() => {
+        if (done) return;
+        rejectPromise?.(new Error(`Python script timed out after ${timeoutMs}ms`));
         killWith("SIGKILL");
       }, timeoutMs);
     }
