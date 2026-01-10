@@ -121,6 +121,71 @@ fn simplex_solves_linear_lp() {
 }
 
 #[test]
+fn simplex_hits_target_objective_value() {
+    // Find x such that objective=x hits 5.0.
+    let model = FnModel::new(vec![0.0], |vars| (vars[0], Vec::new()));
+    let mut model = model;
+
+    let problem = SolverProblem {
+        objective: Objective::target(5.0, 1e-8),
+        variables: vec![VarSpec::continuous(0.0, 10.0)],
+        constraints: Vec::new(),
+    };
+
+    let mut options = SolveOptions::default();
+    options.method = SolveMethod::Simplex;
+    options.apply_solution = false;
+
+    let outcome = Solver::solve(&mut model, &problem, options).expect("solve");
+    assert_eq!(outcome.status, SolveStatus::Optimal);
+    assert!((outcome.best_vars[0] - 5.0).abs() < 1e-6);
+    assert!((outcome.best_objective - 5.0).abs() < 1e-6);
+}
+
+#[test]
+fn simplex_solves_integer_program_via_branch_and_bound() {
+    // Maximize x + y
+    // s.t. 2x + y <= 4
+    //      x <= 3
+    //      y <= 3
+    //      x,y integer >= 0
+    //
+    // LP relaxation chooses x=0.5, y=3 (objective=3.5). Integer optimum is 3.
+    let model = FnModel::new(vec![0.0, 0.0], |vars| {
+        let x = vars[0];
+        let y = vars[1];
+        let objective = x + y;
+        let constraints = vec![2.0 * x + y, x, y];
+        (objective, constraints)
+    });
+
+    let mut model = model;
+    let problem = SolverProblem {
+        objective: Objective::maximize(),
+        variables: vec![VarSpec::integer(0.0, 3.0), VarSpec::integer(0.0, 3.0)],
+        constraints: vec![
+            Constraint::new(0, Relation::LessEqual, 4.0),
+            Constraint::new(1, Relation::LessEqual, 3.0),
+            Constraint::new(2, Relation::LessEqual, 3.0),
+        ],
+    };
+
+    let mut options = SolveOptions::default();
+    options.method = SolveMethod::Simplex;
+    options.apply_solution = false;
+
+    let outcome = Solver::solve(&mut model, &problem, options).expect("solve");
+    assert!(matches!(
+        outcome.status,
+        SolveStatus::Optimal | SolveStatus::Feasible
+    ));
+    assert!((outcome.best_objective - 3.0).abs() < 1e-6);
+    assert!((outcome.best_vars[0].fract()).abs() < 1e-6);
+    assert!((outcome.best_vars[1].fract()).abs() < 1e-6);
+    assert!(outcome.max_constraint_violation < 1e-6);
+}
+
+#[test]
 fn grg_solves_nonlinear_constrained_problem() {
     // Minimize (x-1)^2 + (y-2)^2 subject to x + y = 3, 0<=x,y<=3.
     let model = FnModel::new(vec![0.5, 0.5], |vars| {

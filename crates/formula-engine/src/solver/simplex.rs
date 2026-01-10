@@ -120,7 +120,7 @@ pub(crate) fn solve_simplex<M: SolverModel>(
         objective: f64::NAN,
     });
 
-    let status = match best_lp_solution.status {
+    let mut status = match best_lp_solution.status {
         LpStatus::Optimal => SolveStatus::Optimal,
         LpStatus::Infeasible => SolveStatus::Infeasible,
         LpStatus::Unbounded => SolveStatus::Unbounded,
@@ -153,6 +153,20 @@ pub(crate) fn solve_simplex<M: SolverModel>(
     let best_objective = model.objective();
     model.constraints(&mut constraint_values);
     let max_violation = max_constraint_violation(&constraint_values, &problem.constraints);
+
+    if problem.objective.kind == ObjectiveKind::Target
+        && matches!(status, SolveStatus::Optimal | SolveStatus::Feasible)
+    {
+        let tol = problem
+            .objective
+            .target_tolerance
+            .max(options.tolerance.max(0.0));
+        if (best_objective - problem.objective.target_value).abs() <= tol {
+            status = SolveStatus::Optimal;
+        } else {
+            status = SolveStatus::Feasible;
+        }
+    }
 
     // Progress update (a single update at end; simplex is not iterative in the same way).
     if let Some(progress) = options.progress.as_deref_mut() {
@@ -188,6 +202,21 @@ fn infer_linear_functions<M: SolverModel>(
     let base_obj = model.objective();
     model.constraints(&mut base_constraints);
 
+    if !base_obj.is_finite() {
+        return Err(SolverError::new(format!(
+            "objective is not finite at the starting point ({base_obj}); simplex requires a valid linear model"
+        )));
+    }
+    if let Some((idx, val)) = base_constraints
+        .iter()
+        .enumerate()
+        .find(|(_, v)| !v.is_finite())
+    {
+        return Err(SolverError::new(format!(
+            "constraint {idx} is not finite at the starting point ({val}); simplex requires a valid linear model"
+        )));
+    }
+
     let mut obj_coeffs = vec![0.0; n];
     let mut constraint_coeffs: Vec<Vec<f64>> = vec![vec![0.0; n]; m];
 
@@ -197,16 +226,30 @@ fn infer_linear_functions<M: SolverModel>(
         vars[j] += step;
         clamp_vars(&mut vars, &problem.variables);
 
+        let denom = vars[j] - base_vars[j];
+        if denom.abs() < 1e-12 {
+            // Variable cannot move (e.g. fixed bounds); treat as having a zero
+            // coefficient for the inferred linear model.
+            obj_coeffs[j] = 0.0;
+            for i in 0..m {
+                constraint_coeffs[i][j] = 0.0;
+            }
+            continue;
+        }
+
         let mut constraints = vec![0.0; m];
         model.set_vars(&vars)?;
         model.recalc()?;
         let obj = model.objective();
         model.constraints(&mut constraints);
-
-        let denom = vars[j] - base_vars[j];
-        if denom.abs() < 1e-12 {
+        if !obj.is_finite() {
             return Err(SolverError::new(format!(
-                "cannot infer linear coefficient for var {j}: perturbation collapsed to 0"
+                "objective is not finite while inferring coefficient for var {j} ({obj})"
+            )));
+        }
+        if let Some((idx, val)) = constraints.iter().enumerate().find(|(_, v)| !v.is_finite()) {
+            return Err(SolverError::new(format!(
+                "constraint {idx} is not finite while inferring coefficient for var {j} ({val})"
             )));
         }
 
