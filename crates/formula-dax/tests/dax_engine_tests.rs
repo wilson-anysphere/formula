@@ -263,3 +263,42 @@ fn insert_row_updates_relationship_key_index() {
         &Value::from("Dan")
     );
 }
+
+#[test]
+fn countrows_counts_relatedtable_rows() {
+    let mut model = build_model();
+    model
+        .add_calculated_column(
+            "Customers",
+            "Order Count",
+            "COUNTROWS(RELATEDTABLE(Orders))",
+        )
+        .unwrap();
+
+    let customers = model.table("Customers").unwrap();
+    let values: Vec<Value> = (0..customers.row_count())
+        .map(|row| customers.value(row, "Order Count").unwrap().clone())
+        .collect();
+
+    assert_eq!(values, vec![2.into(), 1.into(), 1.into()]);
+}
+
+#[test]
+fn countx_respects_filter_propagation() {
+    let mut model = build_model();
+    model
+        .add_measure("Order Count", "COUNTX(Orders, Orders[OrderId])")
+        .unwrap();
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    let east_count = model.evaluate_measure("Order Count", &east_filter).unwrap();
+    assert_eq!(east_count, 3.into());
+
+    let empty_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "Nowhere".into());
+    let empty_count = model
+        .evaluate_measure("Order Count", &empty_filter)
+        .unwrap();
+    assert_eq!(empty_count, 0.into());
+}

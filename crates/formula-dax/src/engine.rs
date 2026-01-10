@@ -332,6 +332,26 @@ impl DaxEngine {
                     IteratorKind::Average,
                 )
             }
+            "COUNTROWS" => {
+                let [table_expr] = args else {
+                    return Err(DaxError::Eval("COUNTROWS expects 1 argument".into()));
+                };
+                let table_result = self.eval_table(model, table_expr, filter, row_ctx)?;
+                Ok(Value::from(table_result.rows.len() as i64))
+            }
+            "COUNTX" => {
+                let [table_expr, value_expr] = args else {
+                    return Err(DaxError::Eval("COUNTX expects 2 arguments".into()));
+                };
+                self.eval_iterator(
+                    model,
+                    table_expr,
+                    value_expr,
+                    filter,
+                    row_ctx,
+                    IteratorKind::Count,
+                )
+            }
             "CALCULATE" => {
                 if args.is_empty() {
                     return Err(DaxError::Eval(
@@ -444,23 +464,25 @@ impl DaxEngine {
             let mut inner_ctx = row_ctx.clone();
             inner_ctx.push(&table_result.table, row);
             let value = self.eval_scalar(model, value_expr, filter, &inner_ctx)?;
-            match (kind, value) {
-                (IteratorKind::Sum, Value::Number(n)) => {
-                    sum += n.0;
-                    count += 1;
+            match kind {
+                IteratorKind::Sum | IteratorKind::Average => match value {
+                    Value::Number(n) => {
+                        sum += n.0;
+                        count += 1;
+                    }
+                    Value::Blank => {}
+                    other => {
+                        return Err(DaxError::Type(format!(
+                            "iterator expected numeric expression, got {other}"
+                        )))
+                    }
+                },
+                IteratorKind::Count => {
+                    if !value.is_blank() {
+                        count += 1;
+                    }
                 }
-                (IteratorKind::Sum, Value::Blank) => {}
-                (IteratorKind::Average, Value::Number(n)) => {
-                    sum += n.0;
-                    count += 1;
-                }
-                (IteratorKind::Average, Value::Blank) => {}
-                (_, other) => {
-                    return Err(DaxError::Type(format!(
-                        "iterator expected numeric expression, got {other}"
-                    )))
-                }
-            }
+            };
         }
 
         match kind {
@@ -478,6 +500,7 @@ impl DaxEngine {
                     Ok(Value::from(sum / count as f64))
                 }
             }
+            IteratorKind::Count => Ok(Value::from(count as i64)),
         }
     }
 
@@ -740,6 +763,7 @@ struct TableResult {
 enum IteratorKind {
     Sum,
     Average,
+    Count,
 }
 
 fn resolve_table_rows(
