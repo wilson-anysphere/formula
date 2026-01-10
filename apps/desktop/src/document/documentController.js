@@ -277,7 +277,13 @@ export class DocumentController {
    */
   get isDirty() {
     if (this.savedCursor == null) return true;
-    return this.cursor !== this.savedCursor;
+    if (this.cursor !== this.savedCursor) return true;
+    // While a batch is active we may have applied uncommitted changes to the
+    // model/engine. Those should still be treated as "dirty" for close prompts.
+    if (this.batchDepth > 0 && this.activeBatch && this.activeBatch.deltasByCell.size > 0) {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -627,6 +633,7 @@ export class DocumentController {
         deltasByCell: new Map(),
       };
       this.engine?.beginBatch?.();
+      this.#emitHistory();
     }
   }
 
@@ -643,6 +650,8 @@ export class DocumentController {
     this.engine?.endBatch?.();
 
     if (!batch || batch.deltasByCell.size === 0) {
+      this.#emitHistory();
+      this.#emitDirty();
       return;
     }
 
@@ -700,6 +709,7 @@ export class DocumentController {
 
     if (this.batchDepth > 0) {
       this.#mergeIntoBatch(deltas);
+      this.#emitDirty();
       return;
     }
 

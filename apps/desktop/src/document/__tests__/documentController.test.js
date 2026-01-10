@@ -130,3 +130,46 @@ test("engine recalc is deferred to endBatch", () => {
   doc.endBatch();
   assert.equal(engine.recalcCount, 1);
 });
+
+test("dirty tracking considers in-progress batches (before endBatch)", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.markSaved();
+  assert.equal(doc.isDirty, false);
+
+  doc.beginBatch({ label: "Typing" });
+  doc.setCellValue("Sheet1", "A1", 2);
+  assert.equal(doc.isDirty, true);
+
+  doc.endBatch();
+  assert.equal(doc.isDirty, true);
+
+  doc.undo();
+  assert.equal(doc.getCell("Sheet1", "A1").value, 1);
+  assert.equal(doc.isDirty, false);
+});
+
+test("history enablement updates when entering/leaving an empty batch", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", "x");
+
+  /** @type {{ canUndo: boolean, canRedo: boolean }[]} */
+  const states = [];
+  doc.on("history", (payload) => {
+    states.push(payload);
+  });
+
+  assert.equal(doc.canUndo, true);
+  doc.beginBatch({ label: "No-op" });
+  assert.equal(doc.canUndo, false);
+  doc.endBatch();
+  assert.equal(doc.canUndo, true);
+
+  // We only subscribe after the first edit, so the state sequence should reflect
+  // entering/leaving the empty batch.
+  assert.deepEqual(states, [
+    { canUndo: false, canRedo: false },
+    { canUndo: true, canRedo: false },
+  ]);
+});
