@@ -138,6 +138,26 @@ impl Range {
     pub const fn is_single_cell(&self) -> bool {
         self.start.row == self.end.row && self.start.col == self.end.col
     }
+
+    /// Parse an Excel A1-style range like `A1:B2` or a single-cell reference like `C3`.
+    pub fn from_a1(a1: &str) -> Result<Self, RangeParseError> {
+        let s = a1.trim();
+        if s.is_empty() {
+            return Err(RangeParseError::Empty);
+        }
+
+        match s.split_once(':') {
+            None => {
+                let cell = CellRef::from_a1(s).map_err(RangeParseError::Cell)?;
+                Ok(Range::new(cell, cell))
+            }
+            Some((a, b)) => {
+                let start = CellRef::from_a1(a).map_err(RangeParseError::Cell)?;
+                let end = CellRef::from_a1(b).map_err(RangeParseError::Cell)?;
+                Ok(Range::new(start, end))
+            }
+        }
+    }
 }
 
 impl fmt::Display for Range {
@@ -176,6 +196,31 @@ impl fmt::Display for A1ParseError {
 }
 
 impl std::error::Error for A1ParseError {}
+
+/// Errors that can occur when parsing an A1 range.
+#[derive(Debug)]
+pub enum RangeParseError {
+    Empty,
+    Cell(A1ParseError),
+}
+
+impl fmt::Display for RangeParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RangeParseError::Empty => f.write_str("empty A1 range"),
+            RangeParseError::Cell(e) => write!(f, "invalid cell reference in range: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for RangeParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            RangeParseError::Empty => None,
+            RangeParseError::Cell(e) => Some(e),
+        }
+    }
+}
 
 fn col_to_name(col: u32) -> String {
     // Excel columns are 1-based in A1 notation. We store 0-based internally.
@@ -222,5 +267,16 @@ mod tests {
         let c2 = CellRef::new(31, 54); // BC32
         assert_eq!(c2.to_a1(), "BC32");
         assert_eq!(CellRef::from_a1("bc32").unwrap(), c2);
+    }
+
+    #[test]
+    fn a1_range_parsing() {
+        let r = Range::from_a1("A1:B2").unwrap();
+        assert_eq!(r.start, CellRef::new(0, 0));
+        assert_eq!(r.end, CellRef::new(1, 1));
+
+        let single = Range::from_a1("C3").unwrap();
+        assert!(single.is_single_cell());
+        assert_eq!(single.start, CellRef::new(2, 2));
     }
 }
