@@ -40,6 +40,42 @@ impl CellValue {
     }
 }
 
+impl From<f64> for CellValue {
+    fn from(value: f64) -> Self {
+        CellValue::Number(value)
+    }
+}
+
+impl From<bool> for CellValue {
+    fn from(value: bool) -> Self {
+        CellValue::Boolean(value)
+    }
+}
+
+impl From<String> for CellValue {
+    fn from(value: String) -> Self {
+        CellValue::String(value)
+    }
+}
+
+impl From<&str> for CellValue {
+    fn from(value: &str) -> Self {
+        CellValue::String(value.to_string())
+    }
+}
+
+impl From<ErrorValue> for CellValue {
+    fn from(value: ErrorValue) -> Self {
+        CellValue::Error(value)
+    }
+}
+
+impl From<RichText> for CellValue {
+    fn from(value: RichText) -> Self {
+        CellValue::RichText(value)
+    }
+}
+
 /// Stub representation of a dynamic array result.
 ///
 /// For now this stores a 2D matrix. The calculation engine may later choose a
