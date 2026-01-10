@@ -5,6 +5,7 @@ import { randomSampleRows, stratifiedSampleRows } from "./sampling.js";
 import { classifyText, redactText } from "./dlp.js";
 
 import { indexWorkbook } from "../../ai-rag/src/pipeline/indexWorkbook.js";
+import { workbookFromSpreadsheetApi } from "../../ai-rag/src/workbook/fromSpreadsheetApi.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import { evaluatePolicy, DLP_DECISION } from "../../security/dlp/src/policyEngine.js";
 import { effectiveCellClassification, effectiveRangeClassification } from "../../security/dlp/src/selectors.js";
@@ -295,5 +296,26 @@ export class ContextManager {
       retrieved: retrievedChunks,
       promptContext: packed.map((s) => `## ${s.key}\n${s.text}`).join("\n\n"),
     };
+  }
+
+  /**
+   * Convenience: build workbook RAG context from a `packages/ai-tools`-style SpreadsheetApi.
+   *
+   * @param {{
+   *   spreadsheet: any,
+   *   workbookId: string,
+   *   query: string,
+   *   attachments?: Attachment[],
+   *   topK?: number
+   * }} params
+   */
+  async buildWorkbookContextFromSpreadsheetApi(params) {
+    const workbook = workbookFromSpreadsheetApi({ spreadsheet: params.spreadsheet, workbookId: params.workbookId });
+    return this.buildWorkbookContext({
+      workbook,
+      query: params.query,
+      attachments: params.attachments,
+      topK: params.topK,
+    });
   }
 }

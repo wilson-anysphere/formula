@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { HashEmbedder, InMemoryVectorStore } from "../../ai-rag/src/index.js";
+import { ContextManager } from "../src/contextManager.js";
+
+test("integration: buildWorkbookContextFromSpreadsheetApi retrieves relevant chunk", async () => {
+  const spreadsheet = {
+    listSheets() {
+      return ["Sheet1"];
+    },
+    listNonEmptyCells(sheet) {
+      assert.equal(sheet, "Sheet1");
+      return [
+        { address: { sheet: "Sheet1", row: 0, col: 0 }, cell: { value: "Region" } },
+        { address: { sheet: "Sheet1", row: 0, col: 1 }, cell: { value: "Revenue" } },
+        { address: { sheet: "Sheet1", row: 1, col: 0 }, cell: { value: "North" } },
+        { address: { sheet: "Sheet1", row: 1, col: 1 }, cell: { value: 1000 } },
+        { address: { sheet: "Sheet1", row: 2, col: 0 }, cell: { value: "South" } },
+        { address: { sheet: "Sheet1", row: 2, col: 1 }, cell: { value: 2000 } },
+      ];
+    },
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 800,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const out = await cm.buildWorkbookContextFromSpreadsheetApi({
+    spreadsheet,
+    workbookId: "wb-api",
+    query: "revenue by region",
+  });
+
+  assert.match(out.promptContext, /DATA REGION/i);
+  assert.match(out.promptContext, /Region/);
+  assert.match(out.promptContext, /Revenue/);
+});
+
