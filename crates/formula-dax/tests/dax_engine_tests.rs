@@ -105,6 +105,24 @@ fn calculated_column_can_use_related() {
 }
 
 #[test]
+fn bracket_identifier_resolves_to_column_in_row_context() {
+    let mut model = build_model();
+    model
+        .add_calculated_column("Orders", "Double Amount", "[Amount] * 2")
+        .unwrap();
+
+    let orders = model.table("Orders").unwrap();
+    let values: Vec<Value> = (0..orders.row_count())
+        .map(|row| orders.value(row, "Double Amount").unwrap().clone())
+        .collect();
+
+    assert_eq!(
+        values,
+        vec![20.0.into(), 40.0.into(), 10.0.into(), 16.0.into()]
+    );
+}
+
+#[test]
 fn measure_respects_filter_propagation_across_relationships() {
     let mut model = build_model();
     model

@@ -187,11 +187,34 @@ impl DaxEngine {
             Expr::Text(s) => Ok(Value::from(s.clone())),
             Expr::Boolean(b) => Ok(Value::from(*b)),
             Expr::Measure(name) => {
-                let measure = model
-                    .measures()
-                    .get(DataModel::normalize_measure_name(name))
-                    .ok_or_else(|| DaxError::UnknownMeasure(name.clone()))?;
-                self.eval_scalar(model, &measure.parsed, filter, &RowContext::default())
+                let normalized = DataModel::normalize_measure_name(name).to_string();
+                if let Some(measure) = model.measures().get(&normalized) {
+                    return self.eval_scalar(
+                        model,
+                        &measure.parsed,
+                        filter,
+                        &RowContext::default(),
+                    );
+                }
+
+                // DAX allows `[Column]` references in row context. Bracketed identifiers
+                // are ambiguous (measure vs. column), so we parse them as `Expr::Measure`
+                // and resolve as a column when no measure is defined.
+                let Some(current_table) = row_ctx.current_table() else {
+                    return Err(DaxError::UnknownMeasure(name.clone()));
+                };
+                let row = row_ctx
+                    .row_for(current_table)
+                    .ok_or_else(|| DaxError::Eval(format!("no row context for [{normalized}]")))?;
+                let table_ref = model
+                    .table(current_table)
+                    .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
+                let value = table_ref.value(row, &normalized).ok_or_else(|| {
+                    DaxError::Eval(format!(
+                        "unknown measure [{normalized}] and no column {current_table}[{normalized}]"
+                    ))
+                })?;
+                Ok(value.clone())
             }
             Expr::ColumnRef { table, column } => {
                 let row = row_ctx.row_for(table).ok_or_else(|| {
