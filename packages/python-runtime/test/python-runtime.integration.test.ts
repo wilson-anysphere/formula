@@ -30,6 +30,31 @@ sheet["A2"] = "=A1*2"
     expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 1, col: 0 })).toBe(84);
   });
 
+  it("supports 1D list assignment for single-row and single-column ranges", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import formula
+
+sheet = formula.active_sheet
+
+sheet["A1:B1"] = [1, 2]
+sheet["C1:C2"] = [3, 4]
+`;
+
+    await runtime.execute(script, { api: workbook });
+
+    expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 0, col: 0 })).toBe(1);
+    expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 0, col: 1 })).toBe(2);
+    expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 0, col: 2 })).toBe(3);
+    expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 1, col: 2 })).toBe(4);
+  });
+
   it("blocks filesystem access by default", async () => {
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({

@@ -163,6 +163,32 @@ class Range:
             self._bridge.set_cell_value(self._ref.__dict__, val)
             return
 
+        # Convenience: allow 1D sequences for single-row or single-column ranges.
+        if (
+            not self._ref.is_single_cell
+            and isinstance(val, (list, tuple))
+            and (len(val) == 0 or not isinstance(val[0], (list, tuple)))
+        ):
+            row_count = self._ref.end_row - self._ref.start_row + 1
+            col_count = self._ref.end_col - self._ref.start_col + 1
+            if row_count == 1:
+                if len(val) != col_count:
+                    raise ValueError(
+                        f"Range expects {col_count} values for a 1x{col_count} row range, got {len(val)}"
+                    )
+                val = [list(val)]
+            elif col_count == 1:
+                if len(val) != row_count:
+                    raise ValueError(
+                        f"Range expects {row_count} values for a {row_count}x1 column range, got {len(val)}"
+                    )
+                val = [[v] for v in val]
+            else:
+                raise TypeError(
+                    "Range.value expects a 2D list for multi-cell ranges "
+                    "(a 1D list is only allowed for single-row or single-column ranges)"
+                )
+
         self._bridge.set_range_values(self._ref.__dict__, val)
 
     @property
@@ -223,4 +249,3 @@ def custom_function(func: Optional[Callable[..., Any]] = None, *, name: Optional
 
 def list_custom_functions() -> List[str]:
     return sorted(_function_registry.keys())
-
