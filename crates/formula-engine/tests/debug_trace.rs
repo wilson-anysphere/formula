@@ -115,3 +115,24 @@ fn debug_trace_for_vlookup_includes_reference_arg_and_matches_result() {
     assert_eq!(table_node.value, Value::Blank);
     assert!(matches!(table_node.reference, Some(TraceRef::Range { .. })));
 }
+
+#[test]
+fn trace_respects_if_short_circuiting() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=IF(TRUE,1,1/0)")
+        .unwrap();
+    engine.recalculate();
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, Value::Number(1.0));
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "IF(TRUE,1,1/0)");
+
+    // The trace should include only the condition and the chosen branch.
+    assert!(matches!(dbg.trace.kind, TraceKind::FunctionCall { ref name } if name == "IF"));
+    assert_eq!(dbg.trace.children.len(), 2);
+    assert_eq!(slice(&dbg.formula, dbg.trace.children[0].span), "TRUE");
+    assert_eq!(dbg.trace.children[0].value, Value::Bool(true));
+    assert_eq!(slice(&dbg.formula, dbg.trace.children[1].span), "1");
+    assert_eq!(dbg.trace.children[1].value, Value::Number(1.0));
+}
