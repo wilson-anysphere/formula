@@ -127,6 +127,11 @@ impl Range {
             && cell.col <= self.end.col
     }
 
+    /// Iterate over all cells in the range in row-major order (top-to-bottom, left-to-right).
+    pub fn iter(self) -> RangeIter {
+        RangeIter::new(self)
+    }
+
     /// Number of columns in the range.
     #[inline]
     pub const fn width(&self) -> u32 {
@@ -173,6 +178,44 @@ impl fmt::Display for Range {
         } else {
             write!(f, "{}:{}", self.start, self.end)
         }
+    }
+}
+
+/// Iterator over all cells in a [`Range`] in row-major order.
+#[derive(Clone, Debug)]
+pub struct RangeIter {
+    range: Range,
+    next: Option<CellRef>,
+}
+
+impl RangeIter {
+    fn new(range: Range) -> Self {
+        Self {
+            range,
+            next: Some(range.start),
+        }
+    }
+}
+
+impl Iterator for RangeIter {
+    type Item = CellRef;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.next?;
+        if current.row == self.range.end.row && current.col == self.range.end.col {
+            self.next = None;
+            return Some(current);
+        }
+
+        let mut next_row = current.row;
+        let mut next_col = current.col + 1;
+        if next_col > self.range.end.col {
+            next_col = self.range.start.col;
+            next_row = next_row.saturating_add(1);
+        }
+
+        self.next = Some(CellRef::new(next_row, next_col));
+        Some(current)
     }
 }
 
@@ -291,5 +334,20 @@ mod tests {
         assert!(CellRef::from_a1("XFD1048576").is_ok());
         assert!(CellRef::from_a1("XFE1").is_err()); // col 16385 is out of bounds
         assert!(CellRef::from_a1("A1048577").is_err()); // row 1,048,577 is out of bounds
+    }
+
+    #[test]
+    fn range_iterates_row_major() {
+        let r = Range::new(CellRef::new(0, 0), CellRef::new(1, 1));
+        let cells: Vec<_> = r.iter().collect();
+        assert_eq!(
+            cells,
+            vec![
+                CellRef::new(0, 0),
+                CellRef::new(0, 1),
+                CellRef::new(1, 0),
+                CellRef::new(1, 1),
+            ]
+        );
     }
 }

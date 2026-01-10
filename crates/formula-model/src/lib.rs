@@ -13,7 +13,7 @@ mod value;
 mod workbook;
 mod worksheet;
 
-pub use address::{A1ParseError, CellRef, Range, RangeParseError};
+pub use address::{A1ParseError, CellRef, Range, RangeIter, RangeParseError};
 pub use cell::{Cell, CellId, CellKey};
 pub use error::ErrorValue;
 pub use style::{
