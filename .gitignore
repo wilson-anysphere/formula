@@ -35,6 +35,7 @@ scratchpad.md
 handoff.md
 
 # Python
+/.venv
 __pycache__/
 *.pyc
 

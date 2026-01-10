@@ -1037,6 +1037,14 @@ name = "formula-format"
 version = "0.1.0"
 
 [[package]]
+name = "formula-io"
+version = "0.1.0"
+dependencies = [
+ "formula-xlsb",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "formula-model"
 version = "0.1.0"
 dependencies = [
@@ -1051,6 +1059,16 @@ version = "0.1.0"
 dependencies = [
  "cfb 0.10.0",
  "encoding_rs",
+ "thiserror 1.0.69",
+ "zip 0.6.6",
+]
+
+[[package]]
+name = "formula-xlsb"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "quick-xml 0.31.0",
  "thiserror 1.0.69",
  "zip 0.6.6",
 ]
