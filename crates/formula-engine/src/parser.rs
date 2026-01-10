@@ -156,6 +156,16 @@ impl<'a> Parser<'a> {
         self.skip_ws();
         match self.peek_char() {
             Some(c) if c.is_ascii_digit() => self.parse_number(),
+            Some(c)
+                if c == self.locale.decimal_separator
+                    && self
+                        .input
+                        .get(self.pos + c.len_utf8()..)
+                        .and_then(|s| s.chars().next())
+                        .is_some_and(|next| next.is_ascii_digit()) =>
+            {
+                self.parse_number()
+            }
             Some(c) if is_identifier_start(c) => self.parse_identifier_or_call(),
             Some(c) => Err(ParseError::UnexpectedChar { found: c, at: self.pos }),
             None => Err(ParseError::UnexpectedEof),
@@ -280,4 +290,3 @@ fn is_identifier_start(c: char) -> bool {
 fn is_identifier_continue(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '.' || c == '$'
 }
-

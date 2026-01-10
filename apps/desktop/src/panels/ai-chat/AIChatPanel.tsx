@@ -100,7 +100,14 @@ export function AIChatPanel(props: AIChatPanelProps) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", borderLeft: "1px solid #d4d4d4" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        borderInlineStart: "1px solid #d4d4d4",
+      }}
+    >
       <div style={{ padding: "8px 12px", borderBottom: "1px solid #d4d4d4", fontWeight: 600 }}>
         {t("chat.title")}
       </div>
@@ -162,7 +169,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
       <div style={{ padding: "6px 12px", borderTop: "1px solid #d4d4d4", fontSize: 12, opacity: 0.7 }}>
         {t("chat.attachmentsApiPlaceholder")}
         <button
-          style={{ marginLeft: 8 }}
+          style={{ marginInlineStart: 8 }}
           onClick={() =>
             setAttachments((prev) => [
               ...prev,

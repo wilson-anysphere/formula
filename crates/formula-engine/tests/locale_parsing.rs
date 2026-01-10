@@ -41,3 +41,21 @@ fn parses_en_us_commas_and_dots() {
     assert_eq!(formula.to_localized_string(&locale::EN_US), "=SUM(1.25,2.75)");
 }
 
+#[test]
+fn parses_thousands_and_leading_decimal_in_de_de() {
+    let formula = parse_formula("=SUMME(1.234,56;,5)", &locale::DE_DE).unwrap();
+    assert_eq!(
+        formula.root,
+        Expr::FunctionCall {
+            name: "SUM".to_string(),
+            args: vec![Expr::Number(1234.56), Expr::Number(0.5)],
+        }
+    );
+    assert_eq!(formula.to_canonical_string(), "=SUM(1234.56,0.5)");
+}
+
+#[test]
+fn parses_leading_decimal_in_en_us() {
+    let formula = parse_formula("=.5", &locale::EN_US).unwrap();
+    assert_eq!(formula.root, Expr::Number(0.5));
+}
