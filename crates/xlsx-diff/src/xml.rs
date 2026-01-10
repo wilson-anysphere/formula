@@ -313,6 +313,21 @@ pub fn diff_xml(
     diffs
 }
 
+#[derive(Debug, Clone)]
+struct ChildMatchKey {
+    map_key: String,
+    attr: &'static str,
+    value: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum KeyedChildrenKind {
+    Relationships,
+    ContentTypes,
+    SheetData,
+    Row,
+}
+
 fn diff_node(
     expected: &XmlNode,
     actual: &XmlNode,
@@ -400,40 +415,171 @@ fn diff_element(
         }
     }
 
+    if let Some(kind) = keyed_children_kind(&expected.name) {
+        if diff_children_keyed(expected, actual, severity, &path, diffs, kind) {
+            return;
+        }
+    }
+
+    diff_children_indexed(expected, actual, severity, &path, diffs);
+}
+
+fn keyed_children_kind(name: &QName) -> Option<KeyedChildrenKind> {
+    match (name.ns.as_deref(), name.local.as_str()) {
+        (Some("http://schemas.openxmlformats.org/package/2006/relationships"), "Relationships") => {
+            Some(KeyedChildrenKind::Relationships)
+        }
+        (Some("http://schemas.openxmlformats.org/package/2006/content-types"), "Types") => {
+            Some(KeyedChildrenKind::ContentTypes)
+        }
+        (Some(SPREADSHEETML_NS), "sheetData") => Some(KeyedChildrenKind::SheetData),
+        (Some(SPREADSHEETML_NS), "row") => Some(KeyedChildrenKind::Row),
+        _ => None,
+    }
+}
+
+fn diff_children_keyed(
+    expected: &XmlElement,
+    actual: &XmlElement,
+    severity: Severity,
+    path: &str,
+    diffs: &mut Vec<XmlDiff>,
+    kind: KeyedChildrenKind,
+) -> bool {
+    let expected_map = match build_keyed_children_map(&expected.children, kind) {
+        Some(map) => map,
+        None => return false,
+    };
+    let actual_map = match build_keyed_children_map(&actual.children, kind) {
+        Some(map) => map,
+        None => return false,
+    };
+
+    for (key, (expected_child, expected_key)) in &expected_map {
+        match actual_map.get(key) {
+            Some((actual_child, _actual_key)) => {
+                let child_path = keyed_child_path(path, expected_child, expected_key);
+                diff_node(expected_child, actual_child, severity, child_path, diffs);
+            }
+            None => {
+                let child_path = keyed_child_path(path, expected_child, expected_key);
+                diffs.push(XmlDiff {
+                    severity,
+                    path: child_path,
+                    kind: "child_missing".to_string(),
+                    expected: Some(node_summary(expected_child)),
+                    actual: None,
+                });
+            }
+        }
+    }
+
+    for (key, (actual_child, actual_key)) in &actual_map {
+        if expected_map.contains_key(key) {
+            continue;
+        }
+        let child_path = keyed_child_path(path, actual_child, actual_key);
+        diffs.push(XmlDiff {
+            severity,
+            path: child_path,
+            kind: "child_added".to_string(),
+            expected: None,
+            actual: Some(node_summary(actual_child)),
+        });
+    }
+
+    true
+}
+
+fn build_keyed_children_map<'a>(
+    children: &'a [XmlNode],
+    kind: KeyedChildrenKind,
+) -> Option<BTreeMap<String, (&'a XmlNode, ChildMatchKey)>> {
+    let mut map: BTreeMap<String, (&'a XmlNode, ChildMatchKey)> = BTreeMap::new();
+    for child in children {
+        let key = child_match_key(child, kind)?;
+        if map.insert(key.map_key.clone(), (child, key)).is_some() {
+            // Duplicate keys - fall back to indexed comparison.
+            return None;
+        }
+    }
+    Some(map)
+}
+
+fn child_match_key(node: &XmlNode, kind: KeyedChildrenKind) -> Option<ChildMatchKey> {
+    match (kind, node) {
+        (KeyedChildrenKind::Relationships, XmlNode::Element(el))
+            if el.name.local == "Relationship" =>
+        {
+            let id = attr_value(el, "Id")?;
+            Some(ChildMatchKey {
+                map_key: id.to_string(),
+                attr: "Id",
+                value: id.to_string(),
+            })
+        }
+        (KeyedChildrenKind::ContentTypes, XmlNode::Element(el)) if el.name.local == "Default" => {
+            let ext = attr_value(el, "Extension")?;
+            Some(ChildMatchKey {
+                map_key: format!("Default:{ext}"),
+                attr: "Extension",
+                value: ext.to_string(),
+            })
+        }
+        (KeyedChildrenKind::ContentTypes, XmlNode::Element(el)) if el.name.local == "Override" => {
+            let part = attr_value(el, "PartName")?;
+            Some(ChildMatchKey {
+                map_key: format!("Override:{part}"),
+                attr: "PartName",
+                value: part.to_string(),
+            })
+        }
+        (KeyedChildrenKind::SheetData, XmlNode::Element(el)) if el.name.local == "row" => {
+            let r = attr_value(el, "r")?;
+            Some(ChildMatchKey {
+                map_key: r.to_string(),
+                attr: "r",
+                value: r.to_string(),
+            })
+        }
+        (KeyedChildrenKind::Row, XmlNode::Element(el)) if el.name.local == "c" => {
+            let r = attr_value(el, "r")?;
+            Some(ChildMatchKey {
+                map_key: r.to_string(),
+                attr: "r",
+                value: r.to_string(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn diff_children_indexed(
+    expected: &XmlElement,
+    actual: &XmlElement,
+    severity: Severity,
+    path: &str,
+    diffs: &mut Vec<XmlDiff>,
+) {
     let max_len = expected.children.len().max(actual.children.len());
     for idx in 0..max_len {
         let expected_child = expected.children.get(idx);
         let actual_child = actual.children.get(idx);
         match (expected_child, actual_child) {
             (Some(a), Some(b)) => {
-                let child_path = format!(
-                    "{}/{}[{}]",
-                    path.trim_end_matches('/'),
-                    child_name(a),
-                    idx + 1
-                );
+                let child_path = indexed_child_path(path, a, idx + 1);
                 diff_node(a, b, severity, child_path, diffs);
             }
             (Some(a), None) => diffs.push(XmlDiff {
                 severity,
-                path: format!(
-                    "{}/{}[{}]",
-                    path.trim_end_matches('/'),
-                    child_name(a),
-                    idx + 1
-                ),
+                path: indexed_child_path(path, a, idx + 1),
                 kind: "child_missing".to_string(),
                 expected: Some(node_summary(a)),
                 actual: None,
             }),
             (None, Some(b)) => diffs.push(XmlDiff {
                 severity,
-                path: format!(
-                    "{}/{}[{}]",
-                    path.trim_end_matches('/'),
-                    child_name(b),
-                    idx + 1
-                ),
+                path: indexed_child_path(path, b, idx + 1),
                 kind: "child_added".to_string(),
                 expected: None,
                 actual: Some(node_summary(b)),
@@ -441,6 +587,29 @@ fn diff_element(
             (None, None) => {}
         }
     }
+}
+
+fn indexed_child_path(base: &str, child: &XmlNode, index: usize) -> String {
+    format!(
+        "{}/{}[{}]",
+        base.trim_end_matches('/'),
+        child_name(child),
+        index
+    )
+}
+
+fn keyed_child_path(base: &str, child: &XmlNode, key: &ChildMatchKey) -> String {
+    format!(
+        "{}/{}[@{}=\"{}\"]",
+        base.trim_end_matches('/'),
+        child_name(child),
+        key.attr,
+        escape_path_value(&key.value)
+    )
+}
+
+fn escape_path_value(value: &str) -> String {
+    value.replace('"', "\\\"")
 }
 
 fn child_name(node: &XmlNode) -> String {

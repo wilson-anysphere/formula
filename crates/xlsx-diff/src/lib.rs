@@ -191,7 +191,11 @@ pub fn diff_archives(expected: &WorkbookArchive, actual: &WorkbookArchive) -> Di
         let expected_bytes = expected.get(part).unwrap_or_default();
         let actual_bytes = actual.get(part).unwrap_or_default();
 
-        if is_xml_part(part) {
+        let forced_xml = is_xml_extension(part);
+        let xml_candidate =
+            forced_xml || looks_like_xml(expected_bytes) || looks_like_xml(actual_bytes);
+
+        if xml_candidate {
             match (
                 xml::NormalizedXml::parse(part, expected_bytes),
                 xml::NormalizedXml::parse(part, actual_bytes),
@@ -209,7 +213,7 @@ pub fn diff_archives(expected: &WorkbookArchive, actual: &WorkbookArchive) -> Di
                         ));
                     }
                 }
-                (Err(err), _) | (_, Err(err)) => {
+                (Err(err), Ok(_)) | (Ok(_), Err(err)) if forced_xml => {
                     report.differences.push(Difference::new(
                         Severity::Critical,
                         part.to_string(),
@@ -217,7 +221,40 @@ pub fn diff_archives(expected: &WorkbookArchive, actual: &WorkbookArchive) -> Di
                         "xml_parse_error",
                         None,
                         Some(err.to_string()),
-                    ));
+                    ))
+                }
+                (Err(_), Ok(_)) | (Ok(_), Err(_)) => {
+                    // For non-standard extensions, fall back to binary compare.
+                    if expected_bytes != actual_bytes {
+                        report.differences.push(Difference::new(
+                            Severity::Critical,
+                            part.to_string(),
+                            "",
+                            "binary_diff",
+                            Some(format!("{} bytes", expected_bytes.len())),
+                            Some(format!("{} bytes", actual_bytes.len())),
+                        ));
+                    }
+                }
+                (Err(err_a), Err(err_b)) if forced_xml => report.differences.push(Difference::new(
+                    Severity::Critical,
+                    part.to_string(),
+                    "",
+                    "xml_parse_error",
+                    Some(err_a.to_string()),
+                    Some(err_b.to_string()),
+                )),
+                (Err(_), Err(_)) => {
+                    if expected_bytes != actual_bytes {
+                        report.differences.push(Difference::new(
+                            Severity::Critical,
+                            part.to_string(),
+                            "",
+                            "binary_diff",
+                            Some(format!("{} bytes", expected_bytes.len())),
+                            Some(format!("{} bytes", actual_bytes.len())),
+                        ));
+                    }
                 }
             }
         } else if expected_bytes != actual_bytes {
@@ -235,8 +272,23 @@ pub fn diff_archives(expected: &WorkbookArchive, actual: &WorkbookArchive) -> Di
     report
 }
 
-fn is_xml_part(name: &str) -> bool {
-    name.ends_with(".xml") || name.ends_with(".rels")
+fn is_xml_extension(name: &str) -> bool {
+    name.ends_with(".xml") || name.ends_with(".rels") || name.ends_with(".vml")
+}
+
+fn looks_like_xml(bytes: &[u8]) -> bool {
+    let mut i = 0usize;
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        i = 3;
+    }
+    while i < bytes.len() {
+        match bytes[i] {
+            b' ' | b'\t' | b'\n' | b'\r' => i += 1,
+            b'<' => return true,
+            _ => return false,
+        }
+    }
+    false
 }
 
 fn severity_for_part(part: &str) -> Severity {
