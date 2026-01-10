@@ -84,6 +84,8 @@ importers:
         specifier: ^1.6.0
         version: 1.6.1(@types/node@22.19.5)
 
+  packages/security: {}
+
 packages:
 
   '@babel/code-frame@7.27.1':

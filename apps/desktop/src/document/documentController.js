@@ -606,16 +606,41 @@ export class DocumentController {
    * @returns {CellState}
    */
   #normalizeCellInput(before, input) {
-    // Object form: { value, formula }
-    if (input && typeof input === "object" && ("formula" in input || "value" in input)) {
-      const formula = typeof input.formula === "string" ? input.formula : null;
-      if (formula != null) {
-        return { value: null, formula, format: before.format };
+    // Object form: { value?, formula?, format? }
+    if (
+      input &&
+      typeof input === "object" &&
+      ("formula" in input || "value" in input || "format" in input)
+    ) {
+      /** @type {any} */
+      const obj = input;
+
+      let value = before.value;
+      let formula = before.formula;
+      let format = before.format;
+
+      if ("format" in obj) {
+        format = obj.format ?? null;
       }
-      return { value: input.value ?? null, formula: null, format: before.format };
+
+      if ("formula" in obj) {
+        const nextFormula = typeof obj.formula === "string" ? obj.formula : null;
+        formula = nextFormula;
+        if (nextFormula != null) {
+          value = null;
+        } else if ("value" in obj) {
+          value = obj.value ?? null;
+          formula = null;
+        }
+      } else if ("value" in obj) {
+        value = obj.value ?? null;
+        formula = null;
+      }
+
+      return { value, formula, format };
     }
 
-    // Primitive value (or null => clear)
+    // Primitive value (or null => clear); formats preserved.
     return { value: input ?? null, formula: null, format: before.format };
   }
 

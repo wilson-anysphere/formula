@@ -52,6 +52,5 @@ handoff.md
 __pycache__/
 *.pyc
 
-*.swp
 .idea/
 .vscode/
