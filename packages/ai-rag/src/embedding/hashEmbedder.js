@@ -1,0 +1,60 @@
+import { normalizeL2 } from "../store/vectorMath.js";
+
+function fnv1a32(str) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i += 1) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  // Force unsigned.
+  return hash >>> 0;
+}
+
+/**
+ * A deterministic, offline embedder intended for tests and development.
+ *
+ * It uses a hashing trick on tokenized words, then L2-normalizes the result so
+ * cosine similarity approximates shared-token overlap.
+ */
+export class HashEmbedder {
+  /**
+   * @param {{ dimension?: number }} [opts]
+   */
+  constructor(opts) {
+    this._dimension = opts?.dimension ?? 384;
+  }
+
+  get dimension() {
+    return this._dimension;
+  }
+
+  get name() {
+    return `hash:${this._dimension}`;
+  }
+
+  /**
+   * @param {string} text
+   */
+  _embedOne(text) {
+    const vec = new Float32Array(this._dimension);
+    const tokens = String(text)
+      .toLowerCase()
+      .split(/[^a-z0-9_]+/g)
+      .filter(Boolean);
+    for (const token of tokens) {
+      const h = fnv1a32(token);
+      const idx = h % this._dimension;
+      // Simple TF weighting, lightly damped.
+      vec[idx] += 1;
+    }
+    return normalizeL2(vec);
+  }
+
+  /**
+   * @param {string[]} texts
+   * @returns {Promise<Float32Array[]>}
+   */
+  async embedTexts(texts) {
+    return texts.map((t) => this._embedOne(t));
+  }
+}

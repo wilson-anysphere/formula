@@ -1,0 +1,39 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { ContextManager } from "../src/contextManager.js";
+import { HashEmbedder, InMemoryVectorStore } from "../../ai-rag/src/index.js";
+
+function makeWorkbook() {
+  return {
+    id: "wb3",
+    sheets: [
+      {
+        name: "Sales",
+        cells: [
+          [{ v: "Region" }, { v: "Revenue" }],
+          [{ v: "North" }, { v: 1000 }],
+          [{ v: "South" }, { v: 2000 }],
+        ],
+      },
+    ],
+    tables: [{ name: "RevenueByRegion", sheetName: "Sales", rect: { r0: 0, c0: 0, r1: 2, c1: 1 } }],
+  };
+}
+
+test('integration: query "revenue by region" retrieves the right table chunk', async () => {
+  const workbook = makeWorkbook();
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 500,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const out = await cm.buildWorkbookContext({ workbook, query: "revenue by region" });
+
+  assert.match(out.promptContext, /RevenueByRegion/);
+  assert.ok(out.retrieved.length > 0);
+  assert.equal(out.retrieved[0].metadata.title, "RevenueByRegion");
+});

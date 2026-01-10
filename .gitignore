@@ -60,6 +60,14 @@ services/sync-server/.sync-server-data/
 scratchpad.md
 handoff.md
 
+# App artifacts
+.formula/
+
+# Test artifacts
+**/.tmp/
+**/.tmp-*/
+**/.tmp-*
+
 # Python
 /.venv
 __pycache__/
