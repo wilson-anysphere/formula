@@ -1,11 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/formula-dax",
-    "crates/formula-engine",
-    "crates/formula-format",
-    "crates/formula-model",
-    "crates/formula-vba",
-    "crates/formula-xlsx",
-    "crates/xlsx-diff",
+  "apps/desktop/src-tauri",
+  "crates/formula-dax",
+  "crates/formula-engine",
+  "crates/formula-format",
+  "crates/formula-model",
+  "crates/formula-vba",
+  "crates/formula-xlsx",
+  "crates/xlsx-diff",
 ]

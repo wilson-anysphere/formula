@@ -1,0 +1,35 @@
+[package]
+name = "formula-desktop-tauri"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "formula-desktop"
+path = "src/main.rs"
+# Building the actual desktop shell requires the system WebView toolchain
+# (webkit2gtk/gtk on Linux). Unit tests for the backend logic don't.
+required-features = ["desktop"]
+
+[features]
+default = []
+# Enable the full desktop (Tauri) shell. This pulls in the system WebView
+# toolchain on Linux (gtk/webkit), which isn't required for backend unit tests.
+desktop = ["dep:tauri", "dep:tauri-build"]
+
+[dependencies]
+anyhow = "1.0"
+calamine = "0.26"
+rust_xlsxwriter = "0.79"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2.9", optional = true }
+thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3.10"
+
+[build-dependencies]
+tauri-build = { version = "2.5", optional = true }
