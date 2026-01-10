@@ -1,0 +1,277 @@
+use crate::functions::math::criteria::Criteria;
+use crate::{ErrorKind, Value};
+
+/// SUMIF(range, criteria, [sum_range])
+pub fn sumif(criteria_range: &[Value], criteria: &Value, sum_range: Option<&[Value]>) -> Result<f64, ErrorKind> {
+    let sum_range = sum_range.unwrap_or(criteria_range);
+    if criteria_range.len() != sum_range.len() {
+        return Err(ErrorKind::Value);
+    }
+
+    let criteria = Criteria::parse(criteria)?;
+    let mut sum = 0.0;
+    for (crit_val, sum_val) in criteria_range.iter().zip(sum_range.iter()) {
+        if criteria.matches(crit_val) {
+            match sum_val {
+                Value::Number(n) => sum += n,
+                Value::Error(e) => return Err(*e),
+                _ => {}
+            }
+        }
+    }
+    Ok(sum)
+}
+
+/// SUMIFS(sum_range, criteria_range1, criteria1, ...)
+pub fn sumifs(sum_range: &[Value], criteria_pairs: &[(&[Value], &Value)]) -> Result<f64, ErrorKind> {
+    for (range, _) in criteria_pairs {
+        if range.len() != sum_range.len() {
+            return Err(ErrorKind::Value);
+        }
+    }
+
+    let compiled = criteria_pairs
+        .iter()
+        .map(|(_, crit)| Criteria::parse(*crit))
+        .collect::<Result<Vec<_>, ErrorKind>>()?;
+
+    let mut sum = 0.0;
+    'row: for idx in 0..sum_range.len() {
+        for ((range, _), crit) in criteria_pairs.iter().zip(compiled.iter()) {
+            if !crit.matches(&range[idx]) {
+                continue 'row;
+            }
+        }
+
+        match &sum_range[idx] {
+            Value::Number(n) => sum += n,
+            Value::Error(e) => return Err(*e),
+            _ => {}
+        }
+    }
+
+    Ok(sum)
+}
+
+/// SUMPRODUCT(array1, [array2], ...)
+pub fn sumproduct(arrays: &[&[Value]]) -> Result<f64, ErrorKind> {
+    if arrays.is_empty() {
+        return Ok(0.0);
+    }
+
+    let len = arrays[0].len();
+    for arr in arrays.iter().skip(1) {
+        if arr.len() != len {
+            return Err(ErrorKind::Value);
+        }
+    }
+
+    let mut sum = 0.0;
+    for idx in 0..len {
+        let mut prod = 1.0;
+        for arr in arrays {
+            let n = coerce_sumproduct_number(&arr[idx])?;
+            prod *= n;
+        }
+        sum += prod;
+    }
+
+    Ok(sum)
+}
+
+fn coerce_sumproduct_number(value: &Value) -> Result<f64, ErrorKind> {
+    match value {
+        Value::Number(n) => Ok(*n),
+        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        Value::Text(s) => Ok(s.trim().parse::<f64>().unwrap_or(0.0)),
+        Value::Blank => Ok(0.0),
+        Value::Error(e) => Err(*e),
+    }
+}
+
+/// SUBTOTAL(function_num, ref1, [ref2], ...)
+///
+/// This implements the common `function_num` set (1-11 / 101-111). Hidden rows
+/// / filtered ranges are handled by the caller (range iterator).
+pub fn subtotal(function_num: i32, values: &[Value]) -> Result<f64, ErrorKind> {
+    let base = if function_num >= 100 {
+        function_num - 100
+    } else {
+        function_num
+    };
+
+    match base {
+        1 => average(values, false),
+        2 => Ok(count(values) as f64),
+        3 => Ok(counta(values) as f64),
+        4 => max(values, false),
+        5 => min(values, false),
+        6 => product(values, false),
+        7 => stdev(values, false),
+        8 => stdevp(values, false),
+        9 => sum(values, false),
+        10 => var(values, false),
+        11 => varp(values, false),
+        _ => Err(ErrorKind::Value),
+    }
+}
+
+/// AGGREGATE(function_num, options, ref1, [ref2])
+///
+/// This intentionally implements the most common aggregation subtypes (1-11).
+/// `options` only controls whether errors are ignored.
+pub fn aggregate(function_num: i32, options: i32, values: &[Value]) -> Result<f64, ErrorKind> {
+    let ignore_errors = matches!(options, 2 | 3 | 6 | 7);
+    match function_num {
+        1 => average(values, ignore_errors),
+        2 => Ok(count(values) as f64),
+        3 => Ok(counta_with_errors(values, ignore_errors) as f64),
+        4 => max(values, ignore_errors),
+        5 => min(values, ignore_errors),
+        6 => product(values, ignore_errors),
+        7 => stdev(values, ignore_errors),
+        8 => stdevp(values, ignore_errors),
+        9 => sum(values, ignore_errors),
+        10 => var(values, ignore_errors),
+        11 => varp(values, ignore_errors),
+        _ => Err(ErrorKind::Value),
+    }
+}
+
+fn sum(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
+    let mut out = 0.0;
+    for value in values {
+        match value {
+            Value::Number(n) => out += n,
+            Value::Error(e) if !ignore_errors => return Err(*e),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+fn average(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for value in values {
+        match value {
+            Value::Number(n) => {
+                sum += n;
+                count += 1;
+            }
+            Value::Error(e) if !ignore_errors => return Err(*e),
+            _ => {}
+        }
+    }
+
+    if count == 0 {
+        return Err(ErrorKind::Div0);
+    }
+    Ok(sum / count as f64)
+}
+
+fn count(values: &[Value]) -> usize {
+    values.iter().filter(|v| matches!(v, Value::Number(_))).count()
+}
+
+fn counta(values: &[Value]) -> usize {
+    values.iter().filter(|v| !matches!(v, Value::Blank)).count()
+}
+
+fn counta_with_errors(values: &[Value], ignore_errors: bool) -> usize {
+    values
+        .iter()
+        .filter(|v| match v {
+            Value::Blank => false,
+            Value::Error(_) => !ignore_errors,
+            _ => true,
+        })
+        .count()
+}
+
+fn max(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
+    let mut best: Option<f64> = None;
+    for value in values {
+        match value {
+            Value::Number(n) => best = Some(best.map_or(*n, |b| b.max(*n))),
+            Value::Error(e) if !ignore_errors => return Err(*e),
+            _ => {}
+        }
+    }
+    Ok(best.unwrap_or(0.0))
+}
+
+fn min(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
+    let mut best: Option<f64> = None;
+    for value in values {
+        match value {
+            Value::Number(n) => best = Some(best.map_or(*n, |b| b.min(*n))),
+            Value::Error(e) if !ignore_errors => return Err(*e),
+            _ => {}
+        }
+    }
+    Ok(best.unwrap_or(0.0))
+}
+
+fn product(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
+    let mut out = 1.0;
+    let mut saw_number = false;
+    for value in values {
+        match value {
+            Value::Number(n) => {
+                saw_number = true;
+                out *= n;
+            }
+            Value::Error(e) if !ignore_errors => return Err(*e),
+            _ => {}
+        }
+    }
+    if !saw_number {
+        return Ok(1.0);
+    }
+    if out.is_finite() {
+        Ok(out)
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
+
+fn variance(values: &[Value], ignore_errors: bool) -> Result<(usize, f64, f64), ErrorKind> {
+    let mut nums = Vec::new();
+    for value in values {
+        match value {
+            Value::Number(n) => nums.push(*n),
+            Value::Error(e) if !ignore_errors => return Err(*e),
+            _ => {}
+        }
+    }
+
+    let n = nums.len();
+    if n == 0 {
+        return Err(ErrorKind::Div0);
+    }
+    let mean = nums.iter().sum::<f64>() / n as f64;
+    let sse = nums.iter().map(|x| (x - mean).powi(2)).sum::<f64>();
+    Ok((n, mean, sse))
+}
+
+fn var(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
+    let (n, _, sse) = variance(values, ignore_errors)?;
+    if n < 2 {
+        return Err(ErrorKind::Div0);
+    }
+    Ok(sse / (n as f64 - 1.0))
+}
+
+fn varp(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
+    let (n, _, sse) = variance(values, ignore_errors)?;
+    Ok(sse / n as f64)
+}
+
+fn stdev(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
+    Ok(var(values, ignore_errors)?.sqrt())
+}
+
+fn stdevp(values: &[Value], ignore_errors: bool) -> Result<f64, ErrorKind> {
+    Ok(varp(values, ignore_errors)?.sqrt())
+}
