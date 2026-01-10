@@ -1102,6 +1102,7 @@ dependencies = [
  "formula-engine",
  "formula-vba",
  "formula-vba-runtime",
+ "formula-xlsb",
  "formula-xlsx",
  "rust_xlsxwriter 0.79.4",
  "serde",

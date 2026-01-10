@@ -28,6 +28,7 @@ fn opens_fixture_and_reads_cells() {
 
     let formula_cell = cells.remove(&(0, 2)).unwrap();
     assert_eq!(formula_cell.value, CellValue::Number(85.0));
-    assert!(formula_cell.formula.is_some(), "formula payload preserved");
+    let formula = formula_cell.formula.as_ref().expect("formula payload preserved");
+    assert_eq!(formula.text.as_deref(), Some("A1+B1"));
+    assert_eq!(formula.rgce.len(), 15);
 }
-

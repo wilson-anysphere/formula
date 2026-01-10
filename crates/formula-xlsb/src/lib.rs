@@ -6,4 +6,4 @@ mod opc;
 mod parser;
 
 pub use opc::{OpenOptions, XlsbWorkbook};
-pub use parser::{Cell, CellValue, Dimension, Error, SheetData, SheetMeta};
+pub use parser::{Cell, CellValue, Dimension, Error, Formula, SheetData, SheetMeta};

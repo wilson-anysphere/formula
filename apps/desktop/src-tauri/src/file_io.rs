@@ -2,6 +2,7 @@ use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
+use formula_xlsb::{CellValue as XlsbCellValue, XlsbWorkbook};
 use formula_xlsx::drawingml::PreservedDrawingParts;
 use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
@@ -257,12 +258,21 @@ pub async fn read_xlsx(path: impl Into<PathBuf> + Send + 'static) -> anyhow::Res
 }
 
 pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    let extension = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase());
+
+    if matches!(extension.as_deref(), Some("xlsb")) {
+        return read_xlsb_blocking(path);
+    }
+
     let mut workbook =
         open_workbook_auto(path).with_context(|| format!("open workbook {:?}", path))?;
     let sheet_names = workbook.sheet_names().to_owned();
 
-    let print_settings = match path.extension().and_then(|s| s.to_str()) {
-        Some(ext) if matches!(ext.to_ascii_lowercase().as_str(), "xlsx" | "xlsm") => {
+    let print_settings = match extension.as_deref() {
+        Some(ext) if matches!(ext, "xlsx" | "xlsm") => {
             std::fs::read(path)
                 .ok()
                 .and_then(|bytes| read_workbook_print_settings(&bytes).ok())
@@ -285,10 +295,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     //
     // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
     if matches!(
-        path.extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_ascii_lowercase())
-            .as_deref(),
+        extension.as_deref(),
         Some("xlsx") | Some("xlsm")
     ) {
         let bytes =
@@ -375,6 +382,76 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
 
     out.ensure_sheet_ids();
     Ok(out)
+}
+
+fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    let wb = XlsbWorkbook::open(path).with_context(|| format!("open xlsb workbook {:?}", path))?;
+
+    let mut out = Workbook {
+        path: Some(path.to_string_lossy().to_string()),
+        origin_path: Some(path.to_string_lossy().to_string()),
+        vba_project_bin: None,
+        preserved_drawing_parts: None,
+        sheets: Vec::new(),
+        print_settings: WorkbookPrintSettings::default(),
+    };
+
+    for (idx, sheet_meta) in wb.sheet_metas().iter().enumerate() {
+        let mut sheet = Sheet::new(sheet_meta.name.clone(), sheet_meta.name.clone());
+
+        wb.for_each_cell(idx, |cell| {
+            let row = cell.row as usize;
+            let col = cell.col as usize;
+
+            let value = match cell.value {
+                XlsbCellValue::Blank => CellScalar::Empty,
+                XlsbCellValue::Number(n) => CellScalar::Number(n),
+                XlsbCellValue::Bool(b) => CellScalar::Bool(b),
+                XlsbCellValue::Error(code) => CellScalar::Error(xlsb_error_display(code)),
+                XlsbCellValue::Text(s) => CellScalar::Text(s),
+            };
+
+            if let Some(formula) = cell.formula.and_then(|f| f.text) {
+                let normalized = if formula.starts_with('=') {
+                    formula
+                } else {
+                    format!("={formula}")
+                };
+                let mut c = Cell::from_formula(normalized);
+                c.computed_value = value;
+                sheet.set_cell(row, col, c);
+                return;
+            }
+
+            if matches!(value, CellScalar::Empty) {
+                return;
+            }
+
+            sheet.set_cell(row, col, Cell::from_literal(Some(value)));
+        })
+        .with_context(|| format!("read xlsb sheet {}", sheet_meta.name))?;
+
+        out.sheets.push(sheet);
+    }
+
+    out.ensure_sheet_ids();
+    Ok(out)
+}
+
+fn xlsb_error_display(code: u8) -> String {
+    // Codes match Excel's internal error ids used by XLSB. Keep the string form compatible with
+    // what calamine uses for `Data::Error` so UI/engine layers behave consistently.
+    match code {
+        0x00 => "#NULL!".to_string(),
+        0x07 => "#DIV/0!".to_string(),
+        0x0F => "#VALUE!".to_string(),
+        0x17 => "#REF!".to_string(),
+        0x1D => "#NAME?".to_string(),
+        0x24 => "#NUM!".to_string(),
+        0x2A => "#N/A".to_string(),
+        0x2B => "#GETTING_DATA".to_string(),
+        other => format!("#ERR({other:#04x})"),
+    }
 }
 
 #[cfg(feature = "desktop")]
@@ -485,6 +562,28 @@ fn xlsx_err(err: XlsxError) -> String {
 mod tests {
     use super::*;
     use rust_xlsxwriter::{Chart, ChartType};
+
+    #[test]
+    fn reads_xlsb_fixture() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read xlsb workbook");
+        assert_eq!(workbook.sheets.len(), 1);
+
+        let sheet = &workbook.sheets[0];
+        assert_eq!(sheet.name, "Sheet1");
+
+        assert_eq!(
+            sheet.get_cell(0, 0).computed_value,
+            CellScalar::Text("Hello".to_string())
+        );
+        assert_eq!(sheet.get_cell(0, 1).computed_value, CellScalar::Number(42.5));
+        assert_eq!(sheet.get_cell(0, 2).computed_value, CellScalar::Number(85.0));
+        assert_eq!(sheet.get_cell(0, 2).formula.as_deref(), Some("=A1+B1"));
+    }
 
     #[test]
     fn preserves_vba_project_bin_when_saving_xlsm() {
