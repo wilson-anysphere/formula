@@ -299,7 +299,10 @@ export class ContextManager {
   }
 
   /**
-   * Convenience: build workbook RAG context from a `packages/ai-tools`-style SpreadsheetApi.
+   * Convenience: build workbook RAG context from a `@formula/ai-tools`-style SpreadsheetApi.
+   *
+   * Note: `SpreadsheetApi` cell addresses are 1-based (A1 => row=1,col=1), while
+   * `packages/ai-rag` uses 0-based coordinates internally.
    *
    * @param {{
    *   spreadsheet: any,
@@ -310,7 +313,11 @@ export class ContextManager {
    * }} params
    */
   async buildWorkbookContextFromSpreadsheetApi(params) {
-    const workbook = workbookFromSpreadsheetApi({ spreadsheet: params.spreadsheet, workbookId: params.workbookId });
+    const workbook = workbookFromSpreadsheetApi({
+      spreadsheet: params.spreadsheet,
+      workbookId: params.workbookId,
+      coordinateBase: "one",
+    });
     return this.buildWorkbookContext({
       workbook,
       query: params.query,

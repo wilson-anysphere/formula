@@ -12,12 +12,12 @@ test("integration: buildWorkbookContextFromSpreadsheetApi retrieves relevant chu
     listNonEmptyCells(sheet) {
       assert.equal(sheet, "Sheet1");
       return [
-        { address: { sheet: "Sheet1", row: 0, col: 0 }, cell: { value: "Region" } },
-        { address: { sheet: "Sheet1", row: 0, col: 1 }, cell: { value: "Revenue" } },
-        { address: { sheet: "Sheet1", row: 1, col: 0 }, cell: { value: "North" } },
-        { address: { sheet: "Sheet1", row: 1, col: 1 }, cell: { value: 1000 } },
-        { address: { sheet: "Sheet1", row: 2, col: 0 }, cell: { value: "South" } },
-        { address: { sheet: "Sheet1", row: 2, col: 1 }, cell: { value: 2000 } },
+        { address: { sheet: "Sheet1", row: 1, col: 1 }, cell: { value: "Region" } },
+        { address: { sheet: "Sheet1", row: 1, col: 2 }, cell: { value: "Revenue" } },
+        { address: { sheet: "Sheet1", row: 2, col: 1 }, cell: { value: "North" } },
+        { address: { sheet: "Sheet1", row: 2, col: 2 }, cell: { value: 1000 } },
+        { address: { sheet: "Sheet1", row: 3, col: 1 }, cell: { value: "South" } },
+        { address: { sheet: "Sheet1", row: 3, col: 2 }, cell: { value: 2000 } },
       ];
     },
   };
@@ -40,4 +40,3 @@ test("integration: buildWorkbookContextFromSpreadsheetApi retrieves relevant chu
   assert.match(out.promptContext, /Region/);
   assert.match(out.promptContext, /Revenue/);
 });
-
