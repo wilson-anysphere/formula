@@ -267,10 +267,7 @@ impl Worksheet {
     /// Passing `None` removes the height override. If the row has no overrides
     /// remaining, its entry is removed from the map.
     pub fn set_row_height(&mut self, row: u32, height: Option<f32>) {
-        assert!(
-            row < crate::cell::EXCEL_MAX_ROWS,
-            "row out of Excel bounds: {row}"
-        );
+        self.row_count = self.row_count.max(row.saturating_add(1));
         match self.row_properties.get_mut(&row) {
             Some(props) => {
                 props.height = height;
@@ -298,10 +295,7 @@ impl Worksheet {
     /// If the row ends up with no overrides (not hidden and no height), its entry
     /// is removed from the map.
     pub fn set_row_hidden(&mut self, row: u32, hidden: bool) {
-        assert!(
-            row < crate::cell::EXCEL_MAX_ROWS,
-            "row out of Excel bounds: {row}"
-        );
+        self.row_count = self.row_count.max(row.saturating_add(1));
         match self.row_properties.get_mut(&row) {
             Some(props) => {
                 props.hidden = hidden;
@@ -330,6 +324,7 @@ impl Worksheet {
             col < crate::cell::EXCEL_MAX_COLS,
             "col out of Excel bounds: {col}"
         );
+        self.col_count = self.col_count.max(col.saturating_add(1));
         match self.col_properties.get_mut(&col) {
             Some(props) => {
                 props.width = width;
@@ -358,6 +353,7 @@ impl Worksheet {
             col < crate::cell::EXCEL_MAX_COLS,
             "col out of Excel bounds: {col}"
         );
+        self.col_count = self.col_count.max(col.saturating_add(1));
         match self.col_properties.get_mut(&col) {
             Some(props) => {
                 props.hidden = hidden;
@@ -697,6 +693,9 @@ impl Worksheet {
     }
 
     fn on_cell_inserted(&mut self, cell_ref: CellRef) {
+        self.row_count = self.row_count.max(cell_ref.row.saturating_add(1));
+        self.col_count = self.col_count.max(cell_ref.col.saturating_add(1));
+
         match self.used_range {
             None => self.used_range = Some(Range::new(cell_ref, cell_ref)),
             Some(r) => {
@@ -872,12 +871,6 @@ impl<'de> Deserialize<'de> for Worksheet {
         if helper.col_count == 0 {
             return Err(D::Error::custom("col_count must be >= 1"));
         }
-        if helper.row_count > crate::cell::EXCEL_MAX_ROWS {
-            return Err(D::Error::custom(format!(
-                "row_count out of Excel bounds: {}",
-                helper.row_count
-            )));
-        }
         if helper.col_count > crate::cell::EXCEL_MAX_COLS {
             return Err(D::Error::custom(format!(
                 "col_count out of Excel bounds: {}",
@@ -885,13 +878,6 @@ impl<'de> Deserialize<'de> for Worksheet {
             )));
         }
 
-        for row in helper.row_properties.keys() {
-            if *row >= crate::cell::EXCEL_MAX_ROWS {
-                return Err(D::Error::custom(format!(
-                    "row_properties row out of Excel bounds: {row}"
-                )));
-            }
-        }
         for col in helper.col_properties.keys() {
             if *col >= crate::cell::EXCEL_MAX_COLS {
                 return Err(D::Error::custom(format!(
@@ -904,8 +890,15 @@ impl<'de> Deserialize<'de> for Worksheet {
         let mut col_count = helper.col_count;
 
         if let Some(used) = used_range {
-            row_count = row_count.max(used.end.row + 1);
-            col_count = col_count.max(used.end.col + 1);
+            row_count = row_count.max(used.end.row.saturating_add(1));
+            col_count = col_count.max(used.end.col.saturating_add(1));
+        }
+
+        if let Some(max_row) = helper.row_properties.keys().max().copied() {
+            row_count = row_count.max(max_row.saturating_add(1));
+        }
+        if let Some(max_col) = helper.col_properties.keys().max().copied() {
+            col_count = col_count.max(max_col.saturating_add(1));
         }
 
         if helper.frozen_rows > row_count {

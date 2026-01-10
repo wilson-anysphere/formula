@@ -1,6 +1,6 @@
 use formula_model::{
-    CellKey, CellRef, CellValue, ErrorValue, Range, Workbook, Worksheet, EXCEL_MAX_ROWS,
-    SCHEMA_VERSION,
+    CellKey, CellRef, CellValue, ErrorValue, Range, Workbook, Worksheet, EXCEL_MAX_COLS,
+    EXCEL_MAX_ROWS, SCHEMA_VERSION,
 };
 
 #[test]
@@ -249,7 +249,7 @@ fn worksheet_deserialize_validates_dimensions() {
         "id": 1,
         "name": "Sheet1",
         "row_count": EXCEL_MAX_ROWS + 1,
-        "col_count": 1
+        "col_count": EXCEL_MAX_COLS + 1
     }))
     .unwrap_err();
     assert!(err.to_string().contains("out of Excel bounds"));

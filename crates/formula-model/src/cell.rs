@@ -20,8 +20,8 @@ const COL_MASK: u64 = (1u64 << COL_BITS) - 1;
 /// key = (row << 14) | col
 /// ```
 ///
-/// This supports Excel's maximum dimensions while keeping the key within 34 bits
-/// (JSON-safe for JavaScript numbers).
+/// This supports up to `u32::MAX` rows and Excel's maximum column count while
+/// keeping the key within JavaScript's safe integer range.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[repr(transparent)]
 pub struct CellKey(u64);
@@ -30,17 +30,16 @@ impl CellKey {
     /// Encode a `(row, col)` coordinate into a compact [`CellKey`].
     #[inline]
     pub fn new(row: u32, col: u32) -> Self {
-        assert!(row < EXCEL_MAX_ROWS, "row out of Excel bounds: {row}");
         assert!(col < EXCEL_MAX_COLS, "col out of Excel bounds: {col}");
         Self(((row as u64) << COL_BITS) | (col as u64))
     }
 
     /// Checked version of [`CellKey::new`].
     ///
-    /// Returns `None` if `row`/`col` are outside Excel's sheet bounds.
+    /// Returns `None` if `col` is outside Excel's sheet bounds.
     #[inline]
     pub fn try_new(row: u32, col: u32) -> Option<Self> {
-        if row < EXCEL_MAX_ROWS && col < EXCEL_MAX_COLS {
+        if col < EXCEL_MAX_COLS {
             Some(Self(((row as u64) << COL_BITS) | (col as u64)))
         } else {
             None
@@ -49,12 +48,14 @@ impl CellKey {
 
     /// Attempt to construct a [`CellKey`] from a packed `u64`.
     ///
-    /// Returns `None` if the decoded coordinates are outside Excel's sheet bounds.
+    /// Returns `None` if:
+    /// - the decoded row does not fit within `u32`
+    /// - the decoded column is outside Excel's sheet bounds
     #[inline]
     pub fn try_from_u64(raw: u64) -> Option<Self> {
         let row = raw >> COL_BITS;
         let col = raw & COL_MASK;
-        if row < EXCEL_MAX_ROWS as u64 && col < EXCEL_MAX_COLS as u64 {
+        if row <= u32::MAX as u64 && col < EXCEL_MAX_COLS as u64 {
             Some(CellKey(raw))
         } else {
             None
@@ -101,9 +102,9 @@ impl<'de> Deserialize<'de> for CellKey {
         let row = raw >> COL_BITS;
         let col = raw & COL_MASK;
 
-        if row >= EXCEL_MAX_ROWS as u64 {
+        if row > u32::MAX as u64 {
             return Err(D::Error::custom(format!(
-                "CellKey row out of Excel bounds: {row}"
+                "CellKey row out of bounds: {row}"
             )));
         }
         if col >= EXCEL_MAX_COLS as u64 {
@@ -207,28 +208,35 @@ mod tests {
         let key2 = CellKey::new(EXCEL_MAX_ROWS - 1, EXCEL_MAX_COLS - 1);
         assert_eq!(key2.row(), EXCEL_MAX_ROWS - 1);
         assert_eq!(key2.col(), EXCEL_MAX_COLS - 1);
+
+        let key3 = CellKey::new(EXCEL_MAX_ROWS + 5, 0);
+        assert_eq!(key3.row(), EXCEL_MAX_ROWS + 5);
     }
 
     #[test]
     fn cell_key_deserialize_validates_bounds() {
-        let too_large = ((EXCEL_MAX_ROWS as u64) << COL_BITS) | 0;
+        let too_large = (((u32::MAX as u64) + 1) << COL_BITS) | 0;
         let json = too_large.to_string();
         let err = serde_json::from_str::<CellKey>(&json).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("out of Excel bounds"));
+        assert!(msg.contains("row out of bounds"));
     }
 
     #[test]
     fn cell_key_try_new_enforces_excel_bounds() {
-        assert!(CellKey::try_new(EXCEL_MAX_ROWS, 0).is_none());
         assert!(CellKey::try_new(0, EXCEL_MAX_COLS).is_none());
         assert!(CellKey::try_new(0, 0).is_some());
+        assert!(CellKey::try_new(u32::MAX, 0).is_some());
     }
 
     #[test]
     fn cell_key_try_from_u64_roundtrips() {
         let key = CellKey::new(123, 456);
         assert_eq!(CellKey::try_from_u64(key.as_u64()), Some(key));
-        assert!(CellKey::try_from_u64(((EXCEL_MAX_ROWS as u64) << COL_BITS) | 0).is_none());
+        assert_eq!(
+            CellKey::try_from_u64(((EXCEL_MAX_ROWS as u64) << COL_BITS) | 0),
+            Some(CellKey::new(EXCEL_MAX_ROWS, 0))
+        );
+        assert!(CellKey::try_from_u64((((u32::MAX as u64) + 1) << COL_BITS) | 0).is_none());
     }
 }

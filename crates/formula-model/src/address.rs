@@ -25,10 +25,10 @@ impl CellRef {
 
     /// Checked constructor for a [`CellRef`].
     ///
-    /// Returns `None` if `row`/`col` are outside Excel's sheet bounds.
+    /// Returns `None` if `col` is outside Excel's sheet bounds.
     #[inline]
     pub fn try_new(row: u32, col: u32) -> Option<Self> {
-        if row < crate::cell::EXCEL_MAX_ROWS && col < crate::cell::EXCEL_MAX_COLS {
+        if col < crate::cell::EXCEL_MAX_COLS {
             Some(Self::new(row, col))
         } else {
             None
@@ -90,9 +90,6 @@ impl CellRef {
         if row_1_based == 0 {
             return Err(A1ParseError::InvalidRow);
         }
-        if row_1_based > crate::cell::EXCEL_MAX_ROWS {
-            return Err(A1ParseError::InvalidRow);
-        }
 
         Ok(Self {
             row: row_1_based - 1,
@@ -113,12 +110,6 @@ impl<'de> Deserialize<'de> for CellRef {
         }
 
         let helper = Helper::deserialize(deserializer)?;
-        if helper.row >= crate::cell::EXCEL_MAX_ROWS {
-            return Err(D::Error::custom(format!(
-                "row out of Excel bounds: {}",
-                helper.row
-            )));
-        }
         if helper.col >= crate::cell::EXCEL_MAX_COLS {
             return Err(D::Error::custom(format!(
                 "col out of Excel bounds: {}",
@@ -449,7 +440,10 @@ mod tests {
     fn a1_bounds_are_excel_compatible() {
         assert!(CellRef::from_a1("XFD1048576").is_ok());
         assert!(CellRef::from_a1("XFE1").is_err()); // col 16385 is out of bounds
-        assert!(CellRef::from_a1("A1048577").is_err()); // row 1,048,577 is out of bounds
+        assert_eq!(
+            CellRef::from_a1("A1048577").unwrap(),
+            CellRef::new(1_048_576, 0)
+        );
     }
 
     #[test]
@@ -469,7 +463,7 @@ mod tests {
 
     #[test]
     fn cell_ref_deserialize_validates_bounds() {
-        let json = serde_json::json!({ "row": crate::cell::EXCEL_MAX_ROWS, "col": 0 });
+        let json = serde_json::json!({ "row": 0, "col": crate::cell::EXCEL_MAX_COLS });
         let err = serde_json::from_value::<CellRef>(json).unwrap_err();
         assert!(err.to_string().contains("out of Excel bounds"));
     }
