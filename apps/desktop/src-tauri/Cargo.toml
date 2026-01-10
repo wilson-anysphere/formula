@@ -22,6 +22,7 @@ desktop = ["dep:tauri", "dep:tauri-build"]
 [dependencies]
 anyhow = "1.0"
 calamine = "0.26"
+formula-xlsx = { path = "../../../crates/formula-xlsx" }
 rust_xlsxwriter = "0.79"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

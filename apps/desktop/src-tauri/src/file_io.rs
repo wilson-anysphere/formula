@@ -1,6 +1,7 @@
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
+use formula_xlsx::XlsxPackage;
 use rust_xlsxwriter::{Workbook as XlsxWorkbook, XlsxError};
 use std::collections::HashMap;
 use std::path::Path;
@@ -46,6 +47,7 @@ impl Sheet {
 #[derive(Clone, Debug)]
 pub struct Workbook {
     pub path: Option<String>,
+    pub vba_project_bin: Option<Vec<u8>>,
     pub sheets: Vec<Sheet>,
 }
 
@@ -53,6 +55,7 @@ impl Workbook {
     pub fn new_empty(path: Option<String>) -> Self {
         Self {
             path,
+            vba_project_bin: None,
             sheets: Vec::new(),
         }
     }
@@ -137,8 +140,27 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
 
     let mut out = Workbook {
         path: Some(path.to_string_lossy().to_string()),
+        vba_project_bin: None,
         sheets: Vec::new(),
     };
+
+    // Preserve macros: if the source file contains `xl/vbaProject.bin`, stash it so that
+    // `write_xlsx_blocking` can re-inject it when saving as `.xlsm`.
+    //
+    // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
+    if matches!(
+        path.extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .as_deref(),
+        Some("xlsx") | Some("xlsm")
+    ) {
+        let bytes =
+            std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?;
+        if let Ok(pkg) = XlsxPackage::from_bytes(&bytes) {
+            out.vba_project_bin = pkg.vba_project_bin().map(|b| b.to_vec());
+        }
+    }
 
     for sheet_name in sheet_names {
         let range = workbook
@@ -268,12 +290,72 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<(
         }
     }
 
-    out.save(path)
+    let mut bytes = out
+        .save_to_buffer()
         .map_err(|e| anyhow::anyhow!(xlsx_err(e)))
-        .with_context(|| format!("save workbook {:?}", path))?;
+        .with_context(|| "serialize workbook to buffer")?;
+
+    if workbook.vba_project_bin.is_some()
+        && matches!(
+            path.extension()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_ascii_lowercase())
+                .as_deref(),
+            Some("xlsm")
+        )
+    {
+        let mut pkg =
+            XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
+        pkg.set_part(
+            "xl/vbaProject.bin",
+            workbook.vba_project_bin.clone().expect("checked is_some"),
+        );
+        bytes = pkg
+            .write_to_bytes()
+            .context("repack workbook package with vbaProject.bin")?;
+    }
+
+    std::fs::write(path, bytes).with_context(|| format!("write workbook {:?}", path))?;
     Ok(())
 }
 
 fn xlsx_err(err: XlsxError) -> String {
     format!("{err:?}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_vba_project_bin_when_saving_xlsm() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture xlsm");
+        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse fixture package");
+        let original_vba = original_pkg
+            .vba_project_bin()
+            .expect("fixture has vbaProject.bin")
+            .to_vec();
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read workbook");
+        assert!(
+            workbook.vba_project_bin.is_some(),
+            "read_xlsx_blocking should capture vbaProject.bin"
+        );
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("roundtrip.xlsm");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read written file");
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+        let written_vba = written_pkg
+            .vba_project_bin()
+            .expect("written workbook should contain vbaProject.bin");
+
+        assert_eq!(original_vba, written_vba);
+    }
 }
