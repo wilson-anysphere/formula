@@ -2,9 +2,7 @@
   "name": "formula",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "packages/*"
-  ],
+  "packageManager": "pnpm@9.0.0",
   "dependencies": {
     "yjs": "^13.6.27"
   },
@@ -12,6 +10,7 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "pnpm --dir packages/grid dev",
     "test": "vitest run",
     "test:node": "node --no-warnings --test",
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -1,0 +1,2 @@
+export { GridPerformanceHarness } from "./GridPerformanceHarness";
+
