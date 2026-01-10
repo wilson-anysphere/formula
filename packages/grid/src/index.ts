@@ -1,4 +1,4 @@
-export type { CellProvider, CellData, CellStyle } from "./model/CellProvider";
+export type { CellProvider, CellProviderUpdate, CellRange, CellData, CellStyle } from "./model/CellProvider";
 export { MockCellProvider } from "./model/MockCellProvider";
 
 export type { GridApi, CanvasGridProps } from "./react/CanvasGrid";
@@ -13,4 +13,3 @@ export type { ScrollbarThumb } from "./virtualization/scrollbarMath";
 export { computeScrollbarThumb } from "./virtualization/scrollbarMath";
 export { VirtualScrollManager } from "./virtualization/VirtualScrollManager";
 export type { GridViewportState } from "./virtualization/VirtualScrollManager";
-

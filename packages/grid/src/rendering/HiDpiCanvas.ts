@@ -10,8 +10,8 @@ export function setupHiDpiCanvas(
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
 
-  const nextWidth = Math.max(1, Math.floor(width * dpr));
-  const nextHeight = Math.max(1, Math.floor(height * dpr));
+  const nextWidth = Math.max(1, Math.round(width * dpr));
+  const nextHeight = Math.max(1, Math.round(height * dpr));
 
   if (canvas.width !== nextWidth) canvas.width = nextWidth;
   if (canvas.height !== nextHeight) canvas.height = nextHeight;
@@ -19,4 +19,3 @@ export function setupHiDpiCanvas(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
 }
-

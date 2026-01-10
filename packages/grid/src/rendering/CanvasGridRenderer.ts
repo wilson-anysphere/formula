@@ -1,4 +1,4 @@
-import type { CellProvider } from "../model/CellProvider";
+import type { CellProvider, CellProviderUpdate, CellRange } from "../model/CellProvider";
 import { DirtyRegionTracker, type Rect } from "./DirtyRegionTracker";
 import { setupHiDpiCanvas } from "./HiDpiCanvas";
 import { LruCache } from "../utils/LruCache";
@@ -38,6 +38,11 @@ export class CanvasGridRenderer {
   private selectionCanvas?: HTMLCanvasElement;
   private selectionCtx?: CanvasRenderingContext2D;
 
+  private blitCanvas?: HTMLCanvasElement;
+  private blitCtx?: CanvasRenderingContext2D;
+
+  private unsubscribeProvider?: () => void;
+
   private devicePixelRatio = 1;
 
   private readonly dirty = {
@@ -47,6 +52,19 @@ export class CanvasGridRenderer {
   };
 
   private scheduled = false;
+  private forceFullRedraw = true;
+
+  private lastRendered = {
+    width: 0,
+    height: 0,
+    frozenRows: 0,
+    frozenCols: 0,
+    frozenWidth: 0,
+    frozenHeight: 0,
+    scrollX: 0,
+    scrollY: 0,
+    devicePixelRatio: 1
+  };
 
   private selection: Selection | null = null;
   private previousSelection: Selection | null = null;
@@ -103,7 +121,23 @@ export class CanvasGridRenderer {
     this.contentCanvas.style.zIndex = "1";
     this.selectionCanvas.style.zIndex = "2";
 
+    if (this.unsubscribeProvider) {
+      this.unsubscribeProvider();
+      this.unsubscribeProvider = undefined;
+    }
+
+    if (this.provider.subscribe) {
+      this.unsubscribeProvider = this.provider.subscribe((update) => this.onProviderUpdate(update));
+    }
+
     this.markAllDirty();
+  }
+
+  destroy(): void {
+    if (this.unsubscribeProvider) {
+      this.unsubscribeProvider();
+      this.unsubscribeProvider = undefined;
+    }
   }
 
   resize(width: number, height: number, devicePixelRatio: number): void {
@@ -117,6 +151,7 @@ export class CanvasGridRenderer {
     setupHiDpiCanvas(this.contentCanvas, this.contentCtx, width, height, devicePixelRatio);
     setupHiDpiCanvas(this.selectionCanvas, this.selectionCtx, width, height, devicePixelRatio);
 
+    this.ensureBlitCanvas();
     this.markAllDirty();
   }
 
@@ -127,16 +162,18 @@ export class CanvasGridRenderer {
 
   setScroll(scrollX: number, scrollY: number): void {
     this.scroll.setScroll(scrollX, scrollY);
-    this.markAllDirty();
+    const aligned = this.alignScrollToDevicePixels(this.scroll.getScroll());
+    this.scroll.setScroll(aligned.x, aligned.y);
+    this.invalidateForScroll();
   }
 
   scrollBy(deltaX: number, deltaY: number): void {
     const before = this.scroll.getScroll();
     this.scroll.scrollBy(deltaX, deltaY);
+    const aligned = this.alignScrollToDevicePixels(this.scroll.getScroll());
+    this.scroll.setScroll(aligned.x, aligned.y);
     const after = this.scroll.getScroll();
-    if (before.x !== after.x || before.y !== after.y) {
-      this.markAllDirty();
-    }
+    if (before.x !== after.x || before.y !== after.y) this.invalidateForScroll();
   }
 
   setSelection(selection: Selection | null): void {
@@ -221,6 +258,7 @@ export class CanvasGridRenderer {
     this.dirty.background.markDirty(full);
     this.dirty.content.markDirty(full);
     this.dirty.selection.markDirty(full);
+    this.forceFullRedraw = true;
     this.provider.prefetch?.({
       startRow: viewport.main.rows.start,
       endRow: viewport.main.rows.end,
@@ -233,9 +271,299 @@ export class CanvasGridRenderer {
   private renderFrame(): void {
     const viewport = this.scroll.getViewportState();
 
+    const scrollDeltaX = this.lastRendered.scrollX - viewport.scrollX;
+    const scrollDeltaY = this.lastRendered.scrollY - viewport.scrollY;
+    const viewportChanged =
+      viewport.width !== this.lastRendered.width ||
+      viewport.height !== this.lastRendered.height ||
+      viewport.frozenRows !== this.lastRendered.frozenRows ||
+      viewport.frozenCols !== this.lastRendered.frozenCols ||
+      viewport.frozenWidth !== this.lastRendered.frozenWidth ||
+      viewport.frozenHeight !== this.lastRendered.frozenHeight ||
+      this.devicePixelRatio !== this.lastRendered.devicePixelRatio;
+
+    if (viewportChanged) {
+      this.forceFullRedraw = true;
+    }
+
+    if (scrollDeltaX !== 0 || scrollDeltaY !== 0) {
+      if (!this.forceFullRedraw && this.canBlitScroll(viewport, scrollDeltaX, scrollDeltaY)) {
+        this.blitScroll(viewport, scrollDeltaX, scrollDeltaY);
+        this.markScrollDirtyRegions(viewport, scrollDeltaX, scrollDeltaY);
+      } else {
+        this.markFullViewportDirty(viewport);
+      }
+
+      // Selection overlay moves relative to scroll.
+      this.dirty.selection.markDirty({ x: 0, y: 0, width: viewport.width, height: viewport.height });
+    }
+
     this.renderLayer("background", viewport, this.dirty.background.drain());
     this.renderLayer("content", viewport, this.dirty.content.drain());
     this.renderLayer("selection", viewport, this.dirty.selection.drain());
+
+    this.lastRendered = {
+      width: viewport.width,
+      height: viewport.height,
+      frozenRows: viewport.frozenRows,
+      frozenCols: viewport.frozenCols,
+      frozenWidth: viewport.frozenWidth,
+      frozenHeight: viewport.frozenHeight,
+      scrollX: viewport.scrollX,
+      scrollY: viewport.scrollY,
+      devicePixelRatio: this.devicePixelRatio
+    };
+    this.forceFullRedraw = false;
+  }
+
+  private invalidateForScroll(): void {
+    const viewport = this.scroll.getViewportState();
+    this.provider.prefetch?.({
+      startRow: viewport.main.rows.start,
+      endRow: viewport.main.rows.end,
+      startCol: viewport.main.cols.start,
+      endCol: viewport.main.cols.end
+    });
+    this.requestRender();
+  }
+
+  private alignScrollToDevicePixels(pos: { x: number; y: number }): { x: number; y: number } {
+    const dpr = Number.isFinite(this.devicePixelRatio) && this.devicePixelRatio > 0 ? this.devicePixelRatio : 1;
+    const step = 1 / dpr;
+    const x = Math.round(pos.x / step) * step;
+    const y = Math.round(pos.y / step) * step;
+    return { x, y };
+  }
+
+  private markFullViewportDirty(viewport: GridViewportState): void {
+    const full = { x: 0, y: 0, width: viewport.width, height: viewport.height };
+    this.dirty.background.markDirty(full);
+    this.dirty.content.markDirty(full);
+  }
+
+  private ensureBlitCanvas(): void {
+    const gridCanvas = this.gridCanvas;
+    if (!gridCanvas) return;
+
+    if (!this.blitCanvas) {
+      this.blitCanvas = document.createElement("canvas");
+      this.blitCtx = this.blitCanvas.getContext("2d") ?? undefined;
+    }
+
+    if (!this.blitCanvas || !this.blitCtx) return;
+
+    if (this.blitCanvas.width !== gridCanvas.width) this.blitCanvas.width = gridCanvas.width;
+    if (this.blitCanvas.height !== gridCanvas.height) this.blitCanvas.height = gridCanvas.height;
+  }
+
+  private canBlitScroll(viewport: GridViewportState, deltaX: number, deltaY: number): boolean {
+    if (!this.gridCanvas || !this.contentCanvas) return false;
+    if (!this.gridCtx || !this.contentCtx) return false;
+    if (!this.blitCanvas || !this.blitCtx) return false;
+    if (viewport.width === 0 || viewport.height === 0) return false;
+
+    const scrollableWidth = Math.max(0, viewport.width - viewport.frozenWidth);
+    const scrollableHeight = Math.max(0, viewport.height - viewport.frozenHeight);
+
+    if (deltaX !== 0 && (scrollableWidth === 0 || Math.abs(deltaX) >= scrollableWidth)) return false;
+    if (deltaY !== 0 && (scrollableHeight === 0 || Math.abs(deltaY) >= scrollableHeight)) return false;
+
+    const dpr = Number.isFinite(this.devicePixelRatio) && this.devicePixelRatio > 0 ? this.devicePixelRatio : 1;
+    const dxDevice = deltaX * dpr;
+    const dyDevice = deltaY * dpr;
+    const epsilon = 1e-6;
+    if (deltaX !== 0 && Math.abs(dxDevice - Math.round(dxDevice)) > epsilon) return false;
+    if (deltaY !== 0 && Math.abs(dyDevice - Math.round(dyDevice)) > epsilon) return false;
+
+    return true;
+  }
+
+  private blitScroll(viewport: GridViewportState, deltaX: number, deltaY: number): void {
+    this.ensureBlitCanvas();
+    if (!this.blitCanvas || !this.blitCtx) return;
+
+    this.blitLayer("background", viewport, deltaX, deltaY);
+    this.blitLayer("content", viewport, deltaX, deltaY);
+  }
+
+  private blitLayer(layer: "background" | "content", viewport: GridViewportState, deltaX: number, deltaY: number): void {
+    const canvas = layer === "background" ? this.gridCanvas : this.contentCanvas;
+    const ctx = layer === "background" ? this.gridCtx : this.contentCtx;
+    if (!canvas || !ctx) return;
+    if (!this.blitCanvas || !this.blitCtx) return;
+
+    const dpr = Number.isFinite(this.devicePixelRatio) && this.devicePixelRatio > 0 ? this.devicePixelRatio : 1;
+    const dx = Math.round(deltaX * dpr);
+    const dy = Math.round(deltaY * dpr);
+
+    const widthPx = canvas.width;
+    const heightPx = canvas.height;
+
+    // Copy current layer into the blit buffer.
+    this.blitCtx.setTransform(1, 0, 0, 1, 0, 0);
+    this.blitCtx.clearRect(0, 0, widthPx, heightPx);
+    this.blitCtx.drawImage(canvas, 0, 0);
+
+    const frozenWidthPx = Math.round(viewport.frozenWidth * dpr);
+    const frozenHeightPx = Math.round(viewport.frozenHeight * dpr);
+
+    const quadrants = [
+      {
+        rect: { x: frozenWidthPx, y: 0, width: widthPx - frozenWidthPx, height: frozenHeightPx },
+        shiftX: dx,
+        shiftY: 0
+      },
+      {
+        rect: { x: 0, y: frozenHeightPx, width: frozenWidthPx, height: heightPx - frozenHeightPx },
+        shiftX: 0,
+        shiftY: dy
+      },
+      {
+        rect: {
+          x: frozenWidthPx,
+          y: frozenHeightPx,
+          width: widthPx - frozenWidthPx,
+          height: heightPx - frozenHeightPx
+        },
+        shiftX: dx,
+        shiftY: dy
+      }
+    ];
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    for (const quadrant of quadrants) {
+      const { rect, shiftX, shiftY } = quadrant;
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      if (shiftX === 0 && shiftY === 0) continue;
+
+      if (layer === "background") {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      } else {
+        ctx.clearRect(rect.x, rect.y, rect.width, rect.height);
+      }
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(rect.x, rect.y, rect.width, rect.height);
+      ctx.clip();
+      ctx.drawImage(this.blitCanvas, shiftX, shiftY);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
+  private markScrollDirtyRegions(viewport: GridViewportState, deltaX: number, deltaY: number): void {
+    const frozenWidth = viewport.frozenWidth;
+    const frozenHeight = viewport.frozenHeight;
+
+    const topRight = { x: frozenWidth, y: 0, width: viewport.width - frozenWidth, height: frozenHeight };
+    const bottomLeft = { x: 0, y: frozenHeight, width: frozenWidth, height: viewport.height - frozenHeight };
+    const main = {
+      x: frozenWidth,
+      y: frozenHeight,
+      width: viewport.width - frozenWidth,
+      height: viewport.height - frozenHeight
+    };
+
+    const candidates: { rect: Rect; shiftX: number; shiftY: number }[] = [
+      { rect: topRight, shiftX: deltaX, shiftY: 0 },
+      { rect: bottomLeft, shiftX: 0, shiftY: deltaY },
+      { rect: main, shiftX: deltaX, shiftY: deltaY }
+    ];
+
+    for (const { rect, shiftX, shiftY } of candidates) {
+      if (rect.width <= 0 || rect.height <= 0) continue;
+
+      if (shiftX > 0) {
+        this.markDirtyBoth({ x: rect.x, y: rect.y, width: shiftX, height: rect.height });
+      } else if (shiftX < 0) {
+        this.markDirtyBoth({
+          x: rect.x + rect.width + shiftX,
+          y: rect.y,
+          width: -shiftX,
+          height: rect.height
+        });
+      }
+
+      if (shiftY > 0) {
+        this.markDirtyBoth({ x: rect.x, y: rect.y, width: rect.width, height: shiftY });
+      } else if (shiftY < 0) {
+        this.markDirtyBoth({
+          x: rect.x,
+          y: rect.y + rect.height + shiftY,
+          width: rect.width,
+          height: -shiftY
+        });
+      }
+    }
+  }
+
+  private markDirtyBoth(rect: Rect): void {
+    const padded: Rect = { x: rect.x - 1, y: rect.y - 1, width: rect.width + 2, height: rect.height + 2 };
+    this.dirty.background.markDirty(padded);
+    this.dirty.content.markDirty(padded);
+  }
+
+  private onProviderUpdate(update: CellProviderUpdate): void {
+    if (update.type === "invalidateAll") {
+      this.markAllDirty();
+      return;
+    }
+
+    const viewport = this.scroll.getViewportState();
+    const rects = this.rangeToViewportRects(update.range, viewport);
+    for (const rect of rects) {
+      this.dirty.background.markDirty(rect);
+      this.dirty.content.markDirty(rect);
+    }
+    this.requestRender();
+  }
+
+  private rangeToViewportRects(range: CellRange, viewport: GridViewportState): Rect[] {
+    const rowAxis = this.scroll.rows;
+    const colAxis = this.scroll.cols;
+
+    const frozenRows = viewport.frozenRows;
+    const frozenCols = viewport.frozenCols;
+
+    const rowsFrozenStart = range.startRow;
+    const rowsFrozenEnd = Math.min(range.endRow, frozenRows);
+    const rowsScrollStart = Math.max(range.startRow, frozenRows);
+    const rowsScrollEnd = range.endRow;
+
+    const colsFrozenStart = range.startCol;
+    const colsFrozenEnd = Math.min(range.endCol, frozenCols);
+    const colsScrollStart = Math.max(range.startCol, frozenCols);
+    const colsScrollEnd = range.endCol;
+
+    const viewportRect: Rect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
+    const rects: Rect[] = [];
+
+    const addRect = (rowStart: number, rowEnd: number, colStart: number, colEnd: number, scrollRows: boolean, scrollCols: boolean) => {
+      if (rowStart >= rowEnd || colStart >= colEnd) return;
+
+      const x1 = colAxis.positionOf(colStart);
+      const x2 = colAxis.positionOf(colEnd);
+      const y1 = rowAxis.positionOf(rowStart);
+      const y2 = rowAxis.positionOf(rowEnd);
+
+      const x = scrollCols ? x1 - viewport.scrollX : x1;
+      const y = scrollRows ? y1 - viewport.scrollY : y1;
+
+      const rect = intersectRect({ x, y, width: x2 - x1, height: y2 - y1 }, viewportRect);
+      if (rect) rects.push(rect);
+    };
+
+    addRect(rowsFrozenStart, rowsFrozenEnd, colsFrozenStart, colsFrozenEnd, false, false);
+    addRect(rowsFrozenStart, rowsFrozenEnd, colsScrollStart, colsScrollEnd, false, true);
+    addRect(rowsScrollStart, rowsScrollEnd, colsFrozenStart, colsFrozenEnd, true, false);
+    addRect(rowsScrollStart, rowsScrollEnd, colsScrollStart, colsScrollEnd, true, true);
+
+    return rects;
   }
 
   private renderLayer(layer: Layer, viewport: GridViewportState, regions: Rect[]): void {

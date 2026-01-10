@@ -149,6 +149,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     return () => {
       ro.disconnect();
+      renderer.destroy();
       rendererRef.current = null;
     };
   }, [rendererFactory, frozenRows, frozenCols]);
