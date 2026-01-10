@@ -4,3 +4,5 @@ export * from "./layoutNormalization.js";
 export * from "./layoutPersistence.js";
 export * from "./layoutSerializer.js";
 export * from "./layoutState.js";
+export * from "./windowingSerializer.js";
+export * from "./windowingState.js";
