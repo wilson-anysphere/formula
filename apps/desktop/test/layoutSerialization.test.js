@@ -6,6 +6,7 @@ import {
   createDefaultLayout,
   dockPanel,
   openPanel,
+  setActiveSplitPane,
   setDockSize,
   setSplitDirection,
   setSplitPaneScroll,
@@ -21,6 +22,7 @@ test("layout state round-trips through serialization", () => {
   layout = setDockSize(layout, "left", 420);
 
   layout = setSplitDirection(layout, "vertical", 0.6);
+  layout = setActiveSplitPane(layout, "secondary");
   layout = setSplitPaneSheet(layout, "secondary", "Sheet2");
   layout = setSplitPaneScroll(layout, "primary", { scrollX: 120, scrollY: 340 });
   layout = setSplitPaneScroll(layout, "secondary", { scrollX: 0, scrollY: 9001 });
@@ -35,4 +37,3 @@ test("deserializeLayout falls back to defaults on invalid JSON", () => {
   const restored = deserializeLayout("{this is not json", { primarySheetId: "Sheet1" });
   assert.deepEqual(restored, createDefaultLayout({ primarySheetId: "Sheet1" }));
 });
-

@@ -1,6 +1,7 @@
 import {
   DEFAULT_DOCK_SIZES,
   DEFAULT_FLOATING_RECT,
+  DEFAULT_ACTIVE_SPLIT_PANE,
   DEFAULT_SPLIT_RATIO,
   DOCK_SIDES,
   LAYOUT_STATE_VERSION,
@@ -75,6 +76,7 @@ export function createDefaultLayout(options = {}) {
     splitView: {
       direction: "none",
       ratio: DEFAULT_SPLIT_RATIO,
+      activePane: DEFAULT_ACTIVE_SPLIT_PANE,
       panes: {
         primary: { sheetId: primarySheetId, scrollX: 0, scrollY: 0 },
         secondary: { sheetId: primarySheetId, scrollX: 0, scrollY: 0 },
@@ -311,6 +313,19 @@ export function setSplitDirection(layout, direction, ratio) {
 export function setSplitRatio(layout, ratio) {
   const next = clone(layout);
   next.splitView.ratio = clamp(ratio, 0.1, 0.9);
+  return next;
+}
+
+/**
+ * @param {ReturnType<typeof createDefaultLayout>} layout
+ * @param {"primary" | "secondary"} pane
+ */
+export function setActiveSplitPane(layout, pane) {
+  ensureSplitPane(pane);
+  if (layout.splitView.activePane === pane) return layout;
+
+  const next = clone(layout);
+  next.splitView.activePane = pane;
   return next;
 }
 

@@ -5,6 +5,7 @@ import {
   dockPanel,
   floatPanel,
   openPanel,
+  setActiveSplitPane,
   setDockCollapsed,
   setDockSize,
   setFloatingPanelMinimized,
@@ -182,6 +183,10 @@ export class LayoutController {
     this.#commit(setSplitRatio(this.layout, ratio));
   }
 
+  setActiveSplitPane(pane) {
+    this.#commit(setActiveSplitPane(this.layout, pane));
+  }
+
   setSplitPaneSheet(pane, sheetId) {
     this.#commit(setSplitPaneSheet(this.layout, pane, sheetId));
   }
@@ -195,4 +200,3 @@ export class LayoutController {
     this.#emit("globalDefaultSaved", {});
   }
 }
-

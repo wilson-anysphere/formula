@@ -1,6 +1,7 @@
 import {
   DEFAULT_DOCK_SIZES,
   DEFAULT_FLOATING_RECT,
+  DEFAULT_ACTIVE_SPLIT_PANE,
   DEFAULT_SPLIT_RATIO,
   DOCK_SIDES,
   LAYOUT_STATE_VERSION,
@@ -75,10 +76,11 @@ function normalizeFloating(rawFloating, { panelRegistry }) {
 }
 
 function normalizeSplitView(rawSplitView, { primarySheetId }) {
-  /** @type {{ direction: "none" | "vertical" | "horizontal", ratio: number, panes: { primary: { sheetId: string | null, scrollX: number, scrollY: number }, secondary: { sheetId: string | null, scrollX: number, scrollY: number } } }} */
+  /** @type {{ direction: "none" | "vertical" | "horizontal", ratio: number, activePane: "primary" | "secondary", panes: { primary: { sheetId: string | null, scrollX: number, scrollY: number }, secondary: { sheetId: string | null, scrollX: number, scrollY: number } } }} */
   const splitView = {
     direction: "none",
     ratio: DEFAULT_SPLIT_RATIO,
+    activePane: DEFAULT_ACTIVE_SPLIT_PANE,
     panes: {
       primary: {
         sheetId: primarySheetId ?? null,
@@ -97,6 +99,7 @@ function normalizeSplitView(rawSplitView, { primarySheetId }) {
 
   splitView.direction = SPLIT_DIRECTIONS.includes(rawSplitView.direction) ? rawSplitView.direction : "none";
   splitView.ratio = clampNumber(rawSplitView.ratio, { min: 0.1, max: 0.9, fallback: DEFAULT_SPLIT_RATIO });
+  splitView.activePane = SPLIT_PANES.includes(rawSplitView.activePane) ? rawSplitView.activePane : DEFAULT_ACTIVE_SPLIT_PANE;
 
   const panes = rawSplitView.panes;
   if (panes && typeof panes === "object") {
@@ -169,4 +172,3 @@ export function normalizeLayout(raw, options = {}) {
 
   return layout;
 }
-

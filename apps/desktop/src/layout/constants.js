@@ -18,4 +18,4 @@ export const DEFAULT_FLOATING_RECT = Object.freeze({
 });
 
 export const DEFAULT_SPLIT_RATIO = 0.5;
-
+export const DEFAULT_ACTIVE_SPLIT_PANE = "primary";
