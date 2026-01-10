@@ -35,9 +35,16 @@ export function computeDiffHighlights(diff) {
  */
 
 function withAlpha(color, alpha) {
-  // Accept `rgb(...)`/`rgba(...)`/`#RRGGBB` etc by falling back to a globalAlpha approach.
-  // For simple usage we mostly pass rgba already; this exists for callers that want hex.
+  // Accept CSS color strings (e.g. hex or computed channel values) by falling back to a
+  // `globalAlpha` approach. This exists for callers that want to pass raw token values.
   return { color, alpha };
+}
+
+function readCssVarColor(varName, root = null, fallback = "transparent") {
+  if (!root || typeof getComputedStyle !== "function") return fallback;
+  const value = getComputedStyle(root).getPropertyValue(varName);
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed || fallback;
 }
 
 function drawCellHighlight(ctx, rect, style, options) {
@@ -73,17 +80,27 @@ function drawCellHighlight(ctx, rect, style, options) {
 
 export class DiffOverlayRenderer {
   constructor(options) {
+    const root = options?.cssVarRoot ?? globalThis?.document?.documentElement ?? null;
+
+    const palette = {
+      added: readCssVarColor("--success", root),
+      removed: readCssVarColor("--error", root),
+      modified: readCssVarColor("--warning", root),
+      format: readCssVarColor("--accent", root),
+      moved: readCssVarColor("--accent", root),
+    };
+
     const {
-      addedFill = "rgba(0, 200, 0, 1)",
-      addedStroke = "rgba(0, 200, 0, 1)",
-      removedFill = "rgba(200, 0, 0, 1)",
-      removedStroke = "rgba(200, 0, 0, 1)",
-      modifiedFill = "rgba(255, 200, 0, 1)",
-      modifiedStroke = "rgba(255, 200, 0, 1)",
-      formatFill = "rgba(0, 150, 255, 1)",
-      formatStroke = "rgba(0, 150, 255, 1)",
-      movedFill = "rgba(160, 80, 255, 1)",
-      movedStroke = "rgba(160, 80, 255, 1)",
+      addedFill = palette.added,
+      addedStroke = palette.added,
+      removedFill = palette.removed,
+      removedStroke = palette.removed,
+      modifiedFill = palette.modified,
+      modifiedStroke = palette.modified,
+      formatFill = palette.format,
+      formatStroke = palette.format,
+      movedFill = palette.moved,
+      movedStroke = palette.moved,
       fillAlpha = 0.18,
       strokeAlpha = 0.85,
       strokeWidth = 2,

@@ -51,7 +51,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
   if (!open) return null;
 
   return (
-    <div style={{ padding: 16, border: "1px solid #ccc", borderRadius: 8, maxWidth: 420 }}>
+    <div style={{ padding: 16, border: "1px solid var(--dialog-border)", borderRadius: 8, maxWidth: 420 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h3 style={{ margin: 0 }}>{t("whatIf.goalSeek.title")}</h3>
         <button onClick={onClose} disabled={running}>
@@ -80,7 +80,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
         </button>
       </div>
 
-      {error ? <p style={{ color: "crimson" }}>{error}</p> : null}
+      {error ? <p style={{ color: "var(--error)" }}>{error}</p> : null}
 
       {progress ? (
         <div style={{ marginTop: 12, fontFamily: "monospace", fontSize: 12 }}>

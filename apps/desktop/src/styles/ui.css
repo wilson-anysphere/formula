@@ -1,0 +1,185 @@
+/*
+  Core UI styles wired entirely through CSS variables defined in tokens.css.
+  No hardcoded colors should appear in this file.
+*/
+
+.formula-app {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+}
+
+.formula-app * {
+  box-sizing: border-box;
+}
+
+.formula-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--formula-bar-bg);
+  border-bottom: 1px solid var(--formula-bar-border);
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.formula-bar__label {
+  color: var(--text-secondary);
+  font-weight: 600;
+  user-select: none;
+}
+
+.formula-bar__input {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.formula-bar__input:focus {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  border-top: 1px solid var(--grid-line);
+}
+
+.grid__headers {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 80px repeat(6, 1fr);
+  background: var(--grid-header-bg);
+  color: var(--grid-header-text);
+  border-bottom: 1px solid var(--grid-line);
+}
+
+.grid__header-cell {
+  padding: 8px 10px;
+  border-right: 1px solid var(--grid-line);
+  font-weight: 600;
+  user-select: none;
+}
+
+.grid__body {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 80px repeat(6, 1fr);
+  background: var(--bg-primary);
+}
+
+.grid__row-header,
+.grid__cell {
+  padding: 8px 10px;
+  border-right: 1px solid var(--grid-line);
+  border-bottom: 1px solid var(--grid-line);
+  min-height: 32px;
+}
+
+.grid__row-header {
+  background: var(--grid-header-bg);
+  color: var(--text-secondary);
+  font-weight: 600;
+  user-select: none;
+}
+
+.grid__cell--selected {
+  background: var(--selection-bg);
+  color: var(--selection-text);
+  outline: 2px solid var(--selection-border);
+  outline-offset: -2px;
+}
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 12px;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.panel__title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.dialog {
+  background: var(--dialog-bg);
+  border: 1px solid var(--dialog-border);
+  border-radius: 12px;
+  padding: 16px;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.dialog__title {
+  margin: 0 0 10px;
+  font-weight: 700;
+}
+
+.command-palette {
+  background: var(--cmdk-bg);
+  border: 1px solid var(--cmdk-border);
+  border-radius: 12px;
+  padding: 12px;
+  width: 420px;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.command-palette__input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--cmdk-input-bg);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.command-palette__list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.command-palette__item {
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--text-primary);
+}
+
+.command-palette__item[aria-selected="true"] {
+  background: var(--selection-bg);
+  color: var(--selection-text);
+}
+

@@ -138,7 +138,7 @@ export function PivotBuilderPanel({
               onDragStart={(e) => onDragStartField(f, e)}
               style={{
                 padding: "6px 8px",
-                border: "1px solid #ddd",
+                border: "1px solid var(--border)",
                 borderRadius: 6,
                 cursor: "grab",
                 userSelect: "none",
@@ -165,7 +165,7 @@ export function PivotBuilderPanel({
 
         <DropArea title="Values" onDrop={(e) => onDrop("values", e)} onDragOver={onDragOver}>
           {config.valueFields.length === 0 ? (
-            <div style={{ color: "#666" }}>Drop a numeric field here</div>
+            <div style={{ color: "var(--text-secondary)" }}>Drop a numeric field here</div>
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
               {config.valueFields.map((vf, idx) => (
@@ -176,16 +176,16 @@ export function PivotBuilderPanel({
                     gridTemplateColumns: "1fr 1fr",
                     gap: 8,
                     padding: 8,
-                    border: "1px solid #eee",
+                    border: "1px solid var(--border)",
                     borderRadius: 6,
                   }}
                 >
                   <div>
-                    <div style={{ fontSize: 12, color: "#666" }}>Field</div>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>Field</div>
                     <div>{vf.sourceField}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 12, color: "#666" }}>Aggregation</div>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>Aggregation</div>
                     <select
                       value={vf.aggregation}
                       onChange={(e) => updateValueField(idx, { aggregation: e.target.value as AggregationType })}
@@ -249,11 +249,11 @@ function DropArea({
       style={{
         minHeight: 120,
         padding: 10,
-        border: "1px dashed #bbb",
+        border: "1px dashed var(--border)",
         borderRadius: 8,
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#444", marginBottom: 8 }}>{title}</div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>{title}</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{children}</div>
     </div>
   );
@@ -267,8 +267,8 @@ function Pill({ label }: { label: string }) {
         alignItems: "center",
         padding: "3px 8px",
         borderRadius: 999,
-        background: "#f3f3f3",
-        border: "1px solid #e6e6e6",
+        background: "var(--bg-tertiary)",
+        border: "1px solid var(--border)",
         fontSize: 12,
       }}
     >
@@ -276,4 +276,3 @@ function Pill({ label }: { label: string }) {
     </span>
   );
 }
-

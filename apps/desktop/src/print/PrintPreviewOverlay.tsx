@@ -65,7 +65,8 @@ export function PrintPreviewOverlay({
           width={r.w}
           height={r.h}
           fill="none"
-          stroke="rgba(0,0,0,0.35)"
+          stroke="var(--border)"
+          strokeOpacity={0.35}
           strokeWidth={1}
           strokeDasharray="6 4"
         />
@@ -73,4 +74,3 @@ export function PrintPreviewOverlay({
     </svg>
   );
 }
-

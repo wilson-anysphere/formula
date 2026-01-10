@@ -105,10 +105,10 @@ export function AIChatPanel(props: AIChatPanelProps) {
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        borderInlineStart: "1px solid #d4d4d4",
+        borderInlineStart: "1px solid var(--border)",
       }}
     >
-      <div style={{ padding: "8px 12px", borderBottom: "1px solid #d4d4d4", fontWeight: 600 }}>
+      <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontWeight: 600 }}>
         {t("chat.title")}
       </div>
       <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
@@ -140,7 +140,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
         ))}
       </div>
       {attachments.length ? (
-        <div style={{ padding: "6px 12px", borderTop: "1px solid #d4d4d4", fontSize: 12 }}>
+        <div style={{ padding: "6px 12px", borderTop: "1px solid var(--border)", fontSize: 12 }}>
           {t("chat.pendingAttachments")}{" "}
           {attachments.map((a) => (
             <span key={`${a.type}:${a.reference}`} style={{ marginRight: 8 }}>
@@ -149,7 +149,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
           ))}
         </div>
       ) : null}
-      <div style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid #d4d4d4" }}>
+      <div style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid var(--border)" }}>
         <input
           style={{ flex: 1, padding: 8 }}
           placeholder={t("chat.input.placeholder")}
@@ -166,7 +166,14 @@ export function AIChatPanel(props: AIChatPanelProps) {
           {t("chat.send")}
         </button>
       </div>
-      <div style={{ padding: "6px 12px", borderTop: "1px solid #d4d4d4", fontSize: 12, opacity: 0.7 }}>
+      <div
+        style={{
+          padding: "6px 12px",
+          borderTop: "1px solid var(--border)",
+          fontSize: 12,
+          opacity: 0.7,
+        }}
+      >
         {t("chat.attachmentsApiPlaceholder")}
         <button
           style={{ marginInlineStart: 8 }}

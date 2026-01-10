@@ -11,8 +11,9 @@ const containerStyle: CSSProperties = {
   position: "absolute",
   maxWidth: 320,
   padding: "8px 10px",
-  background: "rgba(17, 24, 39, 0.95)",
-  color: "white",
+  background: "var(--bg-tertiary)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border)",
   borderRadius: 8,
   fontSize: 12,
   lineHeight: 1.4,
@@ -28,4 +29,3 @@ export function CommentTooltip(props: CommentTooltipProps): React.ReactElement {
     </div>
   );
 }
-

@@ -23,19 +23,19 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ padding: 12, borderBottom: "1px solid #E5E7EB" }}>
+      <div style={{ padding: 12, borderBottom: "1px solid var(--border)" }}>
         <div style={{ fontWeight: 600 }}>Comments</div>
-        <div style={{ fontSize: 12, color: "#6B7280" }}>
+        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
           {props.cellRef ? `Cell ${props.cellRef}` : "Select a cell"}
         </div>
       </div>
 
       <div style={{ flex: 1, overflow: "auto", padding: 12, gap: 12, display: "flex", flexDirection: "column" }}>
         {threads.length === 0 ? (
-          <div style={{ fontSize: 12, color: "#6B7280" }}>No comments.</div>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>No comments.</div>
         ) : (
           threads.map((comment) => (
-            <div key={comment.id} style={{ border: "1px solid #E5E7EB", borderRadius: 8, padding: 10 }}>
+            <div key={comment.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                 <div style={{ fontSize: 12, fontWeight: 600 }}>{comment.author.name}</div>
                 <button
@@ -53,7 +53,7 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
                   .slice()
                   .sort((a, b) => a.createdAt - b.createdAt)
                   .map((reply) => (
-                    <div key={reply.id} style={{ paddingLeft: 12, borderLeft: "2px solid #E5E7EB" }}>
+                    <div key={reply.id} style={{ paddingLeft: 12, borderLeft: "2px solid var(--border)" }}>
                       <div style={{ fontSize: 12, fontWeight: 600 }}>{reply.author.name}</div>
                       <div style={{ fontSize: 13, marginTop: 4, whiteSpace: "pre-wrap" }}>{reply.content}</div>
                     </div>
@@ -89,7 +89,7 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
         )}
       </div>
 
-      <div style={{ padding: 12, borderTop: "1px solid #E5E7EB" }}>
+      <div style={{ padding: 12, borderTop: "1px solid var(--border)" }}>
         <div style={{ display: "flex", gap: 8 }}>
           <input
             value={newComment}
@@ -116,4 +116,3 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
     </div>
   );
 }
-

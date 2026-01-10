@@ -79,10 +79,10 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
   }
 
   return (
-    <div style={{ padding: 16, border: "1px solid #ccc", borderRadius: 8 }}>
+    <div style={{ padding: 16, border: "1px solid var(--panel-border)", borderRadius: 8 }}>
       <h3 style={{ marginTop: 0 }}>{t("whatIf.monteCarlo.title")}</h3>
 
-      {error ? <p style={{ color: "crimson" }}>{error}</p> : null}
+      {error ? <p style={{ color: "var(--error)" }}>{error}</p> : null}
 
       <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr 1fr", alignItems: "end" }}>
         <label style={{ display: "grid", gap: 4 }}>

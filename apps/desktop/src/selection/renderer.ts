@@ -1,5 +1,7 @@
 import type { CellCoord, Range, SelectionState } from "./types";
 
+import { resolveCssVar } from "../theme/cssVars.js";
+
 export interface Rect {
   x: number;
   y: number;
@@ -20,19 +22,23 @@ export interface SelectionRenderStyle {
   fillHandleSize: number;
 }
 
-const DEFAULT_STYLE: SelectionRenderStyle = {
-  fillColor: "rgba(14, 101, 235, 0.12)",
-  borderColor: "#0e65eb",
-  activeBorderColor: "#0e65eb",
-  borderWidth: 2,
-  activeBorderWidth: 3,
-  fillHandleSize: 8
-};
+function defaultStyleFromTheme(): SelectionRenderStyle {
+  return {
+    fillColor: resolveCssVar("--selection-bg", { fallback: "transparent" }),
+    borderColor: resolveCssVar("--selection-border", { fallback: "transparent" }),
+    activeBorderColor: resolveCssVar("--selection-border", { fallback: "transparent" }),
+    borderWidth: 2,
+    activeBorderWidth: 3,
+    fillHandleSize: 8,
+  };
+}
 
 export class SelectionRenderer {
-  constructor(private style: SelectionRenderStyle = DEFAULT_STYLE) {}
+  constructor(private style: SelectionRenderStyle | null = null) {}
 
   render(ctx: CanvasRenderingContext2D, selection: SelectionState, metrics: GridMetrics): void {
+    const style = this.style ?? defaultStyleFromTheme();
+
     // `clearRect` is affected by the current transform. Reset to identity to
     // clear the full backing store regardless of DPR scaling.
     ctx.save();
@@ -41,14 +47,14 @@ export class SelectionRenderer {
     ctx.restore();
 
     // We draw in CSS pixels; the caller should already have adjusted for DPR.
-    this.renderFill(ctx, selection.ranges, metrics);
-    this.renderBorders(ctx, selection.ranges, metrics);
-    this.renderActiveCell(ctx, selection.active, metrics, selection.type);
+    this.renderFill(ctx, selection.ranges, metrics, style);
+    this.renderBorders(ctx, selection.ranges, metrics, style);
+    this.renderActiveCell(ctx, selection.active, metrics, selection.type, style);
   }
 
-  private renderFill(ctx: CanvasRenderingContext2D, ranges: Range[], metrics: GridMetrics) {
+  private renderFill(ctx: CanvasRenderingContext2D, ranges: Range[], metrics: GridMetrics, style: SelectionRenderStyle) {
     ctx.save();
-    ctx.fillStyle = this.style.fillColor;
+    ctx.fillStyle = style.fillColor;
     for (const range of ranges) {
       const rect = this.rangeToRect(range, metrics);
       if (!rect) continue;
@@ -57,10 +63,10 @@ export class SelectionRenderer {
     ctx.restore();
   }
 
-  private renderBorders(ctx: CanvasRenderingContext2D, ranges: Range[], metrics: GridMetrics) {
+  private renderBorders(ctx: CanvasRenderingContext2D, ranges: Range[], metrics: GridMetrics, style: SelectionRenderStyle) {
     ctx.save();
-    ctx.strokeStyle = this.style.borderColor;
-    ctx.lineWidth = this.style.borderWidth;
+    ctx.strokeStyle = style.borderColor;
+    ctx.lineWidth = style.borderWidth;
     for (const range of ranges) {
       const rect = this.rangeToRect(range, metrics);
       if (!rect) continue;
@@ -70,18 +76,24 @@ export class SelectionRenderer {
     ctx.restore();
   }
 
-  private renderActiveCell(ctx: CanvasRenderingContext2D, cell: CellCoord, metrics: GridMetrics, selectionType: SelectionState["type"]) {
+  private renderActiveCell(
+    ctx: CanvasRenderingContext2D,
+    cell: CellCoord,
+    metrics: GridMetrics,
+    selectionType: SelectionState["type"],
+    style: SelectionRenderStyle,
+  ) {
     const rect = metrics.getCellRect(cell);
     if (!rect) return;
 
     ctx.save();
-    ctx.strokeStyle = this.style.activeBorderColor;
-    ctx.lineWidth = this.style.activeBorderWidth;
+    ctx.strokeStyle = style.activeBorderColor;
+    ctx.lineWidth = style.activeBorderWidth;
     ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.width - 1, rect.height - 1);
 
     if (selectionType !== "row" && selectionType !== "column" && selectionType !== "all") {
-      const size = this.style.fillHandleSize;
-      ctx.fillStyle = this.style.activeBorderColor;
+      const size = style.fillHandleSize;
+      ctx.fillStyle = style.activeBorderColor;
       ctx.fillRect(rect.x + rect.width - size / 2, rect.y + rect.height - size / 2, size, size);
     }
 

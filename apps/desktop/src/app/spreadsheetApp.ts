@@ -3,6 +3,7 @@ import { cellToA1, rangeToA1 } from "../selection/a1";
 import { navigateSelectionByKey } from "../selection/navigation";
 import { SelectionRenderer } from "../selection/renderer";
 import type { CellCoord, GridLimits, Range, SelectionState } from "../selection/types";
+import { resolveCssVar } from "../theme/cssVars.js";
 import {
   DEFAULT_GRID_LIMITS,
   addCellToSelection,
@@ -158,13 +159,13 @@ export class SpreadsheetApp {
     ctx.restore();
 
     ctx.save();
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = resolveCssVar("--bg-primary", { fallback: "Canvas" });
     ctx.fillRect(0, 0, this.width, this.height);
 
     const cols = Math.max(1, Math.floor(this.width / this.cellWidth));
     const rows = Math.max(1, Math.floor(this.height / this.cellHeight));
 
-    ctx.strokeStyle = "#d4d4d4";
+    ctx.strokeStyle = resolveCssVar("--grid-line", { fallback: "CanvasText" });
     ctx.lineWidth = 1;
 
     for (let r = 0; r <= rows; r++) {
@@ -183,7 +184,7 @@ export class SpreadsheetApp {
       ctx.stroke();
     }
 
-    ctx.fillStyle = "#000";
+    ctx.fillStyle = resolveCssVar("--text-primary", { fallback: "CanvasText" });
     ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
 
     for (let r = 0; r < rows; r++) {

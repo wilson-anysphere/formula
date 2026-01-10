@@ -4,7 +4,7 @@ import type { DataTable } from "../../../../../packages/power-query/src/table.js
 
 export function PreviewGrid(props: { table: DataTable | null }) {
   if (!props.table) {
-    return <div style={{ padding: 12, color: "#666" }}>No preview available.</div>;
+    return <div style={{ padding: 12, color: "var(--text-secondary)" }}>No preview available.</div>;
   }
 
   const grid = props.table.toGrid({ includeHeader: true });
@@ -13,7 +13,16 @@ export function PreviewGrid(props: { table: DataTable | null }) {
       <thead>
         <tr>
           {grid[0].map((cell, idx) => (
-            <th key={idx} style={{ position: "sticky", top: 0, background: "#fafafa", borderBottom: "1px solid #ddd", padding: 6 }}>
+            <th
+              key={idx}
+              style={{
+                position: "sticky",
+                top: 0,
+                background: "var(--grid-header-bg)",
+                borderBottom: "1px solid var(--border)",
+                padding: 6,
+              }}
+            >
               {String(cell)}
             </th>
           ))}
@@ -23,7 +32,7 @@ export function PreviewGrid(props: { table: DataTable | null }) {
         {grid.slice(1).map((row, rIdx) => (
           <tr key={rIdx}>
             {row.map((cell, cIdx) => (
-              <td key={cIdx} style={{ borderBottom: "1px solid #eee", padding: 6, fontSize: 12 }}>
+              <td key={cIdx} style={{ borderBottom: "1px solid var(--border)", padding: 6, fontSize: 12 }}>
                 {cell == null ? "" : String(cell)}
               </td>
             ))}
@@ -33,4 +42,3 @@ export function PreviewGrid(props: { table: DataTable | null }) {
     </table>
   );
 }
-

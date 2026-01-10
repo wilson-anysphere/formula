@@ -1,3 +1,5 @@
+import { resolveCssVar } from "../../../theme/cssVars.js";
+
 /**
  * @param {import('./types.js').RichTextRunStyle | undefined} style
  * @param {{fontFamily: string, fontSizePx: number}} defaults
@@ -87,7 +89,7 @@ export function renderRichText(ctx, richText, rect, options = {}) {
     fontFamily: options.fontFamily ?? "Calibri",
     fontSizePx: options.fontSizePx ?? 12,
   };
-  const defaultColor = options.color ?? "#000000";
+  const defaultColor = options.color ?? resolveCssVar("--text-primary", { fallback: "CanvasText" });
 
   const offsets = buildCodePointIndex(richText.text);
   const textLen = offsets.length - 1;

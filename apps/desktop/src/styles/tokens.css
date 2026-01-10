@@ -1,0 +1,152 @@
+/*
+  Design tokens (CSS variables)
+  Source of truth: docs/12-ux-design.md
+
+  Notes:
+  - Keep token names stable; prefer adding new tokens over renaming.
+  - Theme selection is controlled by setting `data-theme` on <html>.
+  - High contrast is supported both via explicit `data-theme="high-contrast"`
+    and via OS forced-colors / prefers-contrast media queries.
+*/
+
+:root {
+  color-scheme: light;
+
+  /* Base surfaces */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --bg-tertiary: #e8e8e8;
+
+  /* Base text */
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+
+  /* Lines / separators */
+  --border: #d4d4d4;
+
+  /* Brand / interactive */
+  --accent: #0066cc;
+  --accent-light: #e6f0ff;
+
+  /* Semantic */
+  --error: #d32f2f;
+  --warning: #ed6c02;
+  --success: #2e7d32;
+
+  /* Text on strong accent backgrounds (buttons, etc.) */
+  --text-on-accent: #ffffff;
+
+  /* Selection / focus */
+  --selection-bg: var(--accent-light);
+  --selection-border: var(--accent);
+  --selection-text: var(--text-primary);
+
+  /* Grid chrome */
+  --grid-header-bg: var(--bg-secondary);
+  --grid-header-text: var(--text-primary);
+  --grid-line: var(--border);
+
+  /* Panels / dialogs */
+  --panel-bg: var(--bg-secondary);
+  --panel-border: var(--border);
+  --dialog-bg: var(--bg-primary);
+  --dialog-border: var(--border);
+
+  /* Command palette */
+  --cmdk-bg: var(--bg-secondary);
+  --cmdk-border: var(--border);
+  --cmdk-input-bg: var(--bg-tertiary);
+
+  /* Formula bar */
+  --formula-bar-bg: var(--bg-secondary);
+  --formula-bar-border: var(--border);
+
+  /* Motion */
+  --motion-duration: 160ms;
+  --motion-duration-fast: 80ms;
+  --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #333333;
+
+  --text-primary: #e4e4e4;
+  --text-secondary: #a0a0a0;
+
+  --border: #404040;
+
+  --accent: #4da6ff;
+  --accent-light: #1a3a5c;
+
+  --error: #f44336;
+  --warning: #ff9800;
+  --success: #4caf50;
+
+  /* Accent backgrounds in dark are typically light, so dark text reads best. */
+  --text-on-accent: #1e1e1e;
+}
+
+:root[data-theme="high-contrast"] {
+  /* In explicit high contrast mode, prefer system colors for maximum legibility. */
+  color-scheme: light dark;
+
+  --bg-primary: Canvas;
+  --bg-secondary: Canvas;
+  --bg-tertiary: Canvas;
+
+  --text-primary: CanvasText;
+  --text-secondary: CanvasText;
+
+  --border: CanvasText;
+
+  --accent: Highlight;
+  --accent-light: Highlight;
+
+  --error: CanvasText;
+  --warning: CanvasText;
+  --success: CanvasText;
+
+  --text-on-accent: HighlightText;
+  --selection-text: HighlightText;
+}
+
+@media (forced-colors: active), (prefers-contrast: more) {
+  :root {
+    color-scheme: light dark;
+
+    --bg-primary: Canvas;
+    --bg-secondary: Canvas;
+    --bg-tertiary: Canvas;
+
+    --text-primary: CanvasText;
+    --text-secondary: CanvasText;
+
+    --border: CanvasText;
+
+    --accent: Highlight;
+    --accent-light: Highlight;
+
+    --text-on-accent: HighlightText;
+    --selection-text: HighlightText;
+  }
+}
+
+/* Explicit hook for runtime detection (e.g., in a canvas renderer). */
+:root[data-reduced-motion="true"] {
+  --motion-duration: 0ms;
+  --motion-duration-fast: 0ms;
+  --motion-ease: linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration: 0ms;
+    --motion-duration-fast: 0ms;
+    --motion-ease: linear;
+  }
+}
+

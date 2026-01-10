@@ -57,7 +57,7 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", height: "100%" }}>
-      <div style={{ borderRight: "1px solid #ddd", padding: 12, overflow: "auto" }}>
+      <div style={{ borderRight: "1px solid var(--border)", padding: 12, overflow: "auto" }}>
         <h3 style={{ marginTop: 0 }}>{props.query.name}</h3>
         <AddStepMenu
           onAddStep={(operation) => {
@@ -79,9 +79,9 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
       </div>
 
       <div style={{ display: "grid", gridTemplateRows: "auto 1fr", overflow: "hidden" }}>
-        <div style={{ borderBottom: "1px solid #ddd", padding: 12 }}>
+        <div style={{ borderBottom: "1px solid var(--border)", padding: 12 }}>
           <SchemaView table={preview} />
-          {error ? <div style={{ color: "#b00020", marginTop: 8 }}>{error}</div> : null}
+          {error ? <div style={{ color: "var(--error)", marginTop: 8 }}>{error}</div> : null}
         </div>
         <div style={{ overflow: "auto" }}>
           <PreviewGrid table={preview} />
@@ -90,4 +90,3 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
     </div>
   );
 }
-

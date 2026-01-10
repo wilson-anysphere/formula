@@ -49,7 +49,7 @@ export function PageSetupDialog({ value, onChange, onClose }: Props) {
         />
       </label>
 
-      <fieldset style={{ border: "1px solid #ccc", padding: 8 }}>
+      <fieldset style={{ border: "1px solid var(--dialog-border)", padding: 8 }}>
         <legend>Scaling</legend>
 
         <label style={{ display: "block", marginBottom: 6 }}>
@@ -113,7 +113,7 @@ export function PageSetupDialog({ value, onChange, onClose }: Props) {
         </label>
       </fieldset>
 
-      <fieldset style={{ border: "1px solid #ccc", padding: 8, marginTop: 10 }}>
+      <fieldset style={{ border: "1px solid var(--dialog-border)", padding: 8, marginTop: 10 }}>
         <legend>Margins (in)</legend>
 
         {(["left", "right", "top", "bottom"] as const).map((k) => (
@@ -141,4 +141,3 @@ export function PageSetupDialog({ value, onChange, onClose }: Props) {
     </div>
   );
 }
-

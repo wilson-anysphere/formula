@@ -16,7 +16,7 @@ export function StepsList(props: { steps: QueryStep[]; selectedIndex: number; on
                 width: "100%",
                 textAlign: "left",
                 border: "none",
-                background: idx === props.selectedIndex ? "#eef3ff" : "transparent",
+                background: idx === props.selectedIndex ? "var(--selection-bg)" : "transparent",
                 padding: "6px 8px",
                 cursor: "pointer",
                 borderRadius: 4,
@@ -30,4 +30,3 @@ export function StepsList(props: { steps: QueryStep[]; selectedIndex: number; on
     </div>
   );
 }
-

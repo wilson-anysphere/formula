@@ -1,3 +1,5 @@
+import { resolveCssVar } from "../theme/cssVars.js";
+
 export interface CellBounds {
   x: number;
   y: number;
@@ -16,7 +18,7 @@ export function drawCommentIndicator(
   style: CommentIndicatorStyle = {},
 ): void {
   const size = style.size ?? Math.max(6, Math.min(bounds.width, bounds.height) * 0.25);
-  const color = style.color ?? "#F59E0B";
+  const color = style.color ?? resolveCssVar("--warning", { fallback: "CanvasText" });
 
   ctx.save();
   ctx.beginPath();
@@ -28,4 +30,3 @@ export function drawCommentIndicator(
   ctx.fill();
   ctx.restore();
 }
-

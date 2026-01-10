@@ -43,7 +43,7 @@ export function AddStepMenu(props: {
           {suggestions ? (
             <div style={{ marginTop: 8 }}>
               {suggestions.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#666" }}>No suggestions.</div>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>No suggestions.</div>
               ) : (
                 suggestions.map((op, idx) => (
                   <button
@@ -63,4 +63,3 @@ export function AddStepMenu(props: {
     </div>
   );
 }
-

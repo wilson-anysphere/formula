@@ -76,10 +76,10 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
   }
 
   return (
-    <div style={{ padding: 16, border: "1px solid #ccc", borderRadius: 8 }}>
+    <div style={{ padding: 16, border: "1px solid var(--panel-border)", borderRadius: 8 }}>
       <h3 style={{ marginTop: 0 }}>{t("whatIf.scenario.title")}</h3>
 
-      {error ? <p style={{ color: "crimson" }}>{error}</p> : null}
+      {error ? <p style={{ color: "var(--error)" }}>{error}</p> : null}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
         <select
@@ -100,7 +100,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
       </div>
 
       {selectedScenario ? (
-        <div style={{ marginTop: 8, fontSize: 12, color: "#444" }}>
+        <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }}>
           <div>
             {t("whatIf.scenario.changingCells")}: {selectedScenario.changingCells.join(", ") || "—"}
           </div>
@@ -132,11 +132,11 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr>
-                <th style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
+                <th style={{ textAlign: "left", borderBottom: "1px solid var(--border)" }}>
                   {t("whatIf.scenario.table.scenario")}
                 </th>
                 {report.resultCells.map((cell) => (
-                  <th key={cell} style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
+                  <th key={cell} style={{ textAlign: "left", borderBottom: "1px solid var(--border)" }}>
                     {cell}
                   </th>
                 ))}
