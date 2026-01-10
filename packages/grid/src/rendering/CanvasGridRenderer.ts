@@ -1004,12 +1004,13 @@ export class CanvasGridRenderer {
           const startCol = Math.min(range.startCol, range.endCol);
           const endCol = Math.max(range.startCol, range.endCol);
 
-          const clampedStartRow = Math.max(0, Math.min(rowCount - 1, startRow));
-          const clampedEndRow = Math.max(0, Math.min(rowCount - 1, endRow));
-          const clampedStartCol = Math.max(0, Math.min(colCount - 1, startCol));
-          const clampedEndCol = Math.max(0, Math.min(colCount - 1, endCol));
+          if (endRow < 0 || startRow >= rowCount) continue;
+          if (endCol < 0 || startCol >= colCount) continue;
 
-          if (clampedStartRow > clampedEndRow || clampedStartCol > clampedEndCol) continue;
+          const clampedStartRow = Math.max(0, startRow);
+          const clampedEndRow = Math.min(rowCount - 1, endRow);
+          const clampedStartCol = Math.max(0, startCol);
+          const clampedEndCol = Math.min(colCount - 1, endCol);
 
           const rects = this.rangeToViewportRects(
             {
