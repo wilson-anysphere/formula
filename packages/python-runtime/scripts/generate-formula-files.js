@@ -10,6 +10,7 @@ function repoRoot() {
 
 async function collectPythonFiles(dir, baseDir, out) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
+  entries.sort((a, b) => a.name.localeCompare(b.name));
   for (const entry of entries) {
     if (entry.name === "__pycache__") continue;
     const abs = path.join(dir, entry.name);
@@ -40,4 +41,3 @@ async function main() {
 }
 
 await main();
-
