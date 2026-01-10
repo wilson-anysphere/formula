@@ -6,10 +6,9 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
-    "yjs": "^13.6.0"
+    "yjs": "^13.6.27"
   },
   "devDependencies": {
-    "vitest": "^1.0.0"
+    "vitest": "^3.0.7"
   }
 }
-

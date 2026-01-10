@@ -8,7 +8,12 @@ export class CommentManager {
 
   listAll(): Comment[] {
     const map = getCommentsMap(this.doc);
-    return Array.from(map.values()).map(yCommentToComment);
+    const comments = Array.from(map.values()).map(yCommentToComment);
+    comments.sort((a, b) => {
+      if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+      return a.id.localeCompare(b.id);
+    });
+    return comments;
   }
 
   listForCell(cellRef: string): Comment[] {
@@ -93,6 +98,53 @@ export class CommentManager {
       yComment.set("updatedAt", now);
     });
   }
+
+  setCommentContent(input: { commentId: string; content: string; now?: number }): void {
+    const map = getCommentsMap(this.doc);
+    const yComment = map.get(input.commentId);
+    if (!yComment) {
+      throw new Error(`Comment not found: ${input.commentId}`);
+    }
+    const now = input.now ?? Date.now();
+
+    this.doc.transact(() => {
+      yComment.set("content", input.content);
+      yComment.set("updatedAt", now);
+    });
+  }
+
+  setReplyContent(input: { commentId: string; replyId: string; content: string; now?: number }): void {
+    const map = getCommentsMap(this.doc);
+    const yComment = map.get(input.commentId);
+    if (!yComment) {
+      throw new Error(`Comment not found: ${input.commentId}`);
+    }
+
+    const replies = yComment.get("replies") as Y.Array<Y.Map<unknown>> | undefined;
+    if (!replies) {
+      throw new Error(`Comment replies missing: ${input.commentId}`);
+    }
+
+    const now = input.now ?? Date.now();
+
+    const replyIndex = replies
+      .toArray()
+      .findIndex((reply) => String(reply.get("id") ?? "") === input.replyId);
+    if (replyIndex < 0) {
+      throw new Error(`Reply not found: ${input.replyId}`);
+    }
+
+    const yReply = replies.get(replyIndex) as Y.Map<unknown> | undefined;
+    if (!yReply) {
+      throw new Error(`Reply missing at index ${replyIndex}: ${input.replyId}`);
+    }
+
+    this.doc.transact(() => {
+      yReply.set("content", input.content);
+      yReply.set("updatedAt", now);
+      yComment.set("updatedAt", now);
+    });
+  }
 }
 
 function createId(): string {
@@ -102,4 +154,3 @@ function createId(): string {
   }
   return `c_${Math.random().toString(16).slice(2)}_${Date.now()}`;
 }
-

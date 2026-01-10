@@ -54,11 +54,20 @@
         border-top: 1px solid #d4d4d4;
         background: #f7f7f7;
         font-size: 12px;
+        align-items: center;
       }
 
       .statusbar code {
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
           monospace;
+      }
+
+      .statusbar button {
+        padding: 4px 8px;
+        border: 1px solid #d4d4d4;
+        background: #ffffff;
+        border-radius: 6px;
+        cursor: pointer;
       }
     </style>
   </head>
@@ -78,9 +87,9 @@
           Value:
           <code data-testid="active-value"></code>
         </div>
+        <button type="button" data-testid="open-comments-panel">Comments</button>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
-

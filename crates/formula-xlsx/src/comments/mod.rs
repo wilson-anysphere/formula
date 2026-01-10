@@ -15,6 +15,25 @@ pub struct CommentParts {
     pub preserved: BTreeMap<String, Vec<u8>>,
 }
 
+impl XlsxPackage {
+    /// Extract all comment-related parts from the package, parsing any known XML
+    /// formats (legacy notes + modern threaded comments) and preserving all
+    /// comment-related parts byte-for-byte.
+    pub fn comment_parts(&self) -> CommentParts {
+        extract_comment_parts(self)
+    }
+
+    /// Apply an updated set of comment parts back onto the package.
+    ///
+    /// This writes any regenerated XML (`comments*.xml`, `threadedComments*.xml`)
+    /// while keeping all other comment-related parts preserved verbatim.
+    pub fn write_comment_parts(&mut self, parts: &CommentParts) {
+        for (path, bytes) in render_comment_parts(parts) {
+            self.set_part(path, bytes);
+        }
+    }
+}
+
 pub fn extract_comment_parts(pkg: &XlsxPackage) -> CommentParts {
     let mut parts = CommentParts::default();
 

@@ -29,6 +29,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
     const roots = new Map([
       ["sheets", { name: "sheets", kind: "array" }],
       ["cells", { name: "cells", kind: "map" }],
+      ["comments", { name: "comments", kind: "map" }],
       ["metadata", { name: "metadata", kind: "map" }],
       ["namedRanges", { name: "namedRanges", kind: "map" }],
     ]);

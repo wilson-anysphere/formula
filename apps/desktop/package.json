@@ -11,7 +11,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@formula/collab-comments": "workspace:*"
+    "@formula/collab-comments": "workspace:*",
+    "yjs": "^13.6.27"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",

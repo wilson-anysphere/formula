@@ -16,6 +16,11 @@ import {
 } from "../selection/selection";
 import { DocumentController } from "../document/documentController.js";
 import { MockEngine } from "../document/engine.js";
+import { drawCommentIndicator } from "../comments/CommentIndicator";
+
+import * as Y from "yjs";
+import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
+import type { Comment, CommentAuthor } from "@formula/collab-comments";
 
 export interface SpreadsheetAppStatusElements {
   activeCell: HTMLElement;
@@ -48,6 +53,19 @@ export class SpreadsheetApp {
 
   private resizeObserver: ResizeObserver;
 
+  private readonly currentUser: CommentAuthor = { id: "local", name: "You" };
+  private readonly commentsDoc = new Y.Doc();
+  private readonly commentManager = new CommentManager(this.commentsDoc);
+  private commentCells = new Set<string>();
+  private commentsPanelVisible = false;
+  private stopCommentPersistence: (() => void) | null = null;
+
+  private commentsPanel!: HTMLDivElement;
+  private commentsPanelThreads!: HTMLDivElement;
+  private commentsPanelCell!: HTMLDivElement;
+  private newCommentInput!: HTMLInputElement;
+  private commentTooltip!: HTMLDivElement;
+
   constructor(private root: HTMLElement, private status: SpreadsheetAppStatusElements, opts: { limits?: GridLimits } = {}) {
     this.limits = opts.limits ?? { ...DEFAULT_GRID_LIMITS, maxRows: 10_000, maxCols: 200 };
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
@@ -65,6 +83,12 @@ export class SpreadsheetApp {
 
     this.root.appendChild(this.gridCanvas);
     this.root.appendChild(this.selectionCanvas);
+
+    this.commentsPanel = this.createCommentsPanel();
+    this.root.appendChild(this.commentsPanel);
+
+    this.commentTooltip = this.createCommentTooltip();
+    this.root.appendChild(this.commentTooltip);
 
     const gridCtx = this.gridCanvas.getContext("2d");
     const selectionCtx = this.selectionCanvas.getContext("2d");
@@ -100,16 +124,33 @@ export class SpreadsheetApp {
     });
 
     this.root.addEventListener("pointerdown", (e) => this.onPointerDown(e));
+    this.root.addEventListener("pointermove", (e) => this.onPointerMove(e));
+    this.root.addEventListener("pointerleave", () => this.hideCommentTooltip());
     this.root.addEventListener("keydown", (e) => this.onKeyDown(e));
 
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(this.root);
+
+    this.commentsDoc.on("update", () => {
+      this.reindexCommentCells();
+      this.renderGrid();
+      this.renderCommentsPanel();
+    });
+
+    if (typeof window !== "undefined") {
+      try {
+        this.stopCommentPersistence = bindDocToStorage(this.commentsDoc, window.localStorage, "formula:comments");
+      } catch {
+        // Ignore persistence failures (e.g. storage disabled).
+      }
+    }
 
     // Initial layout + render.
     this.onResize();
   }
 
   destroy(): void {
+    this.stopCommentPersistence?.();
     this.resizeObserver.disconnect();
     this.root.replaceChildren();
   }
@@ -125,6 +166,259 @@ export class SpreadsheetApp {
   getCellValueA1(a1: string): string {
     const cell = parseA1(a1);
     return this.getCellDisplayValue(cell);
+  }
+
+  toggleCommentsPanel(): void {
+    this.commentsPanelVisible = !this.commentsPanelVisible;
+    this.commentsPanel.style.display = this.commentsPanelVisible ? "flex" : "none";
+    if (this.commentsPanelVisible) {
+      this.renderCommentsPanel();
+      this.newCommentInput.focus();
+    } else {
+      this.focus();
+    }
+  }
+
+  private createCommentsPanel(): HTMLDivElement {
+    const panel = document.createElement("div");
+    panel.dataset.testid = "comments-panel";
+    panel.style.position = "absolute";
+    panel.style.top = "0";
+    panel.style.right = "0";
+    panel.style.width = "320px";
+    panel.style.height = "100%";
+    panel.style.display = "none";
+    panel.style.flexDirection = "column";
+    panel.style.background = "#ffffff";
+    panel.style.borderLeft = "1px solid #d4d4d4";
+    panel.style.boxShadow = "-2px 0 10px rgba(0,0,0,0.08)";
+    panel.style.zIndex = "20";
+    panel.style.padding = "10px";
+    panel.style.boxSizing = "border-box";
+
+    panel.addEventListener("pointerdown", (e) => e.stopPropagation());
+    panel.addEventListener("dblclick", (e) => e.stopPropagation());
+    panel.addEventListener("keydown", (e) => e.stopPropagation());
+
+    const header = document.createElement("div");
+    header.style.display = "flex";
+    header.style.alignItems = "center";
+    header.style.justifyContent = "space-between";
+    header.style.marginBottom = "8px";
+
+    const title = document.createElement("div");
+    title.textContent = "Comments";
+    title.style.fontWeight = "600";
+
+    const closeButton = document.createElement("button");
+    closeButton.textContent = "×";
+    closeButton.setAttribute("aria-label", "Close comments panel");
+    closeButton.addEventListener("click", () => this.toggleCommentsPanel());
+
+    header.appendChild(title);
+    header.appendChild(closeButton);
+    panel.appendChild(header);
+
+    this.commentsPanelCell = document.createElement("div");
+    this.commentsPanelCell.dataset.testid = "comments-active-cell";
+    this.commentsPanelCell.style.fontSize = "12px";
+    this.commentsPanelCell.style.color = "#6b7280";
+    this.commentsPanelCell.style.marginBottom = "10px";
+    panel.appendChild(this.commentsPanelCell);
+
+    this.commentsPanelThreads = document.createElement("div");
+    this.commentsPanelThreads.style.flex = "1";
+    this.commentsPanelThreads.style.overflow = "auto";
+    this.commentsPanelThreads.style.display = "flex";
+    this.commentsPanelThreads.style.flexDirection = "column";
+    this.commentsPanelThreads.style.gap = "10px";
+    panel.appendChild(this.commentsPanelThreads);
+
+    const footer = document.createElement("div");
+    footer.style.display = "flex";
+    footer.style.gap = "8px";
+    footer.style.paddingTop = "10px";
+    footer.style.borderTop = "1px solid #e5e7eb";
+
+    this.newCommentInput = document.createElement("input");
+    this.newCommentInput.dataset.testid = "new-comment-input";
+    this.newCommentInput.type = "text";
+    this.newCommentInput.placeholder = "Add a comment…";
+    this.newCommentInput.style.flex = "1";
+
+    const submit = document.createElement("button");
+    submit.dataset.testid = "submit-comment";
+    submit.textContent = "Comment";
+    submit.addEventListener("click", () => this.submitNewComment());
+
+    footer.appendChild(this.newCommentInput);
+    footer.appendChild(submit);
+    panel.appendChild(footer);
+
+    return panel;
+  }
+
+  private createCommentTooltip(): HTMLDivElement {
+    const tooltip = document.createElement("div");
+    tooltip.dataset.testid = "comment-tooltip";
+    tooltip.style.position = "absolute";
+    tooltip.style.display = "none";
+    tooltip.style.maxWidth = "260px";
+    tooltip.style.padding = "8px 10px";
+    tooltip.style.background = "rgba(17, 24, 39, 0.95)";
+    tooltip.style.color = "white";
+    tooltip.style.fontSize = "12px";
+    tooltip.style.borderRadius = "8px";
+    tooltip.style.pointerEvents = "none";
+    tooltip.style.whiteSpace = "pre-wrap";
+    tooltip.style.zIndex = "30";
+    return tooltip;
+  }
+
+  private hideCommentTooltip(): void {
+    this.commentTooltip.style.display = "none";
+  }
+
+  private reindexCommentCells(): void {
+    this.commentCells.clear();
+    for (const comment of this.commentManager.listAll()) {
+      this.commentCells.add(comment.cellRef);
+    }
+  }
+
+  private renderCommentsPanel(): void {
+    if (!this.commentsPanelVisible) return;
+
+    const cellRef = cellToA1(this.selection.active);
+    this.commentsPanelCell.textContent = `Cell ${cellRef}`;
+
+    const threads = this.commentManager.listForCell(cellRef);
+    this.commentsPanelThreads.replaceChildren();
+
+    if (threads.length === 0) {
+      const empty = document.createElement("div");
+      empty.textContent = "No comments.";
+      empty.style.fontSize = "12px";
+      empty.style.color = "#6b7280";
+      this.commentsPanelThreads.appendChild(empty);
+      return;
+    }
+
+    for (const comment of threads) {
+      this.commentsPanelThreads.appendChild(this.renderCommentThread(comment));
+    }
+  }
+
+  private renderCommentThread(comment: Comment): HTMLElement {
+    const container = document.createElement("div");
+    container.dataset.testid = "comment-thread";
+    container.dataset.commentId = comment.id;
+    container.dataset.resolved = comment.resolved ? "true" : "false";
+    container.style.border = "1px solid #e5e7eb";
+    container.style.borderRadius = "8px";
+    container.style.padding = "10px";
+    container.style.display = "flex";
+    container.style.flexDirection = "column";
+    container.style.gap = "8px";
+    if (comment.resolved) {
+      container.style.opacity = "0.7";
+    }
+
+    const header = document.createElement("div");
+    header.style.display = "flex";
+    header.style.alignItems = "center";
+    header.style.justifyContent = "space-between";
+
+    const author = document.createElement("div");
+    author.textContent = comment.author.name || "Unknown";
+    author.style.fontSize = "12px";
+    author.style.fontWeight = "600";
+
+    const resolve = document.createElement("button");
+    resolve.dataset.testid = "resolve-comment";
+    resolve.textContent = comment.resolved ? "Unresolve" : "Resolve";
+    resolve.addEventListener("click", () => {
+      this.commentManager.setResolved({
+        commentId: comment.id,
+        resolved: !comment.resolved,
+      });
+    });
+
+    header.appendChild(author);
+    header.appendChild(resolve);
+    container.appendChild(header);
+
+    const body = document.createElement("div");
+    body.textContent = comment.content;
+    body.style.fontSize = "13px";
+    body.style.whiteSpace = "pre-wrap";
+    container.appendChild(body);
+
+    for (const reply of comment.replies) {
+      const replyEl = document.createElement("div");
+      replyEl.style.paddingLeft = "10px";
+      replyEl.style.borderLeft = "2px solid #e5e7eb";
+
+      const replyAuthor = document.createElement("div");
+      replyAuthor.textContent = reply.author.name || "Unknown";
+      replyAuthor.style.fontSize = "12px";
+      replyAuthor.style.fontWeight = "600";
+
+      const replyBody = document.createElement("div");
+      replyBody.textContent = reply.content;
+      replyBody.style.fontSize = "13px";
+      replyBody.style.whiteSpace = "pre-wrap";
+      replyBody.style.marginTop = "4px";
+
+      replyEl.appendChild(replyAuthor);
+      replyEl.appendChild(replyBody);
+      container.appendChild(replyEl);
+    }
+
+    const replyRow = document.createElement("div");
+    replyRow.style.display = "flex";
+    replyRow.style.gap = "8px";
+
+    const replyInput = document.createElement("input");
+    replyInput.dataset.testid = "reply-input";
+    replyInput.type = "text";
+    replyInput.placeholder = "Reply…";
+    replyInput.style.flex = "1";
+
+    const submitReply = document.createElement("button");
+    submitReply.dataset.testid = "submit-reply";
+    submitReply.textContent = "Send";
+    submitReply.addEventListener("click", () => {
+      const content = replyInput.value.trim();
+      if (!content) return;
+      this.commentManager.addReply({
+        commentId: comment.id,
+        content,
+        author: this.currentUser,
+      });
+      replyInput.value = "";
+    });
+
+    replyRow.appendChild(replyInput);
+    replyRow.appendChild(submitReply);
+    container.appendChild(replyRow);
+
+    return container;
+  }
+
+  private submitNewComment(): void {
+    const content = this.newCommentInput.value.trim();
+    if (!content) return;
+    const cellRef = cellToA1(this.selection.active);
+
+    this.commentManager.addComment({
+      cellRef,
+      kind: "threaded",
+      content,
+      author: this.currentUser,
+    });
+
+    this.newCommentInput.value = "";
   }
 
   private onResize(): void {
@@ -195,6 +489,20 @@ export class SpreadsheetApp {
       }
     }
 
+    // Comment indicators.
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cellRef = cellToA1({ row: r, col: c });
+        if (!this.commentCells.has(cellRef)) continue;
+        drawCommentIndicator(ctx, {
+          x: c * this.cellWidth,
+          y: r * this.cellHeight,
+          width: this.cellWidth,
+          height: this.cellHeight,
+        });
+      }
+    }
+
     ctx.restore();
   }
 
@@ -214,6 +522,7 @@ export class SpreadsheetApp {
     this.status.selectionRange.textContent =
       this.selection.ranges.length === 1 ? rangeToA1(this.selection.ranges[0]) : `${this.selection.ranges.length} ranges`;
     this.status.activeValue.textContent = this.getCellDisplayValue(this.selection.active);
+    this.renderCommentsPanel();
   }
 
   private getCellRect(cell: CellCoord) {
@@ -255,6 +564,41 @@ export class SpreadsheetApp {
     this.focus();
   }
 
+  private onPointerMove(e: PointerEvent): void {
+    if (this.commentsPanelVisible) {
+      // Don't show tooltips while the panel is open; it obscures the grid anyway.
+      this.hideCommentTooltip();
+      return;
+    }
+
+    const rect = this.root.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
+      this.hideCommentTooltip();
+      return;
+    }
+
+    const cell = this.cellFromPoint(x, y);
+    const cellRef = cellToA1(cell);
+    if (!this.commentCells.has(cellRef)) {
+      this.hideCommentTooltip();
+      return;
+    }
+
+    const comments = this.commentManager.listForCell(cellRef);
+    const preview = comments[0]?.content ?? "";
+    if (!preview) {
+      this.hideCommentTooltip();
+      return;
+    }
+
+    this.commentTooltip.textContent = preview;
+    this.commentTooltip.style.left = `${x + 12}px`;
+    this.commentTooltip.style.top = `${y + 12}px`;
+    this.commentTooltip.style.display = "block";
+  }
+
   private onKeyDown(e: KeyboardEvent): void {
     if (this.editor.isOpen()) {
       // The editor handles Enter/Tab/Escape itself. We keep focus on the textarea.
@@ -271,7 +615,6 @@ export class SpreadsheetApp {
       return;
     }
 
-    // Selection shortcuts
     const primary = e.ctrlKey || e.metaKey;
     if (e.key === "Delete") {
       e.preventDefault();
@@ -282,6 +625,14 @@ export class SpreadsheetApp {
       return;
     }
 
+    // Ctrl/Cmd+Shift+M toggles the comments panel.
+    if (primary && e.shiftKey && (e.key === "m" || e.key === "M")) {
+      e.preventDefault();
+      this.toggleCommentsPanel();
+      return;
+    }
+
+    // Selection shortcuts
     if (primary && (e.key === "a" || e.key === "A")) {
       e.preventDefault();
       this.selection = selectAll(this.limits);
