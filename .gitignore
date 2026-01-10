@@ -1,7 +1,13 @@
+/target/
+**/target/
+**/*.rs.bk
+
 node_modules/
 **/node_modules/
+
 dist/
 **/dist/
+
 coverage/
 .DS_Store
 
@@ -15,6 +21,5 @@ handoff.md
 
 *.log
 
-/target/
-**/target/
-**/*.rs.bk
+__pycache__/
+*.pyc
