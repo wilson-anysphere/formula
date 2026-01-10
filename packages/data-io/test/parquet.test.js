@@ -45,6 +45,26 @@ test('Parquet import -> Arrow table -> grid batches', async () => {
   assert.deepEqual(grid[3], [3, 'Carla', true, 3.75]);
 });
 
+test('arrowTableToGridBatches can omit header row', async () => {
+  const parquetPath = path.join(__dirname, 'fixtures', 'simple.parquet');
+  const parquetBytes = new Uint8Array(await readFile(parquetPath));
+
+  const table = await parquetToArrowTable(parquetBytes, { batchSize: 2 });
+
+  const grid = [];
+  for await (const batch of arrowTableToGridBatches(table, {
+    batchSize: 2,
+    includeHeader: false,
+  })) {
+    for (let i = 0; i < batch.values.length; i++) {
+      grid[batch.rowOffset + i] = batch.values[i];
+    }
+  }
+
+  assert.deepEqual(grid[0], [1, 'Alice', true, 1.5]);
+  assert.deepEqual(grid[2], [3, 'Carla', true, 3.75]);
+});
+
 test('Parquet export produces a readable parquet file', async () => {
   const parquetPath = path.join(__dirname, 'fixtures', 'simple.parquet');
   const parquetBytes = new Uint8Array(await readFile(parquetPath));

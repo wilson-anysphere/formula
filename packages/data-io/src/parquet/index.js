@@ -101,6 +101,18 @@ export async function arrowTableToParquet(table, options = {}) {
 }
 
 /**
+ * Construct an Arrow JS Table from column arrays.
+ *
+ * This is a small wrapper around Arrow JS's `tableFromArrays` to avoid consumers needing to depend
+ * on `apache-arrow` directly when they already depend on `@formula/data-io`.
+ *
+ * @param {Record<string, any[] | ArrayLike<any>>} columns
+ */
+export function arrowTableFromColumns(columns) {
+  return arrow.tableFromArrays(columns);
+}
+
+/**
  * Yield a 2D grid representation of an Arrow Table in batches suitable for progressive insertion
  * into a cell-based spreadsheet model.
  *
@@ -115,6 +127,7 @@ export async function* arrowTableToGridBatches(
 ) {
   const columnNames = table.schema.fields.map((field) => field.name);
   const columnCount = columnNames.length;
+  const dataBaseRowOffset = includeHeader ? 1 : 0;
 
   if (includeHeader) {
     yield { rowOffset: 0, values: [columnNames] };
@@ -136,7 +149,7 @@ export async function* arrowTableToGridBatches(
         rows[rowIndex - batchStart] = row;
       }
 
-      yield { rowOffset: 1 + dataRowOffset + batchStart, values: rows };
+      yield { rowOffset: dataBaseRowOffset + dataRowOffset + batchStart, values: rows };
     }
 
     dataRowOffset += recordBatch.numRows;
