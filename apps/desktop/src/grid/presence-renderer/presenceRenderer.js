@@ -1,3 +1,5 @@
+import { t } from "../../i18n/index.js";
+
 function parseHexColor(color) {
   const match = /^#?([0-9a-f]{6})$/i.exec(color);
   if (!match) return null;
@@ -110,7 +112,7 @@ export class PresenceRenderer {
           cursorRect.height - this.cursorStrokeWidth,
         );
 
-        const name = presence.name ?? "Anonymous";
+        const name = presence.name ?? t("presence.anonymous");
         const cacheKey = `${this.font}::${name}`;
         let textWidth = this._badgeWidthCache.get(cacheKey);
         if (textWidth === undefined) {

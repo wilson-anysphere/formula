@@ -5,6 +5,8 @@
  * boundary so the integration points are explicit.
  */
 
+import { t } from "../../i18n/index.js";
+
 /**
  * @typedef {import("../../versioning/index.js").VersionManager} VersionManager
  */
@@ -17,8 +19,15 @@ export function buildVersionHistoryItems(versions) {
     id: v.id,
     kind: v.kind,
     timestampMs: v.timestampMs,
-    title: v.kind === "checkpoint" ? v.checkpointName ?? "Checkpoint" : v.description ?? v.kind,
+    title:
+      v.kind === "checkpoint"
+        ? v.checkpointName ?? t("versionHistory.checkpoint")
+        : v.description ??
+          (v.kind === "snapshot"
+            ? t("versionHistory.autoSave")
+            : v.kind === "restore"
+              ? t("versionHistory.restore")
+              : v.kind),
     locked: v.kind === "checkpoint" ? Boolean(v.checkpointLocked) : false,
   }));
 }
-

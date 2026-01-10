@@ -1,3 +1,5 @@
+import { t } from "../i18n/index.js";
+
 /**
  * @param {{ addEventListener: (type: string, listener: (event: any) => void) => void, removeEventListener: (type: string, listener: (event: any) => void) => void }} target
  * @param {{ isDirty: boolean }} controller
@@ -5,7 +7,7 @@
  * @returns {() => void} cleanup
  */
 export function installUnsavedChangesPrompt(target, controller, options = {}) {
-  const message = options.message ?? "You have unsaved changes.";
+  const message = options.message ?? t("prompt.unsavedChanges");
 
   /** @param {any} event */
   function onBeforeUnload(event) {
@@ -19,4 +21,3 @@ export function installUnsavedChangesPrompt(target, controller, options = {}) {
   target.addEventListener("beforeunload", onBeforeUnload);
   return () => target.removeEventListener("beforeunload", onBeforeUnload);
 }
-

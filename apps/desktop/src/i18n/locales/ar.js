@@ -3,6 +3,10 @@ export const ar = {
   "menu.file": "ملف",
   "menu.edit": "تحرير",
   "menu.view": "عرض",
-  "settings.language": "اللغة"
+  "settings.language": "اللغة",
+  "presence.anonymous": "مجهول",
+  "prompt.unsavedChanges": "لديك تغييرات غير محفوظة.",
+  "versionHistory.checkpoint": "نقطة حفظ",
+  "versionHistory.autoSave": "حفظ تلقائي",
+  "versionHistory.restore": "تمت الاستعادة"
 };
-

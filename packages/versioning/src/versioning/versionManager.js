@@ -92,7 +92,6 @@ export class VersionManager extends EventEmitter {
     if (!this.dirty) return null;
     const version = await this._createVersion({
       kind: "snapshot",
-      description: "Auto-save",
     });
     this.dirty = false;
     return version;
@@ -157,7 +156,7 @@ export class VersionManager extends EventEmitter {
       timestampMs: this.nowMs(),
       userId: this.userId,
       userName: this.userName,
-      description: `Restored ${versionId}`,
+      description: null,
       checkpointName: null,
       checkpointLocked: null,
       checkpointAnnotations: null,
@@ -211,4 +210,3 @@ export class VersionManager extends EventEmitter {
     return version;
   }
 }
-
