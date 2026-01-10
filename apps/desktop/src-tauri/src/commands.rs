@@ -139,7 +139,11 @@ fn coerce_save_path_to_xlsx(path: &str) -> String {
     if buf
         .extension()
         .and_then(|s| s.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("xls") || ext.eq_ignore_ascii_case("csv"))
+        .is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("xls")
+                || ext.eq_ignore_ascii_case("xlsb")
+                || ext.eq_ignore_ascii_case("csv")
+        })
     {
         buf.set_extension("xlsx");
         return buf.to_string_lossy().to_string();
