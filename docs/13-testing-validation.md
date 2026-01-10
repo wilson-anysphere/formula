@@ -271,15 +271,18 @@ describe("XLSX Round-Trip", () => {
     "simple-data.xlsx",
     "formulas.xlsx",
     "formatting.xlsx",
-    "charts.xlsx",
     "pivot-tables.xlsx",
     "conditional-formatting.xlsx",
     "data-validation.xlsx",
     "large-file.xlsx",
     "macros.xlsm"
   ];
+
+  // Chart coverage should come from a dedicated fixture set (one workbook per
+  // chart family/type) so we can validate both preservation and rendering.
+  const chartFixtures = globSync("charts/*.xlsx", { cwd: "fixtures" });
   
-  testFiles.forEach(filename => {
+  [...testFiles, ...chartFixtures].forEach(filename => {
     it(`round-trips ${filename} without data loss`, async () => {
       const original = await readFile(`fixtures/${filename}`);
       const workbook = await loadWorkbook(original);
@@ -314,20 +317,19 @@ describe("XLSX Round-Trip", () => {
     expect(savedVBA).toEqual(originalVBA);
   });
   
-  it("preserves chart definitions", async () => {
-    const original = await readFile("fixtures/charts.xlsx");
+  it("preserves chart parts byte-for-byte (no-op save)", async () => {
+    const original = await readFile("fixtures/charts/waterfall.xlsx");
     const workbook = await loadWorkbook(original);
+
+    // Important: if we didn't edit charts, saving must keep the original
+    // chart-related OPC parts intact (including extension lists / ChartEx).
     const saved = await saveWorkbook(workbook);
-    
-    const originalCharts = extractCharts(original);
-    const savedCharts = extractCharts(saved);
-    
-    expect(savedCharts.length).toBe(originalCharts.length);
-    
-    for (let i = 0; i < originalCharts.length; i++) {
-      expect(savedCharts[i].type).toBe(originalCharts[i].type);
-      expect(savedCharts[i].dataRange).toBe(originalCharts[i].dataRange);
-    }
+
+    expect(extractOpcParts(saved, { prefix: "xl/charts/" }))
+      .toEqual(extractOpcParts(original, { prefix: "xl/charts/" }));
+
+    expect(extractOpcParts(saved, { prefix: "xl/drawings/" }))
+      .toEqual(extractOpcParts(original, { prefix: "xl/drawings/" }));
   });
 });
 ```
@@ -560,6 +562,18 @@ test.describe("Visual Regression", () => {
     await loadTestWorkbook(page, "conditional-formatting.xlsx");
     
     expect(await page.screenshot()).toMatchSnapshot("conditional-formatting.png");
+  });
+
+  test("charts render consistently", async ({ page }) => {
+    await page.goto("/");
+    await page.setViewportSize({ width: 1280, height: 800 });
+
+    // Each fixture should contain a single chart anchored in a predictable
+    // location. Snapshots should be compared against golden images exported
+    // from Excel.
+    await loadTestWorkbook(page, "charts/waterfall.xlsx");
+
+    expect(await page.screenshot()).toMatchSnapshot("chart-waterfall.png");
   });
 });
 ```

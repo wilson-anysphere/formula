@@ -585,6 +585,7 @@ Workstream F: Platform
 | [01-formula-engine.md](./docs/01-formula-engine.md) | Formula parsing, evaluation, dependency tracking, function library |
 | [02-xlsx-compatibility.md](./docs/02-xlsx-compatibility.md) | File format handling, preservation strategy, compatibility testing |
 | [03-rendering-ui.md](./docs/03-rendering-ui.md) | Canvas rendering, virtualization, scroll performance, overlays |
+| [17-charts.md](./docs/17-charts.md) | DrawingML/ChartEx chart parsing, rendering fidelity, and round-trip preservation |
 | [04-data-model-storage.md](./docs/04-data-model-storage.md) | Cell storage, columnar compression, relational tables, rich types |
 | [05-ai-integration.md](./docs/05-ai-integration.md) | AI modes, context management, tool calling, safety |
 | [06-collaboration.md](./docs/06-collaboration.md) | CRDT sync, presence, versioning, conflict resolution |

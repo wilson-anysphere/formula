@@ -502,15 +502,31 @@ This document tracks every Excel feature and our implementation status. Features
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Column charts | ⬜ | |
-| Bar charts | ⬜ | |
+| Column charts (clustered/stacked/100% stacked) | ⬜ | DrawingML `c:barChart` + `c:grouping` |
+| Bar charts (clustered/stacked/100% stacked) | ⬜ | DrawingML `c:barChart` + `c:barDir="bar"` |
 | Line charts | ⬜ | |
 | Pie charts | ⬜ | |
-| Area charts | ⬜ | |
+| Area charts (stacked/100% stacked) | ⬜ | |
 | Scatter plots | ⬜ | |
+| Bubble charts | ⬜ | |
+| Radar charts | ⬜ | |
+| Waterfall charts | ⬜ | Often ChartEx (Excel 2016+) |
+| Histogram charts | ⬜ | Often ChartEx (Excel 2016+) |
+| Pareto charts | ⬜ | Often ChartEx (Excel 2016+) |
+| Box & whisker charts | ⬜ | Often ChartEx (Excel 2016+) |
+| Treemap charts | ⬜ | Often ChartEx (Excel 2016+) |
+| Sunburst charts | ⬜ | Often ChartEx (Excel 2016+) |
+| Funnel charts | ⬜ | Often ChartEx (Excel 2016+) |
+| Stock charts (OHLC) | ⬜ | DrawingML `c:stockChart` |
 | Combo charts | ⬜ | |
+| Map charts (preserve/placeholder) | ⬜ | Preserve XML and show placeholder if unsupported |
 | Sparklines | ⬜ | |
-| Chart formatting | ⬜ | Complex |
+| Axis formatting fidelity | ⬜ | Ticks, gridlines, number formats, scaling |
+| Titles, legends, and data labels | ⬜ | Rich text + layout |
+| Theme-based colors | ⬜ | Depends on theme fidelity (Task 109) |
+| Series formatting + markers | ⬜ | Line/fill/marker, per-point overrides |
+| Layout anchored to sheet (EMUs) | ⬜ | Drawing anchors must match Excel |
+| Lossless round-trip (unknown chart types/parts) | ⬜ | Preserve chart-related parts byte-for-byte when unedited |
 
 ### Pivot Tables (P1)
 

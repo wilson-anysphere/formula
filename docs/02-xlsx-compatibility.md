@@ -308,9 +308,9 @@ Excel 2007 and Excel 2010+ use different XML schemas for the same visual feature
 - Write back preserving original schema version
 - Use MC:AlternateContent for cross-version compatibility
 
-### 2. Chart Fidelity (DrawingML)
+### 2. Chart Fidelity (DrawingML + ChartEx)
 
-Charts use DrawingML, a complex XML schema for vector graphics:
+Charts use DrawingML, a complex XML schema for vector graphics. Several newer Excel chart types (e.g. histogram, waterfall, treemap) are often stored using **ChartEx** (an “extended chart” schema) referenced from the drawing layer.
 
 ```xml
 <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
@@ -343,14 +343,18 @@ Charts use DrawingML, a complex XML schema for vector graphics:
 
 **Challenges:**
 - Different applications render same XML differently
-- Absolute positioning in EMUs (English Metric Units)
+- Absolute positioning in EMUs (English Metric Units) anchored to sheet cells
 - Complex inheritance of styles from theme
-- Version-specific chart types (Treemap, Sunburst from Excel 2016)
+- Version-specific chart types (ChartEx / extension lists, Excel 2016+)
+- Multiple related OPC parts (`drawing*.xml`, `chart*.xml`, `chartEx*.xml`, `style*.xml`, `colors*.xml`)
 
 **Strategy:**
-- Implement full DrawingML parsing and rendering
-- Test extensively against Excel output
-- For unsupported chart types, preserve XML and show placeholder
+- Treat charts as a **lossless subsystem**: preserve chart-related parts byte-for-byte unless the user explicitly edits charts.
+- Parse and render supported chart types incrementally; render a placeholder for unsupported chart types.
+- Resolve theme-based colors and number formats using the same machinery as cells.
+- Test with fixtures and visual regression against Excel output.
+
+**Detail spec:** [17-charts.md](./17-charts.md)
 
 ### 3. Date Systems (The Lotus Bug)
 
