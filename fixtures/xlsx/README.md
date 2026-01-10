@@ -30,6 +30,7 @@ fixtures/xlsx/
   - `multi-sheet.xlsx` - 2 worksheets.
   - `comments.xlsx` - legacy comments parts.
   - `grouped-rows.xlsx` - outline/grouped rows metadata.
+  - `image.xlsx` - embedded image (`xl/media/image1.png`) + drawing relationship.
   - `print-settings.xlsx` - page setup + print titles/areas.
 - `formulas/`:
   - `formulas.xlsx` - simple formula + cached result.
@@ -50,7 +51,7 @@ fixtures/xlsx/
 
 ## Regenerating the initial fixtures
 
-The initial `.xlsx` files are generated without external dependencies:
+Some `.xlsx` files (the small synthetic ones) are generated without external dependencies:
 
 ```bash
 python3 fixtures/xlsx/generate_fixtures.py

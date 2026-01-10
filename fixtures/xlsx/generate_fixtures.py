@@ -629,6 +629,129 @@ def write_hyperlinks_xlsx(path: pathlib.Path) -> None:
         _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
 
 
+def content_types_image_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>
+"""
+
+
+def sheet_image_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Image</t></is></c>
+    </row>
+  </sheetData>
+  <drawing r:id="rId1"/>
+</worksheet>
+"""
+
+
+def sheet1_image_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>
+</Relationships>
+"""
+
+
+def drawing_image_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:twoCellAnchor>
+    <xdr:from>
+      <xdr:col>1</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>1</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:from>
+    <xdr:to>
+      <xdr:col>4</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>6</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:to>
+    <xdr:pic>
+      <xdr:nvPicPr>
+        <xdr:cNvPr id="2" name="Picture 1"/>
+        <xdr:cNvPicPr/>
+      </xdr:nvPicPr>
+      <xdr:blipFill>
+        <a:blip r:embed="rId1"/>
+        <a:stretch><a:fillRect/></a:stretch>
+      </xdr:blipFill>
+      <xdr:spPr>
+        <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+      </xdr:spPr>
+    </xdr:pic>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>
+"""
+
+
+def drawing_image_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>
+"""
+
+
+def one_by_one_png_bytes() -> bytes:
+    # A minimal 1x1 PNG (transparent). Keeping this inline avoids extra binary
+    # assets in the generator script.
+    import base64
+
+    return base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMBAe5Z5E8AAAAASUVORK5CYII="
+    )
+
+
+def write_image_xlsx(path: pathlib.Path) -> None:
+    sheet_names = ["Sheet1"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+
+    with zipfile.ZipFile(path, "w") as zf:
+        _zip_write(zf, "[Content_Types].xml", content_types_image_xml())
+        _zip_write(zf, "_rels/.rels", package_rels_xml())
+        _zip_write(zf, "docProps/core.xml", core_props_xml())
+        _zip_write(zf, "docProps/app.xml", app_props_xml(sheet_names))
+        _zip_write(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        _zip_write(
+            zf,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml(sheet_count=1, include_shared_strings=False),
+        )
+        _zip_write(zf, "xl/worksheets/sheet1.xml", sheet_image_xml())
+        _zip_write(zf, "xl/worksheets/_rels/sheet1.xml.rels", sheet1_image_rels_xml())
+        _zip_write(zf, "xl/drawings/drawing1.xml", drawing_image_xml())
+        _zip_write(zf, "xl/drawings/_rels/drawing1.xml.rels", drawing_image_rels_xml())
+
+        info = zipfile.ZipInfo("xl/media/image1.png", date_time=EPOCH)
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.create_system = 0
+        zf.writestr(info, one_by_one_png_bytes())
+
+        _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
+
+
 def main() -> None:
     write_xlsx(
         ROOT / "basic" / "basic.xlsx",
@@ -664,6 +787,7 @@ def main() -> None:
     )
     write_hyperlinks_xlsx(ROOT / "hyperlinks" / "hyperlinks.xlsx")
     write_chart_xlsx(ROOT / "charts" / "basic-chart.xlsx")
+    write_image_xlsx(ROOT / "basic" / "image.xlsx")
 
     # Directory scaffold for future corpora (kept empty for now).
     for name in ["charts", "pivots", "macros"]:
@@ -674,4 +798,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
