@@ -17,6 +17,8 @@ pub enum ChartExtractionError {
     XmlNonUtf8(String, #[source] std::str::Utf8Error),
     #[error("failed to parse XML: {0}: {1}")]
     XmlParse(String, #[source] roxmltree::Error),
+    #[error("invalid XML structure: {0}")]
+    XmlStructure(String),
 }
 
 impl XlsxPackage {

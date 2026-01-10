@@ -4,6 +4,10 @@ use formula_xlsx::XlsxPackage;
 use rust_xlsxwriter::{Chart, ChartType as XlsxChartType, Workbook};
 
 fn build_workbook(chart_type: XlsxChartType) -> Vec<u8> {
+    build_workbook_with_chart(chart_type, true)
+}
+
+fn build_workbook_with_chart(chart_type: XlsxChartType, include_chart: bool) -> Vec<u8> {
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
 
@@ -27,7 +31,9 @@ fn build_workbook(chart_type: XlsxChartType) -> Vec<u8> {
         .set_categories("Sheet1!$A$2:$A$5")
         .set_values("Sheet1!$B$2:$B$5");
 
-    worksheet.insert_chart(1, 3, &chart).unwrap();
+    if include_chart {
+        worksheet.insert_chart(1, 3, &chart).unwrap();
+    }
 
     workbook.save_to_buffer().unwrap()
 }
@@ -119,4 +125,27 @@ fn scatter_chart_round_trip_and_extract() {
     let charts = package.extract_charts().unwrap();
     assert_eq!(charts.len(), 1);
     assert_eq!(charts[0].chart_type, ChartType::Scatter);
+}
+
+#[test]
+fn preserved_drawing_parts_can_be_reapplied_to_regenerated_workbook() {
+    let bytes_with_chart = build_workbook_with_chart(XlsxChartType::Column, true);
+    let pkg_with_chart = XlsxPackage::from_bytes(&bytes_with_chart).unwrap();
+    let preserved = pkg_with_chart.preserve_drawing_parts().unwrap();
+    assert!(!preserved.is_empty());
+
+    let bytes_without_chart = build_workbook_with_chart(XlsxChartType::Column, false);
+    let mut pkg_without_chart = XlsxPackage::from_bytes(&bytes_without_chart).unwrap();
+    assert_eq!(pkg_without_chart.extract_charts().unwrap().len(), 0);
+
+    pkg_without_chart
+        .apply_preserved_drawing_parts(&preserved)
+        .unwrap();
+    let merged_bytes = pkg_without_chart.write_to_bytes().unwrap();
+
+    let merged_pkg = XlsxPackage::from_bytes(&merged_bytes).unwrap();
+    let charts = merged_pkg.extract_charts().unwrap();
+    assert_eq!(charts.len(), 1);
+    assert_eq!(charts[0].chart_type, ChartType::Bar);
+    assert_eq!(charts[0].title.as_deref(), Some("Example Chart"));
 }

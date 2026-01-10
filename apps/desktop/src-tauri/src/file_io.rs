@@ -1,6 +1,7 @@
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
+use formula_xlsx::drawingml::PreservedDrawingParts;
 use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
 };
@@ -51,6 +52,7 @@ impl Sheet {
 pub struct Workbook {
     pub path: Option<String>,
     pub vba_project_bin: Option<Vec<u8>>,
+    pub preserved_drawing_parts: Option<PreservedDrawingParts>,
     pub sheets: Vec<Sheet>,
     pub print_settings: WorkbookPrintSettings,
 }
@@ -60,6 +62,7 @@ impl Workbook {
         Self {
             path,
             vba_project_bin: None,
+            preserved_drawing_parts: None,
             sheets: Vec::new(),
             print_settings: WorkbookPrintSettings::default(),
         }
@@ -156,6 +159,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     let mut out = Workbook {
         path: Some(path.to_string_lossy().to_string()),
         vba_project_bin: None,
+        preserved_drawing_parts: None,
         sheets: Vec::new(),
         print_settings,
     };
@@ -175,6 +179,11 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?;
         if let Ok(pkg) = XlsxPackage::from_bytes(&bytes) {
             out.vba_project_bin = pkg.vba_project_bin().map(|b| b.to_vec());
+            if let Ok(preserved) = pkg.preserve_drawing_parts() {
+                if !preserved.is_empty() {
+                    out.preserved_drawing_parts = Some(preserved);
+                }
+            }
         }
     }
 
@@ -316,21 +325,31 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<(
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
 
-    if workbook.vba_project_bin.is_some()
+    let wants_vba = workbook.vba_project_bin.is_some()
         && matches!(
             extension.as_deref(),
             Some("xlsm")
-        )
-    {
-        let mut pkg =
-            XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
-        pkg.set_part(
-            "xl/vbaProject.bin",
-            workbook.vba_project_bin.clone().expect("checked is_some"),
         );
+    let wants_preserved_drawings = workbook.preserved_drawing_parts.is_some();
+
+    if wants_vba || wants_preserved_drawings {
+        let mut pkg = XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
+
+        if wants_vba {
+            pkg.set_part(
+                "xl/vbaProject.bin",
+                workbook.vba_project_bin.clone().expect("checked is_some"),
+            );
+        }
+
+        if let Some(preserved) = workbook.preserved_drawing_parts.as_ref() {
+            pkg.apply_preserved_drawing_parts(preserved)
+                .context("apply preserved drawing/chart parts")?;
+        }
+
         bytes = pkg
             .write_to_bytes()
-            .context("repack workbook package with vbaProject.bin")?;
+            .context("repack workbook package with preserved parts")?;
     }
 
     if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {
@@ -349,6 +368,7 @@ fn xlsx_err(err: XlsxError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_xlsxwriter::{Chart, ChartType};
 
     #[test]
     fn preserves_vba_project_bin_when_saving_xlsm() {
@@ -380,5 +400,74 @@ mod tests {
             .expect("written workbook should contain vbaProject.bin");
 
         assert_eq!(original_vba, written_vba);
+    }
+
+    #[test]
+    fn preserves_chart_parts_when_saving_xlsx() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let src_path = tmp.path().join("chart-src.xlsx");
+        let dst_path = tmp.path().join("chart-dst.xlsx");
+
+        // Create a workbook with a simple chart.
+        let mut workbook = XlsxWorkbook::new();
+        let worksheet = workbook.add_worksheet();
+
+        worksheet.write_string(0, 0, "Category").unwrap();
+        worksheet.write_string(0, 1, "Value").unwrap();
+        worksheet.write_string(1, 0, "A").unwrap();
+        worksheet.write_number(1, 1, 2).unwrap();
+        worksheet.write_string(2, 0, "B").unwrap();
+        worksheet.write_number(2, 1, 4).unwrap();
+        worksheet.write_string(3, 0, "C").unwrap();
+        worksheet.write_number(3, 1, 3).unwrap();
+
+        let mut chart = Chart::new(ChartType::Column);
+        chart.title().set_name("Example Chart");
+
+        let series = chart.add_series();
+        series
+            .set_categories("Sheet1!$A$2:$A$4")
+            .set_values("Sheet1!$B$2:$B$4");
+
+        worksheet.insert_chart(1, 3, &chart).unwrap();
+
+        let bytes = workbook.save_to_buffer().expect("save workbook");
+        std::fs::write(&src_path, &bytes).expect("write source workbook");
+
+        // Load via the app IO path and save again.
+        let loaded = read_xlsx_blocking(&src_path).expect("read workbook");
+        assert!(
+            loaded.preserved_drawing_parts.is_some(),
+            "expected chart parts to be captured for preservation"
+        );
+
+        write_xlsx_blocking(&dst_path, &loaded).expect("write workbook");
+
+        let roundtrip_bytes = std::fs::read(&dst_path).expect("read written workbook");
+        let src_pkg = XlsxPackage::from_bytes(&bytes).expect("parse src pkg");
+        let dst_pkg = XlsxPackage::from_bytes(&roundtrip_bytes).expect("parse dst pkg");
+
+        // Drawing + chart parts should match byte-for-byte.
+        for (name, part_bytes) in src_pkg.parts() {
+            if name.starts_with("xl/drawings/")
+                || name.starts_with("xl/charts/")
+                || name.starts_with("xl/media/")
+            {
+                assert_eq!(
+                    Some(part_bytes),
+                    dst_pkg.part(name),
+                    "missing or mismatched preserved part {name}"
+                );
+            }
+        }
+
+        // Verify the chart is still discoverable in the saved workbook.
+        let src_charts = src_pkg.extract_charts().expect("extract src charts");
+        let dst_charts = dst_pkg.extract_charts().expect("extract dst charts");
+        assert_eq!(src_charts.len(), 1);
+        assert_eq!(dst_charts.len(), 1);
+        assert_eq!(src_charts[0].rel_id, dst_charts[0].rel_id);
+        assert_eq!(src_charts[0].chart_part, dst_charts[0].chart_part);
+        assert_eq!(src_charts[0].drawing_part, dst_charts[0].drawing_part);
     }
 }

@@ -3,6 +3,10 @@ use roxmltree::Document;
 
 use crate::workbook::ChartExtractionError;
 
+mod preserve;
+
+pub use preserve::{PreservedDrawingParts, SheetDrawingRelationship};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrawingChartRef {
     pub rel_id: String,
