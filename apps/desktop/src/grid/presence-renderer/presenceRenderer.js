@@ -19,16 +19,56 @@ function pickTextColor(backgroundColor) {
 }
 
 function normalizeRange(range) {
-  const startRow = Math.min(range.startRow, range.endRow);
-  const endRow = Math.max(range.startRow, range.endRow);
-  const startCol = Math.min(range.startCol, range.endCol);
-  const endCol = Math.max(range.startCol, range.endCol);
+  if (!range || typeof range !== "object") return null;
 
-  return { startRow, startCol, endRow, endCol };
+  let startRow;
+  let startCol;
+  let endRow;
+  let endCol;
+
+  if (
+    typeof range.startRow === "number" &&
+    typeof range.startCol === "number" &&
+    typeof range.endRow === "number" &&
+    typeof range.endCol === "number"
+  ) {
+    startRow = range.startRow;
+    startCol = range.startCol;
+    endRow = range.endRow;
+    endCol = range.endCol;
+  } else if (
+    range.start &&
+    range.end &&
+    typeof range.start.row === "number" &&
+    typeof range.start.col === "number" &&
+    typeof range.end.row === "number" &&
+    typeof range.end.col === "number"
+  ) {
+    startRow = range.start.row;
+    startCol = range.start.col;
+    endRow = range.end.row;
+    endCol = range.end.col;
+  } else {
+    return null;
+  }
+
+  const normalizedStartRow = Math.min(startRow, endRow);
+  const normalizedEndRow = Math.max(startRow, endRow);
+  const normalizedStartCol = Math.min(startCol, endCol);
+  const normalizedEndCol = Math.max(startCol, endCol);
+
+  return {
+    startRow: Math.trunc(normalizedStartRow),
+    startCol: Math.trunc(normalizedStartCol),
+    endRow: Math.trunc(normalizedEndRow),
+    endCol: Math.trunc(normalizedEndCol),
+  };
 }
 
 function rectForRange(getCellRect, range) {
   const normalized = normalizeRange(range);
+  if (!normalized) return null;
+
   const startRect = getCellRect(normalized.startRow, normalized.startCol);
   const endRect = getCellRect(normalized.endRow, normalized.endCol);
   if (!startRect || !endRect) return null;

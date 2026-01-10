@@ -11,7 +11,7 @@ test("presence serialization roundtrip", () => {
     activeSheet: "Sheet1",
     cursor: { row: 2, col: 4 },
     selections: [
-      { startRow: 10, startCol: 1, endRow: 12, endCol: 5 },
+      { start: { row: 10, col: 1 }, end: { row: 12, col: 5 } },
       { startRow: 3, startCol: 2, endRow: 1, endCol: 7 },
     ],
     lastActive: 12345,
@@ -46,4 +46,3 @@ test("presence deserialization rejects invalid payloads", () => {
     null,
   );
 });
-

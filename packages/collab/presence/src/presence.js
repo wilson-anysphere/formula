@@ -14,17 +14,59 @@ function toInt(value) {
 }
 
 function normalizeRange(range) {
-  const startRow = Math.min(range.startRow, range.endRow);
-  const endRow = Math.max(range.startRow, range.endRow);
-  const startCol = Math.min(range.startCol, range.endCol);
-  const endCol = Math.max(range.startCol, range.endCol);
+  if (!isRecord(range)) return null;
 
-  return { startRow, startCol, endRow, endCol };
+  // Support two common range shapes:
+  // - { startRow, startCol, endRow, endCol } (wire format)
+  // - { start: { row, col }, end: { row, col } } (local UI format)
+
+  let startRow;
+  let startCol;
+  let endRow;
+  let endCol;
+
+  if (
+    isFiniteNumber(range.startRow) &&
+    isFiniteNumber(range.startCol) &&
+    isFiniteNumber(range.endRow) &&
+    isFiniteNumber(range.endCol)
+  ) {
+    startRow = range.startRow;
+    startCol = range.startCol;
+    endRow = range.endRow;
+    endCol = range.endCol;
+  } else if (
+    isRecord(range.start) &&
+    isRecord(range.end) &&
+    isFiniteNumber(range.start.row) &&
+    isFiniteNumber(range.start.col) &&
+    isFiniteNumber(range.end.row) &&
+    isFiniteNumber(range.end.col)
+  ) {
+    startRow = range.start.row;
+    startCol = range.start.col;
+    endRow = range.end.row;
+    endCol = range.end.col;
+  } else {
+    return null;
+  }
+
+  const normalizedStartRow = Math.min(startRow, endRow);
+  const normalizedEndRow = Math.max(startRow, endRow);
+  const normalizedStartCol = Math.min(startCol, endCol);
+  const normalizedEndCol = Math.max(startCol, endCol);
+
+  return {
+    startRow: Math.trunc(normalizedStartRow),
+    startCol: Math.trunc(normalizedStartCol),
+    endRow: Math.trunc(normalizedEndRow),
+    endCol: Math.trunc(normalizedEndCol),
+  };
 }
 
 export function serializePresenceState(state) {
   const selections = Array.isArray(state.selections)
-    ? state.selections.map((range) => normalizeRange(range))
+    ? state.selections.map((range) => normalizeRange(range)).filter((range) => range !== null)
     : [];
 
   const cursor =
@@ -70,12 +112,11 @@ export function deserializePresenceState(payload) {
     if (!Array.isArray(payload.selections)) return null;
     for (const selection of payload.selections) {
       if (!isRecord(selection)) return null;
-      const startRow = toInt(selection.startRow);
-      const startCol = toInt(selection.startCol);
-      const endRow = toInt(selection.endRow);
-      const endCol = toInt(selection.endCol);
-      if (startRow === null || startCol === null || endRow === null || endCol === null) return null;
-      selections.push(normalizeRange({ startRow, startCol, endRow, endCol }));
+
+      // Accept both range shapes for tolerance (see `normalizeRange`).
+      const normalized = normalizeRange(selection);
+      if (!normalized) return null;
+      selections.push(normalized);
     }
   }
 
@@ -89,4 +130,3 @@ export function deserializePresenceState(payload) {
     lastActive,
   };
 }
-

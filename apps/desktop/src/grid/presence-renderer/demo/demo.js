@@ -41,10 +41,8 @@ function clamp(value, min, max) {
 function selectionAround(cursor) {
   return [
     {
-      startRow: cursor.row,
-      startCol: cursor.col,
-      endRow: cursor.row + 1,
-      endCol: cursor.col + 2,
+      start: { row: cursor.row, col: cursor.col },
+      end: { row: cursor.row + 1, col: cursor.col + 2 },
     },
   ];
 }
