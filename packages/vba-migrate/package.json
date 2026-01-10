@@ -1,0 +1,7 @@
+{
+  "name": "@formula/vba-migrate",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.js"
+}
+
