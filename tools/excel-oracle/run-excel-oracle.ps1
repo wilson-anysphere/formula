@@ -50,6 +50,24 @@ function Release-ComObject {
   }
 }
 
+function Set-RangeFormula {
+  param(
+    [Parameter(Mandatory = $true)]
+    [object]$RangeObj,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Formula
+  )
+
+  # Prefer `Formula2` when available so dynamic array formulas behave the same
+  # way users see them in modern Excel (avoids implicit-intersection `@` quirks).
+  try {
+    $RangeObj.Formula2 = $Formula
+  } catch {
+    $RangeObj.Formula = $Formula
+  }
+}
+
 function Encode-CellValue {
   param([object]$CellRange)
 
@@ -174,7 +192,7 @@ try {
       $range = $sheet.Range($cellRef)
       try {
         if ($null -ne $input.formula) {
-          $range.Formula = [string]$input.formula
+          Set-RangeFormula -RangeObj $range -Formula ([string]$input.formula)
         } elseif ($null -eq $input.value) {
           $range.ClearContents()
         } else {
@@ -189,7 +207,7 @@ try {
     $outputCell = if ($null -ne $case.outputCell) { [string]$case.outputCell } else { "C1" }
     $formulaRange = $sheet.Range($outputCell)
     try {
-      $formulaRange.Formula = [string]$case.formula
+      Set-RangeFormula -RangeObj $formulaRange -Formula ([string]$case.formula)
     } finally {
       Release-ComObject $formulaRange
     }
