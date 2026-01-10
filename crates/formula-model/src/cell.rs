@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{CellRef, CellValue};
 
@@ -21,7 +22,7 @@ const COL_MASK: u64 = (1u64 << COL_BITS) - 1;
 ///
 /// This supports Excel's maximum dimensions while keeping the key within 34 bits
 /// (JSON-safe for JavaScript numbers).
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[repr(transparent)]
 pub struct CellKey(u64);
 
@@ -62,6 +63,36 @@ impl CellKey {
     #[inline]
     pub fn from_ref(cell: CellRef) -> Self {
         Self::new(cell.row, cell.col)
+    }
+}
+
+impl<'de> Deserialize<'de> for CellKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = u64::deserialize(deserializer)?;
+        let row = raw >> COL_BITS;
+        let col = raw & COL_MASK;
+
+        if row >= EXCEL_MAX_ROWS as u64 {
+            return Err(D::Error::custom(format!(
+                "CellKey row out of Excel bounds: {row}"
+            )));
+        }
+        if col >= EXCEL_MAX_COLS as u64 {
+            return Err(D::Error::custom(format!(
+                "CellKey col out of Excel bounds: {col}"
+            )));
+        }
+
+        Ok(CellKey(raw))
+    }
+}
+
+impl From<CellKey> for u64 {
+    fn from(value: CellKey) -> Self {
+        value.0
     }
 }
 
@@ -150,5 +181,14 @@ mod tests {
         let key2 = CellKey::new(EXCEL_MAX_ROWS - 1, EXCEL_MAX_COLS - 1);
         assert_eq!(key2.row(), EXCEL_MAX_ROWS - 1);
         assert_eq!(key2.col(), EXCEL_MAX_COLS - 1);
+    }
+
+    #[test]
+    fn cell_key_deserialize_validates_bounds() {
+        let too_large = ((EXCEL_MAX_ROWS as u64) << COL_BITS) | 0;
+        let json = too_large.to_string();
+        let err = serde_json::from_str::<CellKey>(&json).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("out of Excel bounds"));
     }
 }
