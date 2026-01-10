@@ -109,6 +109,7 @@ pub struct SheetInfo {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct WorkbookInfo {
     pub path: Option<String>,
+    pub origin_path: Option<String>,
     pub sheets: Vec<SheetInfo>,
 }
 
@@ -123,11 +124,28 @@ use crate::file_io::{read_xlsx, write_xlsx};
 #[cfg(feature = "desktop")]
 use crate::state::{AppState, AppStateError, CellUpdateData, SharedAppState};
 #[cfg(feature = "desktop")]
+use std::path::PathBuf;
+#[cfg(feature = "desktop")]
 use tauri::State;
 
 #[cfg(feature = "desktop")]
 fn app_error(err: AppStateError) -> String {
     err.to_string()
+}
+
+#[cfg(feature = "desktop")]
+fn coerce_save_path_to_xlsx(path: &str) -> String {
+    let mut buf = PathBuf::from(path);
+    if buf
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("xls"))
+    {
+        buf.set_extension("xlsx");
+        return buf.to_string_lossy().to_string();
+    }
+
+    path.to_string()
 }
 
 #[cfg(feature = "desktop")]
@@ -174,6 +192,7 @@ pub async fn open_workbook(
 
     Ok(WorkbookInfo {
         path: info.path,
+        origin_path: info.origin_path,
         sheets: info
             .sheets
             .into_iter()
@@ -200,6 +219,8 @@ pub async fn save_workbook(
             .ok_or_else(|| "no save path provided".to_string())?;
         (save_path, workbook)
     };
+
+    let save_path = coerce_save_path_to_xlsx(&save_path);
 
     write_xlsx(save_path.clone(), workbook)
         .await

@@ -1,0 +1,9 @@
+[package]
+name = "formula-xls"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+calamine = "0.32"
+formula-model = { path = "../formula-model" }
+thiserror = "2.0"

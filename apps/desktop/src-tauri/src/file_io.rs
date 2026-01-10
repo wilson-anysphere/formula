@@ -51,6 +51,9 @@ impl Sheet {
 #[derive(Clone, Debug)]
 pub struct Workbook {
     pub path: Option<String>,
+    /// Path the workbook was opened from, even if we later save under a different
+    /// name/extension (e.g. opening legacy `.xls` defaults to saving as `.xlsx`).
+    pub origin_path: Option<String>,
     pub vba_project_bin: Option<Vec<u8>>,
     pub preserved_drawing_parts: Option<PreservedDrawingParts>,
     pub sheets: Vec<Sheet>,
@@ -60,6 +63,7 @@ pub struct Workbook {
 impl Workbook {
     pub fn new_empty(path: Option<String>) -> Self {
         Self {
+            origin_path: path.clone(),
             path,
             vba_project_bin: None,
             preserved_drawing_parts: None,
@@ -158,6 +162,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
 
     let mut out = Workbook {
         path: Some(path.to_string_lossy().to_string()),
+        origin_path: Some(path.to_string_lossy().to_string()),
         vba_project_bin: None,
         preserved_drawing_parts: None,
         sheets: Vec::new(),

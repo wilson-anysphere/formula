@@ -131,6 +131,7 @@ pub struct SheetInfoData {
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorkbookInfoData {
     pub path: Option<String>,
+    pub origin_path: Option<String>,
     pub sheets: Vec<SheetInfoData>,
 }
 
@@ -187,6 +188,7 @@ impl AppState {
             .ok_or(AppStateError::NoWorkbookLoaded)?;
         Ok(WorkbookInfoData {
             path: workbook.path.clone(),
+            origin_path: workbook.origin_path.clone(),
             sheets: workbook
                 .sheets
                 .iter()

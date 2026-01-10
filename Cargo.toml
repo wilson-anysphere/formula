@@ -10,6 +10,7 @@ members = [
   "crates/formula-storage",
   "crates/formula-vba",
   "crates/formula-vba-runtime",
+  "crates/formula-xls",
   "crates/formula-xlsb",
   "crates/formula-xlsx",
   "crates/xlsx-diff",

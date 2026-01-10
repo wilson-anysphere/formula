@@ -1,6 +1,5 @@
 /target/
 **/target/
-Cargo.lock
 
 apps/desktop/.turbo/
 

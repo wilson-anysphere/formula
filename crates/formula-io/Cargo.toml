@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
 thiserror = "1.0"
