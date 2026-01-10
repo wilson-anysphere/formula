@@ -27,6 +27,17 @@ pub struct Storage {
     conn: Arc<Mutex<Connection>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChangeLogEntry {
+    pub id: i64,
+    pub sheet_id: Uuid,
+    pub user_id: Option<String>,
+    pub operation: String,
+    pub target: serde_json::Value,
+    pub old_value: serde_json::Value,
+    pub new_value: serde_json::Value,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellRange {
     pub row_start: i64,
@@ -297,6 +308,45 @@ impl Storage {
             |r| r.get(0),
         )?;
         Ok(count)
+    }
+
+    pub fn change_log_count(&self, sheet_id: Uuid) -> Result<u64> {
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let count: u64 = conn.query_row(
+            "SELECT COUNT(*) FROM change_log WHERE sheet_id = ?1",
+            params![sheet_id.to_string()],
+            |r| r.get(0),
+        )?;
+        Ok(count)
+    }
+
+    pub fn latest_change(&self, sheet_id: Uuid) -> Result<Option<ChangeLogEntry>> {
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let row = conn
+            .query_row(
+                r#"
+                SELECT id, sheet_id, user_id, operation, target, old_value, new_value
+                FROM change_log
+                WHERE sheet_id = ?1
+                ORDER BY id DESC
+                LIMIT 1
+                "#,
+                params![sheet_id.to_string()],
+                |r| {
+                    let sheet_id: String = r.get(1)?;
+                    Ok(ChangeLogEntry {
+                        id: r.get(0)?,
+                        sheet_id: Uuid::parse_str(&sheet_id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        user_id: r.get(2)?,
+                        operation: r.get(3)?,
+                        target: r.get(4)?,
+                        old_value: r.get(5)?,
+                        new_value: r.get(6)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
     }
 
     pub fn apply_cell_changes(&self, changes: &[CellChange]) -> Result<()> {

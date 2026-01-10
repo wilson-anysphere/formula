@@ -47,7 +47,9 @@ impl AutoSaveManager {
 
         let handle = tokio::spawn(async move {
             let mut pending: Vec<CellChange> = Vec::new();
-            let mut last_save = Instant::now();
+            // Track the last *successful* save so that a transient SQLite error
+            // doesn't postpone future flush attempts indefinitely.
+            let mut last_successful_save = Instant::now();
             let mut next_flush: Option<Instant> = None;
 
             loop {
@@ -58,18 +60,30 @@ impl AutoSaveManager {
                                 pending.push(change);
 
                                 let now = Instant::now();
-                                if now.duration_since(last_save) >= config.max_delay {
-                                    flush_pending(&storage, &mut pending, &save_count_task).ok();
-                                    last_save = Instant::now();
-                                    next_flush = None;
+                                if now.duration_since(last_successful_save) >= config.max_delay {
+                                    match flush_pending(&storage, &mut pending, &save_count_task) {
+                                        Ok(()) => {
+                                            last_successful_save = Instant::now();
+                                            next_flush = None;
+                                        }
+                                        Err(_) => {
+                                            // Keep pending changes and retry soon.
+                                            next_flush = Some(Instant::now() + config.save_delay);
+                                        }
+                                    }
                                 } else {
                                     next_flush = Some(now + config.save_delay);
                                 }
                             }
                             Some(Command::Flush(reply)) => {
                                 let result = flush_pending(&storage, &mut pending, &save_count_task);
-                                last_save = Instant::now();
-                                next_flush = None;
+                                if result.is_ok() {
+                                    last_successful_save = Instant::now();
+                                    next_flush = None;
+                                } else {
+                                    // Keep pending changes and schedule another attempt.
+                                    next_flush = Some(Instant::now() + config.save_delay);
+                                }
                                 let _ = reply.send(result);
                             }
                             Some(Command::Shutdown(reply)) => {
@@ -88,9 +102,16 @@ impl AutoSaveManager {
                             tokio::time::sleep_until(deadline).await;
                         }
                     }, if next_flush.is_some() => {
-                        flush_pending(&storage, &mut pending, &save_count_task).ok();
-                        last_save = Instant::now();
-                        next_flush = None;
+                        match flush_pending(&storage, &mut pending, &save_count_task) {
+                            Ok(()) => {
+                                last_successful_save = Instant::now();
+                                next_flush = None;
+                            }
+                            Err(_) => {
+                                // Keep pending changes and retry soon.
+                                next_flush = Some(Instant::now() + config.save_delay);
+                            }
+                        }
                     }
                 }
             }
@@ -119,7 +140,7 @@ impl AutoSaveManager {
         let (tx, rx) = oneshot::channel();
         let _ = self.tx.send(Command::Shutdown(tx));
         let result = rx.await.unwrap_or(Ok(()));
-        self.handle.abort();
+        let _ = self.handle.await;
         result
     }
 
@@ -147,4 +168,3 @@ fn flush_pending(
     }
     result
 }
-
