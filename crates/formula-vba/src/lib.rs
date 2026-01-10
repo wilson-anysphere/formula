@@ -39,6 +39,11 @@ pub struct VBAModule {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VBAReference {
+    pub name: Option<String>,
+    pub guid: Option<String>,
+    pub major: Option<u16>,
+    pub minor: Option<u16>,
+    pub path: Option<String>,
     pub raw: String,
 }
 
@@ -71,9 +76,7 @@ impl VBAProject {
                 if let Some(rest) = line.strip_prefix("Name=") {
                     name_from_project_stream = Some(rest.trim_matches('"').to_owned());
                 } else if let Some(rest) = line.strip_prefix("Reference=") {
-                    references.push(VBAReference {
-                        raw: rest.to_owned(),
-                    });
+                    references.push(parse_reference(rest));
                 }
             }
         }
@@ -124,6 +127,64 @@ impl VBAProject {
 fn decode_1252(bytes: &[u8]) -> String {
     let (cow, _, _) = WINDOWS_1252.decode(bytes);
     cow.into_owned()
+}
+
+fn parse_reference(raw: &str) -> VBAReference {
+    // References in the `PROJECT` stream are stored as a single string with
+    // `#`-delimited fields. We parse a few common patterns (type library refs)
+    // and keep the original raw value as a fallback.
+    //
+    // Example (typelib):
+    //   *\\G{00020430-0000-0000-C000-000000000046}#2.0#0#C:\\Windows\\SysWOW64\\stdole2.tlb#OLE Automation
+    let mut reference = VBAReference {
+        name: None,
+        guid: None,
+        major: None,
+        minor: None,
+        path: None,
+        raw: raw.to_owned(),
+    };
+
+    let parts: Vec<&str> = raw.split('#').collect();
+    if parts.is_empty() {
+        return reference;
+    }
+
+    // Extract GUID from the first part if present.
+    if let Some(first) = parts.first() {
+        if let Some(start) = first.find('{') {
+            if let Some(end_rel) = first[start + 1..].find('}') {
+                let guid = &first[start + 1..start + 1 + end_rel];
+                if !guid.is_empty() {
+                    reference.guid = Some(guid.to_owned());
+                }
+            }
+        }
+    }
+
+    // Version major.minor in the second part.
+    if let Some(version) = parts.get(1) {
+        if let Some((major, minor)) = version.split_once('.') {
+            reference.major = major.parse::<u16>().ok();
+            reference.minor = minor.parse::<u16>().ok();
+        }
+    }
+
+    // Path is commonly the 4th field.
+    if let Some(path) = parts.get(3) {
+        if !path.is_empty() {
+            reference.path = Some((*path).to_owned());
+        }
+    }
+
+    // Human-readable name/description is typically the last field.
+    if let Some(name) = parts.last() {
+        if !name.is_empty() {
+            reference.name = Some((*name).to_owned());
+        }
+    }
+
+    reference
 }
 
 fn parse_attributes(code: &str) -> BTreeMap<String, String> {

@@ -237,4 +237,23 @@ mod tests {
         let rels = std::str::from_utf8(pkg2.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
         assert!(rels.contains("http://schemas.microsoft.com/office/2006/relationships/vbaProject"));
     }
+
+    #[test]
+    fn parses_vba_project_from_package() {
+        let fixture = load_fixture();
+        let pkg = XlsxPackage::from_bytes(&fixture).expect("read pkg");
+        let project = pkg
+            .vba_project()
+            .expect("parse vba project")
+            .expect("vba project present");
+
+        assert_eq!(project.name.as_deref(), Some("VBAProject"));
+        let module = project
+            .modules
+            .iter()
+            .find(|m| m.name == "Module1")
+            .expect("Module1 present");
+        assert!(module.code.contains("Sub Hello"));
+        assert_eq!(module.attributes.get("VB_Name").map(String::as_str), Some("Module1"));
+    }
 }

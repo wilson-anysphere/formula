@@ -1,5 +1,5 @@
+use encoding_rs::{UTF_16LE, WINDOWS_1252};
 use thiserror::Error;
-use encoding_rs::WINDOWS_1252;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ModuleType {
@@ -145,6 +145,26 @@ fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {
 }
 
 fn decode_bytes(bytes: &[u8]) -> String {
+    // MS-OVBA strings are generally stored using the project codepage, but some
+    // records may appear in UTF-16LE form. We do a lightweight heuristic to
+    // decode UTF-16LE when it looks plausible (common for simple ASCII names).
+    if looks_like_utf16le(bytes) {
+        let (cow, _) = UTF_16LE.decode_without_bom_handling(bytes);
+        return cow.into_owned();
+    }
+
     let (cow, _, _) = WINDOWS_1252.decode(bytes);
     cow.into_owned()
+}
+
+fn looks_like_utf16le(bytes: &[u8]) -> bool {
+    if bytes.len() < 2 || bytes.len() % 2 != 0 {
+        return false;
+    }
+    // If a substantial portion of the high bytes are NUL, it's probably
+    // UTF-16LE for ASCII-range characters.
+    let high_bytes = bytes.iter().skip(1).step_by(2);
+    let total = bytes.len() / 2;
+    let nul_count = high_bytes.filter(|&&b| b == 0).count();
+    nul_count >= total / 2
 }
