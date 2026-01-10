@@ -821,6 +821,10 @@ export class CanvasGridRenderer {
 
     ctx.textBaseline = "middle";
 
+    let currentFont = "";
+    let currentFillStyle = "";
+    let currentAlign: CanvasTextAlign = "left";
+
     let rowYSheet = this.scroll.rows.positionOf(startRow);
     for (let row = startRow; row < endRow; row++) {
       const rowHeight = this.scroll.rows.getSize(row);
@@ -839,8 +843,16 @@ export class CanvasGridRenderer {
           const fontWeight = style?.fontWeight ?? "400";
           const font = `${fontWeight} ${fontSize}px ${fontFamily}`;
 
-          ctx.font = font;
-          ctx.fillStyle = style?.color ?? "#111111";
+          if (font !== currentFont) {
+            ctx.font = font;
+            currentFont = font;
+          }
+
+          const fillStyle = style?.color ?? "#111111";
+          if (fillStyle !== currentFillStyle) {
+            ctx.fillStyle = fillStyle;
+            currentFillStyle = fillStyle;
+          }
 
           const formattedKey = `${cell.value}`;
           let text = this.formattedCache.get(formattedKey);
@@ -858,7 +870,10 @@ export class CanvasGridRenderer {
 
           const padding = 4;
           const align = style?.textAlign ?? "left";
-          ctx.textAlign = align;
+          if (align !== currentAlign) {
+            ctx.textAlign = align;
+            currentAlign = align;
+          }
 
           const textX =
             align === "left"
