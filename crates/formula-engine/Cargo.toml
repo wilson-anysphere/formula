@@ -11,12 +11,25 @@ rstar = "0.12"
 inventory = "0.3"
 rayon = "1.10"
 serde = { version = "1.0", features = ["derive"] }
-thiserror = "2.0"
 formula-format = { path = "../formula-format" }
 serde_json = "1.0"
+thiserror = "2.0"
+
+# Bytecode cache + SIMD kernels for bulk range evaluation.
+ahash = "0.8"
+dashmap = "5"
+smallvec = "1"
+wide = "0.7"
 
 [dev-dependencies]
 pretty_assertions = "1.4"
+criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
+proptest = "1"
+rand = "0.8"
+
+[[bench]]
+name = "pipeline"
+harness = false
 
 [lib]
 path = "src/lib.rs"

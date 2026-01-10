@@ -14,6 +14,7 @@
 //! parsing/evaluation/recalc paths as the engine evolves.
 
 pub mod calc_settings;
+pub mod bytecode;
 pub mod date;
 pub mod display;
 pub mod editing;
@@ -24,6 +25,7 @@ pub mod graph;
 pub mod iterative;
 pub mod locale;
 pub mod pivot;
+pub mod simd;
 pub mod solver;
 pub mod what_if;
 pub mod value;
