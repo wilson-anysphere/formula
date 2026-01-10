@@ -14,6 +14,7 @@ fixtures/xlsx/
   formulas/
   styles/
   conditional-formatting/
+  hyperlinks/
   charts/
   pivots/
   macros/
@@ -41,6 +42,8 @@ fixtures/xlsx/
   - `conditional-formatting.xlsx` - simple `cfRule` example.
   - `conditional-formatting-2007.xlsx` - Excel 2007-style conditional formatting.
   - `conditional-formatting-x14.xlsx` - Excel 2010+ (`x14`) conditional formatting.
+- `hyperlinks/`:
+  - `hyperlinks.xlsx` - external + internal hyperlinks (tests `hyperlinks` + rels).
 - `pivots/`:
   - `pivot-fixture.xlsx` - minimal pivot table parts (cache definition/records + pivotTable).
 - `charts/`:
