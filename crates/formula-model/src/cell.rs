@@ -29,7 +29,8 @@ impl CellKey {
     /// Encode a `(row, col)` coordinate into a compact [`CellKey`].
     #[inline]
     pub fn new(row: u32, col: u32) -> Self {
-        debug_assert!(col < EXCEL_MAX_COLS, "col out of Excel bounds: {col}");
+        assert!(row < EXCEL_MAX_ROWS, "row out of Excel bounds: {row}");
+        assert!(col < EXCEL_MAX_COLS, "col out of Excel bounds: {col}");
         Self(((row as u64) << COL_BITS) | (col as u64))
     }
 
