@@ -7,11 +7,58 @@ function fontStringForStyle(style, defaults) {
   if (style?.italic) parts.push("italic");
   if (style?.bold) parts.push("bold");
 
-  const size = style?.size ?? defaults.fontSizePx;
+  const size = style?.size_100pt != null
+    ? pointsToPx(style.size_100pt / 100)
+    : defaults.fontSizePx;
   const family = style?.font ?? defaults.fontFamily;
   parts.push(`${size}px`);
   parts.push(family);
   return parts.join(" ");
+}
+
+function pointsToPx(points) {
+  // Excel point sizes are typically interpreted at 96DPI.
+  return (points * 96) / 72;
+}
+
+function engineColorToCanvasColor(color) {
+  if (typeof color !== "string") return undefined;
+  if (!color.startsWith("#")) return color;
+  if (color.length !== 9) return color;
+
+  // Engine colors are serialized as `#AARRGGBB`.
+  const hex = color.slice(1);
+  const a = Number.parseInt(hex.slice(0, 2), 16) / 255;
+  const r = Number.parseInt(hex.slice(2, 4), 16);
+  const g = Number.parseInt(hex.slice(4, 6), 16);
+  const b = Number.parseInt(hex.slice(6, 8), 16);
+
+  if (Number.isNaN(a) || Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
+    return color;
+  }
+
+  if (a >= 1) {
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
+function buildCodePointIndex(text) {
+  /** @type {number[]} */
+  const offsets = [0];
+  let utf16Offset = 0;
+  for (const ch of text) {
+    utf16Offset += ch.length;
+    offsets.push(utf16Offset);
+  }
+  return offsets;
+}
+
+function sliceByCodePointRange(text, offsets, start, end) {
+  const len = offsets.length - 1;
+  const s = Math.max(0, Math.min(len, start));
+  const e = Math.max(s, Math.min(len, end));
+  return text.slice(offsets[s], offsets[e]);
 }
 
 /**
@@ -42,13 +89,16 @@ export function renderRichText(ctx, richText, rect, options = {}) {
   };
   const defaultColor = options.color ?? "#000000";
 
+  const offsets = buildCodePointIndex(richText.text);
+  const textLen = offsets.length - 1;
+
   const runs = Array.isArray(richText.runs) && richText.runs.length > 0
     ? richText.runs
-    : [{ start: 0, end: richText.text.length, style: undefined }];
+    : [{ start: 0, end: textLen, style: undefined }];
 
   // Pre-measure width per run for alignment.
   const measured = runs.map((run) => {
-    const text = richText.text.slice(run.start, run.end);
+    const text = sliceByCodePointRange(richText.text, offsets, run.start, run.end);
     const style = run.style;
     const font = fontStringForStyle(style, defaults);
     ctx.font = font;
@@ -77,12 +127,14 @@ export function renderRichText(ctx, richText, rect, options = {}) {
 
   for (const fragment of measured) {
     ctx.font = fragment.font;
-    ctx.fillStyle = fragment.style?.color ?? defaultColor;
+    ctx.fillStyle = engineColorToCanvasColor(fragment.style?.color) ?? defaultColor;
     ctx.fillText(fragment.text, cursorX, baselineY);
 
-    if (fragment.style?.underline && fragment.text.length > 0) {
+    if (fragment.style?.underline && fragment.style.underline !== "none" && fragment.text.length > 0) {
       // Basic underline rendering. Canvas doesn't support underline natively.
-      const fontSize = fragment.style?.size ?? defaults.fontSizePx;
+      const fontSize = fragment.style?.size_100pt != null
+        ? pointsToPx(fragment.style.size_100pt / 100)
+        : defaults.fontSizePx;
       const underlineOffset = Math.max(1, Math.round(fontSize * 0.08));
       const underlineY =
         ctx.textBaseline === "top"
@@ -104,4 +156,3 @@ export function renderRichText(ctx, richText, rect, options = {}) {
 
   ctx.restore();
 }
-

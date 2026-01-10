@@ -55,10 +55,11 @@ test("renderRichText emits distinct font strings for bold segments", () => {
   renderRichText(
     /** @type {any} */ (ctx),
     {
-      text: "Hello Bold",
+      text: "A😀Bold",
       runs: [
-        { start: 0, end: 6, style: {} },
-        { start: 6, end: 10, style: { bold: true } },
+        { start: 0, end: 1, style: {} },
+        { start: 1, end: 2, style: { bold: true } },
+        { start: 2, end: 6, style: {} },
       ],
     },
     { x: 0, y: 0, width: 200, height: 20 },
@@ -66,10 +67,10 @@ test("renderRichText emits distinct font strings for bold segments", () => {
   );
 
   const fillCalls = ctx.calls.filter((c) => c.op === "fillText");
-  assert.equal(fillCalls.length, 2);
-  assert.equal(fillCalls[0].text, "Hello ");
-  assert.equal(fillCalls[1].text, "Bold");
+  assert.equal(fillCalls.length, 3);
+  assert.equal(fillCalls[0].text, "A");
+  assert.equal(fillCalls[1].text, "😀");
+  assert.equal(fillCalls[2].text, "Bold");
   assert.notEqual(fillCalls[0].font, fillCalls[1].font);
   assert.match(fillCalls[1].font, /bold/);
 });
-
