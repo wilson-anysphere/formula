@@ -1,5 +1,6 @@
 import { CellEditorOverlay } from "../editor/cellEditorOverlay";
 import { FormulaBarView } from "../formula-bar/FormulaBarView";
+import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
@@ -45,12 +46,22 @@ export class SpreadsheetApp {
   private referenceCtx: CanvasRenderingContext2D;
   private selectionCtx: CanvasRenderingContext2D;
 
+  private outline = new Outline();
+  private outlineLayer: HTMLDivElement;
+
   private dpr = 1;
   private width = 0;
   private height = 0;
 
   private readonly cellWidth = 100;
   private readonly cellHeight = 24;
+  private readonly rowHeaderWidth = 48;
+  private readonly colHeaderHeight = 24;
+
+  private visibleRows: number[] = [];
+  private visibleCols: number[] = [];
+  private rowToVisual = new Map<number, number>();
+  private colToVisual = new Map<number, number>();
 
   private selection: SelectionState;
   private selectionRenderer = new SelectionRenderer();
@@ -85,6 +96,13 @@ export class SpreadsheetApp {
     this.limits = opts.limits ?? { ...DEFAULT_GRID_LIMITS, maxRows: 10_000, maxCols: 200 };
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
 
+    // Seed a simple outline group: rows 2-4 with a summary row at 5 (Excel 1-based indices).
+    this.outline.groupRows(2, 4);
+    this.outline.recomputeOutlineHiddenRows();
+    // And columns 2-4 with a summary column at 5.
+    this.outline.groupCols(2, 4);
+    this.outline.recomputeOutlineHiddenCols();
+
     // Seed data for navigation tests (used range ends at D5).
     this.document.setCellValue(this.sheetId, { row: 0, col: 0 }, "Seed");
     this.document.setCellValue(this.sheetId, { row: 0, col: 1 }, {
@@ -109,6 +127,10 @@ export class SpreadsheetApp {
     this.root.appendChild(this.gridCanvas);
     this.root.appendChild(this.referenceCanvas);
     this.root.appendChild(this.selectionCanvas);
+
+    this.outlineLayer = document.createElement("div");
+    this.outlineLayer.className = "outline-layer";
+    this.root.appendChild(this.outlineLayer);
 
     this.commentsPanel = this.createCommentsPanel();
     this.root.appendChild(this.commentsPanel);
@@ -496,6 +518,8 @@ export class SpreadsheetApp {
   }
 
   private renderGrid(): void {
+    this.updateViewportMapping();
+
     const ctx = this.gridCtx;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -506,37 +530,60 @@ export class SpreadsheetApp {
     ctx.fillStyle = resolveCssVar("--bg-primary", { fallback: "Canvas" });
     ctx.fillRect(0, 0, this.width, this.height);
 
-    const cols = Math.max(1, Math.floor(this.width / this.cellWidth));
-    const rows = Math.max(1, Math.floor(this.height / this.cellHeight));
+    const cols = this.visibleCols.length;
+    const rows = this.visibleRows.length;
+
+    const originX = this.rowHeaderWidth;
+    const originY = this.colHeaderHeight;
 
     ctx.strokeStyle = resolveCssVar("--grid-line", { fallback: "CanvasText" });
     ctx.lineWidth = 1;
 
+    // Header backgrounds.
+    ctx.fillStyle = "#f3f3f3";
+    ctx.fillRect(0, 0, this.width, this.colHeaderHeight);
+    ctx.fillRect(0, 0, this.rowHeaderWidth, this.height);
+
+    // Corner cell.
+    ctx.fillStyle = "#ececec";
+    ctx.fillRect(0, 0, this.rowHeaderWidth, this.colHeaderHeight);
+
+    // Grid lines for the data region.
     for (let r = 0; r <= rows; r++) {
-      const y = r * this.cellHeight + 0.5;
+      const y = originY + r * this.cellHeight + 0.5;
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(cols * this.cellWidth, y);
+      ctx.moveTo(originX, y);
+      ctx.lineTo(originX + cols * this.cellWidth, y);
       ctx.stroke();
     }
 
     for (let c = 0; c <= cols; c++) {
-      const x = c * this.cellWidth + 0.5;
+      const x = originX + c * this.cellWidth + 0.5;
       ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, rows * this.cellHeight);
+      ctx.moveTo(x, originY);
+      ctx.lineTo(x, originY + rows * this.cellHeight);
       ctx.stroke();
     }
+
+    // Header separator lines.
+    ctx.beginPath();
+    ctx.moveTo(originX + 0.5, 0);
+    ctx.lineTo(originX + 0.5, this.height);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, originY + 0.5);
+    ctx.lineTo(this.width, originY + 0.5);
+    ctx.stroke();
 
     const fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
     const fontSizePx = 14;
     const defaultTextColor = resolveCssVar("--text-primary", { fallback: "CanvasText" });
-    ctx.fillStyle = defaultTextColor;
-    ctx.font = `${fontSizePx}px ${fontFamily}`;
 
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const state = this.document.getCell(this.sheetId, { row: r, col: c }) as {
+    for (let visualRow = 0; visualRow < rows; visualRow++) {
+      const row = this.visibleRows[visualRow]!;
+      for (let visualCol = 0; visualCol < cols; visualCol++) {
+        const col = this.visibleCols[visualCol]!;
+        const state = this.document.getCell(this.sheetId, { row, col }) as {
           value: unknown;
           formula: string | null;
         };
@@ -556,8 +603,8 @@ export class SpreadsheetApp {
           ctx,
           rich,
           {
-            x: c * this.cellWidth,
-            y: r * this.cellHeight,
+            x: originX + visualCol * this.cellWidth,
+            y: originY + visualRow * this.cellHeight,
             width: this.cellWidth,
             height: this.cellHeight
           },
@@ -574,20 +621,48 @@ export class SpreadsheetApp {
     }
 
     // Comment indicators.
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const cellRef = cellToA1({ row: r, col: c });
+    for (let visualRow = 0; visualRow < rows; visualRow++) {
+      const row = this.visibleRows[visualRow]!;
+      for (let visualCol = 0; visualCol < cols; visualCol++) {
+        const col = this.visibleCols[visualCol]!;
+        const cellRef = cellToA1({ row, col });
         if (!this.commentCells.has(cellRef)) continue;
         drawCommentIndicator(ctx, {
-          x: c * this.cellWidth,
-          y: r * this.cellHeight,
+          x: originX + visualCol * this.cellWidth,
+          y: originY + visualRow * this.cellHeight,
           width: this.cellWidth,
           height: this.cellHeight,
         });
       }
     }
 
+    // Header labels.
+    ctx.fillStyle = resolveCssVar("--text-primary", { fallback: "CanvasText" });
+    ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    for (let visualCol = 0; visualCol < cols; visualCol++) {
+      const colIndex = this.visibleCols[visualCol]!;
+      ctx.fillText(
+        colToName(colIndex),
+        originX + visualCol * this.cellWidth + this.cellWidth / 2,
+        this.colHeaderHeight / 2
+      );
+    }
+
+    for (let visualRow = 0; visualRow < rows; visualRow++) {
+      const rowIndex = this.visibleRows[visualRow]!;
+      ctx.fillText(
+        String(rowIndex + 1),
+        this.rowHeaderWidth / 2,
+        originY + visualRow * this.cellHeight + this.cellHeight / 2
+      );
+    }
+
     ctx.restore();
+
+    this.renderOutlineControls();
   }
 
   private renderSelection(): void {
@@ -597,7 +672,8 @@ export class SpreadsheetApp {
 
     // If scrolling/resizing happened during editing, keep the editor aligned.
     if (this.editor.isOpen()) {
-      this.editor.reposition(this.getCellRect(this.selection.active));
+      const rect = this.getCellRect(this.selection.active);
+      if (rect) this.editor.reposition(rect);
     }
   }
 
@@ -617,18 +693,170 @@ export class SpreadsheetApp {
     this.renderCommentsPanel();
   }
 
+  private isRowHidden(row: number): boolean {
+    const entry = this.outline.rows.entry(row + 1);
+    return isHidden(entry.hidden);
+  }
+
+  private isColHidden(col: number): boolean {
+    const entry = this.outline.cols.entry(col + 1);
+    return isHidden(entry.hidden);
+  }
+
+  private updateViewportMapping(): void {
+    const availableWidth = Math.max(0, this.width - this.rowHeaderWidth);
+    const availableHeight = Math.max(0, this.height - this.colHeaderHeight);
+
+    const cols = Math.max(1, Math.floor(availableWidth / this.cellWidth));
+    const rows = Math.max(1, Math.floor(availableHeight / this.cellHeight));
+
+    this.visibleRows = [];
+    this.visibleCols = [];
+    this.rowToVisual.clear();
+    this.colToVisual.clear();
+
+    for (let r = 0; r < this.limits.maxRows && this.visibleRows.length < rows; r++) {
+      if (this.isRowHidden(r)) continue;
+      this.rowToVisual.set(r, this.visibleRows.length);
+      this.visibleRows.push(r);
+    }
+
+    for (let c = 0; c < this.limits.maxCols && this.visibleCols.length < cols; c++) {
+      if (this.isColHidden(c)) continue;
+      this.colToVisual.set(c, this.visibleCols.length);
+      this.visibleCols.push(c);
+    }
+  }
+
+  private renderOutlineControls(): void {
+    this.outlineLayer.replaceChildren();
+    if (!this.outline.pr.showOutlineSymbols) return;
+
+    const size = 14;
+    const padding = 4;
+
+    // Row group toggles live in the row header.
+    for (let visualRow = 0; visualRow < this.visibleRows.length; visualRow++) {
+      const rowIndex = this.visibleRows[visualRow]!;
+      const summaryIndex = rowIndex + 1; // 1-based
+      const entry = this.outline.rows.entry(summaryIndex);
+      const details = groupDetailRange(this.outline.rows, summaryIndex, entry.level, this.outline.pr.summaryBelow);
+      if (!details) continue;
+
+      const button = document.createElement("button");
+      button.className = "outline-toggle";
+      button.type = "button";
+      button.textContent = entry.collapsed ? "+" : "-";
+      button.setAttribute("data-testid", `outline-toggle-row-${summaryIndex}`);
+      button.style.left = `${padding}px`;
+      button.style.top = `${this.colHeaderHeight + visualRow * this.cellHeight + (this.cellHeight - size) / 2}px`;
+      button.style.width = `${size}px`;
+      button.style.height = `${size}px`;
+
+      button.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.outline.toggleRowGroup(summaryIndex);
+        this.onOutlineUpdated();
+      });
+      button.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+      });
+
+      this.outlineLayer.appendChild(button);
+    }
+
+    // Column group toggles live in the column header.
+    for (let visualCol = 0; visualCol < this.visibleCols.length; visualCol++) {
+      const colIndex = this.visibleCols[visualCol]!;
+      const summaryIndex = colIndex + 1; // 1-based
+      const entry = this.outline.cols.entry(summaryIndex);
+      const details = groupDetailRange(this.outline.cols, summaryIndex, entry.level, this.outline.pr.summaryRight);
+      if (!details) continue;
+
+      const button = document.createElement("button");
+      button.className = "outline-toggle";
+      button.type = "button";
+      button.textContent = entry.collapsed ? "+" : "-";
+      button.setAttribute("data-testid", `outline-toggle-col-${summaryIndex}`);
+      button.style.left = `${this.rowHeaderWidth + visualCol * this.cellWidth + (this.cellWidth - size) / 2}px`;
+      button.style.top = `${padding}px`;
+      button.style.width = `${size}px`;
+      button.style.height = `${size}px`;
+
+      button.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.outline.toggleColGroup(summaryIndex);
+        this.onOutlineUpdated();
+      });
+      button.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+      });
+
+      this.outlineLayer.appendChild(button);
+    }
+  }
+
+  private onOutlineUpdated(): void {
+    this.ensureActiveCellVisible();
+    this.renderGrid();
+    this.renderSelection();
+    this.updateStatus();
+    this.focus();
+  }
+
+  private ensureActiveCellVisible(): void {
+    let { row, col } = this.selection.active;
+
+    if (this.isRowHidden(row)) {
+      row = this.findNextVisibleRow(row, 1) ?? this.findNextVisibleRow(row, -1) ?? row;
+    }
+    if (this.isColHidden(col)) {
+      col = this.findNextVisibleCol(col, 1) ?? this.findNextVisibleCol(col, -1) ?? col;
+    }
+
+    if (row !== this.selection.active.row || col !== this.selection.active.col) {
+      this.selection = setActiveCell(this.selection, { row, col }, this.limits);
+    }
+  }
+
+  private findNextVisibleRow(start: number, dir: 1 | -1): number | null {
+    let row = start + dir;
+    while (row >= 0 && row < this.limits.maxRows) {
+      if (!this.isRowHidden(row)) return row;
+      row += dir;
+    }
+    return null;
+  }
+
+  private findNextVisibleCol(start: number, dir: 1 | -1): number | null {
+    let col = start + dir;
+    while (col >= 0 && col < this.limits.maxCols) {
+      if (!this.isColHidden(col)) return col;
+      col += dir;
+    }
+    return null;
+  }
+
   private getCellRect(cell: CellCoord) {
+    const visualRow = this.rowToVisual.get(cell.row);
+    const visualCol = this.colToVisual.get(cell.col);
+    if (visualRow === undefined || visualCol === undefined) return null;
+
     return {
-      x: cell.col * this.cellWidth,
-      y: cell.row * this.cellHeight,
+      x: this.rowHeaderWidth + visualCol * this.cellWidth,
+      y: this.colHeaderHeight + visualRow * this.cellHeight,
       width: this.cellWidth,
       height: this.cellHeight
     };
   }
 
   private cellFromPoint(pointX: number, pointY: number): CellCoord {
-    const col = Math.floor(pointX / this.cellWidth);
-    const row = Math.floor(pointY / this.cellHeight);
+    const colVisual = Math.floor((pointX - this.rowHeaderWidth) / this.cellWidth);
+    const rowVisual = Math.floor((pointY - this.colHeaderHeight) / this.cellHeight);
+    const col = this.visibleCols[Math.max(0, Math.min(this.visibleCols.length - 1, colVisual))] ?? 0;
+    const row = this.visibleRows[Math.max(0, Math.min(this.visibleRows.length - 1, rowVisual))] ?? 0;
     return {
       row: Math.max(0, Math.min(this.limits.maxRows - 1, row)),
       col: Math.max(0, Math.min(this.limits.maxCols - 1, col))
@@ -641,6 +869,40 @@ export class SpreadsheetApp {
     const rect = this.root.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    const primary = e.ctrlKey || e.metaKey;
+
+    // Top-left corner selects the entire sheet.
+    if (x < this.rowHeaderWidth && y < this.colHeaderHeight) {
+      this.selection = selectAll(this.limits);
+      this.renderSelection();
+      this.updateStatus();
+      this.focus();
+      return;
+    }
+
+    // Column header selects entire column.
+    if (y < this.colHeaderHeight && x >= this.rowHeaderWidth) {
+      const visualCol = Math.floor((x - this.rowHeaderWidth) / this.cellWidth);
+      const col = this.visibleCols[Math.max(0, Math.min(this.visibleCols.length - 1, visualCol))] ?? 0;
+      this.selection = selectColumns(this.selection, col, col, { additive: primary }, this.limits);
+      this.renderSelection();
+      this.updateStatus();
+      this.focus();
+      return;
+    }
+
+    // Row header selects entire row.
+    if (x < this.rowHeaderWidth && y >= this.colHeaderHeight) {
+      const visualRow = Math.floor((y - this.colHeaderHeight) / this.cellHeight);
+      const row = this.visibleRows[Math.max(0, Math.min(this.visibleRows.length - 1, visualRow))] ?? 0;
+      this.selection = selectRows(this.selection, row, row, { additive: primary }, this.limits);
+      this.renderSelection();
+      this.updateStatus();
+      this.focus();
+      return;
+    }
+
     const cell = this.cellFromPoint(x, y);
 
     if (this.formulaBar?.isFormulaEditing()) {
@@ -661,7 +923,7 @@ export class SpreadsheetApp {
     this.root.setPointerCapture(e.pointerId);
     if (e.shiftKey) {
       this.selection = extendSelectionToCell(this.selection, cell, this.limits);
-    } else if (e.ctrlKey || e.metaKey) {
+    } else if (primary) {
       this.selection = addCellToSelection(this.selection, cell, this.limits);
     } else {
       this.selection = setActiveCell(this.selection, cell, this.limits);
@@ -751,6 +1013,7 @@ export class SpreadsheetApp {
       e.preventDefault();
       const cell = this.selection.active;
       const bounds = this.getCellRect(cell);
+      if (!bounds) return;
       const initialValue = this.getCellInputText(cell);
       this.editor.open(cell, bounds, initialValue, { cursor: "end" });
       return;
@@ -800,12 +1063,44 @@ export class SpreadsheetApp {
       return;
     }
 
+    // Outline grouping shortcuts (Excel-style): Alt+Shift+Right/Left.
+    if (e.altKey && e.shiftKey && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+      e.preventDefault();
+      const range = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
+      if (!range) return;
+
+      const startRow = range.startRow + 1;
+      const endRow = range.endRow + 1;
+      const startCol = range.startCol + 1;
+      const endCol = range.endCol + 1;
+
+      if (e.key === "ArrowRight") {
+        if (this.selection.type === "column") {
+          this.outline.groupCols(startCol, endCol);
+          this.outline.recomputeOutlineHiddenCols();
+        } else {
+          this.outline.groupRows(startRow, endRow);
+          this.outline.recomputeOutlineHiddenRows();
+        }
+      } else {
+        if (this.selection.type === "column") {
+          this.outline.ungroupCols(startCol, endCol);
+        } else {
+          this.outline.ungroupRows(startRow, endRow);
+        }
+      }
+
+      this.onOutlineUpdated();
+      return;
+    }
+
     // Excel-like "start typing to edit" behavior: any printable key begins edit
     // mode and replaces the cell contents.
     if (!primary && !e.altKey && e.key.length === 1) {
       e.preventDefault();
       const cell = this.selection.active;
       const bounds = this.getCellRect(cell);
+      if (!bounds) return;
       this.editor.open(cell, bounds, e.key, { cursor: "end" });
       return;
     }
@@ -966,7 +1261,9 @@ export class SpreadsheetApp {
       isCellEmpty: (cell: CellCoord) => {
         const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
         return state?.value == null && state?.formula == null;
-      }
+      },
+      isRowHidden: (row: number) => this.isRowHidden(row),
+      isColHidden: (col: number) => this.isColHidden(col),
     };
   }
 
@@ -1033,6 +1330,17 @@ function intersectRanges(a: Range, b: Range): Range | null {
   const endCol = Math.min(a.endCol, b.endCol);
   if (startRow > endRow || startCol > endCol) return null;
   return { startRow, endRow, startCol, endCol };
+}
+
+function colToName(col: number): string {
+  let n = col + 1;
+  let out = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
 }
 
 function parseA1(a1: string): CellCoord {

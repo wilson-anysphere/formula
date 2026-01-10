@@ -53,5 +53,16 @@ export interface UsedRangeProvider {
    * Return true if the cell should be treated as empty for navigation purposes.
    */
   isCellEmpty(cell: CellCoord): boolean;
+  /**
+   * Return true if the row is hidden (outline collapse, filtering, manual hide).
+   *
+   * When provided, keyboard navigation skips hidden rows like Excel.
+   */
+  isRowHidden?(row: number): boolean;
+  /**
+   * Return true if the column is hidden (outline collapse, filtering, manual hide).
+   *
+   * When provided, keyboard navigation skips hidden columns like Excel.
+   */
+  isColHidden?(col: number): boolean;
 }
-

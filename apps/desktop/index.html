@@ -181,6 +181,31 @@
         height: 100%;
       }
 
+      .outline-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .outline-toggle {
+        position: absolute;
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 1px solid #bdbdbd;
+        border-radius: 2px;
+        background: #ffffff;
+        color: #111;
+        font: 12px/12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        cursor: pointer;
+      }
+
+      .outline-toggle:active {
+        background: #f0f0f0;
+      }
+
       .cell-editor {
         position: absolute;
         box-sizing: border-box;

@@ -100,5 +100,25 @@ describe("keyboard navigation", () => {
     expect(cellToA1(next!.active)).toBe("D1");
     expect(cellToA1(next!.anchor)).toBe("A1");
   });
-});
 
+  it("Arrow navigation skips hidden rows/cols when the provider reports them", () => {
+    const sheet = new SheetModel();
+    sheet.setCellValue({ row: 0, col: 0 }, "A1");
+
+    const data = {
+      getUsedRange: () => sheet.getUsedRange(),
+      isCellEmpty: (cell: { row: number; col: number }) => sheet.isCellEmpty(cell),
+      isRowHidden: (row: number) => row >= 1 && row <= 3,
+      isColHidden: (col: number) => col === 1
+    };
+
+    const start = createSelection({ row: 0, col: 0 }, limits);
+    const down = navigateSelectionByKey(start, "ArrowDown", { shift: false, primary: false }, data, limits);
+    expect(down).not.toBeNull();
+    expect(cellToA1(down!.active)).toBe("A5"); // rows 2-4 hidden (0-indexed 1-3)
+
+    const right = navigateSelectionByKey(start, "ArrowRight", { shift: false, primary: false }, data, limits);
+    expect(right).not.toBeNull();
+    expect(cellToA1(right!.active)).toBe("C1"); // column B hidden
+  });
+});

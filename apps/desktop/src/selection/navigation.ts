@@ -30,9 +30,9 @@ export function navigateSelectionByKey(
     case "ArrowRight":
       return move(state, "right", mods, data, limits);
     case "Tab":
-      return tab(state, mods, limits);
+      return tab(state, mods, limits, data);
     case "Enter":
-      return enter(state, mods, limits);
+      return enter(state, mods, limits, data);
     case "Home":
       if (mods.primary) return mods.shift ? extendSelectionToCell(state, { row: 0, col: 0 }, limits) : setActiveCell(state, { row: 0, col: 0 }, limits);
       return null;
@@ -55,7 +55,7 @@ function move(
   data: UsedRangeProvider,
   limits: GridLimits
 ): SelectionState {
-  const target = mods.primary ? jumpToEdge(state.active, direction, data, limits) : moveByOne(state.active, direction, limits);
+  const target = mods.primary ? jumpToEdge(state.active, direction, data, limits) : moveByOne(state.active, direction, limits, data);
 
   if (mods.shift) {
     return extendSelectionToCell(state, target, limits);
@@ -64,9 +64,19 @@ function move(
   return setActiveCell(state, target, limits);
 }
 
-function moveByOne(cell: CellCoord, direction: Direction, limits: GridLimits): CellCoord {
+function moveByOne(cell: CellCoord, direction: Direction, limits: GridLimits, data?: UsedRangeProvider): CellCoord {
   const delta = directionToDelta(direction);
-  return clampCell({ row: cell.row + delta.dRow, col: cell.col + delta.dCol }, limits);
+  const clamped = clampCell({ row: cell.row + delta.dRow, col: cell.col + delta.dCol }, limits);
+
+  if (!data) return clamped;
+
+  if (delta.dRow !== 0) {
+    const nextRow = nextVisibleRow(clamped.row, delta.dRow, data, limits);
+    return { row: nextRow, col: clamped.col };
+  }
+
+  const nextCol = nextVisibleCol(clamped.col, delta.dCol, data, limits);
+  return { row: clamped.row, col: nextCol };
 }
 
 function directionToDelta(direction: Direction): { dRow: number; dCol: number } {
@@ -101,6 +111,26 @@ export function jumpToEdge(cell: CellCoord, direction: Direction, data: UsedRang
   const maxCol = Math.min(limits.maxCols - 1, Math.max(used.endCol, start.col));
 
   const isEmpty = (row: number, col: number) => data.isCellEmpty({ row, col });
+  const rowHidden = (row: number) => data.isRowHidden?.(row) ?? false;
+  const colHidden = (col: number) => data.isColHidden?.(col) ?? false;
+
+  const nextRow = (row: number, dir: number): number | null => {
+    let r = row + dir;
+    while (r >= minRow && r <= maxRow && rowHidden(r)) {
+      r += dir;
+    }
+    if (r < minRow || r > maxRow) return null;
+    return r;
+  };
+
+  const nextCol = (col: number, dir: number): number | null => {
+    let c = col + dir;
+    while (c >= minCol && c <= maxCol && colHidden(c)) {
+      c += dir;
+    }
+    if (c < minCol || c > maxCol) return null;
+    return c;
+  };
 
   // Use the current cell as the scan origin, but bound the scan window by the sheet's used
   // range. This prevents Ctrl+Arrow from traversing an "infinite" sheet while still behaving
@@ -113,24 +143,30 @@ export function jumpToEdge(cell: CellCoord, direction: Direction, data: UsedRang
     if (row === limit) return clampCell({ row, col }, limits);
 
     // Excel behavior depends on the *next* cell in the direction rather than the current cell.
-    // This ensures Ctrl+Arrow always moves somewhere (unless already at the boundary).
-    if (isEmpty(row + dRow, col)) {
+    let cursor = nextRow(row, dRow);
+    if (cursor === null) return clampCell({ row, col }, limits);
+
+    if (isEmpty(cursor, col)) {
       // Skip empty cells.
-      while (row !== limit && isEmpty(row + dRow, col)) {
-        row += dRow;
+      while (cursor !== null && isEmpty(cursor, col)) {
+        row = cursor;
+        if (row === limit) break;
+        cursor = nextRow(row, dRow);
       }
 
-      if (row === limit) {
-        return clampCell({ row: limit, col }, limits);
+      if (row === limit || cursor === null) {
+        return clampCell({ row, col }, limits);
       }
     }
 
-    // Step into the first non-empty cell (if any).
-    row += dRow;
+    // Step into the first non-empty cell.
+    row = cursor;
+    cursor = nextRow(row, dRow);
 
     // Then run to the end of the contiguous non-empty block.
-    while (row !== limit && !isEmpty(row + dRow, col)) {
-      row += dRow;
+    while (cursor !== null && !isEmpty(cursor, col)) {
+      row = cursor;
+      cursor = nextRow(row, dRow);
     }
 
     return clampCell({ row, col }, limits);
@@ -139,25 +175,32 @@ export function jumpToEdge(cell: CellCoord, direction: Direction, data: UsedRang
   const limit = dCol > 0 ? maxCol : minCol;
   if (col === limit) return clampCell({ row, col }, limits);
 
-  if (isEmpty(row, col + dCol)) {
-    while (col !== limit && isEmpty(row, col + dCol)) {
-      col += dCol;
+  let cursor = nextCol(col, dCol);
+  if (cursor === null) return clampCell({ row, col }, limits);
+
+  if (isEmpty(row, cursor)) {
+    while (cursor !== null && isEmpty(row, cursor)) {
+      col = cursor;
+      if (col === limit) break;
+      cursor = nextCol(col, dCol);
     }
 
-    if (col === limit) {
-      return clampCell({ row, col: limit }, limits);
+    if (col === limit || cursor === null) {
+      return clampCell({ row, col }, limits);
     }
   }
 
-  col += dCol;
-  while (col !== limit && !isEmpty(row, col + dCol)) {
-    col += dCol;
+  col = cursor;
+  cursor = nextCol(col, dCol);
+  while (cursor !== null && !isEmpty(row, cursor)) {
+    col = cursor;
+    cursor = nextCol(col, dCol);
   }
 
   return clampCell({ row, col }, limits);
 }
 
-function tab(state: SelectionState, mods: KeyModifiers, limits: GridLimits): SelectionState {
+function tab(state: SelectionState, mods: KeyModifiers, limits: GridLimits, data: UsedRangeProvider): SelectionState {
   const primaryRange = state.ranges[state.activeRangeIndex] ?? state.ranges[0];
   if (state.ranges.length === 1 && rangeArea(primaryRange) > 1 && cellInRange(state.active, primaryRange)) {
     const next = nextCellInRange(primaryRange, state.active, mods.shift ? "backward" : "forward");
@@ -167,11 +210,11 @@ function tab(state: SelectionState, mods: KeyModifiers, limits: GridLimits): Sel
     );
   }
 
-  const target = moveByOne(state.active, mods.shift ? "left" : "right", limits);
+  const target = moveByOne(state.active, mods.shift ? "left" : "right", limits, data);
   return setActiveCell(state, target, limits);
 }
 
-function enter(state: SelectionState, mods: KeyModifiers, limits: GridLimits): SelectionState {
+function enter(state: SelectionState, mods: KeyModifiers, limits: GridLimits, data: UsedRangeProvider): SelectionState {
   const primaryRange = state.ranges[state.activeRangeIndex] ?? state.ranges[0];
   if (state.ranges.length === 1 && rangeArea(primaryRange) > 1 && cellInRange(state.active, primaryRange)) {
     const next = nextCellInRangeForEnter(primaryRange, state.active, mods.shift ? "backward" : "forward");
@@ -181,8 +224,30 @@ function enter(state: SelectionState, mods: KeyModifiers, limits: GridLimits): S
     );
   }
 
-  const target = moveByOne(state.active, mods.shift ? "up" : "down", limits);
+  const target = moveByOne(state.active, mods.shift ? "up" : "down", limits, data);
   return setActiveCell(state, target, limits);
+}
+
+function nextVisibleRow(row: number, dir: number, data: UsedRangeProvider, limits: GridLimits): number {
+  if (!data.isRowHidden) return row;
+  let r = row;
+  while (r >= 0 && r < limits.maxRows && data.isRowHidden(r)) {
+    r += dir;
+  }
+  if (r < 0) return 0;
+  if (r >= limits.maxRows) return limits.maxRows - 1;
+  return r;
+}
+
+function nextVisibleCol(col: number, dir: number, data: UsedRangeProvider, limits: GridLimits): number {
+  if (!data.isColHidden) return col;
+  let c = col;
+  while (c >= 0 && c < limits.maxCols && data.isColHidden(c)) {
+    c += dir;
+  }
+  if (c < 0) return 0;
+  if (c >= limits.maxCols) return limits.maxCols - 1;
+  return c;
 }
 
 function nextCellInRange(
