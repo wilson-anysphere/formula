@@ -129,6 +129,11 @@ impl Worksheet {
         self.cells.get(&CellKey::from(cell))
     }
 
+    /// Get a mutable cell record if it is present in the sparse store.
+    pub fn cell_mut(&mut self, cell: CellRef) -> Option<&mut Cell> {
+        self.cells.get_mut(&CellKey::from(cell))
+    }
+
     /// Get a cell record from an A1 reference (e.g. `A1`, `$B$2`).
     pub fn cell_a1(&self, a1: &str) -> Result<Option<&Cell>, A1ParseError> {
         Ok(self.cell(CellRef::from_a1(a1)?))
@@ -144,6 +149,83 @@ impl Worksheet {
     /// Get a cell's value from an A1 reference, returning [`CellValue::Empty`] if unset.
     pub fn value_a1(&self, a1: &str) -> Result<CellValue, A1ParseError> {
         Ok(self.value(CellRef::from_a1(a1)?))
+    }
+
+    /// Get the formula text for a cell, if present.
+    pub fn formula(&self, cell: CellRef) -> Option<&str> {
+        self.cell(cell).and_then(|c| c.formula.as_deref())
+    }
+
+    /// Set a cell formula.
+    ///
+    /// Setting a formula to `None` clears the formula and removes the cell from the sparse store
+    /// if it becomes "truly empty".
+    pub fn set_formula(&mut self, cell_ref: CellRef, formula: Option<String>) {
+        let key = CellKey::from(cell_ref);
+
+        match self.cells.get_mut(&key) {
+            Some(cell) => {
+                cell.formula = formula;
+                if cell.is_truly_empty() {
+                    self.cells.remove(&key);
+                    self.on_cell_removed(cell_ref);
+                }
+            }
+            None => {
+                let Some(formula) = formula else {
+                    return;
+                };
+                let mut cell = Cell::default();
+                cell.formula = Some(formula);
+                self.cells.insert(key, cell);
+                self.on_cell_inserted(cell_ref);
+            }
+        }
+    }
+
+    /// Set a cell formula using an A1 reference.
+    pub fn set_formula_a1(
+        &mut self,
+        a1: &str,
+        formula: Option<String>,
+    ) -> Result<(), A1ParseError> {
+        let cell_ref = CellRef::from_a1(a1)?;
+        self.set_formula(cell_ref, formula);
+        Ok(())
+    }
+
+    /// Set the cell's style id.
+    ///
+    /// Cells with a non-zero style id are stored even if the value is empty,
+    /// matching Excel's ability to format empty cells.
+    pub fn set_style_id(&mut self, cell_ref: CellRef, style_id: u32) {
+        let key = CellKey::from(cell_ref);
+
+        match self.cells.get_mut(&key) {
+            Some(cell) => {
+                cell.style_id = style_id;
+                if cell.is_truly_empty() {
+                    self.cells.remove(&key);
+                    self.on_cell_removed(cell_ref);
+                }
+            }
+            None => {
+                if style_id == 0 {
+                    return;
+                }
+                let mut cell = Cell::default();
+                cell.style_id = style_id;
+                self.cells.insert(key, cell);
+                self.on_cell_inserted(cell_ref);
+            }
+        }
+    }
+
+    /// Set the cell's style id using an A1 reference.
+    pub fn set_style_id_a1(&mut self, a1: &str, style_id: u32) -> Result<(), A1ParseError> {
+        let cell_ref = CellRef::from_a1(a1)?;
+        self.set_style_id(cell_ref, style_id);
+        Ok(())
     }
 
     /// Set or replace a cell record.

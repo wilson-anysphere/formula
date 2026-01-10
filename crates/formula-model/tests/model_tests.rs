@@ -82,6 +82,31 @@ fn worksheet_a1_helpers_work() {
 }
 
 #[test]
+fn formula_and_style_keep_empty_cells_in_sparse_store() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+
+    // Formula-only cell is stored.
+    sheet
+        .set_formula_a1("A1", Some("=1+1".to_string()))
+        .unwrap();
+    assert_eq!(sheet.cell_count(), 1);
+    assert_eq!(sheet.formula(CellRef::new(0, 0)), Some("=1+1"));
+
+    // Clearing formula removes cell again (since it's otherwise empty/default).
+    sheet.set_formula(CellRef::new(0, 0), None);
+    assert_eq!(sheet.cell_count(), 0);
+
+    // Styled empty cell is stored.
+    sheet.set_style_id_a1("B2", 42).unwrap();
+    assert_eq!(sheet.cell_count(), 1);
+    assert_eq!(sheet.cell_a1("B2").unwrap().unwrap().style_id, 42);
+
+    // Resetting to default style drops the cell.
+    sheet.set_style_id(CellRef::new(1, 1), 0);
+    assert_eq!(sheet.cell_count(), 0);
+}
+
+#[test]
 fn cell_key_encoding_round_trips() {
     for &(row, col) in &[
         (0, 0),
