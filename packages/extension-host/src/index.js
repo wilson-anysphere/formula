@@ -629,11 +629,24 @@ class ExtensionHost {
       }
 
       case "config.get": {
+        const key = String(args[0]);
         const store = await this._loadExtensionStorage();
-        return store[extension.id]?.[`__config__:${String(args[0])}`];
+        const stored = store[extension.id]?.[`__config__:${key}`];
+        if (stored !== undefined) return stored;
+
+        const schema = extension.manifest.contributes.configuration;
+        const defaultValue = schema?.properties?.[key]?.default;
+        if (defaultValue !== undefined) return defaultValue;
+        return undefined;
       }
       case "config.update": {
-        const key = `__config__:${String(args[0])}`;
+        const configKey = String(args[0]);
+        const schema = extension.manifest.contributes.configuration;
+        if (!schema?.properties || !Object.prototype.hasOwnProperty.call(schema.properties, configKey)) {
+          throw new Error(`Configuration key not declared in manifest: ${configKey}`);
+        }
+
+        const key = `__config__:${configKey}`;
         const value = args[1];
         const store = await this._loadExtensionStorage();
         store[extension.id] = store[extension.id] ?? {};

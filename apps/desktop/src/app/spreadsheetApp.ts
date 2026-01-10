@@ -543,12 +543,12 @@ export class SpreadsheetApp {
     ctx.lineWidth = 1;
 
     // Header backgrounds.
-    ctx.fillStyle = "#f3f3f3";
+    ctx.fillStyle = resolveCssVar("--grid-header-bg", { fallback: "Canvas" });
     ctx.fillRect(0, 0, this.width, this.colHeaderHeight);
     ctx.fillRect(0, 0, this.rowHeaderWidth, this.height);
 
     // Corner cell.
-    ctx.fillStyle = "#ececec";
+    ctx.fillStyle = resolveCssVar("--bg-tertiary", { fallback: "Canvas" });
     ctx.fillRect(0, 0, this.rowHeaderWidth, this.colHeaderHeight);
 
     // Grid lines for the data region.

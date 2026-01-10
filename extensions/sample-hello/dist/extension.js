@@ -100,7 +100,21 @@ async function activate(context) {
     }
   );
 
-  context.subscriptions.push(doubleFn, sumCmd, panelCmd, fetchCmd, copySumCmd, viewActivated);
+  const greetingCmd = await formula.commands.registerCommand("sampleHello.showGreeting", async () => {
+    const greeting = await formula.config.get("sampleHello.greeting");
+    await formula.ui.showMessage(`Greeting: ${greeting ?? ""}`, "info");
+    return greeting ?? null;
+  });
+
+  context.subscriptions.push(
+    doubleFn,
+    sumCmd,
+    panelCmd,
+    fetchCmd,
+    copySumCmd,
+    greetingCmd,
+    viewActivated
+  );
 }
 
 module.exports = {

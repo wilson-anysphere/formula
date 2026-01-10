@@ -81,3 +81,29 @@ test("manifest validation: invalid permission rejected", () => {
   );
 });
 
+test("manifest validation: configuration must declare typed properties", () => {
+  assert.throws(
+    () =>
+      validateExtensionManifest(
+        {
+          name: "x",
+          version: "1.0.0",
+          publisher: "p",
+          main: "./dist/extension.js",
+          engines: { formula: "^1.0.0" },
+          contributes: {
+            configuration: {
+              title: "X",
+              properties: {
+                "x.setting": {
+                  description: "missing type"
+                }
+              }
+            }
+          }
+        },
+        { engineVersion: "1.0.0" }
+      ),
+    /contributes\.configuration\.properties\.x\.setting\.type/
+  );
+});

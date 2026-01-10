@@ -135,7 +135,11 @@ importers:
 
   packages/extension-api: {}
 
-  packages/extension-host: {}
+  packages/extension-host:
+    dependencies:
+      '@formula/security':
+        specifier: workspace:*
+        version: link:../security
 
   packages/gpu-kernels: {}
 

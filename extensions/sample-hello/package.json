@@ -14,6 +14,7 @@
     "onCommand:sampleHello.openPanel",
     "onCommand:sampleHello.fetchText",
     "onCommand:sampleHello.copySumToClipboard",
+    "onCommand:sampleHello.showGreeting",
     "onView:sampleHello.panel",
     "onCustomFunction:SAMPLEHELLO_DOUBLE"
   ],
@@ -38,6 +39,11 @@
         "command": "sampleHello.copySumToClipboard",
         "title": "Copy Selection Sum to Clipboard",
         "category": "Sample Hello"
+      },
+      {
+        "command": "sampleHello.showGreeting",
+        "title": "Show Greeting (Config Demo)",
+        "category": "Sample Hello"
       }
     ],
     "panels": [
@@ -46,6 +52,16 @@
         "title": "Sample Hello Panel"
       }
     ],
+    "configuration": {
+      "title": "Sample Hello",
+      "properties": {
+        "sampleHello.greeting": {
+          "type": "string",
+          "default": "Hello",
+          "description": "Greeting used by Sample Hello commands"
+        }
+      }
+    },
     "customFunctions": [
       {
         "name": "SAMPLEHELLO_DOUBLE",
@@ -69,6 +85,7 @@
     "ui.commands",
     "ui.panels",
     "network",
-    "clipboard"
+    "clipboard",
+    "storage"
   ]
 }

@@ -273,6 +273,28 @@ test("integration: denied clipboard permission blocks clipboard writes", async (
   assert.equal(host.getClipboardText(), "");
 });
 
+test("integration: config.get returns contributed default values", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-config-"));
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extPath = path.resolve(__dirname, "../../../extensions/sample-hello");
+  await host.loadExtension(extPath);
+
+  const greeting = await host.executeCommand("sampleHello.showGreeting");
+  assert.equal(greeting, "Hello");
+  assert.ok(host.getMessages().some((m) => String(m.message).includes("Greeting: Hello")));
+});
+
 test("integration: denied permission prevents side effects", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-deny-"));
 

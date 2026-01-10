@@ -101,7 +101,12 @@ function renderBarLineSvg({ width, height, title, kind, series }) {
   const seriesCount = Math.max(1, series.length);
   const groupW = plotW / catCount;
 
-  const colors = ["var(--chart-series-1)", "var(--chart-series-2)", "var(--chart-series-3)", "var(--chart-series-4)"];
+  const colors = [
+    "var(--chart-series-1)",
+    "var(--chart-series-2)",
+    "var(--chart-series-3)",
+    "var(--chart-series-4)",
+  ];
 
   if (kind === "bar") {
     const barW = Math.max(1, (groupW * 0.8) / seriesCount);
@@ -144,7 +149,12 @@ function renderPieSvg({ width, height, title, series }) {
   const cx = width / 2;
   const cy = height / 2 + 6;
   const r = Math.min(width, height) * 0.35;
-  const colors = ["var(--chart-series-1)", "var(--chart-series-2)", "var(--chart-series-3)", "var(--chart-series-4)"];
+  const colors = [
+    "var(--chart-series-1)",
+    "var(--chart-series-2)",
+    "var(--chart-series-3)",
+    "var(--chart-series-4)",
+  ];
 
   let angle = -Math.PI / 2;
   const svg = [];

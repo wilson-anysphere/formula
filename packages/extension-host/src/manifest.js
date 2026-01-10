@@ -145,6 +145,23 @@ function validateDataConnectors(dataConnectors) {
   return list;
 }
 
+function validateConfiguration(configuration) {
+  if (configuration === undefined) return undefined;
+  const obj = assertObject(configuration, "contributes.configuration");
+  assertOptionalString(obj.title, "contributes.configuration.title");
+
+  const properties = obj.properties ?? obj.settings;
+  const props = assertObject(properties, "contributes.configuration.properties");
+
+  for (const [key, prop] of Object.entries(props)) {
+    assertObject(prop, `contributes.configuration.properties.${key}`);
+    assertString(prop.type, `contributes.configuration.properties.${key}.type`);
+    assertOptionalString(prop.description, `contributes.configuration.properties.${key}.description`);
+  }
+
+  return { ...obj, properties: props };
+}
+
 function validatePermissions(permissions) {
   const list = assertArray(permissions, "permissions");
   for (const [idx, perm] of list.entries()) {
@@ -224,6 +241,7 @@ function validateExtensionManifest(manifest, { engineVersion }) {
   const panels = validatePanels(contributes.panels);
   const customFunctions = validateCustomFunctions(contributes.customFunctions);
   const dataConnectors = validateDataConnectors(contributes.dataConnectors);
+  const configuration = validateConfiguration(contributes.configuration);
 
   const validatedContributes = {
     commands,
@@ -232,7 +250,7 @@ function validateExtensionManifest(manifest, { engineVersion }) {
     panels,
     customFunctions,
     dataConnectors,
-    configuration: contributes.configuration ?? undefined
+    configuration
   };
 
   validateActivationEvents(obj.activationEvents, validatedContributes);
@@ -249,4 +267,3 @@ module.exports = {
   VALID_PERMISSIONS,
   validateExtensionManifest
 };
-

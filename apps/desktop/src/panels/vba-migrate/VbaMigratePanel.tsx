@@ -115,12 +115,10 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
               {analysis ? migrationReportToMarkdown(analysis) : "No analysis"}
             </pre>
           </div>
- 
           <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--border)", padding: 8 }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Conversion output</div>
             <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{conversionOutput || "No output"}</pre>
           </div>
- 
           <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--border)", padding: 8 }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Validation diff</div>
             <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{validationOutput || "No validation run"}</pre>
