@@ -14,7 +14,11 @@ test("integration: load sample extension and execute contributed command", async
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    permissionPrompt: async () => true
+    permissionPrompt: async ({ permissions }) => {
+      // Allow command registration, but deny outbound network access.
+      if (permissions.includes("network")) return false;
+      return true;
+    }
   });
 
   t.after(async () => {
@@ -240,4 +244,75 @@ test("integration: denied permission prevents side effects", async (t) => {
 
   await assert.rejects(() => host.executeCommand("sampleHello.sumSelection"), /Permission denied/);
   assert.equal(host.spreadsheet.getCell(1, 0), null);
+});
+
+test("integration: extension network access is denied by default", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-net-"));
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extDir = path.join(dir, "network-ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  await fs.writeFile(
+    path.join(extDir, "package.json"),
+    JSON.stringify(
+      {
+        name: "sample-network",
+        displayName: "Sample Network",
+        version: "1.0.0",
+        description: "Extension used to verify network sandboxing.",
+        publisher: "formula",
+        license: "MIT",
+        main: "./dist/extension.js",
+        engines: { formula: "^1.0.0" },
+        activationEvents: ["onCommand:sampleNetwork.fetch"],
+        contributes: {
+          commands: [
+            {
+              command: "sampleNetwork.fetch",
+              title: "Fetch Example",
+              category: "Sample Network"
+            }
+          ]
+        },
+        permissions: ["ui.commands", "network"]
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  await fs.writeFile(
+    path.join(extDir, "dist", "extension.js"),
+    [
+      'const formula = require("@formula/extension-api");',
+      "",
+      "async function activate(context) {",
+      '  const cmd = await formula.commands.registerCommand("sampleNetwork.fetch", async () => {',
+      '    await fetch("https://example.com");',
+      "    return true;",
+      "  });",
+      "  context.subscriptions.push(cmd);",
+      "}",
+      "",
+      "module.exports = { activate };",
+      ""
+    ].join("\n"),
+    "utf8"
+  );
+
+  await host.loadExtension(extDir);
+
+  await assert.rejects(() => host.executeCommand("sampleNetwork.fetch"), /Permission denied: network/);
 });

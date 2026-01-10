@@ -51,6 +51,7 @@ class ExtensionHost {
     permissionPrompt,
     permissionsStoragePath = path.join(process.cwd(), ".formula", "permissions.json"),
     extensionStoragePath = path.join(process.cwd(), ".formula", "storage.json"),
+    auditDbPath = null,
     spreadsheet = new InMemorySpreadsheet()
   } = {}) {
     this._engineVersion = engineVersion;
@@ -62,6 +63,14 @@ class ExtensionHost {
     this._pendingWorkerRequests = new Map();
     this._extensionStoragePath = extensionStoragePath;
     this._spreadsheet = spreadsheet;
+
+    // Security baseline: host-level permissions and audit logging for extension runtime.
+    // The security package is ESM; extension-host is CJS, so we load it lazily.
+    this._securityModulePromise = null;
+    this._securityPermissionManager = null;
+    this._securityAuditLogger = null;
+    this._securityAuditDbPath =
+      auditDbPath ?? path.join(path.dirname(path.resolve(permissionsStoragePath)), "audit.sqlite");
 
     this._permissionManager = new PermissionManager({
       storagePath: permissionsStoragePath,
@@ -77,6 +86,8 @@ class ExtensionHost {
   }
 
   async loadExtension(extensionPath) {
+    await this._ensureSecurity();
+
     const manifestPath = path.join(extensionPath, "package.json");
     const raw = await fs.readFile(manifestPath, "utf8");
     const parsed = JSON.parse(raw);
@@ -88,12 +99,16 @@ class ExtensionHost {
     const workerScript = path.resolve(__dirname, "../worker/extension-worker.js");
     const apiModulePath = path.resolve(__dirname, "../../extension-api/index.js");
 
+    const securityPrincipal = { type: "extension", id: extensionId };
+    const securityPermissions = this._securityPermissionManager.getSnapshot(securityPrincipal);
+
     const worker = new Worker(workerScript, {
       workerData: {
         extensionId,
         extensionPath,
         mainPath,
-        apiModulePath
+        apiModulePath,
+        securityPermissions
       }
     });
 
@@ -378,6 +393,25 @@ class ExtensionHost {
     );
   }
 
+  async _ensureSecurity() {
+    if (this._securityPermissionManager) return;
+
+    if (!this._securityModulePromise) {
+      this._securityModulePromise = import("@formula/security").then((security) => {
+        const { AuditLogger, PermissionManager, SqliteAuditLogStore } = security;
+        const store = new SqliteAuditLogStore({ path: this._securityAuditDbPath });
+        const auditLogger = new AuditLogger({ store });
+        const permissionManager = new PermissionManager({ auditLogger });
+
+        this._securityAuditLogger = auditLogger;
+        this._securityPermissionManager = permissionManager;
+        return security;
+      });
+    }
+
+    await this._securityModulePromise;
+  }
+
   async _handleApiCall(extension, message) {
     const { id, namespace, method, args } = message;
     const apiKey = `${namespace}.${method}`;
@@ -629,6 +663,14 @@ class ExtensionHost {
       }
       case "log": {
         // We keep this as a hook for future UI integration.
+        return;
+      }
+      case "audit": {
+        try {
+          this._securityAuditLogger?.log(message.event);
+        } catch {
+          // Audit logging should not break extension execution.
+        }
         return;
       }
       default:
