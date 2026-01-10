@@ -5,18 +5,14 @@ use pretty_assertions::assert_eq;
 fn error_propagation_and_short_circuiting() {
     let mut engine = Engine::new();
 
-    engine
-        .set_cell_formula("Sheet1", "A1", "=1/0")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=1/0").unwrap();
     engine.recalculate();
     assert_eq!(
         engine.get_cell_value("Sheet1", "A1"),
         Value::Error(ErrorKind::Div0)
     );
 
-    engine
-        .set_cell_formula("Sheet1", "B1", "=A1+1")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=A1+1").unwrap();
     engine.recalculate();
     assert_eq!(
         engine.get_cell_value("Sheet1", "B1"),
@@ -59,9 +55,7 @@ fn sum_coercion_scalar_vs_reference_args() {
     engine
         .set_cell_formula("Sheet1", "B2", "=SUM(A1:A3)")
         .unwrap();
-    engine
-        .set_cell_formula("Sheet1", "B3", "=SUM(A2)")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "B3", "=SUM(A2)").unwrap();
     engine
         .set_cell_formula("Sheet1", "B4", "=SUM(TRUE)")
         .unwrap();
@@ -109,9 +103,7 @@ fn incremental_recalc_updates_only_affected_cells() {
 
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
     engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
-    engine
-        .set_cell_formula("Sheet1", "B1", "=A1+A2")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=A1+A2").unwrap();
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
 
@@ -120,9 +112,7 @@ fn incremental_recalc_updates_only_affected_cells() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(12.0));
 
     // Change the formula; dependency graph should update.
-    engine
-        .set_cell_formula("Sheet1", "B1", "=A1*2")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=A1*2").unwrap();
     engine.recalculate();
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(20.0));
 
@@ -137,15 +127,9 @@ fn multithreaded_recalc_matches_single_threaded() {
     fn setup(engine: &mut Engine) {
         engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
         engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
-        engine
-            .set_cell_formula("Sheet1", "B1", "=A1+A2")
-            .unwrap();
-        engine
-            .set_cell_formula("Sheet1", "B2", "=A1*A2")
-            .unwrap();
-        engine
-            .set_cell_formula("Sheet1", "C1", "=B1+B2")
-            .unwrap();
+        engine.set_cell_formula("Sheet1", "B1", "=A1+A2").unwrap();
+        engine.set_cell_formula("Sheet1", "B2", "=A1*A2").unwrap();
+        engine.set_cell_formula("Sheet1", "C1", "=B1+B2").unwrap();
     }
 
     let mut single = Engine::new();
@@ -160,9 +144,18 @@ fn multithreaded_recalc_matches_single_threaded() {
     assert_eq!(single.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
     assert_eq!(single.get_cell_value("Sheet1", "C1"), Value::Number(5.0));
 
-    assert_eq!(multi.get_cell_value("Sheet1", "B1"), single.get_cell_value("Sheet1", "B1"));
-    assert_eq!(multi.get_cell_value("Sheet1", "B2"), single.get_cell_value("Sheet1", "B2"));
-    assert_eq!(multi.get_cell_value("Sheet1", "C1"), single.get_cell_value("Sheet1", "C1"));
+    assert_eq!(
+        multi.get_cell_value("Sheet1", "B1"),
+        single.get_cell_value("Sheet1", "B1")
+    );
+    assert_eq!(
+        multi.get_cell_value("Sheet1", "B2"),
+        single.get_cell_value("Sheet1", "B2")
+    );
+    assert_eq!(
+        multi.get_cell_value("Sheet1", "C1"),
+        single.get_cell_value("Sheet1", "C1")
+    );
 }
 
 #[test]
@@ -257,4 +250,38 @@ fn evaluates_cashflow_functions_with_ranges() {
         other => panic!("expected XIRR numeric result, got {other:?}"),
     };
     assert!((xirr - 0.3733625335188314).abs() <= 1e-12);
+}
+
+#[test]
+fn irr_treats_non_numeric_cells_as_zero_in_ranges() {
+    let mut engine = Engine::new();
+
+    // Text/logical/blank entries are ignored by IRR when supplied via references,
+    // but their positions still count as periods (i.e. they contribute 0 at that
+    // period).
+    engine.set_cell_value("Sheet1", "A1", -1000.0).unwrap();
+    engine
+        .set_cell_value("Sheet1", "A2", "not a number")
+        .unwrap();
+    engine.set_cell_value("Sheet1", "A3", true).unwrap();
+    engine.set_cell_value("Sheet1", "A4", 1100.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=IRR(A1:A4)")
+        .unwrap();
+
+    engine.recalculate();
+
+    let irr = match engine.get_cell_value("Sheet1", "B1") {
+        Value::Number(n) => n,
+        other => panic!("expected IRR numeric result, got {other:?}"),
+    };
+
+    // Equivalent cashflows are [-1000, 0, 0, 1100]:
+    // -1000 + 1100 / (1 + r)^3 = 0 => r = 1.1^(1/3) - 1.
+    let expected = 1.1_f64.powf(1.0 / 3.0) - 1.0;
+    assert!(
+        (irr - expected).abs() <= 1e-12,
+        "expected {expected}, got {irr}"
+    );
 }

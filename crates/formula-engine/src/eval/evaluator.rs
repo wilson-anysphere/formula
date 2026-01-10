@@ -1,6 +1,6 @@
-use crate::eval::address::CellAddr;
-use crate::eval::ast::{BinaryOp, CompiledExpr, CompareOp, Expr, SheetReference, UnaryOp};
 use crate::error::ExcelError;
+use crate::eval::address::CellAddr;
+use crate::eval::ast::{BinaryOp, CompareOp, CompiledExpr, Expr, SheetReference, UnaryOp};
 use crate::functions::financial;
 use crate::value::{ErrorKind, Value};
 use std::cmp::Ordering;
@@ -212,17 +212,25 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         // 1D ranges intersect on the matching row/column.
         if range.start.col == range.end.col {
             if cur.row >= range.start.row && cur.row <= range.end.row {
-                return self
-                    .resolver
-                    .get_cell_value(range.sheet_id, CellAddr { row: cur.row, col: range.start.col });
+                return self.resolver.get_cell_value(
+                    range.sheet_id,
+                    CellAddr {
+                        row: cur.row,
+                        col: range.start.col,
+                    },
+                );
             }
             return Value::Error(ErrorKind::Value);
         }
         if range.start.row == range.end.row {
             if cur.col >= range.start.col && cur.col <= range.end.col {
-                return self
-                    .resolver
-                    .get_cell_value(range.sheet_id, CellAddr { row: range.start.row, col: cur.col });
+                return self.resolver.get_cell_value(
+                    range.sheet_id,
+                    CellAddr {
+                        row: range.start.row,
+                        col: cur.col,
+                    },
+                );
             }
             return Value::Error(ErrorKind::Value);
         }
@@ -350,7 +358,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
     }
 
-    fn eval_optional_number_arg(&self, expr: Option<&CompiledExpr>) -> Result<Option<f64>, ErrorKind> {
+    fn eval_optional_number_arg(
+        &self,
+        expr: Option<&CompiledExpr>,
+    ) -> Result<Option<f64>, ErrorKind> {
         match expr {
             Some(e) => Ok(Some(self.eval_number_arg(e)?)),
             None => Ok(None),
@@ -381,9 +392,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
     fn collect_sum_like_numbers_from_arg(&self, arg: &CompiledExpr) -> Result<Vec<f64>, ErrorKind> {
         let ev = self.eval_value(arg);
         match ev {
-            EvalValue::Scalar(v) => Ok(Self::sum_like_scalar_number(v)?
-                .into_iter()
-                .collect()),
+            EvalValue::Scalar(v) => Ok(Self::sum_like_scalar_number(v)?.into_iter().collect()),
             EvalValue::Reference(range) => {
                 let mut out = Vec::new();
                 for addr in range.iter_cells() {
@@ -409,6 +418,32 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 for addr in range.iter_cells() {
                     let v = self.resolver.get_cell_value(range.sheet_id, addr);
                     out.push(coerce_to_number(&v)?);
+                }
+                Ok(out)
+            }
+        }
+    }
+
+    fn collect_irr_values_from_arg(&self, arg: &CompiledExpr) -> Result<Vec<f64>, ErrorKind> {
+        // Excel IRR accepts references that contain non-numeric cells; text/logical/blank
+        // entries are ignored (i.e. contribute 0) but their position still counts as a period.
+        // Errors propagate.
+        let ev = self.eval_value(arg);
+        match ev {
+            EvalValue::Scalar(v) => match v {
+                Value::Error(e) => Err(e),
+                Value::Number(n) => Ok(vec![n]),
+                Value::Bool(_) | Value::Text(_) | Value::Blank => Ok(vec![0.0]),
+            },
+            EvalValue::Reference(range) => {
+                let mut out = Vec::new();
+                for addr in range.iter_cells() {
+                    let v = self.resolver.get_cell_value(range.sheet_id, addr);
+                    match v {
+                        Value::Error(e) => return Err(e),
+                        Value::Number(n) => out.push(n),
+                        Value::Bool(_) | Value::Text(_) | Value::Blank => out.push(0.0),
+                    }
                 }
                 Ok(out)
             }
@@ -710,7 +745,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             return Value::Error(ErrorKind::Value);
         }
 
-        let values = match self.collect_numbers_strict_from_arg(&args[0]) {
+        let values = match self.collect_irr_values_from_arg(&args[0]) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
