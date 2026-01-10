@@ -1,5 +1,15 @@
 use crate::{literal, FormatOptions};
 
+pub(crate) fn pattern_is_text(pattern: &str) -> bool {
+    let (at_count, _) = scan_outside_quotes(pattern, '@');
+    if at_count == 0 {
+        return false;
+    }
+
+    let (first, last) = find_placeholder_span(pattern);
+    first.is_none() && last.is_none()
+}
+
 pub(crate) fn format_number(value: f64, pattern: &str, auto_negative_sign: bool, options: &FormatOptions) -> String {
     if pattern.trim().eq_ignore_ascii_case("general") {
         return format_general(value, options);
@@ -7,6 +17,13 @@ pub(crate) fn format_number(value: f64, pattern: &str, auto_negative_sign: bool,
 
     if !value.is_finite() {
         return value.to_string();
+    }
+
+    // Text placeholder format (built-in 49) and related custom patterns:
+    // render the number using General, then substitute into the `@` slot(s).
+    if pattern_is_text(pattern) {
+        let general = format_general(value, options);
+        return literal::render_text_section(pattern, &general);
     }
 
     let (percent_count, _) = scan_outside_quotes(pattern, '%');

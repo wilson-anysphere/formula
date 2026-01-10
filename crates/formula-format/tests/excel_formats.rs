@@ -186,3 +186,15 @@ fn bracket_currency_tokens_render_currency_symbol() {
         "($1,234.50)"
     );
 }
+
+#[test]
+fn text_at_placeholder_formats_numbers_as_text_and_aligns_left() {
+    let options = FormatOptions::default();
+    let rendered = format_value(Value::Number(123.0), Some("@"), &options);
+    assert_eq!(rendered.text, "123");
+    assert_eq!(rendered.alignment, formula_format::AlignmentHint::Left);
+
+    let rendered = format_value(Value::Number(-12.5), Some("\"Value: \"@"), &options);
+    assert_eq!(rendered.text, "Value: -12.5");
+    assert_eq!(rendered.alignment, formula_format::AlignmentHint::Left);
+}

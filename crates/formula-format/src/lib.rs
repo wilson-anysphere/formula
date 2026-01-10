@@ -96,12 +96,6 @@ pub struct FormattedValue {
 ///
 /// If `format_code` is `None` or empty, `"General"` is used.
 pub fn format_value(value: Value<'_>, format_code: Option<&str>, options: &FormatOptions) -> FormattedValue {
-    let alignment = match value {
-        Value::Number(_) => AlignmentHint::Right,
-        Value::Bool(_) | Value::Error(_) => AlignmentHint::Center,
-        _ => AlignmentHint::Left,
-    };
-
     let code_str = format_code.unwrap_or("General");
     let code_str = if code_str.trim().is_empty() {
         "General"
@@ -109,35 +103,39 @@ pub fn format_value(value: Value<'_>, format_code: Option<&str>, options: &Forma
         code_str
     };
 
-    let text = match FormatCode::parse(code_str) {
-        Ok(code) => crate::format_with_code(value, &code, options),
-        Err(_) => crate::format_with_code(value, &FormatCode::general(), options),
-    };
+    let code = FormatCode::parse(code_str).unwrap_or_else(|_| FormatCode::general());
 
-    FormattedValue { text, alignment }
-}
-
-fn format_with_code(value: Value<'_>, code: &FormatCode, options: &FormatOptions) -> String {
-    match value {
-        Value::Blank => String::new(),
-        Value::Error(err) => err.to_string(),
-        Value::Text(s) => format_text(s, code),
+    let (text, alignment) = match value {
+        Value::Blank => (String::new(), AlignmentHint::Left),
+        Value::Error(err) => (err.to_string(), AlignmentHint::Center),
+        Value::Text(s) => (format_text(s, &code), AlignmentHint::Left),
         Value::Bool(b) => {
             let s = if b { "TRUE" } else { "FALSE" };
-            format_text(s, code)
+            (format_text(s, &code), AlignmentHint::Center)
         }
         Value::Number(n) => {
             let section = code.select_section_for_number(n);
             if section.pattern.trim().is_empty() {
-                return String::new();
-            }
-            if crate::datetime::looks_like_datetime(section.pattern) {
-                crate::datetime::format_datetime(n, section.pattern, options)
+                (String::new(), AlignmentHint::Right)
+            } else if crate::datetime::looks_like_datetime(section.pattern) {
+                (
+                    crate::datetime::format_datetime(n, section.pattern, options),
+                    AlignmentHint::Right,
+                )
             } else {
-                crate::number::format_number(n, section.pattern, section.auto_negative_sign, options)
+                let text =
+                    crate::number::format_number(n, section.pattern, section.auto_negative_sign, options);
+                let alignment = if crate::number::pattern_is_text(section.pattern) {
+                    AlignmentHint::Left
+                } else {
+                    AlignmentHint::Right
+                };
+                (text, alignment)
             }
         }
-    }
+    };
+
+    FormattedValue { text, alignment }
 }
 
 fn format_text(text: &str, code: &FormatCode) -> String {
