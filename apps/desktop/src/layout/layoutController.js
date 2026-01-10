@@ -20,9 +20,9 @@ import {
 
 export class LayoutController {
   /**
-   * @param {{ workbookId: string, workspaceManager: import("./layoutPersistence.js").LayoutWorkspaceManager, primarySheetId?: string | null }} params
+   * @param {{ workbookId: string, workspaceManager: import("./layoutPersistence.js").LayoutWorkspaceManager, primarySheetId?: string | null, workspaceId?: string }} params
    */
-  constructor({ workbookId, workspaceManager, primarySheetId = null }) {
+  constructor({ workbookId, workspaceManager, primarySheetId = null, workspaceId }) {
     if (typeof workbookId !== "string" || workbookId.length === 0) {
       throw new Error("workbookId must be a non-empty string");
     }
@@ -30,9 +30,12 @@ export class LayoutController {
     this.workbookId = workbookId;
     this.workspaceManager = workspaceManager;
     this.primarySheetId = primarySheetId;
+    this.workspaceId = typeof workspaceId === "string" && workspaceId.length > 0 ? workspaceId : this.workspaceManager.getActiveWorkbookWorkspaceId(this.workbookId);
 
     /** @type {ReturnType<typeof import("./layoutState.js").createDefaultLayout>} */
-    this.layout = this.workspaceManager.loadWorkbookLayout(this.workbookId, { primarySheetId });
+    this.layout = this.workspaceManager.loadWorkbookLayoutForWorkspace(this.workbookId, this.workspaceId, {
+      primarySheetId,
+    });
 
     /** @type {Map<string, Set<(payload: any) => void>>} */
     this.listeners = new Map();
@@ -75,7 +78,7 @@ export class LayoutController {
     });
 
     if (options.persist ?? true) {
-      this.workspaceManager.saveWorkbookLayout(this.workbookId, this.layout);
+      this.workspaceManager.saveWorkbookLayoutForWorkspace(this.workbookId, this.workspaceId, this.layout);
     }
 
     this.#emit("change", { layout: this.layout });
@@ -85,7 +88,9 @@ export class LayoutController {
    * Reload the active workspace layout from persistence (discarding in-memory changes).
    */
   reload() {
-    this.layout = this.workspaceManager.loadWorkbookLayout(this.workbookId, { primarySheetId: this.primarySheetId });
+    this.layout = this.workspaceManager.loadWorkbookLayoutForWorkspace(this.workbookId, this.workspaceId, {
+      primarySheetId: this.primarySheetId,
+    });
     this.#emit("change", { layout: this.layout });
   }
 
@@ -93,7 +98,7 @@ export class LayoutController {
    * @returns {string}
    */
   get activeWorkspaceId() {
-    return this.workspaceManager.getActiveWorkbookWorkspaceId(this.workbookId);
+    return this.workspaceId;
   }
 
   listWorkspaces() {
@@ -105,8 +110,22 @@ export class LayoutController {
    */
   setActiveWorkspace(workspaceId) {
     this.workspaceManager.setActiveWorkbookWorkspace(this.workbookId, workspaceId);
+    this.workspaceId = this.workspaceManager.getActiveWorkbookWorkspaceId(this.workbookId);
     this.reload();
     this.#emit("workspace", { workspaceId, layout: this.layout });
+  }
+
+  /**
+   * Switch the controller to a specific workspace id without updating the workbook's "active workspace"
+   * pointer. Useful for multi-window scenarios where two windows show the same workbook with different
+   * workspace layouts.
+   *
+   * @param {string} workspaceId
+   */
+  setWorkspace(workspaceId) {
+    this.workspaceId = typeof workspaceId === "string" && workspaceId.length > 0 ? workspaceId : "default";
+    this.reload();
+    this.#emit("workspace", { workspaceId: this.workspaceId, layout: this.layout });
   }
 
   /**
@@ -120,8 +139,9 @@ export class LayoutController {
       makeActive: options.makeActive,
     });
     if (options.makeActive) {
+      this.workspaceId = this.workspaceManager.getActiveWorkbookWorkspaceId(this.workbookId);
       this.reload();
-      this.#emit("workspace", { workspaceId: this.activeWorkspaceId, layout: this.layout });
+      this.#emit("workspace", { workspaceId: this.workspaceId, layout: this.layout });
     }
   }
 
@@ -130,10 +150,11 @@ export class LayoutController {
    */
   deleteWorkspace(workspaceId) {
     this.workspaceManager.deleteWorkbookWorkspace(this.workbookId, workspaceId);
-    if (this.activeWorkspaceId === "default") {
-      this.reload();
-      this.#emit("workspace", { workspaceId: "default", layout: this.layout });
+    if (this.workspaceId === workspaceId) {
+      this.workspaceId = this.workspaceManager.getActiveWorkbookWorkspaceId(this.workbookId);
     }
+    this.reload();
+    this.#emit("workspace", { workspaceId: this.workspaceId, layout: this.layout });
   }
 
   openPanel(panelId) {

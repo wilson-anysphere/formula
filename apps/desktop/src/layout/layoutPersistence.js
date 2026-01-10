@@ -102,15 +102,38 @@ export class LayoutWorkspaceManager {
    */
   loadWorkbookLayout(workbookId, options = {}) {
     const activeWorkspaceId = this.getActiveWorkbookWorkspaceId(workbookId);
-    const key = activeWorkspaceId === "default" ? this.workbookKey(workbookId) : this.workbookWorkspaceKey(workbookId, activeWorkspaceId);
+    return this.loadWorkbookLayoutForWorkspace(workbookId, activeWorkspaceId, options);
+  }
+
+  saveWorkbookLayout(workbookId, layout) {
+    const activeWorkspaceId = this.getActiveWorkbookWorkspaceId(workbookId);
+    this.saveWorkbookLayoutForWorkspace(workbookId, activeWorkspaceId, layout);
+  }
+
+  deleteWorkbookLayout(workbookId) {
+    this.storage.removeItem(this.workbookKey(workbookId));
+  }
+
+  /**
+   * Load a specific workspace layout (without modifying the workbook's "active workspace" pointer).
+   *
+   * If the requested workspace does not exist yet, the default workspace (and then the global default)
+   * is used as a fallback so new workspaces can start from a sensible base.
+   *
+   * @param {string} workbookId
+   * @param {string} workspaceId
+   * @param {{ primarySheetId?: string | null }} [options]
+   */
+  loadWorkbookLayoutForWorkspace(workbookId, workspaceId, options = {}) {
+    const id = typeof workspaceId === "string" && workspaceId.length > 0 ? workspaceId : "default";
+    const key = id === "default" ? this.workbookKey(workbookId) : this.workbookWorkspaceKey(workbookId, id);
 
     const raw = this.storage.getItem(key);
     if (raw) {
       return deserializeLayout(raw, { panelRegistry: this.panelRegistry, primarySheetId: options.primarySheetId });
     }
 
-    // If the active workspace isn't present yet (e.g. user deleted it), fall back to default workspace.
-    if (activeWorkspaceId !== "default") {
+    if (id !== "default") {
       const fallbackRaw = this.storage.getItem(this.workbookKey(workbookId));
       if (fallbackRaw) {
         return deserializeLayout(fallbackRaw, { panelRegistry: this.panelRegistry, primarySheetId: options.primarySheetId });
@@ -123,18 +146,29 @@ export class LayoutWorkspaceManager {
     return createDefaultLayout({ primarySheetId: options.primarySheetId });
   }
 
-  saveWorkbookLayout(workbookId, layout) {
-    const activeWorkspaceId = this.getActiveWorkbookWorkspaceId(workbookId);
-    const key =
-      activeWorkspaceId === "default"
-        ? this.workbookKey(workbookId)
-        : this.workbookWorkspaceKey(workbookId, activeWorkspaceId);
+  /**
+   * Save a layout to a specific workspace id (without changing the workbook's active workspace).
+   *
+   * @param {string} workbookId
+   * @param {string} workspaceId
+   * @param {any} layout
+   */
+  saveWorkbookLayoutForWorkspace(workbookId, workspaceId, layout) {
+    const id = typeof workspaceId === "string" && workspaceId.length > 0 ? workspaceId : "default";
 
-    this.storage.setItem(key, serializeLayout(layout, { panelRegistry: this.panelRegistry }));
-  }
+    if (id === "default") {
+      this.storage.setItem(this.workbookKey(workbookId), serializeLayout(layout, { panelRegistry: this.panelRegistry }));
+      return;
+    }
 
-  deleteWorkbookLayout(workbookId) {
-    this.storage.removeItem(this.workbookKey(workbookId));
+    const index = this.loadWorkbookWorkspaceIndex(workbookId);
+    const existingName = index.workspaces?.[id]?.name;
+
+    this.saveWorkbookWorkspace(workbookId, id, {
+      name: existingName,
+      layout,
+      makeActive: false,
+    });
   }
 
   loadWorkbookWorkspaceIndex(workbookId) {

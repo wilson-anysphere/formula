@@ -48,3 +48,50 @@ test("LayoutController can switch between named workspaces", () => {
   assert.deepEqual(getPanelPlacement(controller.layout, PanelIds.VERSION_HISTORY), { kind: "docked", side: "right" });
 });
 
+test("LayoutController can target an explicit workspace id without changing the workbook active workspace", () => {
+  const storage = new MemoryStorage();
+  const workspaceManager = new LayoutWorkspaceManager({ storage, panelRegistry: PANEL_REGISTRY });
+  const workbookId = "workbook-multiwindow";
+
+  const defaultController = new LayoutController({
+    workbookId,
+    workspaceManager,
+    primarySheetId: "Sheet1",
+    workspaceId: "default",
+  });
+
+  defaultController.openPanel(PanelIds.AI_CHAT);
+  defaultController.dockPanel(PanelIds.AI_CHAT, "left");
+
+  const analysisController = new LayoutController({
+    workbookId,
+    workspaceManager,
+    primarySheetId: "Sheet1",
+    workspaceId: "analysis",
+  });
+
+  analysisController.openPanel(PanelIds.VERSION_HISTORY);
+  analysisController.dockPanel(PanelIds.VERSION_HISTORY, "right");
+
+  // Workbook's global "active workspace" remains unchanged unless explicitly set.
+  assert.equal(workspaceManager.getActiveWorkbookWorkspaceId(workbookId), "default");
+
+  const reloadedDefault = new LayoutController({
+    workbookId,
+    workspaceManager,
+    primarySheetId: "Sheet1",
+    workspaceId: "default",
+  });
+
+  const reloadedAnalysis = new LayoutController({
+    workbookId,
+    workspaceManager,
+    primarySheetId: "Sheet1",
+    workspaceId: "analysis",
+  });
+
+  assert.deepEqual(getPanelPlacement(reloadedDefault.layout, PanelIds.AI_CHAT), { kind: "docked", side: "left" });
+  assert.deepEqual(getPanelPlacement(reloadedDefault.layout, PanelIds.VERSION_HISTORY), { kind: "closed" });
+
+  assert.deepEqual(getPanelPlacement(reloadedAnalysis.layout, PanelIds.VERSION_HISTORY), { kind: "docked", side: "right" });
+});
