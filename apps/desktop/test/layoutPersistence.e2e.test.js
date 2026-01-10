@@ -25,3 +25,27 @@ test("E2E: docked panel layout persists per-workbook and restores on reload", ()
   assert.equal(restored.docks.left.active, PanelIds.AI_CHAT);
 });
 
+test("LayoutWorkspaceManager falls back to global default layout when workbook has none", () => {
+  const storage = new MemoryStorage();
+  const workbookId = "workbook-456";
+
+  const manager = new LayoutWorkspaceManager({ storage, panelRegistry: PANEL_REGISTRY });
+
+  let globalLayout = manager.loadWorkbookLayout("temp", { primarySheetId: "Sheet1" });
+  globalLayout = openPanel(globalLayout, PanelIds.VERSION_HISTORY, { panelRegistry: PANEL_REGISTRY });
+  globalLayout = dockPanel(globalLayout, PanelIds.VERSION_HISTORY, "left");
+
+  manager.saveGlobalDefaultLayout(globalLayout);
+
+  const fromWorkbook = manager.loadWorkbookLayout(workbookId, { primarySheetId: "Sheet1" });
+  assert.deepEqual(getPanelPlacement(fromWorkbook, PanelIds.VERSION_HISTORY), { kind: "docked", side: "left" });
+
+  // Workbook override should win over global.
+  let workbookLayout = openPanel(fromWorkbook, PanelIds.AI_CHAT, { panelRegistry: PANEL_REGISTRY });
+  workbookLayout = dockPanel(workbookLayout, PanelIds.AI_CHAT, "right");
+  manager.saveWorkbookLayout(workbookId, workbookLayout);
+
+  const overridden = manager.loadWorkbookLayout(workbookId, { primarySheetId: "Sheet1" });
+  assert.deepEqual(getPanelPlacement(overridden, PanelIds.AI_CHAT), { kind: "docked", side: "right" });
+  assert.deepEqual(getPanelPlacement(overridden, PanelIds.VERSION_HISTORY), { kind: "docked", side: "left" });
+});
