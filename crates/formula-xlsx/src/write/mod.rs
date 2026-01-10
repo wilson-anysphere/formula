@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{Cursor, Write};
 
 use formula_model::rich_text::{RichText, Underline};
-use formula_model::{CellRef, CellValue, ErrorValue, Range, Worksheet};
+use formula_model::{CellRef, CellValue, ErrorValue, Outline, OutlineEntry, Range, Worksheet};
 use quick_xml::events::Event;
 use quick_xml::events::attributes::AttrError;
 use quick_xml::Reader;
@@ -652,7 +652,7 @@ fn write_worksheet_xml(
         .used_range()
         .unwrap_or(Range::new(CellRef::new(0, 0), CellRef::new(0, 0)))
         .to_string();
-    let sheet_data_xml = render_sheet_data(doc, sheet_meta, sheet, shared_lookup);
+    let sheet_data_xml = render_sheet_data(doc, sheet_meta, sheet, shared_lookup, None);
 
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
@@ -672,7 +672,10 @@ fn patch_worksheet_xml(
     original: &[u8],
     shared_lookup: &HashMap<SharedStringKey, u32>,
 ) -> Result<Vec<u8>, WriteError> {
-    let sheet_data_xml = render_sheet_data(doc, sheet_meta, sheet, shared_lookup);
+    let outline = std::str::from_utf8(original)
+        .ok()
+        .and_then(|xml| crate::outline::read_outline_from_worksheet_xml(xml).ok());
+    let sheet_data_xml = render_sheet_data(doc, sheet_meta, sheet, shared_lookup, outline.as_ref());
 
     let mut reader = Reader::from_reader(original);
     reader.config_mut().trim_text(false);
@@ -709,6 +712,7 @@ fn render_sheet_data(
     sheet_meta: &SheetMeta,
     sheet: &Worksheet,
     shared_lookup: &HashMap<SharedStringKey, u32>,
+    outline: Option<&Outline>,
 ) -> String {
     let mut out = String::new();
     out.push_str("<sheetData>");
@@ -716,16 +720,58 @@ fn render_sheet_data(
     let mut cells: Vec<(CellRef, &formula_model::Cell)> = sheet.iter_cells().collect();
     cells.sort_by_key(|(r, _)| (r.row, r.col));
 
-    let mut current_row: Option<u32> = None;
-    for (cell_ref, cell) in cells {
-        let row_1_based = cell_ref.row + 1;
-        if current_row != Some(row_1_based) {
-            if current_row.is_some() {
-                out.push_str("</row>");
+    let mut outline_rows: Vec<u32> = Vec::new();
+    if let Some(outline) = outline {
+        // Preserve outline-only rows (groups, hidden rows, etc) even if they contain no cells.
+        // We don't attempt to preserve all row-level metadata yet—only the outline-related attrs.
+        for (row, entry) in outline.rows.iter() {
+            if entry.level > 0 || entry.hidden.is_hidden() || entry.collapsed {
+                outline_rows.push(row);
             }
-            current_row = Some(row_1_based);
-            out.push_str(&format!(r#"<row r="{row_1_based}">"#));
         }
+    }
+
+    let mut cell_idx = 0usize;
+    let mut outline_idx = 0usize;
+
+    while cell_idx < cells.len() || outline_idx < outline_rows.len() {
+        let next_cell_row = cells
+            .get(cell_idx)
+            .map(|(cell_ref, _)| cell_ref.row + 1)
+            .unwrap_or(u32::MAX);
+        let next_outline_row = outline_rows.get(outline_idx).copied().unwrap_or(u32::MAX);
+        let row_1_based = next_cell_row.min(next_outline_row);
+
+        if row_1_based == next_outline_row {
+            outline_idx += 1;
+        }
+
+        let outline_entry: OutlineEntry = outline
+            .map(|outline| outline.rows.entry(row_1_based))
+            .unwrap_or_default();
+
+        out.push_str(&format!(r#"<row r="{row_1_based}""#));
+        if outline_entry.level > 0 {
+            out.push_str(&format!(r#" outlineLevel="{}""#, outline_entry.level));
+        }
+        if outline_entry.hidden.is_hidden() {
+            out.push_str(r#" hidden="1""#);
+        }
+        if outline_entry.collapsed {
+            out.push_str(r#" collapsed="1""#);
+        }
+
+        let mut wrote_any_cell = false;
+
+        while let Some((cell_ref, cell)) = cells.get(cell_idx).copied() {
+            if cell_ref.row + 1 != row_1_based {
+                break;
+            }
+            if !wrote_any_cell {
+                out.push('>');
+                wrote_any_cell = true;
+            }
+            cell_idx += 1;
 
         out.push_str(r#"<c r=""#);
         out.push_str(&cell_ref.to_a1());
@@ -845,8 +891,11 @@ fn render_sheet_data(
         out.push_str("</c>");
     }
 
-    if current_row.is_some() {
-        out.push_str("</row>");
+        if wrote_any_cell {
+            out.push_str("</row>");
+        } else {
+            out.push_str("/>");
+        }
     }
     out.push_str("</sheetData>");
     out
