@@ -23,6 +23,7 @@ export type TextRun = {
   text: string;
   font?: FontSpec;
   color?: string;
+  underline?: boolean;
 };
 
 export type LayoutOptions = {
@@ -97,4 +98,3 @@ export function normalizeFont(font: FontSpec): Required<
 export function fontKey(font: FontSpec): string;
 
 export function toCanvasFontString(font: FontSpec): string;
-

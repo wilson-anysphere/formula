@@ -91,6 +91,33 @@ test("layout results are cached to avoid repeated measurement work", () => {
   assert.equal(measurer.calls, callsAfterFirst);
 });
 
+test("layout cache keys include non-metric run metadata so returned runs stay correct", () => {
+  const measurer = makeMonospaceMeasurer();
+  const engine = new TextLayoutEngine(measurer);
+
+  const base = {
+    font: { family: "Inter", sizePx: 10, weight: 400 },
+    maxWidth: 100,
+    wrapMode: "none",
+    align: "left",
+    direction: "ltr",
+  };
+
+  const layoutA = engine.layout({
+    ...base,
+    runs: [{ text: "Hello", color: "red" }],
+  });
+
+  const layoutB = engine.layout({
+    ...base,
+    runs: [{ text: "Hello", color: "blue" }],
+  });
+
+  assert.notStrictEqual(layoutA, layoutB);
+  assert.equal(layoutA.lines[0].runs[0].color, "red");
+  assert.equal(layoutB.lines[0].runs[0].color, "blue");
+});
+
 test("word wrap falls back to char wrapping when there are no word break opportunities", () => {
   const measurer = makeMonospaceMeasurer();
   const engine = new TextLayoutEngine(measurer);

@@ -691,7 +691,7 @@ export class SpreadsheetApp {
           },
           {
             padding: 4,
-            align: "left",
+            align: "start",
             verticalAlign: "middle",
             fontFamily,
             fontSizePx,

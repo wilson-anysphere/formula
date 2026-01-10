@@ -1,21 +1,21 @@
 import { resolveCssVar } from "../../../theme/cssVars.js";
+import { detectBaseDirection, resolveAlign, toCanvasFontString } from "@formula/text-layout";
+import { getSharedTextLayoutEngine } from "../textLayout.js";
 
 /**
  * @param {import('./types.js').RichTextRunStyle | undefined} style
  * @param {{fontFamily: string, fontSizePx: number}} defaults
  */
-function fontStringForStyle(style, defaults) {
-  const parts = [];
-  if (style?.italic) parts.push("italic");
-  if (style?.bold) parts.push("bold");
-
-  const size = style?.size_100pt != null
+function fontSpecForStyle(style, defaults) {
+  const sizePx = style?.size_100pt != null
     ? pointsToPx(style.size_100pt / 100)
     : defaults.fontSizePx;
-  const family = style?.font ?? defaults.fontFamily;
-  parts.push(`${size}px`);
-  parts.push(family);
-  return parts.join(" ");
+  return {
+    family: style?.font ?? defaults.fontFamily,
+    sizePx,
+    weight: style?.bold ? "bold" : "normal",
+    style: style?.italic ? "italic" : "normal",
+  };
 }
 
 function pointsToPx(points) {
@@ -73,8 +73,10 @@ function sliceByCodePointRange(text, offsets, start, end) {
  * @param {{x: number, y: number, width: number, height: number}} rect
  * @param {{
  *   padding?: number,
- *   align?: 'left' | 'center' | 'right',
+ *   align?: 'left' | 'center' | 'right' | 'start' | 'end',
  *   verticalAlign?: 'top' | 'middle' | 'bottom',
+ *   wrapMode?: 'none' | 'word' | 'char',
+ *   direction?: 'ltr' | 'rtl' | 'auto',
  *   fontFamily?: string,
  *   fontSizePx?: number,
  *   color?: string,
@@ -82,8 +84,10 @@ function sliceByCodePointRange(text, offsets, start, end) {
  */
 export function renderRichText(ctx, richText, rect, options = {}) {
   const padding = options.padding ?? 2;
-  const align = options.align ?? "left";
+  const align = options.align ?? "start";
   const verticalAlign = options.verticalAlign ?? "middle";
+  const wrapMode = options.wrapMode ?? "none";
+  const direction = options.direction ?? "auto";
 
   const defaults = {
     fontFamily: options.fontFamily ?? "Calibri",
@@ -98,62 +102,139 @@ export function renderRichText(ctx, richText, rect, options = {}) {
     ? richText.runs
     : [{ start: 0, end: textLen, style: undefined }];
 
-  // Pre-measure width per run for alignment.
-  const measured = runs.map((run) => {
+  const engine = getSharedTextLayoutEngine(ctx);
+
+  /** @type {Array<{ text: string, font: any, color: string | undefined, underline: boolean }>} */
+  const layoutRuns = runs.map((run) => {
     const text = sliceByCodePointRange(richText.text, offsets, run.start, run.end);
-    const style = run.style;
-    const font = fontStringForStyle(style, defaults);
-    ctx.font = font;
-    const width = ctx.measureText(text).width;
-    return { text, style, font, width };
+    const font = fontSpecForStyle(run.style, defaults);
+    return {
+      text,
+      font,
+      color: engineColorToCanvasColor(run.style?.color),
+      underline: Boolean(run.style?.underline && run.style.underline !== "none"),
+    };
   });
 
-  const totalWidth = measured.reduce((acc, m) => acc + m.width, 0);
-  let cursorX = rect.x + padding;
-  if (align === "center") {
-    cursorX = rect.x + (rect.width - totalWidth) / 2;
-  } else if (align === "right") {
-    cursorX = rect.x + rect.width - padding - totalWidth;
-  }
+  const fullText = layoutRuns.map((r) => r.text).join("");
+  const hasExplicitNewline = /[\r\n]/.test(fullText);
 
-  let baselineY = rect.y + rect.height / 2;
-  if (verticalAlign === "top") baselineY = rect.y + padding;
-  if (verticalAlign === "bottom") baselineY = rect.y + rect.height - padding;
+  const availableWidth = Math.max(0, rect.width - padding * 2);
+  const availableHeight = Math.max(0, rect.height - padding * 2);
+  const maxFontSizePx = layoutRuns.reduce((acc, run) => Math.max(acc, run.font.sizePx), defaults.fontSizePx);
+  const lineHeight = Math.ceil(maxFontSizePx * 1.2);
+  const maxLines = Math.max(1, Math.floor(availableHeight / lineHeight));
 
   ctx.save();
   ctx.beginPath();
   ctx.rect(rect.x, rect.y, rect.width, rect.height);
   ctx.clip();
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
 
-  ctx.textBaseline = verticalAlign === "middle" ? "middle" : (verticalAlign === "top" ? "top" : "bottom");
+  if (wrapMode === "none" && !hasExplicitNewline) {
+    // Fast path: single-line rich text (no wrapping). Uses cached measurements.
+    const baseDir = direction === "auto" ? detectBaseDirection(fullText) : direction;
+    const resolvedAlign =
+      align === "left" || align === "right" || align === "center"
+        ? align
+        : resolveAlign(align, baseDir);
 
-  for (const fragment of measured) {
-    ctx.font = fragment.font;
-    ctx.fillStyle = engineColorToCanvasColor(fragment.style?.color) ?? defaultColor;
-    ctx.fillText(fragment.text, cursorX, baselineY);
+    const fragments = layoutRuns
+      .map((fragment) => {
+        const measurement = engine.measure(fragment.text, fragment.font);
+        return { ...fragment, measurement, width: measurement.width };
+      })
+      .filter((fragment) => fragment.text.length > 0);
 
-    if (fragment.style?.underline && fragment.style.underline !== "none" && fragment.text.length > 0) {
-      // Basic underline rendering. Canvas doesn't support underline natively.
-      const fontSize = fragment.style?.size_100pt != null
-        ? pointsToPx(fragment.style.size_100pt / 100)
-        : defaults.fontSizePx;
-      const underlineOffset = Math.max(1, Math.round(fontSize * 0.08));
-      const underlineY =
-        ctx.textBaseline === "top"
-          ? baselineY + fontSize + underlineOffset
-          : ctx.textBaseline === "bottom"
-            ? baselineY - underlineOffset
-            : baselineY + Math.round(fontSize * 0.5);
-
-      ctx.beginPath();
-      ctx.strokeStyle = ctx.fillStyle;
-      ctx.lineWidth = Math.max(1, Math.round(fontSize / 16));
-      ctx.moveTo(cursorX, underlineY);
-      ctx.lineTo(cursorX + fragment.width, underlineY);
-      ctx.stroke();
+    const totalWidth = fragments.reduce((acc, fragment) => acc + fragment.width, 0);
+    let cursorX = rect.x + padding;
+    if (resolvedAlign === "center") {
+      cursorX = rect.x + padding + (availableWidth - totalWidth) / 2;
+    } else if (resolvedAlign === "right") {
+      cursorX = rect.x + padding + (availableWidth - totalWidth);
     }
 
-    cursorX += fragment.width;
+    const lineAscent = fragments.reduce((acc, fragment) => Math.max(acc, fragment.measurement.ascent), 0);
+    const lineDescent = fragments.reduce((acc, fragment) => Math.max(acc, fragment.measurement.descent), 0);
+
+    let baselineY = rect.y + padding + lineAscent;
+    if (verticalAlign === "middle") {
+      baselineY = rect.y + rect.height / 2 + (lineAscent - lineDescent) / 2;
+    } else if (verticalAlign === "bottom") {
+      baselineY = rect.y + rect.height - padding - lineDescent;
+    }
+
+    for (const fragment of fragments) {
+      ctx.font = toCanvasFontString(fragment.font);
+      ctx.fillStyle = fragment.color ?? defaultColor;
+      ctx.fillText(fragment.text, cursorX, baselineY);
+
+      if (fragment.underline) {
+        const fontSize = fragment.font.sizePx;
+        const underlineOffset = Math.max(1, Math.round(fontSize * 0.08));
+        const underlineY = baselineY + underlineOffset;
+
+        ctx.beginPath();
+        ctx.strokeStyle = ctx.fillStyle;
+        ctx.lineWidth = Math.max(1, Math.round(fontSize / 16));
+        ctx.moveTo(cursorX, underlineY);
+        ctx.lineTo(cursorX + fragment.width, underlineY);
+        ctx.stroke();
+      }
+
+      cursorX += fragment.width;
+    }
+  } else {
+    // Full layout: wrapping and/or explicit newlines.
+    const layout = engine.layout({
+      runs: layoutRuns.map((r) => ({ text: r.text, font: r.font, color: r.color, underline: r.underline })),
+      text: undefined,
+      font: { family: defaults.fontFamily, sizePx: defaults.fontSizePx },
+      maxWidth: availableWidth,
+      wrapMode,
+      align,
+      direction,
+      lineHeightPx: lineHeight,
+      maxLines,
+    });
+
+    let originY = rect.y + padding;
+    if (verticalAlign === "middle") {
+      originY = rect.y + padding + Math.max(0, (availableHeight - layout.height) / 2);
+    } else if (verticalAlign === "bottom") {
+      originY = rect.y + rect.height - padding - layout.height;
+    }
+
+    const originX = rect.x + padding;
+
+    for (let i = 0; i < layout.lines.length; i++) {
+      const line = layout.lines[i];
+      let cursorX = originX + line.x;
+      const baselineY = originY + i * layout.lineHeight + line.ascent;
+
+      for (const run of line.runs) {
+        const measurement = engine.measure(run.text, run.font);
+        ctx.font = toCanvasFontString(run.font);
+        ctx.fillStyle = run.color ?? defaultColor;
+        ctx.fillText(run.text, cursorX, baselineY);
+
+        if (run.underline) {
+          const fontSize = run.font.sizePx;
+          const underlineOffset = Math.max(1, Math.round(fontSize * 0.08));
+          const underlineY = baselineY + underlineOffset;
+
+          ctx.beginPath();
+          ctx.strokeStyle = ctx.fillStyle;
+          ctx.lineWidth = Math.max(1, Math.round(fontSize / 16));
+          ctx.moveTo(cursorX, underlineY);
+          ctx.lineTo(cursorX + measurement.width, underlineY);
+          ctx.stroke();
+        }
+
+        cursorX += measurement.width;
+      }
+    }
   }
 
   ctx.restore();

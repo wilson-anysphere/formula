@@ -9,8 +9,10 @@ export interface RenderRect {
 
 export interface RenderRichTextOptions {
   padding?: number;
-  align?: "left" | "center" | "right";
+  align?: "left" | "center" | "right" | "start" | "end";
   verticalAlign?: "top" | "middle" | "bottom";
+  wrapMode?: "none" | "word" | "char";
+  direction?: "ltr" | "rtl" | "auto";
   fontFamily?: string;
   fontSizePx?: number;
   color?: string;
@@ -22,4 +24,3 @@ export function renderRichText(
   rect: RenderRect,
   options?: RenderRichTextOptions,
 ): void;
-

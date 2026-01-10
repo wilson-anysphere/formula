@@ -4,6 +4,42 @@ import { fontKey } from "./font.js";
 import { graphemeBreakPositions, skipBreakableWhitespace, wordBreakPositions } from "./segment.js";
 
 /**
+ * Stable serialization for cache keys.
+ *
+ * Layout decisions depend on `text` + `font` + width/wrap options, but consumers may attach
+ * extra metadata to runs (e.g. color/underline). Because the engine returns those runs back,
+ * the layout cache key must include that metadata to avoid returning a layout object with
+ * stale run properties.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function stableValueKey(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return `[${value.map(stableValueKey).join(",")}]`;
+  if (typeof value === "object") {
+    const obj = /** @type {Record<string, unknown>} */ (value);
+    const keys = Object.keys(obj).sort();
+    return `{${keys.map((k) => `${k}:${stableValueKey(obj[k])}`).join(",")}}`;
+  }
+  return String(value);
+}
+
+/**
+ * @param {Record<string, unknown>} run
+ * @returns {string}
+ */
+function runExtrasKey(run) {
+  const keys = Object.keys(run)
+    .filter((k) => k !== "text" && k !== "font")
+    .sort();
+  if (keys.length === 0) return "";
+  return keys.map((k) => `${k}=${stableValueKey(run[k])}`).join(",");
+}
+
+/**
  * @typedef {import("./font.js").FontSpec} FontSpec
  * @typedef {import("./measurer.js").TextMeasurer} TextMeasurer
  * @typedef {import("./measurer.js").TextMeasurement} TextMeasurement
@@ -145,7 +181,12 @@ export class TextLayoutEngine {
    * @returns {string}
    */
   #layoutCacheKey(options) {
-    const runsKey = options.runs.map((r) => `${fontKey(r.font)}:${r.text}`).join("|");
+    const runsKey = options.runs
+      .map((r) => {
+        const extra = runExtrasKey(/** @type {any} */ (r));
+        return extra ? `${fontKey(r.font)}:${r.text}:${extra}` : `${fontKey(r.font)}:${r.text}`;
+      })
+      .join("|");
     return [
       `v1`,
       `runs=${runsKey}`,
