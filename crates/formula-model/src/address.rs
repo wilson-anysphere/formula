@@ -68,10 +68,16 @@ impl CellRef {
         }
 
         let col = name_to_col(col_str)?;
+        if col >= crate::cell::EXCEL_MAX_COLS {
+            return Err(A1ParseError::InvalidColumn);
+        }
         let row_1_based: u32 = s[row_start..idx]
             .parse()
             .map_err(|_| A1ParseError::InvalidRow)?;
         if row_1_based == 0 {
+            return Err(A1ParseError::InvalidRow);
+        }
+        if row_1_based > crate::cell::EXCEL_MAX_ROWS {
             return Err(A1ParseError::InvalidRow);
         }
 
@@ -278,5 +284,12 @@ mod tests {
         let single = Range::from_a1("C3").unwrap();
         assert!(single.is_single_cell());
         assert_eq!(single.start, CellRef::new(2, 2));
+    }
+
+    #[test]
+    fn a1_bounds_are_excel_compatible() {
+        assert!(CellRef::from_a1("XFD1048576").is_ok());
+        assert!(CellRef::from_a1("XFE1").is_err()); // col 16385 is out of bounds
+        assert!(CellRef::from_a1("A1048577").is_err()); // row 1,048,577 is out of bounds
     }
 }
