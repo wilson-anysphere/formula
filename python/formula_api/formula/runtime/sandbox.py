@@ -42,6 +42,22 @@ def apply_sandbox(permissions: Dict[str, Any]) -> None:
 
         builtins.open = blocked_open  # type: ignore[assignment]
 
+        # `io.open` / `_io.open` keep a reference to the original builtin open,
+        # so patch them too to avoid trivial escapes.
+        try:  # pragma: no cover - implementation dependent
+            import io
+
+            io.open = blocked_open  # type: ignore[assignment]
+        except Exception:
+            pass
+
+        try:  # pragma: no cover - implementation dependent
+            import _io  # type: ignore
+
+            _io.open = blocked_open  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
         try:  # pragma: no cover - platform dependent
             import os
 
@@ -56,6 +72,16 @@ def apply_sandbox(permissions: Dict[str, Any]) -> None:
                 "startfile",
                 "listdir",
                 "scandir",
+                "remove",
+                "unlink",
+                "rmdir",
+                "mkdir",
+                "makedirs",
+                "rename",
+                "replace",
+                "link",
+                "symlink",
+                "readlink",
             ):
                 if hasattr(os, attr):
                     setattr(os, attr, blocked_fs)

@@ -47,6 +47,25 @@ with open("some_file.txt", "w") as f:
     await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Filesystem access is not permitted/);
   });
 
+  it("blocks common filesystem escape hatches (io.open and os.remove)", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import io
+import os
+
+io.open("some_file.txt", "w").write("nope")
+os.remove("some_file.txt")
+`;
+
+    await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Filesystem access is not permitted/);
+  });
+
   it("blocks obvious command execution escape hatches (os.system)", async () => {
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({
