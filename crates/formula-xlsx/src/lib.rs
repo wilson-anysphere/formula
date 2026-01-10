@@ -68,6 +68,7 @@ pub use crate::minimal::write_minimal_xlsx;
 pub use workbook::ChartExtractionError;
 pub use writer::{write_workbook, write_workbook_to_writer, XlsxWriteError};
 
+use formula_model::rich_text::RichText;
 use formula_model::{CellRef, Workbook, WorksheetId};
 
 /// Excel date system used to interpret serialized dates.
@@ -142,7 +143,7 @@ pub struct XlsxDocument {
     /// Uncompressed bytes for every part in the OPC package.
     parts: BTreeMap<String, Vec<u8>>,
     /// Shared strings in the order they appeared in the file (if present).
-    shared_strings: Vec<String>,
+    shared_strings: Vec<RichText>,
     meta: XlsxMeta,
 }
 

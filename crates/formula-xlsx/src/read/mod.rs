@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
+use formula_model::rich_text::RichText;
 use formula_model::{Cell, CellRef, CellValue, ErrorValue, Workbook};
 use quick_xml::events::Event;
 use quick_xml::events::attributes::AttrError;
@@ -10,6 +11,7 @@ use quick_xml::Reader;
 use thiserror::Error;
 use zip::ZipArchive;
 
+use crate::shared_strings::parse_shared_strings_xml;
 use crate::{CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta};
 
 #[derive(Debug, Error)]
@@ -22,6 +24,10 @@ pub enum ReadError {
     Xml(#[from] quick_xml::Error),
     #[error("xml attribute error: {0}")]
     XmlAttr(#[from] AttrError),
+    #[error("utf-8 error: {0}")]
+    Utf8(#[from] std::str::Utf8Error),
+    #[error("sharedStrings.xml parse error: {0}")]
+    SharedStrings(#[from] crate::shared_strings::SharedStringsError),
     #[error("missing required part: {0}")]
     MissingPart(&'static str),
     #[error("invalid cell reference: {0}")]
@@ -135,37 +141,10 @@ fn parse_relationships(bytes: &[u8]) -> Result<BTreeMap<String, String>, ReadErr
     Ok(map)
 }
 
-fn parse_shared_strings(bytes: &[u8]) -> Result<Vec<String>, ReadError> {
-    let mut reader = Reader::from_reader(bytes);
-    reader.config_mut().trim_text(false);
-    let mut buf = Vec::new();
-    let mut strings = Vec::new();
-    let mut in_si = false;
-    let mut in_t = false;
-    let mut current = String::new();
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if e.name().as_ref() == b"si" => {
-                in_si = true;
-                current.clear();
-            }
-            Event::End(e) if e.name().as_ref() == b"si" => {
-                in_si = false;
-                strings.push(current.clone());
-                current.clear();
-            }
-            Event::Start(e) if in_si && e.name().as_ref() == b"t" => in_t = true,
-            Event::End(e) if in_si && e.name().as_ref() == b"t" => in_t = false,
-            Event::Text(e) if in_si && in_t => current.push_str(&e.unescape()?.into_owned()),
-            Event::CData(e) if in_si && in_t => {
-                current.push_str(&String::from_utf8_lossy(e.as_ref()))
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-    Ok(strings)
+fn parse_shared_strings(bytes: &[u8]) -> Result<Vec<RichText>, ReadError> {
+    let xml = std::str::from_utf8(bytes)?;
+    let parsed = parse_shared_strings_xml(xml)?;
+    Ok(parsed.items)
 }
 
 #[derive(Debug, Clone)]
@@ -268,7 +247,7 @@ fn parse_worksheet_into_model(
     worksheet: &mut formula_model::Worksheet,
     worksheet_id: formula_model::WorksheetId,
     worksheet_xml: &[u8],
-    shared_strings: &[String],
+    shared_strings: &[RichText],
     cell_meta_map: &mut std::collections::HashMap<(formula_model::WorksheetId, CellRef), CellMeta>,
 ) -> Result<(), ReadError> {
     let mut reader = Reader::from_reader(worksheet_xml);
@@ -482,13 +461,16 @@ fn interpret_cell_value(
     t: Option<&str>,
     v_text: &Option<String>,
     inline_text: &Option<String>,
-    shared_strings: &[String],
+    shared_strings: &[RichText],
 ) -> (CellValue, Option<CellValueKind>, Option<String>) {
     match t {
         Some("s") => {
             let raw = v_text.clone().unwrap_or_default();
             let idx: u32 = raw.parse().unwrap_or(0);
-            let text = shared_strings.get(idx as usize).cloned().unwrap_or_default();
+            let text = shared_strings
+                .get(idx as usize)
+                .map(|rt| rt.text.clone())
+                .unwrap_or_default();
             (
                 CellValue::String(text),
                 Some(CellValueKind::SharedString { index: idx }),

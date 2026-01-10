@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Cursor, Write};
 
+use formula_model::rich_text::{RichText, Underline};
 use formula_model::{CellRef, CellValue, ErrorValue, Range, Worksheet};
 use quick_xml::events::Event;
 use quick_xml::events::attributes::AttrError;
@@ -107,13 +108,80 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
     Ok(parts)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SharedStringKey {
+    text: String,
+    runs: Vec<SharedStringRunKey>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SharedStringRunKey {
+    start: usize,
+    end: usize,
+    style: SharedStringRunStyleKey,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SharedStringRunStyleKey {
+    bold: Option<bool>,
+    italic: Option<bool>,
+    underline: Option<u8>,
+    color: Option<u32>,
+    font: Option<String>,
+    size_100pt: Option<u16>,
+}
+
+impl SharedStringKey {
+    fn plain(text: &str) -> Self {
+        Self {
+            text: text.to_string(),
+            runs: Vec::new(),
+        }
+    }
+
+    fn from_rich_text(rich: &RichText) -> Self {
+        let runs = rich
+            .runs
+            .iter()
+            .map(|run| SharedStringRunKey {
+                start: run.start,
+                end: run.end,
+                style: SharedStringRunStyleKey {
+                    bold: run.style.bold,
+                    italic: run.style.italic,
+                    underline: run.style.underline.map(underline_key),
+                    color: run.style.color.map(|c| c.argb),
+                    font: run.style.font.clone(),
+                    size_100pt: run.style.size_100pt,
+                },
+            })
+            .collect();
+        Self {
+            text: rich.text.clone(),
+            runs,
+        }
+    }
+}
+
+fn underline_key(underline: Underline) -> u8 {
+    match underline {
+        Underline::None => 0,
+        Underline::Single => 1,
+        Underline::Double => 2,
+        Underline::SingleAccounting => 3,
+        Underline::DoubleAccounting => 4,
+    }
+}
+
 fn build_shared_strings_xml(
     doc: &XlsxDocument,
-) -> Result<(Vec<u8>, HashMap<String, u32>), WriteError> {
-    let mut table: Vec<String> = doc.shared_strings.clone();
-    let mut lookup: HashMap<String, u32> = HashMap::new();
-    for (idx, s) in table.iter().enumerate() {
-        lookup.entry(s.clone()).or_insert(idx as u32);
+) -> Result<(Vec<u8>, HashMap<SharedStringKey, u32>), WriteError> {
+    let mut table: Vec<RichText> = doc.shared_strings.clone();
+    let mut lookup: HashMap<SharedStringKey, u32> = HashMap::new();
+    for (idx, rich) in table.iter().enumerate() {
+        lookup
+            .entry(SharedStringKey::from_rich_text(rich))
+            .or_insert(idx as u32);
     }
 
     let mut ref_count: u32 = 0;
@@ -129,18 +197,59 @@ fn build_shared_strings_xml(
         for (cell_ref, cell) in cells {
             let meta = doc.meta.cell_meta.get(&(sheet_meta.worksheet_id, cell_ref));
             let kind = meta.and_then(|m| m.value_kind.clone()).unwrap_or_else(|| infer_value_kind(cell));
-            if let CellValueKind::SharedString { index } = kind {
-                if let CellValue::String(text) = &cell.value {
+            let CellValueKind::SharedString { .. } = kind else {
+                continue;
+            };
+
+            match &cell.value {
+                CellValue::String(text) => {
                     ref_count += 1;
-                    if table.get(index as usize).map(|s| s.as_str()) == Some(text.as_str()) {
-                        lookup.entry(text.clone()).or_insert(index);
+                    if meta
+                        .and_then(|m| m.value_kind.clone())
+                        .and_then(|k| match k {
+                            CellValueKind::SharedString { index } => Some(index),
+                            _ => None,
+                        })
+                        .and_then(|idx| doc.shared_strings.get(idx as usize))
+                        .map(|rt| rt.text.as_str() == text.as_str())
+                        .unwrap_or(false)
+                    {
+                        // Preserve the original shared string index even if the entry
+                        // contains rich formatting.
                         continue;
                     }
-                    if !lookup.contains_key(text) {
+
+                    let key = SharedStringKey::plain(text);
+                    if !lookup.contains_key(&key) {
                         let new_index = table.len() as u32;
-                        table.push(text.clone());
-                        lookup.insert(text.clone(), new_index);
+                        table.push(RichText::new(text.clone()));
+                        lookup.insert(key, new_index);
                     }
+                }
+                CellValue::RichText(rich) => {
+                    ref_count += 1;
+                    if meta
+                        .and_then(|m| m.value_kind.clone())
+                        .and_then(|k| match k {
+                            CellValueKind::SharedString { index } => Some(index),
+                            _ => None,
+                        })
+                        .and_then(|idx| doc.shared_strings.get(idx as usize))
+                        .map(|rt| rt == rich)
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
+                    let key = SharedStringKey::from_rich_text(rich);
+                    if !lookup.contains_key(&key) {
+                        let new_index = table.len() as u32;
+                        table.push(rich.clone());
+                        lookup.insert(key, new_index);
+                    }
+                }
+                _ => {
+                    // Non-string values ignore shared string bookkeeping.
                 }
             }
         }
@@ -150,18 +259,99 @@ fn build_shared_strings_xml(
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push_str(r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main""#);
     xml.push_str(&format!(r#" count="{ref_count}" uniqueCount="{}">"#, table.len()));
-    for s in &table {
-        xml.push_str("<si><t");
-        if needs_space_preserve(s) {
-            xml.push_str(r#" xml:space="preserve""#);
+    for rich in &table {
+        xml.push_str("<si>");
+        if rich.runs.is_empty() {
+            write_shared_string_t(&mut xml, &rich.text);
+        } else {
+            for run in &rich.runs {
+                xml.push_str("<r>");
+                if !run.style.is_empty() {
+                    xml.push_str("<rPr>");
+                    write_shared_string_rpr(&mut xml, &run.style);
+                    xml.push_str("</rPr>");
+                }
+                let segment = rich.slice_run_text(run);
+                write_shared_string_t(&mut xml, segment);
+                xml.push_str("</r>");
+            }
         }
-        xml.push('>');
-        xml.push_str(&escape_text(s));
-        xml.push_str("</t></si>");
+        xml.push_str("</si>");
     }
     xml.push_str("</sst>");
 
     Ok((xml.into_bytes(), lookup))
+}
+
+fn write_shared_string_t(xml: &mut String, text: &str) {
+    xml.push_str("<t");
+    if needs_space_preserve(text) {
+        xml.push_str(r#" xml:space="preserve""#);
+    }
+    xml.push('>');
+    xml.push_str(&escape_text(text));
+    xml.push_str("</t>");
+}
+
+fn write_shared_string_rpr(xml: &mut String, style: &formula_model::rich_text::RichTextRunStyle) {
+    if let Some(font) = &style.font {
+        xml.push_str(r#"<rFont val=""#);
+        xml.push_str(&escape_attr(font));
+        xml.push_str(r#""/>"#);
+    }
+
+    if let Some(size_100pt) = style.size_100pt {
+        xml.push_str(r#"<sz val=""#);
+        xml.push_str(&format_size_100pt(size_100pt));
+        xml.push_str(r#""/>"#);
+    }
+
+    if let Some(color) = style.color {
+        xml.push_str(r#"<color rgb=""#);
+        xml.push_str(&format!("{:08X}", color.argb));
+        xml.push_str(r#""/>"#);
+    }
+
+    if let Some(bold) = style.bold {
+        if bold {
+            xml.push_str("<b/>");
+        } else {
+            xml.push_str(r#"<b val="0"/>"#);
+        }
+    }
+
+    if let Some(italic) = style.italic {
+        if italic {
+            xml.push_str("<i/>");
+        } else {
+            xml.push_str(r#"<i val="0"/>"#);
+        }
+    }
+
+    if let Some(underline) = style.underline {
+        match underline {
+            Underline::Single => xml.push_str("<u/>"),
+            other => {
+                xml.push_str(r#"<u val=""#);
+                xml.push_str(other.to_ooxml().unwrap_or("single"));
+                xml.push_str(r#""/>"#);
+            }
+        }
+    }
+}
+
+fn format_size_100pt(size_100pt: u16) -> String {
+    let int = size_100pt / 100;
+    let frac = size_100pt % 100;
+    if frac == 0 {
+        return int.to_string();
+    }
+
+    let mut s = format!("{int}.{frac:02}");
+    while s.ends_with('0') {
+        s.pop();
+    }
+    s
 }
 
 fn needs_space_preserve(s: &str) -> bool {
@@ -445,7 +635,7 @@ fn write_worksheet_xml(
     sheet_meta: &SheetMeta,
     sheet: &Worksheet,
     original: Option<&[u8]>,
-    shared_lookup: &HashMap<String, u32>,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
 ) -> Result<Vec<u8>, WriteError> {
     if let Some(original) = original {
         return patch_worksheet_xml(doc, sheet_meta, sheet, original, shared_lookup);
@@ -473,7 +663,7 @@ fn patch_worksheet_xml(
     sheet_meta: &SheetMeta,
     sheet: &Worksheet,
     original: &[u8],
-    shared_lookup: &HashMap<String, u32>,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
 ) -> Result<Vec<u8>, WriteError> {
     let sheet_data_xml = render_sheet_data(doc, sheet_meta, sheet, shared_lookup);
 
@@ -511,7 +701,7 @@ fn render_sheet_data(
     doc: &XlsxDocument,
     sheet_meta: &SheetMeta,
     sheet: &Worksheet,
-    shared_lookup: &HashMap<String, u32>,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
 ) -> String {
     let mut out = String::new();
     out.push_str("<sheetData>");
@@ -602,9 +792,9 @@ fn render_sheet_data(
                 out.push_str(&escape_text(&raw_or_error(meta, *err)));
                 out.push_str("</v>");
             }
-            CellValue::String(s) => match value_kind {
-                CellValueKind::SharedString { index } => {
-                    let idx = shared_string_index(doc, meta, s, index, shared_lookup);
+            value @ CellValue::String(s) => match value_kind {
+                CellValueKind::SharedString { .. } => {
+                    let idx = shared_string_index(doc, meta, value, shared_lookup);
                     out.push_str("<v>");
                     out.push_str(&idx.to_string());
                     out.push_str("</v>");
@@ -625,14 +815,23 @@ fn render_sheet_data(
                 }
                 _ => {
                     // Fallback: treat as shared string.
-                    let idx = shared_string_index(doc, meta, s, 0, shared_lookup);
+                    let idx = shared_string_index(doc, meta, value, shared_lookup);
                     out.push_str("<v>");
                     out.push_str(&idx.to_string());
                     out.push_str("</v>");
                 }
             },
+            value @ CellValue::RichText(rich) => {
+                // Rich text is stored in the shared strings table.
+                let idx = shared_string_index(doc, meta, value, shared_lookup);
+                if idx != 0 || !rich.text.is_empty() {
+                    out.push_str("<v>");
+                    out.push_str(&idx.to_string());
+                    out.push_str("</v>");
+                }
+            }
             _ => {
-                // TODO: RichText/Array/Spill not yet modeled for writing. Preserve as blank.
+                // Array/Spill not yet modeled for writing. Preserve as blank.
             }
         }
 
@@ -652,6 +851,7 @@ fn infer_value_kind(cell: &formula_model::Cell) -> CellValueKind {
         CellValue::Error(_) => CellValueKind::Error,
         CellValue::Number(_) => CellValueKind::Number,
         CellValue::String(_) => CellValueKind::SharedString { index: 0 },
+        CellValue::RichText(_) => CellValueKind::SharedString { index: 0 },
         CellValue::Empty => CellValueKind::Number,
         _ => CellValueKind::Number,
     }
@@ -723,23 +923,48 @@ fn raw_or_str(meta: Option<&crate::CellMeta>, s: &str) -> String {
 fn shared_string_index(
     doc: &XlsxDocument,
     meta: Option<&crate::CellMeta>,
-    text: &str,
-    fallback_index: u32,
-    shared_lookup: &HashMap<String, u32>,
+    value: &CellValue,
+    shared_lookup: &HashMap<SharedStringKey, u32>,
 ) -> u32 {
-    if let Some(meta) = meta {
-        if let Some(CellValueKind::SharedString { index }) = &meta.value_kind {
-            if doc
-                .shared_strings
-                .get(*index as usize)
-                .map(|s| s.as_str())
-                == Some(text)
-            {
-                return *index;
+    match value {
+        CellValue::String(text) => {
+            if let Some(meta) = meta {
+                if let Some(CellValueKind::SharedString { index }) = &meta.value_kind {
+                    if doc
+                        .shared_strings
+                        .get(*index as usize)
+                        .map(|rt| rt.text.as_str())
+                        == Some(text.as_str())
+                    {
+                        return *index;
+                    }
+                }
             }
+            shared_lookup
+                .get(&SharedStringKey::plain(text))
+                .copied()
+                .unwrap_or(0)
         }
+        CellValue::RichText(rich) => {
+            if let Some(meta) = meta {
+                if let Some(CellValueKind::SharedString { index }) = &meta.value_kind {
+                    if doc
+                        .shared_strings
+                        .get(*index as usize)
+                        .map(|rt| rt == rich)
+                        .unwrap_or(false)
+                    {
+                        return *index;
+                    }
+                }
+            }
+            shared_lookup
+                .get(&SharedStringKey::from_rich_text(rich))
+                .copied()
+                .unwrap_or(0)
+        }
+        _ => 0,
     }
-    shared_lookup.get(text).copied().unwrap_or(fallback_index)
 }
 
 fn minimal_styles_xml() -> Vec<u8> {
