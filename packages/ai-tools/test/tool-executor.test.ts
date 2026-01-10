@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToolExecutor } from "../src/executor/tool-executor.js";
 import { InMemoryWorkbook } from "../src/spreadsheet/in-memory-workbook.js";
 import { parseA1Cell, parseA1Range } from "../src/spreadsheet/a1.js";
 
 describe("ToolExecutor", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it("write_cell writes a scalar value", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
@@ -251,5 +256,165 @@ describe("ToolExecutor", () => {
     expect(out[3]?.[0]).toBe("Grand Total");
     expect(out[3]?.[1]).toBeCloseTo(3125, 10);
     expect(out[3]?.[2]).toBeCloseTo(Math.sqrt(3125), 10);
+  });
+
+  it("fetch_external_data json_to_table writes headers + rows and returns provenance metadata", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com"] });
+
+    const payload = JSON.stringify([
+      { a: 1, b: "two" },
+      { a: 3, b: "four" }
+    ]);
+    const payloadBytes = Buffer.byteLength(payload);
+
+    const fetchMock = vi.fn(async () => {
+      return new Response(payload, {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(payloadBytes)
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com/data",
+        destination: "Sheet1!A1",
+        transform: "json_to_table"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("fetch_external_data");
+    if (!result.ok || result.tool !== "fetch_external_data") throw new Error("Unexpected tool result");
+
+    expect(result.data).toMatchObject({
+      url: "https://api.example.com/data",
+      destination: "Sheet1!A1",
+      status_code: 200,
+      content_type: "application/json",
+      content_length_bytes: payloadBytes,
+      written_cells: 6,
+      shape: { rows: 3, cols: 2 }
+    });
+    expect(typeof result.data.fetched_at_ms).toBe("number");
+
+    const written = workbook
+      .readRange(parseA1Range("Sheet1!A1:B3"))
+      .map((row) => row.map((cell) => cell.value));
+    expect(written).toEqual([
+      ["a", "b"],
+      [1, "two"],
+      [3, "four"]
+    ]);
+  });
+
+  it("fetch_external_data raw_text writes a single cell and returns provenance metadata", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["example.com"] });
+
+    const payload = "hello world";
+    const payloadBytes = Buffer.byteLength(payload);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(payload, {
+          status: 200,
+          headers: {
+            "content-type": "text/plain",
+            "content-length": String(payloadBytes)
+          }
+        });
+      }) as any
+    );
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://example.com/raw",
+        destination: "Sheet1!C3",
+        transform: "raw_text"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("fetch_external_data");
+    if (!result.ok || result.tool !== "fetch_external_data") throw new Error("Unexpected tool result");
+
+    expect(result.data).toMatchObject({
+      url: "https://example.com/raw",
+      destination: "Sheet1!C3",
+      status_code: 200,
+      content_type: "text/plain",
+      content_length_bytes: payloadBytes,
+      written_cells: 1,
+      shape: { rows: 1, cols: 1 }
+    });
+    expect(workbook.getCell(parseA1Cell("Sheet1!C3")).value).toBe(payload);
+  });
+
+  it("fetch_external_data enforces host allowlist", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["allowed.example.com"] });
+
+    const fetchMock = vi.fn(async () => {
+      throw new Error("fetch should not be called for denied hosts");
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://denied.example.com/data",
+        destination: "Sheet1!A1"
+      }
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+  });
+
+  it("fetch_external_data enforces max_external_bytes using content-length header", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, {
+      allow_external_data: true,
+      allowed_external_hosts: ["example.com"],
+      max_external_bytes: 5
+    });
+
+    const fetchMock = vi.fn(async () => {
+      return new Response("hello world", {
+        status: 200,
+        headers: {
+          "content-type": "text/plain",
+          "content-length": "100"
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://example.com/large",
+        destination: "Sheet1!A1",
+        transform: "raw_text"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+    expect(result.error?.message).toMatch(/too large/i);
   });
 });

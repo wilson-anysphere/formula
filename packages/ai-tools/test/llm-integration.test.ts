@@ -22,6 +22,12 @@ describe("llm integration helpers", () => {
     expect(isSpreadsheetMutationTool("compute_statistics")).toBe(false);
   });
 
+  it("always requires approval for fetch_external_data", () => {
+    const defs = getSpreadsheetToolDefinitions();
+    const fetchExternal = defs.find((t) => t.name === "fetch_external_data");
+    expect(fetchExternal?.requiresApproval).toBe(true);
+  });
+
   it("createPreviewApprovalHandler auto-approves safe changes and delegates risky ones", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });

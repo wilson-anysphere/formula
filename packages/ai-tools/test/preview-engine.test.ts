@@ -50,5 +50,26 @@ describe("PreviewEngine", () => {
     expect(preview.requires_approval).toBe(true);
     expect(preview.approval_reasons.some((reason) => reason.includes("Deletes"))).toBe(true);
   });
-});
 
+  it("requires approval for fetch_external_data previews", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const previewEngine = new PreviewEngine();
+
+    const preview = await previewEngine.generatePreview(
+      [
+        {
+          name: "fetch_external_data",
+          parameters: {
+            source_type: "api",
+            url: "https://example.com/data",
+            destination: "Sheet1!A1"
+          }
+        }
+      ],
+      workbook
+    );
+
+    expect(preview.requires_approval).toBe(true);
+    expect(preview.approval_reasons).toContain("External data access requested");
+  });
+});

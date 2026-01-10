@@ -76,10 +76,18 @@ export function isSpreadsheetMutationTool(name: ToolName): boolean {
 
 export function getSpreadsheetToolDefinitions(options: { require_approval_for_mutations?: boolean } = {}): LLMToolDefinition[] {
   const requireApprovalForMutations = options.require_approval_for_mutations ?? false;
-  return SPREADSHEET_TOOL_DEFINITIONS.map((tool) => ({
-    ...tool,
-    ...(requireApprovalForMutations ? { requiresApproval: isSpreadsheetMutationTool(tool.name) } : {})
-  }));
+  return SPREADSHEET_TOOL_DEFINITIONS.map((tool) => {
+    const requiresApproval =
+      tool.name === "fetch_external_data"
+        ? true
+        : requireApprovalForMutations
+          ? isSpreadsheetMutationTool(tool.name)
+          : undefined;
+    return {
+      ...tool,
+      ...(requiresApproval !== undefined ? { requiresApproval } : {})
+    };
+  });
 }
 
 /**
@@ -98,4 +106,3 @@ export class SpreadsheetLLMToolExecutor {
     return this.executor.execute({ name: call.name, parameters: call.arguments });
   }
 }
-

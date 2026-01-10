@@ -494,16 +494,17 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
   },
   fetch_external_data: {
     name: "fetch_external_data",
-    description: "Fetch external data from an API and write it into the sheet (guarded).",
+    description:
+      "Fetch external data from an API and write it into the sheet. This tool performs network access and should only run with explicit user approval (it is disabled by default unless allow_external_data is enabled and the host is allowlisted).",
     paramsSchema: FetchExternalDataParamsSchema,
     jsonSchema: {
       type: "object",
       properties: {
         source_type: { type: "string", enum: ["api"] },
-        url: { type: "string" },
+        url: { type: "string", description: "HTTP(S) URL to fetch (requires explicit approval)." },
         destination: { type: "string", description: "Top-left cell to write the fetched data to." },
         transform: { type: "string", enum: ["json_to_table", "raw_text"], default: "json_to_table" },
-        headers: { type: "object", additionalProperties: { type: "string" } }
+        headers: { type: "object", description: "Optional request headers.", additionalProperties: { type: "string" } }
       },
       required: ["source_type", "url", "destination"]
     }

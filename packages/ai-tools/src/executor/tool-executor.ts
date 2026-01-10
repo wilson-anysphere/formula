@@ -75,6 +75,11 @@ export type ToolResultDataByName = {
     destination: string;
     written_cells: number;
     shape: { rows: number; cols: number };
+    fetched_at_ms: number;
+    content_type?: string;
+    content_length_bytes?: number;
+    status_code: number;
+    truncated?: boolean;
   };
 };
 
@@ -550,6 +555,9 @@ export class ToolExecutor {
     }
 
     const url = new URL(params.url);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw toolError("permission_denied", `External protocol "${url.protocol}" is not supported for fetch_external_data.`);
+    }
     if (this.options.allowed_external_hosts.length > 0 && !this.options.allowed_external_hosts.includes(url.host)) {
       throw toolError(
         "permission_denied",
@@ -561,22 +569,28 @@ export class ToolExecutor {
       headers: params.headers ?? undefined
     });
 
-    const contentLength = response.headers.get("content-length");
-    if (contentLength && Number(contentLength) > this.options.max_external_bytes) {
+    const statusCode = response.status;
+    const contentType = response.headers.get("content-type") ?? undefined;
+    const contentLengthHeader = response.headers.get("content-length");
+    const declaredLength = contentLengthHeader ? Number(contentLengthHeader) : NaN;
+    if (Number.isFinite(declaredLength) && declaredLength > this.options.max_external_bytes) {
       throw toolError(
         "permission_denied",
-        `External response too large (${contentLength} bytes). Increase max_external_bytes to allow.`
+        `External response too large (${declaredLength} bytes). Increase max_external_bytes to allow.`
       );
     }
 
     if (!response.ok) {
-      throw toolError("runtime_error", `External fetch failed with HTTP ${response.status}`);
+      throw toolError("runtime_error", `External fetch failed with HTTP ${statusCode}`);
     }
 
     const destination = parseA1Cell(params.destination, this.options.default_sheet);
+    const bodyBytes = await readResponseBytes(response, this.options.max_external_bytes);
+    const fetchedAtMs = Date.now();
+    const contentLengthBytes = bodyBytes.byteLength;
 
     if (params.transform === "raw_text") {
-      const text = await response.text();
+      const text = decodeUtf8(bodyBytes);
       this.spreadsheet.setCell(destination, { value: text });
       this.refreshPivotsForRange({
         sheet: destination.sheet,
@@ -585,10 +599,19 @@ export class ToolExecutor {
         startCol: destination.col,
         endCol: destination.col
       });
-      return { url: url.toString(), destination: formatA1Cell(destination), written_cells: 1, shape: { rows: 1, cols: 1 } };
+      return {
+        url: url.toString(),
+        destination: formatA1Cell(destination),
+        written_cells: 1,
+        shape: { rows: 1, cols: 1 },
+        fetched_at_ms: fetchedAtMs,
+        content_type: contentType,
+        content_length_bytes: contentLengthBytes,
+        status_code: statusCode
+      };
     }
 
-    const json = await response.json();
+    const json = JSON.parse(decodeUtf8(bodyBytes));
     const table = jsonToTable(json);
     const range = {
       sheet: destination.sheet,
@@ -606,7 +629,11 @@ export class ToolExecutor {
       url: url.toString(),
       destination: formatA1Cell(destination),
       written_cells: table.length * (table[0]?.length ?? 0),
-      shape: { rows: table.length, cols: table[0]?.length ?? 0 }
+      shape: { rows: table.length, cols: table[0]?.length ?? 0 },
+      fetched_at_ms: fetchedAtMs,
+      content_type: contentType,
+      content_length_bytes: contentLengthBytes,
+      status_code: statusCode
     };
   }
 
@@ -1253,4 +1280,50 @@ function normalizeJsonScalar(value: unknown): CellScalar {
   if (value === null || value === undefined) return null;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
   return JSON.stringify(value);
+}
+
+async function readResponseBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
+  if (!response.body) return new Uint8Array();
+
+  const bodyAny = response.body as any;
+  if (typeof bodyAny.getReader === "function") {
+    const reader = bodyAny.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try {
+          await reader.cancel();
+        } catch {
+          // ignore
+        }
+        throw toolError("permission_denied", `External response too large (>${maxBytes} bytes). Increase max_external_bytes to allow.`);
+      }
+      chunks.push(value);
+    }
+    const combined = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return combined;
+  }
+
+  const buffer = new Uint8Array(await response.arrayBuffer());
+  if (buffer.byteLength > maxBytes) {
+    throw toolError("permission_denied", `External response too large (>${maxBytes} bytes). Increase max_external_bytes to allow.`);
+  }
+  return buffer;
+}
+
+function decodeUtf8(bytes: Uint8Array): string {
+  if (bytes.byteLength === 0) return "";
+  if (typeof TextDecoder !== "undefined") return new TextDecoder().decode(bytes);
+  // Fallback for environments without TextDecoder.
+  return Buffer.from(bytes).toString("utf8");
 }
