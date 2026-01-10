@@ -197,6 +197,46 @@ jobs:
 
           python @args
 
+      - name: Write job summary
+        if: ${{ env.MODE == 'validate-engine' }}
+        shell: powershell
+        run: |
+          $reportPath = "tests/compatibility/excel-oracle/reports/mismatch-report.json"
+          if (-not (Test-Path -LiteralPath $reportPath)) {
+            "No mismatch report found at $reportPath" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            exit 0
+          }
+
+          $report = Get-Content -LiteralPath $reportPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          $s = $report.summary
+
+          "# Excel compatibility report" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "* Total cases: $($s.totalCases)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "* Mismatches: $($s.mismatches)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "* Mismatch rate: $($s.mismatchRate)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "* Max mismatch rate: $($s.maxMismatchRate)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+          if ($null -ne $s.reasonCounts) {
+            "## Mismatch reasons" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            foreach ($p in $s.reasonCounts.PSObject.Properties) {
+              "* $($p.Name): $($p.Value)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            }
+            "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+
+          if ($null -ne $report.mismatches -and $report.mismatches.Count -gt 0) {
+            "## Sample mismatches" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            $max = [Math]::Min(10, $report.mismatches.Count)
+            for ($i = 0; $i -lt $max; $i++) {
+              $m = $report.mismatches[$i]
+              "* `$($m.caseId)` `$($m.reason)` `$($m.formula)`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            }
+          }
+
       - name: Upload oracle dataset + reports
         if: always()
         uses: actions/upload-artifact@v4
