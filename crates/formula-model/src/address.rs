@@ -1,13 +1,14 @@
 use core::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// A reference to a single cell within a worksheet.
 ///
 /// Rows and columns are **0-indexed**:
 /// - `row = 0` is Excel row `1`
 /// - `col = 0` is Excel column `A`
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct CellRef {
     /// 0-indexed row.
     pub row: u32,
@@ -88,6 +89,34 @@ impl CellRef {
     }
 }
 
+impl<'de> Deserialize<'de> for CellRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Helper {
+            row: u32,
+            col: u32,
+        }
+
+        let helper = Helper::deserialize(deserializer)?;
+        if helper.row >= crate::cell::EXCEL_MAX_ROWS {
+            return Err(D::Error::custom(format!(
+                "row out of Excel bounds: {}",
+                helper.row
+            )));
+        }
+        if helper.col >= crate::cell::EXCEL_MAX_COLS {
+            return Err(D::Error::custom(format!(
+                "col out of Excel bounds: {}",
+                helper.col
+            )));
+        }
+        Ok(CellRef::new(helper.row, helper.col))
+    }
+}
+
 impl fmt::Display for CellRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_a1())
@@ -99,7 +128,7 @@ impl fmt::Display for CellRef {
 /// The range is inclusive and always normalized such that:
 /// - `start.row <= end.row`
 /// - `start.col <= end.col`
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct Range {
     pub start: CellRef,
     pub end: CellRef,
@@ -168,6 +197,22 @@ impl Range {
                 Ok(Range::new(start, end))
             }
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Range {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Helper {
+            start: CellRef,
+            end: CellRef,
+        }
+
+        let helper = Helper::deserialize(deserializer)?;
+        Ok(Range::new(helper.start, helper.end))
     }
 }
 
@@ -349,5 +394,24 @@ mod tests {
                 CellRef::new(1, 1),
             ]
         );
+    }
+
+    #[test]
+    fn cell_ref_deserialize_validates_bounds() {
+        let json = serde_json::json!({ "row": crate::cell::EXCEL_MAX_ROWS, "col": 0 });
+        let err = serde_json::from_value::<CellRef>(json).unwrap_err();
+        assert!(err.to_string().contains("out of Excel bounds"));
+    }
+
+    #[test]
+    fn range_deserialize_normalizes() {
+        let json = serde_json::json!({
+            "start": { "row": 5, "col": 5 },
+            "end": { "row": 2, "col": 2 }
+        });
+
+        let range = serde_json::from_value::<Range>(json).unwrap();
+        assert_eq!(range.start, CellRef::new(2, 2));
+        assert_eq!(range.end, CellRef::new(5, 5));
     }
 }
