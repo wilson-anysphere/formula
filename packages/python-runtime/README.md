@@ -28,6 +28,20 @@ sheet["A2"] = "=A1*2"
 );
 ```
 
+If you already use `apps/desktop`'s `DocumentController`, you can use the
+included adapter:
+
+```js
+import { DocumentController } from "../../apps/desktop/src/document/documentController.js";
+import { DocumentControllerBridge, NativePythonRuntime } from "@formula/python-runtime";
+
+const doc = new DocumentController();
+const api = new DocumentControllerBridge(doc);
+const runtime = new NativePythonRuntime();
+
+await runtime.execute(`import formula\nformula.active_sheet["A1"] = 1\n`, { api });
+```
+
 ### Pyodide (web / webview)
 
 ```js
@@ -117,4 +131,3 @@ Regenerate it after editing the Python package:
 ```bash
 node packages/python-runtime/scripts/generate-formula-files.js
 ```
-
