@@ -124,6 +124,134 @@ impl Worksheet {
         self.used_range
     }
 
+    /// Get per-row properties if an override exists.
+    pub fn row_properties(&self, row: u32) -> Option<&RowProperties> {
+        self.row_properties.get(&row)
+    }
+
+    /// Get per-column properties if an override exists.
+    pub fn col_properties(&self, col: u32) -> Option<&ColProperties> {
+        self.col_properties.get(&col)
+    }
+
+    /// Set (or clear) the height override for a row.
+    ///
+    /// Passing `None` removes the height override. If the row has no overrides
+    /// remaining, its entry is removed from the map.
+    pub fn set_row_height(&mut self, row: u32, height: Option<f32>) {
+        assert!(
+            row < crate::cell::EXCEL_MAX_ROWS,
+            "row out of Excel bounds: {row}"
+        );
+        match self.row_properties.get_mut(&row) {
+            Some(props) => {
+                props.height = height;
+                if props.height.is_none() && !props.hidden {
+                    self.row_properties.remove(&row);
+                }
+            }
+            None => {
+                if height.is_none() {
+                    return;
+                }
+                self.row_properties.insert(
+                    row,
+                    RowProperties {
+                        height,
+                        hidden: false,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Set the hidden flag for a row.
+    ///
+    /// If the row ends up with no overrides (not hidden and no height), its entry
+    /// is removed from the map.
+    pub fn set_row_hidden(&mut self, row: u32, hidden: bool) {
+        assert!(
+            row < crate::cell::EXCEL_MAX_ROWS,
+            "row out of Excel bounds: {row}"
+        );
+        match self.row_properties.get_mut(&row) {
+            Some(props) => {
+                props.hidden = hidden;
+                if props.height.is_none() && !props.hidden {
+                    self.row_properties.remove(&row);
+                }
+            }
+            None => {
+                if !hidden {
+                    return;
+                }
+                self.row_properties.insert(
+                    row,
+                    RowProperties {
+                        height: None,
+                        hidden,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Set (or clear) the width override for a column.
+    pub fn set_col_width(&mut self, col: u32, width: Option<f32>) {
+        assert!(
+            col < crate::cell::EXCEL_MAX_COLS,
+            "col out of Excel bounds: {col}"
+        );
+        match self.col_properties.get_mut(&col) {
+            Some(props) => {
+                props.width = width;
+                if props.width.is_none() && !props.hidden {
+                    self.col_properties.remove(&col);
+                }
+            }
+            None => {
+                if width.is_none() {
+                    return;
+                }
+                self.col_properties.insert(
+                    col,
+                    ColProperties {
+                        width,
+                        hidden: false,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Set the hidden flag for a column.
+    pub fn set_col_hidden(&mut self, col: u32, hidden: bool) {
+        assert!(
+            col < crate::cell::EXCEL_MAX_COLS,
+            "col out of Excel bounds: {col}"
+        );
+        match self.col_properties.get_mut(&col) {
+            Some(props) => {
+                props.hidden = hidden;
+                if props.width.is_none() && !props.hidden {
+                    self.col_properties.remove(&col);
+                }
+            }
+            None => {
+                if !hidden {
+                    return;
+                }
+                self.col_properties.insert(
+                    col,
+                    ColProperties {
+                        width: None,
+                        hidden,
+                    },
+                );
+            }
+        }
+    }
+
     /// Get a cell record if it is present in the sparse store.
     pub fn cell(&self, cell: CellRef) -> Option<&Cell> {
         self.cells.get(&CellKey::from(cell))

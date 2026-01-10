@@ -12,7 +12,11 @@ pub struct CellDisplay {
 ///
 /// This helper is intended for UI rendering: it provides the user-visible
 /// string and an alignment hint derived from Excel's "General" alignment rules.
-pub fn format_cell_display(value: &CellValue, style: Option<&Style>, options: &FormatOptions) -> CellDisplay {
+pub fn format_cell_display(
+    value: &CellValue,
+    style: Option<&Style>,
+    options: &FormatOptions,
+) -> CellDisplay {
     let fmt_value = match value {
         CellValue::Empty => FmtValue::Blank,
         CellValue::Number(n) => FmtValue::Number(*n),
@@ -47,4 +51,3 @@ pub fn format_cell_display(value: &CellValue, style: Option<&Style>, options: &F
         alignment,
     }
 }
-

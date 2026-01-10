@@ -107,6 +107,36 @@ fn formula_and_style_keep_empty_cells_in_sparse_store() {
 }
 
 #[test]
+fn row_and_col_properties_are_deduped() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+
+    assert!(sheet.row_properties(10).is_none());
+    sheet.set_row_height(10, Some(12.5));
+    assert_eq!(sheet.row_properties(10).unwrap().height, Some(12.5));
+
+    // Clearing the override removes the entry.
+    sheet.set_row_height(10, None);
+    assert!(sheet.row_properties(10).is_none());
+
+    sheet.set_row_hidden(10, true);
+    assert_eq!(sheet.row_properties(10).unwrap().hidden, true);
+
+    sheet.set_row_hidden(10, false);
+    assert!(sheet.row_properties(10).is_none());
+
+    assert!(sheet.col_properties(3).is_none());
+    sheet.set_col_width(3, Some(8.0));
+    assert_eq!(sheet.col_properties(3).unwrap().width, Some(8.0));
+    sheet.set_col_width(3, None);
+    assert!(sheet.col_properties(3).is_none());
+
+    sheet.set_col_hidden(3, true);
+    assert!(sheet.col_properties(3).unwrap().hidden);
+    sheet.set_col_hidden(3, false);
+    assert!(sheet.col_properties(3).is_none());
+}
+
+#[test]
 fn cell_key_encoding_round_trips() {
     for &(row, col) in &[
         (0, 0),
