@@ -7,8 +7,9 @@ edition = "2021"
 formula-engine = { path = "../formula-engine" }
 formula-model = { path = "../formula-model" }
 formula-vba = { path = "../formula-vba" }
-quick-xml = "0.37"
+quick-xml = { version = "0.37", features = ["serialize"] }
 roxmltree = "0.20"
+serde = { version = "1.0", features = ["derive"] }
 thiserror = "1"
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
 
@@ -18,4 +19,5 @@ cfb = "0.10"
 pretty_assertions = "1"
 insta = "1.46"
 rust_xlsxwriter = "0.64"
+formula-engine = { path = "../formula-engine" }
 tempfile = "3.10"

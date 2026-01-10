@@ -3,6 +3,7 @@ use crate::eval::{
 };
 use crate::locale::{canonicalize_formula, FormulaLocale};
 use crate::value::{ErrorKind, Value};
+use formula_model::Table;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
@@ -53,6 +54,7 @@ impl Default for Cell {
 #[derive(Debug, Default)]
 struct Sheet {
     cells: HashMap<CellAddr, Cell>,
+    tables: Vec<Table>,
 }
 
 #[derive(Debug, Default)]
@@ -67,7 +69,10 @@ impl Workbook {
             return id;
         }
         let id = self.sheets.len();
-        self.sheets.push(Sheet { cells: HashMap::new() });
+        self.sheets.push(Sheet {
+            cells: HashMap::new(),
+            tables: Vec::new(),
+        });
         self.sheet_name_to_id.insert(name.to_string(), id);
         id
     }
@@ -86,6 +91,12 @@ impl Workbook {
 
     fn get_cell_value(&self, key: CellKey) -> Value {
         self.get_cell(key).map(|c| c.value.clone()).unwrap_or(Value::Blank)
+    }
+
+    fn set_tables(&mut self, sheet: SheetId, tables: Vec<Table>) {
+        if let Some(s) = self.sheets.get_mut(sheet) {
+            s.tables = tables;
+        }
     }
 }
 
@@ -178,6 +189,23 @@ impl Engine {
         Ok(())
     }
 
+    /// Replace the set of tables for a given worksheet.
+    ///
+    /// Tables are needed to resolve structured references like `Table1[Col]` and `[@Col]`.
+    pub fn set_sheet_tables(&mut self, sheet: &str, tables: Vec<Table>) {
+        let sheet_id = self.workbook.ensure_sheet(sheet);
+        self.workbook.set_tables(sheet_id, tables);
+        // Mark all formulas dirty; structured reference dependencies may have changed.
+        for (addr, cell) in self.workbook.sheets[sheet_id].cells.iter() {
+            if cell.formula.is_some() {
+                self.dirty.insert(CellKey {
+                    sheet: sheet_id,
+                    addr: *addr,
+                });
+            }
+        }
+    }
+
     pub fn set_cell_formula(
         &mut self,
         sheet: &str,
@@ -190,7 +218,9 @@ impl Engine {
 
         let parsed = Parser::parse(formula)?;
         let compiled = self.compile_expr(&parsed, sheet_id);
-        let (precedents, volatile, thread_safe) = analyze_expr(&compiled, sheet_id);
+        let tables_by_sheet: Vec<Vec<Table>> =
+            self.workbook.sheets.iter().map(|s| s.tables.clone()).collect();
+        let (precedents, volatile, thread_safe) = analyze_expr(&compiled, key, &tables_by_sheet);
 
         self.graph.set_precedents(key, precedents);
 
@@ -611,6 +641,7 @@ fn collect_transitive(map: &HashMap<CellKey, HashSet<CellKey>>, start: CellKey) 
 struct Snapshot {
     sheets: HashSet<SheetId>,
     values: HashMap<CellKey, Value>,
+    tables: Vec<Vec<Table>>,
 }
 
 impl Snapshot {
@@ -622,7 +653,8 @@ impl Snapshot {
                 values.insert(CellKey { sheet: sheet_id, addr: *addr }, cell.value.clone());
             }
         }
-        Self { sheets, values }
+        let tables = workbook.sheets.iter().map(|s| s.tables.clone()).collect();
+        Self { sheets, values, tables }
     }
 }
 
@@ -637,31 +669,51 @@ impl crate::eval::ValueResolver for Snapshot {
             .cloned()
             .unwrap_or(Value::Blank)
     }
+
+    fn resolve_structured_ref(
+        &self,
+        ctx: crate::eval::EvalContext,
+        sref: &crate::structured_refs::StructuredRef,
+    ) -> Option<(usize, CellAddr, CellAddr)> {
+        crate::structured_refs::resolve_structured_ref(&self.tables, ctx.current_sheet, ctx.current_cell, sref).ok()
+    }
 }
 
-fn analyze_expr(expr: &CompiledExpr, current_sheet: SheetId) -> (HashSet<CellKey>, bool, bool) {
+fn analyze_expr(
+    expr: &CompiledExpr,
+    current_cell: CellKey,
+    tables_by_sheet: &[Vec<Table>],
+) -> (HashSet<CellKey>, bool, bool) {
     let mut precedents = HashSet::new();
     let mut volatile = false;
     let mut thread_safe = true;
-    walk_expr(expr, current_sheet, &mut precedents, &mut volatile, &mut thread_safe);
+    walk_expr(
+        expr,
+        current_cell,
+        tables_by_sheet,
+        &mut precedents,
+        &mut volatile,
+        &mut thread_safe,
+    );
     (precedents, volatile, thread_safe)
 }
 
 fn walk_expr(
     expr: &CompiledExpr,
-    current_sheet: SheetId,
+    current_cell: CellKey,
+    tables_by_sheet: &[Vec<Table>],
     precedents: &mut HashSet<CellKey>,
     volatile: &mut bool,
     thread_safe: &mut bool,
 ) {
     match expr {
         Expr::CellRef(r) => {
-            if let Some(sheet) = resolve_sheet(&r.sheet, current_sheet) {
+            if let Some(sheet) = resolve_sheet(&r.sheet, current_cell.sheet) {
                 precedents.insert(CellKey { sheet, addr: r.addr });
             }
         }
         Expr::RangeRef(RangeRef { sheet, start, end }) => {
-            if let Some(sheet) = resolve_sheet(sheet, current_sheet) {
+            if let Some(sheet) = resolve_sheet(sheet, current_cell.sheet) {
                 let (r1, r2) = if start.row <= end.row {
                     (start.row, end.row)
                 } else {
@@ -679,10 +731,58 @@ fn walk_expr(
                 }
             }
         }
-        Expr::Unary { expr, .. } => walk_expr(expr, current_sheet, precedents, volatile, thread_safe),
+        Expr::StructuredRef(sref) => {
+            if let Ok((sheet_id, start, end)) = crate::structured_refs::resolve_structured_ref(
+                tables_by_sheet,
+                current_cell.sheet,
+                current_cell.addr,
+                sref,
+            ) {
+                let (r1, r2) = if start.row <= end.row {
+                    (start.row, end.row)
+                } else {
+                    (end.row, start.row)
+                };
+                let (c1, c2) = if start.col <= end.col {
+                    (start.col, end.col)
+                } else {
+                    (end.col, start.col)
+                };
+                for row in r1..=r2 {
+                    for col in c1..=c2 {
+                        precedents.insert(CellKey {
+                            sheet: sheet_id,
+                            addr: CellAddr { row, col },
+                        });
+                    }
+                }
+            }
+        }
+        Expr::Unary { expr, .. } => walk_expr(
+            expr,
+            current_cell,
+            tables_by_sheet,
+            precedents,
+            volatile,
+            thread_safe,
+        ),
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
-            walk_expr(left, current_sheet, precedents, volatile, thread_safe);
-            walk_expr(right, current_sheet, precedents, volatile, thread_safe);
+            walk_expr(
+                left,
+                current_cell,
+                tables_by_sheet,
+                precedents,
+                volatile,
+                thread_safe,
+            );
+            walk_expr(
+                right,
+                current_cell,
+                tables_by_sheet,
+                precedents,
+                volatile,
+                thread_safe,
+            );
         }
         Expr::FunctionCall { name, args } => {
             if is_volatile_function(name) {
@@ -693,11 +793,25 @@ fn walk_expr(
                 *thread_safe = false;
             }
             for a in args {
-                walk_expr(a, current_sheet, precedents, volatile, thread_safe);
+                walk_expr(
+                    a,
+                    current_cell,
+                    tables_by_sheet,
+                    precedents,
+                    volatile,
+                    thread_safe,
+                );
             }
         }
         Expr::ImplicitIntersection(inner) => {
-            walk_expr(inner, current_sheet, precedents, volatile, thread_safe)
+            walk_expr(
+                inner,
+                current_cell,
+                tables_by_sheet,
+                precedents,
+                volatile,
+                thread_safe,
+            )
         }
         Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
     }

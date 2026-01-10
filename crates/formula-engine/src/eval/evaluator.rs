@@ -14,6 +14,11 @@ pub struct EvalContext {
 pub trait ValueResolver {
     fn sheet_exists(&self, sheet_id: usize) -> bool;
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
+    fn resolve_structured_ref(
+        &self,
+        ctx: EvalContext,
+        sref: &crate::structured_refs::StructuredRef,
+    ) -> Option<(usize, CellAddr, CellAddr)>;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -101,6 +106,12 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     })
                 }
                 _ => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+            },
+            Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref) {
+                Some((sheet_id, start, end)) if self.resolver.sheet_exists(sheet_id) => {
+                    EvalValue::Reference(ResolvedRange { sheet_id, start, end })
+                }
+                _ => EvalValue::Scalar(Value::Error(ErrorKind::Name)),
             },
             Expr::Unary { op, expr } => {
                 let v = self.eval_scalar(expr);

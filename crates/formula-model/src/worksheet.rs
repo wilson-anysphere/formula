@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{A1ParseError, Cell, CellKey, CellRef, CellValue, Range};
+use crate::{A1ParseError, Cell, CellKey, CellRef, CellValue, Range, Table};
 
 /// Identifier for a worksheet within a workbook.
 pub type WorksheetId = u32;
@@ -148,6 +148,10 @@ pub struct Worksheet {
     /// Sheet zoom level (1.0 = 100%).
     #[serde(default = "default_zoom", skip_serializing_if = "is_default_zoom")]
     pub zoom: f32,
+
+    /// Excel tables (structured ranges) hosted on this worksheet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tables: Vec<Table>,
 }
 
 impl Worksheet {
@@ -167,7 +171,13 @@ impl Worksheet {
             frozen_rows: 0,
             frozen_cols: 0,
             zoom: default_zoom(),
+            tables: Vec::new(),
         }
+    }
+
+    /// Find the first table containing `cell`.
+    pub fn table_for_cell(&self, cell: CellRef) -> Option<&Table> {
+        self.tables.iter().find(|t| t.range.contains(cell))
     }
 
     /// Number of stored cells.
@@ -578,6 +588,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             tab_color: Option<TabColor>,
             #[serde(default)]
             cells: HashMap<CellKey, Cell>,
+            #[serde(default)]
+            tables: Vec<Table>,
             #[serde(default = "default_row_count")]
             row_count: u32,
             #[serde(default = "default_col_count")]
@@ -611,6 +623,7 @@ impl<'de> Deserialize<'de> for Worksheet {
             frozen_rows: helper.frozen_rows,
             frozen_cols: helper.frozen_cols,
             zoom: helper.zoom,
+            tables: helper.tables,
         })
     }
 }

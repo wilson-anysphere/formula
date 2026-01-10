@@ -19,6 +19,10 @@ pub enum XlsxError {
     Attr(#[from] quick_xml::events::attributes::AttrError),
     #[error("missing required attribute: {0}")]
     MissingAttr(&'static str),
+    #[error("missing xlsx part: {0}")]
+    MissingPart(String),
+    #[error("invalid xlsx: {0}")]
+    Invalid(String),
     #[error("invalid sheetId value")]
     InvalidSheetId,
 }

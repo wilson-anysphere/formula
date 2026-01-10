@@ -59,6 +59,7 @@ pub enum Expr<S> {
     Error(ErrorKind),
     CellRef(CellRef<S>),
     RangeRef(RangeRef<S>),
+    StructuredRef(crate::structured_refs::StructuredRef),
     Unary {
         op: UnaryOp,
         expr: Box<Expr<S>>,
@@ -101,6 +102,7 @@ impl<S: Clone> Expr<S> {
                 start: r.start,
                 end: r.end,
             }),
+            Expr::StructuredRef(r) => Expr::StructuredRef(r.clone()),
             Expr::Unary { op, expr } => Expr::Unary {
                 op: *op,
                 expr: Box::new(expr.map_sheets(f)),

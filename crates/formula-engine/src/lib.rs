@@ -25,6 +25,7 @@ pub mod debug;
 pub mod sort_filter;
 
 mod engine;
+pub mod structured_refs;
 
 mod ast;
 pub mod parser;

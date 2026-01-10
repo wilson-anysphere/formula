@@ -22,6 +22,7 @@ enum Token {
     Number(f64),
     String(String),
     Ident(String),
+    StructuredRef(String),
     SheetName(String),
     Error(ErrorKind),
     LParen,
@@ -170,6 +171,20 @@ impl ParserImpl {
             Token::Error(e) => {
                 self.next();
                 Ok(Expr::Error(e))
+            }
+            Token::StructuredRef(text) => {
+                self.next();
+                let (sref, end) = crate::structured_refs::parse_structured_ref(&text, 0).ok_or_else(|| {
+                    FormulaParseError::UnexpectedToken(format!(
+                        "invalid structured reference: {text}"
+                    ))
+                })?;
+                if end != text.len() {
+                    return Err(FormulaParseError::UnexpectedToken(format!(
+                        "invalid structured reference: {text}"
+                    )));
+                }
+                Ok(Expr::StructuredRef(sref))
             }
             Token::Ident(id) => {
                 // Function call or reference/name.
@@ -371,6 +386,7 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                     Token::At
                 }
+                '[' => self.lex_structured_ref()?,
                 '+' => {
                     self.pos += 1;
                     Token::Plus
@@ -416,7 +432,7 @@ impl<'a> Lexer<'a> {
                 '\'' => self.lex_sheet_name()?,
                 '#' => self.lex_error()?,
                 '.' | '0'..='9' => self.lex_number()?,
-                _ if is_ident_start(ch) => self.lex_ident(),
+                _ if is_ident_start(ch) => self.lex_ident()?,
                 _ => {
                     return Err(FormulaParseError::UnexpectedToken(format!(
                         "unexpected character '{ch}'"
@@ -437,7 +453,7 @@ impl<'a> Lexer<'a> {
         self.input[self.pos..].starts_with(s)
     }
 
-    fn lex_ident(&mut self) -> Token {
+    fn lex_ident(&mut self) -> Result<Token, FormulaParseError> {
         let start = self.pos;
         while let Some(ch) = self.peek_char() {
             if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '$' {
@@ -446,7 +462,34 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        Token::Ident(self.input[start..self.pos].to_string())
+        if self.peek_char() == Some('[') {
+            self.lex_structured_ref_from(start)
+        } else {
+            Ok(Token::Ident(self.input[start..self.pos].to_string()))
+        }
+    }
+
+    fn lex_structured_ref(&mut self) -> Result<Token, FormulaParseError> {
+        let start = self.pos;
+        self.lex_structured_ref_from(start)
+    }
+
+    fn lex_structured_ref_from(&mut self, start: usize) -> Result<Token, FormulaParseError> {
+        let mut depth: i32 = 0;
+        while let Some(ch) = self.peek_char() {
+            self.pos += ch.len_utf8();
+            match ch {
+                '[' => depth += 1,
+                ']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(Token::StructuredRef(self.input[start..self.pos].to_string()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        Err(FormulaParseError::UnexpectedEof)
     }
 
     fn lex_number(&mut self) -> Result<Token, FormulaParseError> {

@@ -3,7 +3,7 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    rewrite_sheet_names_in_formula, SheetVisibility, Style, StyleTable, TabColor, Worksheet,
+    rewrite_sheet_names_in_formula, SheetVisibility, Style, StyleTable, TabColor, Table, Worksheet,
     WorksheetId,
 };
 
@@ -171,6 +171,16 @@ impl Workbook {
     /// Find a sheet by name (case sensitive, like Excel).
     pub fn sheet_by_name(&self, name: &str) -> Option<&Worksheet> {
         self.sheets.iter().find(|s| s.name == name)
+    }
+
+    /// Find a table by its workbook-scoped name.
+    pub fn find_table(&self, table_name: &str) -> Option<(&Worksheet, &Table)> {
+        for sheet in &self.sheets {
+            if let Some(table) = sheet.tables.iter().find(|t| t.name == table_name) {
+                return Some((sheet, table));
+            }
+        }
+        None
     }
 
     /// Intern (deduplicate) a style into the workbook's style table.

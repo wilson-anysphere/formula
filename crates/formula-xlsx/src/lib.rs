@@ -14,8 +14,10 @@ pub mod autofilter;
 
 mod package;
 mod path;
+mod reader;
 mod relationships;
 mod workbook;
+mod writer;
 
 pub mod charts;
 pub mod comments;
@@ -25,6 +27,7 @@ mod sheet_metadata;
 pub mod pivots;
 pub mod print;
 pub mod shared_strings;
+pub mod tables;
 pub mod vba;
 
 pub mod conditional_formatting;
@@ -33,9 +36,11 @@ pub mod styles;
 pub use conditional_formatting::*;
 pub use package::{XlsxError, XlsxPackage};
 pub use pivots::{PivotCacheDefinitionPart, PivotCacheRecordsPart, PivotTablePart, XlsxPivots};
+pub use reader::{read_workbook, read_workbook_from_reader};
 pub use sheet_metadata::{
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
     WorkbookSheetInfo,
 };
 pub use styles::*;
 pub use workbook::ChartExtractionError;
+pub use writer::{write_workbook, write_workbook_to_writer};

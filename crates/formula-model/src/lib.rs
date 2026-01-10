@@ -16,6 +16,7 @@ pub mod rich_text;
 mod outline;
 mod formula_rewrite;
 mod style;
+pub mod table;
 mod value;
 mod workbook;
 mod worksheet;
@@ -31,6 +32,9 @@ pub use formula_rewrite::rewrite_sheet_names_in_formula;
 pub use style::{
     Alignment, Border, BorderStyle, Color, Fill, Font, HorizontalAlignment, Style, StyleTable,
     VerticalAlignment,
+};
+pub use table::{
+    AutoFilter, FilterColumn, SortCondition, SortState, Table, TableArea, TableColumn, TableStyleInfo,
 };
 pub use value::{ArrayValue, CellValue, RichText, SpillValue};
 pub use workbook::{RenameSheetError, Workbook, WorkbookId};
