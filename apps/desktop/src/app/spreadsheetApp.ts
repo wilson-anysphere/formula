@@ -18,6 +18,7 @@ import {
 import { DocumentController } from "../document/documentController.js";
 import { MockEngine } from "../document/engine.js";
 import { drawCommentIndicator } from "../comments/CommentIndicator";
+import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateFormula";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
@@ -565,8 +566,9 @@ export class SpreadsheetApp {
 
     if (this.formulaBar && !this.formulaBar.isEditing()) {
       const address = cellToA1(this.selection.active);
-      const input = this.getCellDisplayValue(this.selection.active);
-      this.formulaBar.setActiveCell({ address, input, value: input });
+      const input = this.getCellInputText(this.selection.active);
+      const value = this.getCellComputedValue(this.selection.active);
+      this.formulaBar.setActiveCell({ address, input, value });
     }
 
     this.renderCommentsPanel();
@@ -706,7 +708,7 @@ export class SpreadsheetApp {
       e.preventDefault();
       const cell = this.selection.active;
       const bounds = this.getCellRect(cell);
-      const initialValue = this.getCellDisplayValue(cell);
+      const initialValue = this.getCellInputText(cell);
       this.editor.open(cell, bounds, initialValue, { cursor: "end" });
       return;
     }
@@ -781,10 +783,56 @@ export class SpreadsheetApp {
   }
 
   private getCellDisplayValue(cell: CellCoord): string {
+    const value = this.getCellComputedValue(cell);
+    if (value == null) return "";
+    return String(value);
+  }
+
+  private getCellInputText(cell: CellCoord): string {
     const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+    if (state?.formula != null) {
+      return normalizeFormulaText(state.formula);
+    }
     if (state?.value != null) return String(state.value);
-    if (state?.formula != null) return `=${state.formula}`;
     return "";
+  }
+
+  private getCellComputedValue(cell: CellCoord): SpreadsheetValue {
+    const memo = new Map<string, SpreadsheetValue>();
+    const stack = new Set<string>();
+    return this.computeCellValue(cell, memo, stack);
+  }
+
+  private computeCellValue(
+    cell: CellCoord,
+    memo: Map<string, SpreadsheetValue>,
+    stack: Set<string>
+  ): SpreadsheetValue {
+    const key = cellToA1(cell);
+    const cached = memo.get(key);
+    if (cached !== undefined || memo.has(key)) return cached ?? null;
+    if (stack.has(key)) return "#REF!";
+
+    stack.add(key);
+    const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+    let value: SpreadsheetValue;
+
+    if (state?.formula != null) {
+      const formulaText = normalizeFormulaText(state.formula);
+      value = evaluateFormula(formulaText, (ref) => {
+        const normalized = ref.replaceAll("$", "");
+        const coord = parseA1(normalized);
+        return this.computeCellValue(coord, memo, stack);
+      });
+    } else if (state?.value != null) {
+      value = state.value as SpreadsheetValue;
+    } else {
+      value = null;
+    }
+
+    stack.delete(key);
+    memo.set(key, value);
+    return value;
   }
 
   private applyEdit(cell: CellCoord, rawValue: string): void {
@@ -932,4 +980,10 @@ function parseA1(a1: string): CellCoord {
     col = col * 26 + (colName.charCodeAt(i) - 64);
   }
   return { row: Math.max(0, row), col: Math.max(0, col - 1) };
+}
+
+function normalizeFormulaText(formula: string): string {
+  const trimmed = formula.trimStart();
+  if (trimmed.startsWith("=")) return formula;
+  return `=${formula}`;
 }
