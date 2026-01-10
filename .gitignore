@@ -29,7 +29,6 @@ test-results/
 
 coverage/
 .turbo/
-.vite/
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
@@ -37,11 +36,18 @@ pnpm-debug.log*
 .DS_Store
 **/.DS_Store
 
+# Lockfiles
+package-lock.json
+
 # Local secrets
 .env
 .env.*
 **/.env
 **/.env.*
+
+# Sync server persistence
+.sync-server-data/
+services/sync-server/.sync-server-data/
 
 # Local-only agent files (never commit)
 scratchpad.md
