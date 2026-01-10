@@ -620,7 +620,7 @@ mod tests {
         );
         assert_eq!(sheet.get_cell(0, 1).computed_value, CellScalar::Number(42.5));
         assert_eq!(sheet.get_cell(0, 2).computed_value, CellScalar::Number(85.0));
-        assert_eq!(sheet.get_cell(0, 2).formula.as_deref(), Some("=A1+B1"));
+        assert_eq!(sheet.get_cell(0, 2).formula.as_deref(), Some("=B1*2"));
     }
 
     #[test]
