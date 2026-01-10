@@ -7,8 +7,11 @@
 //! - Localized function names (e.g. `SUMME` ↔ `SUM`)
 //! - Round-tripping (localized display; canonical persistence)
 
+pub mod date;
+pub mod error;
+pub mod functions;
 pub mod locale;
 mod parser;
 
+pub use crate::error::{ExcelError, ExcelResult};
 pub use parser::{parse_formula, Expr, Formula, ParseError};
-
