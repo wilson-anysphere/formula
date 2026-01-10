@@ -41,7 +41,11 @@
         border-radius: 4px;
         background: #ffffff;
         line-height: 16px;
-        user-select: none;
+        user-select: text;
+        width: 100%;
+        box-sizing: border-box;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+          monospace;
       }
 
       .formula-bar-fx {
@@ -165,6 +169,34 @@
       .formula-bar-error-suggestions {
         margin: 0;
         padding-left: 18px;
+      }
+
+      dialog.find-replace-dialog,
+      dialog.goto-dialog {
+        width: min(680px, 92vw);
+        border: 1px solid #c9c9c9;
+        border-radius: 8px;
+        padding: 12px;
+      }
+
+      .find-replace-dialog .row,
+      .goto-dialog .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .find-results {
+        max-height: 240px;
+        overflow: auto;
+        padding-left: 18px;
+        margin: 8px 0 0;
+      }
+
+      .find-results li {
+        cursor: pointer;
+        padding: 2px 0;
       }
 
       #workspace {

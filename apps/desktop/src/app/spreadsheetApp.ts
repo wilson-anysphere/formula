@@ -16,6 +16,7 @@ import {
   DEFAULT_GRID_LIMITS,
   addCellToSelection,
   createSelection,
+  buildSelection,
   extendSelectionToCell,
   selectAll,
   selectColumns,
@@ -26,6 +27,8 @@ import { DocumentController } from "../document/documentController.js";
 import { MockEngine } from "../document/engine.js";
 import { drawCommentIndicator } from "../comments/CommentIndicator";
 import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateFormula";
+import { DocumentWorkbookAdapter } from "../search/documentWorkbookAdapter.js";
+import { parseGoTo } from "../../../../packages/search/index.js";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
@@ -67,9 +70,10 @@ export interface SpreadsheetAppStatusElements {
 }
 
 export class SpreadsheetApp {
-  private readonly sheetId = "Sheet1";
+  private sheetId = "Sheet1";
   private readonly engine = new MockEngine();
   private readonly document = new DocumentController({ engine: this.engine });
+  private readonly searchWorkbook = new DocumentWorkbookAdapter({ document: this.document });
   private limits: GridLimits;
 
   private gridCanvas: HTMLCanvasElement;
@@ -99,6 +103,7 @@ export class SpreadsheetApp {
 
   private selection: SelectionState;
   private selectionRenderer = new SelectionRenderer();
+  private readonly selectionListeners = new Set<(selection: SelectionState) => void>();
 
   private editor: CellEditorOverlay;
   private formulaBar: FormulaBarView | null = null;
@@ -256,6 +261,7 @@ export class SpreadsheetApp {
         onBeginEdit: () => {
           this.formulaEditCell = { ...this.selection.active };
         },
+        onGoTo: (reference) => this.goTo(reference),
         onCommit: (text) => this.commitFormulaBar(text),
         onCancel: () => this.cancelFormulaBar(),
         onHoverRange: (range) => {
@@ -311,6 +317,88 @@ export class SpreadsheetApp {
 
   getRecalcCount(): number {
     return this.engine.recalcCount;
+  }
+
+  getDocument(): DocumentController {
+    return this.document;
+  }
+
+  getCurrentSheetId(): string {
+    return this.sheetId;
+  }
+
+  /**
+   * Switch the active sheet id and re-render.
+   */
+  activateSheet(sheetId: string): void {
+    if (!sheetId) return;
+    if (sheetId === this.sheetId) return;
+    this.sheetId = sheetId;
+    this.renderGrid();
+    this.renderSelection();
+    this.updateStatus();
+  }
+
+  /**
+   * Programmatically set the active cell (and optionally change sheets).
+   */
+  activateCell(target: { sheetId?: string; row: number; col: number }): void {
+    if (target.sheetId && target.sheetId !== this.sheetId) {
+      this.sheetId = target.sheetId;
+      this.renderGrid();
+    }
+    this.selection = setActiveCell(this.selection, { row: target.row, col: target.col }, this.limits);
+    this.renderSelection();
+    this.updateStatus();
+    this.focus();
+  }
+
+  /**
+   * Programmatically set the selection range (and optionally change sheets).
+   */
+  selectRange(target: { sheetId?: string; range: Range }): void {
+    if (target.sheetId && target.sheetId !== this.sheetId) {
+      this.sheetId = target.sheetId;
+      this.renderGrid();
+    }
+    const active = { row: target.range.startRow, col: target.range.startCol };
+    this.selection = buildSelection(
+      { ranges: [target.range], active, anchor: active, activeRangeIndex: 0 },
+      this.limits
+    );
+    this.renderSelection();
+    this.updateStatus();
+    this.focus();
+  }
+
+  getSelectionRanges(): Range[] {
+    return this.selection.ranges;
+  }
+
+  getActiveCell(): CellCoord {
+    return { ...this.selection.active };
+  }
+
+  subscribeSelection(listener: (selection: SelectionState) => void): () => void {
+    this.selectionListeners.add(listener);
+    listener(this.selection);
+    return () => this.selectionListeners.delete(listener);
+  }
+
+  private goTo(reference: string): void {
+    try {
+      const parsed = parseGoTo(reference, { workbook: this.searchWorkbook, currentSheetName: this.sheetId });
+      if (parsed.type !== "range") return;
+
+      const { range } = parsed;
+      if (range.startRow === range.endRow && range.startCol === range.endCol) {
+        this.activateCell({ sheetId: parsed.sheetName, row: range.startRow, col: range.startCol });
+      } else {
+        this.selectRange({ sheetId: parsed.sheetName, range });
+      }
+    } catch {
+      // Ignore invalid Go To inputs for now.
+    }
   }
 
   getCellValueA1(a1: string): string {
@@ -819,6 +907,10 @@ export class SpreadsheetApp {
     }
 
     this.renderCommentsPanel();
+
+    for (const listener of this.selectionListeners) {
+      listener(this.selection);
+    }
   }
 
   private isRowHidden(row: number): boolean {
@@ -1398,31 +1490,7 @@ export class SpreadsheetApp {
   }
 
   private computeUsedRange(): Range | null {
-    const sheet = (this.document as any).model?.sheets?.get(this.sheetId) as { cells: Map<string, any> } | undefined;
-    if (!sheet) return null;
-    if (!sheet.cells || sheet.cells.size === 0) return null;
-
-    let minRow = Infinity;
-    let minCol = Infinity;
-    let maxRow = -Infinity;
-    let maxCol = -Infinity;
-    let hasData = false;
-
-    for (const [key, cell] of sheet.cells.entries()) {
-      if (cell?.value == null && cell?.formula == null) continue;
-      const [rowStr, colStr] = String(key).split(",");
-      const row = Number(rowStr);
-      const col = Number(colStr);
-      if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
-      hasData = true;
-      minRow = Math.min(minRow, row);
-      minCol = Math.min(minCol, col);
-      maxRow = Math.max(maxRow, row);
-      maxCol = Math.max(maxCol, col);
-    }
-
-    if (!hasData) return null;
-    return { startRow: minRow, startCol: minCol, endRow: maxRow, endCol: maxCol };
+    return this.document.getUsedRange(this.sheetId);
   }
 
   private clearSelectionContents(): void {

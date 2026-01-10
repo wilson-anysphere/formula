@@ -13,6 +13,8 @@ export class FindReplaceController {
     getActiveCell,
     setActiveCell,
     getSelectionRanges,
+    beginBatch,
+    endBatch,
   }) {
     if (!workbook) throw new Error("FindReplaceController: workbook is required");
     this.workbook = workbook;
@@ -21,6 +23,8 @@ export class FindReplaceController {
     this.getActiveCell = getActiveCell;
     this.setActiveCell = setActiveCell;
     this.getSelectionRanges = getSelectionRanges;
+    this.beginBatch = beginBatch;
+    this.endBatch = endBatch;
 
     this.query = "";
     this.replacement = "";
@@ -89,6 +93,11 @@ export class FindReplaceController {
   }
 
   async replaceAll() {
-    return replaceAll(this.workbook, this.query, this.replacement, this.getSearchOptions());
+    this.beginBatch?.({ label: "Replace All" });
+    try {
+      return await replaceAll(this.workbook, this.query, this.replacement, this.getSearchOptions());
+    } finally {
+      this.endBatch?.();
+    }
   }
 }

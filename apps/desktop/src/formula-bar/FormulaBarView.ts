@@ -6,6 +6,7 @@ export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
   onCommit: (text: string) => void;
   onCancel?: () => void;
+  onGoTo?: (reference: string) => void;
   onHoverRange?: (range: RangeAddress | null) => void;
 }
 
@@ -15,7 +16,7 @@ export class FormulaBarView {
   readonly root: HTMLElement;
   readonly textarea: HTMLTextAreaElement;
 
-  #addressEl: HTMLElement;
+  #addressEl: HTMLInputElement;
   #highlightEl: HTMLElement;
   #hintEl: HTMLElement;
   #errorButton: HTMLButtonElement;
@@ -32,9 +33,13 @@ export class FormulaBarView {
     const row = document.createElement("div");
     row.className = "formula-bar-row";
 
-    const address = document.createElement("div");
+    const address = document.createElement("input");
     address.className = "formula-bar-address";
     address.dataset.testid = "formula-address";
+    address.setAttribute("aria-label", "Name box");
+    address.autocomplete = "off";
+    address.spellcheck = false;
+    address.value = "A1";
 
     const fx = document.createElement("div");
     fx.className = "formula-bar-fx";
@@ -93,6 +98,27 @@ export class FormulaBarView {
     this.#hintEl = hint;
     this.#errorButton = errorButton;
     this.#errorPanel = errorPanel;
+
+    address.addEventListener("focus", () => {
+      address.select();
+    });
+
+    address.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const ref = address.value;
+        // Blur before navigating so subsequent renders can update the value.
+        address.blur();
+        this.#callbacks.onGoTo?.(ref);
+        return;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        address.value = this.model.activeCell.address;
+        address.blur();
+      }
+    });
 
     textarea.addEventListener("focus", () => this.#beginEditFromFocus());
     textarea.addEventListener("input", () => this.#onInputOrSelection());
@@ -223,7 +249,9 @@ export class FormulaBarView {
   }
 
   #render(opts: { preserveTextareaValue: boolean }): void {
-    this.#addressEl.textContent = this.model.activeCell.address;
+    if (document.activeElement !== this.#addressEl) {
+      this.#addressEl.value = this.model.activeCell.address;
+    }
 
     if (!opts.preserveTextareaValue) {
       this.textarea.value = this.model.draft;

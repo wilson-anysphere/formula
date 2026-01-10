@@ -340,6 +340,59 @@ export class DocumentController {
   }
 
   /**
+   * Return the set of sheet ids that exist in the underlying model.
+   *
+   * Note: the DocumentController currently creates sheets lazily when a sheet id is first
+   * referenced by an edit/read. Empty workbooks will return an empty array until at least
+   * one cell is accessed.
+   *
+   * @returns {string[]}
+   */
+  getSheetIds() {
+    return Array.from(this.model.sheets.keys());
+  }
+
+  /**
+   * Compute the bounding box of non-empty cells in a sheet.
+   *
+   * By default this ignores format-only cells (value/formula must be present).
+   *
+   * @param {string} sheetId
+   * @param {{ includeFormat?: boolean }} [options]
+   * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+   */
+  getUsedRange(sheetId, options = {}) {
+    const sheet = this.model.sheets.get(sheetId);
+    if (!sheet || !sheet.cells || sheet.cells.size === 0) return null;
+
+    const includeFormat = Boolean(options.includeFormat);
+
+    let minRow = Infinity;
+    let minCol = Infinity;
+    let maxRow = -Infinity;
+    let maxCol = -Infinity;
+    let hasData = false;
+
+    for (const [key, cell] of sheet.cells.entries()) {
+      if (!cell) continue;
+      const hasContent = includeFormat
+        ? cell.value != null || cell.formula != null || cell.format != null
+        : cell.value != null || cell.formula != null;
+      if (!hasContent) continue;
+
+      const { row, col } = parseRowColKey(key);
+      hasData = true;
+      minRow = Math.min(minRow, row);
+      minCol = Math.min(minCol, col);
+      maxRow = Math.max(maxRow, row);
+      maxCol = Math.max(maxCol, col);
+    }
+
+    if (!hasData) return null;
+    return { startRow: minRow, endRow: maxRow, startCol: minCol, endCol: maxCol };
+  }
+
+  /**
    * @param {string} sheetId
    * @param {CellCoord | string} coord
    * @param {CellValue} value

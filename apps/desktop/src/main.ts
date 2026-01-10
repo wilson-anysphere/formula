@@ -8,6 +8,8 @@ import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
 import { getPanelTitle, PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
 import { renderMacroRunner, TauriMacroBackend } from "./macros";
+import { DocumentWorkbookAdapter } from "./search/documentWorkbookAdapter.js";
+import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -351,6 +353,29 @@ if (
   layoutController.on("change", () => renderLayout());
   renderLayout();
 }
+
+const workbook = new DocumentWorkbookAdapter({ document: app.getDocument() });
+
+const findReplaceController = new FindReplaceController({
+  workbook,
+  getCurrentSheetName: () => app.getCurrentSheetId(),
+  getActiveCell: () => {
+    const cell = app.getActiveCell();
+    return { sheetName: app.getCurrentSheetId(), row: cell.row, col: cell.col };
+  },
+  setActiveCell: ({ sheetName, row, col }) => app.activateCell({ sheetId: sheetName, row, col }),
+  getSelectionRanges: () => app.getSelectionRanges(),
+  beginBatch: (opts) => app.getDocument().beginBatch(opts),
+  endBatch: () => app.getDocument().endBatch()
+});
+
+registerFindReplaceShortcuts({
+  controller: findReplaceController,
+  workbook,
+  getCurrentSheetName: () => app.getCurrentSheetId(),
+  setActiveCell: ({ sheetName, row, col }) => app.activateCell({ sheetId: sheetName, row, col }),
+  selectRange: ({ sheetName, range }) => app.selectRange({ sheetId: sheetName, range })
+});
 
 // Expose a small API for Playwright assertions.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
