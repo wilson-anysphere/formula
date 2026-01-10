@@ -1,4 +1,5 @@
 use super::*;
+use crate::Engine;
 
 struct FnModel<F>
 where
@@ -197,4 +198,104 @@ fn evolutionary_handles_nonsmooth_integer_problem() {
     ));
     assert_eq!(outcome.best_vars[0], 0.0);
     assert_eq!(outcome.best_objective, 0.0);
+}
+
+#[test]
+fn simplex_integrates_with_engine_recalc() {
+    // Same LP as `simplex_solves_linear_lp`, but evaluated through the real
+    // `Engine` formula + dependency graph.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 0.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 0.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=3*A1+2*A2")
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "C1", "=A1+A2").unwrap();
+    engine.set_cell_formula("Sheet1", "C2", "=A1").unwrap();
+    engine.set_cell_formula("Sheet1", "C3", "=A2").unwrap();
+    engine.recalculate();
+
+    let mut model = EngineSolverModel::new(
+        &mut engine,
+        "Sheet1",
+        "B1",
+        vec!["A1", "A2"],
+        vec!["C1", "C2", "C3"],
+    )
+    .unwrap();
+
+    let problem = SolverProblem {
+        objective: Objective::maximize(),
+        variables: vec![
+            VarSpec::continuous(0.0, f64::INFINITY),
+            VarSpec::continuous(0.0, f64::INFINITY),
+        ],
+        constraints: vec![
+            Constraint::new(0, Relation::LessEqual, 4.0),
+            Constraint::new(1, Relation::LessEqual, 2.0),
+            Constraint::new(2, Relation::LessEqual, 3.0),
+        ],
+    };
+
+    let mut options = SolveOptions::default();
+    options.method = SolveMethod::Simplex;
+    options.apply_solution = false;
+
+    let outcome = Solver::solve(&mut model, &problem, options).expect("solve");
+    assert!(matches!(
+        outcome.status,
+        SolveStatus::Optimal | SolveStatus::Feasible
+    ));
+    assert!((outcome.best_vars[0] - 2.0).abs() < 1e-6);
+    assert!((outcome.best_vars[1] - 2.0).abs() < 1e-6);
+    assert!((outcome.best_objective - 10.0).abs() < 1e-6);
+    assert!(outcome.max_constraint_violation < 1e-6);
+}
+
+#[test]
+fn grg_integrates_with_engine_recalc() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 0.5).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 0.5).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=(A1-1)*(A1-1)+(A2-2)*(A2-2)")
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "C1", "=A1+A2").unwrap();
+    engine.recalculate();
+
+    let mut model =
+        EngineSolverModel::new(&mut engine, "Sheet1", "B1", vec!["A1", "A2"], vec!["C1"]).unwrap();
+
+    let problem = SolverProblem {
+        objective: Objective::minimize(),
+        variables: vec![VarSpec::continuous(0.0, 3.0), VarSpec::continuous(0.0, 3.0)],
+        constraints: vec![Constraint::new(0, Relation::Equal, 3.0).with_tolerance(1e-6)],
+    };
+
+    let mut options = SolveOptions::default();
+    options.method = SolveMethod::GrgNonlinear;
+    options.max_iterations = 300;
+    options.tolerance = 1e-6;
+    options.apply_solution = false;
+    options.grg.penalty_weight = 100.0;
+
+    let outcome = Solver::solve(&mut model, &problem, options).expect("solve");
+    assert!(matches!(
+        outcome.status,
+        SolveStatus::Optimal | SolveStatus::Feasible
+    ));
+    assert!(
+        (outcome.best_vars[0] - 1.0).abs() < 1e-2,
+        "x={}",
+        outcome.best_vars[0]
+    );
+    assert!(
+        (outcome.best_vars[1] - 2.0).abs() < 1e-2,
+        "y={}",
+        outcome.best_vars[1]
+    );
+    assert!(outcome.max_constraint_violation < 1e-3);
+    assert!(outcome.best_objective < 1e-3);
 }

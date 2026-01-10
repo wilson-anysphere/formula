@@ -5,12 +5,14 @@
 //! around a [`SolverModel`] trait so the solver can run against a real sheet or
 //! a unit-test mock.
 
+mod engine_model;
 mod evolutionary;
 mod grg;
 mod simplex;
 
 use std::fmt;
 
+pub use engine_model::EngineSolverModel;
 pub use evolutionary::EvolutionaryOptions;
 pub use grg::GrgOptions;
 pub use simplex::SimplexOptions;
@@ -360,7 +362,12 @@ fn normalize_integer_bounds(vars: &mut [VarSpec]) -> Result<(), SolverError> {
     Ok(())
 }
 
+const NON_FINITE_PENALTY: f64 = 1e30;
+
 fn constraint_violation(lhs: f64, constraint: &Constraint) -> f64 {
+    if !lhs.is_finite() || !constraint.rhs.is_finite() {
+        return NON_FINITE_PENALTY;
+    }
     match constraint.relation {
         Relation::LessEqual => (lhs - constraint.rhs - constraint.tolerance).max(0.0),
         Relation::GreaterEqual => (constraint.rhs - lhs - constraint.tolerance).max(0.0),
@@ -406,6 +413,9 @@ fn clamp_vars(vars: &mut [f64], specs: &[VarSpec]) {
 }
 
 fn objective_merit(objective: &Objective, objective_value: f64) -> f64 {
+    if !objective_value.is_finite() {
+        return NON_FINITE_PENALTY;
+    }
     match objective.kind {
         ObjectiveKind::Maximize => -objective_value,
         ObjectiveKind::Minimize => objective_value,
