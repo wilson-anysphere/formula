@@ -23,6 +23,10 @@ fn main() {
             commands::recalculate,
             commands::undo,
             commands::redo,
+            commands::get_sheet_print_settings,
+            commands::set_sheet_page_setup,
+            commands::set_sheet_print_area,
+            commands::export_sheet_range_pdf,
         ])
         .on_window_event(|event| match event.event() {
             tauri::WindowEvent::CloseRequested { api, .. } => {

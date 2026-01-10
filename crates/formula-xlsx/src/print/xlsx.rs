@@ -11,6 +11,12 @@ use std::io::{Cursor, Read, Seek, Write};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
+#[derive(Debug, Clone)]
+enum DefinedNameEdit {
+    Set(String),
+    Remove,
+}
+
 pub fn read_workbook_print_settings(
     xlsx_bytes: &[u8],
 ) -> Result<WorkbookPrintSettings, PrintError> {
@@ -73,25 +79,42 @@ pub fn write_workbook_print_settings(
         settings_by_sheet.insert(sheet.sheet_name.as_str(), sheet);
     }
 
-    let mut defined_name_overrides: HashMap<(String, usize), String> = HashMap::new();
+    let mut defined_name_edits: HashMap<(String, usize), DefinedNameEdit> = HashMap::new();
     for (sheet_index, sheet) in workbook.sheets.iter().enumerate() {
         if let Some(sheet_settings) = settings_by_sheet.get(sheet.name.as_str()) {
-            if let Some(ref ranges) = sheet_settings.print_area {
-                defined_name_overrides.insert(
-                    ("_xlnm.Print_Area".to_string(), sheet_index),
-                    format_print_area_defined_name(&sheet.name, ranges),
-                );
+            match sheet_settings.print_area {
+                Some(ref ranges) => {
+                    defined_name_edits.insert(
+                        ("_xlnm.Print_Area".to_string(), sheet_index),
+                        DefinedNameEdit::Set(format_print_area_defined_name(&sheet.name, ranges)),
+                    );
+                }
+                None => {
+                    defined_name_edits.insert(
+                        ("_xlnm.Print_Area".to_string(), sheet_index),
+                        DefinedNameEdit::Remove,
+                    );
+                }
             }
-            if let Some(ref titles) = sheet_settings.print_titles {
-                defined_name_overrides.insert(
-                    ("_xlnm.Print_Titles".to_string(), sheet_index),
-                    format_print_titles_defined_name(&sheet.name, titles),
-                );
+
+            match sheet_settings.print_titles {
+                Some(ref titles) => {
+                    defined_name_edits.insert(
+                        ("_xlnm.Print_Titles".to_string(), sheet_index),
+                        DefinedNameEdit::Set(format_print_titles_defined_name(&sheet.name, titles)),
+                    );
+                }
+                None => {
+                    defined_name_edits.insert(
+                        ("_xlnm.Print_Titles".to_string(), sheet_index),
+                        DefinedNameEdit::Remove,
+                    );
+                }
             }
         }
     }
 
-    let updated_workbook_xml = update_workbook_xml(&workbook_xml, &defined_name_overrides)?;
+    let updated_workbook_xml = update_workbook_xml(&workbook_xml, &defined_name_edits)?;
 
     let mut updated_sheets: HashMap<String, Vec<u8>> = HashMap::new();
     for sheet in &workbook.sheets {
@@ -484,7 +507,7 @@ fn parse_break_id(e: &BytesStart<'_>) -> Result<Option<u32>, PrintError> {
 
 fn update_workbook_xml(
     workbook_xml: &[u8],
-    overrides: &HashMap<(String, usize), String>,
+    edits: &HashMap<(String, usize), DefinedNameEdit>,
 ) -> Result<Vec<u8>, PrintError> {
     let mut reader = Reader::from_reader(workbook_xml);
     let mut writer = Writer::new(Vec::new());
@@ -492,9 +515,9 @@ fn update_workbook_xml(
 
     let mut in_defined_names = false;
     let mut seen_defined_names = false;
-    let mut replacing_defined_name: Option<(String, usize)> = None;
-    let mut replaced: HashSet<(String, usize)> = HashSet::new();
-    let mut skip_depth = 0usize;
+    let mut skipping_defined_name = false;
+    let mut current_defined_key: Option<(String, usize)> = None;
+    let mut applied: HashSet<(String, usize)> = HashSet::new();
 
     loop {
         let event = reader.read_event_into(&mut buf)?;
@@ -506,11 +529,13 @@ fn update_workbook_xml(
             }
             Event::End(ref e) if e.name().as_ref() == b"definedNames" => {
                 if in_defined_names {
-                    for ((name, local_sheet_id), value) in overrides {
-                        if replaced.contains(&(name.clone(), *local_sheet_id)) {
+                    for ((name, local_sheet_id), edit) in edits {
+                        if applied.contains(&(name.clone(), *local_sheet_id)) {
                             continue;
                         }
-                        write_defined_name(&mut writer, name, *local_sheet_id, value)?;
+                        if let DefinedNameEdit::Set(value) = edit {
+                            write_defined_name(&mut writer, name, *local_sheet_id, value)?;
+                        }
                     }
                 }
                 in_defined_names = false;
@@ -520,56 +545,52 @@ fn update_workbook_xml(
                 let (name, local_sheet_id) = parse_defined_name_key(e)?;
                 if let (Some(name), Some(local_sheet_id)) = (name, local_sheet_id) {
                     let key = (name.clone(), local_sheet_id);
-                    if overrides.contains_key(&key) {
-                        replacing_defined_name = Some(key.clone());
-                        replaced.insert(key.clone());
-                        writer.write_event(event)?;
-                        if let Some(value) = overrides.get(&key) {
-                            writer.write_event(Event::Text(BytesText::new(value)))?;
+                    if let Some(edit) = edits.get(&key) {
+                        applied.insert(key.clone());
+                        current_defined_key = Some(key);
+                        match edit {
+                            DefinedNameEdit::Set(value) => {
+                                writer.write_event(Event::Start(e.to_owned()))?;
+                                writer.write_event(Event::Text(BytesText::new(value)))?;
+                                skipping_defined_name = true;
+                                buf.clear();
+                                continue;
+                            }
+                            DefinedNameEdit::Remove => {
+                                skipping_defined_name = true;
+                                buf.clear();
+                                continue;
+                            }
                         }
-                        skip_depth = 0;
-                        buf.clear();
-                        continue;
                     }
                 }
                 writer.write_event(event)?;
             }
-            Event::End(ref e)
-                if replacing_defined_name.is_some() && e.name().as_ref() == b"definedName" =>
-            {
-                replacing_defined_name = None;
-                writer.write_event(event)?;
-            }
-            _ if replacing_defined_name.is_some() => {
-                // Skip everything inside the replaced definedName until its end tag.
-                match event {
-                    Event::Start(_) => skip_depth += 1,
-                    Event::End(ref e) => {
-                        if skip_depth == 0 && e.name().as_ref() == b"definedName" {
-                            replacing_defined_name = None;
-                            writer.write_event(Event::End(BytesEnd::new("definedName")))?;
-                        } else if skip_depth > 0 {
-                            skip_depth -= 1;
-                        }
+            Event::End(ref e) if skipping_defined_name && e.name().as_ref() == b"definedName" => {
+                if let Some(key) = current_defined_key.take() {
+                    if matches!(edits.get(&key), Some(DefinedNameEdit::Set(_))) {
+                        writer.write_event(Event::End(BytesEnd::new("definedName")))?;
                     }
-                    _ => {}
                 }
+                skipping_defined_name = false;
             }
             Event::End(ref e)
                 if e.name().as_ref() == b"workbook"
                     && !seen_defined_names
-                    && !overrides.is_empty() =>
+                    && edits.values().any(|e| matches!(e, DefinedNameEdit::Set(_))) =>
             {
                 writer.write_event(Event::Start(BytesStart::new("definedNames")))?;
-                for ((name, local_sheet_id), value) in overrides {
-                    write_defined_name(&mut writer, name, *local_sheet_id, value)?;
+                for ((name, local_sheet_id), edit) in edits {
+                    if let DefinedNameEdit::Set(value) = edit {
+                        write_defined_name(&mut writer, name, *local_sheet_id, value)?;
+                    }
                 }
                 writer.write_event(Event::End(BytesEnd::new("definedNames")))?;
                 writer.write_event(event)?;
             }
             Event::Eof => break,
             _ => {
-                if replacing_defined_name.is_none() {
+                if !skipping_defined_name {
                     writer.write_event(event)?;
                 }
             }

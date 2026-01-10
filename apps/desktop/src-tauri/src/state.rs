@@ -1,5 +1,6 @@
 use crate::file_io::Workbook;
 use formula_engine::{Engine as FormulaEngine, ErrorKind, Value as EngineValue};
+use formula_xlsx::print::{CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings};
 use serde_json::Value as JsonValue;
 
 #[derive(Debug, thiserror::Error)]
@@ -230,6 +231,81 @@ impl AppState {
         self.workbook
             .as_ref()
             .ok_or(AppStateError::NoWorkbookLoaded)
+    }
+
+    pub fn get_workbook_mut(&mut self) -> Result<&mut Workbook, AppStateError> {
+        self.workbook
+            .as_mut()
+            .ok_or(AppStateError::NoWorkbookLoaded)
+    }
+
+    pub fn sheet_print_settings(
+        &self,
+        sheet_id: &str,
+    ) -> Result<SheetPrintSettings, AppStateError> {
+        let workbook = self
+            .workbook
+            .as_ref()
+            .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let sheet = workbook
+            .sheet(sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+
+        let settings = workbook
+            .print_settings
+            .sheets
+            .iter()
+            .find(|s| s.sheet_name == sheet.name);
+
+        Ok(settings
+            .cloned()
+            .unwrap_or_else(|| default_sheet_print_settings(sheet.name.clone())))
+    }
+
+    pub fn set_sheet_print_area(
+        &mut self,
+        sheet_id: &str,
+        print_area: Option<Vec<PrintCellRange>>,
+    ) -> Result<(), AppStateError> {
+        let workbook = self
+            .workbook
+            .as_mut()
+            .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let sheet = workbook
+            .sheet(sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+        let sheet_name = sheet.name.clone();
+
+        let settings =
+            ensure_sheet_print_settings(&mut workbook.print_settings.sheets, &sheet_name);
+        settings.print_area = print_area;
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(())
+    }
+
+    pub fn set_sheet_page_setup(
+        &mut self,
+        sheet_id: &str,
+        page_setup: PageSetup,
+    ) -> Result<(), AppStateError> {
+        let workbook = self
+            .workbook
+            .as_mut()
+            .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let sheet = workbook
+            .sheet(sheet_id)
+            .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+        let sheet_name = sheet.name.clone();
+
+        let settings =
+            ensure_sheet_print_settings(&mut workbook.print_settings.sheets, &sheet_name);
+        settings.page_setup = page_setup;
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(())
     }
 
     pub fn get_cell(
@@ -715,6 +791,29 @@ fn apply_snapshot_to_engine(
     let _ = engine.set_cell_value(sheet_name, &addr, engine_value);
 }
 
+fn default_sheet_print_settings(sheet_name: String) -> SheetPrintSettings {
+    SheetPrintSettings {
+        sheet_name,
+        print_area: None,
+        print_titles: None,
+        page_setup: PageSetup::default(),
+        manual_page_breaks: ManualPageBreaks::default(),
+    }
+}
+
+fn ensure_sheet_print_settings<'a>(
+    sheets: &'a mut Vec<SheetPrintSettings>,
+    sheet_name: &str,
+) -> &'a mut SheetPrintSettings {
+    if let Some(idx) = sheets.iter().position(|s| s.sheet_name == sheet_name) {
+        return &mut sheets[idx];
+    }
+
+    sheets.push(default_sheet_print_settings(sheet_name.to_string()));
+    let idx = sheets.len().saturating_sub(1);
+    &mut sheets[idx]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -796,6 +895,8 @@ mod tests {
 
     #[test]
     fn xlsx_round_trip_through_file_io() {
+        use formula_xlsx::print::{CellRange, Orientation, PageSetup, PaperSize, Scaling};
+
         let mut workbook = Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
         let sheet_id = workbook.sheets[0].id.clone();
@@ -810,6 +911,29 @@ mod tests {
             Cell::from_formula("=A1+4".to_string()),
         );
 
+        // Set a print area + a non-default page setup and ensure it survives the
+        // write/read round-trip.
+        workbook
+            .print_settings
+            .sheets
+            .push(formula_xlsx::print::SheetPrintSettings {
+                sheet_name: "Sheet1".to_string(),
+                print_area: Some(vec![CellRange {
+                    start_row: 1,
+                    end_row: 10,
+                    start_col: 1,
+                    end_col: 4,
+                }]),
+                print_titles: None,
+                page_setup: PageSetup {
+                    orientation: Orientation::Landscape,
+                    paper_size: PaperSize { code: 9 },
+                    margins: formula_xlsx::print::PageMargins::default(),
+                    scaling: Scaling::Percent(90),
+                },
+                manual_page_breaks: formula_xlsx::print::ManualPageBreaks::default(),
+            });
+
         let tmp_dir = tempfile::tempdir().expect("temp dir");
         let path = tmp_dir.path().join("roundtrip.xlsx");
         write_xlsx_blocking(&path, &workbook).expect("write");
@@ -822,6 +946,27 @@ mod tests {
         let sheet_id = info.sheets[0].id.clone();
         let b1 = state.get_cell(&sheet_id, 0, 1).unwrap();
         assert_eq!(b1.value, CellScalar::Number(7.0));
+
+        let print_settings = state
+            .sheet_print_settings(&sheet_id)
+            .expect("sheet print settings");
+        assert_eq!(
+            print_settings.print_area.as_deref(),
+            Some(
+                &[CellRange {
+                    start_row: 1,
+                    end_row: 10,
+                    start_col: 1,
+                    end_col: 4,
+                }][..]
+            )
+        );
+        assert_eq!(
+            print_settings.page_setup.orientation,
+            Orientation::Landscape
+        );
+        assert_eq!(print_settings.page_setup.paper_size.code, 9);
+        assert_eq!(print_settings.page_setup.scaling, Scaling::Percent(90));
     }
 
     #[test]

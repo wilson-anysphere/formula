@@ -1,6 +1,9 @@
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
+use formula_xlsx::print::{
+    read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
+};
 use formula_xlsx::XlsxPackage;
 use rust_xlsxwriter::{Workbook as XlsxWorkbook, XlsxError};
 use std::collections::HashMap;
@@ -49,6 +52,7 @@ pub struct Workbook {
     pub path: Option<String>,
     pub vba_project_bin: Option<Vec<u8>>,
     pub sheets: Vec<Sheet>,
+    pub print_settings: WorkbookPrintSettings,
 }
 
 impl Workbook {
@@ -57,6 +61,7 @@ impl Workbook {
             path,
             vba_project_bin: None,
             sheets: Vec::new(),
+            print_settings: WorkbookPrintSettings::default(),
         }
     }
 
@@ -138,10 +143,21 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         open_workbook_auto(path).with_context(|| format!("open workbook {:?}", path))?;
     let sheet_names = workbook.sheet_names().to_owned();
 
+    let print_settings = match path.extension().and_then(|s| s.to_str()) {
+        Some(ext) if matches!(ext.to_ascii_lowercase().as_str(), "xlsx" | "xlsm") => {
+            std::fs::read(path)
+                .ok()
+                .and_then(|bytes| read_workbook_print_settings(&bytes).ok())
+                .unwrap_or_default()
+        }
+        _ => WorkbookPrintSettings::default(),
+    };
+
     let mut out = Workbook {
         path: Some(path.to_string_lossy().to_string()),
         vba_project_bin: None,
         sheets: Vec::new(),
+        print_settings,
     };
 
     // Preserve macros: if the source file contains `xl/vbaProject.bin`, stash it so that
@@ -295,12 +311,14 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<(
         .map_err(|e| anyhow::anyhow!(xlsx_err(e)))
         .with_context(|| "serialize workbook to buffer")?;
 
+    let extension = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase());
+
     if workbook.vba_project_bin.is_some()
         && matches!(
-            path.extension()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_ascii_lowercase())
-                .as_deref(),
+            extension.as_deref(),
             Some("xlsm")
         )
     {
@@ -313,6 +331,11 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<(
         bytes = pkg
             .write_to_bytes()
             .context("repack workbook package with vbaProject.bin")?;
+    }
+
+    if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {
+        bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     }
 
     std::fs::write(path, bytes).with_context(|| format!("write workbook {:?}", path))?;
