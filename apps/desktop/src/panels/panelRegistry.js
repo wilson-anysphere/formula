@@ -1,6 +1,7 @@
 export const PanelIds = Object.freeze({
   AI_CHAT: "aiChat",
   VERSION_HISTORY: "versionHistory",
+  FORMULA_DEBUGGER: "formulaDebugger",
   SCRIPT_EDITOR: "scriptEditor",
   PIVOT_BUILDER: "pivotBuilder",
   QUERY_EDITOR: "queryEditor",
@@ -19,6 +20,11 @@ export const PANEL_REGISTRY = Object.freeze({
     title: "Version History",
     defaultDock: "right",
     defaultFloatingRect: { x: 160, y: 160, width: 480, height: 640 },
+  },
+  [PanelIds.FORMULA_DEBUGGER]: {
+    title: "Formula Debugger",
+    defaultDock: "right",
+    defaultFloatingRect: { x: 180, y: 180, width: 520, height: 640 },
   },
   [PanelIds.SCRIPT_EDITOR]: {
     title: "Script Editor",
