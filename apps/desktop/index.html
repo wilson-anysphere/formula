@@ -15,7 +15,149 @@
       #app {
         height: 100%;
         display: grid;
-        grid-template-rows: 1fr auto;
+        grid-template-rows: auto 1fr auto;
+      }
+
+      .formula-bar {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 8px 12px;
+        border-bottom: 1px solid #d4d4d4;
+        background: #fafafa;
+      }
+
+      .formula-bar-row {
+        display: grid;
+        grid-template-columns: 72px 24px 1fr 24px;
+        gap: 8px;
+        align-items: start;
+      }
+
+      .formula-bar-address {
+        font-size: 12px;
+        padding: 4px 6px;
+        border: 1px solid #d4d4d4;
+        border-radius: 4px;
+        background: #ffffff;
+        line-height: 16px;
+        user-select: none;
+      }
+
+      .formula-bar-fx {
+        font-size: 12px;
+        font-weight: 600;
+        color: #555;
+        padding-top: 6px;
+        user-select: none;
+      }
+
+      .formula-bar-editor {
+        position: relative;
+        min-width: 0;
+      }
+
+      .formula-bar-highlight {
+        margin: 0;
+        box-sizing: border-box;
+        padding: 2px 6px;
+        border: 1px solid #d4d4d4;
+        border-radius: 4px;
+        background: #ffffff;
+        overflow: auto;
+        font: 14px/20px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+          monospace;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .formula-bar-input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 2px 6px;
+        border: none;
+        outline: none;
+        resize: none;
+        background: transparent;
+        color: transparent;
+        caret-color: #111827;
+        font: inherit;
+        line-height: 20px;
+        overflow: auto;
+      }
+
+      .formula-bar-highlight span[data-kind="function"] {
+        color: #0e65eb;
+        font-weight: 600;
+      }
+
+      .formula-bar-highlight span[data-kind="reference"] {
+        color: #7c3aed;
+      }
+
+      .formula-bar-highlight span[data-kind="string"] {
+        color: #b45309;
+      }
+
+      .formula-bar-highlight span[data-kind="number"] {
+        color: #15803d;
+      }
+
+      .formula-bar-highlight span[data-kind="operator"] {
+        color: #374151;
+      }
+
+      .formula-bar-highlight span[data-kind="punctuation"] {
+        color: #6b7280;
+      }
+
+      .formula-bar-highlight span[data-kind="error"] {
+        color: #b91c1c;
+        font-weight: 600;
+      }
+
+      .formula-bar-hint {
+        font-size: 12px;
+        color: #374151;
+        line-height: 16px;
+        min-height: 16px;
+      }
+
+      .formula-bar-error-button {
+        height: 24px;
+        width: 24px;
+        margin-top: 2px;
+        border: 1px solid #fecaca;
+        border-radius: 4px;
+        background: #fee2e2;
+        color: #991b1b;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .formula-bar-error-panel {
+        padding: 8px 12px;
+        border: 1px solid #fecaca;
+        border-radius: 6px;
+        background: #fff1f2;
+        font-size: 12px;
+        color: #111827;
+      }
+
+      .formula-bar-error-title {
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+
+      .formula-bar-error-desc {
+        margin-bottom: 6px;
+      }
+
+      .formula-bar-error-suggestions {
+        margin: 0;
+        padding-left: 18px;
       }
 
       .grid-root {
@@ -73,6 +215,7 @@
   </head>
   <body>
     <div id="app">
+      <div id="formula-bar"></div>
       <div id="grid" class="grid-root" tabindex="0" aria-label="Spreadsheet grid"></div>
       <div class="statusbar">
         <div>

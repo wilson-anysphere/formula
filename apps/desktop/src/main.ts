@@ -5,6 +5,11 @@ if (!gridRoot) {
   throw new Error("Missing #grid container");
 }
 
+const formulaBarRoot = document.getElementById("formula-bar");
+if (!formulaBarRoot) {
+  throw new Error("Missing #formula-bar container");
+}
+
 const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cell"]');
 const selectionRange = document.querySelector<HTMLElement>('[data-testid="selection-range"]');
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
@@ -16,7 +21,7 @@ if (!openComments) {
   throw new Error("Missing comments panel toggle button");
 }
 
-const app = new SpreadsheetApp(gridRoot, { activeCell, selectionRange, activeValue });
+const app = new SpreadsheetApp(gridRoot, { activeCell, selectionRange, activeValue }, { formulaBar: formulaBarRoot });
 app.focus();
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
 

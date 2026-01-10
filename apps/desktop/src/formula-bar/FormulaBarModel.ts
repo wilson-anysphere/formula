@@ -70,6 +70,7 @@ export class FormulaBarModel {
     this.#activeCell = { ...this.#activeCell, input: this.#draft };
     this.#rangeInsertion = null;
     this.#aiSuggestion = null;
+    this.#hoveredReference = null;
     return this.#draft;
   }
 

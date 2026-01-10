@@ -1,4 +1,5 @@
 import { CellEditorOverlay } from "../editor/cellEditorOverlay";
+import { FormulaBarView } from "../formula-bar/FormulaBarView";
 import { cellToA1, rangeToA1 } from "../selection/a1";
 import { navigateSelectionByKey } from "../selection/navigation";
 import { SelectionRenderer } from "../selection/renderer";
@@ -35,8 +36,10 @@ export class SpreadsheetApp {
   private limits: GridLimits;
 
   private gridCanvas: HTMLCanvasElement;
+  private referenceCanvas: HTMLCanvasElement;
   private selectionCanvas: HTMLCanvasElement;
   private gridCtx: CanvasRenderingContext2D;
+  private referenceCtx: CanvasRenderingContext2D;
   private selectionCtx: CanvasRenderingContext2D;
 
   private dpr = 1;
@@ -50,6 +53,11 @@ export class SpreadsheetApp {
   private selectionRenderer = new SelectionRenderer();
 
   private editor: CellEditorOverlay;
+  private formulaBar: FormulaBarView | null = null;
+  private formulaEditCell: CellCoord | null = null;
+  private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
+
+  private dragState: { pointerId: number; mode: "normal" | "formula" } | null = null;
 
   private resizeObserver: ResizeObserver;
 
@@ -66,7 +74,11 @@ export class SpreadsheetApp {
   private newCommentInput!: HTMLInputElement;
   private commentTooltip!: HTMLDivElement;
 
-  constructor(private root: HTMLElement, private status: SpreadsheetAppStatusElements, opts: { limits?: GridLimits } = {}) {
+  constructor(
+    private root: HTMLElement,
+    private status: SpreadsheetAppStatusElements,
+    opts: { limits?: GridLimits; formulaBar?: HTMLElement } = {}
+  ) {
     this.limits = opts.limits ?? { ...DEFAULT_GRID_LIMITS, maxRows: 10_000, maxCols: 200 };
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
 
@@ -77,11 +89,15 @@ export class SpreadsheetApp {
     this.gridCanvas = document.createElement("canvas");
     this.gridCanvas.className = "grid-canvas";
     this.gridCanvas.setAttribute("aria-hidden", "true");
+    this.referenceCanvas = document.createElement("canvas");
+    this.referenceCanvas.className = "grid-canvas";
+    this.referenceCanvas.setAttribute("aria-hidden", "true");
     this.selectionCanvas = document.createElement("canvas");
     this.selectionCanvas.className = "grid-canvas";
     this.selectionCanvas.setAttribute("aria-hidden", "true");
 
     this.root.appendChild(this.gridCanvas);
+    this.root.appendChild(this.referenceCanvas);
     this.root.appendChild(this.selectionCanvas);
 
     this.commentsPanel = this.createCommentsPanel();
@@ -91,11 +107,13 @@ export class SpreadsheetApp {
     this.root.appendChild(this.commentTooltip);
 
     const gridCtx = this.gridCanvas.getContext("2d");
+    const referenceCtx = this.referenceCanvas.getContext("2d");
     const selectionCtx = this.selectionCanvas.getContext("2d");
-    if (!gridCtx || !selectionCtx) {
+    if (!gridCtx || !referenceCtx || !selectionCtx) {
       throw new Error("Canvas 2D context not available");
     }
     this.gridCtx = gridCtx;
+    this.referenceCtx = referenceCtx;
     this.selectionCtx = selectionCtx;
 
     this.editor = new CellEditorOverlay(this.root, {
@@ -125,6 +143,8 @@ export class SpreadsheetApp {
 
     this.root.addEventListener("pointerdown", (e) => this.onPointerDown(e));
     this.root.addEventListener("pointermove", (e) => this.onPointerMove(e));
+    this.root.addEventListener("pointerup", (e) => this.onPointerUp(e));
+    this.root.addEventListener("pointercancel", (e) => this.onPointerUp(e));
     this.root.addEventListener("pointerleave", () => this.hideCommentTooltip());
     this.root.addEventListener("keydown", (e) => this.onKeyDown(e));
 
@@ -143,6 +163,25 @@ export class SpreadsheetApp {
       } catch {
         // Ignore persistence failures (e.g. storage disabled).
       }
+    }
+
+    if (opts.formulaBar) {
+      this.formulaBar = new FormulaBarView(opts.formulaBar, {
+        onBeginEdit: () => {
+          this.formulaEditCell = { ...this.selection.active };
+        },
+        onCommit: (text) => this.commitFormulaBar(text),
+        onCancel: () => this.cancelFormulaBar(),
+        onHoverRange: (range) => {
+          this.referencePreview = range
+            ? {
+                start: { row: range.start.row, col: range.start.col },
+                end: { row: range.end.row, col: range.end.col }
+              }
+            : null;
+          this.renderReferencePreview();
+        }
+      });
     }
 
     // Initial layout + render.
@@ -427,7 +466,7 @@ export class SpreadsheetApp {
     this.height = rect.height;
     this.dpr = window.devicePixelRatio || 1;
 
-    for (const canvas of [this.gridCanvas, this.selectionCanvas]) {
+    for (const canvas of [this.gridCanvas, this.referenceCanvas, this.selectionCanvas]) {
       canvas.width = Math.floor(this.width * this.dpr);
       canvas.height = Math.floor(this.height * this.dpr);
       canvas.style.width = `${this.width}px`;
@@ -435,12 +474,13 @@ export class SpreadsheetApp {
     }
 
     // Reset transforms and apply DPR scaling so drawing code uses CSS pixels.
-    for (const ctx of [this.gridCtx, this.selectionCtx]) {
+    for (const ctx of [this.gridCtx, this.referenceCtx, this.selectionCtx]) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(this.dpr, this.dpr);
     }
 
     this.renderGrid();
+    this.renderReferencePreview();
     this.renderSelection();
     this.updateStatus();
   }
@@ -522,6 +562,13 @@ export class SpreadsheetApp {
     this.status.selectionRange.textContent =
       this.selection.ranges.length === 1 ? rangeToA1(this.selection.ranges[0]) : `${this.selection.ranges.length} ranges`;
     this.status.activeValue.textContent = this.getCellDisplayValue(this.selection.active);
+
+    if (this.formulaBar && !this.formulaBar.isEditing()) {
+      const address = cellToA1(this.selection.active);
+      const input = this.getCellDisplayValue(this.selection.active);
+      this.formulaBar.setActiveCell({ address, input, value: input });
+    }
+
     this.renderCommentsPanel();
   }
 
@@ -551,6 +598,22 @@ export class SpreadsheetApp {
     const y = e.clientY - rect.top;
     const cell = this.cellFromPoint(x, y);
 
+    if (this.formulaBar?.isFormulaEditing()) {
+      e.preventDefault();
+      this.dragState = { pointerId: e.pointerId, mode: "formula" };
+      this.root.setPointerCapture(e.pointerId);
+      this.selection = setActiveCell(this.selection, cell, this.limits);
+      this.renderSelection();
+      this.updateStatus();
+      this.formulaBar.beginRangeSelection({
+        start: { row: cell.row, col: cell.col },
+        end: { row: cell.row, col: cell.col }
+      });
+      return;
+    }
+
+    this.dragState = { pointerId: e.pointerId, mode: "normal" };
+    this.root.setPointerCapture(e.pointerId);
     if (e.shiftKey) {
       this.selection = extendSelectionToCell(this.selection, cell, this.limits);
     } else if (e.ctrlKey || e.metaKey) {
@@ -565,15 +628,35 @@ export class SpreadsheetApp {
   }
 
   private onPointerMove(e: PointerEvent): void {
+    const rect = this.root.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (this.dragState) {
+      if (e.pointerId !== this.dragState.pointerId) return;
+      if (this.editor.isOpen()) return;
+      this.hideCommentTooltip();
+      const cell = this.cellFromPoint(x, y);
+      this.selection = extendSelectionToCell(this.selection, cell, this.limits);
+      this.renderSelection();
+      this.updateStatus();
+
+      if (this.dragState.mode === "formula" && this.formulaBar) {
+        const r = this.selection.ranges[0];
+        this.formulaBar.updateRangeSelection({
+          start: { row: r.startRow, col: r.startCol },
+          end: { row: r.endRow, col: r.endCol }
+        });
+      }
+      return;
+    }
+
     if (this.commentsPanelVisible) {
       // Don't show tooltips while the panel is open; it obscures the grid anyway.
       this.hideCommentTooltip();
       return;
     }
 
-    const rect = this.root.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
     if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
       this.hideCommentTooltip();
       return;
@@ -597,6 +680,19 @@ export class SpreadsheetApp {
     this.commentTooltip.style.left = `${x + 12}px`;
     this.commentTooltip.style.top = `${y + 12}px`;
     this.commentTooltip.style.display = "block";
+  }
+
+  private onPointerUp(e: PointerEvent): void {
+    if (!this.dragState) return;
+    if (e.pointerId !== this.dragState.pointerId) return;
+    const mode = this.dragState.mode;
+    this.dragState = null;
+
+    if (mode === "formula" && this.formulaBar) {
+      this.formulaBar.endRangeSelection();
+      // Restore focus to the formula bar without clearing its insertion state mid-drag.
+      this.formulaBar.focus();
+    }
   }
 
   private onKeyDown(e: KeyboardEvent): void {
@@ -703,6 +799,62 @@ export class SpreadsheetApp {
     }
 
     this.document.setCellValue(this.sheetId, cell, rawValue, { label: "Edit cell" });
+  }
+
+  private commitFormulaBar(text: string): void {
+    const target = this.formulaEditCell ?? this.selection.active;
+    this.applyEdit(target, text);
+    this.renderGrid();
+
+    this.selection = setActiveCell(this.selection, target, this.limits);
+    this.formulaEditCell = null;
+    this.referencePreview = null;
+    this.renderReferencePreview();
+    this.renderSelection();
+    this.updateStatus();
+    this.focus();
+  }
+
+  private cancelFormulaBar(): void {
+    if (this.formulaEditCell) {
+      this.selection = setActiveCell(this.selection, this.formulaEditCell, this.limits);
+    }
+    this.formulaEditCell = null;
+    this.referencePreview = null;
+    this.renderReferencePreview();
+    this.renderSelection();
+    this.updateStatus();
+    this.focus();
+  }
+
+  private renderReferencePreview(): void {
+    const ctx = this.referenceCtx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.referenceCanvas.width, this.referenceCanvas.height);
+    ctx.restore();
+
+    if (!this.referencePreview) return;
+
+    const startRow = Math.min(this.referencePreview.start.row, this.referencePreview.end.row);
+    const endRow = Math.max(this.referencePreview.start.row, this.referencePreview.end.row);
+    const startCol = Math.min(this.referencePreview.start.col, this.referencePreview.end.col);
+    const endCol = Math.max(this.referencePreview.start.col, this.referencePreview.end.col);
+
+    const startRect = this.getCellRect({ row: startRow, col: startCol });
+    const endRect = this.getCellRect({ row: endRow, col: endCol });
+
+    const x = startRect.x;
+    const y = startRect.y;
+    const width = endRect.x + endRect.width - startRect.x;
+    const height = endRect.y + endRect.height - startRect.y;
+
+    ctx.save();
+    ctx.strokeStyle = "#f97316";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+    ctx.restore();
   }
 
   private usedRangeProvider() {
