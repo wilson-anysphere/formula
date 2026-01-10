@@ -559,6 +559,8 @@ class AuditLogger {
 
 ### SIEM Integration
 
+For concrete export formats (JSON/CEF/LEEF), batching/retry behavior, and per-organization configuration endpoints, see [`docs/siem.md`](./siem.md).
+
 ```typescript
 interface SIEMConfig {
   type: "splunk" | "elastic" | "datadog" | "sentinel" | "custom";
