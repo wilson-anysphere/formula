@@ -119,6 +119,17 @@ pub struct Worksheet {
     /// User-visible name.
     pub name: String,
 
+    /// XLSX `sheetId` value preserved for round-trip fidelity.
+    ///
+    /// This is distinct from [`Worksheet::id`], which is the internal stable id
+    /// used by the in-memory model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xlsx_sheet_id: Option<u32>,
+
+    /// XLSX workbook relationship id (`r:id`) for this sheet, preserved for round-trip fidelity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xlsx_rel_id: Option<String>,
+
     /// Sheet visibility state.
     #[serde(default, skip_serializing_if = "is_visible")]
     pub visibility: SheetVisibility,
@@ -194,6 +205,8 @@ impl Worksheet {
         Self {
             id,
             name: name.into(),
+            xlsx_sheet_id: None,
+            xlsx_rel_id: None,
             visibility: SheetVisibility::Visible,
             tab_color: None,
             drawings: Vec::new(),
@@ -833,6 +846,10 @@ impl<'de> Deserialize<'de> for Worksheet {
             id: WorksheetId,
             name: String,
             #[serde(default)]
+            xlsx_sheet_id: Option<u32>,
+            #[serde(default)]
+            xlsx_rel_id: Option<String>,
+            #[serde(default)]
             visibility: SheetVisibility,
             #[serde(default)]
             tab_color: Option<TabColor>,
@@ -924,6 +941,8 @@ impl<'de> Deserialize<'de> for Worksheet {
         Ok(Worksheet {
             id: helper.id,
             name: helper.name,
+            xlsx_sheet_id: helper.xlsx_sheet_id,
+            xlsx_rel_id: helper.xlsx_rel_id,
             visibility: helper.visibility,
             tab_color: helper.tab_color,
             drawings: helper.drawings,

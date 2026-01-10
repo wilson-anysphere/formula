@@ -4,6 +4,11 @@ use std::io::{Cursor, Read, Write};
 use thiserror::Error;
 
 use crate::pivots::XlsxPivots;
+use crate::sheet_metadata::{
+    parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
+    WorkbookSheetInfo,
+};
+use formula_model::TabColor;
 
 #[derive(Debug, Error)]
 pub enum XlsxError {
@@ -126,6 +131,50 @@ impl XlsxPackage {
     pub fn pivots(&self) -> Result<XlsxPivots, XlsxError> {
         XlsxPivots::parse_from_entries(&self.parts)
     }
+
+    /// Parse the ordered list of workbook sheets from `xl/workbook.xml`.
+    pub fn workbook_sheets(&self) -> Result<Vec<WorkbookSheetInfo>, XlsxError> {
+        let workbook_xml = self
+            .part("xl/workbook.xml")
+            .ok_or_else(|| XlsxError::MissingPart("xl/workbook.xml".to_string()))?;
+        let workbook_xml = String::from_utf8(workbook_xml.to_vec())?;
+        parse_workbook_sheets(&workbook_xml)
+    }
+
+    /// Rewrite the `<sheets>` list in `xl/workbook.xml` to match `sheets`.
+    pub fn set_workbook_sheets(&mut self, sheets: &[WorkbookSheetInfo]) -> Result<(), XlsxError> {
+        let workbook_xml = self
+            .part("xl/workbook.xml")
+            .ok_or_else(|| XlsxError::MissingPart("xl/workbook.xml".to_string()))?;
+        let workbook_xml = String::from_utf8(workbook_xml.to_vec())?;
+        let updated = write_workbook_sheets(&workbook_xml, sheets)?;
+        self.set_part("xl/workbook.xml", updated.into_bytes());
+        Ok(())
+    }
+
+    /// Read a worksheet tab color from a worksheet part (e.g. `xl/worksheets/sheet1.xml`).
+    pub fn worksheet_tab_color(&self, worksheet_part: &str) -> Result<Option<TabColor>, XlsxError> {
+        let xml = self
+            .part(worksheet_part)
+            .ok_or_else(|| XlsxError::MissingPart(worksheet_part.to_string()))?;
+        let xml = String::from_utf8(xml.to_vec())?;
+        parse_sheet_tab_color(&xml)
+    }
+
+    /// Update (or remove) a worksheet tab color in a worksheet part.
+    pub fn set_worksheet_tab_color(
+        &mut self,
+        worksheet_part: &str,
+        tab_color: Option<&TabColor>,
+    ) -> Result<(), XlsxError> {
+        let xml = self
+            .part(worksheet_part)
+            .ok_or_else(|| XlsxError::MissingPart(worksheet_part.to_string()))?;
+        let xml = String::from_utf8(xml.to_vec())?;
+        let updated = write_sheet_tab_color(&xml, tab_color)?;
+        self.set_part(worksheet_part.to_string(), updated.into_bytes());
+        Ok(())
+    }
 }
 
 fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
@@ -210,6 +259,32 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
+    fn build_minimal_package() -> Vec<u8> {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></worksheet>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.finish().unwrap().into_inner()
+    }
+
     fn load_fixture() -> Vec<u8> {
         std::fs::read(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -268,5 +343,40 @@ mod tests {
             .expect("Module1 present");
         assert!(module.code.contains("Sub Hello"));
         assert_eq!(module.attributes.get("VB_Name").map(String::as_str), Some("Module1"));
+    }
+
+    #[test]
+    fn package_exposes_sheet_list_and_tab_color_helpers() {
+        let bytes = build_minimal_package();
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        let sheets = pkg.workbook_sheets().expect("parse sheets");
+        assert_eq!(sheets.len(), 1);
+        assert_eq!(sheets[0].name, "Sheet1");
+        assert_eq!(sheets[0].sheet_id, 1);
+        assert_eq!(sheets[0].rel_id, "rId1");
+        assert_eq!(sheets[0].visibility, formula_model::SheetVisibility::Visible);
+
+        let mut updated = sheets.clone();
+        updated[0].name = "Renamed".to_string();
+        pkg.set_workbook_sheets(&updated).expect("write sheets");
+        let renamed = pkg.workbook_sheets().expect("parse renamed sheets");
+        assert_eq!(renamed[0].name, "Renamed");
+
+        let color = TabColor::rgb("FFFF0000");
+        pkg.set_worksheet_tab_color("xl/worksheets/sheet1.xml", Some(&color))
+            .expect("set tab color");
+        let parsed = pkg
+            .worksheet_tab_color("xl/worksheets/sheet1.xml")
+            .expect("parse tab color");
+        assert_eq!(parsed.unwrap().rgb.as_deref(), Some("FFFF0000"));
+
+        pkg.set_worksheet_tab_color("xl/worksheets/sheet1.xml", None)
+            .expect("remove tab color");
+        assert_eq!(
+            pkg.worksheet_tab_color("xl/worksheets/sheet1.xml")
+                .expect("parse tab color"),
+            None
+        );
     }
 }
