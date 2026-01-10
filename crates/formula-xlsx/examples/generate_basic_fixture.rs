@@ -170,6 +170,11 @@ fn build_module_code() -> String {
         r#"    MsgBox "Hello from VBA""#,
         "End Sub",
         "",
+        "Sub WriteCells()",
+        r#"    Range("A1").Value = "Written""#,
+        r#"    Range("B2").Value = 42"#,
+        "End Sub",
+        "",
     ]
     .join("\r\n")
 }

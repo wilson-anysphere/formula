@@ -23,15 +23,23 @@ fn executes_macro_from_xlsm_fixture() {
 
     let mut workbook = InMemoryWorkbook::new();
     runtime
-        .execute(&mut workbook, "Hello", &[])
+        .execute(&mut workbook, "WriteCells", &[])
         .expect("run macro");
 
     assert!(
-        workbook
-            .output
-            .iter()
-            .any(|line| line.contains("Hello from VBA")),
-        "expected MsgBox output, got: {:?}",
-        workbook.output
+        matches!(
+            workbook.get_value_a1("Sheet1", "A1"),
+            Ok(formula_vba_runtime::VbaValue::String(ref s)) if s == "Written"
+        ),
+        "expected A1 to be written, got: {:?}",
+        workbook.get_value_a1("Sheet1", "A1")
+    );
+    assert!(
+        matches!(
+            workbook.get_value_a1("Sheet1", "B2"),
+            Ok(formula_vba_runtime::VbaValue::Double(v)) if (v - 42.0).abs() < f64::EPSILON
+        ),
+        "expected B2 to be 42, got: {:?}",
+        workbook.get_value_a1("Sheet1", "B2")
     );
 }
