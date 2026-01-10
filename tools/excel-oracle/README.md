@@ -20,6 +20,12 @@ To generate oracle data locally you must have:
 - PowerShell (Windows PowerShell 5.1 or PowerShell 7+)
 - Python 3 (for comparison/reporting, optional if you only generate data)
 
+## CI note (Excel availability)
+
+GitHub-hosted `windows-latest` runners typically **do not include Microsoft Excel**. To generate oracle data in CI you generally need a **self-hosted Windows runner** with Excel installed.
+
+If you commit a pinned oracle dataset (see below), CI can still validate the engine even when Excel is not available.
+
 ## Case corpus
 
 The canonical case list lives at:
@@ -50,6 +56,19 @@ The output JSON includes:
 - A SHA-256 of the case corpus used
 - Results encoded with a stable, typed representation (see below)
 
+## Pin an oracle dataset (optional, for CI without Excel)
+
+If you want CI to validate without running Excel, you can commit a pinned dataset file:
+
+```bash
+python tools/excel-oracle/pin_dataset.py \
+  --dataset tests/compatibility/excel-oracle/datasets/excel-oracle.json \
+  --pinned tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json \
+  --versioned-dir tests/compatibility/excel-oracle/datasets/versioned
+```
+
+The workflow prefers `excel-oracle.pinned.json` if present.
+
 ## Compare formula-engine output vs Excel oracle
 
 1) Produce engine results JSON (same schema as Excel output). The intended flow is that your engine exposes a CLI that can evaluate the case corpus and emit results.
@@ -69,6 +88,8 @@ python tools/excel-oracle/compare.py \
 ```
 
 The report includes `caseId`, `formula`, `inputs`, `expected`, `actual`, and a reason.
+
+`compare.py` also verifies that the `caseSet.sha256` embedded in the datasets matches the current `cases.json`, to prevent stale-oracle comparisons.
 
 ## Value encoding
 

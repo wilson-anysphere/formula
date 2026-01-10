@@ -14,6 +14,7 @@ Output:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -25,6 +26,14 @@ from typing import Any, Iterable
 def _load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _index_results(results: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -50,7 +59,11 @@ class CompareConfig:
 
 
 def _is_number(value_obj: Any) -> bool:
-    return isinstance(value_obj, dict) and value_obj.get("t") == "n" and isinstance(value_obj.get("v"), (int, float))
+    return (
+        isinstance(value_obj, dict)
+        and value_obj.get("t") == "n"
+        and isinstance(value_obj.get("v"), (int, float))
+    )
 
 
 def _numbers_close(a: float, b: float, cfg: CompareConfig) -> bool:
@@ -110,6 +123,18 @@ def main() -> int:
     parser.add_argument("--expected", required=True, help="Path to Excel oracle results JSON")
     parser.add_argument("--actual", required=True, help="Path to engine results JSON")
     parser.add_argument("--report", required=True, help="Path to write mismatch report JSON")
+    parser.add_argument(
+        "--include-tag",
+        action="append",
+        default=[],
+        help="Only include cases that contain this tag (can be repeated).",
+    )
+    parser.add_argument(
+        "--exclude-tag",
+        action="append",
+        default=[],
+        help="Exclude cases that contain this tag (can be repeated).",
+    )
     parser.add_argument("--abs-tol", type=float, default=1e-9)
     parser.add_argument("--rel-tol", type=float, default=1e-9)
     parser.add_argument(
@@ -136,42 +161,84 @@ def main() -> int:
     if actual.get("schemaVersion") != 1:
         raise SystemExit(f"Unsupported actual schemaVersion: {actual.get('schemaVersion')}")
 
+    cases_sha = _sha256_file(cases_path)
+    expected_case_set = expected.get("caseSet")
+    actual_case_set = actual.get("caseSet")
+    expected_sha = expected_case_set.get("sha256") if isinstance(expected_case_set, dict) else None
+    actual_sha = actual_case_set.get("sha256") if isinstance(actual_case_set, dict) else None
+
+    if isinstance(expected_sha, str) and expected_sha.lower() != cases_sha.lower():
+        raise SystemExit(
+            "Expected dataset caseSet.sha256 does not match cases.json. "
+            f"expected={expected_sha} cases={cases_sha}"
+        )
+
+    if isinstance(actual_sha, str) and actual_sha.lower() != cases_sha.lower():
+        raise SystemExit(
+            "Actual dataset caseSet.sha256 does not match cases.json. "
+            f"actual={actual_sha} cases={cases_sha}"
+        )
+
     expected_index = _index_results(expected.get("results", []))
     actual_index = _index_results(actual.get("results", []))
 
     cfg = CompareConfig(abs_tol=args.abs_tol, rel_tol=args.rel_tol)
 
     mismatches: list[dict[str, Any]] = []
+    reason_counts: dict[str, int] = {}
 
+    include_tags = set(args.include_tag)
+    exclude_tags = set(args.exclude_tag)
+
+    included_cases: list[dict[str, Any]] = []
     for case in cases.get("cases", []):
         case_id = case.get("id")
         if not isinstance(case_id, str):
             continue
 
+        tags = case.get("tags", [])
+        if not isinstance(tags, list):
+            tags = []
+        tag_set = {t for t in tags if isinstance(t, str)}
+
+        if include_tags and not (include_tags & tag_set):
+            continue
+        if exclude_tags and (exclude_tags & tag_set):
+            continue
+
+        included_cases.append(case)
+
+    for case in included_cases:
+        case_id = case["id"]
+
         exp = expected_index.get(case_id)
         act = actual_index.get(case_id)
 
         if exp is None:
+            reason = "missing-expected"
             mismatches.append(
                 {
                     "caseId": case_id,
-                    "reason": "missing-expected",
+                    "reason": reason,
                     "formula": case.get("formula"),
                     "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
                 }
             )
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
             continue
 
         if act is None:
+            reason = "missing-actual"
             mismatches.append(
                 {
                     "caseId": case_id,
-                    "reason": "missing-actual",
+                    "reason": reason,
                     "formula": case.get("formula"),
                     "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
                     "expected": exp.get("result"),
                 }
             )
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
             continue
 
         ok, reason = _compare_value(exp.get("result"), act.get("result"), cfg)
@@ -186,8 +253,9 @@ def main() -> int:
                     "actual": act.get("result"),
                 }
             )
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
 
-    total = len([c for c in cases.get("cases", []) if isinstance(c.get("id"), str)])
+    total = len(included_cases)
     mismatch_count = len(mismatches)
     mismatch_rate = (mismatch_count / total) if total else 0.0
 
@@ -195,9 +263,13 @@ def main() -> int:
         "schemaVersion": 1,
         "summary": {
             "totalCases": total,
+            "includeTags": sorted(include_tags),
+            "excludeTags": sorted(exclude_tags),
             "mismatches": mismatch_count,
             "mismatchRate": mismatch_rate,
             "maxMismatchRate": args.max_mismatch_rate,
+            "reasonCounts": dict(sorted(reason_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
+            "casesSha256": cases_sha,
         },
         "expectedSource": expected.get("source"),
         "actualSource": actual.get("source"),
@@ -221,4 +293,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

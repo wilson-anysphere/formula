@@ -44,13 +44,29 @@ jobs:
       - name: Verify case corpus is committed
         run: git diff --exit-code tests/compatibility/excel-oracle/cases.json
 
+      - name: Select expected oracle dataset (pinned vs generated)
+        id: expected
+        shell: powershell
+        run: |
+          $mode = "${{ inputs.mode }}"
+          $pinned = "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json"
+          $generated = "tests/compatibility/excel-oracle/datasets/excel-oracle.json"
+          if ($mode -eq "validate-engine" -and (Test-Path -LiteralPath $pinned)) {
+            "path=$pinned" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "source=pinned" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "path=$generated" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "source=generated" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
       - name: Generate Excel oracle dataset (COM automation)
+        if: ${{ steps.expected.outputs.source == 'generated' }}
         shell: powershell
         run: |
           $max = [int]"${{ inputs.max_cases }}"
           $args = @(
             "-CasesPath", "tests/compatibility/excel-oracle/cases.json",
-            "-OutPath", "tests/compatibility/excel-oracle/datasets/excel-oracle.json"
+            "-OutPath", "${{ steps.expected.outputs.path }}"
           )
           if ($max -gt 0) { $args += @("-MaxCases", $max) }
           powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 @args
@@ -77,7 +93,7 @@ jobs:
         run: |
           python tools/excel-oracle/compare.py `
             --cases tests/compatibility/excel-oracle/cases.json `
-            --expected tests/compatibility/excel-oracle/datasets/excel-oracle.json `
+            --expected "${{ steps.expected.outputs.path }}" `
             --actual tests/compatibility/excel-oracle/datasets/engine-results.json `
             --report tests/compatibility/excel-oracle/reports/mismatch-report.json `
             --max-mismatch-rate "${{ inputs.max_mismatch_rate }}"
@@ -88,5 +104,5 @@ jobs:
         with:
           name: excel-oracle-artifacts
           path: |
-            tests/compatibility/excel-oracle/datasets/*.json
+            tests/compatibility/excel-oracle/datasets/**/*.json
             tests/compatibility/excel-oracle/reports/*.json
