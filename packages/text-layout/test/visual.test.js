@@ -59,3 +59,29 @@ test("drawTextLayout respects alignment offsets (simple snapshot)", () => {
   );
 });
 
+test("drawTextLayout positions RTL text using start alignment (mixed-script snapshot)", () => {
+  const engine = new TextLayoutEngine(makeMonospaceMeasurer());
+  const layout = engine.layout({
+    text: "שלום world",
+    font: { family: "Inter", sizePx: 10, weight: 400 },
+    maxWidth: 6,
+    wrapMode: "word",
+    align: "start",
+    direction: "auto",
+    lineHeightPx: 12,
+  });
+
+  assert.equal(layout.direction, "rtl");
+  assert.equal(layout.resolvedAlign, "right");
+
+  const ctx = new FakeCanvasContext();
+  drawTextLayout(ctx, layout, 0, 0);
+
+  assert.deepEqual(
+    ctx.calls.map((c) => ({ text: c.text, x: c.x })),
+    [
+      { text: "שלום", x: 2 },
+      { text: "world", x: 1 },
+    ],
+  );
+});
