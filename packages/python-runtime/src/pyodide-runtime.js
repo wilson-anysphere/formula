@@ -6,6 +6,7 @@
  * underlying spreadsheet engine bridge solidifies.
  */
 import { dispatchRpc } from "./rpc.js";
+import { formulaFiles as bundledFormulaFiles } from "./formula-files.generated.js";
 
 function defaultPermissions() {
   return { filesystem: "none", network: "none" };
@@ -36,7 +37,7 @@ export class PyodideRuntime {
     this.maxMemoryBytes = options.maxMemoryBytes ?? 256 * 1024 * 1024;
     this.permissions = options.permissions ?? defaultPermissions();
     this.api = options.api;
-    this.formulaFiles = options.formulaFiles;
+    this.formulaFiles = options.formulaFiles ?? bundledFormulaFiles;
   }
 
   /**
