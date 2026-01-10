@@ -38,8 +38,11 @@ export type ToolResultDataByName = {
     updated_cells: number;
   };
   create_pivot_table: {
-    status: "stub";
-    message: string;
+    status: "ok";
+    source_range: string;
+    destination_range: string;
+    written_cells: number;
+    shape: { rows: number; cols: number };
   };
   create_chart: {
     status: "stub";
@@ -148,7 +151,7 @@ export class ToolExecutor {
       case "apply_formula_column":
         return this.applyFormulaColumn(call.parameters);
       case "create_pivot_table":
-        return { status: "stub", message: "Pivot table creation is not implemented yet." };
+        return this.createPivotTable(call.parameters);
       case "create_chart":
         return { status: "stub", message: "Chart creation is not implemented yet." };
       case "sort_range":
@@ -243,6 +246,50 @@ export class ToolExecutor {
     }
 
     return { sheet, column, start_row: startRow, end_row: endRow, updated_cells: updated };
+  }
+
+  private createPivotTable(params: any): ToolResultDataByName["create_pivot_table"] {
+    const source = parseA1Range(params.source_range, this.options.default_sheet);
+    const destination = parseA1Cell(params.destination, this.options.default_sheet);
+
+    const sourceCells = this.spreadsheet.readRange(source);
+    const sourceValues: CellScalar[][] = sourceCells.map((row) =>
+      row.map((cell) => (cell.formula ? null : (cell.value ?? null)))
+    );
+
+    const output = buildPivotTableOutput({
+      sourceValues,
+      rowFields: params.rows ?? [],
+      columnFields: params.columns ?? [],
+      values: params.values ?? []
+    });
+
+    const rowCount = output.length;
+    const colCount = Math.max(1, ...output.map((row) => row.length));
+    const normalized: CellScalar[][] = output.map((row) => {
+      const next = row.slice();
+      while (next.length < colCount) next.push(null);
+      return next;
+    });
+
+    const outRange = {
+      sheet: destination.sheet,
+      startRow: destination.row,
+      startCol: destination.col,
+      endRow: destination.row + rowCount - 1,
+      endCol: destination.col + colCount - 1
+    };
+
+    const cells: CellData[][] = normalized.map((row) => row.map((value) => ({ value })));
+    this.spreadsheet.writeRange(outRange, cells);
+
+    return {
+      status: "ok",
+      source_range: formatA1Range(source),
+      destination_range: formatA1Range(outRange),
+      written_cells: rowCount * colCount,
+      shape: { rows: rowCount, cols: colCount }
+    };
   }
 
   private sortRange(params: any): ToolResultDataByName["sort_range"] {
@@ -501,6 +548,265 @@ export class ToolExecutor {
       shape: { rows: table.length, cols: table[0]?.length ?? 0 }
     };
   }
+}
+
+type PivotAggregation = "sum" | "count" | "average" | "min" | "max";
+
+interface PivotValueSpec {
+  field: string;
+  aggregation: PivotAggregation;
+}
+
+interface PivotBuildRequest {
+  sourceValues: CellScalar[][];
+  rowFields: string[];
+  columnFields: string[];
+  values: PivotValueSpec[];
+}
+
+interface AggState {
+  count: number;
+  countNumbers: number;
+  sum: number;
+  min: number;
+  max: number;
+}
+
+function initAggState(): AggState {
+  return { count: 0, countNumbers: 0, sum: 0, min: Infinity, max: -Infinity };
+}
+
+function updateAggState(state: AggState, value: CellScalar) {
+  if (value == null) return;
+  state.count += 1;
+  if (typeof value !== "number" || !Number.isFinite(value)) return;
+  state.countNumbers += 1;
+  state.sum += value;
+  state.min = Math.min(state.min, value);
+  state.max = Math.max(state.max, value);
+}
+
+function mergeAggState(into: AggState, other: AggState) {
+  into.count += other.count;
+  into.countNumbers += other.countNumbers;
+  into.sum += other.sum;
+  into.min = Math.min(into.min, other.min);
+  into.max = Math.max(into.max, other.max);
+}
+
+function finalizeAgg(state: AggState, agg: PivotAggregation): CellScalar {
+  switch (agg) {
+    case "count":
+      return state.count;
+    case "sum":
+      return state.countNumbers > 0 ? state.sum : null;
+    case "average":
+      return state.countNumbers > 0 ? state.sum / state.countNumbers : null;
+    case "min":
+      return state.countNumbers > 0 ? state.min : null;
+    case "max":
+      return state.countNumbers > 0 ? state.max : null;
+    default: {
+      const exhaustive: never = agg;
+      throw new Error(`Unhandled aggregation: ${exhaustive}`);
+    }
+  }
+}
+
+function aggLabel(agg: PivotAggregation): string {
+  switch (agg) {
+    case "sum":
+      return "Sum";
+    case "count":
+      return "Count";
+    case "average":
+      return "Average";
+    case "min":
+      return "Min";
+    case "max":
+      return "Max";
+    default: {
+      const exhaustive: never = agg;
+      return exhaustive;
+    }
+  }
+}
+
+function normalizeKeyPart(value: CellScalar): string {
+  return value == null ? "" : String(value);
+}
+
+function buildPivotTableOutput(request: PivotBuildRequest): CellScalar[][] {
+  const { sourceValues, rowFields, columnFields, values } = request;
+  if (!Array.isArray(sourceValues) || sourceValues.length === 0) {
+    throw new Error("create_pivot_table: source_range is empty");
+  }
+
+  const headerRow = sourceValues[0] ?? [];
+  const headers = headerRow.map((cell) => normalizeKeyPart(cell).trim());
+  const indexByHeader = new Map<string, number>();
+  for (const [idx, name] of headers.entries()) {
+    if (!name) continue;
+    if (!indexByHeader.has(name)) indexByHeader.set(name, idx);
+  }
+
+  const rowIndices = rowFields.map((name) => {
+    const idx = indexByHeader.get(name);
+    if (idx == null) throw new Error(`create_pivot_table: missing row field \"${name}\" in header row`);
+    return idx;
+  });
+
+  const colIndices = columnFields.map((name) => {
+    const idx = indexByHeader.get(name);
+    if (idx == null) throw new Error(`create_pivot_table: missing column field \"${name}\" in header row`);
+    return idx;
+  });
+
+  const valueSpecs: PivotValueSpec[] = values.map((v) => ({
+    field: v.field,
+    aggregation: v.aggregation
+  }));
+
+  const valueIndices = valueSpecs.map((spec) => {
+    const idx = indexByHeader.get(spec.field);
+    if (idx == null) throw new Error(`create_pivot_table: missing value field \"${spec.field}\" in header row`);
+    return idx;
+  });
+
+  const hasColumns = colIndices.length > 0;
+
+  const cube = new Map<string, Map<string, AggState[]>>();
+  const rowKeyParts = new Map<string, CellScalar[]>();
+  const colKeyParts = new Map<string, CellScalar[]>();
+  const rowKeys = new Set<string>();
+  const colKeys = new Set<string>();
+
+  for (const record of sourceValues.slice(1)) {
+    const rowParts = rowIndices.map((idx) => record[idx] ?? null);
+    const rowKey = JSON.stringify(rowParts.map(normalizeKeyPart));
+    rowKeys.add(rowKey);
+    if (!rowKeyParts.has(rowKey)) rowKeyParts.set(rowKey, rowParts);
+
+    const colParts = colIndices.map((idx) => record[idx] ?? null);
+    const colKey = hasColumns ? JSON.stringify(colParts.map(normalizeKeyPart)) : JSON.stringify([]);
+    colKeys.add(colKey);
+    if (!colKeyParts.has(colKey)) colKeyParts.set(colKey, colParts);
+
+    let rowMap = cube.get(rowKey);
+    if (!rowMap) {
+      rowMap = new Map();
+      cube.set(rowKey, rowMap);
+    }
+
+    let cellStates = rowMap.get(colKey);
+    if (!cellStates) {
+      cellStates = valueSpecs.map(() => initAggState());
+      rowMap.set(colKey, cellStates);
+    }
+
+    for (const [idx, state] of cellStates.entries()) {
+      updateAggState(state, record[valueIndices[idx]] ?? null);
+    }
+  }
+
+  const sortedRowKeys = [...rowKeys].sort((a, b) => a.localeCompare(b));
+  const sortedColKeys = [...colKeys].sort((a, b) => a.localeCompare(b));
+
+  const output: CellScalar[][] = [];
+
+  const header: CellScalar[] = [];
+  for (const name of rowFields) header.push(name);
+
+  if (hasColumns) {
+    for (const colKey of sortedColKeys) {
+      const parts = colKeyParts.get(colKey) ?? [];
+      const label = parts.map(normalizeKeyPart).filter(Boolean).join(" / ") || "(blank)";
+      for (const spec of valueSpecs) {
+        header.push(`${label} - ${aggLabel(spec.aggregation)} of ${spec.field}`);
+      }
+    }
+    for (const spec of valueSpecs) {
+      header.push(`Grand Total - ${aggLabel(spec.aggregation)} of ${spec.field}`);
+    }
+  } else {
+    for (const spec of valueSpecs) {
+      header.push(`${aggLabel(spec.aggregation)} of ${spec.field}`);
+    }
+  }
+
+  output.push(header);
+
+  for (const rowKey of sortedRowKeys) {
+    const parts = rowKeyParts.get(rowKey) ?? [];
+    const row: CellScalar[] = [...parts];
+    const rowMap = cube.get(rowKey);
+    const rowTotals = valueSpecs.map(() => initAggState());
+
+    for (const colKey of sortedColKeys) {
+      const cellStates = rowMap?.get(colKey);
+      if (cellStates) {
+        for (const [idx, state] of cellStates.entries()) {
+          row.push(finalizeAgg(state, valueSpecs[idx].aggregation));
+          mergeAggState(rowTotals[idx], state);
+        }
+      } else {
+        for (const spec of valueSpecs) row.push(finalizeAgg(initAggState(), spec.aggregation));
+      }
+    }
+
+    if (hasColumns) {
+      for (const [idx, total] of rowTotals.entries()) {
+        row.push(finalizeAgg(total, valueSpecs[idx].aggregation));
+      }
+    }
+
+    output.push(row);
+  }
+
+  if (sortedRowKeys.length > 0) {
+    const grandTotalsByCol = new Map<string, AggState[]>();
+    const grandTotalsAll = valueSpecs.map(() => initAggState());
+    for (const colKey of sortedColKeys) {
+      grandTotalsByCol.set(colKey, valueSpecs.map(() => initAggState()));
+    }
+
+    for (const rowKey of sortedRowKeys) {
+      const rowMap = cube.get(rowKey);
+      if (!rowMap) continue;
+      for (const colKey of sortedColKeys) {
+        const cellStates = rowMap.get(colKey);
+        if (!cellStates) continue;
+        const colTotals = grandTotalsByCol.get(colKey);
+        if (!colTotals) continue;
+        for (const [idx, state] of cellStates.entries()) {
+          mergeAggState(colTotals[idx], state);
+          mergeAggState(grandTotalsAll[idx], state);
+        }
+      }
+    }
+
+    const grandRow: CellScalar[] = [];
+    if (rowFields.length > 0) {
+      grandRow.push("Grand Total");
+      for (let i = 1; i < rowFields.length; i++) grandRow.push(null);
+    }
+
+    for (const colKey of sortedColKeys) {
+      const totals = grandTotalsByCol.get(colKey) ?? valueSpecs.map(() => initAggState());
+      for (const [idx, state] of totals.entries()) {
+        grandRow.push(finalizeAgg(state, valueSpecs[idx].aggregation));
+      }
+    }
+    if (hasColumns) {
+      for (const [idx, total] of grandTotalsAll.entries()) {
+        grandRow.push(finalizeAgg(total, valueSpecs[idx].aggregation));
+      }
+    }
+
+    output.push(grandRow);
+  }
+
+  return output;
 }
 
 function nowMs(): number {

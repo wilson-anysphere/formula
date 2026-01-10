@@ -134,7 +134,7 @@ export const CreatePivotTableParamsSchema = z.object({
       })
     )
     .min(1),
-  destination: z.string().min(1)
+  destination: A1CellSchema
 });
 
 export type CreatePivotTableParams = z.infer<typeof CreatePivotTableParamsSchema>;

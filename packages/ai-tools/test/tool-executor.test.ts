@@ -113,4 +113,48 @@ describe("ToolExecutor", () => {
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("validation_error");
   });
+
+  it("create_pivot_table writes a pivot output table", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!A1:C5",
+        values: [
+          ["Region", "Product", "Sales"],
+          ["East", "A", 100],
+          ["East", "B", 150],
+          ["West", "A", 200],
+          ["West", "B", 250]
+        ]
+      }
+    });
+
+    const result = await executor.execute({
+      name: "create_pivot_table",
+      parameters: {
+        source_range: "Sheet1!A1:C5",
+        rows: ["Region"],
+        columns: ["Product"],
+        values: [{ field: "Sales", aggregation: "sum" }],
+        destination: "Sheet1!E1"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("create_pivot_table");
+
+    const out = workbook
+      .readRange(parseA1Range("Sheet1!E1:H4"))
+      .map((row) => row.map((cell) => cell.value));
+
+    expect(out).toEqual([
+      ["Region", "A - Sum of Sales", "B - Sum of Sales", "Grand Total - Sum of Sales"],
+      ["East", 100, 150, 250],
+      ["West", 200, 250, 450],
+      ["Grand Total", 300, 400, 700]
+    ]);
+  });
 });
