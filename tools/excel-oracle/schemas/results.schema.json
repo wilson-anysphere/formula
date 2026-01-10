@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Excel Oracle results.json",
+  "type": "object",
+  "required": ["schemaVersion", "generatedAt", "source", "caseSet", "results"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "generatedAt": { "type": "string" },
+    "source": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string" },
+        "version": { "type": "string" },
+        "build": { "type": "string" },
+        "operatingSystem": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "caseSet": {
+      "type": "object",
+      "required": ["sha256", "count"],
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "type": "string" },
+        "count": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/result" }
+    }
+  },
+  "$defs": {
+    "result": {
+      "type": "object",
+      "required": ["caseId", "outputCell", "result", "address", "displayText"],
+      "properties": {
+        "caseId": { "type": "string" },
+        "outputCell": { "type": "string" },
+        "result": { "$ref": "#/$defs/value" },
+        "address": { "type": "string" },
+        "displayText": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "value": {
+      "type": "object",
+      "required": ["t"],
+      "properties": {
+        "t": { "type": "string", "enum": ["blank", "n", "s", "b", "e", "arr"] },
+        "v": {},
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/value" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "t": { "const": "blank" } } },
+          "then": { "additionalProperties": false }
+        },
+        {
+          "if": { "properties": { "t": { "const": "n" } } },
+          "then": { "required": ["v"], "properties": { "v": { "type": "number" } } }
+        },
+        {
+          "if": { "properties": { "t": { "const": "s" } } },
+          "then": { "required": ["v"], "properties": { "v": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "t": { "const": "b" } } },
+          "then": { "required": ["v"], "properties": { "v": { "type": "boolean" } } }
+        },
+        {
+          "if": { "properties": { "t": { "const": "e" } } },
+          "then": { "required": ["v"], "properties": { "v": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "t": { "const": "arr" } } },
+          "then": { "required": ["rows"], "additionalProperties": false }
+        }
+      ]
+    }
+  }
+}
+

@@ -555,6 +555,11 @@ async function generateExcelTestCases() {
 }
 ```
 
+**Implementation note:** This repository includes a concrete Excel-oracle harness under
+`tools/excel-oracle/` (Excel COM automation + JSON export) with a curated corpus under
+`tests/compatibility/excel-oracle/`. This is the intended mechanism for generating and
+maintaining Excel-validated expected results over time.
+
 ### Cross-Application File Testing
 
 ```typescript

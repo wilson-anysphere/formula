@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Excel Oracle cases.json",
+  "type": "object",
+  "required": ["schemaVersion", "caseSet", "defaultSheet", "cases"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "caseSet": { "type": "string" },
+    "defaultSheet": { "type": "string" },
+    "cases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "required": ["id", "formula", "outputCell", "inputs", "tags"],
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "formula": { "type": "string" },
+        "outputCell": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "inputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/input" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "input": {
+      "type": "object",
+      "required": ["cell"],
+      "properties": {
+        "cell": { "type": "string" },
+        "value": {},
+        "formula": { "type": "string" }
+      },
+      "oneOf": [
+        { "required": ["value"] },
+        { "required": ["formula"] }
+      ],
+      "additionalProperties": false
+    }
+  }
+}
+
