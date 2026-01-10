@@ -508,5 +508,9 @@ fn is_known_thread_safe_function(name: &str) -> bool {
             | "SLN"
             | "SYD"
             | "DDB"
+            | "NPV"
+            | "IRR"
+            | "XNPV"
+            | "XIRR"
     )
 }

@@ -255,6 +255,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             "SLN" => self.fn_sln(args),
             "SYD" => self.fn_syd(args),
             "DDB" => self.fn_ddb(args),
+            "NPV" => self.fn_npv(args),
+            "IRR" => self.fn_irr(args),
+            "XNPV" => self.fn_xnpv(args),
+            "XIRR" => self.fn_xirr(args),
             _ => Value::Error(ErrorKind::Name),
         }
     }
@@ -361,6 +365,53 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 ExcelError::Value => ErrorKind::Value,
                 ExcelError::Num => ErrorKind::Num,
             }),
+        }
+    }
+
+    fn sum_like_scalar_number(v: Value) -> Result<Option<f64>, ErrorKind> {
+        match v {
+            Value::Error(e) => Err(e),
+            Value::Number(n) => Ok(Some(n)),
+            Value::Bool(b) => Ok(Some(if b { 1.0 } else { 0.0 })),
+            Value::Blank => Ok(None),
+            Value::Text(s) => Ok(parse_number_from_text(&s)),
+        }
+    }
+
+    fn collect_sum_like_numbers_from_arg(&self, arg: &CompiledExpr) -> Result<Vec<f64>, ErrorKind> {
+        let ev = self.eval_value(arg);
+        match ev {
+            EvalValue::Scalar(v) => Ok(Self::sum_like_scalar_number(v)?
+                .into_iter()
+                .collect()),
+            EvalValue::Reference(range) => {
+                let mut out = Vec::new();
+                for addr in range.iter_cells() {
+                    let v = self.resolver.get_cell_value(range.sheet_id, addr);
+                    match v {
+                        Value::Error(e) => return Err(e),
+                        Value::Number(n) => out.push(n),
+                        // Excel quirk: logicals/text/blanks in references are ignored.
+                        Value::Bool(_) | Value::Text(_) | Value::Blank => {}
+                    }
+                }
+                Ok(out)
+            }
+        }
+    }
+
+    fn collect_numbers_strict_from_arg(&self, arg: &CompiledExpr) -> Result<Vec<f64>, ErrorKind> {
+        let ev = self.eval_value(arg);
+        match ev {
+            EvalValue::Scalar(v) => Ok(vec![coerce_to_number(&v)?]),
+            EvalValue::Reference(range) => {
+                let mut out = Vec::new();
+                for addr in range.iter_cells() {
+                    let v = self.resolver.get_cell_value(range.sheet_id, addr);
+                    out.push(coerce_to_number(&v)?);
+                }
+                Ok(out)
+            }
         }
     }
 
@@ -632,6 +683,85 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             Err(e) => return Value::Error(e),
         };
         Self::excel_result_number(financial::ddb(cost, salvage, life, period, factor))
+    }
+
+    fn fn_npv(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() < 2 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let rate = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+
+        let mut values = Vec::new();
+        for arg in &args[1..] {
+            match self.collect_sum_like_numbers_from_arg(arg) {
+                Ok(mut nums) => values.append(&mut nums),
+                Err(e) => return Value::Error(e),
+            }
+        }
+
+        Self::excel_result_number(financial::npv(rate, &values))
+    }
+
+    fn fn_irr(&self, args: &[CompiledExpr]) -> Value {
+        if args.is_empty() || args.len() > 2 {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let values = match self.collect_numbers_strict_from_arg(&args[0]) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+
+        let guess = match self.eval_optional_number_arg(args.get(1)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+
+        Self::excel_result_number(financial::irr(&values, guess))
+    }
+
+    fn fn_xnpv(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() != 3 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let rate = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+
+        let values = match self.collect_numbers_strict_from_arg(&args[1]) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let dates = match self.collect_numbers_strict_from_arg(&args[2]) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+
+        Self::excel_result_number(financial::xnpv(rate, &values, &dates))
+    }
+
+    fn fn_xirr(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() < 2 || args.len() > 3 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let values = match self.collect_numbers_strict_from_arg(&args[0]) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let dates = match self.collect_numbers_strict_from_arg(&args[1]) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let guess = match self.eval_optional_number_arg(args.get(2)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+
+        Self::excel_result_number(financial::xirr(&values, &dates, guess))
     }
 }
 

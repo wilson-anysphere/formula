@@ -192,3 +192,69 @@ fn evaluates_selected_financial_functions() {
         Value::Error(ErrorKind::Div0)
     );
 }
+
+#[test]
+fn evaluates_cashflow_functions_with_ranges() {
+    let mut engine = Engine::new();
+
+    // NPV matches the scalar-vs-reference coercion quirk used by SUM.
+    engine.set_cell_value("Sheet1", "A1", "5").unwrap();
+    engine.set_cell_value("Sheet1", "A2", true).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=NPV(0, "5", TRUE, 3)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=NPV(0, A1:A3)")
+        .unwrap();
+
+    // IRR/XNPV/XIRR examples mirror the existing numeric unit tests in
+    // `tests/functions/financial_cashflows.rs`.
+    let cashflows = [-70_000.0, 12_000.0, 15_000.0, 18_000.0, 21_000.0, 26_000.0];
+    for (i, v) in cashflows.iter().enumerate() {
+        let addr = format!("C{}", i + 1);
+        engine.set_cell_value("Sheet1", &addr, *v).unwrap();
+    }
+    engine
+        .set_cell_formula("Sheet1", "D1", "=IRR(C1:C6)")
+        .unwrap();
+
+    let values = [-10_000.0, 2_750.0, 4_250.0, 3_250.0, 2_750.0];
+    let dates = [39448.0, 39508.0, 39751.0, 39859.0, 39904.0];
+    for (i, (v, d)) in values.iter().zip(dates.iter()).enumerate() {
+        let v_addr = format!("E{}", i + 1);
+        let d_addr = format!("F{}", i + 1);
+        engine.set_cell_value("Sheet1", &v_addr, *v).unwrap();
+        engine.set_cell_value("Sheet1", &d_addr, *d).unwrap();
+    }
+    engine
+        .set_cell_formula("Sheet1", "G1", "=XNPV(0.09, E1:E5, F1:F5)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "G2", "=XIRR(E1:E5, F1:F5)")
+        .unwrap();
+
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(9.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(3.0));
+
+    let irr = match engine.get_cell_value("Sheet1", "D1") {
+        Value::Number(n) => n,
+        other => panic!("expected IRR numeric result, got {other:?}"),
+    };
+    assert!((irr - 0.08663094803653162).abs() <= 1e-12);
+
+    let xnpv = match engine.get_cell_value("Sheet1", "G1") {
+        Value::Number(n) => n,
+        other => panic!("expected XNPV numeric result, got {other:?}"),
+    };
+    assert!((xnpv - 2_086.6476020315354).abs() <= 1e-10);
+
+    let xirr = match engine.get_cell_value("Sheet1", "G2") {
+        Value::Number(n) => n,
+        other => panic!("expected XIRR numeric result, got {other:?}"),
+    };
+    assert!((xirr - 0.3733625335188314).abs() <= 1e-12);
+}
