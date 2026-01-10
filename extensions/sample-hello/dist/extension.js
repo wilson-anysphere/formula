@@ -1,6 +1,43 @@
 const formula = require("@formula/extension-api");
 
 async function activate(context) {
+  let panel = null;
+  let panelListener = null;
+
+  async function ensurePanel() {
+    if (panel) return panel;
+
+    panel = await formula.ui.createPanel("sampleHello.panel", {
+      title: "Sample Hello Panel",
+      position: "right"
+    });
+
+    panelListener = panel.webview.onDidReceiveMessage(async (message) => {
+      if (message && message.type === "ping") {
+        await panel.webview.postMessage({ type: "pong" });
+      }
+    });
+    context.subscriptions.push(panelListener);
+
+    return panel;
+  }
+
+  async function renderPanel() {
+    const p = await ensurePanel();
+    await p.webview.setHtml(`<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Sample Hello Panel</title>
+  </head>
+  <body>
+    <h1>Sample Hello Panel</h1>
+    <p>This panel is rendered from an extension.</p>
+  </body>
+</html>`);
+    return p.id;
+  }
+
   const doubleFn = await formula.functions.register("SAMPLEHELLO_DOUBLE", {
     description: "Doubles the input value",
     parameters: [{ name: "value", type: "number", description: "Value to double" }],
@@ -28,31 +65,13 @@ async function activate(context) {
   });
 
   const panelCmd = await formula.commands.registerCommand("sampleHello.openPanel", async () => {
-    const panel = await formula.ui.createPanel("sampleHello.panel", {
-      title: "Sample Hello Panel",
-      position: "right"
-    });
+    return renderPanel();
+  });
 
-    const listener = panel.webview.onDidReceiveMessage(async (message) => {
-      if (message && message.type === "ping") {
-        await panel.webview.postMessage({ type: "pong" });
-      }
-    });
-    context.subscriptions.push(listener);
-
-    await panel.webview.setHtml(`<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Sample Hello Panel</title>
-  </head>
-  <body>
-    <h1>Sample Hello Panel</h1>
-    <p>This panel is rendered from an extension.</p>
-  </body>
-</html>`);
-
-    return panel.id;
+  const viewActivated = formula.events.onViewActivated(async ({ viewId }) => {
+    if (viewId === "sampleHello.panel") {
+      await renderPanel();
+    }
   });
 
   const fetchCmd = await formula.commands.registerCommand("sampleHello.fetchText", async (url) => {
@@ -62,7 +81,7 @@ async function activate(context) {
     return text;
   });
 
-  context.subscriptions.push(doubleFn, sumCmd, panelCmd, fetchCmd);
+  context.subscriptions.push(doubleFn, sumCmd, panelCmd, fetchCmd, viewActivated);
 }
 
 module.exports = {

@@ -388,6 +388,9 @@ const events = {
   },
   onCellChanged(callback) {
     return addEventHandler("cellChanged", callback);
+  },
+  onViewActivated(callback) {
+    return addEventHandler("viewActivated", callback);
   }
 };
 

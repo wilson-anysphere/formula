@@ -144,14 +144,19 @@ class ExtensionHost {
 
   async activateView(viewId) {
     const activationEvent = `onView:${viewId}`;
-    const tasks = [];
+    const targets = [];
     for (const extension of this._extensions.values()) {
-      if (extension.active) continue;
       if ((extension.manifest.activationEvents ?? []).includes(activationEvent)) {
-        tasks.push(this._activateExtension(extension, activationEvent));
+        targets.push(extension);
       }
     }
-    await Promise.all(tasks);
+
+    for (const extension of targets) {
+      if (!extension.active) {
+        await this._activateExtension(extension, activationEvent);
+      }
+      this._sendEventToExtension(extension, "viewActivated", { viewId });
+    }
   }
 
   async activateCustomFunction(functionName) {
@@ -543,6 +548,14 @@ class ExtensionHost {
 
     await promise;
     extension.active = true;
+  }
+
+  _sendEventToExtension(extension, event, data) {
+    try {
+      extension.worker.postMessage({ type: "event", event, data });
+    } catch {
+      // ignore
+    }
   }
 
   _broadcastEvent(event, data) {

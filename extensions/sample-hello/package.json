@@ -13,6 +13,7 @@
     "onCommand:sampleHello.sumSelection",
     "onCommand:sampleHello.openPanel",
     "onCommand:sampleHello.fetchText",
+    "onView:sampleHello.panel",
     "onCustomFunction:SAMPLEHELLO_DOUBLE"
   ],
   "contributes": {

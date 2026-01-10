@@ -122,6 +122,7 @@ export namespace events {
   function onCellChanged(
     callback: (e: { row: number; col: number; value: CellValue }) => void
   ): Disposable;
+  function onViewActivated(callback: (e: { viewId: string }) => void): Disposable;
 }
 
 export namespace context {

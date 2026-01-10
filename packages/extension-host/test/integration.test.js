@@ -64,6 +64,38 @@ test("integration: panel command creates panel and sets HTML", async (t) => {
   assert.ok(panel.html.includes("Sample Hello Panel"));
 });
 
+test("integration: view activation creates and renders contributed panel", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-view-"));
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extPath = path.resolve(__dirname, "../../../extensions/sample-hello");
+
+  await host.loadExtension(extPath);
+
+  await host.activateView("sampleHello.panel");
+
+  const deadline = Date.now() + 500;
+  while (Date.now() < deadline) {
+    const panel = host.getPanel("sampleHello.panel");
+    if (panel && panel.html.includes("Sample Hello Panel")) {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 10));
+  }
+
+  assert.fail("Timed out waiting for panel HTML after view activation");
+});
+
 test("integration: panel messaging (webview -> extension -> webview)", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-panel-msg-"));
 
