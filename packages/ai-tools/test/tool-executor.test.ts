@@ -58,6 +58,36 @@ describe("ToolExecutor", () => {
     ]);
   });
 
+  it("set_range expands from a start cell when given a single-cell range", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    const result = await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!C3",
+        values: [
+          [1, 2, 3],
+          [4, 5, 6]
+        ]
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("set_range");
+    if (!result.ok || result.tool !== "set_range") throw new Error("Unexpected tool result");
+    expect(result.data?.updated_cells).toBe(6);
+    expect(result.data?.range).toBe("Sheet1!C3:E4");
+
+    const values = workbook
+      .readRange(parseA1Range("Sheet1!C3:E4"))
+      .map((row) => row.map((cell) => cell.value));
+    expect(values).toEqual([
+      [1, 2, 3],
+      [4, 5, 6]
+    ]);
+  });
+
   it("apply_formula_column fills formulas down to the last used row when end_row = -1", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);

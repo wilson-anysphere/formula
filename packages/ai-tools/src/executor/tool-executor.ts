@@ -212,7 +212,31 @@ export class ToolExecutor {
     const range = parseA1Range(params.range, this.options.default_sheet);
     const interpretAs: "auto" | "value" | "formula" = params.interpret_as ?? "auto";
 
-    const cells: CellData[][] = params.values.map((row: CellScalar[]) =>
+    const rowCount = Array.isArray(params.values) ? params.values.length : 0;
+    const colCount = rowCount > 0 ? Math.max(...params.values.map((row: any[]) => (Array.isArray(row) ? row.length : 0))) : 0;
+
+    const expanded =
+      range.startRow === range.endRow && range.startCol === range.endCol && (rowCount !== 1 || colCount !== 1);
+
+    const targetRange = expanded
+      ? {
+          sheet: range.sheet,
+          startRow: range.startRow,
+          startCol: range.startCol,
+          endRow: range.startRow + rowCount - 1,
+          endCol: range.startCol + colCount - 1
+        }
+      : range;
+
+    const normalizedValues: CellScalar[][] = expanded
+      ? params.values.map((row: CellScalar[]) => {
+          const next = Array.isArray(row) ? row.slice() : [];
+          while (next.length < colCount) next.push(null);
+          return next;
+        })
+      : params.values;
+
+    const cells: CellData[][] = normalizedValues.map((row: CellScalar[]) =>
       row.map((value) => {
         const formulaCandidate = typeof value === "string" ? value.trim() : "";
         const shouldTreatAsFormula =
@@ -226,11 +250,11 @@ export class ToolExecutor {
       })
     );
 
-    this.spreadsheet.writeRange(range, cells);
-    this.refreshPivotsForRange(range);
-    const sizeRows = range.endRow - range.startRow + 1;
-    const sizeCols = range.endCol - range.startCol + 1;
-    return { range: formatA1Range(range), updated_cells: sizeRows * sizeCols };
+    this.spreadsheet.writeRange(targetRange, cells);
+    this.refreshPivotsForRange(targetRange);
+    const sizeRows = targetRange.endRow - targetRange.startRow + 1;
+    const sizeCols = targetRange.endCol - targetRange.startCol + 1;
+    return { range: formatA1Range(targetRange), updated_cells: sizeRows * sizeCols };
   }
 
   private applyFormulaColumn(params: any): ToolResultDataByName["apply_formula_column"] {

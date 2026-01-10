@@ -89,6 +89,24 @@ export const SetRangeParamsSchema = z
   })
   .superRefine((data, ctx) => {
     const size = rangeSize(parseA1Range(data.range));
+    if (size.rows === 1 && size.cols === 1) {
+      if (data.values.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "set_range values must contain at least one row"
+        });
+        return;
+      }
+      const colCount = Math.max(...data.values.map((row) => row.length));
+      if (colCount === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "set_range values must contain at least one column"
+        });
+      }
+      return;
+    }
+
     if (data.values.length !== size.rows) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -298,7 +316,7 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
     jsonSchema: {
       type: "object",
       properties: {
-        range: { type: "string", description: "Range in A1 notation (e.g., 'Sheet1!A1:B3')" },
+        range: { type: "string", description: "Range in A1 notation (e.g., 'Sheet1!A1:B3' or a start cell like 'Sheet1!A1')" },
         values: {
           type: "array",
           items: {
