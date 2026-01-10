@@ -1,0 +1,662 @@
+import { cellStateEquals, cloneCellState, emptyCellState, isCellStateEmpty } from "./cell.js";
+import { normalizeRange, parseA1, parseRangeA1 } from "./coords.js";
+
+/**
+ * @typedef {import("./cell.js").CellState} CellState
+ * @typedef {import("./cell.js").CellValue} CellValue
+ * @typedef {import("./cell.js").CellFormat} CellFormat
+ * @typedef {import("./coords.js").CellCoord} CellCoord
+ * @typedef {import("./coords.js").CellRange} CellRange
+ * @typedef {import("./engine.js").Engine} Engine
+ * @typedef {import("./engine.js").CellChange} CellChange
+ */
+
+function mapKey(sheetId, row, col) {
+  return `${sheetId}:${row},${col}`;
+}
+
+function sortKey(sheetId, row, col) {
+  return `${sheetId}\u0000${row.toString().padStart(10, "0")}\u0000${col
+    .toString()
+    .padStart(10, "0")}`;
+}
+
+/**
+ * @typedef {{
+ *   sheetId: string,
+ *   row: number,
+ *   col: number,
+ *   before: CellState,
+ *   after: CellState,
+ * }} CellDelta
+ */
+
+/**
+ * @typedef {{
+ *   label?: string,
+ *   mergeKey?: string,
+ *   timestamp: number,
+ *   deltasByCell: Map<string, CellDelta>,
+ * }} HistoryEntry
+ */
+
+function cloneDelta(delta) {
+  return {
+    sheetId: delta.sheetId,
+    row: delta.row,
+    col: delta.col,
+    before: cloneCellState(delta.before),
+    after: cloneCellState(delta.after),
+  };
+}
+
+/**
+ * @param {HistoryEntry} entry
+ * @returns {CellDelta[]}
+ */
+function entryDeltas(entry) {
+  const deltas = Array.from(entry.deltasByCell.values()).map(cloneDelta);
+  deltas.sort((a, b) => {
+    const ak = sortKey(a.sheetId, a.row, a.col);
+    const bk = sortKey(b.sheetId, b.row, b.col);
+    return ak < bk ? -1 : ak > bk ? 1 : 0;
+  });
+  return deltas;
+}
+
+/**
+ * @param {CellDelta[]} deltas
+ * @returns {CellDelta[]}
+ */
+function invertDeltas(deltas) {
+  return deltas.map((d) => ({
+    sheetId: d.sheetId,
+    row: d.row,
+    col: d.col,
+    before: cloneCellState(d.after),
+    after: cloneCellState(d.before),
+  }));
+}
+
+class SheetModel {
+  constructor() {
+    /** @type {Map<string, CellState>} */
+    this.cells = new Map();
+  }
+
+  /**
+   * @param {number} row
+   * @param {number} col
+   * @returns {CellState}
+   */
+  getCell(row, col) {
+    return cloneCellState(this.cells.get(`${row},${col}`) ?? emptyCellState());
+  }
+
+  /**
+   * @param {number} row
+   * @param {number} col
+   * @param {CellState} cell
+   */
+  setCell(row, col, cell) {
+    if (isCellStateEmpty(cell)) {
+      this.cells.delete(`${row},${col}`);
+      return;
+    }
+    this.cells.set(`${row},${col}`, cloneCellState(cell));
+  }
+}
+
+class WorkbookModel {
+  constructor() {
+    /** @type {Map<string, SheetModel>} */
+    this.sheets = new Map();
+  }
+
+  /**
+   * @param {string} sheetId
+   * @returns {SheetModel}
+   */
+  #sheet(sheetId) {
+    let sheet = this.sheets.get(sheetId);
+    if (!sheet) {
+      sheet = new SheetModel();
+      this.sheets.set(sheetId, sheet);
+    }
+    return sheet;
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {number} row
+   * @param {number} col
+   * @returns {CellState}
+   */
+  getCell(sheetId, row, col) {
+    return this.#sheet(sheetId).getCell(row, col);
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {number} row
+   * @param {number} col
+   * @param {CellState} cell
+   */
+  setCell(sheetId, row, col, cell) {
+    this.#sheet(sheetId).setCell(row, col, cell);
+  }
+}
+
+/**
+ * DocumentController is the authoritative state machine for a workbook.
+ *
+ * It owns:
+ * - The canonical cell inputs (value/formula/format)
+ * - Undo/redo stacks (with inversion)
+ * - Dirty tracking since last save
+ * - Optional integration hooks for an external calc engine and UI layers
+ */
+export class DocumentController {
+  /**
+   * @param {{ engine?: Engine, mergeWindowMs?: number }} [options]
+   */
+  constructor(options = {}) {
+    /** @type {Engine | null} */
+    this.engine = options.engine ?? null;
+
+    this.mergeWindowMs = options.mergeWindowMs ?? 1000;
+
+    this.model = new WorkbookModel();
+
+    /** @type {HistoryEntry[]} */
+    this.history = [];
+    this.cursor = 0;
+    /** @type {number | null} */
+    this.savedCursor = 0;
+
+    this.batchDepth = 0;
+    /** @type {HistoryEntry | null} */
+    this.activeBatch = null;
+
+    this.lastMergeKey = null;
+    this.lastMergeTime = 0;
+
+    /** @type {Map<string, Set<(payload: any) => void>>} */
+    this.listeners = new Map();
+  }
+
+  /**
+   * Subscribe to controller events.
+   *
+   * Events:
+   * - `change`: { deltas: CellDelta[] }
+   * - `history`: { canUndo: boolean, canRedo: boolean }
+   * - `dirty`: { isDirty: boolean }
+   *
+   * @template {string} T
+   * @param {T} event
+   * @param {(payload: any) => void} listener
+   * @returns {() => void}
+   */
+  on(event, listener) {
+    let set = this.listeners.get(event);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(event, set);
+    }
+    set.add(listener);
+    return () => set.delete(listener);
+  }
+
+  /**
+   * @param {string} event
+   * @param {any} payload
+   */
+  #emit(event, payload) {
+    const set = this.listeners.get(event);
+    if (!set) return;
+    for (const listener of set) listener(payload);
+  }
+
+  #emitHistory() {
+    this.#emit("history", { canUndo: this.canUndo, canRedo: this.canRedo });
+  }
+
+  #emitDirty() {
+    this.#emit("dirty", { isDirty: this.isDirty });
+  }
+
+  /**
+   * @returns {boolean}
+   */
+  get canUndo() {
+    return this.batchDepth === 0 && this.cursor > 0;
+  }
+
+  /**
+   * @returns {boolean}
+   */
+  get canRedo() {
+    return this.batchDepth === 0 && this.cursor < this.history.length;
+  }
+
+  /**
+   * @returns {boolean}
+   */
+  get isDirty() {
+    if (this.savedCursor == null) return true;
+    return this.cursor !== this.savedCursor;
+  }
+
+  /**
+   * Mark the current state as saved (not dirty).
+   */
+  markSaved() {
+    this.savedCursor = this.cursor;
+    // Avoid merging future edits into what is now the saved state.
+    this.lastMergeKey = null;
+    this.lastMergeTime = 0;
+    this.#emitDirty();
+  }
+
+  /**
+   * @returns {{ undo: number, redo: number }}
+   */
+  getStackDepths() {
+    return { undo: this.cursor, redo: this.history.length - this.cursor };
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {CellCoord | string} coord
+   * @returns {CellState}
+   */
+  getCell(sheetId, coord) {
+    const c = typeof coord === "string" ? parseA1(coord) : coord;
+    return this.model.getCell(sheetId, c.row, c.col);
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {CellCoord | string} coord
+   * @param {CellValue} value
+   * @param {{ mergeKey?: string, label?: string }} [options]
+   */
+  setCellValue(sheetId, coord, value, options = {}) {
+    const c = typeof coord === "string" ? parseA1(coord) : coord;
+    const before = this.model.getCell(sheetId, c.row, c.col);
+    const after = { value: value ?? null, formula: null, format: before.format };
+    this.#applyUserDeltas([
+      { sheetId, row: c.row, col: c.col, before, after: cloneCellState(after) },
+    ], options);
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {CellCoord | string} coord
+   * @param {string | null} formula
+   * @param {{ mergeKey?: string, label?: string }} [options]
+   */
+  setCellFormula(sheetId, coord, formula, options = {}) {
+    const c = typeof coord === "string" ? parseA1(coord) : coord;
+    const before = this.model.getCell(sheetId, c.row, c.col);
+    const after = { value: null, formula: formula ?? null, format: before.format };
+    this.#applyUserDeltas([
+      { sheetId, row: c.row, col: c.col, before, after: cloneCellState(after) },
+    ], options);
+  }
+
+  /**
+   * Clear values/formulas (preserving formats).
+   *
+   * @param {string} sheetId
+   * @param {CellRange | string} range
+   * @param {{ label?: string }} [options]
+   */
+  clearRange(sheetId, range, options = {}) {
+    const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
+    /** @type {CellDelta[]} */
+    const deltas = [];
+    for (let row = r.start.row; row <= r.end.row; row++) {
+      for (let col = r.start.col; col <= r.end.col; col++) {
+        const before = this.model.getCell(sheetId, row, col);
+        const after = { value: null, formula: null, format: before.format };
+        if (cellStateEquals(before, after)) continue;
+        deltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
+      }
+    }
+    this.#applyUserDeltas(deltas, { label: options.label });
+  }
+
+  /**
+   * Set values/formulas in a rectangular region.
+   *
+   * The range can either be inferred from `values` dimensions (when `range` is a single
+   * start cell) or explicitly provided as an A1 range (e.g. "A1:B2").
+   *
+   * @param {string} sheetId
+   * @param {CellCoord | string | CellRange} rangeOrStart
+   * @param {ReadonlyArray<ReadonlyArray<any>>} values
+   * @param {{ label?: string }} [options]
+   */
+  setRangeValues(sheetId, rangeOrStart, values, options = {}) {
+    if (!Array.isArray(values) || values.length === 0) return;
+    const rowCount = values.length;
+    const colCount = Math.max(...values.map((row) => (Array.isArray(row) ? row.length : 0)));
+    if (colCount === 0) return;
+
+    /** @type {CellRange} */
+    let range;
+    if (typeof rangeOrStart === "string") {
+      if (rangeOrStart.includes(":")) {
+        range = parseRangeA1(rangeOrStart);
+      } else {
+        const start = parseA1(rangeOrStart);
+        range = { start, end: { row: start.row + rowCount - 1, col: start.col + colCount - 1 } };
+      }
+    } else if (rangeOrStart && "start" in rangeOrStart && "end" in rangeOrStart) {
+      range = normalizeRange(rangeOrStart);
+    } else {
+      const start = /** @type {CellCoord} */ (rangeOrStart);
+      range = { start, end: { row: start.row + rowCount - 1, col: start.col + colCount - 1 } };
+    }
+
+    /** @type {CellDelta[]} */
+    const deltas = [];
+    for (let r = 0; r < rowCount; r++) {
+      const rowValues = values[r] ?? [];
+      for (let c = 0; c < colCount; c++) {
+        const input = rowValues[c] ?? null;
+        const row = range.start.row + r;
+        const col = range.start.col + c;
+        const before = this.model.getCell(sheetId, row, col);
+        const next = this.#normalizeCellInput(before, input);
+        if (cellStateEquals(before, next)) continue;
+        deltas.push({ sheetId, row, col, before, after: cloneCellState(next) });
+      }
+    }
+
+    this.#applyUserDeltas(deltas, { label: options.label });
+  }
+
+  /**
+   * Apply a formatting patch to a range.
+   *
+   * @param {string} sheetId
+   * @param {CellRange | string} range
+   * @param {CellFormat | null} formatPatch
+   * @param {{ label?: string }} [options]
+   */
+  setRangeFormat(sheetId, range, formatPatch, options = {}) {
+    const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
+    /** @type {CellDelta[]} */
+    const deltas = [];
+    for (let row = r.start.row; row <= r.end.row; row++) {
+      for (let col = r.start.col; col <= r.end.col; col++) {
+        const before = this.model.getCell(sheetId, row, col);
+        const afterFormat =
+          formatPatch == null
+            ? null
+            : { ...(before.format ?? {}), ...(/** @type {any} */ (formatPatch) ?? {}) };
+        const after = { value: before.value, formula: before.formula, format: afterFormat };
+        if (cellStateEquals(before, after)) continue;
+        deltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
+      }
+    }
+    this.#applyUserDeltas(deltas, { label: options.label });
+  }
+
+  /**
+   * @param {CellState} before
+   * @param {any} input
+   * @returns {CellState}
+   */
+  #normalizeCellInput(before, input) {
+    // Object form: { value, formula }
+    if (input && typeof input === "object" && ("formula" in input || "value" in input)) {
+      const formula = typeof input.formula === "string" ? input.formula : null;
+      if (formula != null) {
+        return { value: null, formula, format: before.format };
+      }
+      return { value: input.value ?? null, formula: null, format: before.format };
+    }
+
+    // Primitive value (or null => clear)
+    return { value: input ?? null, formula: null, format: before.format };
+  }
+
+  /**
+   * Start an explicit batch. All subsequent edits are merged into one undo step until `endBatch`.
+   *
+   * @param {{ label?: string }} [options]
+   */
+  beginBatch(options = {}) {
+    this.batchDepth += 1;
+    if (this.batchDepth === 1) {
+      this.activeBatch = {
+        label: options.label,
+        timestamp: Date.now(),
+        deltasByCell: new Map(),
+      };
+      this.engine?.beginBatch?.();
+    }
+  }
+
+  /**
+   * Commit the current batch into the undo stack.
+   */
+  endBatch() {
+    if (this.batchDepth === 0) return;
+    this.batchDepth -= 1;
+    if (this.batchDepth > 0) return;
+
+    const batch = this.activeBatch;
+    this.activeBatch = null;
+    this.engine?.endBatch?.();
+
+    if (!batch || batch.deltasByCell.size === 0) {
+      return;
+    }
+
+    this.#commitHistoryEntry(batch);
+    this.engine?.recalculate();
+  }
+
+  /**
+   * Undo the most recent committed history entry.
+   * @returns {boolean} Whether an undo occurred
+   */
+  undo() {
+    if (!this.canUndo) return false;
+    const entry = this.history[this.cursor - 1];
+    const deltas = entryDeltas(entry);
+    const inverse = invertDeltas(deltas);
+    this.cursor -= 1;
+
+    this.lastMergeKey = null;
+    this.lastMergeTime = 0;
+
+    this.#applyDeltas(inverse, { recalc: true, emitChange: true });
+    this.#emitHistory();
+    this.#emitDirty();
+    return true;
+  }
+
+  /**
+   * Redo the next history entry.
+   * @returns {boolean} Whether a redo occurred
+   */
+  redo() {
+    if (!this.canRedo) return false;
+    const entry = this.history[this.cursor];
+    const deltas = entryDeltas(entry);
+    this.cursor += 1;
+
+    this.lastMergeKey = null;
+    this.lastMergeTime = 0;
+
+    this.#applyDeltas(deltas, { recalc: true, emitChange: true });
+    this.#emitHistory();
+    this.#emitDirty();
+    return true;
+  }
+
+  /**
+   * @param {CellDelta[]} deltas
+   * @param {{ label?: string, mergeKey?: string }} options
+   */
+  #applyUserDeltas(deltas, options) {
+    if (!deltas || deltas.length === 0) return;
+
+    this.#applyDeltas(deltas, { recalc: this.batchDepth === 0, emitChange: true });
+
+    if (this.batchDepth > 0) {
+      this.#mergeIntoBatch(deltas);
+      return;
+    }
+
+    this.#commitOrMergeHistoryEntry(deltas, options);
+  }
+
+  /**
+   * @param {CellDelta[]} deltas
+   */
+  #mergeIntoBatch(deltas) {
+    if (!this.activeBatch) {
+      // Should be unreachable, but avoid dropping history silently.
+      this.activeBatch = { timestamp: Date.now(), deltasByCell: new Map() };
+    }
+    for (const delta of deltas) {
+      const key = mapKey(delta.sheetId, delta.row, delta.col);
+      const existing = this.activeBatch.deltasByCell.get(key);
+      if (!existing) {
+        this.activeBatch.deltasByCell.set(key, cloneDelta(delta));
+      } else {
+        existing.after = cloneCellState(delta.after);
+      }
+    }
+  }
+
+  /**
+   * @param {CellDelta[]} deltas
+   * @param {{ label?: string, mergeKey?: string }} options
+   */
+  #commitOrMergeHistoryEntry(deltas, options) {
+    // If we have redo history, truncate it before pushing a new edit.
+    if (this.cursor < this.history.length) {
+      if (this.savedCursor != null && this.savedCursor > this.cursor) {
+        // The saved state is no longer reachable once we branch.
+        this.savedCursor = null;
+      }
+      this.history.splice(this.cursor);
+      this.lastMergeKey = null;
+      this.lastMergeTime = 0;
+    }
+
+    const now = Date.now();
+    const mergeKey = options.mergeKey;
+    const canMerge =
+      mergeKey &&
+      this.cursor > 0 &&
+      this.cursor === this.history.length &&
+      this.lastMergeKey === mergeKey &&
+      now - this.lastMergeTime < this.mergeWindowMs &&
+      // Never mutate what has been marked as saved.
+      (this.savedCursor == null || this.cursor > this.savedCursor);
+
+    if (canMerge) {
+      const entry = this.history[this.cursor - 1];
+      for (const delta of deltas) {
+        const key = mapKey(delta.sheetId, delta.row, delta.col);
+        const existing = entry.deltasByCell.get(key);
+        if (!existing) {
+          entry.deltasByCell.set(key, cloneDelta(delta));
+        } else {
+          existing.after = cloneCellState(delta.after);
+        }
+      }
+      entry.timestamp = now;
+      entry.mergeKey = mergeKey;
+      entry.label = options.label ?? entry.label;
+
+      this.lastMergeKey = mergeKey;
+      this.lastMergeTime = now;
+
+      this.#emitHistory();
+      this.#emitDirty();
+      return;
+    }
+
+    const entry = {
+      label: options.label,
+      mergeKey,
+      timestamp: now,
+      deltasByCell: new Map(),
+    };
+
+    for (const delta of deltas) {
+      entry.deltasByCell.set(mapKey(delta.sheetId, delta.row, delta.col), cloneDelta(delta));
+    }
+
+    this.#commitHistoryEntry(entry);
+
+    if (mergeKey) {
+      this.lastMergeKey = mergeKey;
+      this.lastMergeTime = now;
+    } else {
+      this.lastMergeKey = null;
+      this.lastMergeTime = 0;
+    }
+  }
+
+  /**
+   * @param {HistoryEntry} entry
+   */
+  #commitHistoryEntry(entry) {
+    if (entry.deltasByCell.size === 0) return;
+    this.history.push(entry);
+    this.cursor += 1;
+    this.#emitHistory();
+    this.#emitDirty();
+  }
+
+  /**
+   * Apply deltas to the model and engine. This is the single authoritative mutation path.
+   *
+   * @param {CellDelta[]} deltas
+   * @param {{ recalc: boolean, emitChange: boolean }} options
+   */
+  #applyDeltas(deltas, options) {
+    // Apply to the canonical model first.
+    for (const delta of deltas) {
+      this.model.setCell(delta.sheetId, delta.row, delta.col, delta.after);
+    }
+
+    /** @type {CellChange[] | null} */
+    let engineChanges = null;
+    if (this.engine) {
+      engineChanges = deltas.map((d) => ({
+        sheetId: d.sheetId,
+        row: d.row,
+        col: d.col,
+        cell: cloneCellState(d.after),
+      }));
+    }
+
+    try {
+      if (engineChanges) this.engine.applyChanges(engineChanges);
+      if (options.recalc) this.engine?.recalculate();
+    } catch (err) {
+      // Roll back the canonical model if the engine rejects a change.
+      for (const delta of deltas) {
+        this.model.setCell(delta.sheetId, delta.row, delta.col, delta.before);
+      }
+      throw err;
+    }
+
+    if (options.emitChange) {
+      this.#emit("change", { deltas: deltas.map(cloneDelta) });
+    }
+  }
+}
+
