@@ -113,11 +113,21 @@ jobs:
         shell: powershell
         run: |
           $max = [int]"${{ env.MAX_CASES }}"
+          $includeTags = $env:INCLUDE_TAGS
+          $excludeTags = $env:EXCLUDE_TAGS
           $args = @(
             "-CasesPath", "tests/compatibility/excel-oracle/cases.json",
             "-OutPath", "${{ steps.expected.outputs.path }}"
           )
           if ($max -gt 0) { $args += @("-MaxCases", $max) }
+          foreach ($t in ($includeTags -split ",")) {
+            $tag = $t.Trim()
+            if ($tag -ne "") { $args += @("-IncludeTags", $tag) }
+          }
+          foreach ($t in ($excludeTags -split ",")) {
+            $tag = $t.Trim()
+            if ($tag -ne "") { $args += @("-ExcludeTags", $tag) }
+          }
           powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 @args
 
       - name: Run formula engine (adapter)
@@ -128,11 +138,21 @@ jobs:
         run: |
           $max = [int]"${{ env.MAX_CASES }}"
           $engineCmd = "${{ env.ENGINE_CMD }}"
+          $includeTags = $env:INCLUDE_TAGS
+          $excludeTags = $env:EXCLUDE_TAGS
           $args = @(
             "-CasesPath", "tests/compatibility/excel-oracle/cases.json",
             "-OutPath", "tests/compatibility/excel-oracle/datasets/engine-results.json"
           )
           if ($max -gt 0) { $args += @("-MaxCases", $max) }
+          foreach ($t in ($includeTags -split ",")) {
+            $tag = $t.Trim()
+            if ($tag -ne "") { $args += @("-IncludeTags", $tag) }
+          }
+          foreach ($t in ($excludeTags -split ",")) {
+            $tag = $t.Trim()
+            if ($tag -ne "") { $args += @("-ExcludeTags", $tag) }
+          }
           if ($engineCmd -ne "") { $args += @("-EngineCommand", $engineCmd) }
           powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-engine.ps1 @args
 

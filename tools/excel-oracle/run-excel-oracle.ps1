@@ -18,6 +18,14 @@
 .PARAMETER MaxCases
   Optional cap for debugging (run only the first N cases).
 
+.PARAMETER IncludeTags
+  Optional list of case tags to include. If provided, only cases that contain
+  at least one of these tags are evaluated.
+
+.PARAMETER ExcludeTags
+  Optional list of case tags to exclude. Any case containing one of these tags
+  is skipped.
+
 .PARAMETER Visible
   Make Excel visible while running (useful for debugging).
 #>
@@ -31,6 +39,10 @@ param(
   [string]$OutPath,
 
   [int]$MaxCases = 0,
+
+  [string[]]$IncludeTags = @(),
+
+  [string[]]$ExcludeTags = @(),
 
   [switch]$Visible
 )
@@ -147,6 +159,33 @@ if ($casesJson.schemaVersion -ne 1) {
 }
 
 $caseList = @($casesJson.cases)
+
+$include = @($IncludeTags | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+$exclude = @($ExcludeTags | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+
+if ($include.Count -gt 0 -or $exclude.Count -gt 0) {
+  $caseList = $caseList | Where-Object {
+    $tags = @()
+    if ($null -ne $_.tags) { $tags = @($_.tags | ForEach-Object { [string]$_ }) }
+
+    if ($include.Count -gt 0) {
+      $matched = $false
+      foreach ($t in $tags) {
+        if ($include -contains $t) { $matched = $true; break }
+      }
+      if (-not $matched) { return $false }
+    }
+
+    if ($exclude.Count -gt 0) {
+      foreach ($t in $tags) {
+        if ($exclude -contains $t) { return $false }
+      }
+    }
+
+    return $true
+  }
+}
+
 if ($MaxCases -gt 0) {
   $caseList = $caseList | Select-Object -First $MaxCases
 }

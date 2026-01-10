@@ -26,6 +26,14 @@
 .PARAMETER MaxCases
   Optional cap for debugging (run only the first N cases).
 
+.PARAMETER IncludeTags
+  Optional list of case tags to include. If provided, only cases that contain
+  at least one of these tags are evaluated.
+
+.PARAMETER ExcludeTags
+  Optional list of case tags to exclude. Any case containing one of these tags
+  is skipped.
+
 .NOTES
   If no engine command is provided, this script defaults to running the
   in-repo Rust CLI (`cargo run -p formula-excel-oracle -- ...`).
@@ -40,6 +48,10 @@ param(
   [string]$OutPath,
 
   [int]$MaxCases = 0,
+
+  [string[]]$IncludeTags = @(),
+
+  [string[]]$ExcludeTags = @(),
 
   [string]$EngineCommand
 )
@@ -62,6 +74,8 @@ if (-not $EngineCommand) {
     "--out", $OutPath
   )
   if ($MaxCases -gt 0) { $cargoArgs += @("--max-cases", $MaxCases) }
+  foreach ($t in $IncludeTags) { if ($t -and $t.Trim() -ne "") { $cargoArgs += @("--include-tag", $t.Trim()) } }
+  foreach ($t in $ExcludeTags) { if ($t -and $t.Trim() -ne "") { $cargoArgs += @("--exclude-tag", $t.Trim()) } }
 
   Write-Host ("Running engine via cargo: cargo {0}" -f ($cargoArgs -join " "))
   & cargo @cargoArgs
@@ -84,6 +98,16 @@ if ($outDir -and -not (Test-Path -LiteralPath $outDir)) {
 $cmd = "$EngineCommand --cases `"$CasesPath`" --out `"$OutPath`""
 if ($MaxCases -gt 0) {
   $cmd = "$cmd --max-cases $MaxCases"
+}
+foreach ($t in $IncludeTags) {
+  if ($t -and $t.Trim() -ne "") {
+    $cmd = "$cmd --include-tag `"$($t.Trim())`""
+  }
+}
+foreach ($t in $ExcludeTags) {
+  if ($t -and $t.Trim() -ne "") {
+    $cmd = "$cmd --exclude-tag `"$($t.Trim())`""
+  }
 }
 Write-Host "Running engine: $cmd"
 

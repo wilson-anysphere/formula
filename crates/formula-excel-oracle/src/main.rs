@@ -3,6 +3,7 @@ use clap::Parser;
 use formula_engine::{Engine, Value};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use time::format_description::well_known::Rfc3339;
@@ -24,6 +25,14 @@ struct Args {
     /// Optional cap for debugging (evaluate only the first N cases).
     #[arg(long, default_value_t = 0)]
     max_cases: usize,
+
+    /// Only include cases containing this tag (can be repeated).
+    #[arg(long = "include-tag")]
+    include_tags: Vec<String>,
+
+    /// Exclude cases containing this tag (can be repeated).
+    #[arg(long = "exclude-tag")]
+    exclude_tags: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +51,8 @@ struct Case {
     formula: String,
     output_cell: String,
     inputs: Vec<CellInput>,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -177,15 +188,43 @@ fn main() -> Result<()> {
         ..
     } = corpus;
 
+    let include: HashSet<String> = args
+        .include_tags
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    let exclude: HashSet<String> = args
+        .exclude_tags
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    let filtered_cases: Vec<Case> = cases
+        .into_iter()
+        .filter(|case| {
+            if !include.is_empty() && !case.tags.iter().any(|t| include.contains(t)) {
+                return false;
+            }
+            if !exclude.is_empty() && case.tags.iter().any(|t| exclude.contains(t)) {
+                return false;
+            }
+            true
+        })
+        .collect();
+
     let max_cases = if args.max_cases > 0 {
-        args.max_cases.min(cases.len())
+        args.max_cases.min(filtered_cases.len())
     } else {
-        cases.len()
+        filtered_cases.len()
     };
 
     let mut results = Vec::with_capacity(max_cases);
 
-    for case in cases.into_iter().take(max_cases) {
+    for case in filtered_cases.into_iter().take(max_cases) {
         let mut engine = Engine::new();
         let mut case_error: Option<String> = None;
 

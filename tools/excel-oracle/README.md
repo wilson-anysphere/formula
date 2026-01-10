@@ -52,6 +52,16 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
   -OutPath tests/compatibility/excel-oracle/datasets/excel-oracle.json
 ```
 
+To generate only a subset of cases (by tag):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `
+  -CasesPath tests/compatibility/excel-oracle/cases.json `
+  -OutPath tests/compatibility/excel-oracle/datasets/excel-oracle.json `
+  -IncludeTags SUM,IF,cmp `
+  -ExcludeTags spill,dynarr
+```
+
 The output JSON includes:
 
 - Excel version/build metadata (because behavior can differ between Excel versions)
@@ -79,7 +89,9 @@ To force Excel generation in the workflow when a pinned dataset exists, run the 
 
 This repo includes a reference implementation for the Rust `formula-engine` at:
 
-`crates/formula-excel-oracle/` (run with `cargo run -p formula-excel-oracle -- --cases ... --out ...`)
+`crates/formula-excel-oracle/` (run with `cargo run -p formula-excel-oracle -- --cases ... --out ...`).
+
+It also supports `--include-tag` / `--exclude-tag` for evaluating a filtered subset of the corpus.
 
 2) Compare:
 
