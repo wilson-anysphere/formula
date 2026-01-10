@@ -1,5 +1,3 @@
-import { cloneCellState } from "../../../apps/desktop/src/document/cell.js";
-
 function rangeSize(range) {
   const rowCount = range.end_row - range.start_row + 1;
   const colCount = range.end_col - range.start_col + 1;
@@ -114,12 +112,4 @@ export class DocumentControllerBridge {
     });
     return null;
   }
-
-  /**
-   * Convenience helper for tests/debugging.
-   */
-  dump_cell_state({ sheet_id, row, col }) {
-    return cloneCellState(this.doc.getCell(sheet_id, { row, col }));
-  }
 }
-
