@@ -1,0 +1,552 @@
+# Performance Targets & Optimization Strategy
+
+## Overview
+
+Performance is a feature. Users should never wait, never see jank, never hit limits. These targets represent the bar we must clear to win over power users.
+
+---
+
+## Performance Targets
+
+### Startup
+
+| Metric | Target | Measurement Method |
+|--------|--------|-------------------|
+| Cold start to interactive | <1.0s | Time from launch to first input accepted |
+| Warm start | <0.5s | Time from launch with cached data |
+| Time to first render | <0.3s | Time from launch to grid visible |
+| Bundle size | <10MB | Compressed application download |
+
+### File Operations
+
+| Metric | Target | Measurement Method |
+|--------|--------|-------------------|
+| Open 1MB xlsx | <1s | File dialog close to grid rendered |
+| Open 10MB xlsx | <3s | File dialog close to grid rendered |
+| Open 100MB xlsx | <10s | File dialog close to grid rendered |
+| Save 1MB xlsx | <0.5s | Save command to file written |
+| Save 10MB xlsx | <2s | Save command to file written |
+| Save 100MB xlsx | <5s | Save command to file written |
+
+### Rendering
+
+| Metric | Target | Measurement Method |
+|--------|--------|-------------------|
+| Scroll FPS | 60fps | Chrome DevTools Performance |
+| Scroll with 1M rows | 60fps | No degradation |
+| Scroll with 100 columns | 60fps | No degradation |
+| Selection render | <16ms | Time from click to highlight |
+| Cell edit start | <50ms | Time from F2 to cursor |
+| Cell edit commit | <50ms | Time from Enter to display |
+
+### Calculation
+
+| Metric | Target | Measurement Method |
+|--------|--------|-------------------|
+| Simple formula | <1ms | Single SUM of 100 cells |
+| 1K cell recalc | <10ms | Dependent chain of 1K cells |
+| 10K cell recalc | <50ms | Dependent chain of 10K cells |
+| 100K cell recalc | <100ms | Dependent chain of 100K cells |
+| 1M cell recalc | <1s | Full recalc of 1M formula cells |
+| VLOOKUP 10K rows | <10ms | Single lookup in 10K row table |
+| VLOOKUP 100K rows | <50ms | Single lookup in 100K row table |
+
+### Memory
+
+| Metric | Target | Measurement Method |
+|--------|--------|-------------------|
+| Empty workbook | <50MB | Heap snapshot |
+| 1MB xlsx loaded | <100MB | Heap snapshot |
+| 10MB xlsx loaded | <200MB | Heap snapshot |
+| 100MB xlsx loaded | <500MB | Heap snapshot |
+| Memory per cell | <100 bytes | Calculated from heap |
+
+### Collaboration
+
+| Metric | Target | Measurement Method |
+|--------|--------|-------------------|
+| Edit to sync | <100ms | Time for change to appear on other client |
+| Presence update | <200ms | Time for cursor to update |
+| Conflict resolution | <500ms | Time to merge concurrent edits |
+| Offline duration | Unlimited | Time can work offline |
+
+### AI
+
+| Metric | Target | Measurement Method |
+|--------|--------|-------------------|
+| Tab completion | <100ms | Time from keystroke to suggestion |
+| Inline assist | <2s | Time from Cmd+K to result |
+| Chat response | <5s | Time from Enter to first token |
+| Formula explanation | <3s | Time from request to explanation |
+
+---
+
+## Benchmarking Infrastructure
+
+### Automated Performance Tests
+
+```typescript
+// tests/performance/benchmark.ts
+
+interface BenchmarkResult {
+  name: string;
+  iterations: number;
+  mean: number;
+  median: number;
+  p95: number;
+  p99: number;
+  stdDev: number;
+  passed: boolean;
+  target: number;
+}
+
+async function runBenchmark(
+  name: string,
+  fn: () => Promise<void>,
+  options: { iterations?: number; warmup?: number; target: number }
+): Promise<BenchmarkResult> {
+  const { iterations = 100, warmup = 10, target } = options;
+  const results: number[] = [];
+  
+  // Warmup
+  for (let i = 0; i < warmup; i++) {
+    await fn();
+  }
+  
+  // Measure
+  for (let i = 0; i < iterations; i++) {
+    const start = performance.now();
+    await fn();
+    results.push(performance.now() - start);
+  }
+  
+  // Calculate statistics
+  results.sort((a, b) => a - b);
+  const mean = results.reduce((a, b) => a + b) / results.length;
+  const median = results[Math.floor(results.length / 2)];
+  const p95 = results[Math.floor(results.length * 0.95)];
+  const p99 = results[Math.floor(results.length * 0.99)];
+  const variance = results.reduce((sum, x) => sum + Math.pow(x - mean, 2), 0) / results.length;
+  const stdDev = Math.sqrt(variance);
+  
+  return {
+    name,
+    iterations,
+    mean,
+    median,
+    p95,
+    p99,
+    stdDev,
+    passed: p95 <= target,
+    target
+  };
+}
+```
+
+### Continuous Performance Monitoring
+
+```yaml
+# .github/workflows/perf.yml
+name: Performance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+      - run: npm ci
+      - run: npm run benchmark
+      - uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'customSmallerIsBetter'
+          output-file-path: benchmark-results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '120%'
+          comment-on-alert: true
+          fail-on-alert: true
+```
+
+---
+
+## Optimization Strategies
+
+### Startup Optimization
+
+```typescript
+// 1. Code splitting - only load what's needed immediately
+const CalcEngine = lazy(() => import('./calc-engine'));
+const AIAssistant = lazy(() => import('./ai-assistant'));
+const ChartRenderer = lazy(() => import('./chart-renderer'));
+
+// 2. Pre-computed data
+// Compile function signatures, help text at build time
+import { FUNCTION_SIGNATURES } from './generated/function-signatures';
+
+// 3. Service worker for instant load
+// Cache shell HTML, core JS, CSS
+self.addEventListener('fetch', (event) => {
+  if (event.request.mode === 'navigate') {
+    event.respondWith(caches.match('/shell.html'));
+  }
+});
+
+// 4. Skeleton UI
+// Show grid structure immediately, fill data async
+function showSkeletonUI() {
+  renderGridLines();
+  renderHeaders();
+  // Data comes later via streaming
+}
+```
+
+### Calculation Optimization
+
+```rust
+// 1. SIMD for bulk operations
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+
+fn sum_f64_simd(values: &[f64]) -> f64 {
+    unsafe {
+        let mut sum = _mm256_setzero_pd();
+        
+        for chunk in values.chunks_exact(4) {
+            let v = _mm256_loadu_pd(chunk.as_ptr());
+            sum = _mm256_add_pd(sum, v);
+        }
+        
+        // Horizontal sum
+        let low = _mm256_castpd256_pd128(sum);
+        let high = _mm256_extractf128_pd(sum, 1);
+        let sum128 = _mm_add_pd(low, high);
+        let high64 = _mm_unpackhi_pd(sum128, sum128);
+        _mm_cvtsd_f64(_mm_add_sd(sum128, high64))
+    }
+}
+
+// 2. Parallel calculation with rayon
+fn recalculate_parallel(cells: &mut [Cell], graph: &DependencyGraph) {
+    let order = graph.topological_sort();
+    let levels = graph.parallelize(order);
+    
+    for level in levels {
+        level.par_iter().for_each(|cell_id| {
+            // Safe because cells in same level are independent
+            evaluate_cell(cell_id);
+        });
+    }
+}
+
+// 3. Incremental calculation
+fn recalculate_incremental(dirty: &HashSet<CellId>) {
+    let affected = graph.get_all_dependents(dirty);
+    let order = graph.topological_sort_subset(&affected);
+    
+    for cell_id in order {
+        evaluate_cell(cell_id);
+    }
+}
+```
+
+### Rendering Optimization
+
+```typescript
+// 1. Request idle callback for non-critical updates
+function updateCellCache(cells: Cell[]) {
+  const deadline = 16; // ms
+  let index = 0;
+  
+  function processChunk(idleDeadline: IdleDeadline) {
+    while (index < cells.length && idleDeadline.timeRemaining() > 0) {
+      cacheCell(cells[index]);
+      index++;
+    }
+    
+    if (index < cells.length) {
+      requestIdleCallback(processChunk);
+    }
+  }
+  
+  requestIdleCallback(processChunk);
+}
+
+// 2. Offscreen canvas for complex rendering
+const offscreen = new OffscreenCanvas(width, height);
+const offscreenCtx = offscreen.getContext('2d');
+
+function renderComplex() {
+  // Render to offscreen
+  renderToCanvas(offscreenCtx);
+  
+  // Copy to main in single operation
+  mainCtx.drawImage(offscreen, 0, 0);
+}
+
+// 3. GPU acceleration for transforms
+canvas.style.willChange = 'transform';
+canvas.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+
+// 4. Efficient text rendering
+const textCache = new Map<string, ImageBitmap>();
+
+function renderText(text: string, style: TextStyle): ImageBitmap {
+  const key = `${text}|${styleKey(style)}`;
+  
+  if (!textCache.has(key)) {
+    const canvas = new OffscreenCanvas(100, 20);
+    const ctx = canvas.getContext('2d');
+    ctx.font = fontString(style);
+    ctx.fillText(text, 0, 16);
+    textCache.set(key, canvas.transferToImageBitmap());
+  }
+  
+  return textCache.get(key);
+}
+```
+
+### Memory Optimization
+
+```typescript
+// 1. Sparse storage - only store non-empty cells
+class SparseSheet {
+  private cells = new Map<number, Cell>();
+  
+  private key(row: number, col: number): number {
+    return (row << 16) | col;
+  }
+  
+  get(row: number, col: number): Cell | undefined {
+    return this.cells.get(this.key(row, col));
+  }
+  
+  set(row: number, col: number, cell: Cell): void {
+    if (cell.isEmpty()) {
+      this.cells.delete(this.key(row, col));
+    } else {
+      this.cells.set(this.key(row, col), cell);
+    }
+  }
+}
+
+// 2. String deduplication
+class StringPool {
+  private pool = new Map<string, string>();
+  
+  intern(str: string): string {
+    if (!this.pool.has(str)) {
+      this.pool.set(str, str);
+    }
+    return this.pool.get(str)!;
+  }
+}
+
+// 3. Lazy parsing - don't parse formulas until needed
+class LazyCell {
+  private _ast?: ASTNode;
+  private _formula?: string;
+  
+  get ast(): ASTNode {
+    if (!this._ast && this._formula) {
+      this._ast = parse(this._formula);
+    }
+    return this._ast!;
+  }
+}
+
+// 4. LRU cache for computed values
+class LRUCache<K, V> {
+  private cache = new Map<K, V>();
+  private readonly maxSize: number;
+  
+  get(key: K): V | undefined {
+    const value = this.cache.get(key);
+    if (value !== undefined) {
+      // Move to end (most recent)
+      this.cache.delete(key);
+      this.cache.set(key, value);
+    }
+    return value;
+  }
+  
+  set(key: K, value: V): void {
+    if (this.cache.size >= this.maxSize) {
+      // Delete oldest (first)
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, value);
+  }
+}
+```
+
+---
+
+## Profiling Tools
+
+### Development Profiling
+
+```typescript
+// Custom performance markers
+performance.mark('recalc-start');
+engine.recalculate();
+performance.mark('recalc-end');
+performance.measure('recalculation', 'recalc-start', 'recalc-end');
+
+// Memory profiling
+console.log('Memory before:', process.memoryUsage());
+// ... operation
+console.log('Memory after:', process.memoryUsage());
+
+// Flame graph generation
+const profiler = require('v8-profiler-next');
+profiler.startProfiling('MyProfile');
+// ... operation
+const profile = profiler.stopProfiling('MyProfile');
+profile.export(function(error, result) {
+  fs.writeFileSync('profile.cpuprofile', result);
+  profile.delete();
+});
+```
+
+### Production Monitoring
+
+```typescript
+// Real User Monitoring (RUM)
+class PerformanceMonitor {
+  private metrics: Map<string, number[]> = new Map();
+  
+  measure(name: string, fn: () => void): void {
+    const start = performance.now();
+    fn();
+    const duration = performance.now() - start;
+    
+    if (!this.metrics.has(name)) {
+      this.metrics.set(name, []);
+    }
+    this.metrics.get(name)!.push(duration);
+    
+    // Send to analytics
+    if (this.shouldReport()) {
+      this.report();
+    }
+  }
+  
+  private report(): void {
+    const summary: Record<string, { p50: number; p95: number; p99: number }> = {};
+    
+    for (const [name, values] of this.metrics) {
+      values.sort((a, b) => a - b);
+      summary[name] = {
+        p50: values[Math.floor(values.length * 0.5)],
+        p95: values[Math.floor(values.length * 0.95)],
+        p99: values[Math.floor(values.length * 0.99)]
+      };
+    }
+    
+    analytics.track('performance', summary);
+    this.metrics.clear();
+  }
+}
+```
+
+---
+
+## Performance Regression Prevention
+
+### Pre-commit Hooks
+
+```bash
+#!/bin/bash
+# .git/hooks/pre-commit
+
+echo "Running performance tests..."
+npm run perf:quick
+
+if [ $? -ne 0 ]; then
+  echo "Performance regression detected. Commit blocked."
+  exit 1
+fi
+```
+
+### PR Performance Checks
+
+```typescript
+// Compare PR performance against main
+async function comparePerformance(): Promise<PerfComparison> {
+  const mainResults = await getMainBranchResults();
+  const prResults = await runBenchmarks();
+  
+  const regressions: string[] = [];
+  
+  for (const [name, prMetric] of Object.entries(prResults)) {
+    const mainMetric = mainResults[name];
+    if (!mainMetric) continue;
+    
+    const change = (prMetric.p95 - mainMetric.p95) / mainMetric.p95;
+    
+    if (change > 0.1) { // 10% regression threshold
+      regressions.push(`${name}: ${(change * 100).toFixed(1)}% slower`);
+    }
+  }
+  
+  return {
+    passed: regressions.length === 0,
+    regressions,
+    summary: generateSummary(mainResults, prResults)
+  };
+}
+```
+
+---
+
+## Target Hardware
+
+### Minimum Requirements
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| CPU | 2 cores, 2GHz | 4 cores, 3GHz |
+| RAM | 4GB | 8GB |
+| Storage | 500MB free | 1GB free |
+| Display | 1280x720 | 1920x1080 |
+| GPU | Integrated | Dedicated |
+
+### Performance Scaling
+
+| Workload | Min Hardware | Rec Hardware |
+|----------|--------------|--------------|
+| 10K cells | ✓ Fast | ✓ Instant |
+| 100K cells | ✓ Acceptable | ✓ Fast |
+| 1M cells | ⚠️ Slow | ✓ Acceptable |
+| 10M cells | ❌ Not recommended | ⚠️ Slow |
+
+---
+
+## Performance Budget
+
+### Network Budget
+
+| Resource | Budget | Notes |
+|----------|--------|-------|
+| Initial HTML | 15KB | Shell only |
+| Critical CSS | 10KB | Above-fold styles |
+| Critical JS | 100KB | Core functionality |
+| Total initial | 200KB | Under 3G target |
+| Full app | 5MB | After lazy loading |
+
+### Runtime Budget
+
+| Operation | Budget | Notes |
+|-----------|--------|-------|
+| Frame render | 16ms | 60fps target |
+| Input response | 50ms | Feels instant |
+| Animation | 100ms | Smooth transition |
+| Content load | 1000ms | User waits |
+| Heavy operation | 10000ms | Show progress |
