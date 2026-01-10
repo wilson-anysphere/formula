@@ -1,5 +1,6 @@
 import React, { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "react";
 import type { CellProvider } from "../model/CellProvider";
+import type { GridPresence } from "../presence/types";
 import { CanvasGridRenderer } from "../rendering/CanvasGridRenderer";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 
@@ -10,6 +11,7 @@ export interface GridApi {
   setFrozen(frozenRows: number, frozenCols: number): void;
   setSelection(row: number, col: number): void;
   clearSelection(): void;
+  setRemotePresences(presences: GridPresence[] | null): void;
   renderImmediately(): void;
 }
 
@@ -21,6 +23,7 @@ export interface CanvasGridProps {
   frozenCols?: number;
   defaultRowHeight?: number;
   defaultColWidth?: number;
+  remotePresences?: GridPresence[] | null;
   apiRef?: React.Ref<GridApi>;
   style?: React.CSSProperties;
 }
@@ -117,6 +120,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       },
       setSelection: (row, col) => rendererRef.current?.setSelection({ row, col }),
       clearSelection: () => rendererRef.current?.setSelection(null),
+      setRemotePresences: (presences) => rendererRef.current?.setRemotePresences(presences),
       renderImmediately: () => rendererRef.current?.renderImmediately()
     }),
     [props.apiRef]
@@ -189,6 +193,10 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     selectionCanvas.addEventListener("pointerdown", onPointerDown);
     return () => selectionCanvas.removeEventListener("pointerdown", onPointerDown);
   }, []);
+
+  useEffect(() => {
+    rendererRef.current?.setRemotePresences(props.remotePresences ?? null);
+  }, [props.remotePresences]);
 
   useEffect(() => {
     const vThumb = vThumbRef.current;

@@ -2,6 +2,7 @@ import type { CellProvider, CellProviderUpdate, CellRange } from "../model/CellP
 import { DirtyRegionTracker, type Rect } from "./DirtyRegionTracker";
 import { setupHiDpiCanvas } from "./HiDpiCanvas";
 import { LruCache } from "../utils/LruCache";
+import type { GridPresence } from "../presence/types";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
 import { VirtualScrollManager } from "../virtualization/VirtualScrollManager";
 
@@ -25,6 +26,24 @@ function intersectRect(a: Rect, b: Rect): Rect | null {
 
 function crispLine(pos: number): number {
   return Math.round(pos) + 0.5;
+}
+
+function parseHexColor(color: string): { r: number; g: number; b: number } | null {
+  const match = /^#?([0-9a-f]{6})$/i.exec(color);
+  if (!match) return null;
+  const value = Number.parseInt(match[1], 16);
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255
+  };
+}
+
+function pickTextColor(backgroundColor: string): string {
+  const rgb = parseHexColor(backgroundColor);
+  if (!rgb) return "#ffffff";
+  const luma = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+  return luma > 0.6 ? "#000000" : "#ffffff";
 }
 
 export class CanvasGridRenderer {
@@ -69,8 +88,12 @@ export class CanvasGridRenderer {
   private selection: Selection | null = null;
   private previousSelection: Selection | null = null;
 
+  private remotePresences: GridPresence[] = [];
+
   private readonly formattedCache = new LruCache<string, string>(50_000);
   private readonly textWidthCache = new LruCache<string, number>(50_000);
+
+  private readonly presenceFont = "12px system-ui, sans-serif";
 
   constructor(options: {
     provider: CellProvider;
@@ -188,6 +211,15 @@ export class CanvasGridRenderer {
       return;
     }
 
+    this.dirty.selection.markDirty({ x: 0, y: 0, width: viewport.width, height: viewport.height });
+    this.requestRender();
+  }
+
+  setRemotePresences(presences: GridPresence[] | null): void {
+    if (presences === this.remotePresences) return;
+    this.remotePresences = presences ?? [];
+
+    const viewport = this.scroll.getViewportState();
     this.dirty.selection.markDirty({ x: 0, y: 0, width: viewport.width, height: viewport.height });
     this.requestRender();
   }
@@ -605,6 +637,10 @@ export class CanvasGridRenderer {
 
       this.renderQuadrants(layer, viewport, region);
 
+      if (layer === "selection") {
+        this.renderRemotePresenceOverlays(ctx, viewport);
+      }
+
       ctx.restore();
     }
 
@@ -933,6 +969,104 @@ export class CanvasGridRenderer {
       );
     }
 
+  }
+
+  private renderRemotePresenceOverlays(ctx: CanvasRenderingContext2D, viewport: GridViewportState): void {
+    if (this.remotePresences.length === 0) return;
+
+    const rowCount = this.getRowCount();
+    const colCount = this.getColCount();
+
+    ctx.save();
+    ctx.font = this.presenceFont;
+    ctx.textBaseline = "top";
+
+    const selectionFillAlpha = 0.12;
+    const selectionStrokeAlpha = 0.9;
+    const cursorStrokeWidth = 2;
+    const badgePaddingX = 6;
+    const badgePaddingY = 3;
+    const badgeOffsetX = 8;
+    const badgeOffsetY = -18;
+    const badgeTextHeight = 14;
+
+    for (const presence of this.remotePresences) {
+      const color = presence.color ?? "#4c8bf5";
+
+      if (presence.selections.length > 0) {
+        ctx.fillStyle = color;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = cursorStrokeWidth;
+
+        for (const range of presence.selections) {
+          const startRow = Math.min(range.startRow, range.endRow);
+          const endRow = Math.max(range.startRow, range.endRow);
+          const startCol = Math.min(range.startCol, range.endCol);
+          const endCol = Math.max(range.startCol, range.endCol);
+
+          const clampedStartRow = Math.max(0, Math.min(rowCount - 1, startRow));
+          const clampedEndRow = Math.max(0, Math.min(rowCount - 1, endRow));
+          const clampedStartCol = Math.max(0, Math.min(colCount - 1, startCol));
+          const clampedEndCol = Math.max(0, Math.min(colCount - 1, endCol));
+
+          if (clampedStartRow > clampedEndRow || clampedStartCol > clampedEndCol) continue;
+
+          const rects = this.rangeToViewportRects(
+            {
+              startRow: clampedStartRow,
+              endRow: Math.min(rowCount, clampedEndRow + 1),
+              startCol: clampedStartCol,
+              endCol: Math.min(colCount, clampedEndCol + 1)
+            },
+            viewport
+          );
+
+          if (rects.length === 0) continue;
+
+          ctx.globalAlpha = selectionFillAlpha;
+          for (const rect of rects) {
+            ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+          }
+
+          ctx.globalAlpha = selectionStrokeAlpha;
+          for (const rect of rects) {
+            ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+          }
+
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      if (presence.cursor) {
+        const cursorRect = this.cellRectInViewport(presence.cursor.row, presence.cursor.col, viewport);
+        if (!cursorRect) continue;
+
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = cursorStrokeWidth;
+        ctx.strokeRect(cursorRect.x + 1, cursorRect.y + 1, cursorRect.width - 2, cursorRect.height - 2);
+
+        const name = presence.name ?? "Anonymous";
+        const metricsKey = `${this.presenceFont}::${name}`;
+        let textWidth = this.textWidthCache.get(metricsKey);
+        if (textWidth === undefined) {
+          textWidth = ctx.measureText(name).width;
+          this.textWidthCache.set(metricsKey, textWidth);
+        }
+
+        const badgeWidth = textWidth + badgePaddingX * 2;
+        const badgeHeight = badgeTextHeight + badgePaddingY * 2;
+        const badgeX = cursorRect.x + cursorRect.width + badgeOffsetX;
+        const badgeY = cursorRect.y + badgeOffsetY;
+
+        ctx.fillStyle = color;
+        ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
+        ctx.fillStyle = pickTextColor(color);
+        ctx.fillText(name, badgeX + badgePaddingX, badgeY + badgePaddingY);
+      }
+    }
+
+    ctx.restore();
   }
 
   private drawFreezeLines(ctx: CanvasRenderingContext2D, viewport: GridViewportState): void {
