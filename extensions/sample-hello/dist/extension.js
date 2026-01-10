@@ -81,7 +81,26 @@ async function activate(context) {
     return text;
   });
 
-  context.subscriptions.push(doubleFn, sumCmd, panelCmd, fetchCmd, viewActivated);
+  const copySumCmd = await formula.commands.registerCommand(
+    "sampleHello.copySumToClipboard",
+    async () => {
+      const selection = await formula.cells.getSelection();
+      const values = selection.values ?? [];
+
+      let sum = 0;
+      for (const row of values) {
+        for (const val of row) {
+          if (typeof val === "number" && Number.isFinite(val)) sum += val;
+        }
+      }
+
+      await formula.clipboard.writeText(String(sum));
+      await formula.ui.showMessage(`Copied sum ${sum} to clipboard`, "info");
+      return sum;
+    }
+  );
+
+  context.subscriptions.push(doubleFn, sumCmd, panelCmd, fetchCmd, copySumCmd, viewActivated);
 }
 
 module.exports = {

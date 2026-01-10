@@ -13,6 +13,7 @@
     "onCommand:sampleHello.sumSelection",
     "onCommand:sampleHello.openPanel",
     "onCommand:sampleHello.fetchText",
+    "onCommand:sampleHello.copySumToClipboard",
     "onView:sampleHello.panel",
     "onCustomFunction:SAMPLEHELLO_DOUBLE"
   ],
@@ -31,6 +32,11 @@
       {
         "command": "sampleHello.fetchText",
         "title": "Fetch Text (Demo)",
+        "category": "Sample Hello"
+      },
+      {
+        "command": "sampleHello.copySumToClipboard",
+        "title": "Copy Selection Sum to Clipboard",
         "category": "Sample Hello"
       }
     ],
@@ -62,6 +68,7 @@
     "cells.write",
     "ui.commands",
     "ui.panels",
-    "network"
+    "network",
+    "clipboard"
   ]
 }

@@ -216,6 +216,63 @@ test("integration: denied network permission blocks fetch", async (t) => {
   );
 });
 
+test("integration: clipboard API is permission gated and writes clipboard text", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-clipboard-"));
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extPath = path.resolve(__dirname, "../../../extensions/sample-hello");
+  await host.loadExtension(extPath);
+
+  host.spreadsheet.setCell(0, 0, 1);
+  host.spreadsheet.setCell(0, 1, 2);
+  host.spreadsheet.setSelection({ startRow: 0, startCol: 0, endRow: 0, endCol: 1 });
+
+  const sum = await host.executeCommand("sampleHello.copySumToClipboard");
+  assert.equal(sum, 3);
+  assert.equal(host.getClipboardText(), "3");
+});
+
+test("integration: denied clipboard permission blocks clipboard writes", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-clipboard-deny-"));
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async ({ permissions }) => {
+      if (permissions.includes("clipboard")) return false;
+      return true;
+    }
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extPath = path.resolve(__dirname, "../../../extensions/sample-hello");
+  await host.loadExtension(extPath);
+
+  host.spreadsheet.setCell(0, 0, 1);
+  host.spreadsheet.setCell(0, 1, 2);
+  host.spreadsheet.setSelection({ startRow: 0, startCol: 0, endRow: 0, endCol: 1 });
+
+  await assert.rejects(
+    () => host.executeCommand("sampleHello.copySumToClipboard"),
+    /Permission denied/
+  );
+  assert.equal(host.getClipboardText(), "");
+});
+
 test("integration: denied permission prevents side effects", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-deny-"));
 

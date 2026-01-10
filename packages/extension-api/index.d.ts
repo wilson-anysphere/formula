@@ -93,6 +93,11 @@ export namespace network {
   function fetch(url: string, init?: any): Promise<FetchResponse>;
 }
 
+export namespace clipboard {
+  function readText(): Promise<string>;
+  function writeText(text: string): Promise<void>;
+}
+
 export namespace ui {
   type MessageType = "info" | "warning" | "error";
 

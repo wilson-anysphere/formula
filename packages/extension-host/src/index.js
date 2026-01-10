@@ -30,6 +30,9 @@ const API_PERMISSIONS = {
 
   "network.fetch": ["network"],
 
+  "clipboard.readText": ["clipboard"],
+  "clipboard.writeText": ["clipboard"],
+
   "storage.get": ["storage"],
   "storage.set": ["storage"],
   "storage.delete": ["storage"],
@@ -60,6 +63,7 @@ class ExtensionHost {
     this._panels = new Map(); // panelId -> { id, title, html }
     this._customFunctions = new Map(); // functionName -> extensionId
     this._messages = [];
+    this._clipboardText = "";
     this._pendingWorkerRequests = new Map();
     this._extensionStoragePath = extensionStoragePath;
     this._spreadsheet = spreadsheet;
@@ -267,6 +271,10 @@ class ExtensionHost {
 
   getMessages() {
     return [...this._messages];
+  }
+
+  getClipboardText() {
+    return this._clipboardText;
   }
 
   listExtensions() {
@@ -556,6 +564,12 @@ class ExtensionHost {
           bodyText
         };
       }
+
+      case "clipboard.readText":
+        return this._clipboardText;
+      case "clipboard.writeText":
+        this._clipboardText = String(args[0] ?? "");
+        return null;
 
       case "storage.get": {
         const store = await this._loadExtensionStorage();

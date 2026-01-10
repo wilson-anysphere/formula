@@ -382,6 +382,15 @@ const network = {
   }
 };
 
+const clipboard = {
+  async readText() {
+    return rpcCall("clipboard", "readText", []);
+  },
+  async writeText(text) {
+    await rpcCall("clipboard", "writeText", [String(text)]);
+  }
+};
+
 const events = {
   onSelectionChanged(callback) {
     return addEventHandler("selectionChanged", callback);
@@ -412,6 +421,7 @@ module.exports = {
   commands,
   functions,
   network,
+  clipboard,
   ui,
   storage,
   config,
