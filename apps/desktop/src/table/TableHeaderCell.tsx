@@ -20,7 +20,7 @@ export function TableHeaderCell({
   // A tiny subset of Excel-style table styling: bold header + background.
   // Proper style mapping is out of scope here, but the rendering surface is.
   const background =
-    style?.name.startsWith("TableStyle") ? "var(--bg-secondary)" : "transparent";
+    style?.name.startsWith("TableStyle") ? "var(--grid-header-bg)" : "transparent";
 
   const hasFilter = !!table.autoFilter;
   return (

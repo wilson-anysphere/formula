@@ -1,4 +1,5 @@
-import { diffDocumentSnapshots } from "./diffSnapshots.js";
+import { semanticDiff } from "../diff/semanticDiff.js";
+import { sheetStateFromDocumentSnapshot } from "./sheetState.js";
 
 /**
  * Compute a semantic diff between a stored version snapshot and the current
@@ -16,12 +17,17 @@ import { diffDocumentSnapshots } from "./diffSnapshots.js";
 export async function diffDocumentVersionAgainstCurrent(opts) {
   const version = await opts.versionManager.getVersion(opts.versionId);
   if (!version) throw new Error(`Version not found: ${opts.versionId}`);
-  const currentSnapshot = opts.versionManager.doc.encodeState();
-  return diffDocumentSnapshots({
-    beforeSnapshot: version.snapshot,
-    afterSnapshot: currentSnapshot,
-    sheetId: opts.sheetId,
-  });
+
+  const before = sheetStateFromDocumentSnapshot(version.snapshot, { sheetId: opts.sheetId });
+
+  // Prefer the direct sheet export when available to avoid serializing the entire workbook.
+  const doc = opts.versionManager.doc;
+  const after =
+    typeof doc.exportSheetForSemanticDiff === "function"
+      ? doc.exportSheetForSemanticDiff(opts.sheetId)
+      : sheetStateFromDocumentSnapshot(doc.encodeState(), { sheetId: opts.sheetId });
+
+  return semanticDiff(before, after);
 }
 
 /**
@@ -39,10 +45,8 @@ export async function diffDocumentVersions(opts) {
   if (!before) throw new Error(`Version not found: ${opts.beforeVersionId}`);
   const after = await opts.getVersion(opts.afterVersionId);
   if (!after) throw new Error(`Version not found: ${opts.afterVersionId}`);
-  return diffDocumentSnapshots({
-    beforeSnapshot: before.snapshot,
-    afterSnapshot: after.snapshot,
-    sheetId: opts.sheetId,
-  });
-}
 
+  const beforeState = sheetStateFromDocumentSnapshot(before.snapshot, { sheetId: opts.sheetId });
+  const afterState = sheetStateFromDocumentSnapshot(after.snapshot, { sheetId: opts.sheetId });
+  return semanticDiff(beforeState, afterState);
+}
