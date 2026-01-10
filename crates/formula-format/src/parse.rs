@@ -189,6 +189,7 @@ fn split_sections(code: &str) -> Vec<String> {
 fn parse_section(input: &str) -> Result<Section, ParseError> {
     let mut rest = input.trim().to_string();
     let mut condition: Option<Condition> = None;
+    let mut leading_literal = String::new();
 
     // Strip leading bracketed components like colors, locale tags, currencies,
     // and conditions. Conditions are of the form `[>=100]`.
@@ -208,6 +209,10 @@ fn parse_section(input: &str) -> Result<Section, ParseError> {
             break;
         }
 
+        if let Some(symbol) = currency_symbol_from_bracket(content) {
+            leading_literal.push_str(&symbol);
+        }
+
         if condition.is_none() {
             if let Some(cond) = parse_condition(content) {
                 condition = Some(cond);
@@ -218,7 +223,10 @@ fn parse_section(input: &str) -> Result<Section, ParseError> {
         rest = rest.trim_start().to_string();
     }
 
-    Ok(Section { raw: rest, condition })
+    Ok(Section {
+        raw: format!("{leading_literal}{rest}"),
+        condition,
+    })
 }
 
 fn parse_condition(content: &str) -> Option<Condition> {
@@ -240,4 +248,16 @@ fn parse_condition(content: &str) -> Option<Condition> {
 
     let rhs = rhs_str.trim().parse::<f64>().ok()?;
     Some(Condition { op, rhs })
+}
+
+fn currency_symbol_from_bracket(content: &str) -> Option<String> {
+    // Currency/locale tags are encoded as `[$$-409]` where the currency symbol
+    // is between the first `$` and the optional `-` locale suffix.
+    let after = content.strip_prefix('$')?;
+    let symbol = after.split_once('-').map(|(s, _)| s).unwrap_or(after);
+    if symbol.is_empty() {
+        None
+    } else {
+        Some(symbol.to_string())
+    }
 }

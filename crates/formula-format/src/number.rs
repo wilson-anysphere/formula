@@ -80,6 +80,7 @@ fn format_general(value: f64, options: &FormatOptions) -> String {
 fn scan_outside_quotes(s: &str, needle: char) -> (usize, Vec<usize>) {
     let mut in_quotes = false;
     let mut escape = false;
+    let mut in_brackets = false;
     let mut count = 0;
     let mut positions = Vec::new();
     for (idx, ch) in s.char_indices() {
@@ -93,9 +94,16 @@ fn scan_outside_quotes(s: &str, needle: char) -> (usize, Vec<usize>) {
             }
             continue;
         }
+        if in_brackets {
+            if ch == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
         match ch {
             '"' => in_quotes = true,
             '\\' => escape = true,
+            '[' => in_brackets = true,
             _ if ch == needle => {
                 count += 1;
                 positions.push(idx);
@@ -109,6 +117,7 @@ fn scan_outside_quotes(s: &str, needle: char) -> (usize, Vec<usize>) {
 fn find_placeholder_span(s: &str) -> (Option<usize>, Option<usize>) {
     let mut in_quotes = false;
     let mut escape = false;
+    let mut in_brackets = false;
     let mut first: Option<usize> = None;
     let mut last: Option<usize> = None;
 
@@ -123,9 +132,16 @@ fn find_placeholder_span(s: &str) -> (Option<usize>, Option<usize>) {
             }
             continue;
         }
+        if in_brackets {
+            if ch == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
         match ch {
             '"' => in_quotes = true,
             '\\' => escape = true,
+            '[' => in_brackets = true,
             '0' | '#' | '?' => {
                 if first.is_none() {
                     first = Some(idx);
@@ -161,6 +177,7 @@ fn parse_fixed(number_raw: &str) -> FixedSpec {
 
     let mut in_quotes = false;
     let mut escape = false;
+    let mut in_brackets = false;
     let mut decimal_pos: Option<usize> = None;
     for (idx, ch) in raw.char_indices() {
         if escape {
@@ -173,9 +190,16 @@ fn parse_fixed(number_raw: &str) -> FixedSpec {
             }
             continue;
         }
+        if in_brackets {
+            if ch == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
         match ch {
             '"' => in_quotes = true,
             '\\' => escape = true,
+            '[' => in_brackets = true,
             '.' => {
                 decimal_pos = Some(idx);
                 break;
@@ -296,6 +320,7 @@ struct ScientificSpec {
 fn parse_scientific(number_raw: &str) -> Option<ScientificSpec> {
     let mut in_quotes = false;
     let mut escape = false;
+    let mut in_brackets = false;
     let mut e_pos: Option<(usize, char)> = None;
     for (idx, ch) in number_raw.char_indices() {
         if escape {
@@ -308,9 +333,16 @@ fn parse_scientific(number_raw: &str) -> Option<ScientificSpec> {
             }
             continue;
         }
+        if in_brackets {
+            if ch == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
         match ch {
             '"' => in_quotes = true,
             '\\' => escape = true,
+            '[' => in_brackets = true,
             'E' | 'e' => {
                 e_pos = Some((idx, ch));
                 break;

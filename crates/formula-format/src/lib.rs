@@ -8,11 +8,13 @@
 
 pub mod locale;
 
+mod builtin;
 mod datetime;
 mod literal;
 mod number;
 mod parse;
 
+pub use crate::builtin::builtin_format_code;
 pub use crate::datetime::DateSystem;
 pub use crate::parse::{FormatCode, ParseError};
 
@@ -145,4 +147,3 @@ fn format_text(text: &str, code: &FormatCode) -> String {
         text.to_string()
     }
 }
-

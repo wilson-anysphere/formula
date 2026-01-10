@@ -82,6 +82,27 @@ fn dates_1900_system_lotus_bug() {
 }
 
 #[test]
+fn am_pm_time_formatting() {
+    let options = FormatOptions {
+        locale: Locale::en_us(),
+        date_system: DateSystem::Excel1900,
+    };
+
+    assert_eq!(
+        format_value(Value::Number(1.0), Some("h:mm AM/PM"), &options).text,
+        "12:00 AM"
+    );
+    assert_eq!(
+        format_value(Value::Number(1.5), Some("h:mm AM/PM"), &options).text,
+        "12:00 PM"
+    );
+    assert_eq!(
+        format_value(Value::Number(1.75), Some("h:mm:ss AM/PM"), &options).text,
+        "6:00:00 PM"
+    );
+}
+
+#[test]
 fn locale_separators() {
     let options = FormatOptions {
         locale: Locale::de_de(),
@@ -111,3 +132,20 @@ fn conditional_sections_and_text() {
     );
 }
 
+#[test]
+fn bracket_currency_tokens_render_currency_symbol() {
+    let options = FormatOptions::default();
+    assert_eq!(
+        format_value(Value::Number(1234.5), Some("[$$-409]#,##0.00"), &options).text,
+        "$1,234.50"
+    );
+    assert_eq!(
+        format_value(
+            Value::Number(-1234.5),
+            Some("[$$-409]#,##0.00;([$$-409]#,##0.00)"),
+            &options
+        )
+        .text,
+        "($1,234.50)"
+    );
+}

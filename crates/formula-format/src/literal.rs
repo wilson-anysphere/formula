@@ -20,6 +20,30 @@ pub(crate) fn render_text_section(section: &str, text: &str) -> String {
                     out.push(next);
                 }
             }
+            '[' => {
+                // Bracket tokens (colors, locales, currencies, conditions).
+                // For display text we ignore most bracket tokens, except currency
+                // markers of the form `[$$-409]` which render a currency symbol.
+                let mut content = String::new();
+                let mut closed = false;
+                while let Some(c) = chars.next() {
+                    if c == ']' {
+                        closed = true;
+                        break;
+                    }
+                    content.push(c);
+                }
+
+                if closed {
+                    if let Some(symbol) = currency_symbol_from_bracket(&content) {
+                        out.push_str(&symbol);
+                    }
+                } else {
+                    // No closing `]`: treat as literal.
+                    out.push('[');
+                    out.push_str(&content);
+                }
+            }
             '_' => {
                 // underscore: skip next character, output a space (approximation)
                 let _ = chars.next();
@@ -59,6 +83,27 @@ pub(crate) fn render_literal_segment(segment: &str) -> String {
                     out.push(next);
                 }
             }
+            '[' => {
+                let mut content = String::new();
+                let mut closed = false;
+                while let Some(c) = chars.next() {
+                    if c == ']' {
+                        closed = true;
+                        break;
+                    }
+                    content.push(c);
+                }
+
+                if closed {
+                    if let Some(symbol) = currency_symbol_from_bracket(&content) {
+                        out.push_str(&symbol);
+                    }
+                    // All other bracket tokens are ignored.
+                } else {
+                    out.push('[');
+                    out.push_str(&content);
+                }
+            }
             '_' => {
                 let _ = chars.next();
                 out.push(' ');
@@ -71,4 +116,14 @@ pub(crate) fn render_literal_segment(segment: &str) -> String {
     }
 
     out
+}
+
+fn currency_symbol_from_bracket(content: &str) -> Option<String> {
+    let after = content.strip_prefix('$')?;
+    let symbol = after.split_once('-').map(|(s, _)| s).unwrap_or(after);
+    if symbol.is_empty() {
+        None
+    } else {
+        Some(symbol.to_string())
+    }
 }

@@ -69,23 +69,21 @@ pub(crate) fn looks_like_datetime(section: &str) -> bool {
                 }
             }
             'a' | 'A' => {
-                // AM/PM or A/P
-                let mut lookahead = String::new();
-                lookahead.push(ch);
+                // AM/PM or A/P markers (case-insensitive).
+                let mut probe = String::new();
+                probe.push(ch);
+                let mut clone = chars.clone();
                 for _ in 0..4 {
-                    if let Some(c) = chars.peek().copied() {
-                        lookahead.push(c);
-                        if lookahead.to_ascii_lowercase().starts_with("am/pm")
-                            || lookahead.to_ascii_lowercase().starts_with("a/p")
-                        {
-                            return true;
-                        }
-                        chars.next();
+                    if let Some(c) = clone.next() {
+                        probe.push(c);
                     } else {
                         break;
                     }
                 }
-                // fallthrough as literal
+                let lower = probe.to_ascii_lowercase();
+                if lower.starts_with("am/pm") || lower.starts_with("a/p") {
+                    return true;
+                }
             }
             _ => {}
         }
@@ -300,28 +298,31 @@ fn tokenize(pattern: &str) -> Vec<Token> {
                 // AM/PM or A/P markers (case-insensitive).
                 let mut probe = String::new();
                 probe.push(ch);
-                let mut taken = Vec::new();
+                let mut clone = chars.clone();
                 for _ in 0..4 {
-                    if let Some(c) = chars.peek().copied() {
-                        taken.push(c);
+                    if let Some(c) = clone.next() {
                         probe.push(c);
-                        let lower = probe.to_ascii_lowercase();
-                        if lower == "am/pm" || lower == "a/p" {
-                            for _ in 0..taken.len() {
-                                chars.next();
-                            }
-                            flush_literal(&mut literal_buf, &mut tokens);
-                            tokens.push(Token::AmPm);
-                            probe.clear();
-                            break;
-                        }
-                        // keep probing
                     } else {
                         break;
                     }
                 }
 
-                if !probe.is_empty() {
+                let lower = probe.to_ascii_lowercase();
+                if lower.starts_with("am/pm") {
+                    // Consume `M/PM` (4 chars) from the original iterator.
+                    for _ in 0..4 {
+                        chars.next();
+                    }
+                    flush_literal(&mut literal_buf, &mut tokens);
+                    tokens.push(Token::AmPm);
+                } else if lower.starts_with("a/p") {
+                    // Consume `/P` (2 chars).
+                    for _ in 0..2 {
+                        chars.next();
+                    }
+                    flush_literal(&mut literal_buf, &mut tokens);
+                    tokens.push(Token::AmPm);
+                } else {
                     // Not a recognized token: treat as literal.
                     literal_buf.push(ch);
                 }
