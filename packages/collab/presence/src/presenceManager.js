@@ -1,6 +1,69 @@
 import { deserializePresenceState, serializePresenceState } from "./presence.js";
 import { throttle } from "./throttle.js";
 
+function normalizeRange(range) {
+  if (!range || typeof range !== "object") return null;
+
+  let startRow;
+  let startCol;
+  let endRow;
+  let endCol;
+
+  if (
+    typeof range.startRow === "number" &&
+    typeof range.startCol === "number" &&
+    typeof range.endRow === "number" &&
+    typeof range.endCol === "number"
+  ) {
+    startRow = range.startRow;
+    startCol = range.startCol;
+    endRow = range.endRow;
+    endCol = range.endCol;
+  } else if (
+    range.start &&
+    range.end &&
+    typeof range.start.row === "number" &&
+    typeof range.start.col === "number" &&
+    typeof range.end.row === "number" &&
+    typeof range.end.col === "number"
+  ) {
+    startRow = range.start.row;
+    startCol = range.start.col;
+    endRow = range.end.row;
+    endCol = range.end.col;
+  } else {
+    return null;
+  }
+
+  const normalizedStartRow = Math.min(startRow, endRow);
+  const normalizedEndRow = Math.max(startRow, endRow);
+  const normalizedStartCol = Math.min(startCol, endCol);
+  const normalizedEndCol = Math.max(startCol, endCol);
+
+  return {
+    startRow: Math.trunc(normalizedStartRow),
+    startCol: Math.trunc(normalizedStartCol),
+    endRow: Math.trunc(normalizedEndRow),
+    endCol: Math.trunc(normalizedEndCol),
+  };
+}
+
+function areRangesEqual(a, b) {
+  return (
+    a.startRow === b.startRow && a.startCol === b.startCol && a.endRow === b.endRow && a.endCol === b.endCol
+  );
+}
+
+function areSelectionsEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!areRangesEqual(a[i], b[i])) return false;
+  }
+  return true;
+}
+
 export class PresenceManager {
   constructor(awareness, options) {
     const {
@@ -126,20 +189,34 @@ export class PresenceManager {
   }
 
   setCursor(cursor) {
-    if (!cursor) {
-      this.localPresence.cursor = null;
-      this.localPresence.lastActive = this.now();
-      this._broadcastThrottled();
-      return;
-    }
+    const nextCursor = cursor ? { row: Math.trunc(cursor.row), col: Math.trunc(cursor.col) } : null;
+    const prevCursor = this.localPresence.cursor;
 
-    this.localPresence.cursor = { row: cursor.row, col: cursor.col };
+    if (prevCursor === null && nextCursor === null) return;
+    if (prevCursor && nextCursor && prevCursor.row === nextCursor.row && prevCursor.col === nextCursor.col)
+      return;
+
+    this.localPresence.cursor = nextCursor;
     this.localPresence.lastActive = this.now();
     this._broadcastThrottled();
   }
 
   setSelections(selections) {
-    this.localPresence.selections = Array.isArray(selections) ? selections : [];
+    const normalizedSelections = Array.isArray(selections)
+      ? selections
+          .map((range) => normalizeRange(range))
+          .filter((range) => range !== null)
+          .sort((a, b) => {
+            if (a.startRow !== b.startRow) return a.startRow - b.startRow;
+            if (a.startCol !== b.startCol) return a.startCol - b.startCol;
+            if (a.endRow !== b.endRow) return a.endRow - b.endRow;
+            return a.endCol - b.endCol;
+          })
+      : [];
+
+    if (areSelectionsEqual(normalizedSelections, this.localPresence.selections)) return;
+
+    this.localPresence.selections = normalizedSelections;
     this.localPresence.lastActive = this.now();
     this._broadcastThrottled();
   }
