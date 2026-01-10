@@ -15,3 +15,4 @@ mod parser;
 
 pub use crate::error::{ExcelError, ExcelResult};
 pub use parser::{parse_formula, Expr, Formula, ParseError};
+pub mod what_if;

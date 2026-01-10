@@ -1,0 +1,200 @@
+use std::collections::HashMap;
+use std::time::SystemTime;
+
+use crate::what_if::{CellRef, CellValue, WhatIfError, WhatIfModel};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ScenarioId(u64);
+
+impl ScenarioId {
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Scenario {
+    pub id: ScenarioId,
+    pub name: String,
+    pub changing_cells: Vec<CellRef>,
+    pub values: HashMap<CellRef, CellValue>,
+    pub created: SystemTime,
+    pub created_by: String,
+    pub comment: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SummaryReport {
+    pub changing_cells: Vec<CellRef>,
+    pub result_cells: Vec<CellRef>,
+    /// scenario_name -> (cell -> value)
+    pub results: HashMap<String, HashMap<CellRef, CellValue>>,
+}
+
+#[derive(Debug, Default)]
+pub struct ScenarioManager {
+    scenarios: HashMap<ScenarioId, Scenario>,
+    current_scenario: Option<ScenarioId>,
+    base_values: HashMap<CellRef, CellValue>,
+    next_id: u64,
+}
+
+impl ScenarioManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn scenarios(&self) -> impl Iterator<Item = &Scenario> {
+        self.scenarios.values()
+    }
+
+    pub fn get(&self, id: ScenarioId) -> Option<&Scenario> {
+        self.scenarios.get(&id)
+    }
+
+    pub fn create_scenario(
+        &mut self,
+        name: impl Into<String>,
+        changing_cells: Vec<CellRef>,
+        values: Vec<CellValue>,
+        created_by: impl Into<String>,
+        comment: Option<String>,
+    ) -> Result<ScenarioId, WhatIfError<&'static str>> {
+        if changing_cells.len() != values.len() {
+            return Err(WhatIfError::InvalidParams(
+                "changing_cells and values must have equal length",
+            ));
+        }
+
+        let mut value_map = HashMap::with_capacity(changing_cells.len());
+        for (cell, value) in changing_cells.iter().cloned().zip(values.into_iter()) {
+            value_map.insert(cell, value);
+        }
+
+        let id = ScenarioId(self.next_id);
+        self.next_id = self.next_id.wrapping_add(1);
+
+        self.scenarios.insert(
+            id,
+            Scenario {
+                id,
+                name: name.into(),
+                changing_cells,
+                values: value_map,
+                created: SystemTime::now(),
+                created_by: created_by.into(),
+                comment,
+            },
+        );
+
+        Ok(id)
+    }
+
+    pub fn delete_scenario(&mut self, id: ScenarioId) -> bool {
+        if self.current_scenario == Some(id) {
+            self.current_scenario = None;
+        }
+        self.scenarios.remove(&id).is_some()
+    }
+
+    pub fn current_scenario(&self) -> Option<ScenarioId> {
+        self.current_scenario
+    }
+
+    pub fn clear_base_values(&mut self) {
+        self.base_values.clear();
+    }
+
+    pub fn restore_base<M: WhatIfModel>(
+        &mut self,
+        model: &mut M,
+    ) -> Result<(), WhatIfError<M::Error>> {
+        if self.base_values.is_empty() {
+            return Ok(());
+        }
+
+        for (cell, value) in self.base_values.clone() {
+            model.set_cell_value(&cell, value)?;
+        }
+        model.recalculate()?;
+
+        self.current_scenario = None;
+        Ok(())
+    }
+
+    pub fn apply_scenario<M: WhatIfModel>(
+        &mut self,
+        model: &mut M,
+        id: ScenarioId,
+    ) -> Result<(), WhatIfError<M::Error>> {
+        let scenario = self
+            .scenarios
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| WhatIfError::InvalidParams("scenario not found"))?;
+
+        // Capture base values once, from the changing cells of the scenario
+        // being applied first.
+        if self.base_values.is_empty() {
+            for cell in &scenario.changing_cells {
+                let base = model.get_cell_value(cell)?;
+                self.base_values.insert(cell.clone(), base);
+            }
+        }
+
+        for (cell, value) in scenario.values {
+            model.set_cell_value(&cell, value)?;
+        }
+        model.recalculate()?;
+
+        self.current_scenario = Some(id);
+        Ok(())
+    }
+
+    pub fn generate_summary_report<M: WhatIfModel>(
+        &mut self,
+        model: &mut M,
+        result_cells: Vec<CellRef>,
+        scenario_ids: Vec<ScenarioId>,
+    ) -> Result<SummaryReport, WhatIfError<M::Error>> {
+        self.restore_base(model)?;
+
+        let mut results: HashMap<String, HashMap<CellRef, CellValue>> = HashMap::new();
+
+        // Base case.
+        let mut base_row = HashMap::new();
+        for cell in &result_cells {
+            base_row.insert(cell.clone(), model.get_cell_value(cell)?);
+        }
+        results.insert("Base".to_string(), base_row);
+
+        // Each scenario.
+        for id in &scenario_ids {
+            self.apply_scenario(model, *id)?;
+            let scenario = self
+                .scenarios
+                .get(id)
+                .ok_or_else(|| WhatIfError::InvalidParams("scenario not found"))?;
+
+            let mut row = HashMap::new();
+            for cell in &result_cells {
+                row.insert(cell.clone(), model.get_cell_value(cell)?);
+            }
+            results.insert(scenario.name.clone(), row);
+        }
+
+        self.restore_base(model)?;
+
+        let changing_cells = scenario_ids
+            .first()
+            .and_then(|id| self.scenarios.get(id))
+            .map(|s| s.changing_cells.clone())
+            .unwrap_or_default();
+
+        Ok(SummaryReport {
+            changing_cells,
+            result_cells,
+            results,
+        })
+    }
+}
