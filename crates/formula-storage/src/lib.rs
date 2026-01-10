@@ -1,0 +1,26 @@
+//! SQLite-backed storage for Formula workbooks.
+//!
+//! This crate is intentionally self-contained so it can be integrated into the
+//! Tauri backend later. It follows the schema described in
+//! `docs/04-data-model-storage.md` and exposes:
+//! - SQLite schema creation/migration
+//! - Workbook/sheet metadata operations
+//! - Lazy cell range loading
+//! - Batched transactional writes
+//! - Autosave debouncing
+//! - An LRU sheet cache for memory management
+
+mod autosave;
+mod cache;
+mod schema;
+pub mod storage;
+mod types;
+
+pub use autosave::{AutoSaveConfig, AutoSaveManager};
+pub use cache::{MemoryManager, MemoryManagerConfig, SheetData};
+pub use storage::Storage;
+pub use types::{
+    CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, Style, WorkbookMeta,
+};
+
+pub use storage::{CellChange, CellRange};
