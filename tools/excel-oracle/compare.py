@@ -161,6 +161,13 @@ def main() -> int:
     if actual.get("schemaVersion") != 1:
         raise SystemExit(f"Unsupported actual schemaVersion: {actual.get('schemaVersion')}")
 
+    expected_source = expected.get("source", {})
+    if isinstance(expected_source, dict) and expected_source.get("kind") != "excel":
+        raise SystemExit(
+            "Expected dataset must be produced by real Excel (source.kind == 'excel'). "
+            f"Got: {expected_source.get('kind')!r}"
+        )
+
     cases_sha = _sha256_file(cases_path)
     expected_case_set = expected.get("caseSet")
     actual_case_set = actual.get("caseSet")

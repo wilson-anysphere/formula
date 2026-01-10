@@ -64,6 +64,12 @@ def main() -> int:
     source = payload.get("source", {})
     case_set = payload.get("caseSet", {})
 
+    if not isinstance(source, dict) or source.get("kind") != "excel":
+        raise SystemExit(
+            "Refusing to pin dataset that does not come from real Excel. "
+            f"source.kind={source.get('kind')!r}"
+        )
+
     excel_version = _sanitize_fragment(str(source.get("version", "unknown")))
     excel_build = _sanitize_fragment(str(source.get("build", "unknown")))
     cases_sha = _sanitize_fragment(str(case_set.get("sha256", "unknown")))
@@ -84,4 +90,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

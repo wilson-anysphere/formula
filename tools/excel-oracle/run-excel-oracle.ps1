@@ -172,6 +172,9 @@ try {
   $excel.Calculation = -4135
 
   $workbook = $excel.Workbooks.Add()
+  # Ensure a deterministic date system (Excel for Windows defaults to 1900,
+  # but this can be toggled per-workbook).
+  try { $workbook.Date1904 = $false } catch {}
   $sheet = $workbook.Worksheets.Item(1)
   $sheet.Name = "Oracle"
 
