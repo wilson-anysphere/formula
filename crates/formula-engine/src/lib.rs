@@ -22,6 +22,7 @@ pub mod value;
 pub mod what_if;
 
 pub mod debug;
+pub mod sort_filter;
 
 mod engine;
 
@@ -43,4 +44,3 @@ pub use value::{ErrorKind, Value};
 pub fn parse_formula(formula: &str, opts: ParseOptions) -> Result<Ast, ParseError> {
     parser::parse_formula(formula, opts)
 }
-

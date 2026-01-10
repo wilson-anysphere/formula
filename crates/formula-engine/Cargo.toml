@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+chrono = { version = "0.4", features = ["serde"] }
 formula-model = { path = "../formula-model" }
 rstar = "0.12"
 rayon = "1.10"

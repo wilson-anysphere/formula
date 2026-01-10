@@ -1,0 +1,15 @@
+mod a1;
+mod filter;
+mod sort;
+mod types;
+mod visibility;
+
+pub use a1::{parse_a1_range, to_a1_range, A1ParseError};
+pub use filter::{
+    apply_autofilter, AutoFilter, ColumnFilter, DateComparison, FilterCriterion, FilterJoin,
+    FilterResult, FilterValue, FilterViewId, FilterViews, NumberComparison, TextMatch, TextMatchKind,
+};
+pub use sort::{sort_range, RowPermutation, SortKey, SortOrder, SortSpec, SortValueType};
+pub use types::{CellValue, HeaderOption, RangeData, RangeDataError, RangeRef};
+pub use visibility::{HiddenRows, RowVisibility};
+

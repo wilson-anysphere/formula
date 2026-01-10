@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+formula-engine = { path = "../formula-engine" }
 formula-model = { path = "../formula-model" }
 formula-vba = { path = "../formula-vba" }
 quick-xml = "0.37"

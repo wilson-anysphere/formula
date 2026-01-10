@@ -10,6 +10,8 @@
 //! This crate also includes helpers for worksheet metadata needed for an
 //! Excel-like sheet tab experience (sheet order, visibility, tab colors).
 
+pub mod autofilter;
+
 mod package;
 mod path;
 mod relationships;
