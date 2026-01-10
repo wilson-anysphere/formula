@@ -1,0 +1,43 @@
+{
+  "name": "sample-hello",
+  "displayName": "Sample Hello",
+  "version": "1.0.0",
+  "description": "Sample extension demonstrating commands and panels.",
+  "publisher": "formula",
+  "license": "MIT",
+  "main": "./dist/extension.js",
+  "engines": {
+    "formula": "^1.0.0"
+  },
+  "activationEvents": [
+    "onCommand:sampleHello.sumSelection",
+    "onCommand:sampleHello.openPanel"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "sampleHello.sumSelection",
+        "title": "Sum Selection",
+        "category": "Sample Hello"
+      },
+      {
+        "command": "sampleHello.openPanel",
+        "title": "Open Sample Panel",
+        "category": "Sample Hello"
+      }
+    ],
+    "panels": [
+      {
+        "id": "sampleHello.panel",
+        "title": "Sample Hello Panel"
+      }
+    ]
+  },
+  "permissions": [
+    "cells.read",
+    "cells.write",
+    "ui.commands",
+    "ui.panels"
+  ]
+}
+

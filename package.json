@@ -2,6 +2,9 @@
   "name": "formula",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "dependencies": {
     "yjs": "^13.6.27"
   },

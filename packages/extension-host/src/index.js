@@ -1,0 +1,433 @@
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const { Worker } = require("node:worker_threads");
+
+const { validateExtensionManifest } = require("./manifest");
+const { PermissionManager } = require("./permission-manager");
+const { InMemorySpreadsheet } = require("./spreadsheet-mock");
+const { installExtensionFromDirectory, uninstallExtension, listInstalledExtensions } = require("./installer");
+
+const API_PERMISSIONS = {
+  "workbook.getActiveWorkbook": [],
+  "sheets.getActiveSheet": [],
+
+  "cells.getSelection": ["cells.read"],
+  "cells.getCell": ["cells.read"],
+  "cells.setCell": ["cells.write"],
+
+  "commands.registerCommand": ["ui.commands"],
+  "commands.unregisterCommand": ["ui.commands"],
+  "commands.executeCommand": ["ui.commands"],
+
+  "ui.createPanel": ["ui.panels"],
+  "ui.setPanelHtml": ["ui.panels"],
+  "ui.disposePanel": ["ui.panels"],
+
+  "storage.get": ["storage"],
+  "storage.set": ["storage"],
+  "storage.delete": ["storage"],
+
+  "config.get": ["storage"],
+  "config.update": ["storage"]
+};
+
+function serializeError(error) {
+  if (error instanceof Error) {
+    return { message: error.message, stack: error.stack };
+  }
+  return { message: String(error) };
+}
+
+class ExtensionHost {
+  constructor({
+    engineVersion = "1.0.0",
+    permissionPrompt,
+    permissionsStoragePath = path.join(process.cwd(), ".formula", "permissions.json"),
+    extensionStoragePath = path.join(process.cwd(), ".formula", "storage.json"),
+    spreadsheet = new InMemorySpreadsheet()
+  } = {}) {
+    this._engineVersion = engineVersion;
+    this._extensions = new Map();
+    this._commands = new Map(); // commandId -> extensionId
+    this._panels = new Map(); // panelId -> { id, title, html }
+    this._messages = [];
+    this._pendingWorkerRequests = new Map();
+    this._extensionStoragePath = extensionStoragePath;
+    this._spreadsheet = spreadsheet;
+
+    this._permissionManager = new PermissionManager({
+      storagePath: permissionsStoragePath,
+      prompt: permissionPrompt
+    });
+
+    this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e));
+    this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e));
+  }
+
+  get spreadsheet() {
+    return this._spreadsheet;
+  }
+
+  async loadExtension(extensionPath) {
+    const manifestPath = path.join(extensionPath, "package.json");
+    const raw = await fs.readFile(manifestPath, "utf8");
+    const parsed = JSON.parse(raw);
+    const manifest = validateExtensionManifest(parsed, { engineVersion: this._engineVersion });
+
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const mainPath = path.resolve(extensionPath, manifest.main);
+    const workerScript = path.resolve(__dirname, "../worker/extension-worker.js");
+    const apiModulePath = path.resolve(__dirname, "../../extension-api/index.js");
+
+    const worker = new Worker(workerScript, {
+      workerData: {
+        extensionId,
+        extensionPath,
+        mainPath,
+        apiModulePath
+      }
+    });
+
+    const extension = {
+      id: extensionId,
+      path: extensionPath,
+      mainPath,
+      manifest,
+      worker,
+      active: false,
+      registeredCommands: new Set()
+    };
+
+    worker.on("message", (msg) => this._handleWorkerMessage(extension, msg));
+    worker.on("error", (err) => this._handleWorkerCrash(extension, err));
+    worker.on("exit", (code) => {
+      if (code !== 0) {
+        this._handleWorkerCrash(extension, new Error(`Worker exited with code ${code}`));
+      }
+    });
+
+    // Register contributed commands so the app can route executions before activation.
+    for (const cmd of manifest.contributes.commands ?? []) {
+      this._commands.set(cmd.command, extensionId);
+    }
+
+    this._extensions.set(extensionId, extension);
+
+    return extensionId;
+  }
+
+  async startup() {
+    const tasks = [];
+    for (const extension of this._extensions.values()) {
+      if ((extension.manifest.activationEvents ?? []).includes("onStartupFinished")) {
+        tasks.push(this._activateExtension(extension, "onStartupFinished"));
+      }
+    }
+    await Promise.all(tasks);
+  }
+
+  async activateView(viewId) {
+    const activationEvent = `onView:${viewId}`;
+    const tasks = [];
+    for (const extension of this._extensions.values()) {
+      if (extension.active) continue;
+      if ((extension.manifest.activationEvents ?? []).includes(activationEvent)) {
+        tasks.push(this._activateExtension(extension, activationEvent));
+      }
+    }
+    await Promise.all(tasks);
+  }
+
+  async activateCustomFunction(functionName) {
+    const activationEvent = `onCustomFunction:${functionName}`;
+    const tasks = [];
+    for (const extension of this._extensions.values()) {
+      if (extension.active) continue;
+      if ((extension.manifest.activationEvents ?? []).includes(activationEvent)) {
+        tasks.push(this._activateExtension(extension, activationEvent));
+      }
+    }
+    await Promise.all(tasks);
+  }
+
+  async executeCommand(commandId, ...args) {
+    const extensionId = this._commands.get(commandId);
+    if (!extensionId) throw new Error(`Unknown command: ${commandId}`);
+
+    const extension = this._extensions.get(extensionId);
+    if (!extension) throw new Error(`Extension not loaded: ${extensionId}`);
+
+    if (!extension.active) {
+      const activationEvent = `onCommand:${commandId}`;
+      if (!(extension.manifest.activationEvents ?? []).includes(activationEvent)) {
+        throw new Error(`Extension ${extensionId} is not activated for ${activationEvent}`);
+      }
+      await this._activateExtension(extension, activationEvent);
+    }
+
+    const id = crypto.randomUUID();
+    const promise = new Promise((resolve, reject) => {
+      this._pendingWorkerRequests.set(id, { resolve, reject });
+    });
+
+    extension.worker.postMessage({
+      type: "execute_command",
+      id,
+      commandId,
+      args
+    });
+
+    return promise;
+  }
+
+  getPanel(panelId) {
+    return this._panels.get(panelId);
+  }
+
+  getMessages() {
+    return [...this._messages];
+  }
+
+  async dispose() {
+    const extensions = [...this._extensions.values()];
+    this._extensions.clear();
+    this._commands.clear();
+    this._panels.clear();
+    this._messages = [];
+
+    await Promise.allSettled(
+      extensions.map(async (ext) => {
+        try {
+          await ext.worker.terminate();
+        } catch {
+          // ignore
+        }
+      })
+    );
+  }
+
+  async _handleApiCall(extension, message) {
+    const { id, namespace, method, args } = message;
+    const apiKey = `${namespace}.${method}`;
+
+    const permissions = API_PERMISSIONS[apiKey] ?? [];
+    try {
+      await this._permissionManager.ensurePermissions(
+        {
+          extensionId: extension.id,
+          displayName: extension.manifest.displayName ?? extension.manifest.name,
+          declaredPermissions: extension.manifest.permissions ?? []
+        },
+        permissions
+      );
+
+      const result = await this._executeApi(namespace, method, args, extension);
+
+      extension.worker.postMessage({
+        type: "api_result",
+        id,
+        result
+      });
+    } catch (error) {
+      extension.worker.postMessage({
+        type: "api_error",
+        id,
+        error: serializeError(error)
+      });
+    }
+  }
+
+  async _executeApi(namespace, method, args, extension) {
+    switch (`${namespace}.${method}`) {
+      case "workbook.getActiveWorkbook":
+        return { name: "MockWorkbook", path: null };
+      case "sheets.getActiveSheet":
+        return { id: "sheet1", name: "Sheet1" };
+
+      case "cells.getSelection":
+        return this._spreadsheet.getSelection();
+      case "cells.getCell":
+        return this._spreadsheet.getCell(args[0], args[1]);
+      case "cells.setCell":
+        this._spreadsheet.setCell(args[0], args[1], args[2]);
+        return null;
+
+      case "commands.registerCommand":
+        extension.registeredCommands.add(args[0]);
+        return null;
+      case "commands.unregisterCommand":
+        extension.registeredCommands.delete(args[0]);
+        return null;
+      case "commands.executeCommand": {
+        const [commandId, ...rest] = args;
+        return this.executeCommand(String(commandId), ...rest);
+      }
+
+      case "ui.showMessage":
+        this._messages.push({ message: args[0], type: args[1] });
+        return null;
+
+      case "ui.createPanel": {
+        const panelId = String(args[0]);
+        const options = args[1] ?? {};
+        const title = String(options.title ?? panelId);
+        this._panels.set(panelId, { id: panelId, title, html: "" });
+        return { id: panelId };
+      }
+      case "ui.setPanelHtml": {
+        const panelId = String(args[0]);
+        const html = String(args[1]);
+        const panel = this._panels.get(panelId);
+        if (!panel) throw new Error(`Unknown panel: ${panelId}`);
+        panel.html = html;
+        return null;
+      }
+      case "ui.disposePanel": {
+        const panelId = String(args[0]);
+        this._panels.delete(panelId);
+        return null;
+      }
+
+      case "storage.get": {
+        const store = await this._loadExtensionStorage();
+        return store[extension.id]?.[String(args[0])];
+      }
+      case "storage.set": {
+        const key = String(args[0]);
+        const value = args[1];
+        const store = await this._loadExtensionStorage();
+        store[extension.id] = store[extension.id] ?? {};
+        store[extension.id][key] = value;
+        await this._saveExtensionStorage(store);
+        return null;
+      }
+      case "storage.delete": {
+        const key = String(args[0]);
+        const store = await this._loadExtensionStorage();
+        if (store[extension.id]) delete store[extension.id][key];
+        await this._saveExtensionStorage(store);
+        return null;
+      }
+
+      case "config.get": {
+        const store = await this._loadExtensionStorage();
+        return store[extension.id]?.[`__config__:${String(args[0])}`];
+      }
+      case "config.update": {
+        const key = `__config__:${String(args[0])}`;
+        const value = args[1];
+        const store = await this._loadExtensionStorage();
+        store[extension.id] = store[extension.id] ?? {};
+        store[extension.id][key] = value;
+        await this._saveExtensionStorage(store);
+        return null;
+      }
+
+      default:
+        throw new Error(`Unknown API method: ${namespace}.${method}`);
+    }
+  }
+
+  async _loadExtensionStorage() {
+    try {
+      const raw = await fs.readFile(this._extensionStoragePath, "utf8");
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  async _saveExtensionStorage(store) {
+    await fs.mkdir(path.dirname(this._extensionStoragePath), { recursive: true });
+    await fs.writeFile(this._extensionStoragePath, JSON.stringify(store, null, 2), "utf8");
+  }
+
+  _handleWorkerMessage(extension, message) {
+    if (!message || typeof message !== "object") return;
+
+    switch (message.type) {
+      case "api_call":
+        this._handleApiCall(extension, message);
+        return;
+      case "activate_result": {
+        const pending = this._pendingWorkerRequests.get(message.id);
+        if (!pending) return;
+        this._pendingWorkerRequests.delete(message.id);
+        pending.resolve(true);
+        return;
+      }
+      case "activate_error": {
+        const pending = this._pendingWorkerRequests.get(message.id);
+        if (!pending) return;
+        this._pendingWorkerRequests.delete(message.id);
+        pending.reject(new Error(String(message.error?.message ?? message.error)));
+        return;
+      }
+      case "command_result": {
+        const pending = this._pendingWorkerRequests.get(message.id);
+        if (!pending) return;
+        this._pendingWorkerRequests.delete(message.id);
+        pending.resolve(message.result);
+        return;
+      }
+      case "command_error": {
+        const pending = this._pendingWorkerRequests.get(message.id);
+        if (!pending) return;
+        this._pendingWorkerRequests.delete(message.id);
+        pending.reject(new Error(String(message.error?.message ?? message.error)));
+        return;
+      }
+      case "log": {
+        // We keep this as a hook for future UI integration.
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  _handleWorkerCrash(extension, error) {
+    for (const [id, pending] of this._pendingWorkerRequests.entries()) {
+      pending.reject(new Error(`Extension worker crashed: ${extension.id}: ${error.message}`));
+      this._pendingWorkerRequests.delete(id);
+    }
+  }
+
+  async _activateExtension(extension, reason) {
+    const id = crypto.randomUUID();
+    const promise = new Promise((resolve, reject) => {
+      this._pendingWorkerRequests.set(id, { resolve, reject });
+    });
+
+    extension.worker.postMessage({ type: "activate", id, reason });
+
+    await promise;
+    extension.active = true;
+  }
+
+  _broadcastEvent(event, data) {
+    for (const extension of this._extensions.values()) {
+      try {
+        extension.worker.postMessage({
+          type: "event",
+          event,
+          data
+        });
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+module.exports = {
+  ExtensionHost,
+  API_PERMISSIONS,
+
+  installExtensionFromDirectory,
+  uninstallExtension,
+  listInstalledExtensions
+};
