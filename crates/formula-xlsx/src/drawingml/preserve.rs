@@ -305,15 +305,45 @@ fn ensure_sheet_xml_has_drawings(
     let close_idx = xml.rfind("</worksheet>").ok_or_else(|| {
         ChartExtractionError::XmlStructure(format!("{part_name}: missing </worksheet>"))
     })?;
+    let insert_idx = xml
+        .rfind("<extLst")
+        .filter(|idx| *idx < close_idx)
+        .unwrap_or(close_idx);
 
+    let mut to_insert = String::new();
     for drawing in drawings {
         if xml.contains(&format!("r:id=\"{}\"", drawing.rel_id)) {
             continue;
         }
-        xml.insert_str(close_idx, &format!("<drawing r:id=\"{}\"/>", drawing.rel_id));
+        to_insert.push_str(&format!("<drawing r:id=\"{}\"/>", drawing.rel_id));
+    }
+
+    if !to_insert.is_empty() {
+        xml.insert_str(insert_idx, &to_insert);
     }
 
     Ok(xml.into_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inserts_drawing_before_ext_lst() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><extLst><ext/></extLst></worksheet>"#;
+        let drawings = [SheetDrawingRelationship {
+            rel_id: "rId1".to_string(),
+            target: "drawings/drawing1.xml".to_string(),
+        }];
+        let updated = ensure_sheet_xml_has_drawings(xml, "xl/worksheets/sheet1.xml", &drawings)
+            .expect("patch sheet xml");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        let drawing_pos = updated_str.find("<drawing").unwrap();
+        let ext_pos = updated_str.find("<extLst").unwrap();
+        assert!(drawing_pos < ext_pos, "drawing should be inserted before extLst");
+    }
 }
 
 fn ensure_sheet_rels_has_drawings(
