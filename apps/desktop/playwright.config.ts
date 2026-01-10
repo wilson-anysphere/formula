@@ -5,13 +5,12 @@ export default defineConfig({
   timeout: 30_000,
   retries: 0,
   use: {
-    baseURL: "http://localhost:4173",
+    baseURL: "http://localhost:4174",
     headless: true
   },
   webServer: {
     command: "pnpm dev",
-    port: 4173,
+    port: 4174,
     reuseExistingServer: !process.env.CI
   }
 });
-

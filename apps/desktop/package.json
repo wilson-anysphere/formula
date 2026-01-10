@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --port 4173 --strictPort",
+    "dev": "vite --port 4174 --strictPort",
     "build": "vite build",
-    "preview": "vite preview --port 4173 --strictPort",
+    "preview": "vite preview --port 4174 --strictPort",
     "test:node": "node --test",
     "test": "vitest run",
     "test:e2e": "playwright test"

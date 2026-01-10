@@ -2,7 +2,7 @@ import { CellEditorOverlay } from "../editor/cellEditorOverlay";
 import { cellToA1, rangeToA1 } from "../selection/a1";
 import { navigateSelectionByKey } from "../selection/navigation";
 import { SelectionRenderer } from "../selection/renderer";
-import type { CellCoord, GridLimits, SelectionState } from "../selection/types";
+import type { CellCoord, GridLimits, Range, SelectionState } from "../selection/types";
 import {
   DEFAULT_GRID_LIMITS,
   addCellToSelection,
@@ -13,7 +13,8 @@ import {
   selectRows,
   setActiveCell
 } from "../selection/selection";
-import { SheetModel } from "../sheet/sheetModel";
+import { DocumentController } from "../document/documentController.js";
+import { MockEngine } from "../document/engine.js";
 
 export interface SpreadsheetAppStatusElements {
   activeCell: HTMLElement;
@@ -22,7 +23,9 @@ export interface SpreadsheetAppStatusElements {
 }
 
 export class SpreadsheetApp {
-  private sheet = new SheetModel();
+  private readonly sheetId = "Sheet1";
+  private readonly engine = new MockEngine();
+  private readonly document = new DocumentController({ engine: this.engine });
   private limits: GridLimits;
 
   private gridCanvas: HTMLCanvasElement;
@@ -49,8 +52,8 @@ export class SpreadsheetApp {
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
 
     // Seed data for navigation tests (used range ends at D5).
-    this.sheet.setCellValue({ row: 0, col: 0 }, "Seed");
-    this.sheet.setCellValue({ row: 4, col: 3 }, "BottomRight");
+    this.document.setCellValue(this.sheetId, { row: 0, col: 0 }, "Seed");
+    this.document.setCellValue(this.sheetId, { row: 4, col: 3 }, "BottomRight");
 
     this.gridCanvas = document.createElement("canvas");
     this.gridCanvas.className = "grid-canvas";
@@ -72,14 +75,14 @@ export class SpreadsheetApp {
 
     this.editor = new CellEditorOverlay(this.root, {
       onCommit: (commit) => {
-        this.sheet.setCellValue(commit.cell, commit.value);
+        this.applyEdit(commit.cell, commit.value);
         this.renderGrid();
 
         const next = navigateSelectionByKey(
           this.selection,
           commit.reason === "enter" ? "Enter" : "Tab",
           { shift: commit.shift, primary: false },
-          this.sheet,
+          this.usedRangeProvider(),
           this.limits
         );
 
@@ -114,9 +117,13 @@ export class SpreadsheetApp {
     this.root.focus();
   }
 
+  getRecalcCount(): number {
+    return this.engine.recalcCount;
+  }
+
   getCellValueA1(a1: string): string {
     const cell = parseA1(a1);
-    return this.sheet.getCellValue(cell);
+    return this.getCellDisplayValue(cell);
   }
 
   private onResize(): void {
@@ -181,7 +188,7 @@ export class SpreadsheetApp {
 
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        const value = this.sheet.getCellValue({ row: r, col: c });
+        const value = this.getCellDisplayValue({ row: r, col: c });
         if (value === "") continue;
         ctx.fillText(value, c * this.cellWidth + 4, r * this.cellHeight + 16);
       }
@@ -205,7 +212,7 @@ export class SpreadsheetApp {
     this.status.activeCell.textContent = cellToA1(this.selection.active);
     this.status.selectionRange.textContent =
       this.selection.ranges.length === 1 ? rangeToA1(this.selection.ranges[0]) : `${this.selection.ranges.length} ranges`;
-    this.status.activeValue.textContent = this.sheet.getCellValue(this.selection.active);
+    this.status.activeValue.textContent = this.getCellDisplayValue(this.selection.active);
   }
 
   private getCellRect(cell: CellCoord) {
@@ -258,7 +265,7 @@ export class SpreadsheetApp {
       e.preventDefault();
       const cell = this.selection.active;
       const bounds = this.getCellRect(cell);
-      const initialValue = this.sheet.getCellValue(cell);
+      const initialValue = this.getCellDisplayValue(cell);
       this.editor.open(cell, bounds, initialValue, { cursor: "end" });
       return;
     }
@@ -295,7 +302,7 @@ export class SpreadsheetApp {
       this.selection,
       e.key,
       { shift: e.shiftKey, primary },
-      this.sheet,
+      this.usedRangeProvider(),
       this.limits
     );
     if (!next) return;
@@ -304,6 +311,65 @@ export class SpreadsheetApp {
     this.selection = next;
     this.renderSelection();
     this.updateStatus();
+  }
+
+  private getCellDisplayValue(cell: CellCoord): string {
+    const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+    if (state?.value != null) return String(state.value);
+    if (state?.formula != null) return `=${state.formula}`;
+    return "";
+  }
+
+  private applyEdit(cell: CellCoord, rawValue: string): void {
+    if (rawValue.trim() === "") {
+      this.document.clearCell(this.sheetId, cell, { label: "Clear cell" });
+      return;
+    }
+
+    if (rawValue.startsWith("=")) {
+      this.document.setCellFormula(this.sheetId, cell, rawValue.slice(1), { label: "Edit cell" });
+      return;
+    }
+
+    this.document.setCellValue(this.sheetId, cell, rawValue, { label: "Edit cell" });
+  }
+
+  private usedRangeProvider() {
+    return {
+      getUsedRange: () => this.computeUsedRange(),
+      isCellEmpty: (cell: CellCoord) => {
+        const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+        return state?.value == null && state?.formula == null;
+      }
+    };
+  }
+
+  private computeUsedRange(): Range | null {
+    const sheet = (this.document as any).model?.sheets?.get(this.sheetId) as { cells: Map<string, any> } | undefined;
+    if (!sheet) return null;
+    if (!sheet.cells || sheet.cells.size === 0) return null;
+
+    let minRow = Infinity;
+    let minCol = Infinity;
+    let maxRow = -Infinity;
+    let maxCol = -Infinity;
+    let hasData = false;
+
+    for (const [key, cell] of sheet.cells.entries()) {
+      if (cell?.value == null && cell?.formula == null) continue;
+      const [rowStr, colStr] = String(key).split(",");
+      const row = Number(rowStr);
+      const col = Number(colStr);
+      if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
+      hasData = true;
+      minRow = Math.min(minRow, row);
+      minCol = Math.min(minCol, col);
+      maxRow = Math.max(maxRow, row);
+      maxCol = Math.max(maxCol, col);
+    }
+
+    if (!hasData) return null;
+    return { startRow: minRow, startCol: minCol, endRow: maxRow, endCol: maxCol };
   }
 }
 

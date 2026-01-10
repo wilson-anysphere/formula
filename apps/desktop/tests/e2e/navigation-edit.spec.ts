@@ -33,6 +33,8 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     await page.goto("/");
     await page.click("#grid", { position: { x: 5, y: 5 } });
 
+    const recalcBefore = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
+
     // Edit A1.
     await page.keyboard.press("F2");
     const editor = page.locator("textarea.cell-editor");
@@ -44,6 +46,9 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     // Commit moves down.
     await expect(page.getByTestId("active-cell")).toHaveText("A2");
 
+    const recalcAfterCommit = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
+    expect(recalcAfterCommit).toBeGreaterThan(recalcBefore);
+
     const a1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1Value).toBe("Hello");
 
@@ -52,6 +57,9 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     await expect(editor).toBeVisible();
     await editor.fill("ShouldNotCommit");
     await page.keyboard.press("Escape");
+
+    const recalcAfterCancel = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
+    expect(recalcAfterCancel).toBe(recalcAfterCommit);
 
     const a2Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2"));
     expect(a2Value).toBe("");
