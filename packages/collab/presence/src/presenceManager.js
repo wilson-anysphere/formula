@@ -46,6 +46,15 @@ export class PresenceManager {
     this.awareness.setLocalStateField("presence", serializePresenceState(this.localPresence));
   }
 
+  destroy() {
+    this._broadcastThrottled?.cancel?.();
+    if (typeof this.awareness.setLocalState === "function") {
+      this.awareness.setLocalState(null);
+      return;
+    }
+    this.awareness.setLocalStateField("presence", null);
+  }
+
   setActiveSheet(activeSheet) {
     if (!activeSheet) return;
     if (this.localPresence.activeSheet === activeSheet) return;
@@ -101,4 +110,3 @@ export class PresenceManager {
     return result;
   }
 }
-

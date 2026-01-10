@@ -1,4 +1,4 @@
-import { InMemoryAwarenessHub, PresenceManager } from "../../../../../../packages/collab/presence/index.js";
+import { InMemoryAwarenessHub, PresenceManager } from "../../../collab/presence/index.js";
 import { PresenceRenderer } from "../presenceRenderer.js";
 
 const cellWidth = 60;
