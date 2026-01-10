@@ -4,6 +4,8 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { rowColToA1 } from "./a1.js";
+
 const execFileAsync = promisify(execFile);
 
 function stripMarkdownCodeFences(text) {
@@ -40,7 +42,19 @@ function normalizePythonObjectModel(code) {
 
   // Common artifact: using Range() method as if in VBA.
   // e.g. sheet.Range("A1") -> sheet["A1"]
-  out = out.replace(/\bsheet\.Range\(\s*"([^"]+)"\s*\)/g, 'sheet["$1"]');
+  out = out.replace(/\bsheet\.(?:Range|range)\(\s*(['"])([^'"]+)\1\s*\)/g, 'sheet["$2"]');
+
+  // Common artifact: using Cells(row, col) method as if in VBA.
+  // e.g. sheet.Cells(1,2) -> sheet["B1"]
+  out = out.replace(/\bsheet\.Cells\(\s*(\d+)\s*,\s*(\d+)\s*\)/gi, (_match, row, col) => {
+    try {
+      const addr = rowColToA1(Number(row), Number(col));
+      return `sheet["${addr}"]`;
+    } catch {
+      return _match;
+    }
+  });
+
   out = out.replace(/\bActiveSheet\b/g, "formula.active_sheet");
   return out;
 }
@@ -57,6 +71,7 @@ function ensureTypeScriptWrapper(code) {
 function normalizeTypeScriptObjectModel(code) {
   let out = String(code || "");
   out = out.replace(/\bRange\(/g, "range(");
+  out = out.replace(/\bCells\(/g, "cell(");
   out = out.replace(/\.Value\b/g, ".value");
   out = out.replace(/\.Formula\b/g, ".formula");
   return out;

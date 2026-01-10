@@ -10,8 +10,8 @@ class MockLlmClient {
         "```python",
         "sheet = formula.active_sheet",
         'sheet.Range("A1").Value = 1',
-        'sheet.Range("A2").Value = 2',
-        'sheet.Range("A3").Formula = "=A1+A2"',
+        "sheet.Cells(1, 2).Value = 2",
+        'sheet.Range("A3").Formula = "=A1+B1"',
         "```"
       ].join("\n");
     }
@@ -20,8 +20,8 @@ class MockLlmClient {
       "```typescript",
       "const sheet = ctx.activeSheet;",
       'sheet.Range("A1").Value = 1;',
-      'sheet.Range("A2").Value = 2;',
-      'sheet.Range("A3").Formula = "=A1+A2";',
+      "sheet.Cells(1, 2).Value = 2;",
+      'sheet.Range("A3").Formula = "=A1+B1";',
       "```"
     ].join("\n");
   }
@@ -44,7 +44,8 @@ End Sub
   assert.match(result.code, /\bdef main\(\):/);
   assert.match(result.code, /sheet = formula\.active_sheet/);
   assert.match(result.code, /sheet\["A1"\]\s*=\s*1/);
-  assert.match(result.code, /sheet\["A3"\]\.formula\s*=\s*"=A1\+A2"/);
+  assert.match(result.code, /sheet\["B1"\]\s*=\s*2/);
+  assert.match(result.code, /sheet\["A3"\]\.formula\s*=\s*"=A1\+B1"/);
 });
 
 test("VbaMigrator converts + post-processes TypeScript output into canonical scripting API calls", async () => {
@@ -63,6 +64,6 @@ End Sub
   assert.match(result.code, /\bexport default async function main\(ctx\)/);
   assert.match(result.code, /const sheet = ctx\.activeSheet/);
   assert.match(result.code, /sheet\.range\("A1"\)\.value\s*=\s*1;/);
-  assert.match(result.code, /sheet\.range\("A3"\)\.formula\s*=\s*"=A1\+A2";/);
+  assert.match(result.code, /sheet\.cell\(1,\s*2\)\.value\s*=\s*2;/);
+  assert.match(result.code, /sheet\.range\("A3"\)\.formula\s*=\s*"=A1\+B1";/);
 });
-

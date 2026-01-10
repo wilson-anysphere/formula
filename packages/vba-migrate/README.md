@@ -9,3 +9,9 @@ AI-assisted VBA migration tooling (VBA → Python/TypeScript) with:
 
 This package is intentionally minimal: it is designed to be a testable pipeline that can later be wired into the real VBA parser/executor and scripting runtimes.
 
+## LLM integration
+
+`VbaMigrator` accepts either:
+
+- a `complete({ prompt, temperature }) -> string` style client (used by tests), or
+- an `LLMClient.chat({ messages })` style client (see `packages/llm`).

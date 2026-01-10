@@ -5,6 +5,7 @@ export const PanelIds = Object.freeze({
   MACROS: "macros",
   VERSION_HISTORY: "versionHistory",
   FORMULA_DEBUGGER: "formulaDebugger",
+  VBA_MIGRATE: "vbaMigrate",
   SCRIPT_EDITOR: "scriptEditor",
   PIVOT_BUILDER: "pivotBuilder",
   QUERY_EDITOR: "queryEditor",
@@ -35,6 +36,11 @@ export const PANEL_REGISTRY = Object.freeze({
     titleKey: "panels.formulaDebugger.title",
     defaultDock: "right",
     defaultFloatingRect: { x: 180, y: 180, width: 520, height: 640 },
+  },
+  [PanelIds.VBA_MIGRATE]: {
+    title: "Migrate Macros",
+    defaultDock: "right",
+    defaultFloatingRect: { x: 140, y: 140, width: 720, height: 640 },
   },
   [PanelIds.SCRIPT_EDITOR]: {
     titleKey: "panels.scriptEditor.title",
@@ -85,5 +91,7 @@ export function isPanelId(panelId) {
 export function getPanelTitle(panelId) {
   const def = PANEL_REGISTRY[panelId];
   if (!def) return panelId;
-  return t(def.titleKey);
+  if (def.titleKey) return t(def.titleKey);
+  if (def.title) return def.title;
+  return panelId;
 }

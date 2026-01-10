@@ -50,6 +50,31 @@ export class VbaMigrator {
     this.llm = llm;
   }
 
+  async completePrompt(prompt, { temperature = 0.0 } = {}) {
+    const llm = this.llm;
+    if (typeof llm.complete === "function") {
+      return llm.complete({ prompt, temperature });
+    }
+
+    if (typeof llm.chat === "function") {
+      const response = await llm.chat({
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a code migration assistant. Return ONLY the requested code (no markdown fences, no explanations).",
+          },
+          { role: "user", content: prompt },
+        ],
+        temperature,
+      });
+
+      return response?.message?.content ?? "";
+    }
+
+    throw new Error("Unsupported LLM client: expected .complete(...) or .chat(...)");
+  }
+
   analyzeModule(module) {
     return analyzeVbaModule(module);
   }
@@ -58,10 +83,7 @@ export class VbaMigrator {
     const analysis = analyzeVbaModule(module);
     const prompt = buildPrompt({ module, analysis, target });
 
-    const raw = await this.llm.complete({
-      prompt,
-      temperature: 0.0
-    });
+    const raw = await this.completePrompt(prompt, { temperature: 0.0 });
 
     const postProcessed = await postProcessGeneratedCode({ code: raw, target });
     const compileCheck = await validateGeneratedCodeCompiles({ code: postProcessed, target });
@@ -78,4 +100,3 @@ export class VbaMigrator {
     };
   }
 }
-

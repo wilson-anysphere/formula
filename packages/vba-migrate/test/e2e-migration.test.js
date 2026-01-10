@@ -12,8 +12,8 @@ class MockLlmClient {
         "```python",
         "sheet = formula.active_sheet",
         'sheet.Range("A1").Value = 1',
-        'sheet.Range("A2").Value = 2',
-        'sheet.Range("A3").Formula = "=A1+A2"',
+        "sheet.Cells(1, 2).Value = 2",
+        'sheet.Range("A3").Formula = "=A1+B1"',
         "```"
       ].join("\n");
     }
@@ -22,8 +22,8 @@ class MockLlmClient {
       "```typescript",
       "const sheet = ctx.activeSheet;",
       'sheet.Range("A1").Value = 1;',
-      'sheet.Range("A2").Value = 2;',
-      'sheet.Range("A3").Formula = "=A1+A2";',
+      "sheet.Cells(1, 2).Value = 2;",
+      'sheet.Range("A3").Formula = "=A1+B1";',
       "```"
     ].join("\n");
   }
@@ -38,8 +38,8 @@ test("end-to-end: convert + validate a simple macro fixture against resulting ce
     code: `
 Sub Main()
     Range("A1").Value = 1
-    Range("A2").Value = 2
-    Range("A3").Formula = "=A1+A2"
+    Cells(1, 2).Value = 2
+    Range("A3").Formula = "=A1+B1"
 End Sub
 `
   };
@@ -74,4 +74,3 @@ End Sub
   assert.equal(tsValidation.vbaDiff.length, 3);
   assert.equal(tsValidation.scriptDiff.length, 3);
 });
-

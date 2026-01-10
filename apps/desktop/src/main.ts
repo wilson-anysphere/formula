@@ -6,7 +6,7 @@ import "./styles/workspace.css";
 import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
-import { PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
+import { getPanelTitle, PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
 import { renderMacroRunner, TauriMacroBackend } from "./macros";
 
 const gridRoot = document.getElementById("grid");
@@ -23,6 +23,7 @@ const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cel
 const selectionRange = document.querySelector<HTMLElement>('[data-testid="selection-range"]');
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
 const openComments = document.querySelector<HTMLButtonElement>('[data-testid="open-comments-panel"]');
+const openVbaMigratePanel = document.querySelector<HTMLButtonElement>('[data-testid="open-vba-migrate-panel"]');
 if (!activeCell || !selectionRange || !activeValue) {
   throw new Error("Missing status bar elements");
 }
@@ -132,7 +133,7 @@ if (
   }
 
   function panelTitle(panelId: string) {
-    return (PANEL_REGISTRY as any)?.[panelId]?.title ?? panelId;
+    return getPanelTitle(panelId);
   }
 
   function renderPanelBody(panelId: string, body: HTMLDivElement) {
@@ -156,6 +157,10 @@ if (
           body.textContent = `Macros backend not available: ${String(err)}`;
         }
       });
+      return;
+    }
+    if (panelId === PanelIds.VBA_MIGRATE) {
+      body.textContent = "VBA migration tools will appear here.";
       return;
     }
 
@@ -335,6 +340,12 @@ if (
     const placement = getPanelPlacement(layoutController.layout, PanelIds.MACROS);
     if (placement.kind === "closed") layoutController.openPanel(PanelIds.MACROS);
     else layoutController.closePanel(PanelIds.MACROS);
+  });
+
+  openVbaMigratePanel?.addEventListener("click", () => {
+    const placement = getPanelPlacement(layoutController.layout, PanelIds.VBA_MIGRATE);
+    if (placement.kind === "closed") layoutController.openPanel(PanelIds.VBA_MIGRATE);
+    else layoutController.closePanel(PanelIds.VBA_MIGRATE);
   });
 
   layoutController.on("change", () => renderLayout());
