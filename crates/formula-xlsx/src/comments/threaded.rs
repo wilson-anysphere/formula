@@ -1,5 +1,7 @@
 use formula_model::{CellRef, Comment, CommentAuthor, CommentKind, Reply};
 
+use std::collections::BTreeMap;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ThreadedParseError {
     Utf8(std::str::Utf8Error),
@@ -23,7 +25,10 @@ struct RawThreadedComment {
     resolved: bool,
 }
 
-pub fn parse_threaded_comments_xml(bytes: &[u8]) -> Result<Vec<Comment>, ThreadedParseError> {
+pub fn parse_threaded_comments_xml(
+    bytes: &[u8],
+    persons: &BTreeMap<String, String>,
+) -> Result<Vec<Comment>, ThreadedParseError> {
     let xml = std::str::from_utf8(bytes)?;
 
     let mut raw_comments = Vec::new();
@@ -51,6 +56,7 @@ pub fn parse_threaded_comments_xml(bytes: &[u8]) -> Result<Vec<Comment>, Threade
             .unwrap_or_default();
         let author_name = extract_attr(comment_xml, "author")
             .or_else(|| extract_attr(comment_xml, "displayName"))
+            .or_else(|| persons.get(&author_id).cloned())
             .unwrap_or_else(|| author_id.clone());
         let created_at = extract_attr(comment_xml, "dT")
             .and_then(|dt| parse_iso8601_ms(&dt))

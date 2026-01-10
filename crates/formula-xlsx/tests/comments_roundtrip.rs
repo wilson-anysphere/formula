@@ -24,6 +24,21 @@ fn preserves_comment_related_parts_on_round_trip() {
     assert!(parts.preserved.contains_key("xl/drawings/vmlDrawing1.vml"));
     assert!(parts.preserved.contains_key("xl/threadedComments/threadedComments1.xml"));
     assert!(parts.preserved.contains_key("xl/commentsExt1.xml"));
+    assert!(parts.preserved.contains_key("xl/persons/persons1.xml"));
+
+    let threaded = parts
+        .comments
+        .iter()
+        .find(|comment| comment.kind == CommentKind::Threaded)
+        .expect("fixture should contain threaded comment");
+    assert_eq!(threaded.author.name, "Alex");
+    assert_eq!(
+        threaded
+            .replies
+            .first()
+            .map(|reply| reply.author.name.as_str()),
+        Some("Sam")
+    );
 
     let written = pkg.write_to_bytes().expect("write package");
     let pkg2 = XlsxPackage::from_bytes(&written).expect("read package");

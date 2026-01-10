@@ -5,6 +5,7 @@ use formula_model::Comment;
 use crate::XlsxPackage;
 
 mod legacy;
+mod persons;
 mod threaded;
 
 pub use legacy::parse_vml_drawing_cells;
@@ -37,6 +38,8 @@ impl XlsxPackage {
 pub fn extract_comment_parts(pkg: &XlsxPackage) -> CommentParts {
     let mut parts = CommentParts::default();
 
+    let mut persons = BTreeMap::<String, String>::new();
+
     for (path, bytes) in pkg.parts() {
         if !is_comment_related_part(path) {
             continue;
@@ -44,12 +47,20 @@ pub fn extract_comment_parts(pkg: &XlsxPackage) -> CommentParts {
 
         parts.preserved.insert(path.to_string(), bytes.to_vec());
 
+        if is_persons_xml(path) {
+            if let Ok(parsed) = persons::parse_persons_xml(bytes) {
+                persons.extend(parsed);
+            }
+        }
+    }
+
+    for (path, bytes) in &parts.preserved {
         if is_legacy_comments_xml(path) {
             if let Ok(mut comments) = legacy::parse_comments_xml(bytes) {
                 parts.comments.append(&mut comments);
             }
         } else if is_threaded_comments_xml(path) {
-            if let Ok(mut comments) = threaded::parse_threaded_comments_xml(bytes) {
+            if let Ok(mut comments) = threaded::parse_threaded_comments_xml(bytes, &persons) {
                 parts.comments.append(&mut comments);
             }
         }
@@ -122,4 +133,8 @@ fn is_legacy_comments_xml(path: &str) -> bool {
 
 fn is_threaded_comments_xml(path: &str) -> bool {
     path.contains("threadedComments") && path.ends_with(".xml")
+}
+
+fn is_persons_xml(path: &str) -> bool {
+    path.starts_with("xl/persons/") && path.ends_with(".xml")
 }
