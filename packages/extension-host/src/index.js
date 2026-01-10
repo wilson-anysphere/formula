@@ -71,6 +71,7 @@ class ExtensionHost {
     // Security baseline: host-level permissions and audit logging for extension runtime.
     // The security package is ESM; extension-host is CJS, so we load it lazily.
     this._securityModulePromise = null;
+    this._securityModule = null;
     this._securityPermissionManager = null;
     this._securityAuditLogger = null;
     this._securityAuditDbPath =
@@ -90,8 +91,6 @@ class ExtensionHost {
   }
 
   async loadExtension(extensionPath) {
-    await this._ensureSecurity();
-
     const manifestPath = path.join(extensionPath, "package.json");
     const raw = await fs.readFile(manifestPath, "utf8");
     const parsed = JSON.parse(raw);
@@ -103,16 +102,12 @@ class ExtensionHost {
     const workerScript = path.resolve(__dirname, "../worker/extension-worker.js");
     const apiModulePath = path.resolve(__dirname, "../../extension-api/index.js");
 
-    const securityPrincipal = { type: "extension", id: extensionId };
-    const securityPermissions = this._securityPermissionManager.getSnapshot(securityPrincipal);
-
     const worker = new Worker(workerScript, {
       workerData: {
         extensionId,
         extensionPath,
         mainPath,
-        apiModulePath,
-        securityPermissions
+        apiModulePath
       }
     });
 
@@ -411,6 +406,7 @@ class ExtensionHost {
         const auditLogger = new AuditLogger({ store });
         const permissionManager = new PermissionManager({ auditLogger });
 
+        this._securityModule = security;
         this._securityAuditLogger = auditLogger;
         this._securityPermissionManager = permissionManager;
         return security;
@@ -425,7 +421,14 @@ class ExtensionHost {
     const apiKey = `${namespace}.${method}`;
 
     const permissions = API_PERMISSIONS[apiKey] ?? [];
+    const securityPrincipal = { type: "extension", id: extension.id };
+    const isNetworkFetch = apiKey === "network.fetch";
+
     try {
+      if (isNetworkFetch) {
+        await this._ensureSecurity();
+      }
+
       await this._permissionManager.ensurePermissions(
         {
           extensionId: extension.id,
@@ -435,6 +438,16 @@ class ExtensionHost {
         permissions
       );
 
+      if (isNetworkFetch) {
+        // Mirror the extension-host permission grant into the unified security manager so
+        // audit logging and future allowlist enforcement happen in one place.
+        this._securityPermissionManager.grant(
+          securityPrincipal,
+          { network: { mode: "full" } },
+          { source: "extension-host.permission-manager", apiKey }
+        );
+      }
+
       const result = await this._executeApi(namespace, method, args, extension);
 
       extension.worker.postMessage({
@@ -443,6 +456,20 @@ class ExtensionHost {
         result
       });
     } catch (error) {
+      if (isNetworkFetch) {
+        try {
+          await this._ensureSecurity();
+          this._securityAuditLogger?.log({
+            eventType: "security.permission.denied",
+            actor: securityPrincipal,
+            success: false,
+            metadata: { apiKey, permissions, message: String(error?.message ?? error) }
+          });
+        } catch {
+          // ignore
+        }
+      }
+
       extension.worker.postMessage({
         type: "api_error",
         id,
@@ -546,9 +573,18 @@ class ExtensionHost {
           throw new Error("Network fetch is not available in this runtime");
         }
 
+        await this._ensureSecurity();
+        const principal = { type: "extension", id: extension.id };
+        const secureFetch = this._securityModule.createSecureFetch({
+          principal,
+          permissionManager: this._securityPermissionManager,
+          auditLogger: this._securityAuditLogger,
+          promptIfDenied: false
+        });
+
         const url = String(args[0]);
         const init = args[1];
-        const response = await fetch(url, init);
+        const response = await secureFetch(url, init);
         const bodyText = await response.text();
         const headers = [];
         response.headers.forEach((value, key) => {
