@@ -9,6 +9,8 @@
   },
   "scripts": {
     "dev": "pnpm --dir packages/grid dev",
+    "dev:web": "pnpm --filter @formula/web dev",
+    "build:web": "pnpm --filter @formula/web build",
     "dev:desktop": "pnpm -C apps/desktop dev",
     "build:desktop": "pnpm -C apps/desktop build",
     "test": "pnpm test:vitest && pnpm test:node && pnpm -C apps/desktop test",

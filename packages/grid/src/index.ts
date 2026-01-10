@@ -13,3 +13,5 @@ export type { ScrollbarThumb } from "./virtualization/scrollbarMath";
 export { computeScrollbarThumb } from "./virtualization/scrollbarMath";
 export { VirtualScrollManager } from "./virtualization/VirtualScrollManager";
 export type { GridViewportState } from "./virtualization/VirtualScrollManager";
+export { GridPlaceholder } from "./GridPlaceholder";
+export type { GridPlaceholderProps } from "./GridPlaceholder";
