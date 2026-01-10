@@ -18,8 +18,10 @@ export function GridPerformanceHarness(props?: {
   const provider = useMemo(() => new MockCellProvider({ rowCount, colCount }), [rowCount, colCount]);
 
   useEffect(() => {
+    const metaEnv = (import.meta as any)?.env as { PROD?: boolean } | undefined;
     const nodeEnv = (globalThis as any)?.process?.env?.NODE_ENV as string | undefined;
-    if (nodeEnv === "production") return;
+    const isProd = metaEnv?.PROD === true || nodeEnv === "production";
+    if (isProd) return;
     const api = apiRef.current;
     if (!api) return;
 
