@@ -18,6 +18,15 @@ function clamp(value, min, max) {
   return value;
 }
 
+function clampRect(rect) {
+  return {
+    x: clamp(rect.x, -10000, 100000),
+    y: clamp(rect.y, -10000, 100000),
+    width: clamp(rect.width, 160, 2000),
+    height: clamp(rect.height, 120, 2000),
+  };
+}
+
 function removeFromDockZone(zone, panelId) {
   const next = clone(zone);
   next.panels = next.panels.filter((id) => id !== panelId);
@@ -157,11 +166,13 @@ export function floatPanel(layout, panelId, rect, options = {}) {
 
   removePanelFromAllDocks(next, panelId);
 
+  const nextRect = clampRect(rect);
+
   next.floating[panelId] = {
-    x: rect.x,
-    y: rect.y,
-    width: rect.width,
-    height: rect.height,
+    x: nextRect.x,
+    y: nextRect.y,
+    width: nextRect.width,
+    height: nextRect.height,
     minimized: false,
   };
 
@@ -183,6 +194,23 @@ export function setFloatingPanelMinimized(layout, panelId, minimized) {
 
   const next = clone(layout);
   next.floating[panelId] = { ...existing, minimized: Boolean(minimized) };
+  return next;
+}
+
+/**
+ * Update the position/size of a floating panel (e.g. drag/resize).
+ *
+ * @param {ReturnType<typeof createDefaultLayout>} layout
+ * @param {string} panelId
+ * @param {{ x: number, y: number, width: number, height: number }} rect
+ */
+export function setFloatingPanelRect(layout, panelId, rect) {
+  const existing = layout.floating[panelId];
+  if (!existing) return layout;
+
+  const next = clone(layout);
+  const nextRect = clampRect(rect);
+  next.floating[panelId] = { ...existing, ...nextRect };
   return next;
 }
 
@@ -224,17 +252,21 @@ export function snapFloatingPanel(layout, panelId, viewport, options = {}) {
   const floating = layout.floating[panelId];
   if (!floating) return layout;
 
-  const threshold = options.threshold ?? 24;
+  const threshold = Math.max(0, options.threshold ?? 24);
+  const viewportWidth = typeof viewport.width === "number" ? viewport.width : NaN;
+  const viewportHeight = typeof viewport.height === "number" ? viewport.height : NaN;
+  if (!Number.isFinite(viewportWidth) || !Number.isFinite(viewportHeight)) return layout;
 
   const distances = /** @type {Array<{ side: "left" | "right" | "bottom", distance: number }>} */ ([
     { side: "left", distance: floating.x },
-    { side: "right", distance: viewport.width - (floating.x + floating.width) },
-    { side: "bottom", distance: viewport.height - (floating.y + floating.height) },
+    { side: "right", distance: viewportWidth - (floating.x + floating.width) },
+    { side: "bottom", distance: viewportHeight - (floating.y + floating.height) },
   ]);
 
   const candidate = distances
-    .filter((d) => typeof d.distance === "number" && d.distance <= threshold)
-    .sort((a, b) => a.distance - b.distance)[0];
+    .map((d) => ({ ...d, abs: Math.abs(d.distance) }))
+    .filter((d) => Number.isFinite(d.abs) && d.abs <= threshold)
+    .sort((a, b) => a.abs - b.abs)[0];
 
   if (!candidate) return layout;
 
