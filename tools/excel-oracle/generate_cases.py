@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import datetime as dt
 import hashlib
 import itertools
 import json
@@ -61,6 +62,23 @@ def _add_case(
 
     payload["id"] = _stable_case_id(payload, prefix=prefix)
     cases.append(payload)
+
+
+def _excel_serial_1900(year: int, month: int, day: int) -> int:
+    """
+    Excel 1900 date system serial with Lotus leap-year bug enabled.
+
+    - Serial 1 == 1900-01-01
+    - Serial 60 == fictitious 1900-02-29
+    - For dates >= 1900-03-01, Excel serials are offset by +1 vs real day count.
+    """
+
+    base = dt.date(1899, 12, 31)
+    cur = dt.date(year, month, day)
+    serial = (cur - base).days
+    if cur >= dt.date(1900, 3, 1):
+        serial += 1
+    return serial
 
 
 def generate_cases() -> dict[str, Any]:
@@ -404,6 +422,84 @@ def generate_cases() -> dict[str, Any]:
             inputs=[*table_inputs, CellInput("D1", key)],
             output_cell="E1",
         )
+
+    # ------------------------------------------------------------------
+    # Financial functions (P1)
+    # ------------------------------------------------------------------
+    # Keep this section relatively small; it's mainly intended to cover
+    # algorithmic edge cases and common parameter combinations.
+    _add_case(cases, prefix="pv", tags=["financial", "PV"], formula="=PV(0, 3, -10)")
+    _add_case(cases, prefix="pv", tags=["financial", "PV"], formula="=PV(0.05, 10, -100)")
+    _add_case(cases, prefix="fv", tags=["financial", "FV"], formula="=FV(0, 5, -10)")
+    _add_case(cases, prefix="fv", tags=["financial", "FV"], formula="=FV(0.05, 10, -100)")
+    _add_case(cases, prefix="pmt", tags=["financial", "PMT"], formula="=PMT(0, 2, 10)")
+    _add_case(cases, prefix="pmt", tags=["financial", "PMT"], formula="=PMT(0.05, 10, 1000)")
+    _add_case(cases, prefix="nper", tags=["financial", "NPER"], formula="=NPER(0, -10, 100)")
+    _add_case(cases, prefix="nper", tags=["financial", "NPER"], formula="=NPER(0.05, -100, 1000)")
+    _add_case(cases, prefix="rate", tags=["financial", "RATE"], formula="=RATE(10, -100, 1000)")
+    _add_case(cases, prefix="rate", tags=["financial", "RATE"], formula="=RATE(12, -50, 500)")
+    _add_case(cases, prefix="sln", tags=["financial", "SLN"], formula="=SLN(30, 0, 3)")
+    _add_case(cases, prefix="syd", tags=["financial", "SYD"], formula="=SYD(30, 0, 3, 1)")
+    _add_case(cases, prefix="ddb", tags=["financial", "DDB"], formula="=DDB(1000, 100, 5, 1)")
+
+    # Range-based cashflow functions.
+    cashflows = [-100.0, 30.0, 40.0, 50.0]
+    cf_inputs = [CellInput(f"A{i+1}", v) for i, v in enumerate(cashflows)]
+    _add_case(
+        cases,
+        prefix="npv",
+        tags=["financial", "NPV"],
+        formula="=NPV(0.1,A1:A4)",
+        inputs=cf_inputs,
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="irr",
+        tags=["financial", "IRR"],
+        formula="=IRR(A1:A4)",
+        inputs=cf_inputs,
+        output_cell="C1",
+    )
+    _add_case(
+        cases,
+        prefix="irr_num",
+        tags=["financial", "IRR", "error"],
+        formula="=IRR(A1:A3)",
+        inputs=[CellInput("A1", 10), CellInput("A2", 20), CellInput("A3", 30)],
+        output_cell="C1",
+        description="IRR requires at least one positive and one negative cashflow",
+    )
+
+    # XNPV/XIRR with explicit date serials (Excel 1900 system with Lotus bug).
+    x_values = [-10000.0, 2000.0, 3000.0, 4000.0, 5000.0]
+    x_dates = [
+        _excel_serial_1900(2020, 1, 1),
+        _excel_serial_1900(2020, 7, 1),
+        _excel_serial_1900(2021, 1, 1),
+        _excel_serial_1900(2021, 7, 1),
+        _excel_serial_1900(2022, 1, 1),
+    ]
+    x_inputs = []
+    for i, (v, d) in enumerate(zip(x_values, x_dates), start=1):
+        x_inputs.append(CellInput(f"A{i}", v))
+        x_inputs.append(CellInput(f"B{i}", d))
+    _add_case(
+        cases,
+        prefix="xnpv",
+        tags=["financial", "XNPV"],
+        formula="=XNPV(0.1,A1:A5,B1:B5)",
+        inputs=x_inputs,
+        output_cell="D1",
+    )
+    _add_case(
+        cases,
+        prefix="xirr",
+        tags=["financial", "XIRR"],
+        formula="=XIRR(A1:A5,B1:B5)",
+        inputs=x_inputs,
+        output_cell="D1",
+    )
 
     # ------------------------------------------------------------------
     # Dynamic arrays / spilling

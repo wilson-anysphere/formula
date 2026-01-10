@@ -21825,6 +21825,317 @@
       "id": "index_match_d9885faecbc2"
     },
     {
+      "formula": "=PV(0, 3, -10)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PV"
+      ],
+      "id": "pv_23f3b6ce8410"
+    },
+    {
+      "formula": "=PV(0.05, 10, -100)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PV"
+      ],
+      "id": "pv_8cf087f09db5"
+    },
+    {
+      "formula": "=FV(0, 5, -10)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "FV"
+      ],
+      "id": "fv_56873fbc466b"
+    },
+    {
+      "formula": "=FV(0.05, 10, -100)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "FV"
+      ],
+      "id": "fv_b6105e0cea52"
+    },
+    {
+      "formula": "=PMT(0, 2, 10)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PMT"
+      ],
+      "id": "pmt_195c5c382248"
+    },
+    {
+      "formula": "=PMT(0.05, 10, 1000)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PMT"
+      ],
+      "id": "pmt_c8933d584d66"
+    },
+    {
+      "formula": "=NPER(0, -10, 100)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "NPER"
+      ],
+      "id": "nper_962c8cc8727b"
+    },
+    {
+      "formula": "=NPER(0.05, -100, 1000)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "NPER"
+      ],
+      "id": "nper_0a5685053600"
+    },
+    {
+      "formula": "=RATE(10, -100, 1000)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "RATE"
+      ],
+      "id": "rate_d2bf2bb61d8d"
+    },
+    {
+      "formula": "=RATE(12, -50, 500)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "RATE"
+      ],
+      "id": "rate_d78f43c9e42a"
+    },
+    {
+      "formula": "=SLN(30, 0, 3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "SLN"
+      ],
+      "id": "sln_61d0cf1afc0c"
+    },
+    {
+      "formula": "=SYD(30, 0, 3, 1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "SYD"
+      ],
+      "id": "syd_fd8a5e95c617"
+    },
+    {
+      "formula": "=DDB(1000, 100, 5, 1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DDB"
+      ],
+      "id": "ddb_b4f989ebe2ae"
+    },
+    {
+      "formula": "=NPV(0.1,A1:A4)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": -100.0
+        },
+        {
+          "cell": "A2",
+          "value": 30.0
+        },
+        {
+          "cell": "A3",
+          "value": 40.0
+        },
+        {
+          "cell": "A4",
+          "value": 50.0
+        }
+      ],
+      "tags": [
+        "financial",
+        "NPV"
+      ],
+      "id": "npv_b9b2bb2deab1"
+    },
+    {
+      "formula": "=IRR(A1:A4)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": -100.0
+        },
+        {
+          "cell": "A2",
+          "value": 30.0
+        },
+        {
+          "cell": "A3",
+          "value": 40.0
+        },
+        {
+          "cell": "A4",
+          "value": 50.0
+        }
+      ],
+      "tags": [
+        "financial",
+        "IRR"
+      ],
+      "id": "irr_c4f3af3619f0"
+    },
+    {
+      "formula": "=IRR(A1:A3)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 10
+        },
+        {
+          "cell": "A2",
+          "value": 20
+        },
+        {
+          "cell": "A3",
+          "value": 30
+        }
+      ],
+      "tags": [
+        "financial",
+        "IRR",
+        "error"
+      ],
+      "description": "IRR requires at least one positive and one negative cashflow",
+      "id": "irr_num_f8db7a23ad53"
+    },
+    {
+      "formula": "=XNPV(0.1,A1:A5,B1:B5)",
+      "outputCell": "D1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": -10000.0
+        },
+        {
+          "cell": "B1",
+          "value": 43831
+        },
+        {
+          "cell": "A2",
+          "value": 2000.0
+        },
+        {
+          "cell": "B2",
+          "value": 44013
+        },
+        {
+          "cell": "A3",
+          "value": 3000.0
+        },
+        {
+          "cell": "B3",
+          "value": 44197
+        },
+        {
+          "cell": "A4",
+          "value": 4000.0
+        },
+        {
+          "cell": "B4",
+          "value": 44378
+        },
+        {
+          "cell": "A5",
+          "value": 5000.0
+        },
+        {
+          "cell": "B5",
+          "value": 44562
+        }
+      ],
+      "tags": [
+        "financial",
+        "XNPV"
+      ],
+      "id": "xnpv_7b4b502df7d2"
+    },
+    {
+      "formula": "=XIRR(A1:A5,B1:B5)",
+      "outputCell": "D1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": -10000.0
+        },
+        {
+          "cell": "B1",
+          "value": 43831
+        },
+        {
+          "cell": "A2",
+          "value": 2000.0
+        },
+        {
+          "cell": "B2",
+          "value": 44013
+        },
+        {
+          "cell": "A3",
+          "value": 3000.0
+        },
+        {
+          "cell": "B3",
+          "value": 44197
+        },
+        {
+          "cell": "A4",
+          "value": 4000.0
+        },
+        {
+          "cell": "B4",
+          "value": 44378
+        },
+        {
+          "cell": "A5",
+          "value": 5000.0
+        },
+        {
+          "cell": "B5",
+          "value": 44562
+        }
+      ],
+      "tags": [
+        "financial",
+        "XIRR"
+      ],
+      "id": "xirr_6e931f817abd"
+    },
+    {
       "formula": "=A1:A3",
       "outputCell": "C1",
       "inputs": [
