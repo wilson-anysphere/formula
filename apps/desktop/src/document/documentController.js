@@ -363,6 +363,28 @@ export class DocumentController {
   }
 
   /**
+   * Set a cell from raw user input (e.g. formula bar / cell editor contents).
+   *
+   * - Strings starting with "=" are treated as formulas.
+   * - Strings starting with "'" have the apostrophe stripped and are treated as literal text.
+   *
+   * @param {string} sheetId
+   * @param {CellCoord | string} coord
+   * @param {any} input
+   * @param {{ mergeKey?: string, label?: string }} [options]
+   */
+  setCellInput(sheetId, coord, input, options = {}) {
+    const c = typeof coord === "string" ? parseA1(coord) : coord;
+    const before = this.model.getCell(sheetId, c.row, c.col);
+    const after = this.#normalizeCellInput(before, input);
+    if (cellStateEquals(before, after)) return;
+    this.#applyUserDeltas(
+      [{ sheetId, row: c.row, col: c.col, before, after: cloneCellState(after) }],
+      options
+    );
+  }
+
+  /**
    * Clear a single cell's contents (preserving formatting).
    *
    * @param {string} sheetId
@@ -640,6 +662,18 @@ export class DocumentController {
       return { value, formula, format };
     }
 
+    // String primitives: interpret leading "=" as a formula, and leading apostrophe as a literal.
+    if (typeof input === "string") {
+      if (input.startsWith("'")) {
+        return { value: input.slice(1), formula: null, format: before.format };
+      }
+
+      const trimmed = input.trimStart();
+      if (trimmed.startsWith("=") && trimmed.length > 1) {
+        return { value: null, formula: input, format: before.format };
+      }
+    }
+
     // Primitive value (or null => clear); formats preserved.
     return { value: input ?? null, formula: null, format: before.format };
   }
@@ -682,6 +716,39 @@ export class DocumentController {
 
     this.#commitHistoryEntry(batch);
     this.engine?.recalculate();
+  }
+
+  /**
+   * Cancel the current batch by reverting all changes applied since `beginBatch()`.
+   *
+   * This is useful for editor cancellation (Esc) when the UI updates the document
+   * incrementally while the user types.
+   *
+   * @returns {boolean} Whether any changes were reverted.
+   */
+  cancelBatch() {
+    if (this.batchDepth === 0) return false;
+
+    const batch = this.activeBatch;
+    const hadDeltas = Boolean(batch && batch.deltasByCell.size > 0);
+
+    // Reset batching state first so observers see consistent canUndo/canRedo.
+    this.batchDepth = 0;
+    this.activeBatch = null;
+    this.lastMergeKey = null;
+    this.lastMergeTime = 0;
+
+    if (hadDeltas && batch) {
+      const inverse = invertDeltas(entryDeltas(batch));
+      this.#applyDeltas(inverse, { recalc: false, emitChange: true });
+    }
+
+    this.engine?.endBatch?.();
+    if (hadDeltas) this.engine?.recalculate();
+
+    this.#emitHistory();
+    this.#emitDirty();
+    return hadDeltas;
   }
 
   /**

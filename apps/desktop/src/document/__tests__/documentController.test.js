@@ -173,3 +173,48 @@ test("history enablement updates when entering/leaving an empty batch", () => {
     { canUndo: true, canRedo: false },
   ]);
 });
+
+test("setCellInput interprets '=' as formula and apostrophe as literal text", () => {
+  const doc = new DocumentController();
+
+  doc.setCellInput("Sheet1", "A1", "=1+2");
+  assert.equal(doc.getCell("Sheet1", "A1").formula, "=1+2");
+  assert.equal(doc.getCell("Sheet1", "A1").value, null);
+
+  doc.setCellInput("Sheet1", "A2", "'=1+2");
+  assert.equal(doc.getCell("Sheet1", "A2").formula, null);
+  assert.equal(doc.getCell("Sheet1", "A2").value, "=1+2");
+});
+
+test("setRangeValues treats strings starting with '=' as formulas", () => {
+  const doc = new DocumentController();
+
+  doc.setRangeValues("Sheet1", "A1", [["=A2+1", "'=literal"]]);
+  assert.equal(doc.getCell("Sheet1", "A1").formula, "=A2+1");
+  assert.equal(doc.getCell("Sheet1", "A1").value, null);
+  assert.equal(doc.getCell("Sheet1", "B1").formula, null);
+  assert.equal(doc.getCell("Sheet1", "B1").value, "=literal");
+});
+
+test("cancelBatch reverts uncommitted batch changes without affecting history", () => {
+  const engine = new MockEngine();
+  const doc = new DocumentController({ engine });
+
+  doc.markSaved();
+  assert.equal(doc.isDirty, false);
+  assert.deepEqual(doc.getStackDepths(), { undo: 0, redo: 0 });
+
+  doc.beginBatch({ label: "Typing" });
+  doc.setCellInput("Sheet1", "A1", "=1+2");
+  assert.equal(doc.canUndo, false);
+  assert.equal(engine.recalcCount, 0);
+  assert.equal(doc.getCell("Sheet1", "A1").formula, "=1+2");
+
+  const reverted = doc.cancelBatch();
+  assert.equal(reverted, true);
+  assert.equal(doc.getCell("Sheet1", "A1").formula, null);
+  assert.equal(engine.getCell("Sheet1", 0, 0).formula, null);
+  assert.equal(engine.recalcCount, 1);
+  assert.equal(doc.isDirty, false);
+  assert.deepEqual(doc.getStackDepths(), { undo: 0, redo: 0 });
+});

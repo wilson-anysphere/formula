@@ -4,6 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@9.0.0",
   "dependencies": {
+    "sql.js": "^1.13.0",
     "yjs": "^13.6.27"
   },
   "scripts": {

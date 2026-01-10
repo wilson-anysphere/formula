@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      sql.js:
+        specifier: ^1.13.0
+        version: 1.13.0
       yjs:
         specifier: ^13.6.27
         version: 13.6.29
