@@ -147,6 +147,13 @@ pub struct Alignment {
     pub vertical: Option<VerticalAlignment>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub wrap_text: bool,
+    /// Excel text rotation in degrees.
+    ///
+    /// - `0` = horizontal
+    /// - `-90..=90` = rotated text
+    /// - Excel also uses `255` for vertical stacked text (supported as-is).
+    #[serde(default, skip_serializing_if = "is_zero_i16")]
+    pub text_rotation: i16,
 }
 
 /// Complete cell style (subset).
@@ -168,6 +175,10 @@ pub struct Style {
 
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+fn is_zero_i16(v: &i16) -> bool {
+    *v == 0
 }
 
 /// Deduplicated table of styles.

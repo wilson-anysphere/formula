@@ -34,6 +34,8 @@ mod read;
 mod reader;
 mod relationships;
 pub mod shared_strings;
+pub mod merge_cells;
+pub mod minimal;
 mod sheet_metadata;
 pub mod styles;
 pub mod tables;
@@ -62,6 +64,7 @@ pub use sheet_metadata::{
     WorkbookSheetInfo,
 };
 pub use styles::*;
+pub use crate::minimal::write_minimal_xlsx;
 pub use workbook::ChartExtractionError;
 pub use writer::{write_workbook, write_workbook_to_writer, XlsxWriteError};
 

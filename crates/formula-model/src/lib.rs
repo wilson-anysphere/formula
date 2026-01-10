@@ -15,9 +15,10 @@ mod error;
 pub mod import;
 mod hyperlinks;
 pub mod rich_text;
-mod outline;
 mod formula_rewrite;
 pub mod pivots;
+mod merge;
+mod outline;
 mod style;
 pub mod table;
 mod value;
@@ -31,8 +32,9 @@ pub use conditional_formatting::*;
 pub use display::{format_cell_display, CellDisplay};
 pub use error::ErrorValue;
 pub use hyperlinks::{Hyperlink, HyperlinkTarget};
-pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
 pub use formula_rewrite::rewrite_sheet_names_in_formula;
+pub use merge::{MergeError, MergedRegion, MergedRegions};
+pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
 pub use style::{
     Alignment, Border, BorderStyle, Color, Fill, Font, HorizontalAlignment, Style, StyleTable,
     VerticalAlignment,

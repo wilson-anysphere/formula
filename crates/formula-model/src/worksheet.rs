@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 
-use crate::{A1ParseError, Cell, CellKey, CellRef, CellValue, Hyperlink, Range, Table};
+use crate::{
+    A1ParseError, Cell, CellKey, CellRef, CellValue, Hyperlink, MergeError, MergedRegions, Range,
+    Table,
+};
 
 /// Identifier for a worksheet within a workbook.
 pub type WorksheetId = u32;
@@ -131,6 +134,13 @@ pub struct Worksheet {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     used_range: Option<Range>,
 
+    /// Merged-cell regions for this worksheet.
+    ///
+    /// Values are stored only in the top-left (anchor) cell. All cell addresses inside a
+    /// merged region resolve to that anchor, matching Excel semantics.
+    #[serde(default, skip_serializing_if = "MergedRegions::is_empty")]
+    pub merged_regions: MergedRegions,
+
     /// Logical row count (may exceed the used range).
     #[serde(default = "default_row_count")]
     pub row_count: u32,
@@ -184,6 +194,7 @@ impl Worksheet {
             tab_color: None,
             cells: HashMap::new(),
             used_range: None,
+            merged_regions: MergedRegions::new(),
             row_count: default_row_count(),
             col_count: default_col_count(),
             row_properties: BTreeMap::new(),
@@ -369,7 +380,8 @@ impl Worksheet {
         if cell.row >= crate::cell::EXCEL_MAX_ROWS || cell.col >= crate::cell::EXCEL_MAX_COLS {
             return None;
         }
-        self.cells.get(&CellKey::from_ref(cell))
+        let anchor = self.merged_regions.resolve_cell(cell);
+        self.cells.get(&CellKey::from_ref(anchor))
     }
 
     /// Get a mutable cell record if it is present in the sparse store.
@@ -527,23 +539,24 @@ impl Worksheet {
     ///
     /// If the cell becomes "truly empty", it is removed from storage.
     pub fn set_cell(&mut self, cell_ref: CellRef, cell: Cell) {
-        let key = CellKey::from(cell_ref);
+        let anchor = self.merged_regions.resolve_cell(cell_ref);
+        let key = CellKey::from(anchor);
 
         if cell.is_truly_empty() {
             let removed = self.cells.remove(&key).is_some();
             if removed {
-                self.on_cell_removed(cell_ref);
+                self.on_cell_removed(anchor);
             }
             return;
         }
 
         let is_new = self.cells.insert(key, cell).is_none();
         if is_new {
-            self.on_cell_inserted(cell_ref);
+            self.on_cell_inserted(anchor);
         } else {
             // Existing cell updated; used range can only expand if the sheet was empty.
             if self.used_range.is_none() {
-                self.used_range = Some(Range::new(cell_ref, cell_ref));
+                self.used_range = Some(Range::new(anchor, anchor));
             }
         }
     }
@@ -552,14 +565,15 @@ impl Worksheet {
     ///
     /// If the target cell does not exist yet, it is created with default style.
     pub fn set_value(&mut self, cell_ref: CellRef, value: CellValue) {
-        let key = CellKey::from(cell_ref);
+        let anchor = self.merged_regions.resolve_cell(cell_ref);
+        let key = CellKey::from(anchor);
 
         match self.cells.get_mut(&key) {
             Some(cell) => {
                 cell.value = value;
                 if cell.is_truly_empty() {
                     self.cells.remove(&key);
-                    self.on_cell_removed(cell_ref);
+                    self.on_cell_removed(anchor);
                 }
             }
             None => {
@@ -567,7 +581,7 @@ impl Worksheet {
                     return;
                 }
                 self.cells.insert(key, Cell::new(value));
-                self.on_cell_inserted(cell_ref);
+                self.on_cell_inserted(anchor);
             }
         }
     }
@@ -581,9 +595,10 @@ impl Worksheet {
 
     /// Remove any stored record for this cell.
     pub fn clear_cell(&mut self, cell_ref: CellRef) {
-        let key = CellKey::from(cell_ref);
+        let anchor = self.merged_regions.resolve_cell(cell_ref);
+        let key = CellKey::from(anchor);
         if self.cells.remove(&key).is_some() {
-            self.on_cell_removed(cell_ref);
+            self.on_cell_removed(anchor);
         }
     }
 
@@ -592,6 +607,41 @@ impl Worksheet {
         let cell_ref = CellRef::from_a1(a1)?;
         self.clear_cell(cell_ref);
         Ok(())
+    }
+
+    /// Merge the given range.
+    ///
+    /// If the range intersects existing merged regions, they are unmerged first (Excel-like).
+    /// When merging, only the top-left cell's value/formula/style is kept; all other stored
+    /// cells in the range are cleared.
+    pub fn merge_range(&mut self, range: Range) -> Result<(), MergeError> {
+        if range.is_single_cell() {
+            return Ok(());
+        }
+
+        self.merged_regions.unmerge_range(range);
+
+        let anchor = range.start;
+        let mut removed_any = false;
+        for row in range.start.row..=range.end.row {
+            for col in range.start.col..=range.end.col {
+                let cell = CellRef::new(row, col);
+                if cell != anchor {
+                    removed_any |= self.cells.remove(&CellKey::from(cell)).is_some();
+                }
+            }
+        }
+
+        if removed_any {
+            self.recompute_used_range();
+        }
+
+        self.merged_regions.add(range)
+    }
+
+    /// Unmerge any merged regions that intersect `range`.
+    pub fn unmerge_range(&mut self, range: Range) -> usize {
+        self.merged_regions.unmerge_range(range)
     }
 
     /// Iterate over all stored cells.
@@ -791,6 +841,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             #[serde(default = "default_col_count")]
             col_count: u32,
             #[serde(default)]
+            merged_regions: MergedRegions,
+            #[serde(default)]
             row_properties: BTreeMap<u32, RowProperties>,
             #[serde(default)]
             col_properties: BTreeMap<u32, ColProperties>,
@@ -876,6 +928,7 @@ impl<'de> Deserialize<'de> for Worksheet {
             tab_color: helper.tab_color,
             cells: helper.cells,
             used_range,
+            merged_regions: helper.merged_regions,
             row_count,
             col_count,
             row_properties: helper.row_properties,

@@ -1,10 +1,18 @@
-use formula_model::{parse_argb_hex_color, CfStyleOverride};
+use formula_model::{parse_argb_hex_color, Alignment, CfStyleOverride, HorizontalAlignment, VerticalAlignment};
+use quick_xml::events::Event;
+use quick_xml::Reader;
 use roxmltree::Document;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StylesError {
     #[error("xml parse error: {0}")]
     Xml(#[from] roxmltree::Error),
+    #[error("quick-xml parse error: {0}")]
+    QuickXml(#[from] quick_xml::Error),
+    #[error("quick-xml attribute error: {0}")]
+    Attr(#[from] quick_xml::events::attributes::AttrError),
+    #[error("utf-8 error: {0}")]
+    Utf8(#[from] std::str::Utf8Error),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -86,5 +94,80 @@ pub struct DxfProvider<'a> {
 impl<'a> formula_model::DifferentialFormatProvider for DxfProvider<'a> {
     fn get_dxf(&self, dxf_id: u32) -> Option<CfStyleOverride> {
         self.styles.dxfs.get(dxf_id as usize).cloned()
+    }
+}
+
+/// Parse `xl/styles.xml` cellXfs alignments.
+///
+/// Returns a vector indexed by `xf` index. Missing alignments default to `Alignment::default()`.
+pub fn parse_cell_xfs_alignments(styles_xml: &str) -> Result<Vec<Alignment>, StylesError> {
+    let mut reader = Reader::from_str(styles_xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut in_cell_xfs = false;
+    let mut current_xf: Option<Alignment> = None;
+    let mut xfs = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.local_name().as_ref() == b"cellXfs" => {
+                in_cell_xfs = true;
+            }
+            Event::End(e) if e.local_name().as_ref() == b"cellXfs" => {
+                break;
+            }
+            Event::Start(e) if in_cell_xfs && e.local_name().as_ref() == b"xf" => {
+                current_xf = Some(Alignment::default());
+            }
+            Event::Empty(e) if in_cell_xfs && e.local_name().as_ref() == b"xf" => {
+                xfs.push(Alignment::default());
+            }
+            Event::End(e) if in_cell_xfs && e.local_name().as_ref() == b"xf" => {
+                xfs.push(current_xf.take().unwrap_or_default());
+            }
+            Event::Empty(e) if in_cell_xfs && e.local_name().as_ref() == b"alignment" => {
+                if let Some(xf) = current_xf.as_mut() {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        let value = std::str::from_utf8(&attr.value)?;
+                        match attr.key.as_ref() {
+                            b"horizontal" => xf.horizontal = Some(parse_horizontal(value)),
+                            b"vertical" => xf.vertical = Some(parse_vertical(value)),
+                            b"wrapText" => {
+                                xf.wrap_text = value == "1" || value.eq_ignore_ascii_case("true")
+                            }
+                            b"textRotation" => {
+                                xf.text_rotation = value.parse::<i16>().unwrap_or_default()
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(xfs)
+}
+
+fn parse_horizontal(value: &str) -> HorizontalAlignment {
+    match value {
+        "left" => HorizontalAlignment::Left,
+        "center" => HorizontalAlignment::Center,
+        "right" => HorizontalAlignment::Right,
+        _ => HorizontalAlignment::General,
+    }
+}
+
+fn parse_vertical(value: &str) -> VerticalAlignment {
+    match value {
+        "top" => VerticalAlignment::Top,
+        "center" => VerticalAlignment::Center,
+        "bottom" => VerticalAlignment::Bottom,
+        _ => VerticalAlignment::Bottom,
     }
 }
