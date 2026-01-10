@@ -1,15 +1,16 @@
-import crypto from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
+import initSqlJs from "sql.js";
+import { createRequire } from "node:module";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { applyPatch } from "../patch.js";
+import { randomUUID } from "../uuid.js";
 
 /**
  * SQLite-backed store.
  *
- * Notes:
- * - Uses Node's built-in (currently experimental) `node:sqlite` module so the
- *   repo can run tests without native dependencies.
- * - Stores commits as patches (JSON) relative to the first parent to avoid
- *   duplicating full document snapshots on every version.
+ * Uses the same approach as `packages/versioning/src/store/sqliteVersionStore.js`:
+ * `sql.js` (WASM SQLite) + file persistence. This keeps the implementation
+ * dependency-light and Node-compatible without requiring native modules.
  */
 
 /**
@@ -20,20 +21,58 @@ import { applyPatch } from "../patch.js";
  */
 
 export class SQLiteBranchStore {
-  /** @type {DatabaseSync} */
-  #db;
-
   /**
-   * @param {{ filename: string }} options
+   * @param {{ filePath?: string, filename?: string }} options
    */
-  constructor({ filename }) {
-    this.#db = new DatabaseSync(filename);
-    this.#migrate();
+  constructor(options) {
+    const filePath = options.filePath ?? options.filename;
+    if (!filePath) {
+      throw new Error("SQLiteBranchStore requires { filePath }");
+    }
+    this.filePath = filePath;
+
+    /** @type {any | null} */
+    this._db = null;
+    /** @type {Promise<any> | null} */
+    this._initPromise = null;
+    /** @type {Promise<void>} */
+    this._persistChain = Promise.resolve();
   }
 
-  #migrate() {
-    this.#db.exec(`
+  /**
+   * @returns {Promise<any>}
+   */
+  async _open() {
+    if (this._db) return this._db;
+    if (this._initPromise) return this._initPromise;
+    this._initPromise = this._openInner();
+    return this._initPromise;
+  }
+
+  async _openInner() {
+    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+
+    const SQL = await initSqlJs({ locateFile: locateSqlJsFile });
+
+    /** @type {Uint8Array | null} */
+    let existing = null;
+    try {
+      existing = await fs.readFile(this.filePath);
+    } catch {
+      existing = null;
+    }
+
+    const db = existing ? new SQL.Database(existing) : new SQL.Database();
+    this._db = db;
+    this._ensureSchema();
+    return db;
+  }
+
+  _ensureSchema() {
+    if (!this._db) return;
+    this._db.run(`
       PRAGMA foreign_keys = ON;
+
       CREATE TABLE IF NOT EXISTS commits (
         id TEXT PRIMARY KEY,
         doc_id TEXT NOT NULL,
@@ -60,55 +99,72 @@ export class SQLiteBranchStore {
     `);
   }
 
+  async _persist() {
+    const db = await this._open();
+    const data = db.export();
+    const tmp = `${this.filePath}.tmp`;
+    await fs.writeFile(tmp, data);
+    await fs.rename(tmp, this.filePath);
+  }
+
+  async _queuePersist() {
+    this._persistChain = this._persistChain.then(() => this._persist());
+    return this._persistChain;
+  }
+
   /**
    * @param {string} docId
    * @param {import("../types.js").Actor} actor
    * @param {DocumentState} initialState
    */
   async ensureDocument(docId, actor, initialState) {
-    const existing = this.#db
-      .prepare("SELECT id FROM branches WHERE doc_id = ? AND name = 'main'")
-      .get(docId);
-    if (existing) return;
+    const db = await this._open();
+    const existingStmt = db.prepare("SELECT id FROM branches WHERE doc_id = ? AND name = 'main' LIMIT 1");
+    existingStmt.bind([docId]);
+    const hasExisting = existingStmt.step();
+    existingStmt.free();
+    if (hasExisting) return;
 
     const now = Date.now();
-    const rootCommitId = crypto.randomUUID();
-    const mainBranchId = crypto.randomUUID();
+    const rootCommitId = randomUUID();
+    const mainBranchId = randomUUID();
 
     const patch = { sheets: structuredClone(initialState.sheets ?? {}) };
 
-    this.#db.exec("BEGIN");
+    db.run("BEGIN");
     try {
-      this.#db
-        .prepare(
-          `INSERT INTO commits
+      const insertCommit = db.prepare(
+        `INSERT INTO commits
           (id, doc_id, parent_commit_id, merge_parent_commit_id, created_by, created_at, message, patch_json)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          rootCommitId,
-          docId,
-          null,
-          null,
-          actor.userId,
-          now,
-          "root",
-          JSON.stringify(patch)
-        );
+      );
+      insertCommit.run([
+        rootCommitId,
+        docId,
+        null,
+        null,
+        actor.userId,
+        now,
+        "root",
+        JSON.stringify(patch),
+      ]);
+      insertCommit.free();
 
-      this.#db
-        .prepare(
-          `INSERT INTO branches
+      const insertBranch = db.prepare(
+        `INSERT INTO branches
           (id, doc_id, name, created_by, created_at, description, head_commit_id)
           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(mainBranchId, docId, "main", actor.userId, now, null, rootCommitId);
+      );
+      insertBranch.run([mainBranchId, docId, "main", actor.userId, now, null, rootCommitId]);
+      insertBranch.free();
 
-      this.#db.exec("COMMIT");
+      db.run("COMMIT");
     } catch (e) {
-      this.#db.exec("ROLLBACK");
+      db.run("ROLLBACK");
       throw e;
     }
+
+    await this._queuePersist();
   }
 
   /**
@@ -116,17 +172,29 @@ export class SQLiteBranchStore {
    * @returns {Promise<Branch[]>}
    */
   async listBranches(docId) {
-    const rows = this.#db
-      .prepare(
-        `SELECT id, doc_id as docId, name, created_by as createdBy, created_at as createdAt,
-          description, head_commit_id as headCommitId
-        FROM branches WHERE doc_id = ? ORDER BY created_at ASC`
-      )
-      .all(docId);
-    return rows.map((r) => ({
-      ...r,
-      description: r.description ?? null
-    }));
+    const db = await this._open();
+    const stmt = db.prepare(
+      `SELECT id, doc_id, name, created_by, created_at, description, head_commit_id
+       FROM branches WHERE doc_id = ? ORDER BY created_at ASC`
+    );
+    stmt.bind([docId]);
+
+    /** @type {Branch[]} */
+    const out = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      out.push({
+        id: row.id,
+        docId: row.doc_id,
+        name: row.name,
+        createdBy: row.created_by,
+        createdAt: row.created_at,
+        description: row.description ?? null,
+        headCommitId: row.head_commit_id,
+      });
+    }
+    stmt.free();
+    return out;
   }
 
   /**
@@ -135,15 +203,27 @@ export class SQLiteBranchStore {
    * @returns {Promise<Branch | null>}
    */
   async getBranch(docId, name) {
-    const row = this.#db
-      .prepare(
-        `SELECT id, doc_id as docId, name, created_by as createdBy, created_at as createdAt,
-          description, head_commit_id as headCommitId
-        FROM branches WHERE doc_id = ? AND name = ?`
-      )
-      .get(docId, name);
-    if (!row) return null;
-    return { ...row, description: row.description ?? null };
+    const db = await this._open();
+    const stmt = db.prepare(
+      `SELECT id, doc_id, name, created_by, created_at, description, head_commit_id
+       FROM branches WHERE doc_id = ? AND name = ? LIMIT 1`
+    );
+    stmt.bind([docId, name]);
+    if (!stmt.step()) {
+      stmt.free();
+      return null;
+    }
+    const row = stmt.getAsObject();
+    stmt.free();
+    return {
+      id: row.id,
+      docId: row.doc_id,
+      name: row.name,
+      createdBy: row.created_by,
+      createdAt: row.created_at,
+      description: row.description ?? null,
+      headCommitId: row.head_commit_id,
+    };
   }
 
   /**
@@ -151,22 +231,24 @@ export class SQLiteBranchStore {
    * @returns {Promise<Branch>}
    */
   async createBranch(input) {
-    const id = crypto.randomUUID();
-    this.#db
-      .prepare(
-        `INSERT INTO branches
+    const db = await this._open();
+    const id = randomUUID();
+    const stmt = db.prepare(
+      `INSERT INTO branches
         (id, doc_id, name, created_by, created_at, description, head_commit_id)
         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        id,
-        input.docId,
-        input.name,
-        input.createdBy,
-        input.createdAt,
-        input.description,
-        input.headCommitId
-      );
+    );
+    stmt.run([
+      id,
+      input.docId,
+      input.name,
+      input.createdBy,
+      input.createdAt,
+      input.description,
+      input.headCommitId,
+    ]);
+    stmt.free();
+    await this._queuePersist();
 
     return {
       id,
@@ -175,7 +257,7 @@ export class SQLiteBranchStore {
       createdBy: input.createdBy,
       createdAt: input.createdAt,
       description: input.description,
-      headCommitId: input.headCommitId
+      headCommitId: input.headCommitId,
     };
   }
 
@@ -185,9 +267,11 @@ export class SQLiteBranchStore {
    * @param {string} newName
    */
   async renameBranch(docId, oldName, newName) {
-    this.#db
-      .prepare("UPDATE branches SET name = ? WHERE doc_id = ? AND name = ?")
-      .run(newName, docId, oldName);
+    const db = await this._open();
+    const stmt = db.prepare("UPDATE branches SET name = ? WHERE doc_id = ? AND name = ?");
+    stmt.run([newName, docId, oldName]);
+    stmt.free();
+    await this._queuePersist();
   }
 
   /**
@@ -195,9 +279,11 @@ export class SQLiteBranchStore {
    * @param {string} name
    */
   async deleteBranch(docId, name) {
-    this.#db
-      .prepare("DELETE FROM branches WHERE doc_id = ? AND name = ?")
-      .run(docId, name);
+    const db = await this._open();
+    const stmt = db.prepare("DELETE FROM branches WHERE doc_id = ? AND name = ?");
+    stmt.run([docId, name]);
+    stmt.free();
+    await this._queuePersist();
   }
 
   /**
@@ -206,9 +292,11 @@ export class SQLiteBranchStore {
    * @param {string} headCommitId
    */
   async updateBranchHead(docId, name, headCommitId) {
-    this.#db
-      .prepare("UPDATE branches SET head_commit_id = ? WHERE doc_id = ? AND name = ?")
-      .run(headCommitId, docId, name);
+    const db = await this._open();
+    const stmt = db.prepare("UPDATE branches SET head_commit_id = ? WHERE doc_id = ? AND name = ?");
+    stmt.run([headCommitId, docId, name]);
+    stmt.free();
+    await this._queuePersist();
   }
 
   /**
@@ -216,23 +304,25 @@ export class SQLiteBranchStore {
    * @returns {Promise<Commit>}
    */
   async createCommit(input) {
-    const id = crypto.randomUUID();
-    this.#db
-      .prepare(
-        `INSERT INTO commits
+    const db = await this._open();
+    const id = randomUUID();
+    const stmt = db.prepare(
+      `INSERT INTO commits
         (id, doc_id, parent_commit_id, merge_parent_commit_id, created_by, created_at, message, patch_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        id,
-        input.docId,
-        input.parentCommitId,
-        input.mergeParentCommitId,
-        input.createdBy,
-        input.createdAt,
-        input.message,
-        JSON.stringify(input.patch)
-      );
+    );
+    stmt.run([
+      id,
+      input.docId,
+      input.parentCommitId,
+      input.mergeParentCommitId,
+      input.createdBy,
+      input.createdAt,
+      input.message,
+      JSON.stringify(input.patch),
+    ]);
+    stmt.free();
+    await this._queuePersist();
 
     return {
       id,
@@ -242,7 +332,7 @@ export class SQLiteBranchStore {
       createdBy: input.createdBy,
       createdAt: input.createdAt,
       message: input.message,
-      patch: structuredClone(input.patch)
+      patch: structuredClone(input.patch),
     };
   }
 
@@ -251,24 +341,28 @@ export class SQLiteBranchStore {
    * @returns {Promise<Commit | null>}
    */
   async getCommit(commitId) {
-    const row = this.#db
-      .prepare(
-        `SELECT id, doc_id as docId, parent_commit_id as parentCommitId,
-          merge_parent_commit_id as mergeParentCommitId, created_by as createdBy,
-          created_at as createdAt, message, patch_json as patchJson
-        FROM commits WHERE id = ?`
-      )
-      .get(commitId);
-    if (!row) return null;
+    const db = await this._open();
+    const stmt = db.prepare(
+      `SELECT id, doc_id, parent_commit_id, merge_parent_commit_id,
+        created_by, created_at, message, patch_json
+      FROM commits WHERE id = ? LIMIT 1`
+    );
+    stmt.bind([commitId]);
+    if (!stmt.step()) {
+      stmt.free();
+      return null;
+    }
+    const row = stmt.getAsObject();
+    stmt.free();
     return {
       id: row.id,
-      docId: row.docId,
-      parentCommitId: row.parentCommitId ?? null,
-      mergeParentCommitId: row.mergeParentCommitId ?? null,
-      createdBy: row.createdBy,
-      createdAt: row.createdAt,
+      docId: row.doc_id,
+      parentCommitId: row.parent_commit_id ?? null,
+      mergeParentCommitId: row.merge_parent_commit_id ?? null,
+      createdBy: row.created_by,
+      createdAt: row.created_at,
       message: row.message ?? null,
-      patch: JSON.parse(row.patchJson)
+      patch: JSON.parse(row.patch_json),
     };
   }
 
@@ -299,5 +393,19 @@ export class SQLiteBranchStore {
     }
     return state;
   }
+
+  close() {
+    if (!this._db) return;
+    this._db.close();
+    this._db = null;
+  }
 }
 
+function locateSqlJsFile(file) {
+  try {
+    const require = createRequire(import.meta.url);
+    return require.resolve(`sql.js/dist/${file}`);
+  } catch {
+    return file;
+  }
+}

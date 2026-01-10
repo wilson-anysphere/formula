@@ -64,8 +64,13 @@
   /* Panels / dialogs */
   --panel-bg: var(--bg-secondary);
   --panel-border: var(--border);
+  --panel-shadow: -2px 0 10px rgba(0, 0, 0, 0.08);
   --dialog-bg: var(--bg-primary);
   --dialog-border: var(--border);
+
+  /* Tooltips */
+  --tooltip-bg: rgba(17, 24, 39, 0.95);
+  --tooltip-text: #ffffff;
 
   /* Command palette */
   --cmdk-bg: var(--bg-secondary);
@@ -103,6 +108,10 @@
 
   /* Accent backgrounds in dark are typically light, so dark text reads best. */
   --text-on-accent: #1e1e1e;
+
+  --panel-shadow: -2px 0 10px rgba(0, 0, 0, 0.4);
+  --tooltip-bg: rgba(0, 0, 0, 0.85);
+  --tooltip-text: #ffffff;
 }
 
 :root[data-theme="high-contrast"] {
@@ -127,6 +136,10 @@
 
   --text-on-accent: HighlightText;
   --selection-text: HighlightText;
+
+  --panel-shadow: none;
+  --tooltip-bg: CanvasText;
+  --tooltip-text: Canvas;
 }
 
 @media (forced-colors: active), (prefers-contrast: more) {

@@ -1,4 +1,4 @@
-import { areFormulasAstEquivalent } from "./formulaAst.js";
+import { normalizeFormula } from "../../src/formula/normalize.js";
 
 /**
  * @param {any} value
@@ -63,16 +63,20 @@ export function normalizeCell(cell) {
   /** @type {import("./types.js").Cell} */
   const normalized = {};
 
-  if (Object.prototype.hasOwnProperty.call(cell, "formula")) {
-    normalized.formula = cell.formula ?? "";
+  const formula = /** @type {any} */ (cell).formula;
+  if (typeof formula === "string" && formula.trim().length > 0) {
+    normalized.formula = formula;
   }
 
-  if (Object.prototype.hasOwnProperty.call(cell, "value")) {
-    normalized.value = cell.value;
+  const value = /** @type {any} */ (cell).value;
+  // `null` is treated as empty (DocumentController uses null for blank cells).
+  if (value !== null && value !== undefined) {
+    normalized.value = value;
   }
 
-  if (Object.prototype.hasOwnProperty.call(cell, "format") && cell.format) {
-    normalized.format = cell.format;
+  const format = /** @type {any} */ (cell).format;
+  if (format !== null && format !== undefined) {
+    normalized.format = format;
   }
 
   if (
@@ -114,8 +118,22 @@ export function cellsEqual(a, b) {
 export function cellContentEqual(a, b) {
   const ca = normalizeCell(a);
   const cb = normalizeCell(b);
-  const contentA = ca === null ? null : { value: ca.value, formula: ca.formula };
-  const contentB = cb === null ? null : { value: cb.value, formula: cb.formula };
+  const contentA =
+    ca === null
+      ? null
+      : ca.formula !== undefined
+        ? { formula: ca.formula }
+        : ca.value !== undefined
+          ? { value: ca.value }
+          : null;
+  const contentB =
+    cb === null
+      ? null
+      : cb.formula !== undefined
+        ? { formula: cb.formula }
+        : cb.value !== undefined
+          ? { value: cb.value }
+          : null;
   return deepEqual(contentA, contentB);
 }
 
@@ -131,15 +149,32 @@ export function cellContentEquivalent(a, b) {
   const ca = normalizeCell(a);
   const cb = normalizeCell(b);
 
-  if (ca === null && cb === null) return true;
-  if (ca === null || cb === null) return false;
+  const contentA =
+    ca === null
+      ? null
+      : ca.formula !== undefined
+        ? { kind: "formula", formula: ca.formula }
+        : ca.value !== undefined
+          ? { kind: "value", value: ca.value }
+          : null;
+  const contentB =
+    cb === null
+      ? null
+      : cb.formula !== undefined
+        ? { kind: "formula", formula: cb.formula }
+        : cb.value !== undefined
+          ? { kind: "value", value: cb.value }
+          : null;
 
-  if (ca.formula !== undefined || cb.formula !== undefined) {
-    if (ca.formula === undefined || cb.formula === undefined) return false;
-    return areFormulasAstEquivalent(ca.formula, cb.formula);
+  if (contentA === null && contentB === null) return true;
+  if (contentA === null || contentB === null) return false;
+  if (contentA.kind !== contentB.kind) return false;
+
+  if (contentA.kind === "formula") {
+    return normalizeFormula(contentA.formula) === normalizeFormula(contentB.formula);
   }
 
-  return deepEqual(ca.value, cb.value);
+  return deepEqual(contentA.value, contentB.value);
 }
 
 /**
@@ -179,4 +214,3 @@ export function didContentChange(base, next) {
 export function didFormatChange(base, next) {
   return !deepEqual(cellFormat(base), cellFormat(next));
 }
-

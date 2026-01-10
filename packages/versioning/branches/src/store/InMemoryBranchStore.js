@@ -1,5 +1,5 @@
-import crypto from "node:crypto";
 import { applyPatch } from "../patch.js";
+import { randomUUID } from "../uuid.js";
 
 /**
  * @typedef {import("../types.js").Branch} Branch
@@ -42,7 +42,7 @@ export class InMemoryBranchStore {
   async ensureDocument(docId, actor, initialState) {
     if (this.#rootCommitByDoc.has(docId)) return;
 
-    const rootCommitId = crypto.randomUUID();
+    const rootCommitId = randomUUID();
     const rootCommit = {
       id: rootCommitId,
       docId,
@@ -59,7 +59,7 @@ export class InMemoryBranchStore {
 
     /** @type {Branch} */
     const main = {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       docId,
       name: "main",
       createdBy: actor.userId,
@@ -88,7 +88,7 @@ export class InMemoryBranchStore {
 
     /** @type {Branch} */
     const branch = {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       docId,
       name,
       createdBy,
@@ -126,7 +126,7 @@ export class InMemoryBranchStore {
   }
 
   async createCommit({ docId, parentCommitId, mergeParentCommitId, createdBy, createdAt, message, patch }) {
-    const id = crypto.randomUUID();
+    const id = randomUUID();
     /** @type {Commit} */
     const commit = {
       id,
@@ -171,4 +171,3 @@ export class InMemoryBranchStore {
     return state;
   }
 }
-

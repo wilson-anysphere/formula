@@ -12,6 +12,7 @@ export const PanelIds = Object.freeze({
   SOLVER: "solver",
   SCENARIO_MANAGER: "scenarioManager",
   MARKETPLACE: "marketplace",
+  BRANCH_MANAGER: "branchManager",
 });
 
 export const PANEL_REGISTRY = Object.freeze({
@@ -69,6 +70,11 @@ export const PANEL_REGISTRY = Object.freeze({
     title: "Marketplace",
     defaultDock: "right",
     defaultFloatingRect: { x: 160, y: 120, width: 560, height: 680 },
+  },
+  [PanelIds.BRANCH_MANAGER]: {
+    title: "Branches",
+    defaultDock: "left",
+    defaultFloatingRect: { x: 140, y: 160, width: 520, height: 640 },
   },
 });
 

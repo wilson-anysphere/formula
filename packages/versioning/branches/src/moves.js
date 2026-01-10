@@ -1,4 +1,41 @@
 import { cellsEqual, normalizeCell } from "./cell.js";
+import { normalizeFormula } from "../../src/formula/normalize.js";
+
+/**
+ * Stable stringify for objects so we can build deterministic signatures.
+ * @param {any} value
+ * @returns {string}
+ */
+function stableStringify(value) {
+  if (value === null) return "null";
+  const t = typeof value;
+  if (t === "string") return JSON.stringify(value);
+  if (t === "number" || t === "boolean") return JSON.stringify(value);
+  if (t === "undefined") return "undefined";
+  if (t === "bigint") return JSON.stringify(String(value));
+  if (t === "function") return "\"[Function]\"";
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (t === "object") {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * @param {import("./types.js").Cell | null | undefined} cell
+ * @returns {string | null}
+ */
+function cellFingerprint(cell) {
+  const normalized = normalizeCell(cell);
+  if (normalized === null) return null;
+
+  return stableStringify({
+    value: normalized.value ?? null,
+    formula: normalizeFormula(normalized.formula) ?? null,
+    format: normalized.format ?? null
+  });
+}
 
 /**
  * Detects simple single-cell moves relative to a base state.
@@ -22,9 +59,8 @@ export function detectCellMoves(base, next) {
   for (const [addr, nextCell] of Object.entries(next)) {
     const baseCell = base[addr];
     if (!cellsEqual(baseCell, nextCell) && normalizeCell(baseCell) === null) {
-      const normalized = normalizeCell(nextCell);
-      if (normalized === null) continue;
-      const fingerprint = JSON.stringify(normalized);
+      const fingerprint = cellFingerprint(nextCell);
+      if (!fingerprint) continue;
       const list = additionsByFingerprint.get(fingerprint) ?? [];
       list.push(addr);
       additionsByFingerprint.set(fingerprint, list);
@@ -37,9 +73,8 @@ export function detectCellMoves(base, next) {
   for (const [addr, baseCell] of Object.entries(base)) {
     const nextCell = next[addr];
     if (!cellsEqual(baseCell, nextCell) && normalizeCell(nextCell) === null) {
-      const normalized = normalizeCell(baseCell);
-      if (normalized === null) continue;
-      const fingerprint = JSON.stringify(normalized);
+      const fingerprint = cellFingerprint(baseCell);
+      if (!fingerprint) continue;
       const candidateAddrs = additionsByFingerprint.get(fingerprint) ?? [];
       const target = candidateAddrs.find((a) => !consumedAddrs.has(a));
       if (!target) continue;

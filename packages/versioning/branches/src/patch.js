@@ -1,4 +1,4 @@
-import { normalizeCell } from "./cell.js";
+import { deepEqual, normalizeCell } from "./cell.js";
 
 /**
  * @typedef {import("./types.js").Cell} Cell
@@ -42,7 +42,7 @@ export function diffDocumentStates(base, next) {
     for (const cell of cellAddrs) {
       const baseCell = normalizeCell(baseSheet[cell]);
       const nextCell = normalizeCell(nextSheet[cell]);
-      if (JSON.stringify(baseCell) === JSON.stringify(nextCell)) continue;
+      if (deepEqual(baseCell, nextCell)) continue;
       sheetPatch[cell] = nextCell;
     }
 
@@ -78,4 +78,3 @@ export function applyPatch(state, patch) {
 }
 
 export {};
-
