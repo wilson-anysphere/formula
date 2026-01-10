@@ -8,6 +8,7 @@ import { indexWorkbook } from "../../ai-rag/src/pipeline/indexWorkbook.js";
 import { workbookFromSpreadsheetApi } from "../../ai-rag/src/workbook/fromSpreadsheetApi.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import { evaluatePolicy, DLP_DECISION } from "../../security/dlp/src/policyEngine.js";
+import { CLASSIFICATION_LEVEL, maxClassification } from "../../security/dlp/src/classification.js";
 import { effectiveCellClassification, effectiveRangeClassification } from "../../security/dlp/src/selectors.js";
 import { DlpViolationError } from "../../security/dlp/src/errors.js";
 
@@ -214,13 +215,25 @@ export class ContextManager {
    *   workbook: any,
    *   query: string,
    *   attachments?: Attachment[],
-   *   topK?: number
+   *   topK?: number,
+   *   dlp?: {
+   *     documentId: string,
+   *     policy: any,
+   *     classificationRecords?: Array<{ selector: any, classification: any }>,
+   *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
+   *     includeRestrictedContent?: boolean,
+   *     auditLogger?: { log(event: any): void }
+   *   }
    * }} params
    */
   async buildWorkbookContext(params) {
     if (!this.workbookRag) throw new Error("ContextManager.buildWorkbookContext requires workbookRag");
     const { vectorStore, embedder } = this.workbookRag;
     const topK = params.topK ?? this.workbookRag.topK ?? 8;
+    const dlp = params.dlp;
+    const includeRestrictedContent = dlp?.includeRestrictedContent ?? false;
+    const classificationRecords =
+      dlp?.classificationRecords ?? dlp?.classificationStore?.list(dlp.documentId) ?? [];
 
     const indexStats = await indexWorkbook({
       workbook: params.workbook,
@@ -235,23 +248,177 @@ export class ContextManager {
       filter: (metadata) => metadata && metadata.workbookId === params.workbook.id,
     });
 
+    /**
+     * @param {any} rect
+     */
+    function rectToRange(rect) {
+      if (!rect || typeof rect !== "object") return null;
+      const { r0, c0, r1, c1 } = rect;
+      if (![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) return null;
+      return { start: { row: r0, col: c0 }, end: { row: r1, col: c1 } };
+    }
+
+    /**
+     * @param {{level: string, findings: string[]}} heuristic
+     */
+    function heuristicToPolicyClassification(heuristic) {
+      if (heuristic?.level === "sensitive") {
+        // Conservatively map any heuristic "sensitive" findings to Restricted so policies can
+        // block or redact the chunk before it is sent to a cloud model.
+        const labels = (heuristic.findings || []).map((f) => `heuristic:${f}`);
+        return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
+      }
+      return { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+    }
+
+    /** @type {{level: string, labels: string[]} } */
+    let overallClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+    /** @type {ReturnType<typeof evaluatePolicy> | null} */
+    let overallDecision = null;
+    let redactedChunkCount = 0;
+
+    /** @type {any[]} */
+    const chunkAudits = [];
+
+    // Evaluate policy for all retrieved chunks before returning any prompt context.
+    for (const [idx, hit] of hits.entries()) {
+      const meta = hit.metadata ?? {};
+      const title = meta.title ?? hit.id;
+      const kind = meta.kind ?? "chunk";
+      const header = `#${idx + 1} score=${hit.score.toFixed(3)} kind=${kind} sheet=${meta.sheetName ?? ""} title="${title}"`;
+      const text = meta.text ?? "";
+      const raw = `${header}\n${text}`;
+
+      const heuristic = classifyText(raw);
+      const heuristicClassification = heuristicToPolicyClassification(heuristic);
+
+      // If the caller provided structured cell/range classifications, fold those in using the
+      // chunk's sheet + rect metadata.
+      let recordClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+      if (dlp) {
+        const range = rectToRange(meta.rect);
+        const sheetName = meta.sheetName;
+        if (range && sheetName) {
+          recordClassification = effectiveRangeClassification(
+            { documentId: dlp.documentId, sheetId: sheetName, range },
+            classificationRecords,
+          );
+        }
+      }
+
+      const classification = maxClassification(recordClassification, heuristicClassification);
+      overallClassification = maxClassification(overallClassification, classification);
+
+      const decision = dlp
+        ? evaluatePolicy({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            classification,
+            policy: dlp.policy,
+            options: { includeRestrictedContent },
+          })
+        : null;
+
+      chunkAudits.push({
+        id: hit.id,
+        kind,
+        sheetName: meta.sheetName,
+        title,
+        rect: meta.rect,
+        classification,
+        decision,
+        heuristic,
+      });
+
+      if (decision?.decision === DLP_DECISION.BLOCK) {
+        overallDecision = decision;
+        dlp.auditLogger?.log({
+          type: "ai.workbook_context",
+          documentId: dlp.documentId,
+          workbookId: params.workbook.id,
+          action: DLP_ACTION.AI_CLOUD_PROCESSING,
+          decision: overallDecision,
+          classification: overallClassification,
+          redactedChunkCount: 0,
+          blockedChunkId: hit.id,
+          chunks: chunkAudits,
+        });
+        throw new DlpViolationError(decision);
+      }
+    }
+
+    if (dlp) {
+      overallDecision = evaluatePolicy({
+        action: DLP_ACTION.AI_CLOUD_PROCESSING,
+        classification: overallClassification,
+        policy: dlp.policy,
+        options: { includeRestrictedContent },
+      });
+      if (overallDecision.decision === DLP_DECISION.BLOCK) {
+        dlp.auditLogger?.log({
+          type: "ai.workbook_context",
+          documentId: dlp.documentId,
+          workbookId: params.workbook.id,
+          action: DLP_ACTION.AI_CLOUD_PROCESSING,
+          decision: overallDecision,
+          classification: overallClassification,
+          redactedChunkCount: 0,
+          blockedChunkId: null,
+          chunks: chunkAudits,
+        });
+        throw new DlpViolationError(overallDecision);
+      }
+    }
+
     const retrievedChunks = hits.map((hit, idx) => {
       const meta = hit.metadata ?? {};
       const title = meta.title ?? hit.id;
       const kind = meta.kind ?? "chunk";
       const header = `#${idx + 1} score=${hit.score.toFixed(3)} kind=${kind} sheet=${meta.sheetName ?? ""} title="${title}"`;
       const text = meta.text ?? "";
-      const redacted = this.redactor(`${header}\n${text}`);
+      const raw = `${header}\n${text}`;
+
+      const audit = chunkAudits[idx];
+      const decision = audit?.decision ?? null;
+
+      let outText = this.redactor(raw);
+      let redacted = false;
+
+      if (dlp && decision?.decision === DLP_DECISION.REDACT) {
+        // Ensure deterministic redaction even when the regex redactor has no effect.
+        if (outText === raw) {
+          outText = this.redactor(`${header}\n[REDACTED]`);
+        }
+        redacted = true;
+      }
+
+      // Defense-in-depth: if we're not explicitly including restricted content, never send
+      // text that still matches the heuristic sensitive detectors.
+      if (dlp && !includeRestrictedContent && classifyText(outText).level === "sensitive") {
+        outText = this.redactor(`${header}\n[REDACTED]`);
+        redacted = true;
+      }
+
+      if (redacted) redactedChunkCount += 1;
+
       return {
         id: hit.id,
         score: hit.score,
         metadata: meta,
-        text: redacted,
-        dlp: classifyText(redacted),
+        text: outText,
+        dlp: classifyText(outText),
       };
     });
 
     const sections = [
+      ...(dlp && redactedChunkCount > 0
+        ? [
+            {
+              key: "dlp",
+              priority: 5,
+              text: `DLP: ${redactedChunkCount} retrieved chunks were redacted due to policy.`,
+            },
+          ]
+        : []),
       {
         key: "workbook_summary",
         priority: 3,
@@ -291,6 +458,20 @@ export class ContextManager {
     ].filter((s) => s.text);
 
     const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens);
+
+    if (dlp) {
+      dlp.auditLogger?.log({
+        type: "ai.workbook_context",
+        documentId: dlp.documentId,
+        workbookId: params.workbook.id,
+        action: DLP_ACTION.AI_CLOUD_PROCESSING,
+        decision: overallDecision,
+        classification: overallClassification,
+        redactedChunkCount,
+        totalChunkCount: retrievedChunks.length,
+        chunks: chunkAudits,
+      });
+    }
     return {
       indexStats,
       retrieved: retrievedChunks,
@@ -309,7 +490,15 @@ export class ContextManager {
    *   workbookId: string,
    *   query: string,
    *   attachments?: Attachment[],
-   *   topK?: number
+   *   topK?: number,
+   *   dlp?: {
+   *     documentId: string,
+   *     policy: any,
+   *     classificationRecords?: Array<{ selector: any, classification: any }>,
+   *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
+   *     includeRestrictedContent?: boolean,
+   *     auditLogger?: { log(event: any): void }
+   *   }
    * }} params
    */
   async buildWorkbookContextFromSpreadsheetApi(params) {
@@ -323,6 +512,7 @@ export class ContextManager {
       query: params.query,
       attachments: params.attachments,
       topK: params.topK,
+      dlp: params.dlp,
     });
   }
 }
