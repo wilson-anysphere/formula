@@ -33,6 +33,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@formula/ai-completion':
+        specifier: workspace:*
+        version: link:../../packages/ai-completion
       '@formula/collab-comments':
         specifier: workspace:*
         version: link:../../packages/collab/comments

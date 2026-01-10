@@ -36,8 +36,24 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
   // cursor is currently inside a (...) argument list.
   /** @type {number[]} */
   const openParens = [];
+  let inString = false;
   for (let i = 0; i < prefix.length; i++) {
     const ch = prefix[i];
+    if (inString) {
+      if (ch === '"') {
+        // Excel escapes quotes inside string literals via doubled quotes: "".
+        if (prefix[i + 1] === '"') {
+          i += 1;
+          continue;
+        }
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
     if (ch === "(") {
       openParens.push(i);
     } else if (ch === ")") {
@@ -110,9 +126,24 @@ function getArgContext(input, openParenIndex, cursorPosition) {
   let depth = baseDepth;
   let argIndex = 0;
   let lastCommaIndex = -1;
+  let inString = false;
 
   for (let i = openParenIndex + 1; i < cursorPosition; i++) {
     const ch = input[i];
+    if (inString) {
+      if (ch === '"') {
+        if (input[i + 1] === '"') {
+          i += 1;
+          continue;
+        }
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
     if (ch === "(") depth++;
     else if (ch === ")") depth = Math.max(baseDepth, depth - 1);
     else if (ch === "," && depth === baseDepth) {

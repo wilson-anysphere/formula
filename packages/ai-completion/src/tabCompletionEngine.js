@@ -198,11 +198,15 @@ export class TabCompletionEngine {
     const suggestions = [];
 
     for (const spec of matches) {
-      const replacement = `${spec.name}(`;
+      const completedName = applyNameCase(spec.name, prefix);
+      // Preserve the user-typed prefix exactly so inline "ghost text" can be
+      // rendered as a pure insertion at the cursor.
+      const remainder = completedName.slice(prefix.length);
+      const replacement = `${prefix}${remainder}(`;
       const newText = replaceSpan(input, token.start, token.end, replacement);
       suggestions.push({
         text: newText,
-        displayText: `${spec.name}(`,
+        displayText: replacement,
         type: "formula",
         confidence: clamp01(0.6 + (prefix.length / spec.name.length) * 0.4),
       });
@@ -364,6 +368,16 @@ function closeUnbalancedParens(input) {
     else if (ch === ")") balance = Math.max(0, balance - 1);
   }
   return balance > 0 ? input + ")".repeat(balance) : input;
+}
+
+function applyNameCase(name, typedPrefix) {
+  if (typedPrefix && typedPrefix === typedPrefix.toLowerCase()) {
+    return name.toLowerCase();
+  }
+  if (typedPrefix && typedPrefix === typedPrefix.toUpperCase()) {
+    return name.toUpperCase();
+  }
+  return name;
 }
 
 /**

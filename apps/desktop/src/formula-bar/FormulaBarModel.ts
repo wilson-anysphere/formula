@@ -18,6 +18,12 @@ export class FormulaBarModel {
   #cursorEnd = 0;
   #rangeInsertion: { start: number; end: number } | null = null;
   #hoveredReference: RangeAddress | null = null;
+  /**
+   * Full text suggestion for the current draft (not the "ghost text" tail).
+   *
+   * Consumers should derive ghost text via `aiGhostText()` when rendering inline
+   * suggestions, and call `acceptAiSuggestion()` (typically on Tab) to apply.
+   */
   #aiSuggestion: string | null = null;
 
   setActiveCell(info: ActiveCellInfo): void {
@@ -112,17 +118,20 @@ export class FormulaBarModel {
   beginRangeSelection(range: RangeAddress): void {
     if (!this.#isEditing) return;
     this.#insertOrReplaceRange(rangeToA1(range), true);
+    this.#aiSuggestion = null;
     this.#updateHoverFromCursor();
   }
 
   updateRangeSelection(range: RangeAddress): void {
     if (!this.#isEditing) return;
     this.#insertOrReplaceRange(rangeToA1(range), false);
+    this.#aiSuggestion = null;
     this.#updateHoverFromCursor();
   }
 
   endRangeSelection(): void {
     this.#rangeInsertion = null;
+    this.#aiSuggestion = null;
   }
 
   setAiSuggestion(suggestion: string | null): void {
@@ -133,16 +142,29 @@ export class FormulaBarModel {
     return this.#aiSuggestion;
   }
 
+  aiGhostText(): string {
+    if (!this.#aiSuggestion) return "";
+    if (this.#cursorStart !== this.#cursorEnd) return "";
+
+    const cursor = this.#cursorStart;
+    const prefix = this.#draft.slice(0, cursor);
+    const suffix = this.#draft.slice(cursor);
+    if (!this.#aiSuggestion.startsWith(prefix)) return "";
+    if (suffix && !this.#aiSuggestion.endsWith(suffix)) return "";
+    return this.#aiSuggestion.slice(cursor, this.#aiSuggestion.length - suffix.length);
+  }
+
   acceptAiSuggestion(): boolean {
     if (!this.#aiSuggestion) return false;
     if (!this.#isEditing) return false;
 
-    const insert = this.#aiSuggestion;
+    const suggestionText = this.#aiSuggestion;
     const start = Math.min(this.#cursorStart, this.#cursorEnd);
-    const end = Math.max(this.#cursorStart, this.#cursorEnd);
-    this.#draft = this.#draft.slice(0, start) + insert + this.#draft.slice(end);
-    this.#cursorStart = start + insert.length;
-    this.#cursorEnd = this.#cursorStart;
+    const ghost = this.aiGhostText();
+    this.#draft = suggestionText;
+    const newCursor = ghost ? start + ghost.length : suggestionText.length;
+    this.#cursorStart = newCursor;
+    this.#cursorEnd = newCursor;
     this.#aiSuggestion = null;
     this.#rangeInsertion = null;
     this.#updateHoverFromCursor();

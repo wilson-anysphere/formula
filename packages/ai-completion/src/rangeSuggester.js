@@ -42,7 +42,8 @@ export function suggestRanges(params) {
   const match = /^\$?([A-Za-z]{1,3})(?:\$?(\d+))?$/.exec(arg);
   if (!match) return [];
 
-  const colLetters = match[1].toUpperCase();
+  const colToken = match[1];
+  const colLetters = colToken.toUpperCase();
   const colIndex = safeColumnLetterToIndex(colLetters);
   if (colIndex === null) return [];
 
@@ -58,8 +59,8 @@ export function suggestRanges(params) {
 
   if (contiguous) {
     const { startRow, endRow, numericRatio } = contiguous;
-    const startA1 = `${colLetters}${startRow + 1}`;
-    const endA1 = `${colLetters}${endRow + 1}`;
+    const startA1 = `${colToken}${startRow + 1}`;
+    const endA1 = `${colToken}${endRow + 1}`;
     const range = `${startA1}:${endA1}`;
 
     // Confidence heuristic:
@@ -76,7 +77,7 @@ export function suggestRanges(params) {
   }
 
   suggestions.push({
-    range: `${colLetters}:${colLetters}`,
+    range: `${colToken}:${colToken}`,
     confidence: 0.3,
     reason: "entire_column",
   });

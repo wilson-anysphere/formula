@@ -39,7 +39,11 @@ export function acceptSuggestion(currentInput, cursorPosition, suggestion) {
   if (typeof suggestionText !== "string" || suggestionText.length === 0) {
     return { text: currentInput, cursorPosition: clampCursor(currentInput, cursorPosition) };
   }
-  return { text: suggestionText, cursorPosition: suggestionText.length };
+
+  const cursor = clampCursor(currentInput, cursorPosition);
+  const ghost = getGhostText(currentInput, cursor, { text: suggestionText });
+  const newCursor = ghost ? cursor + ghost.length : suggestionText.length;
+  return { text: suggestionText, cursorPosition: newCursor };
 }
 
 function clampCursor(input, cursorPosition) {

@@ -1,12 +1,17 @@
 import { FormulaBarModel } from "../formula-bar/FormulaBarModel.js";
 import { evaluateFormula, type SpreadsheetValue } from "./evaluateFormula.js";
-import { normalizeRange, parseA1, rangeToA1, type CellAddress, type RangeAddress } from "./a1.js";
+import { normalizeRange, parseA1, rangeToA1, toA1, type CellAddress, type RangeAddress } from "./a1.js";
+import { TabCompletionEngine } from "@formula/ai-completion";
 
 export type Cell = { input: string; value: SpreadsheetValue };
 
 export class SpreadsheetModel {
   readonly formulaBar = new FormulaBarModel();
   readonly #cells = new Map<string, Cell>();
+  readonly #completion = new TabCompletionEngine();
+  #completionRequest = 0;
+  #pendingCompletion: Promise<void> | null = null;
+  #cellsVersion = 0;
   #activeCell = "A1";
   #selection: RangeAddress = { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } };
 
@@ -44,6 +49,7 @@ export class SpreadsheetModel {
   setCellInput(address: string, input: string): void {
     const value = evaluateFormula(input, (ref) => this.getCellValue(ref));
     this.#cells.set(address, { input, value });
+    this.#cellsVersion += 1;
     if (address === this.#activeCell) {
       this.formulaBar.setActiveCell({ address, input, value });
     }
@@ -55,6 +61,7 @@ export class SpreadsheetModel {
 
   typeInFormulaBar(newText: string, cursorIndex: number = newText.length): void {
     this.formulaBar.updateDraft(newText, cursorIndex, cursorIndex);
+    this.#updateCompletions();
   }
 
   commitFormulaBar(): void {
@@ -84,7 +91,68 @@ export class SpreadsheetModel {
     this.formulaBar.endRangeSelection();
   }
 
+  /**
+   * Wait for the most recently scheduled tab-completion request (if any).
+   *
+   * This is primarily used by tests to avoid asserting while completion is
+   * still in-flight.
+   */
+  async flushTabCompletion(): Promise<void> {
+    await (this.#pendingCompletion ?? Promise.resolve());
+  }
+
   selectionA1(): string {
     return rangeToA1(this.#selection);
+  }
+
+  #updateCompletions(): void {
+    if (!this.formulaBar.isEditing) {
+      this.formulaBar.setAiSuggestion(null);
+      return;
+    }
+
+    if (this.formulaBar.cursorStart !== this.formulaBar.cursorEnd) {
+      this.formulaBar.setAiSuggestion(null);
+      return;
+    }
+
+    const requestId = ++this.#completionRequest;
+    const draft = this.formulaBar.draft;
+    const cursor = this.formulaBar.cursorStart;
+    const activeCell = this.#activeCell;
+
+    const surroundingCells = {
+      getCellValue: (row: number, col: number): SpreadsheetValue => {
+        const addr = toA1({ row, col });
+        return this.getCellValue(addr);
+      },
+      getCacheKey: () => `${this.#cellsVersion}:${this.#cells.size}`,
+    };
+
+    this.#pendingCompletion = this.#completion
+      .getSuggestions({
+        currentInput: draft,
+        cursorPosition: cursor,
+        cellRef: activeCell,
+        surroundingCells,
+      })
+      .then((suggestions) => {
+        if (requestId !== this.#completionRequest) return;
+        const prefix = draft.slice(0, cursor);
+        const suffix = draft.slice(cursor);
+        const best = suggestions.find((s) => {
+          if (!s || typeof s.text !== "string") return false;
+          if (s.text === draft) return false;
+          if (!s.text.startsWith(prefix)) return false;
+          if (suffix && !s.text.endsWith(suffix)) return false;
+          const ghostLength = s.text.length - prefix.length - suffix.length;
+          return ghostLength > 0;
+        });
+        this.formulaBar.setAiSuggestion(best ? best.text : null);
+      })
+      .catch(() => {
+        if (requestId !== this.#completionRequest) return;
+        this.formulaBar.setAiSuggestion(null);
+      });
   }
 }
