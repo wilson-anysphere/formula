@@ -1,9 +1,11 @@
 use crate::what_if::{CellRef, CellValue, WhatIfError, WhatIfModel};
+use serde::{Deserialize, Serialize};
 
 /// Parameters for Goal Seek.
 ///
 /// Mirrors the high-level design in `docs/07-power-features.md`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GoalSeekParams {
     /// Cell containing the formula we want to match.
     pub target_cell: CellRef,
@@ -44,7 +46,7 @@ impl GoalSeekParams {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GoalSeekStatus {
     Converged,
     MaxIterationsReached,
@@ -52,7 +54,8 @@ pub enum GoalSeekStatus {
     NumericalFailure,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GoalSeekResult {
     pub status: GoalSeekStatus,
     pub solution: f64,
@@ -67,7 +70,8 @@ impl GoalSeekResult {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GoalSeekProgress {
     pub iteration: usize,
     pub input: f64,

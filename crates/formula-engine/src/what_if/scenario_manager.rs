@@ -1,9 +1,11 @@
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::what_if::{CellRef, CellValue, WhatIfError, WhatIfModel};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ScenarioId(u64);
 
 impl ScenarioId {
@@ -12,18 +14,20 @@ impl ScenarioId {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Scenario {
     pub id: ScenarioId,
     pub name: String,
     pub changing_cells: Vec<CellRef>,
     pub values: HashMap<CellRef, CellValue>,
-    pub created: SystemTime,
+    pub created_ms: u64,
     pub created_by: String,
     pub comment: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SummaryReport {
     pub changing_cells: Vec<CellRef>,
     pub result_cells: Vec<CellRef>,
@@ -81,7 +85,7 @@ impl ScenarioManager {
                 name: name.into(),
                 changing_cells,
                 values: value_map,
-                created: SystemTime::now(),
+                created_ms: now_ms(),
                 created_by: created_by.into(),
                 comment,
             },
@@ -199,6 +203,13 @@ impl ScenarioManager {
             results,
         })
     }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

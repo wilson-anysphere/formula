@@ -36,6 +36,7 @@ export interface Scenario {
   name: string;
   changingCells: CellRef[];
   values: Record<CellRef, unknown>;
+  createdMs?: number;
   createdBy: string;
   comment?: string;
 }

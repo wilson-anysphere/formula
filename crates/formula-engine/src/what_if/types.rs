@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// Spreadsheet cell reference (currently an A1-style address string).
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct CellRef(String);
 
 impl CellRef {
@@ -28,7 +31,8 @@ impl From<&str> for CellRef {
 }
 
 /// Minimal cell value representation used by What‑If tools.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum CellValue {
     Number(f64),
     Text(String),

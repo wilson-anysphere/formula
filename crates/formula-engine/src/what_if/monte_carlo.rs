@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::what_if::{CellRef, CellValue, WhatIfError, WhatIfModel};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SimulationConfig {
     pub iterations: usize,
     pub input_distributions: Vec<InputDistribution>,
@@ -29,16 +31,19 @@ impl SimulationConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InputDistribution {
     pub cell: CellRef,
     pub distribution: Distribution,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Distribution {
     Normal {
         mean: f64,
+        #[serde(rename = "stdDev")]
         std_dev: f64,
     },
     Uniform {
@@ -52,6 +57,7 @@ pub enum Distribution {
     },
     Lognormal {
         mean: f64,
+        #[serde(rename = "stdDev")]
         std_dev: f64,
     },
     Discrete {
@@ -256,7 +262,8 @@ fn scale_unit_interval(raw: f64, min: Option<f64>, max: Option<f64>) -> f64 {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CorrelationMatrix {
     pub matrix: Vec<Vec<f64>>,
 }
@@ -301,19 +308,22 @@ impl CorrelationMatrix {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HistogramBin {
     pub start: f64,
     pub end: f64,
     pub count: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Histogram {
     pub bins: Vec<HistogramBin>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OutputStatistics {
     pub mean: f64,
     pub median: f64,
@@ -325,7 +335,8 @@ pub struct OutputStatistics {
     pub histogram: Histogram,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SimulationResult {
     pub iterations: usize,
     pub output_stats: HashMap<CellRef, OutputStatistics>,
@@ -333,7 +344,8 @@ pub struct SimulationResult {
     pub output_samples: HashMap<CellRef, Vec<f64>>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SimulationProgress {
     pub completed_iterations: usize,
     pub total_iterations: usize,
