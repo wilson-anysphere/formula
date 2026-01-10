@@ -47,6 +47,8 @@ fn main() {
             commands::set_sheet_page_setup,
             commands::set_sheet_print_area,
             commands::export_sheet_range_pdf,
+            commands::list_macros,
+            commands::run_macro,
         ])
         .setup(|app| {
             tray::init(app)?;

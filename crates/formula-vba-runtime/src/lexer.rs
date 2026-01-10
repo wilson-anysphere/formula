@@ -160,6 +160,7 @@ impl<'a> Lexer<'a> {
                 | "private"
                 | "public"
                 | "option"
+                | "attribute"
                 | "explicit"
                 | "debug"
                 | "print"

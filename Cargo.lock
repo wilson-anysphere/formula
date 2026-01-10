@@ -1100,6 +1100,8 @@ dependencies = [
  "calamine 0.26.1",
  "formula-columnar",
  "formula-engine",
+ "formula-vba",
+ "formula-vba-runtime",
  "formula-xlsx",
  "rust_xlsxwriter 0.79.4",
  "serde",
@@ -1196,6 +1198,8 @@ dependencies = [
 name = "formula-vba-runtime"
 version = "0.1.0"
 dependencies = [
+ "formula-vba",
+ "formula-xlsx",
  "pretty_assertions",
  "thiserror 1.0.69",
 ]

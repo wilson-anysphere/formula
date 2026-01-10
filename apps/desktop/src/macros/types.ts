@@ -31,9 +31,23 @@ export interface MacroRunRequest {
   timeoutMs?: number;
 }
 
+export interface MacroCellUpdate {
+  sheetId: string;
+  row: number;
+  col: number;
+  value: unknown | null;
+  formula: string | null;
+  displayValue: string;
+}
+
 export interface MacroRunResult {
   ok: boolean;
   output: string[];
+  /**
+   * Optional cell updates produced by the backend (for UIs that apply changes
+   * incrementally).
+   */
+  updates?: MacroCellUpdate[];
   error?: {
     message: string;
     stack?: string;
@@ -50,4 +64,3 @@ export interface MacroBackend {
   listMacros(workbookId: string): Promise<MacroInfo[]>;
   runMacro(request: MacroRunRequest): Promise<MacroRunResult>;
 }
-

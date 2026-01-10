@@ -8,4 +8,5 @@ thiserror = "1.0"
 
 [dev-dependencies]
 pretty_assertions = "1.4"
-
+formula-vba = { path = "../formula-vba" }
+formula-xlsx = { path = "../formula-xlsx" }

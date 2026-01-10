@@ -69,6 +69,14 @@ impl<'a> Parser<'a> {
                 self.eat_newlines()?;
                 continue;
             }
+            if self.eat_keyword("attribute")? {
+                // Attribute VB_Name = "Module1"
+                while !matches!(self.lookahead.kind, TokenKind::Newline | TokenKind::Eof) {
+                    self.bump()?;
+                }
+                self.eat_newlines()?;
+                continue;
+            }
 
             // Ignore visibility modifiers.
             self.eat_keyword("private")?;
