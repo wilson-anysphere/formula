@@ -6,3 +6,4 @@ export * from "./spreadsheet/a1.js";
 export * from "./spreadsheet/api.js";
 export { cloneCell, isCellEmpty } from "./spreadsheet/types.js";
 export type { CellData, CellFormat } from "./spreadsheet/types.js";
+export * from "./llm/integration.js";

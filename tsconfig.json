@@ -14,5 +14,10 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["packages/**/*.ts", "packages/**/*.d.ts", "vitest.config.ts"]
+  "include": [
+    "packages/ai-tools/**/*.ts",
+    "packages/ai-audit/**/*.ts",
+    "packages/ai-audit/**/*.d.ts",
+    "vitest.config.ts"
+  ]
 }

@@ -106,11 +106,13 @@ export namespace ui {
   function createPanel(id: string, options: PanelOptions): Promise<Panel>;
 }
 
-export namespace storage {
-  function get<T = unknown>(key: string): Promise<T | undefined>;
-  function set<T = unknown>(key: string, value: T): Promise<void>;
-  function delete(key: string): Promise<void>;
+export interface StorageApi {
+  get<T = unknown>(key: string): Promise<T | undefined>;
+  set<T = unknown>(key: string, value: T): Promise<void>;
+  delete(key: string): Promise<void>;
 }
+
+export const storage: StorageApi;
 
 export namespace config {
   function get<T = unknown>(key: string): Promise<T | undefined>;
