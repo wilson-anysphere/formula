@@ -24,6 +24,7 @@ The desktop store is encrypted with **AES-256-GCM** using a **master key** store
 Implementation:
 
 - `apps/desktop/src-tauri/src/storage/encryptedDocumentStore.js`
+- `packages/versioning/src/store/sqliteVersionStore.js` (optional encryption for on-disk SQLite via AES-256-GCM + keychain-backed `KeyRing`)
 - Key material stored via a `KeychainProvider` (`packages/security/crypto/keychain/**`)
 - Encryption uses a versioned `KeyRing` so key rotation can be performed without losing access to existing data.
 
@@ -108,4 +109,3 @@ For tests/examples:
 ```bash
 npm test
 ```
-

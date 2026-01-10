@@ -1,7 +1,15 @@
 import initSqlJs from "sql.js";
 import { createRequire } from "node:module";
+import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+
+import { KeyRing } from "../../../security/crypto/keyring.js";
+import {
+  decodeEncryptedFileBytes,
+  encodeEncryptedFileBytes,
+  isEncryptedFileBytes
+} from "../../../security/crypto/encryptedFile.js";
 
 /**
  * @typedef {"snapshot" | "checkpoint" | "restore"} VersionKind
@@ -29,16 +37,88 @@ import path from "node:path";
  */
 export class SQLiteVersionStore {
   /**
-   * @param {{ filePath: string }} opts
+   * @param {{
+   *   filePath: string;
+   *   encryption?: {
+   *     enabled: boolean;
+   *     keychainProvider: {
+   *       getSecret: (opts: { service: string; account: string }) => Promise<Buffer | null>;
+   *       setSecret: (opts: { service: string; account: string; secret: Buffer }) => Promise<void>;
+   *       deleteSecret: (opts: { service: string; account: string }) => Promise<void>;
+   *     };
+   *     keychainService?: string;
+   *     keychainAccount?: string;
+   *     aadContext?: any;
+   *   };
+   * }} opts
    */
   constructor(opts) {
     this.filePath = opts.filePath;
+    this.encryption = opts.encryption ?? null;
+    this._encryptionEnabled = Boolean(opts.encryption?.enabled);
     /** @type {any | null} */
     this._db = null;
     /** @type {Promise<any> | null} */
     this._initPromise = null;
     /** @type {Promise<void>} */
     this._persistChain = Promise.resolve();
+    /** @type {KeyRing | null} */
+    this._keyRing = null;
+  }
+
+  _aadContext() {
+    return this.encryption?.aadContext ?? { scope: "formula.versioning.sqlite", schemaVersion: 1 };
+  }
+
+  _keychainService() {
+    return this.encryption?.keychainService ?? "formula.desktop";
+  }
+
+  _keychainAccount() {
+    if (this.encryption?.keychainAccount) return this.encryption.keychainAccount;
+    const hash = crypto.createHash("sha256").update(this.filePath).digest("hex").slice(0, 16);
+    return `sqlite-version-store:${hash}`;
+  }
+
+  async _loadKeyRing() {
+    if (this._keyRing) return this._keyRing;
+    if (!this.encryption) return null;
+    const secret = await this.encryption.keychainProvider.getSecret({
+      service: this._keychainService(),
+      account: this._keychainAccount()
+    });
+    if (!secret) return null;
+    const parsed = JSON.parse(secret.toString("utf8"));
+    this._keyRing = KeyRing.fromJSON(parsed);
+    return this._keyRing;
+  }
+
+  async _storeKeyRing(keyRing) {
+    if (!this.encryption) throw new Error("encryption is not configured");
+    const json = JSON.stringify(keyRing.toJSON());
+    await this.encryption.keychainProvider.setSecret({
+      service: this._keychainService(),
+      account: this._keychainAccount(),
+      secret: Buffer.from(json, "utf8")
+    });
+    this._keyRing = keyRing;
+  }
+
+  async _deleteKeyRing() {
+    if (!this.encryption) return;
+    await this.encryption.keychainProvider.deleteSecret({
+      service: this._keychainService(),
+      account: this._keychainAccount()
+    });
+    this._keyRing = null;
+  }
+
+  async _ensureKeyRing() {
+    const existing = await this._loadKeyRing();
+    if (existing) return existing;
+    const created = KeyRing.create();
+    await this._storeKeyRing(created);
+    return created;
   }
 
   async _open() {
@@ -61,7 +141,20 @@ export class SQLiteVersionStore {
       existing = null;
     }
 
-    const db = existing ? new SQL.Database(existing) : new SQL.Database();
+    let bytes = existing ? Buffer.from(existing) : null;
+    if (bytes && isEncryptedFileBytes(bytes)) {
+      if (!this.encryption) {
+        throw new Error("Encrypted SQLiteVersionStore requires encryption configuration");
+      }
+      const ring = await this._loadKeyRing();
+      if (!ring) {
+        throw new Error("Encrypted SQLiteVersionStore is missing key material in keychain");
+      }
+      const decoded = decodeEncryptedFileBytes(bytes);
+      bytes = ring.decryptBytes(decoded, { aadContext: this._aadContext() });
+    }
+
+    const db = bytes ? new SQL.Database(bytes) : new SQL.Database();
     this._db = db;
     this._ensureSchema();
     return db;
@@ -90,9 +183,23 @@ export class SQLiteVersionStore {
 
   async _persist() {
     const db = await this._open();
-    const data = db.export();
+    const data = Buffer.from(db.export());
+    let out = data;
+
+    if (this._encryptionEnabled) {
+      if (!this.encryption) throw new Error("encryption is not configured");
+      const ring = await this._ensureKeyRing();
+      const encrypted = ring.encryptBytes(out, { aadContext: this._aadContext() });
+      out = encodeEncryptedFileBytes({
+        keyVersion: encrypted.keyVersion,
+        iv: encrypted.iv,
+        tag: encrypted.tag,
+        ciphertext: encrypted.ciphertext
+      });
+    }
+
     const tmp = `${this.filePath}.tmp`;
-    await fs.writeFile(tmp, data);
+    await fs.writeFile(tmp, out);
     await fs.rename(tmp, this.filePath);
   }
 
@@ -211,6 +318,31 @@ export class SQLiteVersionStore {
     if (!this._db) return;
     this._db.close();
     this._db = null;
+  }
+
+  async enableEncryption() {
+    if (!this.encryption) throw new Error("encryption is not configured");
+    this._encryptionEnabled = true;
+    await this._queuePersist();
+  }
+
+  async disableEncryption({ deleteKey = true } = {}) {
+    this._encryptionEnabled = false;
+    await this._queuePersist();
+    if (deleteKey) {
+      await this._deleteKeyRing();
+    }
+  }
+
+  async rotateKey() {
+    if (!this.encryption) throw new Error("encryption is not configured");
+    if (!this._encryptionEnabled) {
+      throw new Error("Cannot rotate key: encryption is disabled");
+    }
+    const ring = await this._ensureKeyRing();
+    ring.rotate();
+    await this._storeKeyRing(ring);
+    await this._queuePersist();
   }
 }
 

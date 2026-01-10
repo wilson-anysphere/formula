@@ -15,4 +15,8 @@ export { decryptEnvelope, encryptEnvelope } from "./envelope.js";
 export * as kms from "./kms/index.js";
 export * as keychain from "./keychain/index.js";
 export { aadFromContext, canonicalJson, randomId } from "./utils.js";
-
+export {
+  decodeEncryptedFileBytes,
+  encodeEncryptedFileBytes,
+  isEncryptedFileBytes
+} from "./encryptedFile.js";

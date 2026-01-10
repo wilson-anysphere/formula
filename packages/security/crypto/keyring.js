@@ -69,11 +69,44 @@ export class KeyRing {
     };
   }
 
+  /**
+   * Encrypt bytes with the current key version, returning raw buffers.
+   *
+   * This is useful for encrypting binary blobs (e.g. SQLite databases) without
+   * base64 overhead.
+   */
+  encryptBytes(plaintext, { aadContext = null } = {}) {
+    const aad = aadFromContext(aadContext);
+    const encrypted = encryptAes256Gcm({
+      plaintext,
+      key: this.getKey(this.currentVersion),
+      aad
+    });
+    return {
+      keyVersion: this.currentVersion,
+      ...encrypted
+    };
+  }
+
   decrypt(encrypted, { aadContext = null } = {}) {
     const aad = aadFromContext(aadContext);
     const payload = deserializeEncryptedPayload(encrypted);
     return decryptAes256Gcm({
       ...payload,
+      key: this.getKey(encrypted.keyVersion),
+      aad
+    });
+  }
+
+  decryptBytes(encrypted, { aadContext = null } = {}) {
+    const aad = aadFromContext(aadContext);
+    if (!encrypted || typeof encrypted !== "object") {
+      throw new TypeError("encrypted must be an object");
+    }
+    return decryptAes256Gcm({
+      ciphertext: encrypted.ciphertext,
+      iv: encrypted.iv,
+      tag: encrypted.tag,
       key: this.getKey(encrypted.keyVersion),
       aad
     });
