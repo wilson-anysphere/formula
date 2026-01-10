@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Formula Desktop</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+
+      #app {
+        height: 100%;
+        display: grid;
+        grid-template-rows: 1fr auto;
+      }
+
+      .grid-root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        outline: none;
+        background: #ffffff;
+        user-select: none;
+      }
+
+      .grid-canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .cell-editor {
+        position: absolute;
+        box-sizing: border-box;
+        padding: 2px 4px;
+        border: 2px solid #0e65eb;
+        outline: none;
+        resize: none;
+        font: 14px/20px system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: #ffffff;
+        color: #000;
+        overflow: hidden;
+      }
+
+      .statusbar {
+        display: flex;
+        gap: 16px;
+        padding: 8px 12px;
+        border-top: 1px solid #d4d4d4;
+        background: #f7f7f7;
+        font-size: 12px;
+      }
+
+      .statusbar code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+          monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="grid" class="grid-root" tabindex="0" aria-label="Spreadsheet grid"></div>
+      <div class="statusbar">
+        <div>
+          Active:
+          <code data-testid="active-cell">A1</code>
+        </div>
+        <div>
+          Selection:
+          <code data-testid="selection-range">A1</code>
+        </div>
+        <div>
+          Value:
+          <code data-testid="active-value"></code>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+
