@@ -54,5 +54,5 @@ fn xnpv_xirr_match_excel_example() {
 fn xirr_input_length_mismatch_is_value_error() {
     let values = [1.0, -2.0];
     let dates = [0.0];
-    assert_eq!(xirr(&values, &dates, None), Err(ExcelError::Value));
+    assert_eq!(xirr(&values, &dates, None), Err(ExcelError::Num));
 }

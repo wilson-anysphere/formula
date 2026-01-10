@@ -75,7 +75,7 @@ fn irr_npv_derivative(values: &[f64], rate: f64) -> Option<f64> {
 
 pub fn xnpv(rate: f64, values: &[f64], dates: &[f64]) -> ExcelResult<f64> {
     if values.len() != dates.len() {
-        return Err(ExcelError::Value);
+        return Err(ExcelError::Num);
     }
     if values.is_empty() {
         return Err(ExcelError::Num);
@@ -99,7 +99,7 @@ pub fn xnpv(rate: f64, values: &[f64], dates: &[f64]) -> ExcelResult<f64> {
 
 pub fn xirr(values: &[f64], dates: &[f64], guess: Option<f64>) -> ExcelResult<f64> {
     if values.len() != dates.len() {
-        return Err(ExcelError::Value);
+        return Err(ExcelError::Num);
     }
     if values.is_empty() {
         return Err(ExcelError::Num);
