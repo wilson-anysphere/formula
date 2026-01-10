@@ -348,6 +348,34 @@ impl DaxEngine {
                 let b = value.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
                 Ok(Value::Boolean(!b))
             }
+            "DISTINCTCOUNT" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval("DISTINCTCOUNT expects 1 argument".into()));
+                };
+                self.eval_distinctcount(model, arg, filter)
+            }
+            "HASONEVALUE" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval("HASONEVALUE expects 1 argument".into()));
+                };
+                let values = self.distinct_column_values(model, arg, filter)?;
+                Ok(Value::Boolean(values.len() == 1))
+            }
+            "SELECTEDVALUE" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(DaxError::Eval(
+                        "SELECTEDVALUE expects 1 or 2 arguments".into(),
+                    ));
+                }
+                let values = self.distinct_column_values(model, &args[0], filter)?;
+                if values.len() == 1 {
+                    Ok(values.into_iter().next().expect("len==1"))
+                } else if args.len() == 2 {
+                    self.eval_scalar(model, &args[1], filter, row_ctx)
+                } else {
+                    Ok(Value::Blank)
+                }
+            }
             "SUM" => {
                 let [arg] = args else {
                     return Err(DaxError::Eval("SUM expects 1 argument".into()));
@@ -675,6 +703,48 @@ impl DaxEngine {
                 Ok(best.map(Value::from).unwrap_or(Value::Blank))
             }
         }
+    }
+
+    fn eval_distinctcount(
+        &self,
+        model: &DataModel,
+        expr: &Expr,
+        filter: &FilterContext,
+    ) -> DaxResult<Value> {
+        let values = self.distinct_column_values(model, expr, filter)?;
+        Ok(Value::from(values.len() as i64))
+    }
+
+    fn distinct_column_values(
+        &self,
+        model: &DataModel,
+        expr: &Expr,
+        filter: &FilterContext,
+    ) -> DaxResult<HashSet<Value>> {
+        let Expr::ColumnRef { table, column } = expr else {
+            return Err(DaxError::Type("expected a column reference".to_string()));
+        };
+
+        let rows = resolve_table_rows(model, filter, table)?;
+        let table_ref = model
+            .table(table)
+            .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+        let idx = table_ref
+            .column_idx(column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: table.clone(),
+                column: column.clone(),
+            })?;
+
+        let mut out = HashSet::new();
+        for row in rows {
+            let value = table_ref
+                .value_by_idx(row, idx)
+                .cloned()
+                .unwrap_or(Value::Blank);
+            out.insert(value);
+        }
+        Ok(out)
     }
 
     fn eval_calculate(

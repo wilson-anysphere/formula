@@ -423,3 +423,102 @@ fn coalesce_returns_first_non_blank_value() {
         .unwrap();
     assert_eq!(value, 7.into());
 }
+
+#[test]
+fn selectedvalue_and_hasonevalue_use_filter_context() {
+    let mut model = build_model();
+    model
+        .add_measure("Selected Region", "SELECTEDVALUE(Customers[Region])")
+        .unwrap();
+    model
+        .add_measure(
+            "Selected Region (fallback)",
+            "SELECTEDVALUE(Customers[Region], \"Multiple\")",
+        )
+        .unwrap();
+    model
+        .add_measure("Has One Region", "HASONEVALUE(Customers[Region])")
+        .unwrap();
+    model
+        .add_measure("Region Count", "DISTINCTCOUNT(Customers[Region])")
+        .unwrap();
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    assert_eq!(
+        model
+            .evaluate_measure("Selected Region", &east_filter)
+            .unwrap(),
+        Value::from("East")
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Selected Region (fallback)", &east_filter)
+            .unwrap(),
+        Value::from("East")
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Has One Region", &east_filter)
+            .unwrap(),
+        Value::from(true)
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Region Count", &east_filter)
+            .unwrap(),
+        Value::from(1)
+    );
+
+    assert_eq!(
+        model
+            .evaluate_measure("Selected Region", &FilterContext::empty())
+            .unwrap(),
+        Value::Blank
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Selected Region (fallback)", &FilterContext::empty())
+            .unwrap(),
+        Value::from("Multiple")
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Has One Region", &FilterContext::empty())
+            .unwrap(),
+        Value::from(false)
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Region Count", &FilterContext::empty())
+            .unwrap(),
+        Value::from(2)
+    );
+
+    let empty_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "Nowhere".into());
+    assert_eq!(
+        model
+            .evaluate_measure("Selected Region", &empty_filter)
+            .unwrap(),
+        Value::Blank
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Selected Region (fallback)", &empty_filter)
+            .unwrap(),
+        Value::from("Multiple")
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Has One Region", &empty_filter)
+            .unwrap(),
+        Value::from(false)
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("Region Count", &empty_filter)
+            .unwrap(),
+        Value::from(0)
+    );
+}
