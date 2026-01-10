@@ -221,3 +221,45 @@ fn calculate_context_transition_respects_existing_filter_context() {
 
     assert_eq!(value, Value::Blank);
 }
+
+#[test]
+fn insert_row_computes_calculated_columns() {
+    let mut model = build_model();
+    model
+        .add_calculated_column("Orders", "CustomerName", "RELATED(Customers[Name])")
+        .unwrap();
+
+    model
+        .insert_row("Orders", vec![104.into(), 1.into(), 7.0.into()])
+        .unwrap();
+
+    let orders = model.table("Orders").unwrap();
+    assert_eq!(orders.row_count(), 5);
+    assert_eq!(
+        orders.value(4, "CustomerName").unwrap(),
+        &Value::from("Alice")
+    );
+}
+
+#[test]
+fn insert_row_updates_relationship_key_index() {
+    let mut model = build_model();
+    model
+        .add_calculated_column("Orders", "CustomerName", "RELATED(Customers[Name])")
+        .unwrap();
+
+    model
+        .insert_row("Customers", vec![4.into(), "Dan".into(), "East".into()])
+        .unwrap();
+
+    model
+        .insert_row("Orders", vec![104.into(), 4.into(), 12.0.into()])
+        .unwrap();
+
+    let orders = model.table("Orders").unwrap();
+    assert_eq!(orders.row_count(), 5);
+    assert_eq!(
+        orders.value(4, "CustomerName").unwrap(),
+        &Value::from("Dan")
+    );
+}

@@ -177,79 +177,152 @@ impl DataModel {
     }
 
     pub fn insert_row(&mut self, table: &str, row: Vec<Value>) -> DaxResult<()> {
-        let (row_index, to_index_updates) = {
-            let table_ref = self
-                .tables
-                .get(table)
-                .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+        let table_ref = self
+            .tables
+            .get(table)
+            .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
 
-            if row.len() != table_ref.columns.len() {
+        let calc_count = self
+            .calculated_columns
+            .iter()
+            .filter(|c| c.table == table)
+            .count();
+
+        let total_columns = table_ref.columns.len();
+        let base_columns = total_columns.saturating_sub(calc_count);
+
+        let mut full_row = match row.len() {
+            n if n == total_columns => row,
+            n if n == base_columns => {
+                let mut expanded = row;
+                expanded.resize(total_columns, Value::Blank);
+                expanded
+            }
+            actual => {
                 return Err(DaxError::SchemaMismatch {
                     table: table_ref.name.clone(),
-                    expected: table_ref.columns.len(),
-                    actual: row.len(),
-                });
+                    expected: base_columns,
+                    actual,
+                })
             }
-
-            let row_index = table_ref.row_count();
-            let mut to_index_updates = Vec::new();
-
-            for (rel_idx, rel_info) in self.relationships.iter().enumerate() {
-                let rel = &rel_info.rel;
-
-                if rel.to_table == table {
-                    let to_idx = table_ref.column_idx(&rel.to_column).ok_or_else(|| {
-                        DaxError::UnknownColumn {
-                            table: rel.to_table.clone(),
-                            column: rel.to_column.clone(),
-                        }
-                    })?;
-                    let key = row[to_idx].clone();
-                    if rel_info.to_index.contains_key(&key) {
-                        return Err(DaxError::NonUniqueKey {
-                            table: rel.to_table.clone(),
-                            column: rel.to_column.clone(),
-                            value: key,
-                        });
-                    }
-                    to_index_updates.push((rel_idx, key));
-                }
-
-                if rel.from_table == table && rel.enforce_referential_integrity {
-                    let from_idx = table_ref.column_idx(&rel.from_column).ok_or_else(|| {
-                        DaxError::UnknownColumn {
-                            table: rel.from_table.clone(),
-                            column: rel.from_column.clone(),
-                        }
-                    })?;
-
-                    let key = row[from_idx].clone();
-                    if key.is_blank() {
-                        continue;
-                    }
-
-                    if !rel_info.to_index.contains_key(&key) {
-                        return Err(DaxError::ReferentialIntegrityViolation {
-                            relationship: rel.name.clone(),
-                            from_table: rel.from_table.clone(),
-                            from_column: rel.from_column.clone(),
-                            to_table: rel.to_table.clone(),
-                            to_column: rel.to_column.clone(),
-                            value: key,
-                        });
-                    }
-                }
-            }
-
-            (row_index, to_index_updates)
         };
 
-        {
+        let row_index = {
             let table_mut = self
                 .tables
                 .get_mut(table)
                 .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
-            table_mut.push_row(row)?;
+            table_mut.rows.push(full_row.clone());
+            table_mut.row_count() - 1
+        };
+
+        if calc_count > 0 {
+            let mut row_ctx = RowContext::default();
+            row_ctx.push(table, row_index);
+            let engine = crate::engine::DaxEngine::new();
+
+            let calc_defs: Vec<CalculatedColumn> = self
+                .calculated_columns
+                .iter()
+                .filter(|c| c.table == table)
+                .cloned()
+                .collect();
+
+            for calc in calc_defs {
+                let value = engine.evaluate_expr(
+                    self,
+                    &calc.parsed,
+                    &FilterContext::default(),
+                    &row_ctx,
+                )?;
+                let col_idx = {
+                    let table_ref = self
+                        .tables
+                        .get(table)
+                        .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+                    table_ref
+                        .column_idx(&calc.name)
+                        .ok_or_else(|| DaxError::UnknownColumn {
+                            table: table.to_string(),
+                            column: calc.name.clone(),
+                        })?
+                };
+
+                let table_mut = self
+                    .tables
+                    .get_mut(table)
+                    .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+                table_mut.rows[row_index][col_idx] = value;
+            }
+
+            full_row = self
+                .tables
+                .get(table)
+                .and_then(|t| t.rows.get(row_index).cloned())
+                .unwrap_or(full_row);
+        }
+
+        let mut to_index_updates = Vec::new();
+        for (rel_idx, rel_info) in self.relationships.iter().enumerate() {
+            let rel = &rel_info.rel;
+            if rel.to_table == table {
+                let table_ref = self
+                    .tables
+                    .get(table)
+                    .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+                let to_idx = table_ref.column_idx(&rel.to_column).ok_or_else(|| {
+                    DaxError::UnknownColumn {
+                        table: rel.to_table.clone(),
+                        column: rel.to_column.clone(),
+                    }
+                })?;
+                let key = full_row.get(to_idx).cloned().unwrap_or(Value::Blank);
+                if rel_info.to_index.contains_key(&key) {
+                    self.tables
+                        .get_mut(table)
+                        .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?
+                        .rows
+                        .pop();
+                    return Err(DaxError::NonUniqueKey {
+                        table: rel.to_table.clone(),
+                        column: rel.to_column.clone(),
+                        value: key,
+                    });
+                }
+                to_index_updates.push((rel_idx, key));
+            }
+
+            if rel.from_table == table && rel.enforce_referential_integrity {
+                let table_ref = self
+                    .tables
+                    .get(table)
+                    .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
+                let from_idx = table_ref.column_idx(&rel.from_column).ok_or_else(|| {
+                    DaxError::UnknownColumn {
+                        table: rel.from_table.clone(),
+                        column: rel.from_column.clone(),
+                    }
+                })?;
+                let key = full_row.get(from_idx).cloned().unwrap_or(Value::Blank);
+                if key.is_blank() {
+                    continue;
+                }
+                if !rel_info.to_index.contains_key(&key) {
+                    self.tables
+                        .get_mut(table)
+                        .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?
+                        .rows
+                        .pop();
+                    return Err(DaxError::ReferentialIntegrityViolation {
+                        relationship: rel.name.clone(),
+                        from_table: rel.from_table.clone(),
+                        from_column: rel.from_column.clone(),
+                        to_table: rel.to_table.clone(),
+                        to_column: rel.to_column.clone(),
+                        value: key,
+                    });
+                }
+            }
         }
 
         for (rel_idx, key) in to_index_updates {
