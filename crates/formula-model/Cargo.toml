@@ -6,8 +6,10 @@ license = "MIT OR Apache-2.0"
 description = "Core in-memory data model for Formula spreadsheets (workbooks/sheets/cells/styles)."
 
 [dependencies]
+regex = "1.10"
 serde = { version = "1.0", features = ["derive"] }
 formula-format = { path = "../formula-format" }
+thiserror = "2.0"
 
 [dev-dependencies]
 serde_json = "1.0"

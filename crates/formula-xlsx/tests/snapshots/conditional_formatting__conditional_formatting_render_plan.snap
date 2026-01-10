@@ -1,0 +1,17 @@
+---
+source: crates/formula-xlsx/tests/conditional_formatting.rs
+assertion_line: 143
+expression: snapshot
+---
+A1: none
+B1: dataBar color=FF638EC6 ratio=0.00
+C1: fill=FFFF0000
+D1: icon=ThreeArrows:0
+A2: fill=FFFF0000 font=FFFFFFFF
+B2: dataBar color=FF638EC6 ratio=0.50
+C2: fill=FFFFFF00
+D2: icon=ThreeArrows:1
+A3: fill=FFFF0000 font=FFFFFFFF
+B3: dataBar color=FF638EC6 ratio=1.00
+C3: fill=FF00FF00
+D3: icon=ThreeArrows:2

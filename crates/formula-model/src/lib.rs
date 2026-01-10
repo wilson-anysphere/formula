@@ -8,6 +8,7 @@
 mod address;
 mod cell;
 mod display;
+pub mod conditional_formatting;
 mod error;
 pub mod rich_text;
 mod style;
@@ -18,6 +19,7 @@ mod worksheet;
 pub use address::{A1ParseError, CellRef, Range, RangeIter, RangeParseError};
 pub use cell::{Cell, CellId, CellKey, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 pub use display::{format_cell_display, CellDisplay};
+pub use conditional_formatting::*;
 pub use error::ErrorValue;
 pub use style::{
     Alignment, Border, BorderStyle, Color, Fill, Font, HorizontalAlignment, Style, StyleTable,

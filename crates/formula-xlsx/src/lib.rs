@@ -13,5 +13,10 @@ pub mod print;
 pub mod shared_strings;
 pub mod vba;
 
+pub mod conditional_formatting;
+pub mod styles;
+
+pub use conditional_formatting::*;
 pub use package::{XlsxError, XlsxPackage};
 pub use pivots::{PivotCacheDefinitionPart, PivotCacheRecordsPart, PivotTablePart, XlsxPivots};
+pub use styles::*;
