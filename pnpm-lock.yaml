@@ -18,6 +18,9 @@ importers:
       '@types/node':
         specifier: ^22.13.4
         version: 22.19.5
+      fake-indexeddb:
+        specifier: ^6.2.5
+        version: 6.2.5
       typescript:
         specifier: ^5.8.2
         version: 5.9.3
@@ -26,6 +29,10 @@ importers:
         version: 3.2.4(@types/node@22.19.5)
 
   apps/desktop:
+    dependencies:
+      '@formula/collab-comments':
+        specifier: workspace:*
+        version: link:../../packages/collab/comments
     devDependencies:
       '@playwright/test':
         specifier: ^1.57.0
@@ -49,11 +56,23 @@ importers:
         specifier: ^1.13.0
         version: 1.13.0
 
+  packages/ai-completion: {}
+
   packages/ai-tools:
     dependencies:
       zod:
         specifier: ^3.24.2
         version: 3.25.76
+
+  packages/collab/comments:
+    dependencies:
+      yjs:
+        specifier: ^13.6.0
+        version: 13.6.29
+    devDependencies:
+      vitest:
+        specifier: ^1.0.0
+        version: 1.6.1(@types/node@22.19.5)
 
   packages/extension-api: {}
 
@@ -853,6 +872,10 @@ packages:
   expect-type@1.3.0:
     resolution: {integrity: sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA==}
     engines: {node: '>=12.0.0'}
+
+  fake-indexeddb@6.2.5:
+    resolution: {integrity: sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w==}
+    engines: {node: '>=18'}
 
   fdir@6.5.0:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
@@ -2021,6 +2044,8 @@ snapshots:
       strip-final-newline: 3.0.0
 
   expect-type@1.3.0: {}
+
+  fake-indexeddb@6.2.5: {}
 
   fdir@6.5.0(picomatch@4.0.3):
     optionalDependencies:
