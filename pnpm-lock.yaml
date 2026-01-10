@@ -103,6 +103,9 @@ importers:
 
   packages/ai-tools:
     dependencies:
+      '@formula/ai-audit':
+        specifier: workspace:*
+        version: link:../ai-audit
       zod:
         specifier: ^3.24.2
         version: 3.25.76
@@ -167,6 +170,8 @@ importers:
   packages/security: {}
 
   packages/text-layout: {}
+
+  packages/vba-migrate: {}
 
   services/api:
     dependencies:

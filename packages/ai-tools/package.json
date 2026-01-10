@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./src/index.ts",
   "dependencies": {
+    "@formula/ai-audit": "workspace:*",
     "zod": "^3.24.2"
   }
 }
-
