@@ -1,6 +1,7 @@
 use crate::eval::{
     parse_a1, CellAddr, CompiledExpr, Expr, FormulaParseError, Parser, RangeRef, SheetReference,
 };
+use crate::locale::{canonicalize_formula, FormulaLocale};
 use crate::value::{ErrorKind, Value};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -239,6 +240,23 @@ impl Engine {
         Ok(())
     }
 
+    /// Set a cell formula that was entered in a locale-specific display format.
+    ///
+    /// This converts the incoming formula to canonical form before parsing and
+    /// persistence. Canonical form uses English function names and `,`/`.` for
+    /// separators, which matches XLSX expectations and keeps storage stable across
+    /// UI locale changes.
+    pub fn set_cell_formula_localized(
+        &mut self,
+        sheet: &str,
+        addr: &str,
+        localized_formula: &str,
+        locale: &FormulaLocale,
+    ) -> Result<(), EngineError> {
+        let canonical = canonicalize_formula(localized_formula, locale)?;
+        self.set_cell_formula(sheet, addr, &canonical)
+    }
+
     pub fn get_cell_value(&self, sheet: &str, addr: &str) -> Value {
         let Some(sheet_id) = self.workbook.sheet_id(sheet) else {
             return Value::Blank;
@@ -248,6 +266,13 @@ impl Engine {
         };
         self.workbook
             .get_cell_value(CellKey { sheet: sheet_id, addr })
+    }
+
+    pub fn get_cell_formula(&self, sheet: &str, addr: &str) -> Option<&str> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        let addr = parse_a1(addr).ok()?;
+        let key = CellKey { sheet: sheet_id, addr };
+        self.workbook.get_cell(key)?.formula.as_deref()
     }
 
     pub fn recalculate(&mut self) {
