@@ -7,6 +7,7 @@ import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
 import { PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
+import { renderMacroRunner, TauriMacroBackend } from "./macros";
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -44,6 +45,7 @@ const gridSplit = document.getElementById("grid-split");
 const gridSecondary = document.getElementById("grid-secondary");
 const gridSplitter = document.getElementById("grid-splitter");
 const openAiPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-ai-panel"]');
+const openMacrosPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-macros-panel"]');
 const splitVertical = document.querySelector<HTMLButtonElement>('[data-testid="split-vertical"]');
 const splitHorizontal = document.querySelector<HTMLButtonElement>('[data-testid="split-horizontal"]');
 const splitNone = document.querySelector<HTMLButtonElement>('[data-testid="split-none"]');
@@ -58,6 +60,7 @@ if (
   gridSecondary &&
   gridSplitter &&
   openAiPanel &&
+  openMacrosPanel &&
   splitVertical &&
   splitHorizontal &&
   splitNone
@@ -130,6 +133,33 @@ if (
 
   function panelTitle(panelId: string) {
     return (PANEL_REGISTRY as any)?.[panelId]?.title ?? panelId;
+  }
+
+  function renderPanelBody(panelId: string, body: HTMLDivElement) {
+    if (panelId === PanelIds.AI_CHAT) {
+      body.textContent = "Ask a question about your data…";
+      return;
+    }
+    if (panelId === PanelIds.VERSION_HISTORY) {
+      body.textContent = "Version history will appear here.";
+      return;
+    }
+    if (panelId === PanelIds.MACROS) {
+      body.textContent = "Loading macros…";
+      queueMicrotask(() => {
+        try {
+          const backend = new TauriMacroBackend();
+          void renderMacroRunner(body, backend, workbookId).catch((err) => {
+            body.textContent = `Failed to load macros: ${String(err)}`;
+          });
+        } catch (err) {
+          body.textContent = `Macros backend not available: ${String(err)}`;
+        }
+      });
+      return;
+    }
+
+    body.textContent = `Panel: ${panelId}`;
   }
 
   function renderDock(el: HTMLElement, zone: { panels: string[]; active: string | null }, currentSide: "left" | "right" | "bottom") {
@@ -209,12 +239,7 @@ if (
 
     const body = document.createElement("div");
     body.className = "dock-panel__body";
-    body.textContent =
-      active === PanelIds.AI_CHAT
-        ? "Ask a question about your data…"
-        : active === PanelIds.VERSION_HISTORY
-          ? "Version history will appear here."
-          : `Panel: ${active}`;
+    renderPanelBody(active, body);
 
     panel.appendChild(header);
     panel.appendChild(body);
@@ -277,7 +302,7 @@ if (
 
       const body = document.createElement("div");
       body.className = "dock-panel__body";
-      body.textContent = `Floating panel: ${panelId}`;
+      renderPanelBody(panelId, body);
 
       inner.appendChild(header);
       inner.appendChild(body);
@@ -304,6 +329,12 @@ if (
     const placement = getPanelPlacement(layoutController.layout, PanelIds.AI_CHAT);
     if (placement.kind === "closed") layoutController.openPanel(PanelIds.AI_CHAT);
     else layoutController.closePanel(PanelIds.AI_CHAT);
+  });
+
+  openMacrosPanel.addEventListener("click", () => {
+    const placement = getPanelPlacement(layoutController.layout, PanelIds.MACROS);
+    if (placement.kind === "closed") layoutController.openPanel(PanelIds.MACROS);
+    else layoutController.closePanel(PanelIds.MACROS);
   });
 
   layoutController.on("change", () => renderLayout());
