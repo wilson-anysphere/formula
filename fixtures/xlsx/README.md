@@ -19,8 +19,8 @@ fixtures/xlsx/
   macros/
 ```
 
-`charts/` and `pivots/` are currently scaffolds for future expansion. `macros/`
-contains small `.xlsm` fixtures used to validate VBA project preservation.
+`pivots/` is currently a scaffold for future expansion. `macros/` contains small
+`.xlsm` fixtures used to validate VBA project preservation.
 
 ## Notable fixtures
 
@@ -35,6 +35,7 @@ contains small `.xlsm` fixtures used to validate VBA project preservation.
   - `pivot-fixture.xlsx` - minimal pivot table parts (cache definition/records + pivotTable).
 - `charts/`:
   - `basic-chart.xlsx` - minimal chart parts (drawing + chart referencing sheet data).
+  - `bar.xlsx`, `line.xlsx`, `pie.xlsx`, `scatter.xlsx` - small fixtures for common chart types.
 - `macros/`:
   - `basic.xlsm` - minimal VBA project preservation fixture.
 
