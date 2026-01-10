@@ -8,7 +8,7 @@ formula-model = { path = "../formula-model" }
 formula-vba = { path = "../formula-vba" }
 quick-xml = "0.37"
 thiserror = "1"
-zip = "0.6"
+zip = { version = "2.1", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 cfb = "0.10"

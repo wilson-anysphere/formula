@@ -1,4 +1,5 @@
 use thiserror::Error;
+use encoding_rs::WINDOWS_1252;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ModuleType {
@@ -144,6 +145,6 @@ fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {
 }
 
 fn decode_bytes(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).to_string()
+    let (cow, _, _) = WINDOWS_1252.decode(bytes);
+    cow.into_owned()
 }
-

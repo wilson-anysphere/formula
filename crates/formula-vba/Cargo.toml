@@ -9,4 +9,4 @@ encoding_rs = "0.8"
 thiserror = "1"
 
 [dev-dependencies]
-zip = "0.6"
+zip = { version = "2.1", default-features = false, features = ["deflate"] }

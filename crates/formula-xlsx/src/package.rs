@@ -72,8 +72,8 @@ impl XlsxPackage {
 
         let cursor = Cursor::new(Vec::new());
         let mut zip = zip::ZipWriter::new(cursor);
-        let options =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
 
         for (name, bytes) in parts {
             zip.start_file(name, options)?;

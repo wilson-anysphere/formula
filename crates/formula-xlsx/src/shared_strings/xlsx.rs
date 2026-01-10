@@ -63,7 +63,8 @@ pub fn write_shared_strings_to_xlsx(
 
         if name == "xl/sharedStrings.xml" {
             seen_shared_strings = true;
-            let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+            let options =
+                FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
             output_zip.start_file(name, options)?;
             output_zip.write_all(shared_strings_xml.as_bytes())?;
             continue;
@@ -72,12 +73,13 @@ pub fn write_shared_strings_to_xlsx(
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
 
-        let options = FileOptions::default()
-            .compression_method(match file.compression() {
-                CompressionMethod::Stored => CompressionMethod::Stored,
-                _ => CompressionMethod::Deflated,
-            })
-            .last_modified_time(file.last_modified());
+        let mut options = FileOptions::<()>::default().compression_method(match file.compression() {
+            CompressionMethod::Stored => CompressionMethod::Stored,
+            _ => CompressionMethod::Deflated,
+        });
+        if let Some(modified) = file.last_modified() {
+            options = options.last_modified_time(modified);
+        }
 
         output_zip.start_file(name, options)?;
         output_zip.write_all(&buf)?;
@@ -86,7 +88,7 @@ pub fn write_shared_strings_to_xlsx(
     if !seen_shared_strings {
         output_zip.start_file(
             "xl/sharedStrings.xml",
-            FileOptions::default().compression_method(CompressionMethod::Deflated),
+            FileOptions::<()>::default().compression_method(CompressionMethod::Deflated),
         )?;
         output_zip.write_all(shared_strings_xml.as_bytes())?;
     }

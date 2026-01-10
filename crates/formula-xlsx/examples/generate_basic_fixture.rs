@@ -16,30 +16,26 @@ fn main() {
 fn build_xlsm(vba_project_bin: &[u8]) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(cursor);
-    let options =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
 
     zip.start_file("[Content_Types].xml", options)
         .expect("ct file");
     zip.write_all(content_types_xml().as_bytes())
         .expect("write ct");
 
-    zip.add_directory("_rels/", options).expect("dir");
     zip.start_file("_rels/.rels", options).expect("rels");
     zip.write_all(package_rels_xml().as_bytes())
         .expect("write rels");
 
-    zip.add_directory("xl/", options).expect("dir");
     zip.start_file("xl/workbook.xml", options).expect("wb");
     zip.write_all(workbook_xml().as_bytes()).expect("wb");
 
-    zip.add_directory("xl/_rels/", options).expect("dir");
     zip.start_file("xl/_rels/workbook.xml.rels", options)
         .expect("wb rels");
     zip.write_all(workbook_rels_xml().as_bytes())
         .expect("wb rels");
 
-    zip.add_directory("xl/worksheets/", options).expect("dir");
     zip.start_file("xl/worksheets/sheet1.xml", options)
         .expect("sheet");
     zip.write_all(sheet1_xml().as_bytes()).expect("sheet");
@@ -213,4 +209,3 @@ fn make_compressed_container_literals(data: &[u8], compressed_chunk: bool) -> Ve
     out.extend_from_slice(&chunk_data);
     out
 }
-

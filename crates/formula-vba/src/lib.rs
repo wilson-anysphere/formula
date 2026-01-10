@@ -13,6 +13,8 @@ pub use compression::{compress_container, decompress_container, CompressionError
 pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
 pub use ole::{OleError, OleFile};
 
+use std::collections::BTreeMap;
+
 use encoding_rs::WINDOWS_1252;
 use thiserror::Error;
 
@@ -32,6 +34,7 @@ pub struct VBAModule {
     pub stream_name: String,
     pub module_type: ModuleType,
     pub code: String,
+    pub attributes: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,12 +98,14 @@ impl VBAProject {
             let source_container = &module_stream[text_offset..];
             let source_bytes = decompress_container(source_container)?;
             let code = decode_1252(&source_bytes);
+            let attributes = parse_attributes(&code);
 
             modules.push(VBAModule {
                 name: module.name.clone(),
                 stream_name: module.stream_name.clone(),
                 module_type: module.module_type,
                 code,
+                attributes,
             });
         }
 
@@ -119,6 +124,30 @@ impl VBAProject {
 fn decode_1252(bytes: &[u8]) -> String {
     let (cow, _, _) = WINDOWS_1252.decode(bytes);
     cow.into_owned()
+}
+
+fn parse_attributes(code: &str) -> BTreeMap<String, String> {
+    let mut attrs = BTreeMap::new();
+    for line in code.lines() {
+        let line = line.trim_end_matches('\r').trim();
+        let Some(rest) = line.strip_prefix("Attribute ") else {
+            continue;
+        };
+
+        let Some((key, value)) = rest.split_once('=') else {
+            continue;
+        };
+
+        let key = key.trim().to_owned();
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .unwrap_or(value)
+            .to_owned();
+        attrs.insert(key, value);
+    }
+    attrs
 }
 
 /// Try to find the start of the compressed source container in a module stream
@@ -166,6 +195,7 @@ mod tests {
             .iter()
             .find(|m| m.name == "Module1")
             .expect("Module1 present");
+        assert_eq!(module.attributes.get("VB_Name").map(String::as_str), Some("Module1"));
         assert!(module.code.contains("Sub Hello"));
         assert!(module.code.contains("MsgBox"));
     }
