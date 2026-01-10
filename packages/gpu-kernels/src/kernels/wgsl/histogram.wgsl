@@ -1,0 +1,38 @@
+alias Scalar = f32;
+
+const WG_SIZE: u32 = 256u;
+
+struct Params {
+  min: Scalar,
+  max: Scalar,
+  inv_bin_width: Scalar,
+  length: u32,
+  bin_count: u32,
+  _pad0: u32,
+  _pad1: u32,
+  _pad2: u32,
+}
+
+@group(0) @binding(0) var<storage, read> input: array<Scalar>;
+@group(0) @binding(1) var<storage, read_write> bins: array<atomic<u32>>;
+@group(0) @binding(2) var<uniform> params: Params;
+
+@compute @workgroup_size(WG_SIZE)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  if (i >= params.length) {
+    return;
+  }
+
+  let v = input[i];
+  var bin_i = i32((v - params.min) * params.inv_bin_width);
+  if (bin_i < 0) {
+    bin_i = 0;
+  }
+  if (bin_i >= i32(params.bin_count)) {
+    bin_i = i32(params.bin_count) - 1;
+  }
+
+  atomicAdd(&bins[u32(bin_i)], 1u);
+}
+

@@ -19,7 +19,8 @@
     "test:vitest": "vitest run",
     "test:node": "node scripts/run-node-tests.mjs",
     "test:e2e": "pnpm -C apps/desktop test:e2e",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "bench:gpu-kernels": "node packages/gpu-kernels/bench/bench.mjs"
   },
   "engines": {
     "node": ">=18"

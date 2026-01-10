@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>GPU Kernels Diagnostics</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        margin: 24px;
+      }
+      pre {
+        padding: 12px;
+        background: #111;
+        color: #eee;
+        border-radius: 8px;
+        overflow: auto;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>GPU Acceleration Diagnostics</h1>
+    <div class="row">
+      <label>
+        <input id="gpuToggle" type="checkbox" />
+        Enable GPU acceleration (WebGPU)
+      </label>
+      <button id="refresh">Refresh</button>
+    </div>
+    <pre id="output">Loading…</pre>
+
+    <script type="module">
+      import { createKernelEngine, loadGpuAccelerationSettings, saveGpuAccelerationSettings } from "../src/index.js";
+
+      const output = document.getElementById("output");
+      const toggle = document.getElementById("gpuToggle");
+      const refresh = document.getElementById("refresh");
+
+      async function render() {
+        const settings = loadGpuAccelerationSettings();
+        toggle.checked = settings.enabled;
+
+        const engine = await createKernelEngine({ gpu: { enabled: settings.enabled } });
+        output.textContent = JSON.stringify(engine.diagnostics(), null, 2);
+        await engine.dispose();
+      }
+
+      toggle.addEventListener("change", () => {
+        saveGpuAccelerationSettings({ enabled: toggle.checked });
+        render();
+      });
+      refresh.addEventListener("click", render);
+      render();
+    </script>
+  </body>
+</html>
+
