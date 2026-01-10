@@ -62,11 +62,16 @@ export interface InputDistribution {
   distribution: Distribution;
 }
 
+export interface CorrelationMatrix {
+  matrix: number[][];
+}
+
 export interface SimulationConfig {
   iterations: number;
   inputDistributions: InputDistribution[];
   outputCells: CellRef[];
   seed?: number;
+  correlations?: CorrelationMatrix;
   histogramBins?: number;
 }
 
@@ -115,4 +120,3 @@ export interface WhatIfApi {
     onProgress?: (p: SimulationProgress) => void
   ) => Promise<SimulationResult>;
 }
-

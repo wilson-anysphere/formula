@@ -8,6 +8,11 @@ pub struct SimulationConfig {
     pub input_distributions: Vec<InputDistribution>,
     pub output_cells: Vec<CellRef>,
     pub seed: u64,
+    /// Optional correlation matrix between input distributions.
+    ///
+    /// When supplied, correlated sampling is currently supported only for
+    /// [`Distribution::Normal`] inputs.
+    pub correlations: Option<CorrelationMatrix>,
     pub histogram_bins: usize,
 }
 
@@ -18,6 +23,7 @@ impl SimulationConfig {
             input_distributions: Vec::new(),
             output_cells: Vec::new(),
             seed: 0,
+            correlations: None,
             histogram_bins: 50,
         }
     }
@@ -251,6 +257,51 @@ fn scale_unit_interval(raw: f64, min: Option<f64>, max: Option<f64>) -> f64 {
 }
 
 #[derive(Clone, Debug)]
+pub struct CorrelationMatrix {
+    pub matrix: Vec<Vec<f64>>,
+}
+
+impl CorrelationMatrix {
+    pub fn new(matrix: Vec<Vec<f64>>) -> Self {
+        Self { matrix }
+    }
+
+    fn validate(&self, expected_size: usize) -> Result<(), &'static str> {
+        let n = self.matrix.len();
+        if n == 0 {
+            return Err("correlation matrix must not be empty");
+        }
+        if n != expected_size {
+            return Err("correlation matrix size must match input_distributions length");
+        }
+
+        for (i, row) in self.matrix.iter().enumerate() {
+            if row.len() != n {
+                return Err("correlation matrix must be square");
+            }
+
+            for (j, value) in row.iter().enumerate() {
+                if !value.is_finite() {
+                    return Err("correlation matrix contains non-finite value");
+                }
+
+                if i == j {
+                    if (value - 1.0).abs() > 1e-9 {
+                        return Err("correlation matrix diagonal entries must be 1");
+                    }
+                } else if *value < -1.0 || *value > 1.0 {
+                    return Err("correlation matrix entries must be within [-1, 1]");
+                } else if (value - self.matrix[j][i]).abs() > 1e-9 {
+                    return Err("correlation matrix must be symmetric");
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct HistogramBin {
     pub start: f64,
     pub end: f64,
@@ -321,15 +372,46 @@ impl MonteCarloEngine {
 
         let mut rng = SeededRng::new(config.seed);
 
+        let correlated = if let Some(corr) = &config.correlations {
+            corr.validate(config.input_distributions.len())
+                .map_err(WhatIfError::InvalidParams)?;
+
+            // Keep the first iteration error message simple by rejecting
+            // non-normal inputs up-front.
+            for input in &config.input_distributions {
+                if !matches!(input.distribution, Distribution::Normal { .. }) {
+                    return Err(WhatIfError::InvalidParams(
+                        "correlated sampling is currently supported only for normal distributions",
+                    ));
+                }
+            }
+
+            let l = cholesky_decomposition(&corr.matrix).map_err(WhatIfError::InvalidParams)?;
+            Some(l)
+        } else {
+            None
+        };
+
         let mut output_samples: HashMap<CellRef, Vec<f64>> = HashMap::new();
         for cell in &config.output_cells {
             output_samples.insert(cell.clone(), Vec::with_capacity(config.iterations));
         }
 
         for i in 0..config.iterations {
-            for input in &config.input_distributions {
-                let value = input.distribution.sample(&mut rng);
-                model.set_cell_value(&input.cell, CellValue::Number(value))?;
+            if let Some(l) = &correlated {
+                let z = generate_correlated_normals(&mut rng, l);
+                for (input, zi) in config.input_distributions.iter().zip(z.into_iter()) {
+                    let value = match input.distribution {
+                        Distribution::Normal { mean, std_dev } => mean + std_dev * zi,
+                        _ => unreachable!("validated correlated distributions are normal"),
+                    };
+                    model.set_cell_value(&input.cell, CellValue::Number(value))?;
+                }
+            } else {
+                for input in &config.input_distributions {
+                    let value = input.distribution.sample(&mut rng);
+                    model.set_cell_value(&input.cell, CellValue::Number(value))?;
+                }
             }
 
             model.recalculate()?;
@@ -376,6 +458,53 @@ impl MonteCarloEngine {
             output_samples,
         })
     }
+}
+
+fn cholesky_decomposition(matrix: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, &'static str> {
+    let n = matrix.len();
+    let mut l = vec![vec![0.0_f64; n]; n];
+
+    for i in 0..n {
+        for j in 0..=i {
+            let mut sum = 0.0;
+            for k in 0..j {
+                sum += l[i][k] * l[j][k];
+            }
+
+            if i == j {
+                let diag = matrix[i][i] - sum;
+                if diag <= 0.0 {
+                    return Err("correlation matrix is not positive definite");
+                }
+                l[i][j] = diag.sqrt();
+            } else {
+                if l[j][j] == 0.0 {
+                    return Err("correlation matrix is not positive definite");
+                }
+                l[i][j] = (matrix[i][j] - sum) / l[j][j];
+            }
+        }
+    }
+
+    Ok(l)
+}
+
+fn generate_correlated_normals(rng: &mut SeededRng, l: &[Vec<f64>]) -> Vec<f64> {
+    let n = l.len();
+    let mut z = vec![0.0_f64; n];
+    for zi in &mut z {
+        *zi = standard_normal(rng);
+    }
+
+    let mut out = vec![0.0_f64; n];
+    for i in 0..n {
+        let mut sum = 0.0;
+        for j in 0..=i {
+            sum += l[i][j] * z[j];
+        }
+        out[i] = sum;
+    }
+    out
 }
 
 fn analyze_samples(samples: &[f64], histogram_bins: usize) -> OutputStatistics {
@@ -597,5 +726,74 @@ mod tests {
         assert!(stats.min.is_finite());
         assert!(stats.max.is_finite());
         assert!(stats.histogram.bins.len() > 1);
+    }
+
+    #[test]
+    fn monte_carlo_correlated_normals_approximate_requested_correlation() {
+        let mut model = InMemoryModel::new();
+        model
+            .set_cell_value(&CellRef::from("A1"), CellValue::Number(0.0))
+            .unwrap();
+        model
+            .set_cell_value(&CellRef::from("B1"), CellValue::Number(0.0))
+            .unwrap();
+
+        let rho = 0.8;
+        let mut config = SimulationConfig::new(10_000);
+        config.seed = 42;
+        config.input_distributions = vec![
+            InputDistribution {
+                cell: CellRef::from("A1"),
+                distribution: Distribution::Normal {
+                    mean: 0.0,
+                    std_dev: 1.0,
+                },
+            },
+            InputDistribution {
+                cell: CellRef::from("B1"),
+                distribution: Distribution::Normal {
+                    mean: 0.0,
+                    std_dev: 1.0,
+                },
+            },
+        ];
+        config.output_cells = vec![CellRef::from("A1"), CellRef::from("B1")];
+        config.correlations = Some(CorrelationMatrix::new(vec![vec![1.0, rho], vec![rho, 1.0]]));
+
+        let result = MonteCarloEngine::run_simulation(&mut model, config).unwrap();
+        let a = result.output_samples.get(&CellRef::from("A1")).unwrap();
+        let b = result.output_samples.get(&CellRef::from("B1")).unwrap();
+
+        let corr = sample_correlation(a, b);
+        assert!(
+            (corr - rho).abs() < 0.05,
+            "expected corr ≈ {rho}, got {corr}"
+        );
+    }
+
+    fn sample_correlation(x: &[f64], y: &[f64]) -> f64 {
+        assert_eq!(x.len(), y.len());
+        let n = x.len();
+        let mean_x = x.iter().sum::<f64>() / n as f64;
+        let mean_y = y.iter().sum::<f64>() / n as f64;
+
+        let mut cov = 0.0;
+        let mut var_x = 0.0;
+        let mut var_y = 0.0;
+        for (&xi, &yi) in x.iter().zip(y.iter()) {
+            let dx = xi - mean_x;
+            let dy = yi - mean_y;
+            cov += dx * dy;
+            var_x += dx * dx;
+            var_y += dy * dy;
+        }
+
+        if n > 1 {
+            cov /= n as f64 - 1.0;
+            var_x /= n as f64 - 1.0;
+            var_y /= n as f64 - 1.0;
+        }
+
+        cov / (var_x.sqrt() * var_y.sqrt())
     }
 }
