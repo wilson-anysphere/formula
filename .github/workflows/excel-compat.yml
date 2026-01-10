@@ -18,6 +18,15 @@ on:
         description: "Run only first N cases (0 = all). Useful for debugging."
         required: true
         default: "0"
+      oracle_source:
+        description: "auto = use pinned if present, else generate; pinned = force pinned; generate = force Excel generation"
+        required: false
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - pinned
+          - generate
       max_mismatch_rate:
         description: "Fail if mismatches/total exceeds this rate (0-1)."
         required: true
@@ -38,6 +47,7 @@ on:
 env:
   MODE: ${{ github.event.inputs.mode || 'validate-engine' }}
   MAX_CASES: ${{ github.event.inputs.max_cases || '0' }}
+  ORACLE_SOURCE: ${{ github.event.inputs.oracle_source || 'auto' }}
   MAX_MISMATCH_RATE: ${{ github.event.inputs.max_mismatch_rate || '' }}
   INCLUDE_TAGS: ${{ github.event.inputs.include_tags || '' }}
   EXCLUDE_TAGS: ${{ github.event.inputs.exclude_tags || '' }}
@@ -71,8 +81,25 @@ jobs:
         shell: powershell
         run: |
           $mode = "${{ env.MODE }}"
+          $oracle = "${{ env.ORACLE_SOURCE }}"
           $pinned = "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json"
           $generated = "tests/compatibility/excel-oracle/datasets/excel-oracle.json"
+          if ($oracle -eq "pinned") {
+            if (-not (Test-Path -LiteralPath $pinned)) {
+              throw "oracle_source=pinned but pinned dataset not found at $pinned"
+            }
+            "path=$pinned" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "source=pinned" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+
+          if ($oracle -eq "generate") {
+            "path=$generated" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "source=generated" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+
+          # auto
           if ($mode -eq "validate-engine" -and (Test-Path -LiteralPath $pinned)) {
             "path=$pinned" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             "source=pinned" | Out-File -FilePath $env:GITHUB_OUTPUT -Append

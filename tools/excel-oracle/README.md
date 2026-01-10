@@ -69,6 +69,8 @@ python tools/excel-oracle/pin_dataset.py \
 
 The workflow prefers `excel-oracle.pinned.json` if present.
 
+To force Excel generation in the workflow when a pinned dataset exists, run the workflow manually (`workflow_dispatch`) and set `oracle_source=generate`.
+
 ## Compare formula-engine output vs Excel oracle
 
 1) Produce engine results JSON (same schema as Excel output). The intended flow is that your engine exposes a CLI that can evaluate the case corpus and emit results.
