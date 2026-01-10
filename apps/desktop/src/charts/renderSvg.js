@@ -62,8 +62,8 @@ export function resolveSeries(chart, provider) {
 export function placeholderSvg({ width, height, label }) {
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(width)}" height="${fmt(height)}" viewBox="0 0 ${fmt(width)} ${fmt(height)}">`,
-    `<rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" fill="#f8f8f8" stroke="#b0b0b0"/>`,
-    `<text x="${fmt(width / 2)}" y="${fmt(height / 2)}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="12" fill="#444">${label}</text>`,
+    `<rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" fill="var(--chart-placeholder-bg)" stroke="var(--chart-placeholder-border)"/>`,
+    `<text x="${fmt(width / 2)}" y="${fmt(height / 2)}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="12" fill="var(--chart-label)">${label}</text>`,
     `</svg>`,
   ].join("");
 }
@@ -84,24 +84,24 @@ function renderBarLineSvg({ width, height, title, kind, series }) {
   svg.push(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(width)}" height="${fmt(height)}" viewBox="0 0 ${fmt(width)} ${fmt(height)}">`
   );
-  svg.push(`<rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" fill="#fff" stroke="#ccc"/>`);
+  svg.push(`<rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" fill="var(--chart-bg)" stroke="var(--chart-border)"/>`);
 
   if (title) {
     svg.push(
-      `<text x="${fmt(width / 2)}" y="14" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#111">${title}</text>`
+      `<text x="${fmt(width / 2)}" y="14" text-anchor="middle" font-family="sans-serif" font-size="12" fill="var(--chart-title)">${title}</text>`
     );
   }
 
   const originX = margin.left;
   const originY = margin.top + plotH;
-  svg.push(`<line x1="${fmt(originX)}" y1="${fmt(originY)}" x2="${fmt(originX + plotW)}" y2="${fmt(originY)}" stroke="#666"/>`);
-  svg.push(`<line x1="${fmt(originX)}" y1="${fmt(margin.top)}" x2="${fmt(originX)}" y2="${fmt(originY)}" stroke="#666"/>`);
+  svg.push(`<line x1="${fmt(originX)}" y1="${fmt(originY)}" x2="${fmt(originX + plotW)}" y2="${fmt(originY)}" stroke="var(--chart-axis)"/>`);
+  svg.push(`<line x1="${fmt(originX)}" y1="${fmt(margin.top)}" x2="${fmt(originX)}" y2="${fmt(originY)}" stroke="var(--chart-axis)"/>`);
 
   const catCount = Math.max(1, categories.length);
   const seriesCount = Math.max(1, series.length);
   const groupW = plotW / catCount;
 
-  const colors = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2"];
+  const colors = ["var(--chart-series-1)", "var(--chart-series-2)", "var(--chart-series-3)", "var(--chart-series-4)"];
 
   if (kind === "bar") {
     const barW = Math.max(1, (groupW * 0.8) / seriesCount);
@@ -144,17 +144,17 @@ function renderPieSvg({ width, height, title, series }) {
   const cx = width / 2;
   const cy = height / 2 + 6;
   const r = Math.min(width, height) * 0.35;
-  const colors = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2"];
+  const colors = ["var(--chart-series-1)", "var(--chart-series-2)", "var(--chart-series-3)", "var(--chart-series-4)"];
 
   let angle = -Math.PI / 2;
   const svg = [];
   svg.push(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(width)}" height="${fmt(height)}" viewBox="0 0 ${fmt(width)} ${fmt(height)}">`
   );
-  svg.push(`<rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" fill="#fff" stroke="#ccc"/>`);
+  svg.push(`<rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" fill="var(--chart-bg)" stroke="var(--chart-border)"/>`);
   if (title) {
     svg.push(
-      `<text x="${fmt(width / 2)}" y="14" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#111">${title}</text>`
+      `<text x="${fmt(width / 2)}" y="14" text-anchor="middle" font-family="sans-serif" font-size="12" fill="var(--chart-title)">${title}</text>`
     );
   }
 
@@ -181,7 +181,7 @@ function renderPieSvg({ width, height, title, series }) {
 
   if (labels.length) {
     svg.push(
-      `<text x="${fmt(6)}" y="${fmt(height - 6)}" font-family="sans-serif" font-size="10" fill="#666">${labels.join(", ")}</text>`
+      `<text x="${fmt(6)}" y="${fmt(height - 6)}" font-family="sans-serif" font-size="10" fill="var(--chart-label)">${labels.join(", ")}</text>`
     );
   }
 
@@ -221,20 +221,20 @@ function renderScatterSvg({ width, height, title, series }) {
   svg.push(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(width)}" height="${fmt(height)}" viewBox="0 0 ${fmt(width)} ${fmt(height)}">`
   );
-  svg.push(`<rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" fill="#fff" stroke="#ccc"/>`);
+  svg.push(`<rect x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" fill="var(--chart-bg)" stroke="var(--chart-border)"/>`);
   if (title) {
     svg.push(
-      `<text x="${fmt(width / 2)}" y="14" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#111">${title}</text>`
+      `<text x="${fmt(width / 2)}" y="14" text-anchor="middle" font-family="sans-serif" font-size="12" fill="var(--chart-title)">${title}</text>`
     );
   }
 
   const originX = margin.left;
   const originY = margin.top + plotH;
-  svg.push(`<line x1="${fmt(originX)}" y1="${fmt(originY)}" x2="${fmt(originX + plotW)}" y2="${fmt(originY)}" stroke="#666"/>`);
-  svg.push(`<line x1="${fmt(originX)}" y1="${fmt(margin.top)}" x2="${fmt(originX)}" y2="${fmt(originY)}" stroke="#666"/>`);
+  svg.push(`<line x1="${fmt(originX)}" y1="${fmt(originY)}" x2="${fmt(originX + plotW)}" y2="${fmt(originY)}" stroke="var(--chart-axis)"/>`);
+  svg.push(`<line x1="${fmt(originX)}" y1="${fmt(margin.top)}" x2="${fmt(originX)}" y2="${fmt(originY)}" stroke="var(--chart-axis)"/>`);
 
   for (const p of points) {
-    svg.push(`<circle cx="${fmt(scaleX(p.x))}" cy="${fmt(scaleY(p.y))}" r="3" fill="#4e79a7"/>`);
+    svg.push(`<circle cx="${fmt(scaleX(p.x))}" cy="${fmt(scaleY(p.y))}" r="3" fill="var(--chart-series-1)"/>`);
   }
 
   svg.push(`</svg>`);

@@ -22,7 +22,7 @@ export function SheetTabStrip({ workbook, activeSheetId, onActivateSheet }: Prop
       style={{
         display: "flex",
         alignItems: "center",
-        borderTop: "1px solid #d4d4d4",
+        borderTop: "1px solid var(--border)",
         padding: "4px 8px",
         gap: 6,
         userSelect: "none",
@@ -76,9 +76,9 @@ export function SheetTabStrip({ workbook, activeSheetId, onActivateSheet }: Prop
         style={{
           height: 24,
           width: 28,
-          border: "1px solid #d4d4d4",
+          border: "1px solid var(--border)",
           borderRadius: 4,
-          background: "white",
+          background: "var(--bg-primary)",
           cursor: "pointer",
         }}
         aria-label="Add sheet"
@@ -125,8 +125,8 @@ function SheetTab(props: {
       style={{
         padding: "4px 10px",
         borderRadius: 6,
-        border: `1px solid ${active ? "#0066cc" : "#d4d4d4"}`,
-        background: active ? "#e6f0ff" : "white",
+        border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
+        background: active ? "var(--accent-light)" : "var(--bg-primary)",
         cursor: "pointer",
         position: "relative",
       }}
@@ -144,7 +144,7 @@ function SheetTab(props: {
           style={{
             width: Math.max(60, draftName.length * 8),
             font: "inherit",
-            border: "1px solid #0066cc",
+            border: "1px solid var(--accent)",
           }}
         />
       ) : (
@@ -160,7 +160,7 @@ function SheetTab(props: {
 function TabColorUnderline({ tabColor }: { tabColor: TabColor }) {
   const rgb = tabColor.rgb;
   if (!rgb) return null;
-  const css = argbToCssRgb(rgb);
+  const css = argbToCssHsl(rgb);
   return (
     <div
       style={{
@@ -176,11 +176,43 @@ function TabColorUnderline({ tabColor }: { tabColor: TabColor }) {
   );
 }
 
-function argbToCssRgb(argb: string): string {
+function argbToCssHsl(argb: string): string {
   if (!/^([0-9A-Fa-f]{8})$/.test(argb)) return "transparent";
+  const alpha = parseInt(argb.slice(0, 2), 16) / 255;
   const r = parseInt(argb.slice(2, 4), 16);
   const g = parseInt(argb.slice(4, 6), 16);
   const b = parseInt(argb.slice(6, 8), 16);
-  return `rgb(${r}, ${g}, ${b})`;
-}
 
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const delta = max - min;
+  const light = (max + min) / 2;
+
+  let hue = 0;
+  let sat = 0;
+
+  if (delta !== 0) {
+    sat = delta / (1 - Math.abs(2 * light - 1));
+    switch (max) {
+      case rn:
+        hue = ((gn - bn) / delta + (gn < bn ? 6 : 0)) * 60;
+        break;
+      case gn:
+        hue = ((bn - rn) / delta + 2) * 60;
+        break;
+      default:
+        hue = ((rn - gn) / delta + 4) * 60;
+        break;
+    }
+  }
+
+  const h = Math.round(hue);
+  const s = Math.round(sat * 100);
+  const l = Math.round(light * 100);
+  const a = Math.max(0, Math.min(1, alpha));
+
+  return a < 1 ? `hsla(${h}, ${s}%, ${l}%, ${a.toFixed(3)})` : `hsl(${h}, ${s}%, ${l}%)`;
+}

@@ -46,6 +46,21 @@
   --grid-header-text: var(--text-primary);
   --grid-line: var(--border);
 
+  /* Charts */
+  --chart-bg: var(--bg-primary);
+  --chart-border: var(--border);
+  --chart-axis: var(--text-secondary);
+  --chart-title: var(--text-primary);
+  --chart-placeholder-bg: var(--bg-secondary);
+  --chart-placeholder-border: var(--border);
+  --chart-label: var(--text-secondary);
+
+  /* Chart series palette (defaults to Tableau 10-inspired hues). */
+  --chart-series-1: #4e79a7;
+  --chart-series-2: #f28e2b;
+  --chart-series-3: #e15759;
+  --chart-series-4: #76b7b2;
+
   /* Panels / dialogs */
   --panel-bg: var(--bg-secondary);
   --panel-border: var(--border);
@@ -149,4 +164,3 @@
     --motion-ease: linear;
   }
 }
-
