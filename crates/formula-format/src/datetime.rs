@@ -14,6 +14,7 @@ struct DateTimeParts {
     hour: u32,
     minute: u32,
     second: u32,
+    millis: u32,
     // Used for elapsed time formats like `[h]:mm:ss`
     total_seconds: i64,
     // 0=Sunday..6=Saturday
@@ -95,18 +96,26 @@ pub(crate) fn looks_like_datetime(section: &str) -> bool {
 }
 
 pub(crate) fn format_datetime(serial: f64, pattern: &str, options: &FormatOptions) -> String {
-    let Some(parts) = serial_to_parts(serial, options.date_system) else {
-        return "#####".to_string();
-    };
-
     let mut tokens = tokenize(pattern);
     let has_ampm = tokens.iter().any(|t| matches!(t, Token::AmPm));
     disambiguate_minutes(&mut tokens);
 
+    let frac_digits = tokens
+        .iter()
+        .filter_map(|t| match t {
+            Token::FractionalSeconds(d) => Some(*d),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+
+    let Some(parts) = serial_to_parts(serial, options.date_system, frac_digits) else {
+        return "#####".to_string();
+    };
     render_tokens(&tokens, &parts, has_ampm, options)
 }
 
-fn serial_to_parts(serial: f64, date_system: DateSystem) -> Option<DateTimeParts> {
+fn serial_to_parts(serial: f64, date_system: DateSystem, frac_second_digits: usize) -> Option<DateTimeParts> {
     if !serial.is_finite() {
         return None;
     }
@@ -117,18 +126,23 @@ fn serial_to_parts(serial: f64, date_system: DateSystem) -> Option<DateTimeParts
 
     let mut days = serial.floor() as i64;
     let frac = serial - days as f64;
-    let mut total_seconds = (frac * 86_400.0).round() as i64;
+    let step_ms = match frac_second_digits {
+        0 => 1000,
+        1 => 100,
+        2 => 10,
+        _ => 1,
+    };
+    let mut total_millis = ((frac * 86_400_000.0) / (step_ms as f64)).round() as i64 * step_ms;
 
-    if total_seconds >= 86_400 {
-        total_seconds = 0;
+    if total_millis >= 86_400_000 {
+        total_millis = 0;
         days += 1;
     }
 
-    let (hour, minute, second) = (
-        (total_seconds / 3600) as u32,
-        ((total_seconds % 3600) / 60) as u32,
-        (total_seconds % 60) as u32,
-    );
+    let hour = (total_millis / 3_600_000) as u32;
+    let minute = ((total_millis % 3_600_000) / 60_000) as u32;
+    let second = ((total_millis % 60_000) / 1000) as u32;
+    let millis = (total_millis % 1000) as u32;
 
     // Convert the date part.
     let (year, month, day, weekday) = match date_system {
@@ -143,7 +157,8 @@ fn serial_to_parts(serial: f64, date_system: DateSystem) -> Option<DateTimeParts
         hour,
         minute,
         second,
-        total_seconds: (days * 86_400) + total_seconds,
+        millis,
+        total_seconds: (days * 86_400) + (total_millis / 1000),
         weekday,
     })
 }
@@ -221,6 +236,7 @@ enum Token {
     Day(usize),
     Hour(usize),
     Second(usize),
+    FractionalSeconds(usize),
     MonthOrMinute(usize),
     Month(usize),
     Minute(usize),
@@ -346,6 +362,24 @@ fn tokenize(pattern: &str) -> Vec<Token> {
                 let count = consume_run(ch, &mut chars);
                 flush_literal(&mut literal_buf, &mut tokens);
                 tokens.push(Token::Second(count));
+
+                // Fractional seconds: `ss.0`, `ss.00`, `ss.000`, etc.
+                if chars.peek().copied() == Some('.') {
+                    let mut clone = chars.clone();
+                    let _ = clone.next(); // '.'
+                    let mut zeros = 0usize;
+                    while let Some('0') = clone.next() {
+                        zeros += 1;
+                    }
+                    if zeros > 0 {
+                        // Consume '.' + zeros from the original iterator.
+                        let _ = chars.next();
+                        for _ in 0..zeros {
+                            let _ = chars.next();
+                        }
+                        tokens.push(Token::FractionalSeconds(zeros));
+                    }
+                }
             }
             'm' | 'M' => {
                 let count = consume_run(ch, &mut chars);
@@ -445,6 +479,10 @@ fn render_tokens(tokens: &[Token], parts: &DateTimeParts, has_ampm: bool, option
                 out.push_str(&format_two(hour, *count));
             }
             Token::Second(count) => out.push_str(&format_two(parts.second, *count)),
+            Token::FractionalSeconds(digits) => {
+                out.push('.');
+                out.push_str(&format_fractional_seconds(parts.millis, *digits));
+            }
             Token::AmPm => out.push_str(if parts.hour < 12 { "AM" } else { "PM" }),
             Token::ElapsedHours => out.push_str(&(parts.total_seconds / 3600).to_string()),
             Token::ElapsedMinutes => out.push_str(&(parts.total_seconds / 60).to_string()),
@@ -521,5 +559,14 @@ fn format_day(day: u32, weekday: u32, count: usize) -> String {
         2 => format!("{:02}", day),
         3 => DAYS_SHORT[weekday as usize].to_string(),
         _ => DAYS_LONG[weekday as usize].to_string(),
+    }
+}
+
+fn format_fractional_seconds(millis: u32, digits: usize) -> String {
+    match digits {
+        0 => String::new(),
+        1 => format!("{}", millis / 100),
+        2 => format!("{:02}", millis / 10),
+        _ => format!("{:03}", millis),
     }
 }

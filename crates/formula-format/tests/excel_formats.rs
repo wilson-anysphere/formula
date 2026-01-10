@@ -132,6 +132,31 @@ fn am_pm_time_formatting() {
 }
 
 #[test]
+fn fractional_seconds_time_formatting() {
+    let options = FormatOptions {
+        locale: Locale::en_us(),
+        date_system: DateSystem::Excel1900,
+    };
+
+    assert_eq!(
+        format_value(Value::Number(0.0), Some("mm:ss.0"), &options).text,
+        "00:00.0"
+    );
+
+    let serial = 1.234 / 86_400.0;
+    assert_eq!(
+        format_value(Value::Number(serial), Some("mm:ss.0"), &options).text,
+        "00:01.2"
+    );
+
+    let serial = 59.96 / 86_400.0;
+    assert_eq!(
+        format_value(Value::Number(serial), Some("mm:ss.0"), &options).text,
+        "01:00.0"
+    );
+}
+
+#[test]
 fn locale_separators() {
     let options = FormatOptions {
         locale: Locale::de_de(),
