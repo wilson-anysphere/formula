@@ -228,9 +228,9 @@ export class SpreadsheetApp {
     panel.style.height = "100%";
     panel.style.display = "none";
     panel.style.flexDirection = "column";
-    panel.style.background = "#ffffff";
-    panel.style.borderLeft = "1px solid #d4d4d4";
-    panel.style.boxShadow = "-2px 0 10px rgba(0,0,0,0.08)";
+    panel.style.background = "var(--bg-primary)";
+    panel.style.borderLeft = "1px solid var(--border)";
+    panel.style.boxShadow = "-2px 0 10px var(--border)";
     panel.style.zIndex = "20";
     panel.style.padding = "10px";
     panel.style.boxSizing = "border-box";
@@ -261,7 +261,7 @@ export class SpreadsheetApp {
     this.commentsPanelCell = document.createElement("div");
     this.commentsPanelCell.dataset.testid = "comments-active-cell";
     this.commentsPanelCell.style.fontSize = "12px";
-    this.commentsPanelCell.style.color = "#6b7280";
+    this.commentsPanelCell.style.color = "var(--text-secondary)";
     this.commentsPanelCell.style.marginBottom = "10px";
     panel.appendChild(this.commentsPanelCell);
 
@@ -277,7 +277,7 @@ export class SpreadsheetApp {
     footer.style.display = "flex";
     footer.style.gap = "8px";
     footer.style.paddingTop = "10px";
-    footer.style.borderTop = "1px solid #e5e7eb";
+    footer.style.borderTop = "1px solid var(--border)";
 
     this.newCommentInput = document.createElement("input");
     this.newCommentInput.dataset.testid = "new-comment-input";
@@ -304,8 +304,8 @@ export class SpreadsheetApp {
     tooltip.style.display = "none";
     tooltip.style.maxWidth = "260px";
     tooltip.style.padding = "8px 10px";
-    tooltip.style.background = "rgba(17, 24, 39, 0.95)";
-    tooltip.style.color = "white";
+    tooltip.style.background = "var(--bg-tertiary)";
+    tooltip.style.color = "var(--text-primary)";
     tooltip.style.fontSize = "12px";
     tooltip.style.borderRadius = "8px";
     tooltip.style.pointerEvents = "none";
@@ -338,7 +338,7 @@ export class SpreadsheetApp {
       const empty = document.createElement("div");
       empty.textContent = "No comments.";
       empty.style.fontSize = "12px";
-      empty.style.color = "#6b7280";
+      empty.style.color = "var(--text-secondary)";
       this.commentsPanelThreads.appendChild(empty);
       return;
     }
@@ -353,7 +353,7 @@ export class SpreadsheetApp {
     container.dataset.testid = "comment-thread";
     container.dataset.commentId = comment.id;
     container.dataset.resolved = comment.resolved ? "true" : "false";
-    container.style.border = "1px solid #e5e7eb";
+    container.style.border = "1px solid var(--border)";
     container.style.borderRadius = "8px";
     container.style.padding = "10px";
     container.style.display = "flex";
@@ -396,7 +396,7 @@ export class SpreadsheetApp {
     for (const reply of comment.replies) {
       const replyEl = document.createElement("div");
       replyEl.style.paddingLeft = "10px";
-      replyEl.style.borderLeft = "2px solid #e5e7eb";
+      replyEl.style.borderLeft = "2px solid var(--border)";
 
       const replyAuthor = document.createElement("div");
       replyAuthor.textContent = reply.author.name || "Unknown";
@@ -850,7 +850,7 @@ export class SpreadsheetApp {
     const height = endRect.y + endRect.height - startRect.y;
 
     ctx.save();
-    ctx.strokeStyle = "#f97316";
+    ctx.strokeStyle = resolveCssVar("--warning", { fallback: "CanvasText" });
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 3]);
     ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
