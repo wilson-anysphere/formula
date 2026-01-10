@@ -189,13 +189,19 @@ class WorkbookModel {
  */
 export class DocumentController {
   /**
-   * @param {{ engine?: Engine, mergeWindowMs?: number }} [options]
+   * @param {{
+   *   engine?: Engine,
+   *   mergeWindowMs?: number,
+   *   canEditCell?: (cell: { sheetId: string, row: number, col: number }) => boolean
+   * }} [options]
    */
   constructor(options = {}) {
     /** @type {Engine | null} */
     this.engine = options.engine ?? null;
 
     this.mergeWindowMs = options.mergeWindowMs ?? 1000;
+
+    this.canEditCell = typeof options.canEditCell === "function" ? options.canEditCell : null;
 
     this.model = new WorkbookModel();
 
@@ -796,6 +802,13 @@ export class DocumentController {
    */
   #applyUserDeltas(deltas, options) {
     if (!deltas || deltas.length === 0) return;
+
+    if (this.canEditCell) {
+      deltas = deltas.filter((delta) =>
+        this.canEditCell({ sheetId: delta.sheetId, row: delta.row, col: delta.col })
+      );
+      if (deltas.length === 0) return;
+    }
 
     this.#applyDeltas(deltas, { recalc: this.batchDepth === 0, emitChange: true });
 

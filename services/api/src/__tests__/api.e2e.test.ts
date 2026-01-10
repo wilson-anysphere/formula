@@ -186,5 +186,117 @@ describe("API e2e: auth + RBAC + sync token", () => {
 
     expect(forbiddenInvite.statusCode).toBe(403);
   });
-});
 
+  it("creates share links (public/private), redeems public link, and exposes permissions", async () => {
+    const ownerRes = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "link-owner@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "Link Org"
+      }
+    });
+    const ownerCookie = extractCookie(ownerRes.headers["set-cookie"]);
+    const orgId = (ownerRes.json() as any).organization.id as string;
+
+    const privateUserRes = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "private-user@example.com",
+        password: "password1234",
+        name: "Private"
+      }
+    });
+    const privateUserCookie = extractCookie(privateUserRes.headers["set-cookie"]);
+
+    const publicUserRes = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "public-user@example.com",
+        password: "password1234",
+        name: "Public"
+      }
+    });
+    const publicUserCookie = extractCookie(publicUserRes.headers["set-cookie"]);
+    const publicUserId = (publicUserRes.json() as any).user.id as string;
+
+    const createDoc = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { cookie: ownerCookie },
+      payload: { orgId, title: "Shared Doc" }
+    });
+    const docId = (createDoc.json() as any).document.id as string;
+
+    const privateLink = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/share-links`,
+      headers: { cookie: ownerCookie },
+      payload: { visibility: "private", role: "viewer" }
+    });
+    expect(privateLink.statusCode).toBe(200);
+    const privateToken = (privateLink.json() as any).shareLink.token as string;
+
+    const privateRedeem = await app.inject({
+      method: "POST",
+      url: `/share-links/${privateToken}/redeem`,
+      headers: { cookie: privateUserCookie }
+    });
+    expect(privateRedeem.statusCode).toBe(403);
+
+    const publicLink = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/share-links`,
+      headers: { cookie: ownerCookie },
+      payload: { visibility: "public", role: "viewer" }
+    });
+    expect(publicLink.statusCode).toBe(200);
+    const publicToken = (publicLink.json() as any).shareLink.token as string;
+
+    const publicRedeem = await app.inject({
+      method: "POST",
+      url: `/share-links/${publicToken}/redeem`,
+      headers: { cookie: publicUserCookie }
+    });
+    expect(publicRedeem.statusCode).toBe(200);
+    expect((publicRedeem.json() as any).role).toBe("viewer");
+
+    const rangePerm = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/range-permissions`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        sheetName: "Sheet1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        permissionType: "read",
+        allowedUserEmail: "public-user@example.com"
+      }
+    });
+    expect(rangePerm.statusCode).toBe(200);
+
+    const permissions = await app.inject({
+      method: "GET",
+      url: `/docs/${docId}/permissions`,
+      headers: { cookie: publicUserCookie }
+    });
+    expect(permissions.statusCode).toBe(200);
+    const body = permissions.json() as any;
+    expect(body.permissions.role).toBe("viewer");
+    expect(body.permissions.rangeRestrictions.length).toBe(1);
+    expect(body.permissions.rangeRestrictions[0]).toMatchObject({
+      sheetName: "Sheet1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 0,
+      endCol: 0
+    });
+    expect(body.permissions.rangeRestrictions[0].readAllowlist).toContain(publicUserId);
+  });
+});

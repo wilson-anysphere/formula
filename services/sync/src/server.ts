@@ -13,6 +13,10 @@ export interface SyncServer {
   close: () => Promise<void>;
 }
 
+function canEdit(role: unknown): boolean {
+  return role === "owner" || role === "admin" || role === "editor";
+}
+
 function unauthorized(socket: Duplex): void {
   socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
   socket.destroy();
@@ -65,6 +69,16 @@ export function createSyncServer(config: SyncServerConfig): SyncServer {
     ws.on("message", (data: RawData) => {
       // Placeholder: this is a token-gated transport. The CRDT sync protocol
       // (Task 24) can replace this echo behavior.
+      try {
+        const text = data.toString();
+        const parsed = JSON.parse(text) as any;
+        if (parsed?.type === "cell:update" && !canEdit(context.role)) {
+          ws.send(JSON.stringify({ type: "error", error: "forbidden" }));
+          return;
+        }
+      } catch {
+        // Not JSON, or unparseable. Leave the message unchanged.
+      }
       ws.send(data);
     });
   });

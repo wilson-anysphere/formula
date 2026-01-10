@@ -9,6 +9,28 @@ import { signSyncToken } from "../sync/token";
 import { withTransaction } from "../db/tx";
 import { requireAuth } from "./auth";
 
+type ShareLinkRole = Exclude<DocumentRole, "owner" | "admin">;
+type ShareLinkVisibility = "public" | "private";
+
+function roleRank(role: DocumentRole): number {
+  switch (role) {
+    case "owner":
+      return 5;
+    case "admin":
+      return 4;
+    case "editor":
+      return 3;
+    case "commenter":
+      return 2;
+    case "viewer":
+      return 1;
+  }
+}
+
+function hashShareToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
 async function getDocMembership(
   request: FastifyRequest,
   docId: string
@@ -246,6 +268,188 @@ export function registerDocRoutes(app: FastifyInstance): void {
     return reply.send({ token, expiresAt: expiresAt.toISOString() });
   });
 
+  const ShareLinkBody = z
+    .object({
+      visibility: z.enum(["public", "private"]).default("private"),
+      role: z.enum(["editor", "commenter", "viewer"]).default("viewer"),
+      expiresInSeconds: z.number().int().positive().optional(),
+      expiresAt: z.string().datetime().optional()
+    })
+    .refine((value) => !(value.expiresAt && value.expiresInSeconds), {
+      message: "expiresAt and expiresInSeconds are mutually exclusive"
+    });
+
+  app.post("/docs/:docId/share-links", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "share")) return reply.code(403).send({ error: "forbidden" });
+
+    const parsed = ShareLinkBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    const settings = await app.db.query(
+      "SELECT allow_public_links FROM org_settings WHERE org_id = $1",
+      [membership.orgId]
+    );
+    const allowPublicLinks = settings.rowCount === 1 ? Boolean((settings.rows[0] as any).allow_public_links) : true;
+    if (parsed.data.visibility === "public" && !allowPublicLinks) {
+      return reply.code(403).send({ error: "public_links_disabled" });
+    }
+
+    const now = new Date();
+    const expiresAt = parsed.data.expiresAt
+      ? new Date(parsed.data.expiresAt)
+      : parsed.data.expiresInSeconds
+        ? new Date(now.getTime() + parsed.data.expiresInSeconds * 1000)
+        : null;
+
+    const token = crypto.randomBytes(32).toString("base64url");
+    const tokenHash = hashShareToken(token);
+    const id = crypto.randomUUID();
+
+    await app.db.query(
+      `
+        INSERT INTO document_share_links (id, document_id, token_hash, visibility, role, created_by, expires_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+      `,
+      [id, docId, tokenHash, parsed.data.visibility, parsed.data.role, request.user!.id, expiresAt]
+    );
+
+    await writeAuditEvent(app.db, {
+      orgId: membership.orgId,
+      userId: request.user!.id,
+      userEmail: request.user!.email,
+      eventType: "sharing.link_created",
+      resourceType: "document",
+      resourceId: docId,
+      sessionId: request.session?.id,
+      success: true,
+      details: { visibility: parsed.data.visibility, role: parsed.data.role, expiresAt: expiresAt?.toISOString() ?? null },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request)
+    });
+
+    return reply.send({
+      shareLink: {
+        id,
+        token,
+        visibility: parsed.data.visibility as ShareLinkVisibility,
+        role: parsed.data.role as ShareLinkRole,
+        expiresAt: expiresAt?.toISOString() ?? null
+      }
+    });
+  });
+
+  app.get("/docs/:docId/share-links", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "share")) return reply.code(403).send({ error: "forbidden" });
+
+    const links = await app.db.query(
+      `
+        SELECT id, visibility, role, created_at, expires_at, revoked_at
+        FROM document_share_links
+        WHERE document_id = $1
+        ORDER BY created_at DESC
+      `,
+      [docId]
+    );
+
+    return reply.send({ shareLinks: links.rows });
+  });
+
+  app.post("/share-links/:token/redeem", { preHandler: requireAuth }, async (request, reply) => {
+    const token = (request.params as { token: string }).token;
+    if (!token) return reply.code(400).send({ error: "invalid_request" });
+
+    const tokenHash = hashShareToken(token);
+    const linkRes = await app.db.query(
+      `
+        SELECT l.id, l.document_id, l.visibility, l.role, l.expires_at, l.revoked_at, d.org_id
+        FROM document_share_links l
+        JOIN documents d ON d.id = l.document_id
+        WHERE l.token_hash = $1
+        LIMIT 1
+      `,
+      [tokenHash]
+    );
+
+    if (linkRes.rowCount !== 1) return reply.code(404).send({ error: "share_link_not_found" });
+
+    const linkRow = linkRes.rows[0] as any;
+    const expiresAt = linkRow.expires_at ? new Date(linkRow.expires_at as string) : null;
+    if (linkRow.revoked_at || (expiresAt && Date.now() > expiresAt.getTime())) {
+      return reply.code(404).send({ error: "share_link_not_found" });
+    }
+
+    const docId = linkRow.document_id as string;
+    const orgId = linkRow.org_id as string;
+    const visibility = linkRow.visibility as ShareLinkVisibility;
+    const linkRole = linkRow.role as ShareLinkRole;
+
+    const orgSettings = await app.db.query(
+      "SELECT allow_external_sharing FROM org_settings WHERE org_id = $1",
+      [orgId]
+    );
+    const allowExternalSharing =
+      orgSettings.rowCount === 1 ? Boolean((orgSettings.rows[0] as any).allow_external_sharing) : true;
+
+    const orgMembership = await app.db.query(
+      "SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2",
+      [orgId, request.user!.id]
+    );
+
+    if (visibility === "private" || !allowExternalSharing) {
+      if (orgMembership.rowCount !== 1) return reply.code(403).send({ error: "forbidden" });
+    } else if (orgMembership.rowCount !== 1) {
+      await app.db.query(
+        "INSERT INTO org_members (org_id, user_id, role) VALUES ($1,$2,'member')",
+        [orgId, request.user!.id]
+      );
+    }
+
+    const existingDocMember = await app.db.query(
+      "SELECT role FROM document_members WHERE document_id = $1 AND user_id = $2",
+      [docId, request.user!.id]
+    );
+
+    const nextRole: DocumentRole =
+      existingDocMember.rowCount === 1 &&
+      roleRank(existingDocMember.rows[0].role as DocumentRole) > roleRank(linkRole)
+        ? (existingDocMember.rows[0].role as DocumentRole)
+        : linkRole;
+
+    await withTransaction(app.db, async (client) => {
+      await client.query(
+        `
+          INSERT INTO document_members (document_id, user_id, role, created_by)
+          VALUES ($1,$2,$3,$4)
+          ON CONFLICT (document_id, user_id)
+          DO UPDATE SET role = EXCLUDED.role
+        `,
+        [docId, request.user!.id, nextRole, request.user!.id]
+      );
+    });
+
+    await writeAuditEvent(app.db, {
+      orgId,
+      userId: request.user!.id,
+      userEmail: request.user!.email,
+      eventType: "sharing.added",
+      resourceType: "document",
+      resourceId: docId,
+      sessionId: request.session?.id,
+      success: true,
+      details: { via: "share-link", shareLinkId: linkRow.id, role: nextRole },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request)
+    });
+
+    return reply.send({ ok: true, documentId: docId, role: nextRole });
+  });
+
   const RangePermissionBody = z.object({
     sheetName: z.string().min(1),
     startRow: z.number().int().nonnegative(),
@@ -327,5 +531,60 @@ export function registerDocRoutes(app: FastifyInstance): void {
       [docId]
     );
     return { rangePermissions: rows.rows };
+  });
+
+  app.get("/docs/:docId/permissions", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+
+    const rows = await app.db.query(
+      `
+        SELECT sheet_name, start_row, start_col, end_row, end_col, permission_type, allowed_user_id
+        FROM document_range_permissions
+        WHERE document_id = $1
+      `,
+      [docId]
+    );
+
+    type Restriction = {
+      sheetName: string;
+      startRow: number;
+      startCol: number;
+      endRow: number;
+      endCol: number;
+      readAllowlist: string[];
+      editAllowlist: string[];
+    };
+
+    const byRange = new Map<string, Restriction>();
+    const keyFor = (r: any) =>
+      `${r.sheet_name}:${r.start_row}:${r.start_col}:${r.end_row}:${r.end_col}`;
+
+    for (const row of rows.rows as any[]) {
+      const key = keyFor(row);
+      let restriction = byRange.get(key);
+      if (!restriction) {
+        restriction = {
+          sheetName: row.sheet_name as string,
+          startRow: Number(row.start_row),
+          startCol: Number(row.start_col),
+          endRow: Number(row.end_row),
+          endCol: Number(row.end_col),
+          readAllowlist: [],
+          editAllowlist: []
+        };
+        byRange.set(key, restriction);
+      }
+      if (row.permission_type === "read") restriction.readAllowlist.push(row.allowed_user_id as string);
+      if (row.permission_type === "edit") restriction.editAllowlist.push(row.allowed_user_id as string);
+    }
+
+    return reply.send({
+      permissions: {
+        role: membership.role,
+        rangeRestrictions: Array.from(byRange.values())
+      }
+    });
   });
 }
