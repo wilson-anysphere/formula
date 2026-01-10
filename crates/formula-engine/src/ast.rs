@@ -80,26 +80,34 @@ pub struct LocaleConfig {
     pub arg_separator: char,
     pub array_col_separator: char,
     pub array_row_separator: char,
+    /// Thousands/grouping separator that may appear in numeric literals (e.g. `1.234,56` in
+    /// `de-DE`). This is only used by the lexer to *accept* localized input; the parser does not
+    /// preserve grouping separators in the token/AST representation.
+    pub thousands_separator: Option<char>,
 }
 
 impl LocaleConfig {
     #[must_use]
-    pub fn en_us() -> Self {
+    pub const fn en_us() -> Self {
         Self {
             decimal_separator: '.',
             arg_separator: ',',
             array_col_separator: ',',
             array_row_separator: ';',
+            // The en-US thousands separator (`,`) collides with the argument separator, so we
+            // disable it during lexing to avoid ambiguity.
+            thousands_separator: None,
         }
     }
 
     #[must_use]
-    pub fn de_de() -> Self {
+    pub const fn de_de() -> Self {
         Self {
             decimal_separator: ',',
             arg_separator: ';',
             array_col_separator: '\\',
             array_row_separator: ';',
+            thousands_separator: Some('.'),
         }
     }
 }

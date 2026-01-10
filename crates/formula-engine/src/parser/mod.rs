@@ -494,9 +494,16 @@ impl<'a> Lexer<'a> {
             if is_digit(ch) {
                 self.bump();
                 out.push(ch);
-            } else {
-                break;
+                continue;
             }
+
+            // Locale-specific grouping separators inside the integer portion of the literal.
+            if Some(ch) == self.locale.thousands_separator && !out.is_empty() && self.peek_next_is_digit() {
+                self.bump();
+                continue;
+            }
+
+            break;
         }
         if self.peek_char() == Some(self.locale.decimal_separator) {
             self.bump();

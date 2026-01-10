@@ -1,4 +1,6 @@
 use crate::eval::FormulaParseError;
+use crate::parser::{lex, Token, TokenKind};
+use crate::LocaleConfig;
 
 use super::FormulaLocale;
 
@@ -6,8 +8,9 @@ use super::FormulaLocale;
 ///
 /// Canonical form uses:
 /// - English function names (e.g. `SUM`)
-/// - `,` as argument separator
+/// - `,` as list/argument separator (and union operator)
 /// - `.` as decimal separator
+/// - en-US array separators (`,` columns, `;` rows)
 ///
 /// The input may include an optional leading `=`, which is preserved in the output.
 pub fn canonicalize_formula(formula: &str, locale: &FormulaLocale) -> Result<String, FormulaParseError> {
@@ -32,71 +35,52 @@ fn translate_formula(
     locale: &FormulaLocale,
     dir: Direction,
 ) -> Result<String, FormulaParseError> {
+    // Match the previous implementation: accept leading whitespace and keep an optional leading `=`.
     let trimmed = formula.trim_start();
-    let mut pos = 0usize;
-    let mut out = String::with_capacity(trimmed.len());
+    let (has_equals, expr_src) = if let Some(rest) = trimmed.strip_prefix('=') {
+        (true, rest)
+    } else {
+        (false, trimmed)
+    };
 
-    if trimmed.as_bytes().first() == Some(&b'=') {
+    let canonical_config = LocaleConfig::en_us();
+    let (src_config, dst_config) = match dir {
+        Direction::ToCanonical => (&locale.config, &canonical_config),
+        Direction::ToLocalized => (&canonical_config, &locale.config),
+    };
+
+    let tokens = lex(expr_src, src_config).map_err(map_lex_error)?;
+
+    let mut out = String::with_capacity(trimmed.len());
+    if has_equals {
         out.push('=');
-        pos += 1;
     }
 
-    while pos < trimmed.len() {
-        let Some(ch) = trimmed[pos..].chars().next() else {
-            break;
-        };
-
-        if ch.is_whitespace() {
-            out.push(ch);
-            pos += ch.len_utf8();
-            continue;
-        }
-
-        match ch {
-            '"' => {
-                pos = copy_quoted_segment(trimmed, pos, '"', &mut out)?;
+    for (idx, tok) in tokens.iter().enumerate() {
+        match &tok.kind {
+            TokenKind::Eof => break,
+            TokenKind::Whitespace(raw) | TokenKind::Intersect(raw) => out.push_str(raw),
+            TokenKind::String(_) | TokenKind::QuotedIdent(_) => {
+                out.push_str(token_slice(expr_src, tok)?);
             }
-            '\'' => {
-                pos = copy_quoted_segment(trimmed, pos, '\'', &mut out)?;
+            TokenKind::Number(raw) => {
+                out.push_str(&translate_number(raw, src_config.decimal_separator, dst_config.decimal_separator));
             }
-            _ if is_number_start(trimmed, pos, locale, dir) => {
-                let (next, rendered) = scan_number(trimmed, pos, locale, dir)?;
-                out.push_str(&rendered);
-                pos = next;
+            TokenKind::Ident(raw) if is_function_ident(&tokens, idx) => match dir {
+                Direction::ToCanonical => out.push_str(&locale.canonical_function_name(raw)),
+                Direction::ToLocalized => out.push_str(&locale.localized_function_name(raw)),
+            },
+            TokenKind::ArgSep | TokenKind::Union => {
+                out.push(dst_config.arg_separator);
             }
-            _ if is_ident_start(ch) => {
-                let (next, ident) = scan_identifier(trimmed, pos);
-                let is_fn = is_function_name(trimmed, next);
-                if is_fn {
-                    match dir {
-                        Direction::ToCanonical => out.push_str(&locale.canonical_function_name(&ident)),
-                        Direction::ToLocalized => {
-                            out.push_str(&locale.localized_function_name(&ident))
-                        }
-                    }
-                } else {
-                    out.push_str(&ident);
-                }
-                pos = next;
+            TokenKind::ArrayRowSep => {
+                out.push(dst_config.array_row_separator);
+            }
+            TokenKind::ArrayColSep => {
+                out.push(dst_config.array_col_separator);
             }
             _ => {
-                match dir {
-                    Direction::ToCanonical => {
-                        if ch == locale.argument_separator {
-                            out.push(',');
-                        } else {
-                            out.push(ch);
-                        }
-                    }
-                    Direction::ToLocalized => {
-                        if ch == ',' {
-                            out.push(locale.argument_separator);
-                        } else {
-                            out.push(ch);
-                        }
-                    }
-                }
-                pos += ch.len_utf8();
+                out.push_str(token_slice(expr_src, tok)?);
             }
         }
     }
@@ -104,149 +88,39 @@ fn translate_formula(
     Ok(out)
 }
 
-fn is_ident_start(ch: char) -> bool {
-    ch.is_ascii_alphabetic() || ch == '_' || ch == '$'
-}
-
-fn scan_identifier(input: &str, start: usize) -> (usize, String) {
-    let mut pos = start;
-    while let Some(ch) = input[pos..].chars().next() {
-        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '$' {
-            pos += ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-    (pos, input[start..pos].to_string())
-}
-
-fn is_function_name(input: &str, mut pos: usize) -> bool {
-    while let Some(ch) = input[pos..].chars().next() {
-        if ch.is_whitespace() {
-            pos += ch.len_utf8();
-            continue;
-        }
-        return ch == '(';
-    }
-    false
-}
-
-fn is_number_start(input: &str, pos: usize, locale: &FormulaLocale, dir: Direction) -> bool {
-    let ch = input[pos..].chars().next().unwrap();
-    if ch.is_ascii_digit() {
-        return true;
-    }
-
-    let decimal = match dir {
-        Direction::ToCanonical => locale.decimal_separator,
-        Direction::ToLocalized => '.',
-    };
-
-    if ch != decimal {
+fn is_function_ident(tokens: &[Token], idx: usize) -> bool {
+    if !matches!(tokens.get(idx).map(|t| &t.kind), Some(TokenKind::Ident(_))) {
         return false;
     }
 
-    let next_pos = pos + ch.len_utf8();
-    input
-        .get(next_pos..)
-        .and_then(|s| s.chars().next())
-        .is_some_and(|next| next.is_ascii_digit())
-}
-
-fn scan_number(
-    input: &str,
-    start: usize,
-    locale: &FormulaLocale,
-    dir: Direction,
-) -> Result<(usize, String), FormulaParseError> {
-    let decimal_in = match dir {
-        Direction::ToCanonical => locale.decimal_separator,
-        Direction::ToLocalized => '.',
-    };
-
-    let decimal_out = match dir {
-        Direction::ToCanonical => '.',
-        Direction::ToLocalized => locale.decimal_separator,
-    };
-
-    let thousands = match dir {
-        Direction::ToCanonical => locale.numeric_thousands_separator(),
-        // Canonical formulas do not contain grouping separators.
-        Direction::ToLocalized => None,
-    };
-
-    let mut pos = start;
-    let mut out = String::new();
-    let mut seen_decimal = false;
-
-    while let Some(ch) = input.get(pos..).and_then(|s| s.chars().next()) {
-        match ch {
-            '0'..='9' => {
-                out.push(ch);
-                pos += 1;
-            }
-            'e' | 'E' => {
-                out.push(ch);
-                pos += 1;
-                if matches!(input.get(pos..).and_then(|s| s.chars().next()), Some('+') | Some('-')) {
-                    let sign = input[pos..].chars().next().unwrap();
-                    out.push(sign);
-                    pos += 1;
-                }
-                // Consume exponent digits.
-                while matches!(input.get(pos..).and_then(|s| s.chars().next()), Some(d) if d.is_ascii_digit())
-                {
-                    out.push(input[pos..].chars().next().unwrap());
-                    pos += 1;
-                }
-            }
-            _ if Some(ch) == thousands => {
-                pos += ch.len_utf8();
-            }
-            _ if ch == decimal_in && !seen_decimal => {
-                out.push(decimal_out);
-                seen_decimal = true;
-                pos += ch.len_utf8();
-            }
-            _ => break,
-        }
+    let mut j = idx + 1;
+    while matches!(tokens.get(j).map(|t| &t.kind), Some(TokenKind::Whitespace(_))) {
+        j += 1;
     }
 
-    Ok((pos, out))
+    matches!(tokens.get(j).map(|t| &t.kind), Some(TokenKind::LParen))
 }
 
-fn copy_quoted_segment(
-    input: &str,
-    start: usize,
-    quote: char,
-    out: &mut String,
-) -> Result<usize, FormulaParseError> {
-    // Copy opening quote.
-    out.push(quote);
-    let mut pos = start + quote.len_utf8();
-
-    loop {
-        let Some(ch) = input.get(pos..).and_then(|s| s.chars().next()) else {
-            return Err(FormulaParseError::UnexpectedEof);
-        };
-
-        out.push(ch);
-        pos += ch.len_utf8();
-
-        if ch != quote {
-            continue;
-        }
-
-        // Escaped quote ("" or '') stays within the quoted segment.
-        if input.get(pos..).and_then(|s| s.chars().next()) == Some(quote) {
-            out.push(quote);
-            pos += quote.len_utf8();
-            continue;
-        }
-
-        break;
+fn translate_number(raw: &str, decimal_in: char, decimal_out: char) -> String {
+    if decimal_in == decimal_out {
+        return raw.to_string();
     }
+    raw.chars()
+        .map(|ch| if ch == decimal_in { decimal_out } else { ch })
+        .collect()
+}
 
-    Ok(pos)
+fn token_slice<'a>(src: &'a str, tok: &Token) -> Result<&'a str, FormulaParseError> {
+    src.get(tok.span.start..tok.span.end)
+        .ok_or_else(|| FormulaParseError::UnexpectedToken("invalid token span".to_string()))
+}
+
+fn map_lex_error(err: crate::ParseError) -> FormulaParseError {
+    // The legacy translation API uses `FormulaParseError`; keep the mapping coarse.
+    if err.message.to_ascii_lowercase().contains("unterminated") {
+        FormulaParseError::UnexpectedEof
+    } else {
+        FormulaParseError::UnexpectedToken(err.message)
+    }
 }
 
