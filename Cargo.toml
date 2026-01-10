@@ -1,4 +1,3 @@
 [workspace]
-members = ["crates/formula-model"]
 resolver = "2"
-
+members = ["crates/formula-model", "crates/xlsx-diff"]
