@@ -104,6 +104,7 @@ fn fill_repeats_formulas_and_updates_relative_references() {
 #[test]
 fn structural_edits_update_sheet_qualified_references() {
     let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 0.0).unwrap();
     engine
         .set_cell_formula("Other", "A1", "=Sheet1!A1")
         .unwrap();
@@ -118,4 +119,3 @@ fn structural_edits_update_sheet_qualified_references() {
 
     assert_eq!(engine.get_cell_formula("Other", "A1"), Some("=Sheet1!A2"));
 }
-

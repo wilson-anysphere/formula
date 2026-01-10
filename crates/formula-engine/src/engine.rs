@@ -71,12 +71,20 @@ struct Sheet {
 #[derive(Debug, Default, Clone)]
 struct Workbook {
     sheets: Vec<Sheet>,
+    sheet_names: Vec<String>,
     sheet_name_to_id: HashMap<String, SheetId>,
 }
 
 impl Workbook {
+    fn sheet_key(name: &str) -> String {
+        // Excel treats sheet names as case-insensitive. Use a normalized lookup key while
+        // preserving the original display name.
+        name.to_ascii_uppercase()
+    }
+
     fn ensure_sheet(&mut self, name: &str) -> SheetId {
-        if let Some(id) = self.sheet_name_to_id.get(name).copied() {
+        let key = Self::sheet_key(name);
+        if let Some(id) = self.sheet_name_to_id.get(&key).copied() {
             return id;
         }
         let id = self.sheets.len();
@@ -84,12 +92,14 @@ impl Workbook {
             cells: HashMap::new(),
             tables: Vec::new(),
         });
-        self.sheet_name_to_id.insert(name.to_string(), id);
+        self.sheet_names.push(name.to_string());
+        self.sheet_name_to_id.insert(key, id);
         id
     }
 
     fn sheet_id(&self, name: &str) -> Option<SheetId> {
-        self.sheet_name_to_id.get(name).copied()
+        let key = Self::sheet_key(name);
+        self.sheet_name_to_id.get(&key).copied()
     }
 
     fn get_cell(&self, key: CellKey) -> Option<&Cell> {
@@ -854,7 +864,11 @@ impl Engine {
     fn compile_expr(&mut self, expr: &Expr<String>, current_sheet: SheetId) -> CompiledExpr {
         let mut map = |sref: &SheetReference<String>| match sref {
             SheetReference::Current => SheetReference::Sheet(current_sheet),
-            SheetReference::Sheet(name) => SheetReference::Sheet(self.workbook.ensure_sheet(name)),
+            SheetReference::Sheet(name) => self
+                .workbook
+                .sheet_id(name)
+                .map(SheetReference::Sheet)
+                .unwrap_or_else(|| SheetReference::External(name.clone())),
             SheetReference::External(wb) => SheetReference::External(wb.clone()),
         };
         expr.map_sheets(&mut map)
@@ -1091,9 +1105,11 @@ impl Engine {
 
 fn sheet_names_by_id(workbook: &Workbook) -> HashMap<SheetId, String> {
     workbook
-        .sheet_name_to_id
+        .sheet_names
         .iter()
-        .map(|(name, id)| (*id, name.clone()))
+        .cloned()
+        .enumerate()
+        .map(|(id, name)| (id, name))
         .collect()
 }
 

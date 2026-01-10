@@ -11,6 +11,52 @@ fn model_to_addr(cell: CellRef) -> CellAddr {
     CellAddr { row: cell.row, col: cell.col }
 }
 
+fn column_index_ci(table: &Table, name: &str) -> Option<u32> {
+    table
+        .columns
+        .iter()
+        .position(|c| c.name.eq_ignore_ascii_case(name))
+        .map(|idx| idx as u32)
+}
+
+fn column_range_in_area_ci(table: &Table, column_name: &str, area: TableArea) -> Option<Range> {
+    let r = table.range;
+    let col_offset = column_index_ci(table, column_name)?;
+    let col = r.start.col + col_offset;
+
+    match area {
+        TableArea::Headers => table.header_range().map(|hr| {
+            Range::new(
+                CellRef::new(hr.start.row, col),
+                CellRef::new(hr.end.row, col),
+            )
+        }),
+        TableArea::Totals => table.totals_range().map(|tr| {
+            Range::new(
+                CellRef::new(tr.start.row, col),
+                CellRef::new(tr.end.row, col),
+            )
+        }),
+        TableArea::Data => table.data_range().map(|dr| {
+            Range::new(
+                CellRef::new(dr.start.row, col),
+                CellRef::new(dr.end.row, col),
+            )
+        }),
+        TableArea::All => Some(Range::new(CellRef::new(r.start.row, col), CellRef::new(r.end.row, col))),
+    }
+}
+
+fn cell_for_this_row_ci(table: &Table, current_cell: CellRef, column_name: &str) -> Option<CellRef> {
+    let r = table.range;
+    let data_range = table.data_range()?;
+    if !data_range.contains(current_cell) {
+        return None;
+    }
+    let col_offset = column_index_ci(table, column_name)?;
+    Some(CellRef::new(current_cell.row, r.start.col + col_offset))
+}
+
 /// Resolve a structured reference into a concrete `(sheet_id, start, end)` range.
 ///
 /// The caller provides `tables_by_sheet` indexed by `sheet_id`.
@@ -42,7 +88,9 @@ fn find_table<'a>(
 ) -> Result<(usize, &'a Table), String> {
     if let Some(name) = &sref.table_name {
         for (sheet_id, tables) in tables_by_sheet.iter().enumerate() {
-            if let Some(table) = tables.iter().find(|t| t.name == *name) {
+            if let Some(table) = tables.iter().find(|t| {
+                t.name.eq_ignore_ascii_case(name) || t.display_name.eq_ignore_ascii_case(name)
+            }) {
                 return Ok((sheet_id, table));
             }
         }
@@ -80,18 +128,13 @@ fn resolve_area(table: &Table, area: TableArea, columns: &StructuredColumns) -> 
             Ok((model_to_addr(range.start), model_to_addr(range.end)))
         }
         StructuredColumns::Single(name) => {
-            let range = table
-                .column_range_in_area(name, area)
+            let range = column_range_in_area_ci(table, name, area)
                 .ok_or_else(|| format!("unknown column '{name}'"))?;
             Ok((model_to_addr(range.start), model_to_addr(range.end)))
         }
         StructuredColumns::Range { start, end } => {
-            let start_idx = table
-                .column_index(start)
-                .ok_or_else(|| format!("unknown column '{start}'"))?;
-            let end_idx = table
-                .column_index(end)
-                .ok_or_else(|| format!("unknown column '{end}'"))?;
+            let start_idx = column_index_ci(table, start).ok_or_else(|| format!("unknown column '{start}'"))?;
+            let end_idx = column_index_ci(table, end).ok_or_else(|| format!("unknown column '{end}'"))?;
             let (left_idx, right_idx) = if start_idx <= end_idx {
                 (start_idx, end_idx)
             } else {
@@ -143,19 +186,14 @@ fn resolve_this_row(
             CellAddr { row, col: table.range.end.col },
         )),
         StructuredColumns::Single(name) => {
-            let cell = table
-                .cell_for_this_row(addr_to_model(origin_cell), name)
+            let cell = cell_for_this_row_ci(table, addr_to_model(origin_cell), name)
                 .ok_or_else(|| format!("unknown column '{name}'"))?;
             let addr = model_to_addr(cell);
             Ok((addr, addr))
         }
         StructuredColumns::Range { start, end } => {
-            let start_idx = table
-                .column_index(start)
-                .ok_or_else(|| format!("unknown column '{start}'"))?;
-            let end_idx = table
-                .column_index(end)
-                .ok_or_else(|| format!("unknown column '{end}'"))?;
+            let start_idx = column_index_ci(table, start).ok_or_else(|| format!("unknown column '{start}'"))?;
+            let end_idx = column_index_ci(table, end).ok_or_else(|| format!("unknown column '{end}'"))?;
             let (left_idx, right_idx) = if start_idx <= end_idx {
                 (start_idx, end_idx)
             } else {
@@ -229,4 +267,3 @@ mod tests {
         assert_eq!(end, CellAddr { row: 2, col: 1 });
     }
 }
-
