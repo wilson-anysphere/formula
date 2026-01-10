@@ -670,7 +670,18 @@ function rangesIntersect(
   return !(a.endRow < b.startRow || a.startRow > b.endRow || a.endCol < b.startCol || a.startCol > b.endCol);
 }
 
-type PivotAggregation = "sum" | "count" | "average" | "min" | "max";
+type PivotAggregation =
+  | "sum"
+  | "count"
+  | "average"
+  | "min"
+  | "max"
+  | "product"
+  | "countnumbers"
+  | "stddev"
+  | "stddevp"
+  | "var"
+  | "varp";
 
 interface PivotValueSpec {
   field: string;
@@ -688,44 +699,99 @@ interface AggState {
   count: number;
   countNumbers: number;
   sum: number;
+  product: number;
   min: number;
   max: number;
+  mean: number;
+  m2: number;
 }
 
 function initAggState(): AggState {
-  return { count: 0, countNumbers: 0, sum: 0, min: Infinity, max: -Infinity };
+  return {
+    count: 0,
+    countNumbers: 0,
+    sum: 0,
+    product: 1,
+    min: Infinity,
+    max: -Infinity,
+    mean: 0,
+    m2: 0
+  };
 }
 
 function updateAggState(state: AggState, value: CellScalar) {
   if (value == null) return;
   state.count += 1;
   if (typeof value !== "number" || !Number.isFinite(value)) return;
-  state.countNumbers += 1;
+  const nextCount = state.countNumbers + 1;
+  state.countNumbers = nextCount;
   state.sum += value;
+  state.product *= value;
   state.min = Math.min(state.min, value);
   state.max = Math.max(state.max, value);
+
+  const delta = value - state.mean;
+  state.mean += delta / nextCount;
+  const delta2 = value - state.mean;
+  state.m2 += delta * delta2;
 }
 
 function mergeAggState(into: AggState, other: AggState) {
   into.count += other.count;
-  into.countNumbers += other.countNumbers;
+  if (other.countNumbers === 0) return;
+  if (into.countNumbers === 0) {
+    into.countNumbers = other.countNumbers;
+    into.sum = other.sum;
+    into.product = other.product;
+    into.min = other.min;
+    into.max = other.max;
+    into.mean = other.mean;
+    into.m2 = other.m2;
+    return;
+  }
+
+  const n1 = into.countNumbers;
+  const n2 = other.countNumbers;
+  const n = n1 + n2;
+  const delta = other.mean - into.mean;
+
+  into.countNumbers = n;
   into.sum += other.sum;
+  into.product *= other.product;
   into.min = Math.min(into.min, other.min);
   into.max = Math.max(into.max, other.max);
+  into.mean = (n1 * into.mean + n2 * other.mean) / n;
+  into.m2 += other.m2 + (delta * delta * n1 * n2) / n;
 }
 
 function finalizeAgg(state: AggState, agg: PivotAggregation): CellScalar {
   switch (agg) {
     case "count":
       return state.count;
+    case "countnumbers":
+      return state.countNumbers;
     case "sum":
       return state.countNumbers > 0 ? state.sum : null;
     case "average":
       return state.countNumbers > 0 ? state.sum / state.countNumbers : null;
+    case "product":
+      return state.countNumbers > 0 ? state.product : null;
     case "min":
       return state.countNumbers > 0 ? state.min : null;
     case "max":
       return state.countNumbers > 0 ? state.max : null;
+    case "var":
+      return state.countNumbers >= 2 ? state.m2 / (state.countNumbers - 1) : null;
+    case "varp":
+      return state.countNumbers > 0 ? state.m2 / state.countNumbers : null;
+    case "stddev": {
+      const variance = state.countNumbers >= 2 ? state.m2 / (state.countNumbers - 1) : null;
+      return variance == null ? null : Math.sqrt(variance);
+    }
+    case "stddevp": {
+      const variance = state.countNumbers > 0 ? state.m2 / state.countNumbers : null;
+      return variance == null ? null : Math.sqrt(variance);
+    }
     default: {
       const exhaustive: never = agg;
       throw new Error(`Unhandled aggregation: ${exhaustive}`);
@@ -745,6 +811,18 @@ function aggLabel(agg: PivotAggregation): string {
       return "Min";
     case "max":
       return "Max";
+    case "product":
+      return "Product";
+    case "countnumbers":
+      return "CountNumbers";
+    case "stddev":
+      return "StdDev";
+    case "stddevp":
+      return "StdDevP";
+    case "var":
+      return "Var";
+    case "varp":
+      return "VarP";
     default: {
       const exhaustive: never = agg;
       return exhaustive;

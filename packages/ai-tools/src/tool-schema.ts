@@ -119,7 +119,7 @@ export type ApplyFormulaColumnParams = z.infer<typeof ApplyFormulaColumnParamsSc
 
 const AggregationSchema = z.preprocess(
   (value) => (typeof value === "string" ? value.toLowerCase() : value),
-  z.enum(["sum", "count", "average", "max", "min"])
+  z.enum(["sum", "count", "average", "max", "min", "product", "countnumbers", "stddev", "stddevp", "var", "varp"])
 );
 
 export const CreatePivotTableParamsSchema = z.object({

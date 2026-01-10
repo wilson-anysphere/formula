@@ -174,4 +174,52 @@ describe("ToolExecutor", () => {
       ["Grand Total", 310, 400, 710]
     ]);
   });
+
+  it("create_pivot_table supports variance/stddev aggregations", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!A1:C5",
+        values: [
+          ["Region", "Product", "Sales"],
+          ["East", "A", 100],
+          ["East", "B", 150],
+          ["West", "A", 200],
+          ["West", "B", 250]
+        ]
+      }
+    });
+
+    const result = await executor.execute({
+      name: "create_pivot_table",
+      parameters: {
+        source_range: "Sheet1!A1:C5",
+        rows: ["Region"],
+        values: [
+          { field: "Sales", aggregation: "varp" },
+          { field: "Sales", aggregation: "stddevp" }
+        ],
+        destination: "Sheet1!E1"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("create_pivot_table");
+
+    const out = workbook
+      .readRange(parseA1Range("Sheet1!E1:G4"))
+      .map((row) => row.map((cell) => cell.value));
+
+    expect(out[0]).toEqual(["Region", "VarP of Sales", "StdDevP of Sales"]);
+    expect(out[1]).toEqual(["East", 625, 25]);
+    expect(out[2]).toEqual(["West", 625, 25]);
+
+    // Grand total is based on all records; check it roughly matches expected values.
+    expect(out[3]?.[0]).toBe("Grand Total");
+    expect(out[3]?.[1]).toBeCloseTo(3125, 10);
+    expect(out[3]?.[2]).toBeCloseTo(Math.sqrt(3125), 10);
+  });
 });
