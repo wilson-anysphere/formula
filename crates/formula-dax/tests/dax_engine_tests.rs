@@ -339,3 +339,29 @@ fn max_respects_filter_propagation() {
     let empty_max = model.evaluate_measure("Max Sale", &empty_filter).unwrap();
     assert_eq!(empty_max, Value::Blank);
 }
+
+#[test]
+fn calculate_supports_column_comparisons() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure("Big Sales", "CALCULATE([Total Sales], Orders[Amount] > 10)")
+        .unwrap();
+
+    let value = model
+        .evaluate_measure("Big Sales", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, 20.0.into());
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    let east_value = model.evaluate_measure("Big Sales", &east_filter).unwrap();
+    assert_eq!(east_value, 20.0.into());
+
+    let west_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "West".into());
+    let west_value = model.evaluate_measure("Big Sales", &west_filter).unwrap();
+    assert_eq!(west_value, Value::Blank);
+}

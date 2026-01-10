@@ -660,20 +660,78 @@ impl DaxEngine {
 
         for arg in filter_args {
             match arg {
-                Expr::BinaryOp {
-                    op: BinaryOp::Equals,
-                    left,
-                    right,
-                } => {
+                Expr::BinaryOp { op, left, right } => {
                     let Expr::ColumnRef { table, column } = left.as_ref() else {
                         return Err(DaxError::Eval(
-                            "CALCULATE filter must be a column equality".into(),
+                            "CALCULATE filter must be a column comparison".into(),
                         ));
                     };
-                    let value = self.eval_scalar(model, right, &new_filter, row_ctx)?;
-                    new_filter
-                        .column_filters
-                        .insert((table.clone(), column.clone()), HashSet::from([value]));
+
+                    let rhs = self.eval_scalar(model, right, &new_filter, row_ctx)?;
+                    let key = (table.clone(), column.clone());
+
+                    match op {
+                        BinaryOp::Equals => {
+                            new_filter.column_filters.insert(key, HashSet::from([rhs]));
+                        }
+                        BinaryOp::NotEquals
+                        | BinaryOp::Less
+                        | BinaryOp::LessEquals
+                        | BinaryOp::Greater
+                        | BinaryOp::GreaterEquals => {
+                            let mut base_filter = new_filter.clone();
+                            base_filter.column_filters.remove(&key);
+                            let candidate_rows = resolve_table_rows(model, &base_filter, table)?;
+
+                            let table_ref = model
+                                .table(table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                            let idx = table_ref.column_idx(column).ok_or_else(|| {
+                                DaxError::UnknownColumn {
+                                    table: table.clone(),
+                                    column: column.clone(),
+                                }
+                            })?;
+
+                            let mut allowed = HashSet::new();
+                            for row in candidate_rows {
+                                let lhs = table_ref
+                                    .value_by_idx(row, idx)
+                                    .cloned()
+                                    .unwrap_or(Value::Blank);
+
+                                let keep = match op {
+                                    BinaryOp::NotEquals => lhs != rhs,
+                                    BinaryOp::Less
+                                    | BinaryOp::LessEquals
+                                    | BinaryOp::Greater
+                                    | BinaryOp::GreaterEquals => {
+                                        let Some(l) = lhs.as_f64() else { continue };
+                                        let Some(r) = rhs.as_f64() else { continue };
+                                        match op {
+                                            BinaryOp::Less => l < r,
+                                            BinaryOp::LessEquals => l <= r,
+                                            BinaryOp::Greater => l > r,
+                                            BinaryOp::GreaterEquals => l >= r,
+                                            _ => unreachable!(),
+                                        }
+                                    }
+                                    _ => unreachable!(),
+                                };
+
+                                if keep {
+                                    allowed.insert(lhs);
+                                }
+                            }
+
+                            new_filter.column_filters.insert(key, allowed);
+                        }
+                        _ => {
+                            return Err(DaxError::Eval(format!(
+                                "unsupported CALCULATE filter operator {op:?}"
+                            )))
+                        }
+                    }
                 }
                 Expr::Call { .. } | Expr::TableName(_) => {
                     let table_filter = self.eval_table(model, arg, &new_filter, row_ctx)?;
