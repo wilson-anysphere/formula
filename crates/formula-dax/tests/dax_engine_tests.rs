@@ -365,3 +365,61 @@ fn calculate_supports_column_comparisons() {
     let west_value = model.evaluate_measure("Big Sales", &west_filter).unwrap();
     assert_eq!(west_value, Value::Blank);
 }
+
+#[test]
+fn if_works_in_calculated_columns() {
+    let mut model = build_model();
+    model
+        .add_calculated_column(
+            "Customers",
+            "IsEast",
+            "IF(Customers[Region] = \"East\", 1, 0)",
+        )
+        .unwrap();
+
+    let customers = model.table("Customers").unwrap();
+    let values: Vec<Value> = (0..customers.row_count())
+        .map(|row| customers.value(row, "IsEast").unwrap().clone())
+        .collect();
+
+    assert_eq!(values, vec![1.into(), 0.into(), 1.into()]);
+}
+
+#[test]
+fn divide_supports_safe_division_and_blanks() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure("Average Sale", "DIVIDE([Total Sales], COUNTROWS(Orders))")
+        .unwrap();
+
+    let east_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+    let east_avg = model
+        .evaluate_measure("Average Sale", &east_filter)
+        .unwrap();
+    assert_eq!(east_avg, (38.0 / 3.0).into());
+
+    let empty_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "Nowhere".into());
+    let empty_avg = model
+        .evaluate_measure("Average Sale", &empty_filter)
+        .unwrap();
+    assert_eq!(empty_avg, Value::Blank);
+}
+
+#[test]
+fn coalesce_returns_first_non_blank_value() {
+    let model = build_model();
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "COALESCE(BLANK(), BLANK(), 7)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 7.into());
+}

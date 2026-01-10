@@ -294,6 +294,60 @@ impl DaxEngine {
             "TRUE" => Ok(Value::Boolean(true)),
             "FALSE" => Ok(Value::Boolean(false)),
             "BLANK" => Ok(Value::Blank),
+            "IF" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return Err(DaxError::Eval("IF expects 2 or 3 arguments".into()));
+                }
+                let cond = self.eval_scalar(model, &args[0], filter, row_ctx)?;
+                let cond = cond.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
+                if cond {
+                    self.eval_scalar(model, &args[1], filter, row_ctx)
+                } else if args.len() == 3 {
+                    self.eval_scalar(model, &args[2], filter, row_ctx)
+                } else {
+                    Ok(Value::Blank)
+                }
+            }
+            "DIVIDE" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return Err(DaxError::Eval("DIVIDE expects 2 or 3 arguments".into()));
+                }
+                let numerator = self.eval_scalar(model, &args[0], filter, row_ctx)?;
+                let denominator = self.eval_scalar(model, &args[1], filter, row_ctx)?;
+                let denominator = denominator.as_f64().unwrap_or(0.0);
+                if denominator == 0.0 {
+                    if args.len() == 3 {
+                        self.eval_scalar(model, &args[2], filter, row_ctx)
+                    } else {
+                        Ok(Value::Blank)
+                    }
+                } else {
+                    let numerator = numerator.as_f64().unwrap_or(0.0);
+                    Ok(Value::from(numerator / denominator))
+                }
+            }
+            "COALESCE" => {
+                if args.is_empty() {
+                    return Err(DaxError::Eval(
+                        "COALESCE expects at least 1 argument".into(),
+                    ));
+                }
+                for arg in args {
+                    let value = self.eval_scalar(model, arg, filter, row_ctx)?;
+                    if !value.is_blank() {
+                        return Ok(value);
+                    }
+                }
+                Ok(Value::Blank)
+            }
+            "NOT" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval("NOT expects 1 argument".into()));
+                };
+                let value = self.eval_scalar(model, arg, filter, row_ctx)?;
+                let b = value.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
+                Ok(Value::Boolean(!b))
+            }
             "SUM" => {
                 let [arg] = args else {
                     return Err(DaxError::Eval("SUM expects 1 argument".into()));
