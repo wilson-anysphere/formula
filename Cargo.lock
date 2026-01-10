@@ -1078,9 +1078,11 @@ name = "formula-xlsx"
 version = "0.1.0"
 dependencies = [
  "cfb 0.10.0",
+ "formula-model",
  "formula-vba",
  "pretty_assertions",
  "quick-xml 0.37.5",
+ "tempfile",
  "thiserror 1.0.69",
  "zip 0.6.6",
 ]

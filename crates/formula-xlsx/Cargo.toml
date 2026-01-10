@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+formula-model = { path = "../formula-model" }
 formula-vba = { path = "../formula-vba" }
 quick-xml = "0.37"
 thiserror = "1"
@@ -12,3 +13,4 @@ zip = "0.6"
 [dev-dependencies]
 cfb = "0.10"
 pretty_assertions = "1"
+tempfile = "3.10"

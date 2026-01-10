@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+pub use crate::rich_text::RichText;
 use crate::{CellRef, ErrorValue};
 
 /// Versioned, JSON-friendly representation of a cell value.
@@ -37,15 +38,6 @@ impl CellValue {
     pub fn is_empty(&self) -> bool {
         matches!(self, CellValue::Empty)
     }
-}
-
-/// Stub representation of rich text.
-///
-/// Excel supports multiple formatting "runs" inside a single cell string.
-/// This struct is a placeholder until full fidelity is implemented.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct RichText {
-    pub text: String,
 }
 
 /// Stub representation of a dynamic array result.

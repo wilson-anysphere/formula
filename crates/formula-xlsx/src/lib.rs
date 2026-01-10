@@ -9,6 +9,7 @@
 
 mod package;
 pub mod pivots;
+pub mod shared_strings;
 pub mod vba;
 
 pub use package::{XlsxError, XlsxPackage};

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="2" uniqueCount="2">
+  <si>
+    <r>
+      <rPr>
+        <rFont val="Calibri"/>
+        <sz val="11"/>
+        <color rgb="FF000000"/>
+      </rPr>
+      <t xml:space="preserve">Hello </t>
+    </r>
+    <r>
+      <rPr>
+        <rFont val="Calibri"/>
+        <sz val="11"/>
+        <color rgb="FFFF0000"/>
+        <b/>
+      </rPr>
+      <t>Bold</t>
+    </r>
+    <r>
+      <rPr>
+        <rFont val="Calibri"/>
+        <sz val="11"/>
+        <color rgb="FF000000"/>
+        <i/>
+        <u/>
+      </rPr>
+      <t xml:space="preserve"> Italic</t>
+    </r>
+  </si>
+  <si>
+    <t>Plain</t>
+  </si>
+</sst>
+

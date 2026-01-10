@@ -9,6 +9,7 @@ mod address;
 mod cell;
 mod display;
 mod error;
+pub mod rich_text;
 mod style;
 mod value;
 mod workbook;
