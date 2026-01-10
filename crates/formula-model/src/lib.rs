@@ -29,7 +29,7 @@ pub use style::{
 };
 pub use value::{ArrayValue, CellValue, RichText, SpillValue};
 pub use workbook::{Workbook, WorkbookId};
-pub use worksheet::{ColProperties, RowProperties, Worksheet, WorksheetId};
+pub use worksheet::{ColProperties, RowProperties, SheetVisibility, Worksheet, WorksheetId};
 
 /// Current serialization schema version.
 ///

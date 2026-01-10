@@ -171,6 +171,17 @@ fn iter_cells_in_range_filters_sparse_cells() {
 }
 
 #[test]
+fn worksheet_visibility_serializes_only_when_non_default() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+    let json = serde_json::to_value(&sheet).unwrap();
+    assert!(json.get("visibility").is_none());
+
+    sheet.visibility = formula_model::SheetVisibility::Hidden;
+    let json = serde_json::to_value(&sheet).unwrap();
+    assert_eq!(json.get("visibility").unwrap(), "hidden");
+}
+
+#[test]
 fn cell_key_encoding_round_trips() {
     for &(row, col) in &[
         (0, 0),

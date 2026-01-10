@@ -23,8 +23,27 @@ fn is_default_zoom(z: &f32) -> bool {
     (*z - 1.0).abs() < f32::EPSILON
 }
 
+fn is_visible(v: &SheetVisibility) -> bool {
+    matches!(v, SheetVisibility::Visible)
+}
+
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+/// Sheet visibility state (Excel-compatible).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SheetVisibility {
+    Visible,
+    Hidden,
+    VeryHidden,
+}
+
+impl Default for SheetVisibility {
+    fn default() -> Self {
+        SheetVisibility::Visible
+    }
 }
 
 /// Per-row overrides.
@@ -56,6 +75,10 @@ pub struct Worksheet {
     pub id: WorksheetId,
     /// User-visible name.
     pub name: String,
+
+    /// Sheet visibility state.
+    #[serde(default, skip_serializing_if = "is_visible")]
+    pub visibility: SheetVisibility,
 
     /// Sparse cell storage; only non-empty cells are stored.
     #[serde(default)]
@@ -100,6 +123,7 @@ impl Worksheet {
         Self {
             id,
             name: name.into(),
+            visibility: SheetVisibility::Visible,
             cells: HashMap::new(),
             used_range: None,
             row_count: default_row_count(),
@@ -510,6 +534,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             id: WorksheetId,
             name: String,
             #[serde(default)]
+            visibility: SheetVisibility,
+            #[serde(default)]
             cells: HashMap<CellKey, Cell>,
             #[serde(default = "default_row_count")]
             row_count: u32,
@@ -533,6 +559,7 @@ impl<'de> Deserialize<'de> for Worksheet {
         Ok(Worksheet {
             id: helper.id,
             name: helper.name,
+            visibility: helper.visibility,
             cells: helper.cells,
             used_range,
             row_count: helper.row_count,
