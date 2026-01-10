@@ -99,6 +99,7 @@ export interface ToolExecutorOptions {
 export class ToolExecutor {
   readonly spreadsheet: SpreadsheetApi;
   readonly options: Required<ToolExecutorOptions>;
+  private readonly pivots: PivotRegistration[] = [];
 
   constructor(spreadsheet: SpreadsheetApi, options: ToolExecutorOptions = {}) {
     this.spreadsheet = spreadsheet;
@@ -196,6 +197,13 @@ export class ToolExecutor {
       : { value: rest.value };
 
     this.spreadsheet.setCell(address, next);
+    this.refreshPivotsForRange({
+      sheet: address.sheet,
+      startRow: address.row,
+      endRow: address.row,
+      startCol: address.col,
+      endCol: address.col
+    });
     const after = this.spreadsheet.getCell(address);
     return { cell: formatA1Cell(address), changed: !cellsEqual(before, after) };
   }
@@ -219,6 +227,7 @@ export class ToolExecutor {
     );
 
     this.spreadsheet.writeRange(range, cells);
+    this.refreshPivotsForRange(range);
     const sizeRows = range.endRow - range.startRow + 1;
     const sizeCols = range.endCol - range.startCol + 1;
     return { range: formatA1Range(range), updated_cells: sizeRows * sizeCols };
@@ -244,6 +253,14 @@ export class ToolExecutor {
       this.spreadsheet.setCell({ sheet, row, col: colIndex }, { value: null, formula });
       updated++;
     }
+
+    this.refreshPivotsForRange({
+      sheet,
+      startRow,
+      endRow,
+      startCol: colIndex,
+      endCol: colIndex
+    });
 
     return { sheet, column, start_row: startRow, end_row: endRow, updated_cells: updated };
   }
@@ -282,6 +299,17 @@ export class ToolExecutor {
 
     const cells: CellData[][] = normalized.map((row) => row.map((value) => ({ value })));
     this.spreadsheet.writeRange(outRange, cells);
+
+    // Register for automatic refresh when source data changes.
+    const registration: PivotRegistration = {
+      source,
+      destination,
+      rowFields: params.rows ?? [],
+      columnFields: params.columns ?? [],
+      values: (params.values ?? []) as PivotValueSpec[],
+      lastDestinationRange: outRange
+    };
+    this.pivots.push(registration);
 
     return {
       status: "ok",
@@ -322,6 +350,7 @@ export class ToolExecutor {
 
     const sorted = [...header, ...body];
     this.spreadsheet.writeRange(range, sorted);
+    this.refreshPivotsForRange(range);
 
     return { range: formatA1Range(range), sorted_rows: body.length };
   }
@@ -525,6 +554,13 @@ export class ToolExecutor {
     if (params.transform === "raw_text") {
       const text = await response.text();
       this.spreadsheet.setCell(destination, { value: text });
+      this.refreshPivotsForRange({
+        sheet: destination.sheet,
+        startRow: destination.row,
+        endRow: destination.row,
+        startCol: destination.col,
+        endCol: destination.col
+      });
       return { url: url.toString(), destination: formatA1Cell(destination), written_cells: 1, shape: { rows: 1, cols: 1 } };
     }
 
@@ -540,6 +576,7 @@ export class ToolExecutor {
 
     const cells: CellData[][] = table.map((row) => row.map((value) => ({ value })));
     this.spreadsheet.writeRange(range, cells);
+    this.refreshPivotsForRange(range);
 
     return {
       url: url.toString(),
@@ -548,6 +585,89 @@ export class ToolExecutor {
       shape: { rows: table.length, cols: table[0]?.length ?? 0 }
     };
   }
+
+  private refreshPivotsForRange(changed: { sheet: string; startRow: number; endRow: number; startCol: number; endCol: number }): void {
+    if (this.pivots.length === 0) return;
+
+    for (const pivot of this.pivots) {
+      if (!rangesIntersect(changed, pivot.source)) continue;
+      this.refreshPivot(pivot);
+    }
+  }
+
+  private refreshPivot(pivot: PivotRegistration): void {
+    const sourceCells = this.spreadsheet.readRange(pivot.source);
+    const sourceValues: CellScalar[][] = sourceCells.map((row) =>
+      row.map((cell) => (cell.formula ? null : (cell.value ?? null)))
+    );
+
+    const output = buildPivotTableOutput({
+      sourceValues,
+      rowFields: pivot.rowFields,
+      columnFields: pivot.columnFields,
+      values: pivot.values
+    });
+
+    const rowCount = output.length;
+    const colCount = Math.max(1, ...output.map((row) => row.length));
+    const normalized: CellScalar[][] = output.map((row) => {
+      const next = row.slice();
+      while (next.length < colCount) next.push(null);
+      return next;
+    });
+
+    const nextRange = {
+      sheet: pivot.destination.sheet,
+      startRow: pivot.destination.row,
+      startCol: pivot.destination.col,
+      endRow: pivot.destination.row + rowCount - 1,
+      endCol: pivot.destination.col + colCount - 1
+    };
+
+    const prevRange = pivot.lastDestinationRange;
+    const unionRange = {
+      sheet: pivot.destination.sheet,
+      startRow: pivot.destination.row,
+      startCol: pivot.destination.col,
+      endRow: Math.max(prevRange.endRow, nextRange.endRow),
+      endCol: Math.max(prevRange.endCol, nextRange.endCol)
+    };
+
+    const unionRows = unionRange.endRow - unionRange.startRow + 1;
+    const unionCols = unionRange.endCol - unionRange.startCol + 1;
+
+    /** @type {CellData[][]} */
+    const cells: CellData[][] = [];
+    for (let r = 0; r < unionRows; r++) {
+      const row: CellData[] = [];
+      for (let c = 0; c < unionCols; c++) {
+        const withinNew =
+          r < nextRange.endRow - nextRange.startRow + 1 && c < nextRange.endCol - nextRange.startCol + 1;
+        row.push({ value: withinNew ? normalized[r]?.[c] ?? null : null });
+      }
+      cells.push(row);
+    }
+
+    this.spreadsheet.writeRange(unionRange, cells);
+    pivot.lastDestinationRange = unionRange;
+  }
+}
+
+interface PivotRegistration {
+  source: ReturnType<typeof parseA1Range>;
+  destination: ReturnType<typeof parseA1Cell>;
+  rowFields: string[];
+  columnFields: string[];
+  values: PivotValueSpec[];
+  lastDestinationRange: ReturnType<typeof parseA1Range>;
+}
+
+function rangesIntersect(
+  a: { sheet: string; startRow: number; endRow: number; startCol: number; endCol: number },
+  b: { sheet: string; startRow: number; endRow: number; startCol: number; endCol: number }
+): boolean {
+  if (a.sheet !== b.sheet) return false;
+  return !(a.endRow < b.startRow || a.startRow > b.endRow || a.endCol < b.startCol || a.startCol > b.endCol);
 }
 
 type PivotAggregation = "sum" | "count" | "average" | "min" | "max";

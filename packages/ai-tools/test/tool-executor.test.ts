@@ -156,5 +156,22 @@ describe("ToolExecutor", () => {
       ["West", 200, 250, 450],
       ["Grand Total", 300, 400, 700]
     ]);
+
+    // Updating the source range should refresh the pivot output automatically.
+    await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "Sheet1!C2", value: 110 }
+    });
+
+    const refreshed = workbook
+      .readRange(parseA1Range("Sheet1!E1:H4"))
+      .map((row) => row.map((cell) => cell.value));
+
+    expect(refreshed).toEqual([
+      ["Region", "A - Sum of Sales", "B - Sum of Sales", "Grand Total - Sum of Sales"],
+      ["East", 110, 150, 260],
+      ["West", 200, 250, 450],
+      ["Grand Total", 310, 400, 710]
+    ]);
   });
 });
