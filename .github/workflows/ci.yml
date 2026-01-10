@@ -14,6 +14,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Run xlsx-diff tests (includes fixture harness)
         run: cargo test -p xlsx-diff
+      - name: Run formula-xlsx tests
+        run: cargo test -p formula-xlsx
 
   web:
     name: Web build

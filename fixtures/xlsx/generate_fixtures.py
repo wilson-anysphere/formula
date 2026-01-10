@@ -392,6 +392,51 @@ def sheet_two_xml() -> str:
 """
 
 
+def sheet_hyperlinks_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>External</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="inlineStr"><is><t>Internal</t></is></c>
+    </row>
+    <row r="3">
+      <c r="A3" t="inlineStr"><is><t>Email</t></is></c>
+    </row>
+  </sheetData>
+  <hyperlinks>
+    <hyperlink ref="A1" r:id="rId1" display="Example" tooltip="Go to example"/>
+    <hyperlink ref="A2" location="Sheet2!B2" display="Jump"/>
+    <hyperlink ref="A3" r:id="rId2"/>
+  </hyperlinks>
+</worksheet>
+"""
+
+
+def sheet_hyperlinks_target_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="2">
+      <c r="B2" t="inlineStr"><is><t>Target</t></is></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
+def sheet_hyperlinks_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com" TargetMode="External"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="mailto:test@example.com" TargetMode="External"/>
+</Relationships>
+"""
+
+
 def sheet_chart_data_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -557,6 +602,33 @@ def write_chart_xlsx(path: pathlib.Path) -> None:
         _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
 
 
+def write_hyperlinks_xlsx(path: pathlib.Path) -> None:
+    sheet_names = ["Sheet1", "Sheet2"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+
+    with zipfile.ZipFile(path, "w") as zf:
+        _zip_write(
+            zf,
+            "[Content_Types].xml",
+            content_types_xml(sheet_count=2, include_shared_strings=False),
+        )
+        _zip_write(zf, "_rels/.rels", package_rels_xml())
+        _zip_write(zf, "docProps/core.xml", core_props_xml())
+        _zip_write(zf, "docProps/app.xml", app_props_xml(sheet_names))
+        _zip_write(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        _zip_write(
+            zf,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml(sheet_count=2, include_shared_strings=False),
+        )
+        _zip_write(zf, "xl/worksheets/sheet1.xml", sheet_hyperlinks_xml())
+        _zip_write(zf, "xl/worksheets/sheet2.xml", sheet_hyperlinks_target_xml())
+        _zip_write(zf, "xl/worksheets/_rels/sheet1.xml.rels", sheet_hyperlinks_rels_xml())
+        _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
+
+
 def main() -> None:
     write_xlsx(
         ROOT / "basic" / "basic.xlsx",
@@ -590,6 +662,7 @@ def main() -> None:
         [sheet_styles_xml()],
         styles_bold_cell_xml(),
     )
+    write_hyperlinks_xlsx(ROOT / "hyperlinks" / "hyperlinks.xlsx")
     write_chart_xlsx(ROOT / "charts" / "basic-chart.xlsx")
 
     # Directory scaffold for future corpora (kept empty for now).
@@ -601,3 +674,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

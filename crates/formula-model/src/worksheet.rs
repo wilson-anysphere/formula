@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 
-use crate::{A1ParseError, Cell, CellKey, CellRef, CellValue, Range, Table};
+use crate::{A1ParseError, Cell, CellKey, CellRef, CellValue, Hyperlink, Range, Table};
 
 /// Identifier for a worksheet within a workbook.
 pub type WorksheetId = u32;
@@ -167,6 +167,10 @@ pub struct Worksheet {
     /// This is runtime-only for now; persistence is handled by the storage layer.
     #[serde(skip)]
     columnar: Option<ColumnarBackend>,
+
+    /// Hyperlinks anchored to cells/ranges in this worksheet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hyperlinks: Vec<Hyperlink>,
 }
 
 impl Worksheet {
@@ -188,6 +192,7 @@ impl Worksheet {
             zoom: default_zoom(),
             tables: Vec::new(),
             columnar: None,
+            hyperlinks: Vec::new(),
         }
     }
 
@@ -630,6 +635,11 @@ impl Worksheet {
         self.cells.iter_mut().map(|(k, v)| (k.to_ref(), v))
     }
 
+    /// Return the first hyperlink whose anchor range contains `cell`.
+    pub fn hyperlink_at(&self, cell: CellRef) -> Option<&Hyperlink> {
+        self.hyperlinks.iter().find(|h| h.range.contains(cell))
+    }
+
     fn on_cell_inserted(&mut self, cell_ref: CellRef) {
         match self.used_range {
             None => self.used_range = Some(Range::new(cell_ref, cell_ref)),
@@ -789,6 +799,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             frozen_cols: u32,
             #[serde(default = "default_zoom")]
             zoom: f32,
+            #[serde(default)]
+            hyperlinks: Vec<Hyperlink>,
         }
 
         let helper = Helper::deserialize(deserializer)?;
@@ -810,6 +822,7 @@ impl<'de> Deserialize<'de> for Worksheet {
             zoom: helper.zoom,
             tables: helper.tables,
             columnar: None,
+            hyperlinks: helper.hyperlinks,
         })
     }
 }

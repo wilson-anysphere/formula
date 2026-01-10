@@ -13,6 +13,7 @@ pub mod conditional_formatting;
 mod display;
 mod error;
 pub mod import;
+mod hyperlinks;
 pub mod rich_text;
 mod outline;
 mod formula_rewrite;
@@ -29,6 +30,7 @@ pub use comments::{Comment, CommentAuthor, CommentKind, Mention, Reply, Timestam
 pub use conditional_formatting::*;
 pub use display::{format_cell_display, CellDisplay};
 pub use error::ErrorValue;
+pub use hyperlinks::{Hyperlink, HyperlinkTarget};
 pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
 pub use formula_rewrite::rewrite_sheet_names_in_formula;
 pub use style::{

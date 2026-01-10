@@ -25,6 +25,8 @@ pub enum XlsxError {
     Invalid(String),
     #[error("invalid sheetId value")]
     InvalidSheetId,
+    #[error("hyperlink error: {0}")]
+    Hyperlink(String),
 }
 
 /// In-memory representation of an XLSX/XLSM package as a map of part name -> bytes.

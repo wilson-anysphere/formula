@@ -24,6 +24,7 @@ pub mod conditional_formatting;
 mod compare;
 mod openxml;
 pub mod drawingml;
+pub mod hyperlinks;
 pub mod outline;
 mod package;
 mod path;
@@ -45,6 +46,9 @@ use std::collections::{BTreeMap, HashMap};
 
 pub use compare::*;
 pub use conditional_formatting::*;
+pub use hyperlinks::{
+    parse_worksheet_hyperlinks, update_worksheet_relationships, update_worksheet_xml,
+};
 pub use package::{XlsxError, XlsxPackage};
 pub use pivots::{
     pivot_charts::PivotChartPart,
