@@ -3,6 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "main": "./src/index.js"
+  "exports": {
+    ".": {
+      "browser": "./src/index-browser.js",
+      "node": "./src/index-node.js",
+      "default": "./src/index-node.js"
+    },
+    "./pyodide": "./src/pyodide.js",
+    "./native": "./src/native.js",
+    "./test-utils": "./src/test-utils.js",
+    "./document-controller": "./src/document-controller.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.2"
+  }
 }
-

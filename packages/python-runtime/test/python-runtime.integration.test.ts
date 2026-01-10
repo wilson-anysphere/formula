@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { NativePythonRuntime } from "../src/native-python-runtime.js";
-import { MockWorkbook } from "../src/mock-workbook.js";
+import { NativePythonRuntime } from "@formula/python-runtime/native";
+import { MockWorkbook } from "@formula/python-runtime/test-utils";
 
 describe("python runtime integration (native)", () => {
   it("executes a script that writes values and formulas via the formula API", async () => {

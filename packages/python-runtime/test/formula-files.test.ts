@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formulaFiles } from "../src/formula-files.generated.js";
+import { formulaFiles } from "@formula/python-runtime";
 
 describe("python runtime bundled formula API files", () => {
   it("includes core formula modules needed for Pyodide installation", () => {
@@ -12,4 +12,3 @@ describe("python runtime bundled formula API files", () => {
     expect(formulaFiles).toHaveProperty("formula/runtime/sandbox.py");
   });
 });
-

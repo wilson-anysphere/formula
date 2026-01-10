@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { NativePythonRuntime } from "../src/native-python-runtime.js";
-import { MockWorkbook } from "../src/mock-workbook.js";
+import { NativePythonRuntime } from "@formula/python-runtime/native";
+import { MockWorkbook } from "@formula/python-runtime/test-utils";
 
 test("native python runtime can set values and formulas via formula API", async () => {
   const workbook = new MockWorkbook();
@@ -45,4 +45,3 @@ with open("some_file.txt", "w") as f:
 
   await assert.rejects(() => runtime.execute(script, { api: workbook }), /Filesystem access is not permitted/);
 });
-

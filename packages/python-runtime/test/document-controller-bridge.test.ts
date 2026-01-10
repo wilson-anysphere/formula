@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../../apps/desktop/src/document/documentController.js";
-import { NativePythonRuntime } from "../src/native-python-runtime.js";
-import { DocumentControllerBridge } from "../src/document-controller-bridge.js";
+import { NativePythonRuntime } from "@formula/python-runtime/native";
+import { DocumentControllerBridge } from "@formula/python-runtime/document-controller";
 
 describe("DocumentControllerBridge", () => {
   it("lets Python scripts write values + formulas into a DocumentController", async () => {
@@ -28,4 +28,3 @@ sheet["A2"] = "=A1*2"
     expect(doc.getCell("Sheet1", { row: 1, col: 0 }).formula).toBe("=A1*2");
   });
 });
-
