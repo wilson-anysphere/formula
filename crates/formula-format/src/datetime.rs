@@ -1,0 +1,524 @@
+use crate::FormatOptions;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DateSystem {
+    Excel1900,
+    Excel1904,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DateTimeParts {
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    // Used for elapsed time formats like `[h]:mm:ss`
+    total_seconds: i64,
+    // 0=Sunday..6=Saturday
+    weekday: u32,
+}
+
+pub(crate) fn looks_like_datetime(section: &str) -> bool {
+    let mut in_quotes = false;
+    let mut prev: Option<char> = None;
+    let mut chars = section.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if in_quotes {
+            if ch == '"' {
+                in_quotes = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_quotes = true,
+            '\\' => {
+                // Skip escaped char.
+                let _ = chars.next();
+            }
+            '[' => {
+                // Elapsed time: [h], [m], [s]
+                let mut content = String::new();
+                while let Some(c) = chars.next() {
+                    if c == ']' {
+                        break;
+                    }
+                    content.push(c);
+                }
+                let lower = content.to_ascii_lowercase();
+                if matches!(lower.as_str(), "h" | "hh" | "m" | "mm" | "s" | "ss") {
+                    return true;
+                }
+            }
+            'y' | 'Y' | 'd' | 'D' | 'h' | 'H' | 's' | 'S' => return true,
+            'm' | 'M' => {
+                // `m` is ambiguous; treat it as datetime only if it is likely
+                // part of a date/time expression (e.g. next to y/d/h/s).
+                if let Some(p) = prev {
+                    if matches!(p, 'y' | 'Y' | 'd' | 'D' | 'h' | 'H' | 's' | 'S') {
+                        return true;
+                    }
+                }
+                if let Some(n) = chars.peek().copied() {
+                    if matches!(n, 'y' | 'Y' | 'd' | 'D' | 'h' | 'H' | 's' | 'S') {
+                        return true;
+                    }
+                }
+            }
+            'a' | 'A' => {
+                // AM/PM or A/P
+                let mut lookahead = String::new();
+                lookahead.push(ch);
+                for _ in 0..4 {
+                    if let Some(c) = chars.peek().copied() {
+                        lookahead.push(c);
+                        if lookahead.to_ascii_lowercase().starts_with("am/pm")
+                            || lookahead.to_ascii_lowercase().starts_with("a/p")
+                        {
+                            return true;
+                        }
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                // fallthrough as literal
+            }
+            _ => {}
+        }
+
+        prev = Some(ch);
+    }
+
+    false
+}
+
+pub(crate) fn format_datetime(serial: f64, pattern: &str, options: &FormatOptions) -> String {
+    let Some(parts) = serial_to_parts(serial, options.date_system) else {
+        return "#####".to_string();
+    };
+
+    let mut tokens = tokenize(pattern);
+    let has_ampm = tokens.iter().any(|t| matches!(t, Token::AmPm));
+    disambiguate_minutes(&mut tokens);
+
+    render_tokens(&tokens, &parts, has_ampm, options)
+}
+
+fn serial_to_parts(serial: f64, date_system: DateSystem) -> Option<DateTimeParts> {
+    if !serial.is_finite() {
+        return None;
+    }
+    if serial < 0.0 {
+        // Excel shows ##### for negative date serials when formatted as dates.
+        return None;
+    }
+
+    let mut days = serial.floor() as i64;
+    let frac = serial - days as f64;
+    let mut total_seconds = (frac * 86_400.0).round() as i64;
+
+    if total_seconds >= 86_400 {
+        total_seconds = 0;
+        days += 1;
+    }
+
+    let (hour, minute, second) = (
+        (total_seconds / 3600) as u32,
+        ((total_seconds % 3600) / 60) as u32,
+        (total_seconds % 60) as u32,
+    );
+
+    // Convert the date part.
+    let (year, month, day, weekday) = match date_system {
+        DateSystem::Excel1900 => excel_1900_days_to_ymd(days)?,
+        DateSystem::Excel1904 => excel_1904_days_to_ymd(days)?,
+    };
+
+    Some(DateTimeParts {
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        total_seconds: (days * 86_400) + total_seconds,
+        weekday,
+    })
+}
+
+fn excel_1900_days_to_ymd(days: i64) -> Option<(i32, u32, u32, u32)> {
+    // In Excel's 1900 date system, day 0 is 1899-12-31.
+    // Day 60 is the fictitious 1900-02-29 (Lotus bug).
+    let base = days_from_civil(1899, 12, 31);
+
+    if days == 60 {
+        // Return the fake date; weekday is computed from the adjusted day count
+        // (base + 60) which corresponds to 1900-03-01 in the real calendar.
+        let weekday = weekday_from_days(base + 60);
+        return Some((1900, 2, 29, weekday));
+    }
+
+    let adjusted = if days < 60 { days } else { days - 1 };
+    let abs_days = base + adjusted;
+    let (year, month, day) = civil_from_days(abs_days);
+    let weekday = weekday_from_days(abs_days);
+    Some((year, month, day, weekday))
+}
+
+fn excel_1904_days_to_ymd(days: i64) -> Option<(i32, u32, u32, u32)> {
+    // In Excel's 1904 date system, day 0 is 1904-01-01.
+    let base = days_from_civil(1904, 1, 1);
+    let abs_days = base + days;
+    let (year, month, day) = civil_from_days(abs_days);
+    let weekday = weekday_from_days(abs_days);
+    Some((year, month, day, weekday))
+}
+
+// date algorithms from Howard Hinnant (public domain).
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let mut y = year as i64;
+    let m = month as i64;
+    let d = day as i64;
+
+    y -= if m <= 2 { 1 } else { 0 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = m + if m > 2 { -3 } else { 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+fn civil_from_days(days: i64) -> (i32, u32, u32) {
+    let z = days + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if m <= 2 { 1 } else { 0 };
+    (year as i32, m as u32, d as u32)
+}
+
+fn weekday_from_days(days: i64) -> u32 {
+    // 1970-01-01 was Thursday. Map 0=Sunday..6=Saturday.
+    let mut w = (days + 4).rem_euclid(7);
+    // rem_euclid returns 0..6; now 0=Thursday, shift to 0=Sunday.
+    // Thursday(0) -> 4, Friday(1)->5, Saturday(2)->6, Sunday(3)->0, ...
+    w = (w + 3).rem_euclid(7);
+    w as u32
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Token {
+    Literal(String),
+    Year(usize),
+    Day(usize),
+    Hour(usize),
+    Second(usize),
+    MonthOrMinute(usize),
+    Month(usize),
+    Minute(usize),
+    DateSep,
+    TimeSep,
+    AmPm,
+    ElapsedHours,
+    ElapsedMinutes,
+    ElapsedSeconds,
+}
+
+fn tokenize(pattern: &str) -> Vec<Token> {
+    let mut tokens = Vec::new();
+    let mut literal_buf = String::new();
+    let mut in_quotes = false;
+    let mut chars = pattern.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if in_quotes {
+            if ch == '"' {
+                in_quotes = false;
+            } else {
+                literal_buf.push(ch);
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_quotes = true,
+            '\\' => {
+                if let Some(next) = chars.next() {
+                    literal_buf.push(next);
+                }
+            }
+            '_' => {
+                // Skip next and emit a space.
+                let _ = chars.next();
+                literal_buf.push(' ');
+            }
+            '*' => {
+                // Skip next char; fill is layout-only.
+                let _ = chars.next();
+            }
+            '/' => {
+                flush_literal(&mut literal_buf, &mut tokens);
+                tokens.push(Token::DateSep);
+            }
+            ':' => {
+                flush_literal(&mut literal_buf, &mut tokens);
+                tokens.push(Token::TimeSep);
+            }
+            '[' => {
+                let mut content = String::new();
+                while let Some(c) = chars.next() {
+                    if c == ']' {
+                        break;
+                    }
+                    content.push(c);
+                }
+                let lower = content.to_ascii_lowercase();
+                flush_literal(&mut literal_buf, &mut tokens);
+                match lower.as_str() {
+                    "h" | "hh" => tokens.push(Token::ElapsedHours),
+                    "m" | "mm" => tokens.push(Token::ElapsedMinutes),
+                    "s" | "ss" => tokens.push(Token::ElapsedSeconds),
+                    _ => {
+                        // Treat unknown brackets as literals (e.g. colors).
+                        literal_buf.push('[');
+                        literal_buf.push_str(&content);
+                        literal_buf.push(']');
+                    }
+                }
+            }
+            'a' | 'A' => {
+                // AM/PM or A/P markers (case-insensitive).
+                let mut probe = String::new();
+                probe.push(ch);
+                let mut taken = Vec::new();
+                for _ in 0..4 {
+                    if let Some(c) = chars.peek().copied() {
+                        taken.push(c);
+                        probe.push(c);
+                        let lower = probe.to_ascii_lowercase();
+                        if lower == "am/pm" || lower == "a/p" {
+                            for _ in 0..taken.len() {
+                                chars.next();
+                            }
+                            flush_literal(&mut literal_buf, &mut tokens);
+                            tokens.push(Token::AmPm);
+                            probe.clear();
+                            break;
+                        }
+                        // keep probing
+                    } else {
+                        break;
+                    }
+                }
+
+                if !probe.is_empty() {
+                    // Not a recognized token: treat as literal.
+                    literal_buf.push(ch);
+                }
+            }
+            'y' | 'Y' => {
+                let count = consume_run(ch, &mut chars);
+                flush_literal(&mut literal_buf, &mut tokens);
+                tokens.push(Token::Year(count));
+            }
+            'd' | 'D' => {
+                let count = consume_run(ch, &mut chars);
+                flush_literal(&mut literal_buf, &mut tokens);
+                tokens.push(Token::Day(count));
+            }
+            'h' | 'H' => {
+                let count = consume_run(ch, &mut chars);
+                flush_literal(&mut literal_buf, &mut tokens);
+                tokens.push(Token::Hour(count));
+            }
+            's' | 'S' => {
+                let count = consume_run(ch, &mut chars);
+                flush_literal(&mut literal_buf, &mut tokens);
+                tokens.push(Token::Second(count));
+            }
+            'm' | 'M' => {
+                let count = consume_run(ch, &mut chars);
+                flush_literal(&mut literal_buf, &mut tokens);
+                tokens.push(Token::MonthOrMinute(count));
+            }
+            _ => literal_buf.push(ch),
+        }
+    }
+
+    flush_literal(&mut literal_buf, &mut tokens);
+    tokens
+}
+
+fn consume_run(first: char, chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> usize {
+    let mut count = 1;
+    while let Some(next) = chars.peek().copied() {
+        if next.eq_ignore_ascii_case(&first) {
+            chars.next();
+            count += 1;
+        } else {
+            break;
+        }
+    }
+    count
+}
+
+fn flush_literal(buf: &mut String, tokens: &mut Vec<Token>) {
+    if buf.is_empty() {
+        return;
+    }
+    tokens.push(Token::Literal(std::mem::take(buf)));
+}
+
+fn disambiguate_minutes(tokens: &mut [Token]) {
+    // Replace MonthOrMinute based on adjacent time tokens.
+    for idx in 0..tokens.len() {
+        let Token::MonthOrMinute(count) = tokens[idx] else {
+            continue;
+        };
+
+        let prev = prev_non_literal(tokens, idx);
+        let next = next_non_literal(tokens, idx);
+        let is_minute = matches!(prev, Some(Token::Hour(_)) | Some(Token::ElapsedHours))
+            || matches!(next, Some(Token::Second(_)) | Some(Token::ElapsedSeconds));
+
+        tokens[idx] = if is_minute {
+            Token::Minute(count)
+        } else {
+            Token::Month(count)
+        };
+    }
+}
+
+fn prev_non_literal(tokens: &[Token], idx: usize) -> Option<&Token> {
+    for j in (0..idx).rev() {
+        match &tokens[j] {
+            Token::Literal(_) | Token::DateSep | Token::TimeSep => continue,
+            t => return Some(t),
+        }
+    }
+    None
+}
+
+fn next_non_literal(tokens: &[Token], idx: usize) -> Option<&Token> {
+    for j in idx + 1..tokens.len() {
+        match &tokens[j] {
+            Token::Literal(_) | Token::DateSep | Token::TimeSep => continue,
+            t => return Some(t),
+        }
+    }
+    None
+}
+
+fn render_tokens(tokens: &[Token], parts: &DateTimeParts, has_ampm: bool, options: &FormatOptions) -> String {
+    let mut out = String::new();
+
+    for token in tokens {
+        match token {
+            Token::Literal(s) => out.push_str(s),
+            Token::DateSep => out.push(options.locale.date_sep),
+            Token::TimeSep => out.push(options.locale.time_sep),
+            Token::Year(count) => out.push_str(&format_year(parts.year, *count)),
+            Token::Month(count) => out.push_str(&format_month(parts.month, *count)),
+            Token::Minute(count) => out.push_str(&format_two(parts.minute, *count)),
+            Token::Day(count) => out.push_str(&format_day(parts.day, parts.weekday, *count)),
+            Token::Hour(count) => {
+                let hour = if has_ampm {
+                    let mut h = (parts.hour % 12) as u32;
+                    if h == 0 {
+                        h = 12;
+                    }
+                    h
+                } else {
+                    parts.hour
+                };
+                out.push_str(&format_two(hour, *count));
+            }
+            Token::Second(count) => out.push_str(&format_two(parts.second, *count)),
+            Token::AmPm => out.push_str(if parts.hour < 12 { "AM" } else { "PM" }),
+            Token::ElapsedHours => out.push_str(&(parts.total_seconds / 3600).to_string()),
+            Token::ElapsedMinutes => out.push_str(&(parts.total_seconds / 60).to_string()),
+            Token::ElapsedSeconds => out.push_str(&parts.total_seconds.to_string()),
+            Token::MonthOrMinute(_) => unreachable!("month/minute disambiguation should run first"),
+        }
+    }
+
+    out
+}
+
+fn format_year(year: i32, count: usize) -> String {
+    if count == 2 {
+        format!("{:02}", (year % 100).abs())
+    } else {
+        // Excel treats y, yyy, yyyy similarly in most contexts.
+        format!("{:04}", year)
+    }
+}
+
+fn format_two(value: u32, count: usize) -> String {
+    if count <= 1 {
+        value.to_string()
+    } else {
+        format!("{:02}", value)
+    }
+}
+
+fn format_month(month: u32, count: usize) -> String {
+    const MONTHS_SHORT: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    const MONTHS_LONG: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+
+    match count {
+        1 => month.to_string(),
+        2 => format!("{:02}", month),
+        3 => MONTHS_SHORT[(month.saturating_sub(1)) as usize].to_string(),
+        4 => MONTHS_LONG[(month.saturating_sub(1)) as usize].to_string(),
+        _ => MONTHS_LONG[(month.saturating_sub(1)) as usize]
+            .chars()
+            .next()
+            .unwrap_or('?')
+            .to_string(),
+    }
+}
+
+fn format_day(day: u32, weekday: u32, count: usize) -> String {
+    const DAYS_SHORT: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const DAYS_LONG: [&str; 7] = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ];
+    match count {
+        1 => day.to_string(),
+        2 => format!("{:02}", day),
+        3 => DAYS_SHORT[weekday as usize].to_string(),
+        _ => DAYS_LONG[weekday as usize].to_string(),
+    }
+}

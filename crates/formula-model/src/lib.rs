@@ -7,6 +7,7 @@
 
 mod address;
 mod cell;
+mod display;
 mod error;
 mod style;
 mod value;
@@ -15,6 +16,7 @@ mod worksheet;
 
 pub use address::{A1ParseError, CellRef, Range, RangeIter, RangeParseError};
 pub use cell::{Cell, CellId, CellKey, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
+pub use display::{format_cell_display, CellDisplay};
 pub use error::ErrorValue;
 pub use style::{
     Alignment, Border, BorderStyle, Color, Fill, Font, HorizontalAlignment, Style, StyleTable,

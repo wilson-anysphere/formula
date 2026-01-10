@@ -1,5 +1,4 @@
 [workspace]
-resolver = "2"
 members = [
   "apps/desktop/src-tauri",
   "crates/formula-dax",
@@ -10,3 +9,4 @@ members = [
   "crates/formula-xlsx",
   "crates/xlsx-diff",
 ]
+resolver = "2"

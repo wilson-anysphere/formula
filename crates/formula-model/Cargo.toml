@@ -7,7 +7,7 @@ description = "Core in-memory data model for Formula spreadsheets (workbooks/she
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
+formula-format = { path = "../formula-format" }
 
 [dev-dependencies]
 serde_json = "1.0"
-

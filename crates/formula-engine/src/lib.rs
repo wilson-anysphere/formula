@@ -11,6 +11,7 @@
 //! - Round-tripping (localized display; canonical persistence)
 
 pub mod date;
+pub mod display;
 pub mod error;
 pub mod functions;
 pub mod graph;
@@ -30,3 +31,4 @@ mod engine;
 
 pub use engine::{Engine, EngineError, RecalcMode};
 pub use value::{ErrorKind, Value};
+
