@@ -8,9 +8,10 @@ use crate::editing::rewrite::{
     rewrite_formula_for_copy_delta, rewrite_formula_for_range_map, rewrite_formula_for_structural_edit,
     GridRange, RangeMapEdit, StructuralEdit,
 };
+use crate::graph::{CellDeps, DependencyGraph as CalcGraph, Precedent, SheetRange};
 use crate::locale::{canonicalize_formula, FormulaLocale};
 use crate::value::{ErrorKind, Value};
-use formula_model::{CellRef, Range, Table};
+use formula_model::{CellId, CellRef, Range, Table};
 use rayon::prelude::*;
 use std::cmp::max;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -98,7 +99,9 @@ impl Workbook {
     }
 
     fn get_cell_value(&self, key: CellKey) -> Value {
-        self.get_cell(key).map(|c| c.value.clone()).unwrap_or(Value::Blank)
+        self.get_cell(key)
+            .map(|c| c.value.clone())
+            .unwrap_or(Value::Blank)
     }
 
     fn set_tables(&mut self, sheet: SheetId, tables: Vec<Table>) {
@@ -108,14 +111,19 @@ impl Workbook {
     }
 }
 
+/// Expanded dependency view used for UX/auditing.
+///
+/// This intentionally stores **cell-level** precedents (ranges are expanded),
+/// matching Excel's precedent/dependent tracing UX and making it easy to explain
+/// why a cell is dirty.
 #[derive(Debug, Default)]
-struct DependencyGraph {
+struct AuditGraph {
     precedents: HashMap<CellKey, HashSet<CellKey>>,
     dependents: HashMap<CellKey, HashSet<CellKey>>,
     volatile_cells: HashSet<CellKey>,
 }
 
-impl DependencyGraph {
+impl AuditGraph {
     fn set_precedents(&mut self, cell: CellKey, new_precedents: HashSet<CellKey>) {
         if let Some(old) = self.precedents.remove(&cell) {
             for p in old {
@@ -141,15 +149,14 @@ impl DependencyGraph {
         self.set_precedents(cell, HashSet::new());
         self.volatile_cells.remove(&cell);
     }
-
-    // Dirty-marking with reason tracking is implemented in `Engine` (where we can
-    // store the predecessor edge used for diagnostics). The graph itself only
-    // maintains adjacency lists.
 }
 
 pub struct Engine {
     workbook: Workbook,
-    graph: DependencyGraph,
+    /// Optimized dependency graph used for incremental recalculation ordering.
+    calc_graph: CalcGraph,
+    /// Expanded dependency graph used for auditing/introspection (precedents/dependents queries).
+    graph: AuditGraph,
     dirty: HashSet<CellKey>,
     dirty_reasons: HashMap<CellKey, CellKey>,
 }
@@ -164,7 +171,8 @@ impl Engine {
     pub fn new() -> Self {
         Self {
             workbook: Workbook::default(),
-            graph: DependencyGraph::default(),
+            calc_graph: CalcGraph::new(),
+            graph: AuditGraph::default(),
             dirty: HashSet::new(),
             dirty_reasons: HashMap::new(),
         }
@@ -179,9 +187,11 @@ impl Engine {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         let addr = parse_a1(addr)?;
         let key = CellKey { sheet: sheet_id, addr };
+        let cell_id = cell_id_from_key(key);
 
         // Replace any existing formula and dependencies.
         self.graph.clear_cell(key);
+        self.calc_graph.remove_cell(cell_id);
         self.dirty.remove(&key);
         self.dirty_reasons.remove(&key);
 
@@ -194,6 +204,7 @@ impl Engine {
 
         // Mark downstream dependents dirty.
         self.mark_dirty_dependents_with_reasons(key);
+        self.calc_graph.mark_dirty(cell_id);
         Ok(())
     }
 
@@ -203,14 +214,47 @@ impl Engine {
     pub fn set_sheet_tables(&mut self, sheet: &str, tables: Vec<Table>) {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         self.workbook.set_tables(sheet_id, tables);
-        // Mark all formulas dirty; structured reference dependencies may have changed.
-        for (addr, cell) in self.workbook.sheets[sheet_id].cells.iter() {
-            if cell.formula.is_some() {
-                self.dirty.insert(CellKey {
-                    sheet: sheet_id,
-                    addr: *addr,
-                });
+
+        let tables_by_sheet: Vec<Vec<Table>> =
+            self.workbook.sheets.iter().map(|s| s.tables.clone()).collect();
+
+        // Structured reference resolution can change which cells a formula depends on, so refresh
+        // dependencies for all formulas.
+        let mut formulas: Vec<(CellKey, CompiledExpr)> = Vec::new();
+        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            for (addr, cell) in &sheet.cells {
+                if let Some(ast) = cell.ast.clone() {
+                    formulas.push((CellKey { sheet: sheet_id, addr: *addr }, ast));
+                }
             }
+        }
+
+        for (key, ast) in formulas {
+            let cell_id = cell_id_from_key(key);
+            let (precedents, volatile, thread_safe) = analyze_expr(&ast, key, &tables_by_sheet);
+            self.graph.set_precedents(key, precedents);
+            if volatile {
+                self.graph.volatile_cells.insert(key);
+            } else {
+                self.graph.volatile_cells.remove(&key);
+            }
+
+            let calc_precedents = analyze_calc_precedents(&ast, key, &tables_by_sheet);
+            let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
+            calc_vec.sort_by_key(|p| match p {
+                Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col),
+                Precedent::Range(r) => (1u8, r.sheet_id, r.range.start.row, r.range.start.col),
+            });
+            let deps = CellDeps::new(calc_vec).volatile(volatile);
+            self.calc_graph.update_cell_dependencies(cell_id, deps);
+
+            let cell = self.workbook.get_or_create_cell_mut(key);
+            cell.volatile = volatile;
+            cell.thread_safe = thread_safe;
+
+            self.dirty.insert(key);
+            self.dirty_reasons.remove(&key);
+            self.calc_graph.mark_dirty(cell_id);
         }
     }
 
@@ -223,20 +267,31 @@ impl Engine {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         let addr = parse_a1(addr)?;
         let key = CellKey { sheet: sheet_id, addr };
+        let cell_id = cell_id_from_key(key);
 
         let parsed = Parser::parse(formula)?;
         let compiled = self.compile_expr(&parsed, sheet_id);
         let tables_by_sheet: Vec<Vec<Table>> =
             self.workbook.sheets.iter().map(|s| s.tables.clone()).collect();
+
+        // Expanded precedents for auditing, plus volatility/thread-safety flags.
         let (precedents, volatile, thread_safe) = analyze_expr(&compiled, key, &tables_by_sheet);
-
         self.graph.set_precedents(key, precedents);
-
         if volatile {
             self.graph.volatile_cells.insert(key);
         } else {
             self.graph.volatile_cells.remove(&key);
         }
+
+        // Optimized precedents for calculation ordering (range nodes are not expanded).
+        let calc_precedents = analyze_calc_precedents(&compiled, key, &tables_by_sheet);
+        let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
+        calc_vec.sort_by_key(|p| match p {
+            Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col),
+            Precedent::Range(r) => (1u8, r.sheet_id, r.range.start.row, r.range.start.col),
+        });
+        let deps = CellDeps::new(calc_vec).volatile(volatile);
+        self.calc_graph.update_cell_dependencies(cell_id, deps);
 
         let cell = self.workbook.get_or_create_cell_mut(key);
         cell.formula = Some(formula.to_string());
@@ -246,6 +301,7 @@ impl Engine {
 
         // Recalculate this cell and anything depending on it.
         self.mark_dirty_including_self_with_reasons(key);
+        self.calc_graph.mark_dirty(cell_id);
         Ok(())
     }
 
@@ -552,7 +608,6 @@ impl Engine {
     }
 
     pub fn recalculate(&mut self) {
-        // Default to multithreaded when rayon is available.
         self.recalculate_with_mode(RecalcMode::MultiThreaded);
     }
 
@@ -565,116 +620,95 @@ impl Engine {
     }
 
     fn recalculate_with_mode(&mut self, mode: RecalcMode) {
-        // Volatile formulas recalculate every time, and so do their dependents.
-        let volatile_cells: Vec<CellKey> = self.graph.volatile_cells.iter().copied().collect();
-        for cell in volatile_cells {
-            self.mark_dirty_including_self_with_reasons(cell);
-        }
+        let levels = match self.calc_graph.calc_levels_for_dirty() {
+            Ok(levels) => levels,
+            Err(_) => {
+                self.apply_cycle_error();
+                return;
+            }
+        };
 
-        if self.dirty.is_empty() {
+        if levels.is_empty() {
             return;
         }
 
         let mut snapshot = Snapshot::from_workbook(&self.workbook);
 
-        let dirty_cells: HashSet<CellKey> = self.dirty.iter().copied().collect();
-        let mut in_degree: HashMap<CellKey, usize> = HashMap::new();
-        for &cell in &dirty_cells {
-            let deg = self
-                .graph
-                .precedents
-                .get(&cell)
-                .map(|p| p.iter().filter(|c| dirty_cells.contains(c)).count())
-                .unwrap_or(0);
-            in_degree.insert(cell, deg);
-        }
-
-        let mut current_level: Vec<CellKey> = in_degree
-            .iter()
-            .filter_map(|(&k, &d)| (d == 0).then_some(k))
-            .collect();
-
-        let mut processed = HashSet::new();
-
-        while !current_level.is_empty() {
-            let level = std::mem::take(&mut current_level);
-            let has_barrier = level.iter().any(|&k| {
+        for level in levels {
+            let keys: Vec<CellKey> = level.into_iter().map(cell_key_from_id).collect();
+            let has_barrier = keys.iter().any(|&k| {
                 self.workbook
                     .get_cell(k)
                     .map(|c| c.volatile || !c.thread_safe)
                     .unwrap_or(false)
             });
 
-            let tasks: Vec<(CellKey, CompiledExpr)> = level
+            let tasks: Vec<(CellKey, CompiledExpr)> = keys
                 .iter()
-                .filter_map(|&k| self.workbook.get_cell(k).and_then(|c| c.ast.clone().map(|a| (k, a))))
+                .filter_map(|&k| {
+                    self.workbook
+                        .get_cell(k)
+                        .and_then(|c| c.ast.clone().map(|a| (k, a)))
+                })
                 .collect();
 
-            let results: Vec<(CellKey, Value)> = if mode == RecalcMode::MultiThreaded && !has_barrier
-            {
-                tasks
-                    .par_iter()
-                    .map(|(k, expr)| {
-                        let ctx = crate::eval::EvalContext {
-                            current_sheet: k.sheet,
-                            current_cell: k.addr,
-                        };
-                        let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
-                        (*k, evaluator.eval_formula(expr))
-                    })
-                    .collect()
-            } else {
-                tasks
-                    .iter()
-                    .map(|(k, expr)| {
-                        let ctx = crate::eval::EvalContext {
-                            current_sheet: k.sheet,
-                            current_cell: k.addr,
-                        };
-                        let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
-                        (*k, evaluator.eval_formula(expr))
-                    })
-                    .collect()
-            };
+            let results: Vec<(CellKey, Value)> =
+                if mode == RecalcMode::MultiThreaded && !has_barrier {
+                    tasks
+                        .par_iter()
+                        .map(|(k, expr)| {
+                            let ctx = crate::eval::EvalContext {
+                                current_sheet: k.sheet,
+                                current_cell: k.addr,
+                            };
+                            let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
+                            (*k, evaluator.eval_formula(expr))
+                        })
+                        .collect()
+                } else {
+                    tasks
+                        .iter()
+                        .map(|(k, expr)| {
+                            let ctx = crate::eval::EvalContext {
+                                current_sheet: k.sheet,
+                                current_cell: k.addr,
+                            };
+                            let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
+                            (*k, evaluator.eval_formula(expr))
+                        })
+                        .collect()
+                };
 
             for (k, v) in &results {
                 let cell = self.workbook.get_or_create_cell_mut(*k);
                 cell.value = v.clone();
                 snapshot.values.insert(*k, v.clone());
             }
-
-            for &k in &level {
-                processed.insert(k);
-                self.dirty.remove(&k);
-                self.dirty_reasons.remove(&k);
-                if let Some(deps) = self.graph.dependents.get(&k) {
-                    for &d in deps {
-                        if !dirty_cells.contains(&d) {
-                            continue;
-                        }
-                        if let Some(entry) = in_degree.get_mut(&d) {
-                            *entry = entry.saturating_sub(1);
-                            if *entry == 0 {
-                                current_level.push(d);
-                            }
-                        }
-                    }
-                }
-            }
         }
 
-        // Any remaining dirty cells are in a cycle. For now, surface a calc error.
-        for cell in dirty_cells.difference(&processed).copied().collect::<Vec<_>>() {
-            let c = self.workbook.get_or_create_cell_mut(cell);
-            c.value = Value::Error(ErrorKind::Calc);
-            self.dirty.remove(&cell);
-            self.dirty_reasons.remove(&cell);
-        }
+        self.calc_graph.clear_dirty();
+        self.dirty.clear();
+        self.dirty_reasons.clear();
     }
 
-    fn compile_expr(&mut self, expr: &Expr<String>, _current_sheet: SheetId) -> CompiledExpr {
+    fn apply_cycle_error(&mut self) {
+        let mut impacted: HashSet<CellId> = self.calc_graph.dirty_cells().into_iter().collect();
+        impacted.extend(self.calc_graph.volatile_cells());
+
+        for cell_id in impacted {
+            let key = cell_key_from_id(cell_id);
+            let cell = self.workbook.get_or_create_cell_mut(key);
+            cell.value = Value::Error(ErrorKind::Calc);
+        }
+
+        self.calc_graph.clear_dirty();
+        self.dirty.clear();
+        self.dirty_reasons.clear();
+    }
+
+    fn compile_expr(&mut self, expr: &Expr<String>, current_sheet: SheetId) -> CompiledExpr {
         let mut map = |sref: &SheetReference<String>| match sref {
-            SheetReference::Current => SheetReference::Current,
+            SheetReference::Current => SheetReference::Sheet(current_sheet),
             SheetReference::Sheet(name) => SheetReference::Sheet(self.workbook.ensure_sheet(name)),
             SheetReference::External(wb) => SheetReference::External(wb.clone()),
         };
@@ -695,7 +729,8 @@ impl Engine {
             }
         }
 
-        self.graph = DependencyGraph::default();
+        self.graph = AuditGraph::default();
+        self.calc_graph = CalcGraph::new();
         self.dirty.clear();
         self.dirty_reasons.clear();
 
@@ -1447,7 +1482,10 @@ fn walk_expr(
                 };
                 for row in r1..=r2 {
                     for col in c1..=c2 {
-                        precedents.insert(CellKey { sheet, addr: CellAddr { row, col } });
+                        precedents.insert(CellKey {
+                            sheet,
+                            addr: CellAddr { row, col },
+                        });
                     }
                 }
             }
@@ -1542,10 +1580,98 @@ fn walk_expr(
     }
 }
 
+fn analyze_calc_precedents(
+    expr: &CompiledExpr,
+    current_cell: CellKey,
+    tables_by_sheet: &[Vec<Table>],
+) -> HashSet<Precedent> {
+    let mut out = HashSet::new();
+    walk_calc_expr(expr, current_cell, tables_by_sheet, &mut out);
+    out
+}
+
+fn walk_calc_expr(
+    expr: &CompiledExpr,
+    current_cell: CellKey,
+    tables_by_sheet: &[Vec<Table>],
+    precedents: &mut HashSet<Precedent>,
+) {
+    match expr {
+        Expr::CellRef(r) => {
+            if let Some(sheet) = resolve_sheet(&r.sheet, current_cell.sheet) {
+                precedents.insert(Precedent::Cell(CellId::new(
+                    sheet_id_for_graph(sheet),
+                    r.addr.row,
+                    r.addr.col,
+                )));
+            }
+        }
+        Expr::RangeRef(RangeRef { sheet, start, end }) => {
+            if let Some(sheet) = resolve_sheet(sheet, current_cell.sheet) {
+                let range = Range::new(
+                    CellRef::new(start.row, start.col),
+                    CellRef::new(end.row, end.col),
+                );
+                precedents.insert(Precedent::Range(SheetRange::new(
+                    sheet_id_for_graph(sheet),
+                    range,
+                )));
+            }
+        }
+        Expr::StructuredRef(sref) => {
+            if let Ok((sheet_id, start, end)) = crate::structured_refs::resolve_structured_ref(
+                tables_by_sheet,
+                current_cell.sheet,
+                current_cell.addr,
+                sref,
+            ) {
+                let range = Range::new(
+                    CellRef::new(start.row, start.col),
+                    CellRef::new(end.row, end.col),
+                );
+                precedents.insert(Precedent::Range(SheetRange::new(
+                    sheet_id_for_graph(sheet_id),
+                    range,
+                )));
+            }
+        }
+        Expr::Unary { expr, .. } => walk_calc_expr(expr, current_cell, tables_by_sheet, precedents),
+        Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
+            walk_calc_expr(left, current_cell, tables_by_sheet, precedents);
+            walk_calc_expr(right, current_cell, tables_by_sheet, precedents);
+        }
+        Expr::FunctionCall { args, .. } => {
+            for a in args {
+                walk_calc_expr(a, current_cell, tables_by_sheet, precedents);
+            }
+        }
+        Expr::ImplicitIntersection(inner) => walk_calc_expr(inner, current_cell, tables_by_sheet, precedents),
+        Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
+    }
+}
+
 fn resolve_sheet(sheet: &SheetReference<usize>, current_sheet: SheetId) -> Option<SheetId> {
     match sheet {
         SheetReference::Current => Some(current_sheet),
         SheetReference::Sheet(id) => Some(*id),
         SheetReference::External(_) => None,
+    }
+}
+
+fn sheet_id_for_graph(sheet: SheetId) -> u32 {
+    sheet.try_into().expect("sheet id exceeds u32")
+}
+
+fn cell_id_from_key(key: CellKey) -> CellId {
+    CellId::new(sheet_id_for_graph(key.sheet), key.addr.row, key.addr.col)
+}
+
+fn cell_key_from_id(id: CellId) -> CellKey {
+    CellKey {
+        sheet: usize::try_from(id.sheet_id).expect("sheet id exceeds usize"),
+        addr: CellAddr {
+            row: id.cell.row,
+            col: id.cell.col,
+        },
     }
 }

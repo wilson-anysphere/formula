@@ -375,6 +375,171 @@ impl DependencyGraph {
         Ok(out)
     }
 
+    /// Returns the calculation schedule for the current dirty set (plus volatile closure),
+    /// grouped into independent dependency levels.
+    ///
+    /// Each inner `Vec<CellId>` contains formula cells that can be evaluated in parallel because
+    /// all of their precedents (within the evaluated subset) appear in earlier levels.
+    ///
+    /// This is similar to [`calc_order_for_dirty`], but preserves the level structure needed for
+    /// multi-threaded recalculation. Range nodes are treated as ordering constraints and are
+    /// processed internally (they do not appear in the returned schedule).
+    pub fn calc_levels_for_dirty(&mut self) -> Result<Vec<Vec<CellId>>, CycleError> {
+        // Ensure the full graph has no cycles. If there is a cycle anywhere in the workbook,
+        // Excel's calculation chain becomes undefined; we surface the cycle as an error and
+        // avoid producing a partial schedule.
+        self.rebuild_calc_chain()?;
+        self.rebuild_volatile_closure_if_needed();
+
+        let mut eval_cells: HashSet<CellId> = HashSet::new();
+        eval_cells.extend(self.dirty.iter().copied());
+        eval_cells.extend(self.volatile_closure.iter().copied());
+
+        if eval_cells.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Relevant range nodes are those referenced as precedents by any cell we will evaluate.
+        let mut relevant_ranges: HashSet<RangeId> = HashSet::new();
+        for cell in eval_cells.iter().copied() {
+            if let Some(node) = self.cells.get(&cell) {
+                relevant_ranges.extend(node.precedent_ranges.iter().copied());
+            }
+        }
+
+        // In-degree for formula cells restricted to the evaluated subset.
+        let mut cell_in: HashMap<CellId, usize> = HashMap::with_capacity(eval_cells.len());
+        let mut ready_cells: BTreeSet<ReadyNode> = BTreeSet::new();
+        for cell in eval_cells.iter().copied() {
+            let Some(node) = self.cells.get(&cell) else {
+                continue;
+            };
+            let direct_formula_precedents = node
+                .precedent_cells
+                .iter()
+                .filter(|p| eval_cells.contains(p))
+                .count();
+            let deg = direct_formula_precedents + node.precedent_ranges.len();
+            cell_in.insert(cell, deg);
+            if deg == 0 {
+                ready_cells.insert(ReadyNode::cell(cell));
+            }
+        }
+
+        // In-degree for range nodes = number of evaluated formula cells inside the range.
+        let mut range_in: HashMap<RangeId, usize> = relevant_ranges
+            .iter()
+            .copied()
+            .map(|id| (id, 0usize))
+            .collect();
+        for cell in eval_cells.iter().copied() {
+            for range_id in self.range_nodes_containing_cell(cell) {
+                if let Some(deg) = range_in.get_mut(&range_id) {
+                    *deg = deg.saturating_add(1);
+                }
+            }
+        }
+
+        let mut ready_ranges: BTreeSet<ReadyNode> = BTreeSet::new();
+        for (&range_id, &deg) in &range_in {
+            if deg == 0 {
+                ready_ranges.insert(self.ready_range_node(range_id));
+            }
+        }
+
+        let mut out: Vec<Vec<CellId>> = Vec::new();
+        let mut processed = 0usize;
+
+        while processed < eval_cells.len() {
+            // Range nodes are ordering-only: process any that are ready before selecting the next
+            // batch of evaluable formula cells.
+            while let Some(node) = ready_ranges.pop_first() {
+                let range_id = match node.kind {
+                    ReadyNodeKind::Range(id) => id,
+                    ReadyNodeKind::Cell(_) => unreachable!("ready_ranges only stores range nodes"),
+                };
+
+                range_in.remove(&range_id);
+
+                if let Some(range_node) = self.range_nodes.get(&range_id) {
+                    for &dep in &range_node.dependents {
+                        if !eval_cells.contains(&dep) {
+                            continue;
+                        }
+                        if let Some(deg) = cell_in.get_mut(&dep) {
+                            *deg = deg.saturating_sub(1);
+                            if *deg == 0 {
+                                ready_cells.insert(ReadyNode::cell(dep));
+                            }
+                        }
+                    }
+                }
+            }
+
+            if ready_cells.is_empty() {
+                // The full graph is acyclic (checked above), so this should not happen. Still, be
+                // defensive in case of internal inconsistency.
+                break;
+            }
+
+            let mut level: Vec<CellId> = Vec::with_capacity(ready_cells.len());
+            while let Some(node) = ready_cells.pop_first() {
+                let cell = match node.kind {
+                    ReadyNodeKind::Cell(cell) => cell,
+                    ReadyNodeKind::Range(_) => unreachable!("ready_cells only stores cell nodes"),
+                };
+                // `cell_in` only tracks cells we still need to schedule; skip if already processed.
+                if cell_in.remove(&cell).is_none() {
+                    continue;
+                }
+                level.push(cell);
+            }
+
+            if level.is_empty() {
+                break;
+            }
+
+            processed += level.len();
+            out.push(level.clone());
+
+            let mut next_ready_cells: BTreeSet<ReadyNode> = BTreeSet::new();
+            let mut next_ready_ranges: BTreeSet<ReadyNode> = BTreeSet::new();
+
+            for cell in level {
+                // Direct dependents.
+                if let Some(dependents) = self.cell_dependents.get(&cell) {
+                    for &dep in dependents {
+                        if let Some(deg) = cell_in.get_mut(&dep) {
+                            *deg = deg.saturating_sub(1);
+                            if *deg == 0 {
+                                next_ready_cells.insert(ReadyNode::cell(dep));
+                            }
+                        }
+                    }
+                }
+
+                // Range membership edges.
+                for range_id in self.range_nodes_containing_cell(cell) {
+                    if let Some(deg) = range_in.get_mut(&range_id) {
+                        *deg = deg.saturating_sub(1);
+                        if *deg == 0 {
+                            next_ready_ranges.insert(self.ready_range_node(range_id));
+                        }
+                    }
+                }
+            }
+
+            ready_cells = next_ready_cells;
+            ready_ranges = next_ready_ranges;
+        }
+
+        if processed != eval_cells.len() {
+            return Err(CycleError { path: Vec::new() });
+        }
+
+        Ok(out)
+    }
+
     /// Clears the explicit dirty set. Volatile cells remain effectively dirty on every call to
     /// [`calc_order_for_dirty`].
     pub fn clear_dirty(&mut self) {
