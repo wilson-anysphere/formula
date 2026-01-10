@@ -97,7 +97,9 @@ pub(crate) fn looks_like_datetime(section: &str) -> bool {
 
 pub(crate) fn format_datetime(serial: f64, pattern: &str, options: &FormatOptions) -> String {
     let mut tokens = tokenize(pattern);
-    let has_ampm = tokens.iter().any(|t| matches!(t, Token::AmPm));
+    let has_ampm = tokens
+        .iter()
+        .any(|t| matches!(t, Token::AmPmLong | Token::AmPmShort));
     disambiguate_minutes(&mut tokens);
 
     let frac_digits = tokens
@@ -242,7 +244,8 @@ enum Token {
     Minute(usize),
     DateSep,
     TimeSep,
-    AmPm,
+    AmPmLong,
+    AmPmShort,
     ElapsedHours,
     ElapsedMinutes,
     ElapsedSeconds,
@@ -330,14 +333,14 @@ fn tokenize(pattern: &str) -> Vec<Token> {
                         chars.next();
                     }
                     flush_literal(&mut literal_buf, &mut tokens);
-                    tokens.push(Token::AmPm);
+                    tokens.push(Token::AmPmLong);
                 } else if lower.starts_with("a/p") {
                     // Consume `/P` (2 chars).
                     for _ in 0..2 {
                         chars.next();
                     }
                     flush_literal(&mut literal_buf, &mut tokens);
-                    tokens.push(Token::AmPm);
+                    tokens.push(Token::AmPmShort);
                 } else {
                     // Not a recognized token: treat as literal.
                     literal_buf.push(ch);
@@ -483,7 +486,8 @@ fn render_tokens(tokens: &[Token], parts: &DateTimeParts, has_ampm: bool, option
                 out.push('.');
                 out.push_str(&format_fractional_seconds(parts.millis, *digits));
             }
-            Token::AmPm => out.push_str(if parts.hour < 12 { "AM" } else { "PM" }),
+            Token::AmPmLong => out.push_str(if parts.hour < 12 { "AM" } else { "PM" }),
+            Token::AmPmShort => out.push_str(if parts.hour < 12 { "A" } else { "P" }),
             Token::ElapsedHours => out.push_str(&(parts.total_seconds / 3600).to_string()),
             Token::ElapsedMinutes => out.push_str(&(parts.total_seconds / 60).to_string()),
             Token::ElapsedSeconds => out.push_str(&parts.total_seconds.to_string()),

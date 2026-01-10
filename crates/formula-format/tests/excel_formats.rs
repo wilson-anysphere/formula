@@ -129,6 +129,15 @@ fn am_pm_time_formatting() {
         format_value(Value::Number(1.75), Some("h:mm:ss AM/PM"), &options).text,
         "6:00:00 PM"
     );
+
+    assert_eq!(
+        format_value(Value::Number(1.0), Some("h:mm A/P"), &options).text,
+        "12:00 A"
+    );
+    assert_eq!(
+        format_value(Value::Number(1.5), Some("h:mm A/P"), &options).text,
+        "12:00 P"
+    );
 }
 
 #[test]
