@@ -1,5 +1,6 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use crate::{A1ParseError, CellRef, CellValue, Color, ErrorValue, Range};
@@ -111,6 +112,31 @@ pub struct ColorScaleRule {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum IconSet {
     ThreeArrows,
+    ThreeTrafficLights1,
+    ThreeTrafficLights2,
+    ThreeFlags,
+    ThreeSymbols,
+    ThreeSymbols2,
+    FourArrows,
+    FourArrowsGray,
+    FiveArrows,
+    FiveArrowsGray,
+    FiveQuarters,
+}
+
+impl IconSet {
+    pub fn icon_count(self) -> usize {
+        match self {
+            IconSet::ThreeArrows
+            | IconSet::ThreeTrafficLights1
+            | IconSet::ThreeTrafficLights2
+            | IconSet::ThreeFlags
+            | IconSet::ThreeSymbols
+            | IconSet::ThreeSymbols2 => 3,
+            IconSet::FourArrows | IconSet::FourArrowsGray => 4,
+            IconSet::FiveArrows | IconSet::FiveArrowsGray | IconSet::FiveQuarters => 5,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -194,12 +220,17 @@ pub trait DifferentialFormatProvider {
 pub struct DataBarRender {
     pub color: Color,
     pub fill_ratio: f32,
+    pub min_length: u8,
+    pub max_length: u8,
+    pub gradient: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IconRender {
     pub set: IconSet,
     pub index: usize,
+    pub show_value: bool,
+    pub reverse: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -340,9 +371,11 @@ fn evaluate_rules(
             CfRuleKind::Expression { formula } => {
                 apply_expression(&mut result, rule, formula, visible, formula_evaluator, dxfs)
             }
-            CfRuleKind::DataBar(db) => apply_data_bar(&mut result, rule, db, visible, values),
-            CfRuleKind::ColorScale(cs) => apply_color_scale(&mut result, rule, cs, visible, values),
-            CfRuleKind::IconSet(is) => apply_icon_set(&mut result, rule, is, visible, values),
+            CfRuleKind::DataBar(db) => apply_data_bar(&mut result, rule, db, visible, values, formula_evaluator),
+            CfRuleKind::ColorScale(cs) => {
+                apply_color_scale(&mut result, rule, cs, visible, values, formula_evaluator)
+            }
+            CfRuleKind::IconSet(is) => apply_icon_set(&mut result, rule, is, visible, values, formula_evaluator),
             CfRuleKind::TopBottom(tb) => apply_top_bottom(&mut result, rule, tb, visible, values, dxfs),
             CfRuleKind::UniqueDuplicate(ud) => {
                 apply_unique_duplicate(&mut result, rule, ud, visible, values, dxfs)
@@ -434,26 +467,45 @@ fn apply_data_bar(
     db: &DataBarRule,
     visible: Range,
     values: &dyn CellValueProvider,
+    formula_evaluator: Option<&dyn FormulaEvaluator>,
 ) {
-    let Some((min, max)) = min_max_for_ranges(&rule.applies_to, values) else {
+    let Some(ctx) = rule_context_cell(rule) else {
         return;
     };
-    let denom = (max - min).abs();
+    let Some(mut stats) = NumericRangeStats::collect(&rule.applies_to, values) else {
+        return;
+    };
+    let Some(min) = cfvo_threshold(&db.min, &mut stats, ctx, values, formula_evaluator, CfvoContextKind::DataBar) else {
+        return;
+    };
+    let Some(max) = cfvo_threshold(&db.max, &mut stats, ctx, values, formula_evaluator, CfvoContextKind::DataBar) else {
+        return;
+    };
+    let denom = max - min;
     let color = db.color.unwrap_or_else(|| Color::new_argb(0xFF638EC6));
+    let min_length = db.min_length.unwrap_or(0).min(100);
+    let max_length = db.max_length.unwrap_or(100).min(100);
+    let gradient = db.gradient.unwrap_or(true);
 
     for cell in iter_rule_cells(rule, visible) {
         let Some(v) = values.get_value(cell).and_then(cell_value_as_number) else {
             continue;
         };
+        if v.is_nan() {
+            continue;
+        }
         let ratio = if denom == 0.0 {
             0.0
         } else {
-            ((v - min) / (max - min)) as f32
+            ((v - min) / denom) as f32
         };
         let entry = result.get_mut(cell).expect("visible intersection");
         entry.data_bar = Some(DataBarRender {
             color,
             fill_ratio: ratio.clamp(0.0, 1.0),
+            min_length,
+            max_length,
+            gradient,
         });
     }
 }
@@ -464,45 +516,61 @@ fn apply_color_scale(
     cs: &ColorScaleRule,
     visible: Range,
     values: &dyn CellValueProvider,
+    formula_evaluator: Option<&dyn FormulaEvaluator>,
 ) {
-    let Some((min, max)) = min_max_for_ranges(&rule.applies_to, values) else {
-        return;
-    };
-    let denom = (max - min).abs();
-    if cs.colors.len() < 2 {
+    if cs.colors.len() < 2 || cs.cfvos.len() < 2 {
         return;
     }
+    let Some(ctx) = rule_context_cell(rule) else {
+        return;
+    };
+    let Some(mut stats) = NumericRangeStats::collect(&rule.applies_to, values) else {
+        return;
+    };
 
-    // TODO: Implement cfvo-driven midpoints and percentile thresholds.
     let has_mid = cs.colors.len() >= 3 && cs.cfvos.len() >= 3;
-    let mid_value = (min + max) / 2.0;
+    let min_cfvo = &cs.cfvos[0];
+    let max_cfvo = &cs.cfvos[cs.cfvos.len() - 1];
+    let mid_cfvo = has_mid.then(|| &cs.cfvos[1]);
+
+    let Some(min) = cfvo_threshold(min_cfvo, &mut stats, ctx, values, formula_evaluator, CfvoContextKind::Other)
+    else {
+        return;
+    };
+    let Some(max) = cfvo_threshold(max_cfvo, &mut stats, ctx, values, formula_evaluator, CfvoContextKind::Other)
+    else {
+        return;
+    };
+    let mid = mid_cfvo
+        .and_then(|m| cfvo_threshold(m, &mut stats, ctx, values, formula_evaluator, CfvoContextKind::Other));
+    let min_color = cs.colors[0];
+    let max_color = cs.colors[cs.colors.len() - 1];
 
     for cell in iter_rule_cells(rule, visible) {
         let Some(v) = values.get_value(cell).and_then(cell_value_as_number) else {
             continue;
         };
+        if v.is_nan() {
+            continue;
+        }
 
-        let fill = if denom == 0.0 {
-            cs.colors[0]
-        } else if has_mid {
-            if v <= mid_value {
-                let t = if (mid_value - min).abs() == 0.0 {
-                    0.0
-                } else {
-                    ((v - min) / (mid_value - min)) as f32
-                };
-                lerp_color(cs.colors[0], cs.colors[1], t)
+        let fill = if has_mid && mid.is_some() {
+            let mid = mid.expect("checked");
+            let mid_color = cs.colors[1];
+            let high_color = cs.colors[2];
+            if v <= mid {
+                let denom = mid - min;
+                let t = if denom == 0.0 { 0.0 } else { ((v - min) / denom) as f32 };
+                lerp_color(min_color, mid_color, t)
             } else {
-                let t = if (max - mid_value).abs() == 0.0 {
-                    0.0
-                } else {
-                    ((v - mid_value) / (max - mid_value)) as f32
-                };
-                lerp_color(cs.colors[1], cs.colors[2], t)
+                let denom = max - mid;
+                let t = if denom == 0.0 { 0.0 } else { ((v - mid) / denom) as f32 };
+                lerp_color(mid_color, high_color, t)
             }
         } else {
-            let t = ((v - min) / (max - min)) as f32;
-            lerp_color(cs.colors[0], cs.colors[cs.colors.len() - 1], t)
+            let denom = max - min;
+            let t = if denom == 0.0 { 0.0 } else { ((v - min) / denom) as f32 };
+            lerp_color(min_color, max_color, t)
         };
 
         let entry = result.get_mut(cell).expect("visible intersection");
@@ -516,30 +584,36 @@ fn apply_icon_set(
     is: &IconSetRule,
     visible: Range,
     values: &dyn CellValueProvider,
+    formula_evaluator: Option<&dyn FormulaEvaluator>,
 ) {
-    let Some((min, max)) = min_max_for_ranges(&rule.applies_to, values) else {
+    let Some(ctx) = rule_context_cell(rule) else {
         return;
     };
-    let denom = (max - min).abs();
-    if denom == 0.0 {
+    let Some(mut stats) = NumericRangeStats::collect(&rule.applies_to, values) else {
         return;
-    }
-    let thresholds = icon_set_thresholds(is, min, max);
+    };
+    let Some(thresholds) = icon_set_thresholds(is, &mut stats, ctx, values, formula_evaluator) else {
+        return;
+    };
+    let icon_count = is.set.icon_count();
 
     for cell in iter_rule_cells(rule, visible) {
         let Some(v) = values.get_value(cell).and_then(cell_value_as_number) else {
             continue;
         };
-        let mut idx = 0;
-        if v >= thresholds[1] {
-            idx = 2;
-        } else if v >= thresholds[0] {
-            idx = 1;
+        if v.is_nan() {
+            continue;
+        }
+        let mut idx = thresholds.iter().take_while(|t| v >= **t).count();
+        if is.reverse && icon_count > 0 {
+            idx = (icon_count - 1).saturating_sub(idx);
         }
         let entry = result.get_mut(cell).expect("visible intersection");
         entry.icon = Some(IconRender {
             set: is.set,
             index: idx,
+            show_value: is.show_value,
+            reverse: is.reverse,
         });
     }
 }
@@ -680,33 +754,199 @@ fn cell_value_truthy(value: &CellValue) -> bool {
     }
 }
 
-fn min_max_for_ranges(ranges: &[Range], values: &dyn CellValueProvider) -> Option<(f64, f64)> {
-    let mut min = f64::INFINITY;
-    let mut max = f64::NEG_INFINITY;
-    let mut found = false;
+fn rule_context_cell(rule: &CfRule) -> Option<CellRef> {
+    rule.applies_to
+        .iter()
+        .map(|r| r.start)
+        .min_by_key(|c| (c.row, c.col))
+}
 
-    for r in ranges {
-        for cell in iter_cells(*r) {
-            if let Some(v) = values.get_value(cell).and_then(cell_value_as_number) {
+#[derive(Clone, Debug)]
+struct NumericRangeStats {
+    values: Vec<f64>,
+    sorted: bool,
+    min: f64,
+    max: f64,
+}
+
+impl NumericRangeStats {
+    fn collect(ranges: &[Range], values: &dyn CellValueProvider) -> Option<Self> {
+        let mut out = Self {
+            values: Vec::new(),
+            sorted: false,
+            min: f64::INFINITY,
+            max: f64::NEG_INFINITY,
+        };
+
+        for r in ranges {
+            for cell in iter_cells(*r) {
+                let Some(v) = values.get_value(cell).and_then(cell_value_as_number) else {
+                    continue;
+                };
                 if v.is_nan() {
                     continue;
                 }
-                found = true;
-                if v < min {
-                    min = v;
+                out.values.push(v);
+                if v < out.min {
+                    out.min = v;
                 }
-                if v > max {
-                    max = v;
+                if v > out.max {
+                    out.max = v;
                 }
             }
         }
+
+        if out.values.is_empty() {
+            return None;
+        }
+
+        Some(out)
     }
 
-    if found {
-        Some((min, max))
-    } else {
-        None
+    fn ensure_sorted(&mut self) {
+        if self.sorted {
+            return;
+        }
+        self.values
+            .sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+        self.sorted = true;
     }
+
+    /// "Percent" threshold semantics for conditional formatting cfvos.
+    ///
+    /// This behaves like Excel's percentile interpolation (similar to `PERCENTILE.INC`),
+    /// where `percent=0` is the minimum and `percent=100` is the maximum.
+    fn percentile_rank(&mut self, percent: f64) -> Option<f64> {
+        if percent.is_nan() {
+            return None;
+        }
+        let n = self.values.len();
+        if n == 0 {
+            return None;
+        }
+        self.ensure_sorted();
+        if n == 1 {
+            return Some(self.values[0]);
+        }
+
+        let p = (percent / 100.0).clamp(0.0, 1.0);
+        let pos = p * (n as f64 - 1.0);
+        let lo = pos.floor() as usize;
+        let hi = pos.ceil() as usize;
+        if lo == hi {
+            return Some(self.values[lo]);
+        }
+        let t = pos - lo as f64;
+        Some(self.values[lo] + (self.values[hi] - self.values[lo]) * t)
+    }
+
+    /// "Percentile" threshold semantics for conditional formatting cfvos.
+    ///
+    /// This uses a nearest-rank selection: `ceil(p/100 * N)` (clamped).
+    fn percentile_nearest_rank(&mut self, percent: f64) -> Option<f64> {
+        if percent.is_nan() {
+            return None;
+        }
+        let n = self.values.len();
+        if n == 0 {
+            return None;
+        }
+        self.ensure_sorted();
+        if n == 1 {
+            return Some(self.values[0]);
+        }
+
+        let p = (percent / 100.0).clamp(0.0, 1.0);
+        let rank = (p * (n as f64)).ceil() as usize;
+        let idx = rank.saturating_sub(1).min(n - 1);
+        Some(self.values[idx])
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CfvoContextKind {
+    DataBar,
+    Other,
+}
+
+fn cfvo_threshold(
+    cfvo: &Cfvo,
+    stats: &mut NumericRangeStats,
+    ctx: CellRef,
+    values: &dyn CellValueProvider,
+    formula_evaluator: Option<&dyn FormulaEvaluator>,
+    kind: CfvoContextKind,
+) -> Option<f64> {
+    let v = match cfvo.type_ {
+        CfvoType::Min => Some(stats.min),
+        CfvoType::Max => Some(stats.max),
+        CfvoType::AutoMin => match kind {
+            CfvoContextKind::DataBar => Some(if stats.min >= 0.0 { 0.0 } else { stats.min }),
+            CfvoContextKind::Other => Some(stats.min),
+        },
+        CfvoType::AutoMax => match kind {
+            CfvoContextKind::DataBar => Some(if stats.max <= 0.0 { 0.0 } else { stats.max }),
+            CfvoContextKind::Other => Some(stats.max),
+        },
+        CfvoType::Number => cfvo
+            .value
+            .as_deref()
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .filter(|n| !n.is_nan()),
+        CfvoType::Percent => cfvo
+            .value
+            .as_deref()
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .and_then(|p| stats.percentile_rank(p)),
+        CfvoType::Percentile => cfvo
+            .value
+            .as_deref()
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .and_then(|p| stats.percentile_nearest_rank(p)),
+        CfvoType::Formula => eval_threshold(
+            cfvo.value.as_deref().unwrap_or(""),
+            ctx,
+            values,
+            formula_evaluator,
+        ),
+    };
+
+    v.filter(|n| !n.is_nan())
+}
+
+fn icon_set_thresholds(
+    rule: &IconSetRule,
+    stats: &mut NumericRangeStats,
+    ctx: CellRef,
+    values: &dyn CellValueProvider,
+    formula_evaluator: Option<&dyn FormulaEvaluator>,
+) -> Option<Vec<f64>> {
+    let icon_count = rule.set.icon_count();
+    if icon_count < 2 {
+        return None;
+    }
+    let mut thresholds = Vec::with_capacity(icon_count - 1);
+    for boundary in 1..icon_count {
+        let default_percent = 100.0 * (boundary as f64) / (icon_count as f64);
+        let threshold = rule
+            .cfvos
+            .get(boundary)
+            .and_then(|cfvo| {
+                cfvo_threshold(
+                    cfvo,
+                    stats,
+                    ctx,
+                    values,
+                    formula_evaluator,
+                    CfvoContextKind::Other,
+                )
+            })
+            .or_else(|| stats.percentile_rank(default_percent));
+
+        thresholds.push(threshold?);
+    }
+
+    Some(thresholds)
 }
 
 fn eval_threshold(
@@ -716,39 +956,36 @@ fn eval_threshold(
     formula_evaluator: Option<&dyn FormulaEvaluator>,
 ) -> Option<f64> {
     let trimmed = formula.trim();
-    if trimmed.is_empty() {
+    let expr = trimmed.strip_prefix('=').unwrap_or(trimmed).trim();
+    if expr.is_empty() {
         return None;
     }
-    if let Ok(num) = trimmed.parse::<f64>() {
-        return Some(num);
+    if let Ok(num) = expr.parse::<f64>() {
+        if !num.is_nan() {
+            return Some(num);
+        }
     }
     if let Some(fe) = formula_evaluator {
-        return fe.eval(trimmed, ctx).and_then(cell_value_as_number);
+        if let Some(v) = fe.eval(expr, ctx).and_then(cell_value_as_number).filter(|n| !n.is_nan()) {
+            return Some(v);
+        }
+        if expr != trimmed {
+            return fe
+                .eval(trimmed, ctx)
+                .and_then(cell_value_as_number)
+                .filter(|n| !n.is_nan());
+        }
     }
     // Support a bare A1 reference even without a formula evaluator.
-    if let Ok(cell) = CellRef::from_a1(trimmed) {
-        return values.get_value(cell).and_then(cell_value_as_number);
+    if let Ok(cell) = CellRef::from_a1(expr) {
+        return values.get_value(cell).and_then(cell_value_as_number).filter(|n| !n.is_nan());
+    }
+    if let Some((_, a1)) = expr.rsplit_once('!') {
+        if let Ok(cell) = CellRef::from_a1(a1) {
+            return values.get_value(cell).and_then(cell_value_as_number).filter(|n| !n.is_nan());
+        }
     }
     None
-}
-
-fn icon_set_thresholds(rule: &IconSetRule, min: f64, max: f64) -> [f64; 2] {
-    let mut t1 = 33.0;
-    let mut t2 = 67.0;
-    if rule.cfvos.len() >= 3 {
-        if let Some(v) = rule.cfvos.get(1).and_then(|c| c.value.as_deref()) {
-            if let Ok(n) = v.parse::<f64>() {
-                t1 = n;
-            }
-        }
-        if let Some(v) = rule.cfvos.get(2).and_then(|c| c.value.as_deref()) {
-            if let Ok(n) = v.parse::<f64>() {
-                t2 = n;
-            }
-        }
-    }
-    let span = max - min;
-    [min + span * (t1 / 100.0), min + span * (t2 / 100.0)]
 }
 
 /// Parse a SpreadsheetML `sqref` attribute (`A1`, `A1:B2`, `A1 A3:B7`).
@@ -791,6 +1028,10 @@ pub fn extract_a1_references(formula: &str) -> Vec<Range> {
         if let Some(m) = cap.get(1) {
             // Avoid matching function names that look like cell references (e.g. LOG10()).
             if formula[m.end()..].starts_with('(') {
+                continue;
+            }
+            // Avoid matching sheet names that look like cell references (e.g. `ABC1!A1`).
+            if formula[m.end()..].starts_with('!') || formula[m.end()..].starts_with("'!") {
                 continue;
             }
             if let Ok(r) = parse_range_a1(m.as_str()) {
@@ -923,10 +1164,287 @@ impl Iterator for RangeIter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct TestValues {
+        values: HashMap<CellRef, CellValue>,
+    }
+
+    impl TestValues {
+        fn with_numbers<const N: usize>(items: [(&'static str, f64); N]) -> Self {
+            let mut values = HashMap::new();
+            for (a1, n) in items {
+                values.insert(CellRef::from_a1(a1).unwrap(), CellValue::Number(n));
+            }
+            Self { values }
+        }
+    }
+
+    impl CellValueProvider for TestValues {
+        fn get_value(&self, cell: CellRef) -> Option<CellValue> {
+            self.values.get(&cell).cloned()
+        }
+    }
+
+    struct AssertCtxFormulaEvaluator {
+        expected_ctx: CellRef,
+        results: HashMap<String, CellValue>,
+    }
+
+    impl FormulaEvaluator for AssertCtxFormulaEvaluator {
+        fn eval(&self, formula: &str, ctx: CellRef) -> Option<CellValue> {
+            assert_eq!(ctx, self.expected_ctx, "formula evaluated with unexpected ctx");
+            self.results.get(formula.trim()).cloned()
+        }
+    }
 
     #[test]
     fn extract_refs_avoids_function_name() {
         let refs = extract_a1_references("LOG10(A1)+Sheet1!$B$2");
         assert_eq!(refs, vec![parse_range_a1("A1").unwrap(), parse_range_a1("$B$2").unwrap()]);
+    }
+
+    #[test]
+    fn extract_refs_avoids_sheet_names_that_look_like_cells() {
+        let refs = extract_a1_references("SUM('ABC1'!A1, ABC1!B2)");
+        assert_eq!(refs, vec![parse_range_a1("A1").unwrap(), parse_range_a1("B2").unwrap()]);
+    }
+
+    #[test]
+    fn percent_and_percentile_thresholds_differ() {
+        let values = TestValues::with_numbers([("A1", 0.0), ("A2", 0.0), ("A3", 100.0), ("A4", 100.0)]);
+
+        let visible = parse_range_a1("A1:A4").unwrap();
+        let percent_rule = CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 1,
+            applies_to: vec![visible],
+            dxf_id: None,
+            stop_if_true: false,
+            kind: CfRuleKind::IconSet(IconSetRule {
+                set: IconSet::ThreeArrows,
+                cfvos: vec![
+                    Cfvo {
+                        type_: CfvoType::Min,
+                        value: None,
+                    },
+                    Cfvo {
+                        type_: CfvoType::Percent,
+                        value: Some("50".to_string()),
+                    },
+                    Cfvo {
+                        type_: CfvoType::Max,
+                        value: None,
+                    },
+                ],
+                show_value: true,
+                reverse: false,
+            }),
+            dependencies: vec![],
+        };
+
+        let percentile_rule = CfRule {
+            kind: CfRuleKind::IconSet(IconSetRule {
+                set: IconSet::ThreeArrows,
+                cfvos: vec![
+                    Cfvo {
+                        type_: CfvoType::Min,
+                        value: None,
+                    },
+                    Cfvo {
+                        type_: CfvoType::Percentile,
+                        value: Some("50".to_string()),
+                    },
+                    Cfvo {
+                        type_: CfvoType::Max,
+                        value: None,
+                    },
+                ],
+                show_value: true,
+                reverse: false,
+            }),
+            ..percent_rule.clone()
+        };
+
+        let mut engine = ConditionalFormattingEngine::new(vec![percent_rule]);
+        let eval = engine.evaluate_visible_range(visible, &values, None, None);
+        assert_eq!(eval.get(CellRef::from_a1("A1").unwrap()).unwrap().icon.as_ref().unwrap().index, 0);
+        assert_eq!(eval.get(CellRef::from_a1("A2").unwrap()).unwrap().icon.as_ref().unwrap().index, 0);
+
+        let mut engine = ConditionalFormattingEngine::new(vec![percentile_rule]);
+        let eval = engine.evaluate_visible_range(visible, &values, None, None);
+        assert_eq!(eval.get(CellRef::from_a1("A1").unwrap()).unwrap().icon.as_ref().unwrap().index, 1);
+        assert_eq!(eval.get(CellRef::from_a1("A2").unwrap()).unwrap().icon.as_ref().unwrap().index, 1);
+    }
+
+    #[test]
+    fn color_scale_midpoint_is_driven_by_cfvo() {
+        let values =
+            TestValues::with_numbers([("A1", 0.0), ("A2", 1.0), ("A3", 2.0), ("A4", 100.0)]);
+        let visible = parse_range_a1("A1:A4").unwrap();
+
+        let rule = CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 1,
+            applies_to: vec![visible],
+            dxf_id: None,
+            stop_if_true: false,
+            kind: CfRuleKind::ColorScale(ColorScaleRule {
+                cfvos: vec![
+                    Cfvo {
+                        type_: CfvoType::Min,
+                        value: None,
+                    },
+                    Cfvo {
+                        type_: CfvoType::Percentile,
+                        value: Some("50".to_string()),
+                    },
+                    Cfvo {
+                        type_: CfvoType::Max,
+                        value: None,
+                    },
+                ],
+                colors: vec![
+                    Color::new_argb(0xFFFF0000),
+                    Color::new_argb(0xFFFFFF00),
+                    Color::new_argb(0xFF00FF00),
+                ],
+            }),
+            dependencies: vec![],
+        };
+
+        let mut engine = ConditionalFormattingEngine::new(vec![rule]);
+        let eval = engine.evaluate_visible_range(visible, &values, None, None);
+        assert_eq!(
+            eval.get(CellRef::from_a1("A2").unwrap()).unwrap().style.fill,
+            Some(Color::new_argb(0xFFFFFF00)),
+            "value at cfvo-driven midpoint should receive the midpoint color"
+        );
+    }
+
+    #[test]
+    fn formula_cfvo_thresholds_and_databar_options_are_applied() {
+        let values = TestValues::with_numbers([("B1", 100.0), ("B2", 200.0)]);
+        let visible = parse_range_a1("B1:B2").unwrap();
+
+        let evaluator = AssertCtxFormulaEvaluator {
+            expected_ctx: CellRef::from_a1("B1").unwrap(),
+            results: HashMap::from([("BAR_MAX".to_string(), CellValue::Number(200.0))]),
+        };
+
+        let rule = CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 1,
+            applies_to: vec![visible],
+            dxf_id: None,
+            stop_if_true: false,
+            kind: CfRuleKind::DataBar(DataBarRule {
+                min: Cfvo {
+                    type_: CfvoType::Number,
+                    value: Some("0".to_string()),
+                },
+                max: Cfvo {
+                    type_: CfvoType::Formula,
+                    value: Some("BAR_MAX".to_string()),
+                },
+                color: None,
+                min_length: Some(10),
+                max_length: Some(90),
+                gradient: Some(false),
+            }),
+            dependencies: vec![],
+        };
+
+        let mut engine = ConditionalFormattingEngine::new(vec![rule]);
+        let eval = engine.evaluate_visible_range(visible, &values, Some(&evaluator), None);
+
+        let bar1 = eval.get(CellRef::from_a1("B1").unwrap()).unwrap().data_bar.as_ref().unwrap();
+        assert!((bar1.fill_ratio - 0.5).abs() < 1e-6);
+        assert_eq!(bar1.min_length, 10);
+        assert_eq!(bar1.max_length, 90);
+        assert!(!bar1.gradient);
+    }
+
+    #[test]
+    fn icon_set_reverse_and_show_value_are_recorded() {
+        let values = TestValues::with_numbers([("C1", 0.0), ("C2", 100.0), ("C3", 200.0)]);
+        let visible = parse_range_a1("C1:C3").unwrap();
+
+        let rule = CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 1,
+            applies_to: vec![visible],
+            dxf_id: None,
+            stop_if_true: false,
+            kind: CfRuleKind::IconSet(IconSetRule {
+                set: IconSet::ThreeArrows,
+                cfvos: vec![
+                    Cfvo {
+                        type_: CfvoType::Min,
+                        value: None,
+                    },
+                    Cfvo {
+                        type_: CfvoType::Number,
+                        value: Some("100".to_string()),
+                    },
+                    Cfvo {
+                        type_: CfvoType::Number,
+                        value: Some("200".to_string()),
+                    },
+                ],
+                show_value: false,
+                reverse: true,
+            }),
+            dependencies: vec![],
+        };
+
+        let mut engine = ConditionalFormattingEngine::new(vec![rule]);
+        let eval = engine.evaluate_visible_range(visible, &values, None, None);
+        let c1 = eval.get(CellRef::from_a1("C1").unwrap()).unwrap().icon.as_ref().unwrap();
+        let c3 = eval.get(CellRef::from_a1("C3").unwrap()).unwrap().icon.as_ref().unwrap();
+        assert_eq!(c1.index, 2);
+        assert_eq!(c3.index, 0);
+        assert!(!c1.show_value);
+        assert!(c1.reverse);
+    }
+
+    #[test]
+    fn databar_automatic_min_includes_zero_baseline_for_all_positive_values() {
+        let values = TestValues::with_numbers([("D1", 10.0), ("D2", 20.0)]);
+        let visible = parse_range_a1("D1:D2").unwrap();
+
+        let rule = CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 1,
+            applies_to: vec![visible],
+            dxf_id: None,
+            stop_if_true: false,
+            kind: CfRuleKind::DataBar(DataBarRule {
+                min: Cfvo {
+                    type_: CfvoType::AutoMin,
+                    value: None,
+                },
+                max: Cfvo {
+                    type_: CfvoType::AutoMax,
+                    value: None,
+                },
+                color: None,
+                min_length: None,
+                max_length: None,
+                gradient: None,
+            }),
+            dependencies: vec![],
+        };
+
+        let mut engine = ConditionalFormattingEngine::new(vec![rule]);
+        let eval = engine.evaluate_visible_range(visible, &values, None, None);
+        let d1 = eval.get(CellRef::from_a1("D1").unwrap()).unwrap().data_bar.as_ref().unwrap();
+        assert!((d1.fill_ratio - 0.5).abs() < 1e-6);
     }
 }

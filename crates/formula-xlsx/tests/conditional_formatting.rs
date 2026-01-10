@@ -107,6 +107,28 @@ fn round_trip_preserves_conditional_formatting_xml() {
 }
 
 #[test]
+fn dependencies_include_cfvo_formula_references() {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <conditionalFormatting sqref="B1:B2">
+    <cfRule type="dataBar" priority="1">
+      <dataBar>
+        <cfvo type="min"/>
+        <cfvo type="formula" val="Sheet1!$A$1"/>
+        <color rgb="FF638EC6"/>
+      </dataBar>
+    </cfRule>
+  </conditionalFormatting>
+</worksheet>"#;
+
+    let parsed = parse_worksheet_conditional_formatting(xml).unwrap();
+    assert_eq!(parsed.rules.len(), 1);
+    let deps = &parsed.rules[0].dependencies;
+    assert!(deps.contains(&parse_range_a1("B1:B2").unwrap()));
+    assert!(deps.contains(&parse_range_a1("$A$1").unwrap()));
+}
+
+#[test]
 fn evaluates_visible_range_and_renders_snapshot() {
     let pkg = load_package("conditional_formatting_2007.xlsx");
     let sheet_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();

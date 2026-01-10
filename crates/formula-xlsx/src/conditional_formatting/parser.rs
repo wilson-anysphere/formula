@@ -305,6 +305,16 @@ fn parse_icon_set(rule_node: roxmltree::Node<'_, '_>, main_ns: &str) -> Option<C
     let set_name = is.attribute("iconSet").unwrap_or("3Arrows");
     let set = match set_name {
         "3Arrows" => IconSet::ThreeArrows,
+        "3TrafficLights1" => IconSet::ThreeTrafficLights1,
+        "3TrafficLights2" => IconSet::ThreeTrafficLights2,
+        "3Flags" => IconSet::ThreeFlags,
+        "3Symbols" => IconSet::ThreeSymbols,
+        "3Symbols2" => IconSet::ThreeSymbols2,
+        "4Arrows" => IconSet::FourArrows,
+        "4ArrowsGray" => IconSet::FourArrowsGray,
+        "5Arrows" => IconSet::FiveArrows,
+        "5ArrowsGray" => IconSet::FiveArrowsGray,
+        "5Quarters" => IconSet::FiveQuarters,
         _ => IconSet::ThreeArrows,
     };
     let cfvos = is
@@ -386,6 +396,28 @@ fn compute_dependencies(applies_to: &[formula_model::Range], kind: &CfRuleKind) 
         }
         CfRuleKind::Expression { formula } => {
             deps.extend(extract_a1_references(formula));
+        }
+        CfRuleKind::DataBar(db) => {
+            if db.min.type_ == CfvoType::Formula {
+                deps.extend(extract_a1_references(db.min.value.as_deref().unwrap_or("")));
+            }
+            if db.max.type_ == CfvoType::Formula {
+                deps.extend(extract_a1_references(db.max.value.as_deref().unwrap_or("")));
+            }
+        }
+        CfRuleKind::ColorScale(cs) => {
+            for cfvo in &cs.cfvos {
+                if cfvo.type_ == CfvoType::Formula {
+                    deps.extend(extract_a1_references(cfvo.value.as_deref().unwrap_or("")));
+                }
+            }
+        }
+        CfRuleKind::IconSet(is) => {
+            for cfvo in &is.cfvos {
+                if cfvo.type_ == CfvoType::Formula {
+                    deps.extend(extract_a1_references(cfvo.value.as_deref().unwrap_or("")));
+                }
+            }
         }
         _ => {}
     }
