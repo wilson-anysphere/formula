@@ -7,7 +7,7 @@ from typing import Any, Dict
 
 import formula
 from formula._rpc_bridge import StdioRpcBridge
-from formula.runtime.sandbox import apply_memory_limit, apply_sandbox
+from formula.runtime.sandbox import apply_cpu_time_limit, apply_memory_limit, apply_sandbox
 
 
 def main() -> None:
@@ -28,6 +28,10 @@ def main() -> None:
         return
 
     apply_memory_limit(cmd.get("max_memory_bytes"))
+    apply_cpu_time_limit(
+        max_cpu_seconds=cmd.get("max_cpu_seconds"),
+        timeout_ms=cmd.get("timeout_ms", cmd.get("timeoutMs")),
+    )
 
     # Configure the bridge before applying sandbox restrictions so our own
     # imports aren't blocked.

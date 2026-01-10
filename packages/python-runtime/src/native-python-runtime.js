@@ -156,6 +156,7 @@ export class NativePythonRuntime {
         type: "execute",
         code,
         permissions,
+        timeout_ms: timeoutMs,
         max_memory_bytes: maxMemoryBytes,
       }) + "\n",
     );
