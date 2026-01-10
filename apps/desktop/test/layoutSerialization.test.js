@@ -11,6 +11,7 @@ import {
   setSplitDirection,
   setSplitPaneScroll,
   setSplitPaneSheet,
+  setSplitPaneZoom,
 } from "../src/layout/layoutState.js";
 import { PANEL_REGISTRY, PanelIds } from "../src/panels/panelRegistry.js";
 
@@ -26,6 +27,7 @@ test("layout state round-trips through serialization", () => {
   layout = setSplitPaneSheet(layout, "secondary", "Sheet2");
   layout = setSplitPaneScroll(layout, "primary", { scrollX: 120, scrollY: 340 });
   layout = setSplitPaneScroll(layout, "secondary", { scrollX: 0, scrollY: 9001 });
+  layout = setSplitPaneZoom(layout, "primary", 1.25);
 
   const serialized = serializeLayout(layout, { panelRegistry: PANEL_REGISTRY, primarySheetId: "Sheet1" });
   const restored = deserializeLayout(serialized, { panelRegistry: PANEL_REGISTRY, primarySheetId: "Sheet1" });

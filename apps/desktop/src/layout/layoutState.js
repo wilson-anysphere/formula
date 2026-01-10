@@ -2,6 +2,7 @@ import {
   DEFAULT_DOCK_SIZES,
   DEFAULT_FLOATING_RECT,
   DEFAULT_ACTIVE_SPLIT_PANE,
+  DEFAULT_PANE_ZOOM,
   DEFAULT_SPLIT_RATIO,
   DOCK_SIDES,
   LAYOUT_STATE_VERSION,
@@ -78,8 +79,8 @@ export function createDefaultLayout(options = {}) {
       ratio: DEFAULT_SPLIT_RATIO,
       activePane: DEFAULT_ACTIVE_SPLIT_PANE,
       panes: {
-        primary: { sheetId: primarySheetId, scrollX: 0, scrollY: 0 },
-        secondary: { sheetId: primarySheetId, scrollX: 0, scrollY: 0 },
+        primary: { sheetId: primarySheetId, scrollX: 0, scrollY: 0, zoom: DEFAULT_PANE_ZOOM },
+        secondary: { sheetId: primarySheetId, scrollX: 0, scrollY: 0, zoom: DEFAULT_PANE_ZOOM },
       },
     },
   };
@@ -352,5 +353,20 @@ export function setSplitPaneScroll(layout, pane, scroll) {
 
   const next = clone(layout);
   next.splitView.panes[pane] = { ...next.splitView.panes[pane], scrollX: scroll.scrollX, scrollY: scroll.scrollY };
+  return next;
+}
+
+/**
+ * @param {ReturnType<typeof createDefaultLayout>} layout
+ * @param {"primary" | "secondary"} pane
+ * @param {number} zoom
+ */
+export function setSplitPaneZoom(layout, pane, zoom) {
+  ensureSplitPane(pane);
+
+  const next = clone(layout);
+  const value = typeof zoom === "number" && Number.isFinite(zoom) ? zoom : DEFAULT_PANE_ZOOM;
+  const clamped = clamp(value, 0.25, 4);
+  next.splitView.panes[pane] = { ...next.splitView.panes[pane], zoom: clamped };
   return next;
 }

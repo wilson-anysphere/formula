@@ -2,6 +2,7 @@ import {
   DEFAULT_DOCK_SIZES,
   DEFAULT_FLOATING_RECT,
   DEFAULT_ACTIVE_SPLIT_PANE,
+  DEFAULT_PANE_ZOOM,
   DEFAULT_SPLIT_RATIO,
   DOCK_SIDES,
   LAYOUT_STATE_VERSION,
@@ -76,7 +77,7 @@ function normalizeFloating(rawFloating, { panelRegistry }) {
 }
 
 function normalizeSplitView(rawSplitView, { primarySheetId }) {
-  /** @type {{ direction: "none" | "vertical" | "horizontal", ratio: number, activePane: "primary" | "secondary", panes: { primary: { sheetId: string | null, scrollX: number, scrollY: number }, secondary: { sheetId: string | null, scrollX: number, scrollY: number } } }} */
+  /** @type {{ direction: "none" | "vertical" | "horizontal", ratio: number, activePane: "primary" | "secondary", panes: { primary: { sheetId: string | null, scrollX: number, scrollY: number, zoom: number }, secondary: { sheetId: string | null, scrollX: number, scrollY: number, zoom: number } } }} */
   const splitView = {
     direction: "none",
     ratio: DEFAULT_SPLIT_RATIO,
@@ -86,11 +87,13 @@ function normalizeSplitView(rawSplitView, { primarySheetId }) {
         sheetId: primarySheetId ?? null,
         scrollX: 0,
         scrollY: 0,
+        zoom: DEFAULT_PANE_ZOOM,
       },
       secondary: {
         sheetId: primarySheetId ?? null,
         scrollX: 0,
         scrollY: 0,
+        zoom: DEFAULT_PANE_ZOOM,
       },
     },
   };
@@ -110,6 +113,7 @@ function normalizeSplitView(rawSplitView, { primarySheetId }) {
         sheetId: typeof rawPane.sheetId === "string" ? rawPane.sheetId : splitView.panes[paneId].sheetId,
         scrollX: clampNumber(rawPane.scrollX, { min: -1e12, max: 1e12, fallback: splitView.panes[paneId].scrollX }),
         scrollY: clampNumber(rawPane.scrollY, { min: -1e12, max: 1e12, fallback: splitView.panes[paneId].scrollY }),
+        zoom: clampNumber(rawPane.zoom, { min: 0.25, max: 4, fallback: splitView.panes[paneId].zoom }),
       };
     }
   }

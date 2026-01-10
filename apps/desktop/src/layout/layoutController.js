@@ -13,6 +13,7 @@ import {
   setSplitDirection,
   setSplitPaneScroll,
   setSplitPaneSheet,
+  setSplitPaneZoom,
   setSplitRatio,
   snapFloatingPanel,
 } from "./layoutState.js";
@@ -193,6 +194,10 @@ export class LayoutController {
 
   setSplitPaneScroll(pane, scroll) {
     this.#commit(setSplitPaneScroll(this.layout, pane, scroll));
+  }
+
+  setSplitPaneZoom(pane, zoom) {
+    this.#commit(setSplitPaneZoom(this.layout, pane, zoom));
   }
 
   saveAsGlobalDefault() {
