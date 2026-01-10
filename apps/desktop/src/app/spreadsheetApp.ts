@@ -1,5 +1,7 @@
 import { CellEditorOverlay } from "../editor/cellEditorOverlay";
 import { FormulaBarView } from "../formula-bar/FormulaBarView";
+import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
+import { renderRichText } from "../grid/text/rich-text/render.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
 import { navigateSelectionByKey } from "../selection/navigation";
 import { SelectionRenderer } from "../selection/renderer";
@@ -85,6 +87,13 @@ export class SpreadsheetApp {
 
     // Seed data for navigation tests (used range ends at D5).
     this.document.setCellValue(this.sheetId, { row: 0, col: 0 }, "Seed");
+    this.document.setCellValue(this.sheetId, { row: 0, col: 1 }, {
+      text: "Rich Bold",
+      runs: [
+        { start: 0, end: 5, style: {} },
+        { start: 5, end: 9, style: { bold: true, color: "#FFFF0000" } }
+      ]
+    });
     this.document.setCellValue(this.sheetId, { row: 4, col: 3 }, "BottomRight");
 
     this.gridCanvas = document.createElement("canvas");
@@ -519,14 +528,48 @@ export class SpreadsheetApp {
       ctx.stroke();
     }
 
-    ctx.fillStyle = resolveCssVar("--text-primary", { fallback: "CanvasText" });
-    ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    const fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    const fontSizePx = 14;
+    const defaultTextColor = resolveCssVar("--text-primary", { fallback: "CanvasText" });
+    ctx.fillStyle = defaultTextColor;
+    ctx.font = `${fontSizePx}px ${fontFamily}`;
 
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        const value = this.getCellDisplayValue({ row: r, col: c });
-        if (value === "") continue;
-        ctx.fillText(value, c * this.cellWidth + 4, r * this.cellHeight + 16);
+        const state = this.document.getCell(this.sheetId, { row: r, col: c }) as {
+          value: unknown;
+          formula: string | null;
+        };
+        if (!state) continue;
+
+        const rich = isRichTextValue(state.value)
+          ? state.value
+          : state.formula != null
+            ? { text: `=${state.formula}`, runs: [] }
+            : state.value != null
+              ? { text: String(state.value), runs: [] }
+              : null;
+
+        if (!rich || rich.text === "") continue;
+
+        renderRichText(
+          ctx,
+          rich,
+          {
+            x: c * this.cellWidth,
+            y: r * this.cellHeight,
+            width: this.cellWidth,
+            height: this.cellHeight
+          },
+          {
+            padding: 4,
+            align: "left",
+            verticalAlign: "middle",
+            fontFamily,
+            fontSizePx,
+            color: defaultTextColor
+          }
+        );
       }
     }
 
@@ -793,6 +836,7 @@ export class SpreadsheetApp {
     if (state?.formula != null) {
       return normalizeFormulaText(state.formula);
     }
+    if (isRichTextValue(state?.value)) return state.value.text;
     if (state?.value != null) return String(state.value);
     return "";
   }
@@ -836,6 +880,7 @@ export class SpreadsheetApp {
   }
 
   private applyEdit(cell: CellCoord, rawValue: string): void {
+    const original = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
     if (rawValue.trim() === "") {
       this.document.clearCell(this.sheetId, cell, { label: "Clear cell" });
       return;
@@ -843,6 +888,16 @@ export class SpreadsheetApp {
 
     if (rawValue.startsWith("=")) {
       this.document.setCellFormula(this.sheetId, cell, rawValue.slice(1), { label: "Edit cell" });
+      return;
+    }
+
+    if (isRichTextValue(original?.value)) {
+      const updated = applyPlainTextEdit(original.value, rawValue);
+      if (original.formula == null && updated === original.value) {
+        // No-op edit: keep rich runs without creating a history entry.
+        return;
+      }
+      this.document.setCellValue(this.sheetId, cell, updated, { label: "Edit cell" });
       return;
     }
 
@@ -959,6 +1014,16 @@ export class SpreadsheetApp {
       );
     }
   }
+}
+
+function isRichTextValue(
+  value: unknown
+): value is { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> } {
+  if (typeof value !== "object" || value == null) return false;
+  const v = value as { text?: unknown; runs?: unknown };
+  if (typeof v.text !== "string") return false;
+  if (v.runs == null) return true;
+  return Array.isArray(v.runs);
 }
 
 function intersectRanges(a: Range, b: Range): Range | null {

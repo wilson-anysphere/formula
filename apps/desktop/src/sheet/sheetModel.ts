@@ -1,4 +1,5 @@
 import type { CellCoord, Range } from "../selection/types";
+import type { RichText } from "../grid/text/rich-text/types.js";
 
 /**
  * Minimal in-memory sparse sheet model.
@@ -7,23 +8,27 @@ import type { CellCoord, Range } from "../selection/types";
  * navigation and editing semantics end-to-end.
  */
 export class SheetModel {
-  private cells = new Map<string, string>();
+  private cells = new Map<string, RichText>();
 
-  getCellValue(cell: CellCoord): string {
-    return this.cells.get(key(cell)) ?? "";
+  getCellRichText(cell: CellCoord): RichText | null {
+    return this.cells.get(key(cell)) ?? null;
   }
 
-  setCellValue(cell: CellCoord, value: string): void {
-    const trimmed = value;
-    if (trimmed === "") {
+  getCellValue(cell: CellCoord): string {
+    return this.cells.get(key(cell))?.text ?? "";
+  }
+
+  setCellValue(cell: CellCoord, value: string | RichText): void {
+    const rich: RichText = typeof value === "string" ? { text: value, runs: [] } : value;
+    if (rich.text === "") {
       this.cells.delete(key(cell));
       return;
     }
-    this.cells.set(key(cell), trimmed);
+    this.cells.set(key(cell), rich);
   }
 
   isCellEmpty(cell: CellCoord): boolean {
-    return (this.cells.get(key(cell)) ?? "") === "";
+    return (this.cells.get(key(cell))?.text ?? "") === "";
   }
 
   getUsedRange(): Range | null {
@@ -56,4 +61,3 @@ export class SheetModel {
 function key(cell: CellCoord): string {
   return `${cell.row},${cell.col}`;
 }
-
