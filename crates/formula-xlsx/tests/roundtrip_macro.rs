@@ -26,6 +26,29 @@ fn roundtrip_preserves_vba_project_bytes() {
     );
 }
 
+#[test]
+fn parses_vba_modules_for_ui_display() {
+    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/xlsx/macros/basic.xlsm");
+    let bytes = std::fs::read(fixture_path).expect("read fixture");
+    let doc = load_from_bytes(&bytes).expect("load fixture");
+
+    let vba_project = doc
+        .vba_project()
+        .expect("parse vba")
+        .expect("vba present");
+    assert!(
+        vba_project.modules.iter().any(|module| module.name == "Module1"),
+        "expected Module1 to be present"
+    );
+    let module = vba_project
+        .modules
+        .iter()
+        .find(|m| m.name == "Module1")
+        .unwrap();
+    assert!(module.code.contains("Sub Hello"));
+    assert!(module.code.contains("MsgBox"));
+}
+
 fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
     let cursor = Cursor::new(zip_bytes);
     let mut archive = ZipArchive::new(cursor).expect("open zip");
@@ -34,4 +57,3 @@ fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
     file.read_to_end(&mut buf).expect("read part");
     buf
 }
-
