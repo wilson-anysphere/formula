@@ -85,6 +85,14 @@ export class VersionManager extends EventEmitter {
   }
 
   /**
+   * @param {string} versionId
+   * @returns {Promise<VersionRecord | null>}
+   */
+  async getVersion(versionId) {
+    return this.store.getVersion(versionId);
+  }
+
+  /**
    * Create a periodic snapshot (auto-save) iff the document is dirty.
    * @returns {Promise<VersionRecord | null>}
    */

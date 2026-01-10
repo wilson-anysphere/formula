@@ -10,6 +10,7 @@ import { SQLiteVersionStore } from "../packages/versioning/src/store/sqliteVersi
 import { VersionManager } from "../packages/versioning/src/versioning/versionManager.js";
 import { createYjsSpreadsheetDocAdapter } from "../packages/versioning/src/yjs/yjsSpreadsheetDocAdapter.js";
 import { diffYjsSnapshots } from "../packages/versioning/src/yjs/diffSnapshots.js";
+import { diffYjsVersionAgainstCurrent } from "../packages/versioning/src/yjs/versionHistory.js";
 
 test("Yjs + SQLite: checkpoint, edit, diff, restore (history preserved)", async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "versioning-yjs-"));
@@ -64,6 +65,13 @@ test("Yjs + SQLite: checkpoint, edit, diff, restore (history preserved)", async 
   assert.deepEqual(diff.moved[0].oldLocation, { row: 0, col: 0 });
   assert.deepEqual(diff.moved[0].newLocation, { row: 2, col: 3 });
 
+  const diffToCurrent = await diffYjsVersionAgainstCurrent({
+    versionManager: vm,
+    versionId: checkpoint.id,
+    sheetId: "sheet1",
+  });
+  assert.equal(diffToCurrent.moved.length, 1);
+
   // Restore should bring back the original cell location/content.
   await vm.restoreVersion(checkpoint.id);
   assert.equal(cells.has("sheet1:2:3"), false);
@@ -81,4 +89,3 @@ test("Yjs + SQLite: checkpoint, edit, diff, restore (history preserved)", async 
 
   store.close();
 });
-

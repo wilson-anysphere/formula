@@ -11,8 +11,9 @@
   ],
   "scripts": {
     "dev": "pnpm --dir packages/grid dev",
-    "test": "vitest run",
-    "test:node": "node --no-warnings --test",
+    "test": "vitest run && node scripts/run-node-tests.mjs",
+    "test:vitest": "vitest run",
+    "test:node": "node scripts/run-node-tests.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "engines": {
