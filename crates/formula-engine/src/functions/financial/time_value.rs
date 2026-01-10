@@ -156,7 +156,7 @@ pub fn rate(
     }
 
     let f = |r: f64| rate_equation(r, nper, pmt, pv, fv, typ);
-    let df = |r: f64| numeric_derivative(r, &f);
+    let df = |r: f64| rate_equation_derivative(r, nper, pmt, pv, fv, typ);
 
     newton_raphson(guess, MAX_ITER_RATE, f, df).ok_or(ExcelError::Num)
 }
@@ -177,31 +177,46 @@ fn rate_equation(rate: f64, nper: f64, pmt: f64, pv: f64, fv: f64, typ: f64) -> 
     Some(pv * g + pmt * pmt_factor + fv)
 }
 
-fn numeric_derivative<F>(x: f64, f: &F) -> Option<f64>
-where
-    F: Fn(f64) -> Option<f64>,
-{
-    if x <= -1.0 {
+fn rate_equation_derivative(
+    rate: f64,
+    nper: f64,
+    pmt: f64,
+    pv: f64,
+    _fv: f64,
+    typ: f64,
+) -> Option<f64> {
+    if rate <= -1.0 {
         return None;
     }
 
-    let mut h = (x.abs() * 1.0e-8).max(1.0e-6);
-
-    // Keep x ± h inside the domain (> -1).
-    if x - h <= -1.0 {
-        h = (x + 1.0) * 0.5;
+    // Use the analytic derivative for Newton-Raphson. Handling `rate == 0`
+    // specially avoids catastrophic cancellation in the `(g - 1) / rate` term.
+    if rate == 0.0 {
+        let df = nper * pv + pmt * (nper * (nper - 1.0) / 2.0 + typ * nper);
+        return (df.is_finite() && df != 0.0).then_some(df);
     }
-    if h <= 0.0 {
+
+    let (g, g_minus_1) = pow1p(rate, nper)?;
+    let one_plus_rate = 1.0 + rate;
+    if one_plus_rate == 0.0 {
         return None;
     }
 
-    let f1 = f(x + h)?;
-    let f0 = f(x - h)?;
-    let df = (f1 - f0) / (2.0 * h);
-    if !df.is_finite() || df == 0.0 {
+    // d/dr (1+r)^n = n*(1+r)^(n-1)
+    let dg = nper * g / one_plus_rate;
+
+    let annuity = g_minus_1 / rate;
+    let rate_sq = rate * rate;
+    if rate_sq == 0.0 {
         return None;
     }
-    Some(df)
+
+    // d/dr ((g - 1) / r) = (dg*r - (g - 1)) / r^2
+    let dannuity = (dg * rate - g_minus_1) / rate_sq;
+    let dpmt_factor = typ * annuity + (1.0 + rate * typ) * dannuity;
+
+    let df = pv * dg + pmt * dpmt_factor;
+    (df.is_finite() && df != 0.0).then_some(df)
 }
 
 /// Interest payment for a given period.

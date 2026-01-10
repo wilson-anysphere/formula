@@ -1,4 +1,5 @@
 use formula_engine::functions::financial::{fv, ipmt, nper, pmt, ppmt, pv, rate};
+use formula_engine::ExcelError;
 
 fn assert_close(actual: f64, expected: f64, tol: f64) {
     assert!(
@@ -43,6 +44,20 @@ fn rate_matches_excel_example() {
     // Excel docs: RATE(4*12, -200, 8000) ≈ 0.0077014725
     let r = rate(4.0 * 12.0, -200.0, 8_000.0, None, None, None).unwrap();
     assert_close(r, 0.00770147248820165, 1e-12);
+}
+
+#[test]
+fn rate_converges_with_zero_guess() {
+    let r = rate(4.0 * 12.0, -200.0, 8_000.0, None, None, Some(0.0)).unwrap();
+    assert_close(r, 0.00770147248820165, 1e-12);
+}
+
+#[test]
+fn rate_returns_num_when_no_solution_exists() {
+    // With PV and FV both positive and no payments, there's no real rate > -1
+    // that makes PV*(1+r)^n + FV == 0.
+    let result = rate(10.0, 0.0, 1_000.0, Some(1_000.0), None, None);
+    assert_eq!(result, Err(ExcelError::Num));
 }
 
 #[test]

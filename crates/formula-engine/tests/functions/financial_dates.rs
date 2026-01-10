@@ -47,3 +47,23 @@ fn excel_1904_date_system_has_different_epoch() {
         ExcelDate::new(1904, 1, 1)
     );
 }
+
+#[test]
+fn lotus_bug_can_be_disabled() {
+    let system = ExcelDateSystem::Excel1900 {
+        lotus_compat: false,
+    };
+
+    // Without the Lotus bug, 1900-03-01 is serial 60 (no fictitious Feb 29).
+    assert_eq!(
+        ymd_to_serial(ExcelDate::new(1900, 3, 1), system).unwrap(),
+        60
+    );
+    assert_eq!(
+        serial_to_ymd(60, system).unwrap(),
+        ExcelDate::new(1900, 3, 1)
+    );
+
+    // 1900-02-29 is not a real Gregorian date and should be rejected.
+    assert!(ymd_to_serial(ExcelDate::new(1900, 2, 29), system).is_err());
+}
