@@ -61,3 +61,10 @@ Implications:
   - or the host adapter (platform-specific).
 - The web target will constrain some early design choices (e.g. avoid synchronous filesystem APIs).
 
+## Current implementation pointers
+
+- Desktop app (Tauri host): `apps/desktop/`
+- Web app (Vite/React): `apps/web/` (CI builds via `pnpm build:web`)
+- Shared grid renderer package: `packages/grid/`
+- Worker-based engine client boundary: `packages/engine/` (initial stub; long-term will load the Rust/WASM engine)
+- Rust/WASM engine crate (wasm-bindgen): `crates/formula-wasm/`
