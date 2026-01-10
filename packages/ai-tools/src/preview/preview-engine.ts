@@ -164,7 +164,7 @@ function diffKey(sheet: string, row: number, col: number): string {
 }
 
 function cellsEqual(left: CellData, right: CellData): boolean {
-  if (left.value !== right.value) return false;
+  if (!cellValuesEqual(left.value, right.value)) return false;
   if ((left.formula ?? null) !== (right.formula ?? null)) return false;
   const leftFormat = left.format ?? {};
   const rightFormat = right.format ?? {};
@@ -172,4 +172,22 @@ function cellsEqual(left: CellData, right: CellData): boolean {
   const rightKeys = Object.keys(rightFormat);
   if (leftKeys.length !== rightKeys.length) return false;
   return leftKeys.every((key) => (leftFormat as any)[key] === (rightFormat as any)[key]);
+}
+
+function cellValuesEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (typeof left !== typeof right) return false;
+  if (left === null || right === null) return left === right;
+
+  if (typeof left === "object") {
+    // Support DocumentController rich values (objects) without producing noisy diffs
+    // between cloned workbooks.
+    try {
+      return JSON.stringify(left) === JSON.stringify(right);
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
 }
