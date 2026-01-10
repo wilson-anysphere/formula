@@ -9,6 +9,7 @@
 
 mod package;
 pub mod comments;
+pub mod outline;
 pub mod pivots;
 pub mod print;
 pub mod shared_strings;

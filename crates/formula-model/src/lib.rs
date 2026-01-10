@@ -12,6 +12,7 @@ mod display;
 pub mod conditional_formatting;
 mod error;
 pub mod rich_text;
+mod outline;
 mod style;
 mod value;
 mod workbook;
@@ -23,6 +24,7 @@ pub use comments::{Comment, CommentAuthor, CommentKind, Mention, Reply, Timestam
 pub use display::{format_cell_display, CellDisplay};
 pub use conditional_formatting::*;
 pub use error::ErrorValue;
+pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
 pub use style::{
     Alignment, Border, BorderStyle, Color, Fill, Font, HorizontalAlignment, Style, StyleTable,
     VerticalAlignment,

@@ -110,7 +110,8 @@ pub fn write_workbook_print_settings(
     // Rewind zip to iterate entries again.
     let mut zip = ZipArchive::new(Cursor::new(xlsx_bytes))?;
     let mut out = ZipWriter::new(Cursor::new(Vec::new()));
-    let options = FileOptions::default();
+    let options =
+        FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)?;
