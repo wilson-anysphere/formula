@@ -20,6 +20,11 @@ dist/
 build/
 **/build/
 
+# Extensions ship their built entrypoints so integration tests and marketplace
+# packaging can run without a separate build step.
+!extensions/**/dist/
+!extensions/**/dist/**
+
 .cache/
 **/.cache/
 

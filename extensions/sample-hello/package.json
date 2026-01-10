@@ -87,5 +87,9 @@
     "network",
     "clipboard",
     "storage"
-  ]
+  ],
+  "scripts": {
+    "build": "node build.js",
+    "build:check": "node build.js --check"
+  }
 }

@@ -1,4 +1,3 @@
-// This file is generated from src/extension.js by build.js. Do not edit.
 const formula = require("@formula/extension-api");
 
 const PANEL_ID = "sampleHello.panel";
