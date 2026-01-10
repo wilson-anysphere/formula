@@ -1,0 +1,891 @@
+use super::{
+    format_print_area_defined_name, format_print_titles_defined_name,
+    parse_print_area_defined_name, parse_print_titles_defined_name, ManualPageBreaks, Orientation,
+    PageMargins, PageSetup, PaperSize, PrintError, Scaling, SheetPrintSettings,
+    WorkbookPrintSettings,
+};
+use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::{Reader, Writer};
+use std::collections::{HashMap, HashSet};
+use std::io::{Cursor, Read, Seek, Write};
+use zip::write::FileOptions;
+use zip::{ZipArchive, ZipWriter};
+
+pub fn read_workbook_print_settings(
+    xlsx_bytes: &[u8],
+) -> Result<WorkbookPrintSettings, PrintError> {
+    let mut zip = ZipArchive::new(Cursor::new(xlsx_bytes))?;
+    let workbook_xml = read_zip_bytes(&mut zip, "xl/workbook.xml")?;
+    let rels_xml = read_zip_bytes(&mut zip, "xl/_rels/workbook.xml.rels")?;
+
+    let workbook = parse_workbook_xml(&workbook_xml)?;
+    let rels = parse_workbook_rels(&rels_xml)?;
+
+    let mut sheets = Vec::with_capacity(workbook.sheets.len());
+    for (sheet_index, sheet) in workbook.sheets.iter().enumerate() {
+        let sheet_target = rels
+            .get(&sheet.r_id)
+            .ok_or(PrintError::MissingPart("worksheet relationship"))?;
+        let sheet_path = format!("xl/{sheet_target}");
+        let sheet_xml = read_zip_bytes(&mut zip, &sheet_path)?;
+
+        let (page_setup, manual_page_breaks) = parse_worksheet_print_settings(&sheet_xml)?;
+
+        let print_area = workbook
+            .defined_names
+            .iter()
+            .find(|dn| dn.name == "_xlnm.Print_Area" && dn.local_sheet_id == Some(sheet_index))
+            .map(|dn| parse_print_area_defined_name(&sheet.name, &dn.value))
+            .transpose()?;
+
+        let print_titles = workbook
+            .defined_names
+            .iter()
+            .find(|dn| dn.name == "_xlnm.Print_Titles" && dn.local_sheet_id == Some(sheet_index))
+            .map(|dn| parse_print_titles_defined_name(&sheet.name, &dn.value))
+            .transpose()?;
+
+        sheets.push(SheetPrintSettings {
+            sheet_name: sheet.name.clone(),
+            print_area,
+            print_titles,
+            page_setup,
+            manual_page_breaks,
+        });
+    }
+
+    Ok(WorkbookPrintSettings { sheets })
+}
+
+pub fn write_workbook_print_settings(
+    xlsx_bytes: &[u8],
+    settings: &WorkbookPrintSettings,
+) -> Result<Vec<u8>, PrintError> {
+    let mut zip = ZipArchive::new(Cursor::new(xlsx_bytes))?;
+    let workbook_xml = read_zip_bytes(&mut zip, "xl/workbook.xml")?;
+    let rels_xml = read_zip_bytes(&mut zip, "xl/_rels/workbook.xml.rels")?;
+
+    let workbook = parse_workbook_xml(&workbook_xml)?;
+    let rels = parse_workbook_rels(&rels_xml)?;
+
+    let mut settings_by_sheet: HashMap<&str, &SheetPrintSettings> = HashMap::new();
+    for sheet in &settings.sheets {
+        settings_by_sheet.insert(sheet.sheet_name.as_str(), sheet);
+    }
+
+    let mut defined_name_overrides: HashMap<(String, usize), String> = HashMap::new();
+    for (sheet_index, sheet) in workbook.sheets.iter().enumerate() {
+        if let Some(sheet_settings) = settings_by_sheet.get(sheet.name.as_str()) {
+            if let Some(ref ranges) = sheet_settings.print_area {
+                defined_name_overrides.insert(
+                    ("_xlnm.Print_Area".to_string(), sheet_index),
+                    format_print_area_defined_name(&sheet.name, ranges),
+                );
+            }
+            if let Some(ref titles) = sheet_settings.print_titles {
+                defined_name_overrides.insert(
+                    ("_xlnm.Print_Titles".to_string(), sheet_index),
+                    format_print_titles_defined_name(&sheet.name, titles),
+                );
+            }
+        }
+    }
+
+    let updated_workbook_xml = update_workbook_xml(&workbook_xml, &defined_name_overrides)?;
+
+    let mut updated_sheets: HashMap<String, Vec<u8>> = HashMap::new();
+    for sheet in &workbook.sheets {
+        let Some(sheet_settings) = settings_by_sheet.get(sheet.name.as_str()) else {
+            continue;
+        };
+        let Some(sheet_target) = rels.get(&sheet.r_id) else {
+            continue;
+        };
+        let sheet_path = format!("xl/{sheet_target}");
+        let sheet_xml = read_zip_bytes(&mut zip, &sheet_path)?;
+        let updated_xml = update_worksheet_xml(&sheet_xml, sheet_settings)?;
+        updated_sheets.insert(sheet_path, updated_xml);
+    }
+
+    // Rewind zip to iterate entries again.
+    let mut zip = ZipArchive::new(Cursor::new(xlsx_bytes))?;
+    let mut out = ZipWriter::new(Cursor::new(Vec::new()));
+    let options = FileOptions::default();
+
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i)?;
+        let name = entry.name().to_string();
+        if entry.is_dir() {
+            out.add_directory(name, options)?;
+            continue;
+        }
+
+        let mut data = Vec::new();
+        entry.read_to_end(&mut data)?;
+
+        let replacement = if name == "xl/workbook.xml" {
+            Some(updated_workbook_xml.clone())
+        } else {
+            updated_sheets.get(&name).cloned()
+        };
+
+        out.start_file(name, options)?;
+        out.write_all(replacement.as_deref().unwrap_or(&data))?;
+    }
+
+    Ok(out.finish()?.into_inner())
+}
+
+fn read_zip_bytes<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Vec<u8>, PrintError> {
+    let mut file = zip.by_name(name)?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
+#[derive(Debug)]
+struct WorkbookInfo {
+    sheets: Vec<SheetInfo>,
+    defined_names: Vec<DefinedName>,
+}
+
+#[derive(Debug)]
+struct SheetInfo {
+    name: String,
+    r_id: String,
+}
+
+#[derive(Debug)]
+struct DefinedName {
+    name: String,
+    local_sheet_id: Option<usize>,
+    value: String,
+}
+
+fn parse_workbook_xml(workbook_xml: &[u8]) -> Result<WorkbookInfo, PrintError> {
+    let mut reader = Reader::from_reader(workbook_xml);
+
+    let mut buf = Vec::new();
+    let mut sheets = Vec::new();
+    let mut defined_names = Vec::new();
+
+    let mut current_defined: Option<DefinedName> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.name().as_ref() == b"sheet" => {
+                sheets.push(parse_sheet_info(&reader, &e)?);
+            }
+            Event::Empty(e) if e.name().as_ref() == b"sheet" => {
+                sheets.push(parse_sheet_info(&reader, &e)?);
+            }
+            Event::Start(e) if e.name().as_ref() == b"definedName" => {
+                current_defined = Some(parse_defined_name_start(&reader, &e)?);
+            }
+            Event::Text(e) if current_defined.is_some() => {
+                if let Some(ref mut dn) = current_defined {
+                    dn.value.push_str(&e.unescape()?.to_string());
+                }
+            }
+            Event::End(e) if e.name().as_ref() == b"definedName" => {
+                if let Some(dn) = current_defined.take() {
+                    defined_names.push(dn);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+
+        buf.clear();
+    }
+
+    Ok(WorkbookInfo {
+        sheets,
+        defined_names,
+    })
+}
+
+fn parse_sheet_info(reader: &Reader<&[u8]>, e: &BytesStart<'_>) -> Result<SheetInfo, PrintError> {
+    let mut name: Option<String> = None;
+    let mut r_id: Option<String> = None;
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        match attr.key.as_ref() {
+            b"name" => name = Some(attr.unescape_value()?.to_string()),
+            b"r:id" => r_id = Some(attr.unescape_value()?.to_string()),
+            _ => {}
+        }
+    }
+
+    let name = name.ok_or_else(|| PrintError::InvalidA1("sheet missing name".to_string()))?;
+    let r_id = r_id.ok_or_else(|| PrintError::InvalidA1("sheet missing r:id".to_string()))?;
+    let _ = reader;
+    Ok(SheetInfo { name, r_id })
+}
+
+fn parse_defined_name_start(
+    _reader: &Reader<&[u8]>,
+    e: &BytesStart<'_>,
+) -> Result<DefinedName, PrintError> {
+    let mut name: Option<String> = None;
+    let mut local_sheet_id: Option<usize> = None;
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        match attr.key.as_ref() {
+            b"name" => name = Some(attr.unescape_value()?.to_string()),
+            b"localSheetId" => {
+                local_sheet_id = Some(
+                    attr.unescape_value()?
+                        .parse::<usize>()
+                        .map_err(|_| PrintError::InvalidA1("invalid localSheetId".to_string()))?,
+                )
+            }
+            _ => {}
+        }
+    }
+
+    Ok(DefinedName {
+        name: name.ok_or_else(|| PrintError::InvalidA1("definedName missing name".to_string()))?,
+        local_sheet_id,
+        value: String::new(),
+    })
+}
+
+fn parse_workbook_rels(rels_xml: &[u8]) -> Result<HashMap<String, String>, PrintError> {
+    let mut reader = Reader::from_reader(rels_xml);
+    let mut buf = Vec::new();
+
+    let mut map = HashMap::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.name().as_ref() == b"Relationship" => {
+                if let Some((id, target)) = parse_relationship(&e)? {
+                    map.insert(id, target);
+                }
+            }
+            Event::Empty(e) if e.name().as_ref() == b"Relationship" => {
+                if let Some((id, target)) = parse_relationship(&e)? {
+                    map.insert(id, target);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(map)
+}
+
+fn parse_relationship(e: &BytesStart<'_>) -> Result<Option<(String, String)>, PrintError> {
+    let mut id: Option<String> = None;
+    let mut target: Option<String> = None;
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        match attr.key.as_ref() {
+            b"Id" => id = Some(attr.unescape_value()?.to_string()),
+            b"Target" => target = Some(attr.unescape_value()?.to_string()),
+            _ => {}
+        }
+    }
+
+    match (id, target) {
+        (Some(id), Some(target)) => Ok(Some((id, target))),
+        _ => Ok(None),
+    }
+}
+
+fn parse_worksheet_print_settings(
+    sheet_xml: &[u8],
+) -> Result<(PageSetup, ManualPageBreaks), PrintError> {
+    let mut reader = Reader::from_reader(sheet_xml);
+    let mut buf = Vec::new();
+
+    let mut margins = None;
+    let mut orientation: Option<Orientation> = None;
+    let mut paper_size: Option<PaperSize> = None;
+    let mut scale: Option<u16> = None;
+    let mut fit_to_width: Option<u16> = None;
+    let mut fit_to_height: Option<u16> = None;
+    let mut fit_to_page = false;
+
+    let mut manual_breaks = ManualPageBreaks::default();
+    let mut in_row_breaks = false;
+    let mut in_col_breaks = false;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"pageMargins" => {
+                margins = Some(parse_page_margins(&e)?);
+            }
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"pageSetup" => {
+                let (o, p, s, ftw, fth) = parse_page_setup(&e)?;
+                orientation = o.or(orientation);
+                paper_size = p.or(paper_size);
+                scale = s.or(scale);
+                fit_to_width = ftw.or(fit_to_width);
+                fit_to_height = fth.or(fit_to_height);
+            }
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"pageSetUpPr" => {
+                fit_to_page = parse_fit_to_page(&e)?;
+            }
+            Event::Start(e) if e.name().as_ref() == b"rowBreaks" => in_row_breaks = true,
+            Event::End(e) if e.name().as_ref() == b"rowBreaks" => in_row_breaks = false,
+            Event::Start(e) if e.name().as_ref() == b"colBreaks" => in_col_breaks = true,
+            Event::End(e) if e.name().as_ref() == b"colBreaks" => in_col_breaks = false,
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"brk" && in_row_breaks => {
+                if let Some(id) = parse_break_id(&e)? {
+                    manual_breaks.row_breaks_after.insert(id);
+                }
+            }
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"brk" && in_col_breaks => {
+                if let Some(id) = parse_break_id(&e)? {
+                    manual_breaks.col_breaks_after.insert(id);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+
+        buf.clear();
+    }
+
+    let scaling = if fit_to_page || fit_to_width.is_some() || fit_to_height.is_some() {
+        Scaling::FitTo {
+            width: fit_to_width.unwrap_or(0),
+            height: fit_to_height.unwrap_or(0),
+        }
+    } else if let Some(scale) = scale {
+        Scaling::Percent(scale)
+    } else {
+        Scaling::Percent(100)
+    };
+
+    Ok((
+        PageSetup {
+            orientation: orientation.unwrap_or_default(),
+            paper_size: paper_size.unwrap_or_default(),
+            margins: margins.unwrap_or_default(),
+            scaling,
+        },
+        manual_breaks,
+    ))
+}
+
+fn parse_page_margins(e: &BytesStart<'_>) -> Result<PageMargins, PrintError> {
+    let mut margins = PageMargins::default();
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let value = attr.unescape_value()?;
+        match attr.key.as_ref() {
+            b"left" => margins.left = value.parse::<f64>().unwrap_or(margins.left),
+            b"right" => margins.right = value.parse::<f64>().unwrap_or(margins.right),
+            b"top" => margins.top = value.parse::<f64>().unwrap_or(margins.top),
+            b"bottom" => margins.bottom = value.parse::<f64>().unwrap_or(margins.bottom),
+            b"header" => margins.header = value.parse::<f64>().unwrap_or(margins.header),
+            b"footer" => margins.footer = value.parse::<f64>().unwrap_or(margins.footer),
+            _ => {}
+        }
+    }
+    Ok(margins)
+}
+
+fn parse_page_setup(
+    e: &BytesStart<'_>,
+) -> Result<
+    (
+        Option<Orientation>,
+        Option<PaperSize>,
+        Option<u16>,
+        Option<u16>,
+        Option<u16>,
+    ),
+    PrintError,
+> {
+    let mut orientation = None;
+    let mut paper_size = None;
+    let mut scale = None;
+    let mut fit_to_width = None;
+    let mut fit_to_height = None;
+
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let value = attr.unescape_value()?;
+        match attr.key.as_ref() {
+            b"orientation" => {
+                orientation = match value.as_ref() {
+                    "landscape" => Some(Orientation::Landscape),
+                    "portrait" => Some(Orientation::Portrait),
+                    _ => None,
+                }
+            }
+            b"paperSize" => {
+                if let Ok(code) = value.parse::<u16>() {
+                    paper_size = Some(PaperSize { code });
+                }
+            }
+            b"scale" => {
+                if let Ok(v) = value.parse::<u16>() {
+                    scale = Some(v);
+                }
+            }
+            b"fitToWidth" => {
+                if let Ok(v) = value.parse::<u16>() {
+                    fit_to_width = Some(v);
+                }
+            }
+            b"fitToHeight" => {
+                if let Ok(v) = value.parse::<u16>() {
+                    fit_to_height = Some(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok((orientation, paper_size, scale, fit_to_width, fit_to_height))
+}
+
+fn parse_fit_to_page(e: &BytesStart<'_>) -> Result<bool, PrintError> {
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        if attr.key.as_ref() == b"fitToPage" {
+            let value = attr.unescape_value()?;
+            return Ok(value.as_ref() == "1" || value.as_ref().eq_ignore_ascii_case("true"));
+        }
+    }
+    Ok(false)
+}
+
+fn parse_break_id(e: &BytesStart<'_>) -> Result<Option<u32>, PrintError> {
+    let mut id: Option<u32> = None;
+    let mut man: Option<bool> = None;
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let value = attr.unescape_value()?;
+        match attr.key.as_ref() {
+            b"id" => id = value.parse::<u32>().ok(),
+            b"man" => {
+                man = Some(value.as_ref() == "1" || value.as_ref().eq_ignore_ascii_case("true"))
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(false) = man {
+        return Ok(None);
+    }
+
+    Ok(id)
+}
+
+fn update_workbook_xml(
+    workbook_xml: &[u8],
+    overrides: &HashMap<(String, usize), String>,
+) -> Result<Vec<u8>, PrintError> {
+    let mut reader = Reader::from_reader(workbook_xml);
+    let mut writer = Writer::new(Vec::new());
+    let mut buf = Vec::new();
+
+    let mut in_defined_names = false;
+    let mut seen_defined_names = false;
+    let mut replacing_defined_name: Option<(String, usize)> = None;
+    let mut replaced: HashSet<(String, usize)> = HashSet::new();
+    let mut skip_depth = 0usize;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Start(ref e) if e.name().as_ref() == b"definedNames" => {
+                in_defined_names = true;
+                seen_defined_names = true;
+                writer.write_event(event)?;
+            }
+            Event::End(ref e) if e.name().as_ref() == b"definedNames" => {
+                if in_defined_names {
+                    for ((name, local_sheet_id), value) in overrides {
+                        if replaced.contains(&(name.clone(), *local_sheet_id)) {
+                            continue;
+                        }
+                        write_defined_name(&mut writer, name, *local_sheet_id, value)?;
+                    }
+                }
+                in_defined_names = false;
+                writer.write_event(event)?;
+            }
+            Event::Start(ref e) if in_defined_names && e.name().as_ref() == b"definedName" => {
+                let (name, local_sheet_id) = parse_defined_name_key(e)?;
+                if let (Some(name), Some(local_sheet_id)) = (name, local_sheet_id) {
+                    let key = (name.clone(), local_sheet_id);
+                    if overrides.contains_key(&key) {
+                        replacing_defined_name = Some(key.clone());
+                        replaced.insert(key.clone());
+                        writer.write_event(event)?;
+                        if let Some(value) = overrides.get(&key) {
+                            writer.write_event(Event::Text(BytesText::new(value)))?;
+                        }
+                        skip_depth = 0;
+                        buf.clear();
+                        continue;
+                    }
+                }
+                writer.write_event(event)?;
+            }
+            Event::End(ref e)
+                if replacing_defined_name.is_some() && e.name().as_ref() == b"definedName" =>
+            {
+                replacing_defined_name = None;
+                writer.write_event(event)?;
+            }
+            _ if replacing_defined_name.is_some() => {
+                // Skip everything inside the replaced definedName until its end tag.
+                match event {
+                    Event::Start(_) => skip_depth += 1,
+                    Event::End(ref e) => {
+                        if skip_depth == 0 && e.name().as_ref() == b"definedName" {
+                            replacing_defined_name = None;
+                            writer.write_event(Event::End(BytesEnd::new("definedName")))?;
+                        } else if skip_depth > 0 {
+                            skip_depth -= 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Event::End(ref e)
+                if e.name().as_ref() == b"workbook"
+                    && !seen_defined_names
+                    && !overrides.is_empty() =>
+            {
+                writer.write_event(Event::Start(BytesStart::new("definedNames")))?;
+                for ((name, local_sheet_id), value) in overrides {
+                    write_defined_name(&mut writer, name, *local_sheet_id, value)?;
+                }
+                writer.write_event(Event::End(BytesEnd::new("definedNames")))?;
+                writer.write_event(event)?;
+            }
+            Event::Eof => break,
+            _ => {
+                if replacing_defined_name.is_none() {
+                    writer.write_event(event)?;
+                }
+            }
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn parse_defined_name_key(
+    e: &BytesStart<'_>,
+) -> Result<(Option<String>, Option<usize>), PrintError> {
+    let mut name = None;
+    let mut local_sheet_id = None;
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        match attr.key.as_ref() {
+            b"name" => name = Some(attr.unescape_value()?.to_string()),
+            b"localSheetId" => {
+                local_sheet_id = attr.unescape_value()?.parse::<usize>().ok();
+            }
+            _ => {}
+        }
+    }
+    Ok((name, local_sheet_id))
+}
+
+fn write_defined_name(
+    writer: &mut Writer<Vec<u8>>,
+    name: &str,
+    local_sheet_id: usize,
+    value: &str,
+) -> Result<(), PrintError> {
+    let local_sheet_id_str = local_sheet_id.to_string();
+    let mut start = BytesStart::new("definedName");
+    start.push_attribute(("name", name));
+    start.push_attribute(("localSheetId", local_sheet_id_str.as_str()));
+    writer.write_event(Event::Start(start))?;
+    writer.write_event(Event::Text(BytesText::new(value)))?;
+    writer.write_event(Event::End(BytesEnd::new("definedName")))?;
+    Ok(())
+}
+
+fn update_worksheet_xml(
+    sheet_xml: &[u8],
+    settings: &SheetPrintSettings,
+) -> Result<Vec<u8>, PrintError> {
+    let mut reader = Reader::from_reader(sheet_xml);
+    let mut writer = Writer::new(Vec::new());
+    let mut buf = Vec::new();
+
+    let mut seen_sheet_pr = false;
+    let mut in_sheet_pr = false;
+    let mut seen_page_setup_pr = false;
+
+    let mut seen_page_margins = false;
+    let mut seen_page_setup = false;
+    let mut seen_row_breaks = false;
+    let mut seen_col_breaks = false;
+
+    let mut skip_tag: Option<Vec<u8>> = None;
+    let mut skip_depth = 0usize;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+
+        if let Some(ref tag) = skip_tag {
+            match event {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(ref e) => {
+                    if skip_depth == 0 && e.name().as_ref() == tag.as_slice() {
+                        skip_tag = None;
+                    } else if skip_depth > 0 {
+                        skip_depth -= 1;
+                    }
+                }
+                Event::Eof => break,
+                _ => {}
+            }
+
+            buf.clear();
+            continue;
+        }
+
+        match event {
+            Event::Start(ref e) if e.name().as_ref() == b"sheetPr" => {
+                seen_sheet_pr = true;
+                in_sheet_pr = true;
+                writer.write_event(event)?;
+            }
+            Event::End(ref e) if e.name().as_ref() == b"sheetPr" => {
+                if settings.page_setup.scaling.is_fit_to() && !seen_page_setup_pr {
+                    write_page_setup_pr(&mut writer, true)?;
+                }
+                in_sheet_pr = false;
+                writer.write_event(event)?;
+            }
+            Event::Start(ref e) | Event::Empty(ref e)
+                if in_sheet_pr && e.name().as_ref() == b"pageSetUpPr" =>
+            {
+                seen_page_setup_pr = true;
+                let fit_to_page = settings.page_setup.scaling.is_fit_to();
+                writer.write_event(update_page_setup_pr_event(&event, fit_to_page)?)?;
+            }
+            Event::Start(ref e) if e.name().as_ref() == b"pageMargins" => {
+                seen_page_margins = true;
+                writer.write_event(build_page_margins_event(&settings.page_setup.margins)?)?;
+                skip_tag = Some(b"pageMargins".to_vec());
+                skip_depth = 0;
+            }
+            Event::Empty(ref e) if e.name().as_ref() == b"pageMargins" => {
+                seen_page_margins = true;
+                writer.write_event(build_page_margins_event(&settings.page_setup.margins)?)?;
+            }
+            Event::Start(ref e) if e.name().as_ref() == b"pageSetup" => {
+                seen_page_setup = true;
+                writer.write_event(build_page_setup_event(&settings.page_setup)?)?;
+                skip_tag = Some(b"pageSetup".to_vec());
+                skip_depth = 0;
+            }
+            Event::Empty(ref e) if e.name().as_ref() == b"pageSetup" => {
+                seen_page_setup = true;
+                writer.write_event(build_page_setup_event(&settings.page_setup)?)?;
+            }
+            Event::Start(ref e) if e.name().as_ref() == b"rowBreaks" => {
+                seen_row_breaks = true;
+                if !settings.manual_page_breaks.row_breaks_after.is_empty() {
+                    write_row_breaks(&mut writer, &settings.manual_page_breaks)?;
+                }
+                skip_tag = Some(b"rowBreaks".to_vec());
+                skip_depth = 0;
+            }
+            Event::Empty(ref e) if e.name().as_ref() == b"rowBreaks" => {
+                seen_row_breaks = true;
+                if !settings.manual_page_breaks.row_breaks_after.is_empty() {
+                    write_row_breaks(&mut writer, &settings.manual_page_breaks)?;
+                }
+            }
+            Event::Start(ref e) if e.name().as_ref() == b"colBreaks" => {
+                seen_col_breaks = true;
+                if !settings.manual_page_breaks.col_breaks_after.is_empty() {
+                    write_col_breaks(&mut writer, &settings.manual_page_breaks)?;
+                }
+                skip_tag = Some(b"colBreaks".to_vec());
+                skip_depth = 0;
+            }
+            Event::Empty(ref e) if e.name().as_ref() == b"colBreaks" => {
+                seen_col_breaks = true;
+                if !settings.manual_page_breaks.col_breaks_after.is_empty() {
+                    write_col_breaks(&mut writer, &settings.manual_page_breaks)?;
+                }
+            }
+            Event::End(ref e) if e.name().as_ref() == b"worksheet" => {
+                if !seen_sheet_pr && settings.page_setup.scaling.is_fit_to() {
+                    writer.write_event(Event::Start(BytesStart::new("sheetPr")))?;
+                    write_page_setup_pr(&mut writer, true)?;
+                    writer.write_event(Event::End(BytesEnd::new("sheetPr")))?;
+                }
+                if !seen_page_margins {
+                    writer.write_event(build_page_margins_event(&settings.page_setup.margins)?)?;
+                }
+                if !seen_page_setup {
+                    writer.write_event(build_page_setup_event(&settings.page_setup)?)?;
+                }
+                if !seen_row_breaks && !settings.manual_page_breaks.row_breaks_after.is_empty() {
+                    write_row_breaks(&mut writer, &settings.manual_page_breaks)?;
+                }
+                if !seen_col_breaks && !settings.manual_page_breaks.col_breaks_after.is_empty() {
+                    write_col_breaks(&mut writer, &settings.manual_page_breaks)?;
+                }
+                writer.write_event(event)?;
+            }
+            Event::Eof => break,
+            _ => {
+                writer.write_event(event)?;
+            }
+        }
+
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+trait ScalingExt {
+    fn is_fit_to(&self) -> bool;
+}
+
+impl ScalingExt for Scaling {
+    fn is_fit_to(&self) -> bool {
+        matches!(self, Scaling::FitTo { .. })
+    }
+}
+
+fn update_page_setup_pr_event(
+    event: &Event<'_>,
+    fit_to_page: bool,
+) -> Result<Event<'static>, PrintError> {
+    let mut start = BytesStart::new("pageSetUpPr");
+
+    let mut has_fit = false;
+    if let Event::Start(e) | Event::Empty(e) = event {
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr?;
+            if attr.key.as_ref() == b"fitToPage" {
+                has_fit = true;
+                let v = if fit_to_page { "1" } else { "0" };
+                start.push_attribute(("fitToPage", v));
+            } else {
+                start.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+            }
+        }
+    }
+
+    if fit_to_page && !has_fit {
+        start.push_attribute(("fitToPage", "1"));
+    }
+
+    Ok(match event {
+        Event::Start(_) => Event::Start(start),
+        Event::Empty(_) => Event::Empty(start),
+        _ => unreachable!(),
+    })
+}
+
+fn write_page_setup_pr(writer: &mut Writer<Vec<u8>>, fit_to_page: bool) -> Result<(), PrintError> {
+    let fit = if fit_to_page { "1" } else { "0" };
+    let mut start = BytesStart::new("pageSetUpPr");
+    start.push_attribute(("fitToPage", fit));
+    writer.write_event(Event::Empty(start))?;
+    Ok(())
+}
+
+fn build_page_margins_event(margins: &PageMargins) -> Result<Event<'static>, PrintError> {
+    let left = margins.left.to_string();
+    let right = margins.right.to_string();
+    let top = margins.top.to_string();
+    let bottom = margins.bottom.to_string();
+    let header = margins.header.to_string();
+    let footer = margins.footer.to_string();
+    let mut start = BytesStart::new("pageMargins");
+    start.push_attribute(("left", left.as_str()));
+    start.push_attribute(("right", right.as_str()));
+    start.push_attribute(("top", top.as_str()));
+    start.push_attribute(("bottom", bottom.as_str()));
+    start.push_attribute(("header", header.as_str()));
+    start.push_attribute(("footer", footer.as_str()));
+    Ok(Event::Empty(start))
+}
+
+fn build_page_setup_event(page_setup: &PageSetup) -> Result<Event<'static>, PrintError> {
+    let paper_size = page_setup.paper_size.code.to_string();
+    let orientation = match page_setup.orientation {
+        Orientation::Portrait => "portrait",
+        Orientation::Landscape => "landscape",
+    };
+
+    let mut start = BytesStart::new("pageSetup");
+    start.push_attribute(("paperSize", paper_size.as_str()));
+    start.push_attribute(("orientation", orientation));
+
+    match page_setup.scaling {
+        Scaling::Percent(pct) => {
+            let pct = pct.to_string();
+            start.push_attribute(("scale", pct.as_str()));
+        }
+        Scaling::FitTo { width, height } => {
+            let width = width.to_string();
+            let height = height.to_string();
+            start.push_attribute(("fitToWidth", width.as_str()));
+            start.push_attribute(("fitToHeight", height.as_str()));
+        }
+    }
+
+    Ok(Event::Empty(start))
+}
+
+fn write_row_breaks(
+    writer: &mut Writer<Vec<u8>>,
+    breaks: &ManualPageBreaks,
+) -> Result<(), PrintError> {
+    let count = breaks.row_breaks_after.len().to_string();
+    let mut outer = BytesStart::new("rowBreaks");
+    outer.push_attribute(("count", count.as_str()));
+    outer.push_attribute(("manualBreakCount", count.as_str()));
+    writer.write_event(Event::Start(outer))?;
+    for id in &breaks.row_breaks_after {
+        let id_str = id.to_string();
+        let mut brk = BytesStart::new("brk");
+        brk.push_attribute(("id", id_str.as_str()));
+        brk.push_attribute(("max", "16383"));
+        brk.push_attribute(("man", "1"));
+        writer.write_event(Event::Empty(brk))?;
+    }
+    writer.write_event(Event::End(BytesEnd::new("rowBreaks")))?;
+    Ok(())
+}
+
+fn write_col_breaks(
+    writer: &mut Writer<Vec<u8>>,
+    breaks: &ManualPageBreaks,
+) -> Result<(), PrintError> {
+    let count = breaks.col_breaks_after.len().to_string();
+    let mut outer = BytesStart::new("colBreaks");
+    outer.push_attribute(("count", count.as_str()));
+    outer.push_attribute(("manualBreakCount", count.as_str()));
+    writer.write_event(Event::Start(outer))?;
+    for id in &breaks.col_breaks_after {
+        let id_str = id.to_string();
+        let mut brk = BytesStart::new("brk");
+        brk.push_attribute(("id", id_str.as_str()));
+        brk.push_attribute(("max", "1048575"));
+        brk.push_attribute(("man", "1"));
+        writer.write_event(Event::Empty(brk))?;
+    }
+    writer.write_event(Event::End(BytesEnd::new("colBreaks")))?;
+    Ok(())
+}

@@ -9,6 +9,7 @@
 
 mod package;
 pub mod pivots;
+pub mod print;
 pub mod shared_strings;
 pub mod vba;
 

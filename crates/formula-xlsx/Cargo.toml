@@ -11,6 +11,7 @@ thiserror = "1"
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+base64 = "0.22"
 cfb = "0.10"
 pretty_assertions = "1"
 tempfile = "3.10"
