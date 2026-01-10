@@ -428,7 +428,9 @@ impl AppState {
     }
 
     pub fn recalculate_all(&mut self) -> Result<Vec<CellUpdateData>, AppStateError> {
-        self.rebuild_engine_from_workbook()?;
+        if self.workbook.is_none() {
+            return Err(AppStateError::NoWorkbookLoaded);
+        }
         self.engine.recalculate();
         self.refresh_computed_values()
     }
@@ -600,9 +602,12 @@ impl AppState {
             let sheet_id = sheet.id.clone();
 
             for ((row, col), cell) in sheet.cells.iter_mut() {
-                let addr = coord_to_a1(*row, *col);
-                let new_value =
-                    engine_value_to_scalar(self.engine.get_cell_value(&sheet_name, &addr));
+                let new_value = if cell.formula.is_some() {
+                    let addr = coord_to_a1(*row, *col);
+                    engine_value_to_scalar(self.engine.get_cell_value(&sheet_name, &addr))
+                } else {
+                    cell.input_value.clone().unwrap_or(CellScalar::Empty)
+                };
 
                 if new_value != cell.computed_value {
                     cell.computed_value = new_value.clone();
@@ -834,6 +839,58 @@ mod tests {
         state.load_workbook(workbook);
         let b1 = state.get_cell(&sheet_id, 0, 1).unwrap();
         assert_eq!(b1.value, CellScalar::Number(6.0));
+    }
+
+    #[test]
+    fn cross_sheet_references_recalculate() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let sheet2_id = workbook.sheets[1].id.clone();
+
+        workbook.sheet_mut(&sheet1_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(1.0))),
+        );
+        workbook.sheet_mut(&sheet2_id).unwrap().set_cell(
+            0,
+            1,
+            Cell::from_formula("=Sheet1!A1+1".to_string()),
+        );
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let b1 = state.get_cell(&sheet2_id, 0, 1).unwrap();
+        assert_eq!(b1.value, CellScalar::Number(2.0));
+    }
+
+    #[test]
+    fn quoted_sheet_references_recalculate() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("My Sheet".to_string());
+        workbook.add_sheet("Sheet1".to_string());
+        let my_sheet_id = workbook.sheets[0].id.clone();
+        let sheet1_id = workbook.sheets[1].id.clone();
+
+        workbook.sheet_mut(&my_sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(10.0))),
+        );
+        workbook.sheet_mut(&sheet1_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_formula("='My Sheet'!A1+1".to_string()),
+        );
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let a1 = state.get_cell(&sheet1_id, 0, 0).unwrap();
+        assert_eq!(a1.value, CellScalar::Number(11.0));
     }
 
     #[test]
