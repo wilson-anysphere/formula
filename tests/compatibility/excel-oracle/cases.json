@@ -21825,6 +21825,66 @@
       "id": "index_match_d9885faecbc2"
     },
     {
+      "formula": "=A1:A3",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        }
+      ],
+      "tags": [
+        "spill",
+        "range"
+      ],
+      "description": "Reference spill",
+      "id": "spill_range_a18cd22aa987"
+    },
+    {
+      "formula": "=TRANSPOSE(A1:C1)",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": 2
+        },
+        {
+          "cell": "C1",
+          "value": 3
+        }
+      ],
+      "tags": [
+        "spill",
+        "TRANSPOSE"
+      ],
+      "description": "Function spill",
+      "id": "spill_transpose_b72ce234f655"
+    },
+    {
+      "formula": "=SEQUENCE(2,2,1,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "SEQUENCE",
+        "dynarr"
+      ],
+      "description": "Dynamic array function (Excel 365+)",
+      "id": "spill_sequence_fafca1fa5240"
+    },
+    {
       "formula": "=1/0",
       "outputCell": "A1",
       "inputs": [],

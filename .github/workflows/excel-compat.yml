@@ -1,6 +1,9 @@
 name: Excel Compatibility (Oracle)
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       mode:
@@ -24,10 +27,19 @@ on:
         required: false
         default: ""
 
+env:
+  MODE: ${{ github.event.inputs.mode || 'validate-engine' }}
+  MAX_CASES: ${{ github.event.inputs.max_cases || '0' }}
+  MAX_MISMATCH_RATE: ${{ github.event.inputs.max_mismatch_rate || '0.001' }}
+  ENGINE_CMD: ${{ github.event.inputs.engine_cmd || '' }}
+
 jobs:
   excel-oracle:
     runs-on: windows-latest
     timeout-minutes: 60
+    # For push/PR we validate against a pinned dataset (no Excel required).
+    # If there is no pinned dataset committed yet, skip the job to avoid failing CI.
+    if: ${{ github.event_name == 'workflow_dispatch' || hashFiles('tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json') != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +60,7 @@ jobs:
         id: expected
         shell: powershell
         run: |
-          $mode = "${{ inputs.mode }}"
+          $mode = "${{ env.MODE }}"
           $pinned = "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json"
           $generated = "tests/compatibility/excel-oracle/datasets/excel-oracle.json"
           if ($mode -eq "validate-engine" -and (Test-Path -LiteralPath $pinned)) {
@@ -63,7 +75,7 @@ jobs:
         if: ${{ steps.expected.outputs.source == 'generated' }}
         shell: powershell
         run: |
-          $max = [int]"${{ inputs.max_cases }}"
+          $max = [int]"${{ env.MAX_CASES }}"
           $args = @(
             "-CasesPath", "tests/compatibility/excel-oracle/cases.json",
             "-OutPath", "${{ steps.expected.outputs.path }}"
@@ -72,13 +84,13 @@ jobs:
           powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 @args
 
       - name: Run formula engine (adapter)
-        if: ${{ inputs.mode == 'validate-engine' }}
+        if: ${{ env.MODE == 'validate-engine' }}
         shell: powershell
         env:
-          FORMULA_ENGINE_CMD: ${{ inputs.engine_cmd }}
+          FORMULA_ENGINE_CMD: ${{ env.ENGINE_CMD }}
         run: |
-          $max = [int]"${{ inputs.max_cases }}"
-          $engineCmd = "${{ inputs.engine_cmd }}"
+          $max = [int]"${{ env.MAX_CASES }}"
+          $engineCmd = "${{ env.ENGINE_CMD }}"
           $args = @(
             "-CasesPath", "tests/compatibility/excel-oracle/cases.json",
             "-OutPath", "tests/compatibility/excel-oracle/datasets/engine-results.json"
@@ -88,7 +100,7 @@ jobs:
           powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-engine.ps1 @args
 
       - name: Compare engine vs Excel oracle
-        if: ${{ inputs.mode == 'validate-engine' }}
+        if: ${{ env.MODE == 'validate-engine' }}
         shell: powershell
         run: |
           python tools/excel-oracle/compare.py `
@@ -96,7 +108,7 @@ jobs:
             --expected "${{ steps.expected.outputs.path }}" `
             --actual tests/compatibility/excel-oracle/datasets/engine-results.json `
             --report tests/compatibility/excel-oracle/reports/mismatch-report.json `
-            --max-mismatch-rate "${{ inputs.max_mismatch_rate }}"
+            --max-mismatch-rate "${{ env.MAX_MISMATCH_RATE }}"
 
       - name: Upload oracle dataset + reports
         if: always()

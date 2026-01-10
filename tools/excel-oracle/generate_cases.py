@@ -406,6 +406,37 @@ def generate_cases() -> dict[str, Any]:
         )
 
     # ------------------------------------------------------------------
+    # Dynamic arrays / spilling
+    # ------------------------------------------------------------------
+    _add_case(
+        cases,
+        prefix="spill_range",
+        tags=["spill", "range"],
+        formula="=A1:A3",
+        inputs=[CellInput("A1", 1), CellInput("A2", 2), CellInput("A3", 3)],
+        output_cell="C1",
+        description="Reference spill",
+    )
+    _add_case(
+        cases,
+        prefix="spill_transpose",
+        tags=["spill", "TRANSPOSE"],
+        formula="=TRANSPOSE(A1:C1)",
+        inputs=[CellInput("A1", 1), CellInput("B1", 2), CellInput("C1", 3)],
+        output_cell="E1",
+        description="Function spill",
+    )
+    _add_case(
+        cases,
+        prefix="spill_sequence",
+        tags=["spill", "SEQUENCE", "dynarr"],
+        formula="=SEQUENCE(2,2,1,1)",
+        inputs=[],
+        output_cell="C1",
+        description="Dynamic array function (Excel 365+)",
+    )
+
+    # ------------------------------------------------------------------
     # Explicit error values
     # ------------------------------------------------------------------
     _add_case(cases, prefix="err_div0", tags=["error"], formula="=1/0", inputs=[], output_cell="A1")
