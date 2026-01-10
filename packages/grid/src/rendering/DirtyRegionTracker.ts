@@ -37,15 +37,18 @@ export class DirtyRegionTracker {
     const normalized = normalizeRect(rect);
     if (!normalized) return;
 
-    for (let i = 0; i < this.dirty.length; i++) {
+    let merged = normalized;
+    for (let i = 0; i < this.dirty.length; ) {
       const existing = this.dirty[i];
-      if (rectsOverlap(existing, normalized)) {
-        this.dirty[i] = unionRect(existing, normalized);
-        return;
+      if (rectsOverlap(existing, merged)) {
+        merged = unionRect(existing, merged);
+        this.dirty.splice(i, 1);
+        continue;
       }
+      i++;
     }
 
-    this.dirty.push(normalized);
+    this.dirty.push(merged);
   }
 
   drain(): Rect[] {
@@ -58,4 +61,3 @@ export class DirtyRegionTracker {
     this.dirty = [];
   }
 }
-

@@ -330,8 +330,13 @@ export class CanvasGridRenderer {
   private alignScrollToDevicePixels(pos: { x: number; y: number }): { x: number; y: number } {
     const dpr = Number.isFinite(this.devicePixelRatio) && this.devicePixelRatio > 0 ? this.devicePixelRatio : 1;
     const step = 1 / dpr;
-    const x = Math.round(pos.x / step) * step;
-    const y = Math.round(pos.y / step) * step;
+    const { maxScrollX, maxScrollY } = this.scroll.getMaxScroll();
+
+    const maxAlignedX = Math.floor(maxScrollX / step) * step;
+    const maxAlignedY = Math.floor(maxScrollY / step) * step;
+
+    const x = Math.min(maxAlignedX, Math.max(0, Math.round(pos.x / step) * step));
+    const y = Math.min(maxAlignedY, Math.max(0, Math.round(pos.y / step) * step));
     return { x, y };
   }
 
@@ -603,7 +608,7 @@ export class CanvasGridRenderer {
       ctx.restore();
     }
 
-    if (layer === "background") {
+    if (layer === "selection") {
       this.drawFreezeLines(ctx, viewport);
     }
   }
