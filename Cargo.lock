@@ -1123,6 +1123,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "formula-vba-runtime"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "formula-wasm"
 version = "0.1.0"
 dependencies = [
