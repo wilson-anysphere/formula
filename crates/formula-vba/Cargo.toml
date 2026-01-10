@@ -1,0 +1,12 @@
+[package]
+name = "formula-vba"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cfb = "0.10"
+encoding_rs = "0.8"
+thiserror = "1"
+
+[dev-dependencies]
+zip = "0.6"

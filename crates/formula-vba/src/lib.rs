@@ -1,0 +1,225 @@
+//! `formula-vba` provides lightweight parsing utilities for the VBA project
+//! embedded in macro-enabled Excel workbooks (`vbaProject.bin`).
+//!
+//! Current scope (per `docs/08-macro-compatibility.md`):
+//! - L1: Preserve `vbaProject.bin` bytes (handled by the XLSX layer).
+//! - L2: Parse enough of `vbaProject.bin` to enumerate modules and show source.
+
+mod compression;
+mod dir;
+mod ole;
+
+use std::collections::HashMap;
+
+pub use compression::{decompress_container, CompressionError};
+pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
+pub use ole::{OleError, OleFile};
+
+use encoding_rs::WINDOWS_1252;
+use thiserror::Error;
+
+/// Parsed representation of a VBA project. This model is intentionally minimal
+/// and geared towards UI display (module tree + code viewer).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VBAProject {
+    pub name: Option<String>,
+    pub constants: Option<String>,
+    pub references: Vec<VBAReference>,
+    pub modules: Vec<VBAModule>,
+    /// Raw bytes of streams we don't currently interpret but may be useful for
+    /// future analysis/debugging.
+    pub raw_streams: HashMap<String, Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VBAModule {
+    pub name: String,
+    pub stream_name: String,
+    pub module_type: ModuleType,
+    pub code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VBAReference {
+    pub raw: String,
+}
+
+#[derive(Debug, Error)]
+pub enum ParseError {
+    #[error("OLE error: {0}")]
+    Ole(#[from] OleError),
+    #[error("VBA compression error: {0}")]
+    Compression(#[from] CompressionError),
+    #[error("dir stream parse error: {0}")]
+    Dir(#[from] DirParseError),
+    #[error("missing required stream {0}")]
+    MissingStream(&'static str),
+}
+
+impl VBAProject {
+    /// Parse a `vbaProject.bin` OLE compound file into a [`VBAProject`].
+    ///
+    /// The goal is to be permissive: we try to recover modules even if some
+    /// optional metadata is missing.
+    pub fn parse(vba_project_bin: &[u8]) -> Result<Self, ParseError> {
+        let mut ole = OleFile::open(vba_project_bin)?;
+
+        let project_text = ole.read_stream_opt("PROJECT")?;
+        let mut references = Vec::new();
+        let mut name_from_project_stream = None;
+        if let Some(project_text) = project_text {
+            let text = decode_1252(&project_text);
+            for line in text.lines() {
+                if let Some(rest) = line.strip_prefix("Name=") {
+                    name_from_project_stream = Some(rest.trim_matches('"').to_owned());
+                } else if let Some(rest) = line.strip_prefix("Reference=") {
+                    references.push(VBAReference {
+                        raw: rest.to_owned(),
+                    });
+                }
+            }
+        }
+
+        let dir_bytes = ole
+            .read_stream_opt("VBA/dir")?
+            .ok_or(ParseError::MissingStream("VBA/dir"))?;
+        let dir_decompressed = decompress_container(&dir_bytes)?;
+        let dir_stream = DirStream::parse(&dir_decompressed)?;
+
+        let mut modules = Vec::new();
+        for module in &dir_stream.modules {
+            let stream_path = format!("VBA/{}", module.stream_name);
+            let module_stream = ole
+                .read_stream_opt(&stream_path)?
+                .ok_or(ParseError::MissingStream("module stream"))?;
+
+            let text_offset = module
+                .text_offset
+                .unwrap_or_else(|| guess_text_offset(&module_stream));
+            let text_offset = text_offset.min(module_stream.len());
+            let source_container = &module_stream[text_offset..];
+            let source_bytes = decompress_container(source_container)?;
+            let code = decode_1252(&source_bytes);
+
+            modules.push(VBAModule {
+                name: module.name.clone(),
+                stream_name: module.stream_name.clone(),
+                module_type: module.module_type,
+                code,
+            });
+        }
+
+        let mut raw_streams = HashMap::new();
+        for path in ole.list_streams()? {
+            if path == "VBA/dir" {
+                continue;
+            }
+            if path.starts_with("VBA/") {
+                // module streams can be large; keep for debugging but only if not already.
+                raw_streams.entry(path.clone()).or_insert_with(|| Vec::new());
+            }
+        }
+
+        Ok(Self {
+            name: dir_stream
+                .project_name
+                .clone()
+                .or(name_from_project_stream),
+            constants: dir_stream.constants.clone(),
+            references,
+            modules,
+            raw_streams,
+        })
+    }
+}
+
+fn decode_1252(bytes: &[u8]) -> String {
+    let (cow, _, _) = WINDOWS_1252.decode(bytes);
+    cow.into_owned()
+}
+
+/// Try to find the start of the compressed source container in a module stream
+/// when the `dir` stream doesn't give us a text offset.
+///
+/// This is a best-effort heuristic: scan for the first 0x01 byte that looks
+/// like an MS-OVBA compressed container signature.
+fn guess_text_offset(module_stream: &[u8]) -> usize {
+    module_stream
+        .iter()
+        .position(|&b| b == 0x01)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+
+    fn load_fixture_vba_bin() -> Vec<u8> {
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/xlsx/macros/basic.xlsm"
+        );
+        let data = std::fs::read(fixture_path).expect("fixture xlsm exists");
+        let reader = std::io::Cursor::new(data);
+        let mut zip = zip::ZipArchive::new(reader).expect("valid zip");
+        let mut file = zip
+            .by_name("xl/vbaProject.bin")
+            .expect("vbaProject.bin in fixture");
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).unwrap();
+        buf
+    }
+
+    #[test]
+    fn parses_modules_and_code_from_fixture() {
+        let vba_bin = load_fixture_vba_bin();
+        let project = VBAProject::parse(&vba_bin).expect("parse VBA project");
+        assert_eq!(project.name.as_deref(), Some("VBAProject"));
+        assert!(!project.modules.is_empty());
+
+        let module = project
+            .modules
+            .iter()
+            .find(|m| m.name == "Module1")
+            .expect("Module1 present");
+        assert!(module.code.contains("Sub Hello"));
+        assert!(module.code.contains("MsgBox"));
+    }
+
+    #[test]
+    fn decompresses_copy_tokens() {
+        // Compressed container that expands "ABCABCABC" using a copy token.
+        //
+        // We build one compressed chunk:
+        // - First 3 literals: A B C
+        // - Then a copy token: offset=3, length=6 -> repeats ABCABC
+        //
+        // Encoding details follow MS-OVBA:
+        // copy_token_bit_count at output_len=3 is 4 (minimum).
+        // length bits = 12, offset bits = 4.
+        // token layout: (offset-1)<<12 | (length-3)
+        // offset-1 = 2, length-3 = 3 => 0x2000 | 0x0003 = 0x2003
+        let mut chunk_data = Vec::new();
+        // Flag byte: bits 0-2 literal, bit3 copy token.
+        chunk_data.push(0b0000_1000);
+        chunk_data.extend_from_slice(b"ABC");
+        chunk_data.extend_from_slice(&0x2003u16.to_le_bytes());
+
+        // Container: signature + chunk header + chunk data
+        // header:
+        // - size field = chunk_data_len - 1
+        // - signature bits = 0b011 at bits 12..14 => 0x3000
+        // - compressed flag at bit 15 => 0x8000
+        let size_field = (chunk_data.len() - 1) as u16;
+        let header = 0xB000u16 | size_field;
+        let mut container = Vec::new();
+        container.push(0x01);
+        container.extend_from_slice(&header.to_le_bytes());
+        container.extend_from_slice(&chunk_data);
+
+        let out = decompress_container(&container).expect("decompress");
+        assert_eq!(&out, b"ABCABCABC");
+    }
+}
+

@@ -1,0 +1,13 @@
+[package]
+name = "formula-xlsx"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+formula-vba = { path = "../formula-vba" }
+thiserror = "1"
+zip = "0.6"
+
+[dev-dependencies]
+cfb = "0.10"
+pretty_assertions = "1"
