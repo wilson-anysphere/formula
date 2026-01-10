@@ -1,6 +1,8 @@
 [workspace]
+resolver = "2"
 members = [
   "apps/desktop/src-tauri",
+  "crates/formula-columnar",
   "crates/formula-dax",
   "crates/formula-engine",
   "crates/formula-excel-oracle",
@@ -17,4 +19,3 @@ members = [
   "crates/formula-core",
   "crates/formula-wasm",
 ]
-resolver = "2"

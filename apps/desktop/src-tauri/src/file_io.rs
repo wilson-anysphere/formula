@@ -1,6 +1,7 @@
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
+use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_xlsx::drawingml::PreservedDrawingParts;
 use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
@@ -9,6 +10,7 @@ use formula_xlsx::XlsxPackage;
 use rust_xlsxwriter::{Workbook as XlsxWorkbook, XlsxError};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
 
@@ -17,6 +19,7 @@ pub struct Sheet {
     pub id: String,
     pub name: String,
     pub(crate) cells: HashMap<(usize, usize), Cell>,
+    pub(crate) columnar: Option<Arc<ColumnarTable>>,
 }
 
 impl Sheet {
@@ -25,14 +28,32 @@ impl Sheet {
             id,
             name,
             cells: HashMap::new(),
+            columnar: None,
         }
     }
 
     pub fn get_cell(&self, row: usize, col: usize) -> Cell {
-        self.cells
-            .get(&(row, col))
-            .cloned()
-            .unwrap_or_else(Cell::empty)
+        if let Some(cell) = self.cells.get(&(row, col)) {
+            return cell.clone();
+        }
+
+        if let Some(table) = &self.columnar {
+            if row < table.row_count() && col < table.column_count() {
+                let col_type = table
+                    .schema()
+                    .get(col)
+                    .map(|c| c.column_type)
+                    .unwrap_or(ColumnarType::String);
+                let value = table.get_cell(row, col);
+                let scalar = columnar_to_scalar(value, col_type);
+                return match scalar {
+                    CellScalar::Empty => Cell::empty(),
+                    other => Cell::from_literal(Some(other)),
+                };
+            }
+        }
+
+        Cell::empty()
     }
 
     pub fn set_cell(&mut self, row: usize, col: usize, cell: Cell) {
@@ -45,6 +66,96 @@ impl Sheet {
 
     pub fn cells_iter(&self) -> impl Iterator<Item = ((usize, usize), &Cell)> {
         self.cells.iter().map(|(k, v)| (*k, v))
+    }
+
+    pub fn set_columnar_table(&mut self, table: Arc<ColumnarTable>) {
+        self.columnar = Some(table);
+    }
+
+    pub fn get_range_cells(
+        &self,
+        start_row: usize,
+        start_col: usize,
+        end_row: usize,
+        end_col: usize,
+    ) -> Vec<Vec<Cell>> {
+        let rows = end_row.saturating_sub(start_row) + 1;
+        let cols = end_col.saturating_sub(start_col) + 1;
+        let mut out = vec![vec![Cell::empty(); cols]; rows];
+
+        if let Some(table) = &self.columnar {
+            let fetched = table.get_range(
+                start_row,
+                end_row.saturating_add(1),
+                start_col,
+                end_col.saturating_add(1),
+            );
+            let dest_row_off = fetched.row_start.saturating_sub(start_row);
+            let dest_col_off = fetched.col_start.saturating_sub(start_col);
+            let fetched_col_start = fetched.col_start;
+
+            for (local_col, values) in fetched.columns.into_iter().enumerate() {
+                let table_col_idx = fetched_col_start + local_col;
+                let col_type = table
+                    .schema()
+                    .get(table_col_idx)
+                    .map(|c| c.column_type)
+                    .unwrap_or(ColumnarType::String);
+                let out_col = dest_col_off + local_col;
+                for (local_row, v) in values.into_iter().enumerate() {
+                    let out_row = dest_row_off + local_row;
+                    if let Some(row_vec) = out.get_mut(out_row) {
+                        if let Some(cell) = row_vec.get_mut(out_col) {
+                            let scalar = columnar_to_scalar(v, col_type);
+                            *cell = match scalar {
+                                CellScalar::Empty => Cell::empty(),
+                                other => Cell::from_literal(Some(other)),
+                            };
+                        }
+                    }
+                }
+            }
+        } else {
+            for r in 0..rows {
+                for c in 0..cols {
+                    out[r][c] = self.get_cell(start_row + r, start_col + c);
+                }
+            }
+        }
+
+        // Overlay sparse edits/formulas.
+        for ((row, col), cell) in &self.cells {
+            if *row < start_row || *row > end_row || *col < start_col || *col > end_col {
+                continue;
+            }
+            out[row - start_row][col - start_col] = cell.clone();
+        }
+
+        out
+    }
+}
+
+fn columnar_to_scalar(value: ColumnarValue, column_type: ColumnarType) -> CellScalar {
+    match value {
+        ColumnarValue::Null => CellScalar::Empty,
+        ColumnarValue::Number(v) => CellScalar::Number(v),
+        ColumnarValue::Boolean(v) => CellScalar::Bool(v),
+        ColumnarValue::String(v) => CellScalar::Text(v.as_ref().to_string()),
+        ColumnarValue::DateTime(v) => CellScalar::Number(v as f64),
+        ColumnarValue::Currency(v) => match column_type {
+            ColumnarType::Currency { scale } => {
+                let denom = 10f64.powi(scale as i32);
+                CellScalar::Number(v as f64 / denom)
+            }
+            _ => CellScalar::Number(v as f64),
+        },
+        ColumnarValue::Percentage(v) => match column_type {
+            ColumnarType::Percentage { scale } => {
+                let denom = 10f64.powi(scale as i32);
+                CellScalar::Number(v as f64 / denom)
+            }
+            _ => CellScalar::Number(v as f64),
+        },
     }
 }
 

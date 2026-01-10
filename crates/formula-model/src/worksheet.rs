@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+
+use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 
 use crate::{A1ParseError, Cell, CellKey, CellRef, CellValue, Range, Table};
 
@@ -97,6 +100,12 @@ pub struct ColProperties {
     pub hidden: bool,
 }
 
+#[derive(Clone, Debug)]
+struct ColumnarBackend {
+    origin: CellRef,
+    table: Arc<ColumnarTable>,
+}
+
 /// A worksheet (sheet tab) containing sparse cells and per-row/column metadata.
 #[derive(Clone, Debug, Serialize)]
 pub struct Worksheet {
@@ -152,6 +161,12 @@ pub struct Worksheet {
     /// Excel tables (structured ranges) hosted on this worksheet.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tables: Vec<Table>,
+
+    /// Optional columnar backing store for large imported datasets.
+    ///
+    /// This is runtime-only for now; persistence is handled by the storage layer.
+    #[serde(skip)]
+    columnar: Option<ColumnarBackend>,
 }
 
 impl Worksheet {
@@ -172,6 +187,7 @@ impl Worksheet {
             frozen_cols: 0,
             zoom: default_zoom(),
             tables: Vec::new(),
+            columnar: None,
         }
     }
 
@@ -190,6 +206,28 @@ impl Worksheet {
     /// Get the current used range (bounding box of stored cells).
     pub fn used_range(&self) -> Option<Range> {
         self.used_range
+    }
+
+    /// Attach a columnar table as the backing store for this worksheet.
+    ///
+    /// The existing sparse cell map is retained as an "overlay" for edits, formulas,
+    /// and styles.
+    pub fn set_columnar_table(&mut self, origin: CellRef, table: Arc<ColumnarTable>) {
+        let table_rows = table.row_count().min(u32::MAX as usize) as u32;
+        let table_cols = table.column_count().min(u32::MAX as usize) as u32;
+        self.row_count = self.row_count.max(origin.row.saturating_add(table_rows));
+        self.col_count = self.col_count.max(origin.col.saturating_add(table_cols));
+        self.columnar = Some(ColumnarBackend { origin, table });
+    }
+
+    /// Remove any columnar backing table.
+    pub fn clear_columnar_table(&mut self) {
+        self.columnar = None;
+    }
+
+    /// Returns the backing columnar table, if present.
+    pub fn columnar_table(&self) -> Option<&Arc<ColumnarTable>> {
+        self.columnar.as_ref().map(|c| &c.table)
     }
 
     /// Get per-row properties if an override exists.
@@ -322,12 +360,18 @@ impl Worksheet {
 
     /// Get a cell record if it is present in the sparse store.
     pub fn cell(&self, cell: CellRef) -> Option<&Cell> {
-        self.cells.get(&CellKey::from(cell))
+        if cell.row >= crate::cell::EXCEL_MAX_ROWS || cell.col >= crate::cell::EXCEL_MAX_COLS {
+            return None;
+        }
+        self.cells.get(&CellKey::from_ref(cell))
     }
 
     /// Get a mutable cell record if it is present in the sparse store.
     pub fn cell_mut(&mut self, cell: CellRef) -> Option<&mut Cell> {
-        self.cells.get_mut(&CellKey::from(cell))
+        if cell.row >= crate::cell::EXCEL_MAX_ROWS || cell.col >= crate::cell::EXCEL_MAX_COLS {
+            return None;
+        }
+        self.cells.get_mut(&CellKey::from_ref(cell))
     }
 
     /// Get a cell record from an A1 reference (e.g. `A1`, `$B$2`).
@@ -337,9 +381,58 @@ impl Worksheet {
 
     /// Get a cell's value, returning [`CellValue::Empty`] if unset.
     pub fn value(&self, cell: CellRef) -> CellValue {
-        self.cell(cell)
-            .map(|c| c.value.clone())
-            .unwrap_or(CellValue::Empty)
+        if let Some(cell) = self.cell(cell) {
+            return cell.value.clone();
+        }
+
+        self.columnar_value(cell).unwrap_or(CellValue::Empty)
+    }
+
+    fn columnar_value(&self, cell: CellRef) -> Option<CellValue> {
+        let backend = self.columnar.as_ref()?;
+        if cell.row < backend.origin.row || cell.col < backend.origin.col {
+            return None;
+        }
+
+        let row = (cell.row - backend.origin.row) as usize;
+        let col = (cell.col - backend.origin.col) as usize;
+        if row >= backend.table.row_count() || col >= backend.table.column_count() {
+            return None;
+        }
+
+        let col_type = backend.table.schema().get(col)?.column_type;
+        let value = backend.table.get_cell(row, col);
+        Some(columnar_to_cell_value(value, col_type))
+    }
+
+    /// Fetch a rectangular region as a column-major payload suitable for
+    /// virtualized grid rendering.
+    pub fn get_range_batch(&self, range: Range) -> RangeBatch {
+        let rows = (range.end.row - range.start.row + 1) as usize;
+        let cols = (range.end.col - range.start.col + 1) as usize;
+        let mut columns = vec![vec![CellValue::Empty; rows]; cols];
+
+        // Bulk fill from columnar backing (if present).
+        if let Some(backend) = &self.columnar {
+            fill_from_columnar(&mut columns, range, backend);
+        }
+
+        // Overlay sparse cells (edits / formulas / formatting) on top.
+        for r_off in 0..rows {
+            let row = range.start.row + r_off as u32;
+            for c_off in 0..cols {
+                let col = range.start.col + c_off as u32;
+                let cell_ref = CellRef::new(row, col);
+                if let Some(cell) = self.cell(cell_ref) {
+                    columns[c_off][r_off] = cell.value.clone();
+                }
+            }
+        }
+
+        RangeBatch {
+            start: range.start,
+            columns,
+        }
     }
 
     /// Get a cell's value from an A1 reference, returning [`CellValue::Empty`] if unset.
@@ -573,6 +666,98 @@ impl Worksheet {
     }
 }
 
+/// Column-major range payload for a virtualized grid viewport.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RangeBatch {
+    pub start: CellRef,
+    pub columns: Vec<Vec<CellValue>>,
+}
+
+fn columnar_to_cell_value(value: ColumnarValue, column_type: ColumnarType) -> CellValue {
+    match value {
+        ColumnarValue::Null => CellValue::Empty,
+        ColumnarValue::Number(v) => CellValue::Number(v),
+        ColumnarValue::Boolean(v) => CellValue::Boolean(v),
+        ColumnarValue::String(v) => CellValue::String(v.as_ref().to_string()),
+        ColumnarValue::DateTime(v) => CellValue::Number(v as f64),
+        ColumnarValue::Currency(v) => match column_type {
+            ColumnarType::Currency { scale } => {
+                let denom = 10f64.powi(scale as i32);
+                CellValue::Number(v as f64 / denom)
+            }
+            _ => CellValue::Number(v as f64),
+        },
+        ColumnarValue::Percentage(v) => match column_type {
+            ColumnarType::Percentage { scale } => {
+                let denom = 10f64.powi(scale as i32);
+                CellValue::Number(v as f64 / denom)
+            }
+            _ => CellValue::Number(v as f64),
+        },
+    }
+}
+
+fn fill_from_columnar(dest: &mut [Vec<CellValue>], range: Range, backend: &ColumnarBackend) {
+    let origin_row = backend.origin.row as u64;
+    let origin_col = backend.origin.col as u64;
+    let table_rows = backend.table.row_count() as u64;
+    let table_cols = backend.table.column_count() as u64;
+
+    if table_rows == 0 || table_cols == 0 {
+        return;
+    }
+
+    let table_row_end = origin_row.saturating_add(table_rows - 1);
+    let table_col_end = origin_col.saturating_add(table_cols - 1);
+
+    let view_row_start = range.start.row as u64;
+    let view_row_end = range.end.row as u64;
+    let view_col_start = range.start.col as u64;
+    let view_col_end = range.end.col as u64;
+
+    let overlap_row_start = view_row_start.max(origin_row);
+    let overlap_row_end = view_row_end.min(table_row_end);
+    let overlap_col_start = view_col_start.max(origin_col);
+    let overlap_col_end = view_col_end.min(table_col_end);
+
+    if overlap_row_start > overlap_row_end || overlap_col_start > overlap_col_end {
+        return;
+    }
+
+    let rel_row_start = (overlap_row_start - origin_row) as usize;
+    let rel_row_end = (overlap_row_end - origin_row + 1) as usize;
+    let rel_col_start = (overlap_col_start - origin_col) as usize;
+    let rel_col_end = (overlap_col_end - origin_col + 1) as usize;
+
+    let fetched = backend
+        .table
+        .get_range(rel_row_start, rel_row_end, rel_col_start, rel_col_end);
+
+    let dest_row_off = (overlap_row_start - view_row_start) as usize;
+    let dest_col_off = (overlap_col_start - view_col_start) as usize;
+
+    let fetched_col_start = fetched.col_start;
+    for (local_col, values) in fetched.columns.into_iter().enumerate() {
+        let table_col_idx = fetched_col_start + local_col;
+        let column_type = backend
+            .table
+            .schema()
+            .get(table_col_idx)
+            .map(|c| c.column_type)
+            .unwrap_or(ColumnarType::String);
+
+        for (local_row, v) in values.into_iter().enumerate() {
+            let out_col = dest_col_off + local_col;
+            let out_row = dest_row_off + local_row;
+            if let Some(col_vec) = dest.get_mut(out_col) {
+                if let Some(cell) = col_vec.get_mut(out_row) {
+                    *cell = columnar_to_cell_value(v, column_type);
+                }
+            }
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for Worksheet {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -624,6 +809,7 @@ impl<'de> Deserialize<'de> for Worksheet {
             frozen_cols: helper.frozen_cols,
             zoom: helper.zoom,
             tables: helper.tables,
+            columnar: None,
         })
     }
 }

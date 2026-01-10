@@ -355,18 +355,18 @@ impl AppState {
             .sheet(sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
 
-        let mut rows = Vec::new();
-        for row in start_row..=end_row {
-            let mut cols = Vec::new();
-            for col in start_col..=end_col {
-                let cell = sheet.get_cell(row, col);
-                cols.push(CellData {
-                    value: cell.computed_value,
-                    formula: cell.formula,
-                });
-            }
-            rows.push(cols);
-        }
+        let rows = sheet
+            .get_range_cells(start_row, start_col, end_row, end_col)
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|cell| CellData {
+                        value: cell.computed_value,
+                        formula: cell.formula,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
 
         Ok(rows)
     }

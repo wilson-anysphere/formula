@@ -9,9 +9,10 @@ mod address;
 mod cell;
 pub mod charts;
 mod comments;
-mod display;
 pub mod conditional_formatting;
+mod display;
 mod error;
+pub mod import;
 pub mod rich_text;
 mod outline;
 mod formula_rewrite;
@@ -25,8 +26,8 @@ mod worksheet;
 pub use address::{A1ParseError, CellRef, Range, RangeIter, RangeParseError};
 pub use cell::{Cell, CellId, CellKey, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 pub use comments::{Comment, CommentAuthor, CommentKind, Mention, Reply, TimestampMs};
-pub use display::{format_cell_display, CellDisplay};
 pub use conditional_formatting::*;
+pub use display::{format_cell_display, CellDisplay};
 pub use error::ErrorValue;
 pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
 pub use formula_rewrite::rewrite_sheet_names_in_formula;
@@ -40,11 +41,10 @@ pub use table::{
 pub use value::{ArrayValue, CellValue, RichText, SpillValue};
 pub use workbook::{RenameSheetError, Workbook, WorkbookId};
 pub use worksheet::{
-    ColProperties, RowProperties, SheetVisibility, TabColor, Worksheet, WorksheetId,
+    ColProperties, RangeBatch, RowProperties, SheetVisibility, TabColor, Worksheet, WorksheetId,
 };
 
 /// Current serialization schema version.
 ///
 /// This is embedded into [`Workbook`] to enable forward-compatible IPC payloads.
 pub const SCHEMA_VERSION: u32 = 1;
-

@@ -1070,6 +1070,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "formula-columnar"
+version = "0.1.0"
+
+[[package]]
 name = "formula-core"
 version = "0.1.0"
 dependencies = [
@@ -1094,6 +1098,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "calamine 0.26.1",
+ "formula-columnar",
  "formula-engine",
  "formula-xlsx",
  "rust_xlsxwriter 0.79.4",
@@ -1154,6 +1159,7 @@ name = "formula-model"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "formula-columnar",
  "formula-format",
  "ordered-float",
  "regex",
