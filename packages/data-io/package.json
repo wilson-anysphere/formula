@@ -1,0 +1,12 @@
+{
+  "name": "@formula/data-io",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "dependencies": {
+    "apache-arrow": "^21.1.0",
+    "parquet-wasm": "^0.7.1"
+  }
+}
+

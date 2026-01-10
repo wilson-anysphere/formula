@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@formula/collab-comments": "workspace:*",
+    "@formula/data-io": "workspace:*",
     "@formula/text-layout": "workspace:*",
     "yjs": "^13.6.27"
   },
