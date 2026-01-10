@@ -164,10 +164,13 @@ pub async fn open_workbook(
     state: State<'_, SharedAppState>,
 ) -> Result<WorkbookInfo, String> {
     let workbook = read_xlsx(path.clone()).await.map_err(|e| e.to_string())?;
-    let info = {
-        let mut state = state.inner().lock().unwrap();
+    let shared = state.inner().clone();
+    let info = tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
         state.load_workbook(workbook)
-    };
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     Ok(WorkbookInfo {
         path: info.path,

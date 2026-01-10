@@ -507,6 +507,43 @@ impl AppState {
         if self.workbook.is_none() {
             return Err(AppStateError::NoWorkbookLoaded);
         }
+        // `formula_engine::Engine` only recalculates the current dirty set (plus volatile
+        // closure). The desktop `recalculate()` command is intended as a user-triggered
+        // "recalculate all formulas" action, so we re-feed existing formulas to mark them
+        // dirty before recalculating.
+        let formulas = {
+            let workbook = self
+                .workbook
+                .as_ref()
+                .expect("checked workbook is_some above");
+            workbook
+                .sheets
+                .iter()
+                .flat_map(|sheet| {
+                    let sheet_name = sheet.name.clone();
+                    sheet.cells_iter().filter_map(move |((row, col), cell)| {
+                        cell.formula.as_ref().map(|formula| {
+                            (sheet_name.clone(), coord_to_a1(row, col), formula.clone())
+                        })
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+
+        for (sheet_name, addr, formula) in formulas {
+            if self
+                .engine
+                .set_cell_formula(&sheet_name, &addr, &formula)
+                .is_err()
+            {
+                let _ = self.engine.set_cell_value(
+                    &sheet_name,
+                    &addr,
+                    EngineValue::Error(ErrorKind::Name),
+                );
+            }
+        }
+
         self.engine.recalculate();
         self.refresh_computed_values()
     }
