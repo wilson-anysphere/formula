@@ -1,0 +1,11 @@
+# Allowlisted RustSec advisory IDs (one per line).
+#
+# Format:
+#   # <reason / tracking issue>
+#   RUSTSEC-YYYY-NNNN
+#
+# Notes:
+# - Keep this list small and well-justified.
+# - Prefer fixing/upgrading dependencies over allowlisting.
+# - Remove entries once upstream fixes are available.
+

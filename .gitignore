@@ -12,6 +12,8 @@ apps/**/src-tauri/gen/
 # Node / web
 node_modules/
 **/node_modules/
+.pnpm-store/
+**/.pnpm-store/
 dist/
 **/dist/
 
@@ -59,6 +61,9 @@ services/sync-server/.sync-server-data/
 # Local-only agent files (never commit)
 scratchpad.md
 handoff.md
+# Security scan output (generated locally and in CI)
+security-report/
+**/security-report/
 # Benchmark outputs (generated locally/CI)
 benchmark-results.json
 benchmark-details.json

@@ -1,0 +1,16 @@
+# Allowlisted Node advisory IDs (one per line).
+#
+# Acceptable identifiers (depending on the audit source):
+# - GHSA-xxxx-xxxx-xxxx
+# - CVE-YYYY-NNNN
+# - npm advisory numeric IDs (e.g. 1234)
+#
+# Format:
+#   # <reason / tracking issue>
+#   <ID>
+#
+# Notes:
+# - Keep this list small and well-justified.
+# - Prefer fixing/upgrading dependencies over allowlisting.
+# - Remove entries once upstream fixes are available.
+
