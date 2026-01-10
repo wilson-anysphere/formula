@@ -36,7 +36,7 @@ Build:
 pnpm build:web
 ```
 
-The web build currently renders a placeholder grid and initializes a Worker-based engine stub. The Worker boundary is where the Rust/WASM engine will execute.
+The web target renders the shared Canvas grid (`@formula/grid`) with a mock data provider and brings up a Worker-based engine client (`@formula/engine`). The Worker boundary is where the Rust/WASM engine will execute as it is implemented.
 
 ### Collaboration sync server (Yjs)
 
