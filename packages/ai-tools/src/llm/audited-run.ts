@@ -1,4 +1,6 @@
-import { AIAuditRecorder, type AIAuditStore, type AIMode, type TokenUsage } from "@formula/ai-audit";
+import { AIAuditRecorder } from "@formula/ai-audit/src/recorder.js";
+import type { AIAuditStore } from "@formula/ai-audit/src/store.js";
+import type { AIMode, TokenUsage } from "@formula/ai-audit/src/types.js";
 
 import { runChatWithTools } from "../../../llm/src/toolCalling.js";
 
@@ -110,4 +112,3 @@ function nowMs(): number {
   if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
   return Date.now();
 }
-
