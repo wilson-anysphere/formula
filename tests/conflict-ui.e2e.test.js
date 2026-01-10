@@ -1,0 +1,142 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { JSDOM } from "jsdom";
+import * as Y from "yjs";
+
+import { createUndoService, REMOTE_ORIGIN } from "../packages/collab/undo/index.js";
+import { FormulaConflictMonitor } from "../packages/collab/conflicts/src/formula-conflict-monitor.js";
+import { ConflictUiController } from "../apps/desktop/src/collab/conflicts-ui/index.js";
+
+/**
+ * @param {Y.Doc} docA
+ * @param {Y.Doc} docB
+ */
+function syncDocs(docA, docB) {
+  for (let i = 0; i < 10; i += 1) {
+    let changed = false;
+    const updateA = Y.encodeStateAsUpdate(docA, Y.encodeStateVector(docB));
+    if (updateA.length > 0) {
+      Y.applyUpdate(docB, updateA, REMOTE_ORIGIN);
+      changed = true;
+    }
+    const updateB = Y.encodeStateAsUpdate(docB, Y.encodeStateVector(docA));
+    if (updateB.length > 0) {
+      Y.applyUpdate(docA, updateB, REMOTE_ORIGIN);
+      changed = true;
+    }
+    if (!changed) break;
+  }
+}
+
+/**
+ * @param {string} userId
+ * @param {HTMLElement} container
+ */
+function createClient(userId, container) {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+  const origin = { type: "local", userId };
+  const undo = createUndoService({ mode: "collab", doc, scope: cells, origin, captureTimeoutMs: 10_000 });
+
+  /** @type {Array<any>} */
+  const conflicts = [];
+
+  /** @type {ConflictUiController} */
+  let ui;
+
+  const monitor = new FormulaConflictMonitor({
+    doc,
+    cells,
+    localUserId: userId,
+    origin,
+    localOrigins: undo.localOrigins,
+    onConflict: (c) => {
+      conflicts.push(c);
+      ui?.addConflict(c);
+    }
+  });
+
+  ui = new ConflictUiController({ container, monitor });
+
+  return { doc, cells, monitor, conflicts, ui };
+}
+
+/**
+ * @param {Y.Map<any>} cells
+ * @param {string} key
+ */
+function getFormula(cells, key) {
+  const cell = /** @type {Y.Map<any>|undefined} */ (cells.get(key));
+  return (cell?.get("formula") ?? "").toString();
+}
+
+test("E2E: concurrent same-cell edit triggers conflict UI and converges after user resolution", () => {
+  const dom = new JSDOM('<div id="a"></div><div id="b"></div>', { url: "http://localhost" });
+
+  const prevWindow = globalThis.window;
+  const prevDocument = globalThis.document;
+  const prevEvent = globalThis.Event;
+
+  // Expose JSDOM globals for the UI controller.
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.Event = dom.window.Event;
+
+  try {
+    const containerA = dom.window.document.getElementById("a");
+    const containerB = dom.window.document.getElementById("b");
+    assert.ok(containerA && containerB);
+
+    const a = createClient("alice", containerA);
+    const b = createClient("bob", containerB);
+
+    // Establish base formula.
+    a.monitor.setLocalFormula("s:0:0", "=1");
+    syncDocs(a.doc, b.doc);
+
+    // Offline concurrent edits.
+    a.monitor.setLocalFormula("s:0:0", "=1+1");
+    b.monitor.setLocalFormula("s:0:0", "=1*2");
+
+    // Reconnect.
+    syncDocs(a.doc, b.doc);
+
+    const toastA = containerA.querySelector('[data-testid="conflict-toast"]');
+    const toastB = containerB.querySelector('[data-testid="conflict-toast"]');
+
+    assert.ok(toastA || toastB, "expected conflict toast on at least one client");
+
+    const chosen = toastA ? a : b;
+    const chosenContainer = toastA ? containerA : containerB;
+
+    const conflict = chosen.conflicts[0];
+    assert.ok(conflict, "expected recorded conflict");
+
+    // User opens conflict dialog.
+    const openBtn = chosenContainer.querySelector('[data-testid="conflict-toast-open"]');
+    assert.ok(openBtn);
+    openBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+
+    const dialog = chosenContainer.querySelector('[data-testid="conflict-dialog"]');
+    assert.ok(dialog, "expected conflict dialog to open");
+
+    // User chooses "Keep yours" (local formula on the losing client).
+    const keepLocalBtn = chosenContainer.querySelector('[data-testid="conflict-choose-local"]');
+    assert.ok(keepLocalBtn);
+    keepLocalBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+
+    // Propagate resolution.
+    syncDocs(a.doc, b.doc);
+
+    assert.equal(getFormula(a.cells, "s:0:0"), conflict.localFormula.trim());
+    assert.equal(getFormula(b.cells, "s:0:0"), conflict.localFormula.trim());
+
+    // Toast should be gone on the resolved client.
+    assert.equal(chosenContainer.querySelector('[data-testid="conflict-toast"]'), null);
+  } finally {
+    globalThis.window = prevWindow;
+    globalThis.document = prevDocument;
+    globalThis.Event = prevEvent;
+  }
+});
