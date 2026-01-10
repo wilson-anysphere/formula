@@ -160,6 +160,12 @@
         padding-left: 18px;
       }
 
+      #workspace {
+        position: relative;
+        width: 100%;
+        height: 100%;
+      }
+
       .grid-root {
         position: relative;
         width: 100%;
@@ -216,7 +222,13 @@
   <body>
     <div id="app">
       <div id="formula-bar"></div>
-      <div id="grid" class="grid-root" tabindex="0" aria-label="Spreadsheet grid"></div>
+      <div id="workspace">
+        <div id="dock-left" data-testid="dock-left"></div>
+        <div id="dock-right" data-testid="dock-right"></div>
+        <div id="dock-bottom" data-testid="dock-bottom"></div>
+        <div id="floating-root" data-testid="floating-root"></div>
+        <div id="grid" class="grid-root" tabindex="0" aria-label="Spreadsheet grid"></div>
+      </div>
       <div class="statusbar">
         <div>
           Active:
@@ -230,6 +242,7 @@
           Value:
           <code data-testid="active-value"></code>
         </div>
+        <button type="button" data-testid="open-ai-panel">AI panel</button>
         <button type="button" data-testid="open-comments-panel">Comments</button>
       </div>
     </div>

@@ -1,0 +1,109 @@
+/*
+  Dock layout scaffolding for the desktop shell.
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+#workspace {
+  display: grid;
+  grid-template-columns: var(--dock-left-size, 0px) 1fr var(--dock-right-size, 0px);
+  grid-template-rows: 1fr var(--dock-bottom-size, 0px);
+  min-height: 0;
+}
+
+#dock-left,
+#dock-right,
+#dock-bottom {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+}
+
+#dock-left[data-hidden="true"],
+#dock-right[data-hidden="true"],
+#dock-bottom[data-hidden="true"] {
+  display: none;
+}
+
+#dock-left {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#grid {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  z-index: 0;
+}
+
+#dock-right {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+#dock-bottom {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+#floating-root {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  position: relative;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.floating-panel {
+  position: absolute;
+  pointer-events: auto;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.dock-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.dock-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.dock-panel__title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dock-panel__controls {
+  display: flex;
+  gap: 6px;
+}
+
+.dock-panel__controls button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.dock-panel__body {
+  padding: 10px;
+  color: var(--text-secondary);
+}

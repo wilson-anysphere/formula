@@ -84,7 +84,7 @@ export function MergeBranchPanel({
   return (
     <div style={{ padding: 12, fontFamily: "system-ui, sans-serif" }}>
       <h3>Merge branch: {sourceBranch}</h3>
-      {error && <div style={{ color: "crimson" }}>{error}</div>}
+      {error && <div style={{ color: "var(--error)" }}>{error}</div>}
       {!preview ? (
         <div>Loading…</div>
       ) : (
@@ -96,7 +96,7 @@ export function MergeBranchPanel({
           {preview.conflicts.map((c, idx) => (
             <div
               key={`${c.type}-${idx}`}
-              style={{ border: "1px solid #eee", padding: 8, marginBottom: 8 }}
+              style={{ border: "1px solid var(--border)", padding: 8, marginBottom: 8 }}
             >
               <div style={{ fontWeight: 600 }}>
                 {c.sheetId}!{c.cell} ({c.reason})
@@ -104,15 +104,15 @@ export function MergeBranchPanel({
               {c.type === "cell" ? (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                   <div>
-                    <div style={{ color: "#666" }}>Base</div>
+                    <div style={{ color: "var(--text-secondary)" }}>Base</div>
                     <div>{cellSummary(c.base)}</div>
                   </div>
                   <div>
-                    <div style={{ color: "#666" }}>Ours</div>
+                    <div style={{ color: "var(--text-secondary)" }}>Ours</div>
                     <div>{cellSummary(c.ours)}</div>
                   </div>
                   <div>
-                    <div style={{ color: "#666" }}>Theirs</div>
+                    <div style={{ color: "var(--text-secondary)" }}>Theirs</div>
                     <div>{cellSummary(c.theirs)}</div>
                   </div>
                 </div>
@@ -195,4 +195,3 @@ export function MergeBranchPanel({
     </div>
   );
 }
-

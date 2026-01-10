@@ -60,15 +60,15 @@ export function BranchManagerPanel({
   const canManage = useMemo(() => actor.role === "owner" || actor.role === "admin", [actor.role]);
 
   return (
-    <div style={{ padding: 12, fontFamily: "system-ui, sans-serif" }}>
-      <h3>Branches</h3>
-      {!canManage && (
-        <div style={{ color: "#666", marginBottom: 8 }}>
+      <div style={{ padding: 12, fontFamily: "system-ui, sans-serif" }}>
+        <h3>Branches</h3>
+        {!canManage && (
+        <div style={{ color: "var(--text-secondary)", marginBottom: 8 }}>
           Branch operations require owner/admin permissions.
         </div>
       )}
       {error && (
-        <div style={{ color: "crimson", marginBottom: 8 }}>
+        <div style={{ color: "var(--error)", marginBottom: 8 }}>
           {error}
         </div>
       )}
@@ -105,12 +105,12 @@ export function BranchManagerPanel({
               alignItems: "center",
               justifyContent: "space-between",
               padding: "6px 0",
-              borderBottom: "1px solid #eee"
+              borderBottom: "1px solid var(--border)"
             }}
           >
             <div>
               <div style={{ fontWeight: 600 }}>{b.name}</div>
-              {b.description ? <div style={{ color: "#666" }}>{b.description}</div> : null}
+              {b.description ? <div style={{ color: "var(--text-secondary)" }}>{b.description}</div> : null}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button
@@ -168,4 +168,3 @@ export function BranchManagerPanel({
     </div>
   );
 }
-
