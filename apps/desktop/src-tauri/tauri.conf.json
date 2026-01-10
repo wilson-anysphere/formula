@@ -41,6 +41,11 @@
         "role": "Editor"
       },
       {
+        "ext": ["xls"],
+        "name": "Excel 97-2003 Spreadsheet",
+        "role": "Editor"
+      },
+      {
         "ext": ["xlsm"],
         "name": "Excel Macro-Enabled Spreadsheet",
         "role": "Editor"
