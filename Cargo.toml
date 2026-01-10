@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/formula-dax",
     "crates/formula-engine",
     "crates/formula-format",
     "crates/formula-model",

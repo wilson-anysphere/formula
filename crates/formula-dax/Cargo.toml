@@ -1,0 +1,11 @@
+[package]
+name = "formula-dax"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ordered-float = "4.2.0"
+thiserror = "2"
+
+[dev-dependencies]
+pretty_assertions = "1.4.0"
