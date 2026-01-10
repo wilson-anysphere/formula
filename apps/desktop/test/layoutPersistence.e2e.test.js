@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { LayoutWorkspaceManager, MemoryStorage } from "../src/layout/layoutPersistence.js";
-import { dockPanel, getPanelPlacement, openPanel } from "../src/layout/layoutState.js";
+import {
+  dockPanel,
+  getPanelPlacement,
+  openPanel,
+  setActiveSplitPane,
+  setSplitDirection,
+  setSplitPaneScroll,
+  setSplitPaneSheet,
+  setSplitPaneZoom,
+} from "../src/layout/layoutState.js";
 import { PANEL_REGISTRY, PanelIds } from "../src/panels/panelRegistry.js";
 
 test("E2E: docked panel layout persists per-workbook and restores on reload", () => {
@@ -23,6 +32,26 @@ test("E2E: docked panel layout persists per-workbook and restores on reload", ()
 
   assert.deepEqual(getPanelPlacement(restored, PanelIds.AI_CHAT), { kind: "docked", side: "left" });
   assert.equal(restored.docks.left.active, PanelIds.AI_CHAT);
+});
+
+test("E2E: split view state (direction, sheets, scroll, zoom) persists and restores", () => {
+  const storage = new MemoryStorage();
+  const manager = new LayoutWorkspaceManager({ storage, panelRegistry: PANEL_REGISTRY });
+  const workbookId = "workbook-split-view";
+
+  let layout = manager.loadWorkbookLayout(workbookId, { primarySheetId: "Sheet1" });
+
+  layout = setSplitDirection(layout, "vertical", 0.55);
+  layout = setActiveSplitPane(layout, "secondary");
+  layout = setSplitPaneSheet(layout, "secondary", "Sheet2");
+  layout = setSplitPaneScroll(layout, "primary", { scrollX: 120, scrollY: 340 });
+  layout = setSplitPaneScroll(layout, "secondary", { scrollX: 1, scrollY: 9001 });
+  layout = setSplitPaneZoom(layout, "primary", 1.25);
+
+  manager.saveWorkbookLayout(workbookId, layout);
+
+  const restored = manager.loadWorkbookLayout(workbookId, { primarySheetId: "Sheet1" });
+  assert.deepEqual(restored.splitView, layout.splitView);
 });
 
 test("LayoutWorkspaceManager falls back to global default layout when workbook has none", () => {

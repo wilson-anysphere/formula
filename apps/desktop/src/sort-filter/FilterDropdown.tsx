@@ -30,7 +30,7 @@ export function FilterDropdown(props: FilterDropdownProps) {
         style={{ width: "100%", marginBottom: 8 }}
       />
 
-      <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid #ddd" }}>
+      <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid var(--border)" }}>
         {visibleValues.map((v) => (
           <label key={v} style={{ display: "block", padding: "4px 8px" }}>
             <input type="checkbox" /> {v}
@@ -54,4 +54,3 @@ export function FilterDropdown(props: FilterDropdownProps) {
     </div>
   );
 }
-

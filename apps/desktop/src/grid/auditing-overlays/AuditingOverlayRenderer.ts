@@ -1,5 +1,6 @@
 import { parseCellAddress } from "./address";
 import type { CellAddress } from "./address";
+import { resolveCssVar } from "../../theme/cssVars.js";
 
 export interface Rect {
   x: number;
@@ -61,10 +62,11 @@ export class AuditingOverlayRenderer {
   strokeWidth: number;
 
   constructor(options?: Partial<AuditingOverlayRenderer>) {
-    this.precedentFill = options?.precedentFill ?? "rgba(0, 102, 204, 1)"; // Excel-ish blue
-    this.precedentStroke = options?.precedentStroke ?? "rgba(0, 102, 204, 1)";
-    this.dependentFill = options?.dependentFill ?? "rgba(0, 160, 60, 1)"; // green
-    this.dependentStroke = options?.dependentStroke ?? "rgba(0, 160, 60, 1)";
+    // Default to theme tokens so overlays match the current UI theme.
+    this.precedentFill = options?.precedentFill ?? resolveCssVar("--accent", { fallback: "CanvasText" });
+    this.precedentStroke = options?.precedentStroke ?? resolveCssVar("--accent", { fallback: "CanvasText" });
+    this.dependentFill = options?.dependentFill ?? resolveCssVar("--success", { fallback: "CanvasText" });
+    this.dependentStroke = options?.dependentStroke ?? resolveCssVar("--success", { fallback: "CanvasText" });
     this.fillAlpha = options?.fillAlpha ?? 0.18;
     this.strokeAlpha = options?.strokeAlpha ?? 0.85;
     this.strokeWidth = options?.strokeWidth ?? 2;
@@ -103,4 +105,3 @@ export class AuditingOverlayRenderer {
     }
   }
 }
-
