@@ -1,6 +1,6 @@
 use crate::file_io::Workbook;
+use formula_engine::{Engine as FormulaEngine, ErrorKind, Value as EngineValue};
 use serde_json::Value as JsonValue;
-use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppStateError {
@@ -35,7 +35,6 @@ impl CellScalar {
         match self {
             CellScalar::Empty => String::new(),
             CellScalar::Number(n) => {
-                // Avoid showing ".0" for whole numbers in the UI layer.
                 if (n.fract() - 0.0).abs() < f64::EPSILON {
                     format!("{:.0}", n)
                 } else {
@@ -69,19 +68,6 @@ impl CellScalar {
                 .unwrap_or_else(|| CellScalar::Error("#NUM!".to_string())),
             JsonValue::String(s) => CellScalar::Text(s.clone()),
             other => CellScalar::Text(other.to_string()),
-        }
-    }
-
-    fn coerce_number(&self) -> Result<f64, CellScalar> {
-        match self {
-            CellScalar::Empty => Ok(0.0),
-            CellScalar::Number(n) => Ok(*n),
-            CellScalar::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-            CellScalar::Text(s) => s
-                .trim()
-                .parse::<f64>()
-                .map_err(|_| CellScalar::Error("#VALUE!".to_string())),
-            CellScalar::Error(e) => Err(CellScalar::Error(e.clone())),
         }
     }
 }
@@ -162,125 +148,11 @@ struct UndoEntry {
     after: Vec<CellInputSnapshot>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct CellKey {
-    sheet_id: String,
-    row: usize,
-    col: usize,
-}
-
-#[derive(Default, Debug)]
-struct DependencyGraph {
-    deps: HashMap<CellKey, HashSet<CellKey>>,
-    rev_deps: HashMap<CellKey, HashSet<CellKey>>,
-}
-
-impl DependencyGraph {
-    fn clear(&mut self) {
-        self.deps.clear();
-        self.rev_deps.clear();
-    }
-
-    fn set_deps(&mut self, cell: &CellKey, new_deps: HashSet<CellKey>) {
-        let old = self.deps.insert(cell.clone(), new_deps.clone());
-        if let Some(old_deps) = old {
-            for dep in old_deps {
-                if let Some(dependents) = self.rev_deps.get_mut(&dep) {
-                    dependents.remove(cell);
-                    if dependents.is_empty() {
-                        self.rev_deps.remove(&dep);
-                    }
-                }
-            }
-        }
-
-        for dep in new_deps {
-            self.rev_deps.entry(dep).or_default().insert(cell.clone());
-        }
-    }
-
-    fn remove_cell(&mut self, cell: &CellKey) {
-        if let Some(old_deps) = self.deps.remove(cell) {
-            for dep in old_deps {
-                if let Some(dependents) = self.rev_deps.get_mut(&dep) {
-                    dependents.remove(cell);
-                    if dependents.is_empty() {
-                        self.rev_deps.remove(&dep);
-                    }
-                }
-            }
-        }
-    }
-
-    fn dependents_closure(&self, start: &CellKey) -> HashSet<CellKey> {
-        let mut out = HashSet::new();
-        let mut queue = VecDeque::new();
-        queue.push_back(start.clone());
-
-        while let Some(cell) = queue.pop_front() {
-            if !out.insert(cell.clone()) {
-                continue;
-            }
-
-            if let Some(dependents) = self.rev_deps.get(&cell) {
-                for dependent in dependents {
-                    queue.push_back(dependent.clone());
-                }
-            }
-        }
-
-        out
-    }
-}
-
-#[derive(Default, Debug)]
-struct CalcEngine {
-    graph: DependencyGraph,
-}
-
-impl CalcEngine {
-    fn rebuild(&mut self, workbook: &Workbook) {
-        self.graph.clear();
-        for sheet in &workbook.sheets {
-            for ((row, col), cell) in sheet.cells_iter() {
-                if let Some(formula) = &cell.formula {
-                    let key = CellKey {
-                        sheet_id: sheet.id.clone(),
-                        row,
-                        col,
-                    };
-                    let deps = extract_dependencies(formula, &sheet.id);
-                    self.graph.set_deps(&key, deps);
-                }
-            }
-        }
-    }
-
-    fn update_cell_formula(
-        &mut self,
-        sheet_id: &str,
-        row: usize,
-        col: usize,
-        formula: Option<&str>,
-    ) {
-        let key = CellKey {
-            sheet_id: sheet_id.to_string(),
-            row,
-            col,
-        };
-
-        if let Some(formula) = formula {
-            let deps = extract_dependencies(formula, sheet_id);
-            self.graph.set_deps(&key, deps);
-        } else {
-            self.graph.remove_cell(&key);
-        }
-    }
-}
+pub type SharedAppState = std::sync::Arc<std::sync::Mutex<AppState>>;
 
 pub struct AppState {
     workbook: Option<Workbook>,
-    engine: CalcEngine,
+    engine: FormulaEngine,
     dirty: bool,
     undo_stack: Vec<UndoEntry>,
     redo_stack: Vec<UndoEntry>,
@@ -292,13 +164,11 @@ impl Default for AppState {
     }
 }
 
-pub type SharedAppState = std::sync::Arc<std::sync::Mutex<AppState>>;
-
 impl AppState {
     pub fn new() -> Self {
         Self {
             workbook: None,
-            engine: CalcEngine::default(),
+            engine: FormulaEngine::new(),
             dirty: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
@@ -329,13 +199,14 @@ impl AppState {
 
     pub fn load_workbook(&mut self, mut workbook: Workbook) -> WorkbookInfoData {
         workbook.ensure_sheet_ids();
-        self.engine.rebuild(&workbook);
-
-        // Calculate formulas once on load so the UI sees fresh values even if the file
-        // only has cached values.
-        let _ = recalculate_all_formulas(&mut workbook, &self.engine.graph);
-
         self.workbook = Some(workbook);
+        self.engine = FormulaEngine::new();
+
+        // Best effort: rebuild and calculate. Unsupported formulas become #NAME? via the engine.
+        let _ = self.rebuild_engine_from_workbook();
+        self.engine.recalculate();
+        let _ = self.refresh_computed_values();
+
         self.dirty = false;
         self.undo_stack.clear();
         self.redo_stack.clear();
@@ -361,12 +232,6 @@ impl AppState {
             .ok_or(AppStateError::NoWorkbookLoaded)
     }
 
-    pub fn get_workbook_mut(&mut self) -> Result<&mut Workbook, AppStateError> {
-        self.workbook
-            .as_mut()
-            .ok_or(AppStateError::NoWorkbookLoaded)
-    }
-
     pub fn get_cell(
         &self,
         sheet_id: &str,
@@ -382,8 +247,8 @@ impl AppState {
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
         let cell = sheet.get_cell(row, col);
         Ok(CellData {
-            value: cell.computed_value.clone(),
-            formula: cell.formula.clone(),
+            value: cell.computed_value,
+            formula: cell.formula,
         })
     }
 
@@ -418,8 +283,8 @@ impl AppState {
             for col in start_col..=end_col {
                 let cell = sheet.get_cell(row, col);
                 cols.push(CellData {
-                    value: cell.computed_value.clone(),
-                    formula: cell.formula.clone(),
+                    value: cell.computed_value,
+                    formula: cell.formula,
                 });
             }
             rows.push(cols);
@@ -450,14 +315,9 @@ impl AppState {
         }
 
         self.apply_snapshots(&[after_cell.clone()])?;
-        let mut updates = self.recalculate_from_cells(&[CellKey {
-            sheet_id: sheet_id.to_string(),
-            row,
-            col,
-        }]);
+        self.engine.recalculate();
+        let mut updates = self.refresh_computed_values()?;
 
-        // Ensure the edited cell is included even if its computed value didn't change
-        // (e.g. formula edit).
         if !updates
             .iter()
             .any(|u| u.sheet_id == sheet_id && u.row == row && u.col == col)
@@ -532,11 +392,7 @@ impl AppState {
                 if snapshot_before != snapshot_after {
                     before.push(snapshot_before);
                     after.push(snapshot_after.clone());
-                    changed.push(CellKey {
-                        sheet_id: sheet_id.to_string(),
-                        row,
-                        col,
-                    });
+                    changed.push((row, col));
                 }
             }
         }
@@ -546,19 +402,19 @@ impl AppState {
         }
 
         self.apply_snapshots(&after)?;
-        let mut updates = self.recalculate_from_cells(&changed);
+        self.engine.recalculate();
+        let mut updates = self.refresh_computed_values()?;
 
-        // Ensure all explicitly edited cells are included in the update list.
-        for cell in changed {
+        for (row, col) in changed {
             if !updates
                 .iter()
-                .any(|u| u.sheet_id == cell.sheet_id && u.row == cell.row && u.col == cell.col)
+                .any(|u| u.sheet_id == sheet_id && u.row == row && u.col == col)
             {
-                let cell_data = self.get_cell(&cell.sheet_id, cell.row, cell.col)?;
+                let cell_data = self.get_cell(sheet_id, row, col)?;
                 updates.push(CellUpdateData {
-                    sheet_id: cell.sheet_id,
-                    row: cell.row,
-                    col: cell.col,
+                    sheet_id: sheet_id.to_string(),
+                    row,
+                    col,
                     value: cell_data.value,
                     formula: cell_data.formula,
                 });
@@ -572,12 +428,9 @@ impl AppState {
     }
 
     pub fn recalculate_all(&mut self) -> Result<Vec<CellUpdateData>, AppStateError> {
-        let workbook = self
-            .workbook
-            .as_mut()
-            .ok_or(AppStateError::NoWorkbookLoaded)?;
-        let updates = recalculate_all_formulas(workbook, &self.engine.graph);
-        Ok(updates)
+        self.rebuild_engine_from_workbook()?;
+        self.engine.recalculate();
+        self.refresh_computed_values()
     }
 
     pub fn undo(&mut self) -> Result<Vec<CellUpdateData>, AppStateError> {
@@ -586,17 +439,10 @@ impl AppState {
         }
         let entry = self.undo_stack.pop().ok_or(AppStateError::NoUndoHistory)?;
         self.apply_snapshots(&entry.before)?;
-        let changed: Vec<CellKey> = entry
-            .before
-            .iter()
-            .map(|s| CellKey {
-                sheet_id: s.sheet_id.clone(),
-                row: s.row,
-                col: s.col,
-            })
-            .collect();
-        let mut updates = self.recalculate_from_cells(&changed);
-        for cell in &changed {
+        self.engine.recalculate();
+        let mut updates = self.refresh_computed_values()?;
+
+        for cell in &entry.before {
             if !updates
                 .iter()
                 .any(|u| u.sheet_id == cell.sheet_id && u.row == cell.row && u.col == cell.col)
@@ -611,6 +457,7 @@ impl AppState {
                 });
             }
         }
+
         self.redo_stack.push(entry);
         self.dirty = true;
         Ok(updates)
@@ -622,17 +469,10 @@ impl AppState {
         }
         let entry = self.redo_stack.pop().ok_or(AppStateError::NoRedoHistory)?;
         self.apply_snapshots(&entry.after)?;
-        let changed: Vec<CellKey> = entry
-            .after
-            .iter()
-            .map(|s| CellKey {
-                sheet_id: s.sheet_id.clone(),
-                row: s.row,
-                col: s.col,
-            })
-            .collect();
-        let mut updates = self.recalculate_from_cells(&changed);
-        for cell in &changed {
+        self.engine.recalculate();
+        let mut updates = self.refresh_computed_values()?;
+
+        for cell in &entry.after {
             if !updates
                 .iter()
                 .any(|u| u.sheet_id == cell.sheet_id && u.row == cell.row && u.col == cell.col)
@@ -647,6 +487,7 @@ impl AppState {
                 });
             }
         }
+
         self.undo_stack.push(entry);
         self.dirty = true;
         Ok(updates)
@@ -671,8 +512,8 @@ impl AppState {
             sheet_id: sheet_id.to_string(),
             row,
             col,
-            value: cell.input_value.clone(),
-            formula: cell.formula.clone(),
+            value: cell.input_value,
+            formula: cell.formula,
         })
     }
 
@@ -681,10 +522,13 @@ impl AppState {
             .workbook
             .as_mut()
             .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let engine = &mut self.engine;
+
         for snap in snapshots {
             let sheet = workbook
                 .sheet_mut(&snap.sheet_id)
                 .ok_or_else(|| AppStateError::UnknownSheet(snap.sheet_id.clone()))?;
+            let sheet_name = sheet.name.clone();
 
             let new_cell = match (&snap.formula, &snap.value) {
                 (Some(formula), _) => Cell::from_formula(formula.clone()),
@@ -693,29 +537,87 @@ impl AppState {
             };
 
             sheet.set_cell(snap.row, snap.col, new_cell);
-            self.engine.update_cell_formula(
-                &snap.sheet_id,
+            apply_snapshot_to_engine(
+                engine,
+                &sheet_name,
                 snap.row,
                 snap.col,
-                snap.formula.as_deref(),
+                &snap.value,
+                &snap.formula,
             );
         }
 
         Ok(())
     }
 
-    fn recalculate_from_cells(&mut self, changed: &[CellKey]) -> Vec<CellUpdateData> {
-        let workbook = match self.workbook.as_mut() {
-            Some(workbook) => workbook,
-            None => return Vec::new(),
-        };
+    fn rebuild_engine_from_workbook(&mut self) -> Result<(), AppStateError> {
+        let workbook = self
+            .workbook
+            .as_ref()
+            .ok_or(AppStateError::NoWorkbookLoaded)?;
+        self.engine = FormulaEngine::new();
 
-        let mut impacted = HashSet::new();
-        for cell in changed {
-            impacted.extend(self.engine.graph.dependents_closure(cell));
+        for sheet in &workbook.sheets {
+            let sheet_name = &sheet.name;
+            for ((row, col), cell) in sheet.cells_iter() {
+                let addr = coord_to_a1(row, col);
+                if let Some(formula) = &cell.formula {
+                    if self
+                        .engine
+                        .set_cell_formula(sheet_name, &addr, formula)
+                        .is_err()
+                    {
+                        let _ = self.engine.set_cell_value(
+                            sheet_name,
+                            &addr,
+                            EngineValue::Error(ErrorKind::Name),
+                        );
+                    }
+                    continue;
+                }
+                if let Some(value) = &cell.input_value {
+                    let _ = self.engine.set_cell_value(
+                        sheet_name,
+                        &addr,
+                        scalar_to_engine_value(value),
+                    );
+                }
+            }
         }
 
-        recalculate_impacted(workbook, &self.engine.graph, &impacted)
+        Ok(())
+    }
+
+    fn refresh_computed_values(&mut self) -> Result<Vec<CellUpdateData>, AppStateError> {
+        let workbook = self
+            .workbook
+            .as_mut()
+            .ok_or(AppStateError::NoWorkbookLoaded)?;
+        let mut updates = Vec::new();
+
+        for sheet in &mut workbook.sheets {
+            let sheet_name = sheet.name.clone();
+            let sheet_id = sheet.id.clone();
+
+            for ((row, col), cell) in sheet.cells.iter_mut() {
+                let addr = coord_to_a1(*row, *col);
+                let new_value =
+                    engine_value_to_scalar(self.engine.get_cell_value(&sheet_name, &addr));
+
+                if new_value != cell.computed_value {
+                    cell.computed_value = new_value.clone();
+                    updates.push(CellUpdateData {
+                        sheet_id: sheet_id.clone(),
+                        row: *row,
+                        col: *col,
+                        value: new_value,
+                        formula: cell.formula.clone(),
+                    });
+                }
+            }
+        }
+
+        Ok(updates)
     }
 }
 
@@ -730,482 +632,82 @@ fn normalize_formula(formula: Option<String>) -> Option<String> {
     Some(formula)
 }
 
-fn recalculate_all_formulas(
-    workbook: &mut Workbook,
-    graph: &DependencyGraph,
-) -> Vec<CellUpdateData> {
-    let formula_cells: HashSet<CellKey> = workbook
-        .sheets
-        .iter()
-        .flat_map(|sheet| {
-            sheet
-                .cells_iter()
-                .filter(|(_, cell)| cell.formula.is_some())
-                .map(|((row, col), _)| CellKey {
-                    sheet_id: sheet.id.clone(),
-                    row,
-                    col,
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect();
-
-    recalculate_impacted(workbook, graph, &formula_cells)
+fn coord_to_a1(row: usize, col: usize) -> String {
+    format!("{}{}", col_index_to_letters(col), row + 1)
 }
 
-fn recalculate_impacted(
-    workbook: &mut Workbook,
-    graph: &DependencyGraph,
-    impacted: &HashSet<CellKey>,
-) -> Vec<CellUpdateData> {
-    if impacted.is_empty() {
-        return Vec::new();
+fn col_index_to_letters(mut col: usize) -> String {
+    // Excel columns are base-26 with A=1..Z=26.
+    col += 1;
+    let mut letters = Vec::new();
+    while col > 0 {
+        let rem = (col - 1) % 26;
+        letters.push((b'A' + rem as u8) as char);
+        col = (col - 1) / 26;
     }
-
-    let formula_set: HashSet<CellKey> = impacted
-        .iter()
-        .filter(|key| workbook.cell_has_formula(&key.sheet_id, key.row, key.col))
-        .cloned()
-        .collect();
-
-    let mut in_degree: HashMap<CellKey, usize> = formula_set
-        .iter()
-        .map(|key| (key.clone(), 0usize))
-        .collect();
-
-    for cell in &formula_set {
-        if let Some(deps) = graph.deps.get(cell) {
-            let mut count = 0usize;
-            for dep in deps {
-                if formula_set.contains(dep) {
-                    count += 1;
-                }
-            }
-            in_degree.insert(cell.clone(), count);
-        }
-    }
-
-    let mut queue: VecDeque<CellKey> = in_degree
-        .iter()
-        .filter(|(_, &deg)| deg == 0)
-        .map(|(cell, _)| cell.clone())
-        .collect();
-
-    let mut ordered = Vec::new();
-    while let Some(cell) = queue.pop_front() {
-        ordered.push(cell.clone());
-        if let Some(dependents) = graph.rev_deps.get(&cell) {
-            for dependent in dependents {
-                if !formula_set.contains(dependent) {
-                    continue;
-                }
-                if let Some(deg) = in_degree.get_mut(dependent) {
-                    *deg = deg.saturating_sub(1);
-                    if *deg == 0 {
-                        queue.push_back(dependent.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    let mut updates = Vec::new();
-
-    // Any remaining nodes have a cycle. Mark them as errors.
-    if ordered.len() != formula_set.len() {
-        let ordered_set: HashSet<CellKey> = ordered.iter().cloned().collect();
-        for cell in formula_set.difference(&ordered_set) {
-            let old = workbook.cell_value(&cell.sheet_id, cell.row, cell.col);
-            if old != CellScalar::Error("#CYCLE!".to_string()) {
-                workbook.set_computed_value(
-                    &cell.sheet_id,
-                    cell.row,
-                    cell.col,
-                    CellScalar::Error("#CYCLE!".to_string()),
-                );
-                updates.push(CellUpdateData {
-                    sheet_id: cell.sheet_id.clone(),
-                    row: cell.row,
-                    col: cell.col,
-                    value: CellScalar::Error("#CYCLE!".to_string()),
-                    formula: workbook.cell_formula(&cell.sheet_id, cell.row, cell.col),
-                });
-            }
-        }
-    }
-
-    for cell in ordered {
-        let old = workbook.cell_value(&cell.sheet_id, cell.row, cell.col);
-        let formula = workbook.cell_formula(&cell.sheet_id, cell.row, cell.col);
-        let new = match formula.as_deref() {
-            Some(formula) => evaluate_formula(formula, &cell.sheet_id, workbook),
-            None => old.clone(),
-        };
-
-        if new != old {
-            workbook.set_computed_value(&cell.sheet_id, cell.row, cell.col, new.clone());
-            updates.push(CellUpdateData {
-                sheet_id: cell.sheet_id.clone(),
-                row: cell.row,
-                col: cell.col,
-                value: new,
-                formula,
-            });
-        }
-    }
-
-    updates
+    letters.iter().rev().collect()
 }
 
-#[derive(Clone, Debug, PartialEq)]
-enum Expr {
-    Number(f64),
-    CellRef {
-        row: usize,
-        col: usize,
-    },
-    Unary {
-        op: char,
-        expr: Box<Expr>,
-    },
-    Binary {
-        op: char,
-        left: Box<Expr>,
-        right: Box<Expr>,
-    },
-}
-
-struct Parser {
-    chars: Vec<char>,
-    pos: usize,
-}
-
-impl Parser {
-    fn new(input: &str) -> Self {
-        Self {
-            chars: input.chars().collect(),
-            pos: 0,
-        }
-    }
-
-    fn parse(mut self) -> Result<Expr, CellScalar> {
-        let expr = self.parse_expr()?;
-        self.skip_ws();
-        if self.pos < self.chars.len() {
-            return Err(CellScalar::Error("#PARSE!".to_string()));
-        }
-        Ok(expr)
-    }
-
-    fn parse_expr(&mut self) -> Result<Expr, CellScalar> {
-        let mut node = self.parse_term()?;
-        loop {
-            self.skip_ws();
-            let op = match self.peek() {
-                Some('+') => '+',
-                Some('-') => '-',
-                _ => break,
-            };
-            self.pos += 1;
-            let rhs = self.parse_term()?;
-            node = Expr::Binary {
-                op,
-                left: Box::new(node),
-                right: Box::new(rhs),
-            };
-        }
-        Ok(node)
-    }
-
-    fn parse_term(&mut self) -> Result<Expr, CellScalar> {
-        let mut node = self.parse_unary()?;
-        loop {
-            self.skip_ws();
-            let op = match self.peek() {
-                Some('*') => '*',
-                Some('/') => '/',
-                _ => break,
-            };
-            self.pos += 1;
-            let rhs = self.parse_unary()?;
-            node = Expr::Binary {
-                op,
-                left: Box::new(node),
-                right: Box::new(rhs),
-            };
-        }
-        Ok(node)
-    }
-
-    fn parse_unary(&mut self) -> Result<Expr, CellScalar> {
-        self.skip_ws();
-        match self.peek() {
-            Some('+') | Some('-') => {
-                let op = self.peek().unwrap();
-                self.pos += 1;
-                let expr = self.parse_unary()?;
-                Ok(Expr::Unary {
-                    op,
-                    expr: Box::new(expr),
-                })
-            }
-            _ => self.parse_primary(),
-        }
-    }
-
-    fn parse_primary(&mut self) -> Result<Expr, CellScalar> {
-        self.skip_ws();
-        match self.peek() {
-            Some('(') => {
-                self.pos += 1;
-                let expr = self.parse_expr()?;
-                self.skip_ws();
-                if self.peek() != Some(')') {
-                    return Err(CellScalar::Error("#PARSE!".to_string()));
-                }
-                self.pos += 1;
-                Ok(expr)
-            }
-            Some(c) if c.is_ascii_digit() || c == '.' => self.parse_number(),
-            Some(_) => self.parse_cell_ref(),
-            None => Err(CellScalar::Error("#PARSE!".to_string())),
-        }
-    }
-
-    fn parse_number(&mut self) -> Result<Expr, CellScalar> {
-        self.skip_ws();
-        let start = self.pos;
-        let mut saw_digit = false;
-        while let Some(c) = self.peek() {
-            if c.is_ascii_digit() {
-                saw_digit = true;
-                self.pos += 1;
-                continue;
-            }
-            if c == '.' {
-                self.pos += 1;
-                continue;
-            }
-            break;
-        }
-        if !saw_digit {
-            return Err(CellScalar::Error("#PARSE!".to_string()));
-        }
-        let s: String = self.chars[start..self.pos].iter().collect();
-        let n = s
-            .parse::<f64>()
-            .map_err(|_| CellScalar::Error("#NUM!".to_string()))?;
-        Ok(Expr::Number(n))
-    }
-
-    fn parse_cell_ref(&mut self) -> Result<Expr, CellScalar> {
-        self.skip_ws();
-        let start = self.pos;
-        if self.peek() == Some('$') {
-            self.pos += 1;
-        }
-
-        let col_start = self.pos;
-        while let Some(c) = self.peek() {
-            if c.is_ascii_alphabetic() {
-                self.pos += 1;
-                continue;
-            }
-            break;
-        }
-
-        if col_start == self.pos {
-            return Err(CellScalar::Error("#PARSE!".to_string()));
-        }
-
-        if self.peek() == Some('$') {
-            self.pos += 1;
-        }
-
-        let row_start = self.pos;
-        while let Some(c) = self.peek() {
-            if c.is_ascii_digit() {
-                self.pos += 1;
-                continue;
-            }
-            break;
-        }
-
-        if row_start == self.pos {
-            // Not a cell ref, treat as unsupported token (e.g. function name)
-            let token: String = self.chars[start..self.pos].iter().collect();
-            return Err(CellScalar::Error(format!("#UNSUPPORTED({})!", token)));
-        }
-
-        let col_str: String = self.chars[col_start..row_start]
-            .iter()
-            .filter(|c| c.is_ascii_alphabetic())
-            .collect();
-        let row_str: String = self.chars[row_start..self.pos].iter().collect();
-        let col =
-            col_letters_to_index(&col_str).ok_or_else(|| CellScalar::Error("#REF!".to_string()))?;
-        let row_num = row_str
-            .parse::<usize>()
-            .map_err(|_| CellScalar::Error("#REF!".to_string()))?;
-        if row_num == 0 {
-            return Err(CellScalar::Error("#REF!".to_string()));
-        }
-        Ok(Expr::CellRef {
-            row: row_num - 1,
-            col,
-        })
-    }
-
-    fn skip_ws(&mut self) {
-        while let Some(c) = self.peek() {
-            if c.is_whitespace() {
-                self.pos += 1;
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn peek(&self) -> Option<char> {
-        self.chars.get(self.pos).copied()
+fn scalar_to_engine_value(value: &CellScalar) -> EngineValue {
+    match value {
+        CellScalar::Empty => EngineValue::Blank,
+        CellScalar::Number(n) => EngineValue::Number(*n),
+        CellScalar::Text(s) => EngineValue::Text(s.clone()),
+        CellScalar::Bool(b) => EngineValue::Bool(*b),
+        CellScalar::Error(code) => match parse_error_kind(code) {
+            Some(kind) => EngineValue::Error(kind),
+            None => EngineValue::Text(code.clone()),
+        },
     }
 }
 
-fn evaluate_formula(formula: &str, sheet_id: &str, workbook: &Workbook) -> CellScalar {
-    let formula = formula.trim();
-    let body = formula.strip_prefix('=').unwrap_or(formula);
-
-    let expr = match Parser::new(body).parse() {
-        Ok(expr) => expr,
-        Err(err) => return err,
-    };
-
-    eval_expr(&expr, sheet_id, workbook)
-}
-
-fn eval_expr(expr: &Expr, sheet_id: &str, workbook: &Workbook) -> CellScalar {
-    match expr {
-        Expr::Number(n) => CellScalar::Number(*n),
-        Expr::CellRef { row, col } => workbook.cell_value(sheet_id, *row, *col),
-        Expr::Unary { op, expr } => {
-            let value = eval_expr(expr, sheet_id, workbook);
-            let n = match value.coerce_number() {
-                Ok(n) => n,
-                Err(err) => return err,
-            };
-            match op {
-                '+' => CellScalar::Number(n),
-                '-' => CellScalar::Number(-n),
-                _ => CellScalar::Error("#PARSE!".to_string()),
-            }
-        }
-        Expr::Binary { op, left, right } => {
-            let left_val = eval_expr(left, sheet_id, workbook);
-            let right_val = eval_expr(right, sheet_id, workbook);
-
-            let l = match left_val.coerce_number() {
-                Ok(n) => n,
-                Err(err) => return err,
-            };
-            let r = match right_val.coerce_number() {
-                Ok(n) => n,
-                Err(err) => return err,
-            };
-
-            match op {
-                '+' => CellScalar::Number(l + r),
-                '-' => CellScalar::Number(l - r),
-                '*' => CellScalar::Number(l * r),
-                '/' => {
-                    if r == 0.0 {
-                        CellScalar::Error("#DIV/0!".to_string())
-                    } else {
-                        CellScalar::Number(l / r)
-                    }
-                }
-                _ => CellScalar::Error("#PARSE!".to_string()),
-            }
-        }
+fn engine_value_to_scalar(value: EngineValue) -> CellScalar {
+    match value {
+        EngineValue::Blank => CellScalar::Empty,
+        EngineValue::Number(n) => CellScalar::Number(n),
+        EngineValue::Text(s) => CellScalar::Text(s),
+        EngineValue::Bool(b) => CellScalar::Bool(b),
+        EngineValue::Error(e) => CellScalar::Error(e.as_code().to_string()),
     }
 }
 
-fn extract_dependencies(formula: &str, sheet_id: &str) -> HashSet<CellKey> {
-    let formula = formula.trim();
-    let body = formula.strip_prefix('=').unwrap_or(formula);
-    let mut deps = HashSet::new();
-
-    let chars: Vec<char> = body.chars().collect();
-    let mut i = 0usize;
-    while i < chars.len() {
-        if chars[i] == '$' || chars[i].is_ascii_alphabetic() {
-            let mut j = i;
-            if chars[j] == '$' {
-                j += 1;
-            }
-            let col_start = j;
-            while j < chars.len() && chars[j].is_ascii_alphabetic() {
-                j += 1;
-            }
-            let col_end = j;
-
-            if col_end == col_start {
-                i += 1;
-                continue;
-            }
-
-            // Avoid false positives like "Sheet1" or function names.
-            if col_end - col_start > 3 {
-                i += 1;
-                continue;
-            }
-
-            if j < chars.len() && chars[j] == '$' {
-                j += 1;
-            }
-            let row_start = j;
-            while j < chars.len() && chars[j].is_ascii_digit() {
-                j += 1;
-            }
-            if row_start == j {
-                i += 1;
-                continue;
-            }
-
-            let col: String = chars[col_start..col_end].iter().collect();
-            let row: String = chars[row_start..j].iter().collect();
-            if let (Some(col_idx), Ok(row_idx)) = (col_letters_to_index(&col), row.parse::<usize>())
-            {
-                if row_idx > 0 {
-                    deps.insert(CellKey {
-                        sheet_id: sheet_id.to_string(),
-                        row: row_idx - 1,
-                        col: col_idx,
-                    });
-                }
-            }
-
-            i = j;
-        } else {
-            i += 1;
-        }
+fn parse_error_kind(value: &str) -> Option<ErrorKind> {
+    match value.trim() {
+        "#NULL!" | "Null" => Some(ErrorKind::Null),
+        "#DIV/0!" | "Div0" => Some(ErrorKind::Div0),
+        "#VALUE!" | "Value" => Some(ErrorKind::Value),
+        "#REF!" | "Ref" => Some(ErrorKind::Ref),
+        "#NAME?" | "Name" => Some(ErrorKind::Name),
+        "#NUM!" | "Num" => Some(ErrorKind::Num),
+        "#N/A" | "#N/A!" | "NA" => Some(ErrorKind::NA),
+        "#SPILL!" | "Spill" => Some(ErrorKind::Spill),
+        "#CALC!" | "Calc" => Some(ErrorKind::Calc),
+        _ => None,
     }
-
-    deps
 }
 
-fn col_letters_to_index(input: &str) -> Option<usize> {
-    if input.is_empty() {
-        return None;
-    }
-    let mut col = 0usize;
-    for ch in input.chars() {
-        let ch = ch.to_ascii_uppercase();
-        if !('A'..='Z').contains(&ch) {
-            return None;
+fn apply_snapshot_to_engine(
+    engine: &mut FormulaEngine,
+    sheet_name: &str,
+    row: usize,
+    col: usize,
+    value: &Option<CellScalar>,
+    formula: &Option<String>,
+) {
+    let addr = coord_to_a1(row, col);
+
+    if let Some(formula) = formula.as_deref() {
+        if engine.set_cell_formula(sheet_name, &addr, formula).is_err() {
+            let _ = engine.set_cell_value(sheet_name, &addr, EngineValue::Error(ErrorKind::Name));
         }
-        col = col * 26 + (ch as usize - 'A' as usize + 1);
+        return;
     }
-    Some(col - 1)
+
+    let engine_value = value
+        .as_ref()
+        .map(scalar_to_engine_value)
+        .unwrap_or(EngineValue::Blank);
+    let _ = engine.set_cell_value(sheet_name, &addr, engine_value);
 }
 
 #[cfg(test)]
@@ -1219,7 +721,6 @@ mod tests {
         workbook.add_sheet("Sheet1".to_string());
         let sheet_id = workbook.sheets[0].id.clone();
 
-        // A1 = 1, B1 = =A1+1
         workbook.sheet_mut(&sheet_id).unwrap().set_cell(
             0,
             0,
@@ -1316,5 +817,32 @@ mod tests {
         let sheet_id = info.sheets[0].id.clone();
         let b1 = state.get_cell(&sheet_id, 0, 1).unwrap();
         assert_eq!(b1.value, CellScalar::Number(7.0));
+    }
+
+    #[test]
+    fn engine_can_evaluate_sum_function() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+        let sheet = workbook.sheet_mut(&sheet_id).unwrap();
+        sheet.set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(1.0))));
+        sheet.set_cell(1, 0, Cell::from_literal(Some(CellScalar::Number(2.0))));
+        sheet.set_cell(2, 0, Cell::from_literal(Some(CellScalar::Number(3.0))));
+        sheet.set_cell(0, 1, Cell::from_formula("=SUM(A1:A3)".to_string()));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        let b1 = state.get_cell(&sheet_id, 0, 1).unwrap();
+        assert_eq!(b1.value, CellScalar::Number(6.0));
+    }
+
+    #[test]
+    fn col_index_to_letters_matches_excel_a1() {
+        assert_eq!(col_index_to_letters(0), "A");
+        assert_eq!(col_index_to_letters(25), "Z");
+        assert_eq!(col_index_to_letters(26), "AA");
+        assert_eq!(col_index_to_letters(27), "AB");
+        assert_eq!(col_index_to_letters(701), "ZZ");
+        assert_eq!(col_index_to_letters(702), "AAA");
     }
 }

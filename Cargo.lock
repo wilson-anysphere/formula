@@ -1008,6 +1008,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "calamine",
+ "formula-engine",
  "formula-xlsx",
  "rust_xlsxwriter 0.79.4",
  "serde",
