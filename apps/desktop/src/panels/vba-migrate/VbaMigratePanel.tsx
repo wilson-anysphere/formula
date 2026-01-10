@@ -65,7 +65,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
 
   return (
     <div style={{ display: "flex", height: "100%", gap: 12 }}>
-      <div style={{ width: 240, borderRight: "1px solid #333", paddingRight: 12 }}>
+      <div style={{ width: 240, borderRight: "1px solid var(--border)", paddingRight: 12 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Modules</div>
         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {props.modules.map((mod) => (
@@ -76,8 +76,8 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
                   width: "100%",
                   textAlign: "left",
                   padding: "6px 8px",
-                  background: mod.name === selectedModuleName ? "#222" : "transparent",
-                  border: "1px solid #333",
+                  background: mod.name === selectedModuleName ? "var(--selection-bg)" : "transparent",
+                  border: "1px solid var(--border)",
                   marginBottom: 6,
                   cursor: "pointer",
                   color: "inherit"
@@ -107,21 +107,21 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
             Save
           </button>
         </div>
-
+ 
         <div style={{ display: "flex", gap: 12, flex: 1, overflow: "hidden" }}>
-          <div style={{ flex: 1, overflow: "auto", border: "1px solid #333", padding: 8 }}>
+          <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--border)", padding: 8 }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Analysis</div>
             <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
               {analysis ? migrationReportToMarkdown(analysis) : "No analysis"}
             </pre>
           </div>
-
-          <div style={{ flex: 1, overflow: "auto", border: "1px solid #333", padding: 8 }}>
+ 
+          <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--border)", padding: 8 }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Conversion output</div>
             <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{conversionOutput || "No output"}</pre>
           </div>
-
-          <div style={{ flex: 1, overflow: "auto", border: "1px solid #333", padding: 8 }}>
+ 
+          <div style={{ flex: 1, overflow: "auto", border: "1px solid var(--border)", padding: 8 }}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>Validation diff</div>
             <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{validationOutput || "No validation run"}</pre>
           </div>
@@ -130,4 +130,3 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
     </div>
   );
 }
-

@@ -40,9 +40,28 @@ const dockRight = document.getElementById("dock-right");
 const dockBottom = document.getElementById("dock-bottom");
 const floatingRoot = document.getElementById("floating-root");
 const workspaceRoot = document.getElementById("workspace");
+const gridSplit = document.getElementById("grid-split");
+const gridSecondary = document.getElementById("grid-secondary");
+const gridSplitter = document.getElementById("grid-splitter");
 const openAiPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-ai-panel"]');
+const splitVertical = document.querySelector<HTMLButtonElement>('[data-testid="split-vertical"]');
+const splitHorizontal = document.querySelector<HTMLButtonElement>('[data-testid="split-horizontal"]');
+const splitNone = document.querySelector<HTMLButtonElement>('[data-testid="split-none"]');
 
-if (dockLeft && dockRight && dockBottom && floatingRoot && workspaceRoot && openAiPanel) {
+if (
+  dockLeft &&
+  dockRight &&
+  dockBottom &&
+  floatingRoot &&
+  workspaceRoot &&
+  gridSplit &&
+  gridSecondary &&
+  gridSplitter &&
+  openAiPanel &&
+  splitVertical &&
+  splitHorizontal &&
+  splitNone
+) {
   const workbookId = "local-workbook";
   const workspaceManager = new LayoutWorkspaceManager({ storage: localStorage, panelRegistry: PANEL_REGISTRY });
   const layoutController = new LayoutController({
@@ -70,6 +89,43 @@ if (dockLeft && dockRight && dockBottom && floatingRoot && workspaceRoot && open
     dockLeft.dataset.hidden = zoneVisible(layout.docks.left) ? "false" : "true";
     dockRight.dataset.hidden = zoneVisible(layout.docks.right) ? "false" : "true";
     dockBottom.dataset.hidden = zoneVisible(layout.docks.bottom) ? "false" : "true";
+  }
+
+  function renderSplitView() {
+    const split = layoutController.layout.splitView;
+    const ratio = typeof split.ratio === "number" ? split.ratio : 0.5;
+    const clamped = Math.max(0.1, Math.min(0.9, ratio));
+    const primaryPct = Math.round(clamped * 1000) / 10;
+    const secondaryPct = Math.round((100 - primaryPct) * 10) / 10;
+
+    if (split.direction === "none") {
+      gridSplit.style.gridTemplateColumns = "1fr 0px 0px";
+      gridSplit.style.gridTemplateRows = "1fr";
+      gridSecondary.style.display = "none";
+      gridSplitter.style.display = "none";
+      return;
+    }
+
+    gridSecondary.style.display = "block";
+    gridSplitter.style.display = "block";
+
+    if (split.direction === "vertical") {
+      gridSplit.style.gridTemplateColumns = `${primaryPct}% 4px ${secondaryPct}%`;
+      gridSplit.style.gridTemplateRows = "1fr";
+      gridSplitter.style.cursor = "col-resize";
+    } else {
+      gridSplit.style.gridTemplateColumns = "1fr";
+      gridSplit.style.gridTemplateRows = `${primaryPct}% 4px ${secondaryPct}%`;
+      gridSplitter.style.cursor = "row-resize";
+    }
+
+    const sheetLabel = split.panes.secondary.sheetId ?? "Sheet";
+    gridSecondary.textContent = `Secondary view (${sheetLabel})`;
+    gridSecondary.style.display = "flex";
+    gridSecondary.style.alignItems = "center";
+    gridSecondary.style.justifyContent = "center";
+    gridSecondary.style.color = "var(--text-secondary)";
+    gridSecondary.style.fontSize = "12px";
   }
 
   function panelTitle(panelId: string) {
@@ -233,11 +289,16 @@ if (dockLeft && dockRight && dockBottom && floatingRoot && workspaceRoot && open
 
   function renderLayout() {
     applyDockSizes();
+    renderSplitView();
     renderDock(dockLeft, layoutController.layout.docks.left, "left");
     renderDock(dockRight, layoutController.layout.docks.right, "right");
     renderDock(dockBottom, layoutController.layout.docks.bottom, "bottom");
     renderFloating();
   }
+
+  splitVertical.addEventListener("click", () => layoutController.setSplitDirection("vertical", 0.5));
+  splitHorizontal.addEventListener("click", () => layoutController.setSplitDirection("horizontal", 0.5));
+  splitNone.addEventListener("click", () => layoutController.setSplitDirection("none", 0.5));
 
   openAiPanel.addEventListener("click", () => {
     const placement = getPanelPlacement(layoutController.layout, PanelIds.AI_CHAT);

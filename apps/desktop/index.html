@@ -226,7 +226,17 @@
         <div id="dock-right" data-testid="dock-right"></div>
         <div id="dock-bottom" data-testid="dock-bottom"></div>
         <div id="floating-root" data-testid="floating-root"></div>
-        <div id="grid" class="grid-root" tabindex="0" aria-label="Spreadsheet grid"></div>
+        <div id="grid-split" data-testid="grid-split">
+          <div id="grid" class="grid-root" tabindex="0" aria-label="Spreadsheet grid"></div>
+          <div id="grid-splitter" data-testid="grid-splitter"></div>
+          <div
+            id="grid-secondary"
+            class="grid-root"
+            data-testid="grid-secondary"
+            tabindex="0"
+            aria-label="Secondary spreadsheet grid"
+          ></div>
+        </div>
       </div>
       <div class="statusbar">
         <div>
@@ -241,6 +251,9 @@
           Value:
           <code data-testid="active-value"></code>
         </div>
+        <button type="button" data-testid="split-vertical">Split vertical</button>
+        <button type="button" data-testid="split-horizontal">Split horizontal</button>
+        <button type="button" data-testid="split-none">Unsplit</button>
         <button type="button" data-testid="open-ai-panel">AI panel</button>
         <button type="button" data-testid="open-comments-panel">Comments</button>
       </div>
