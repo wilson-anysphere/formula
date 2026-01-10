@@ -1,7 +1,10 @@
-//! Locale-aware formula parsing and (re-)stringification.
+#![forbid(unsafe_code)]
+
+//! Locale-aware formula parsing and (re-)stringification, plus a core evaluation
+//! engine.
 //!
-//! This crate intentionally keeps the parser surface small for now: we only
-//! model enough syntax to prove out internationalization requirements:
+//! The parsing surface is intentionally small for now: we only model enough
+//! syntax to prove out internationalization requirements:
 //! - Locale dependent argument separators (`,` vs `;`)
 //! - Locale dependent decimal separators (`.` vs `,`)
 //! - Localized function names (e.g. `SUMME` ↔ `SUM`)
@@ -16,3 +19,11 @@ mod parser;
 pub use crate::error::{ExcelError, ExcelResult};
 pub use parser::{parse_formula, Expr, Formula, ParseError};
 pub mod what_if;
+
+pub mod eval;
+pub mod value;
+
+mod engine;
+
+pub use engine::{Engine, EngineError, RecalcMode};
+pub use value::{ErrorKind, Value};
