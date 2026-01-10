@@ -107,7 +107,12 @@ export class PresenceRenderer {
   }
 
   clear(ctx) {
+    // `clearRect` is affected by the current transform. Reset to identity to
+    // clear the full backing store regardless of DPR scaling.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.restore();
   }
 
   render(ctx, presences, options) {
@@ -126,14 +131,25 @@ export class PresenceRenderer {
         ctx.fillStyle = color;
         ctx.strokeStyle = color;
 
+        /** @type {Array<{ x: number; y: number; width: number; height: number }>} */
+        const rects = [];
         for (const selection of presence.selections) {
           const rect = rectForRange(getCellRect, selection);
           if (!rect) continue;
+          rects.push(rect);
+        }
 
+        if (rects.length > 0) {
           ctx.globalAlpha = this.selectionFillAlpha;
-          ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+          for (const rect of rects) {
+            ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+          }
+
           ctx.globalAlpha = this.selectionStrokeAlpha;
-          ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+          for (const rect of rects) {
+            // Sub-pixel alignment for crisp borders.
+            ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.width - 1, rect.height - 1);
+          }
         }
 
         ctx.globalAlpha = 1;
