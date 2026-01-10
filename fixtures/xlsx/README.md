@@ -33,6 +33,8 @@ contains small `.xlsm` fixtures used to validate VBA project preservation.
   - `rich-text-shared-strings.xlsx` - shared strings with rich-text runs.
 - `pivots/`:
   - `pivot-fixture.xlsx` - minimal pivot table parts (cache definition/records + pivotTable).
+- `charts/`:
+  - `basic-chart.xlsx` - minimal chart parts (drawing + chart referencing sheet data).
 - `macros/`:
   - `basic.xlsm` - minimal VBA project preservation fixture.
 

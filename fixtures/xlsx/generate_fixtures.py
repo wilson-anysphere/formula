@@ -392,6 +392,171 @@ def sheet_two_xml() -> str:
 """
 
 
+def sheet_chart_data_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Category</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Value</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="inlineStr"><is><t>A</t></is></c>
+      <c r="B2"><v>10</v></c>
+    </row>
+    <row r="3">
+      <c r="A3" t="inlineStr"><is><t>B</t></is></c>
+      <c r="B3"><v>20</v></c>
+    </row>
+    <row r="4">
+      <c r="A4" t="inlineStr"><is><t>C</t></is></c>
+      <c r="B4"><v>30</v></c>
+    </row>
+  </sheetData>
+  <drawing r:id="rId1"/>
+</worksheet>
+"""
+
+
+def sheet1_drawing_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>
+</Relationships>
+"""
+
+
+def drawing1_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <xdr:twoCellAnchor>
+    <xdr:from>
+      <xdr:col>2</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>1</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:from>
+    <xdr:to>
+      <xdr:col>8</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>15</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:to>
+    <xdr:graphicFrame macro="">
+      <xdr:nvGraphicFramePr>
+        <xdr:cNvPr id="2" name="Chart 1"/>
+        <xdr:cNvGraphicFramePr/>
+      </xdr:nvGraphicFramePr>
+      <xdr:xfrm>
+        <a:off x="0" y="0"/>
+        <a:ext cx="0" cy="0"/>
+      </xdr:xfrm>
+      <a:graphic>
+        <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
+          <c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+                   xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                   r:id="rId1"/>
+        </a:graphicData>
+      </a:graphic>
+    </xdr:graphicFrame>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>
+"""
+
+
+def drawing1_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/>
+</Relationships>
+"""
+
+
+def chart1_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+              xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <c:chart>
+    <c:autoTitleDeleted val="1"/>
+    <c:plotArea>
+      <c:layout/>
+      <c:pieChart>
+        <c:varyColors val="1"/>
+        <c:ser>
+          <c:idx val="0"/>
+          <c:order val="0"/>
+          <c:tx>
+            <c:strRef>
+              <c:f>Sheet1!$B$1</c:f>
+            </c:strRef>
+          </c:tx>
+          <c:cat>
+            <c:strRef>
+              <c:f>Sheet1!$A$2:$A$4</c:f>
+            </c:strRef>
+          </c:cat>
+          <c:val>
+            <c:numRef>
+              <c:f>Sheet1!$B$2:$B$4</c:f>
+            </c:numRef>
+          </c:val>
+        </c:ser>
+        <c:firstSliceAng val="0"/>
+      </c:pieChart>
+    </c:plotArea>
+    <c:plotVisOnly val="1"/>
+    <c:dispBlanksAs val="zero"/>
+    <c:showDLblsOverMax val="0"/>
+  </c:chart>
+</c:chartSpace>
+"""
+
+
+def content_types_chart_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>
+  <Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>
+"""
+
+
+def write_chart_xlsx(path: pathlib.Path) -> None:
+    sheet_names = ["Sheet1"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+
+    with zipfile.ZipFile(path, "w") as zf:
+        _zip_write(zf, "[Content_Types].xml", content_types_chart_xml())
+        _zip_write(zf, "_rels/.rels", package_rels_xml())
+        _zip_write(zf, "docProps/core.xml", core_props_xml())
+        _zip_write(zf, "docProps/app.xml", app_props_xml(sheet_names))
+        _zip_write(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        _zip_write(
+            zf,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml(sheet_count=1, include_shared_strings=False),
+        )
+        _zip_write(zf, "xl/worksheets/sheet1.xml", sheet_chart_data_xml())
+        _zip_write(zf, "xl/worksheets/_rels/sheet1.xml.rels", sheet1_drawing_rels_xml())
+        _zip_write(zf, "xl/drawings/drawing1.xml", drawing1_xml())
+        _zip_write(zf, "xl/drawings/_rels/drawing1.xml.rels", drawing1_rels_xml())
+        _zip_write(zf, "xl/charts/chart1.xml", chart1_xml())
+        _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
+
+
 def main() -> None:
     write_xlsx(
         ROOT / "basic" / "basic.xlsx",
@@ -425,6 +590,7 @@ def main() -> None:
         [sheet_styles_xml()],
         styles_bold_cell_xml(),
     )
+    write_chart_xlsx(ROOT / "charts" / "basic-chart.xlsx")
 
     # Directory scaffold for future corpora (kept empty for now).
     for name in ["charts", "pivots", "macros"]:
