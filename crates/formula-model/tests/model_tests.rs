@@ -137,6 +137,40 @@ fn row_and_col_properties_are_deduped() {
 }
 
 #[test]
+fn clear_range_removes_cells_and_updates_used_range() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+
+    // Set 3 cells in a 3x3 block.
+    sheet.set_value_a1("A1", CellValue::Number(1.0)).unwrap();
+    sheet.set_value_a1("B2", CellValue::Number(2.0)).unwrap();
+    sheet.set_value_a1("C3", CellValue::Number(3.0)).unwrap();
+
+    assert_eq!(sheet.used_range(), Some(Range::from_a1("A1:C3").unwrap()));
+
+    // Clear a subrange that removes the bottom-right corner.
+    sheet.clear_range(Range::from_a1("B2:C3").unwrap());
+    assert_eq!(sheet.cell_count(), 1);
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(sheet.used_range(), Some(Range::from_a1("A1").unwrap()));
+}
+
+#[test]
+fn iter_cells_in_range_filters_sparse_cells() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+    sheet.set_value_a1("A1", CellValue::Number(1.0)).unwrap();
+    sheet.set_value_a1("D4", CellValue::Number(2.0)).unwrap();
+    sheet.set_value_a1("F1", CellValue::Number(3.0)).unwrap();
+
+    let cells: Vec<_> = sheet
+        .iter_cells_in_range(Range::from_a1("A1:E4").unwrap())
+        .map(|(r, _)| r.to_a1())
+        .collect();
+    assert_eq!(cells.len(), 2);
+    assert!(cells.contains(&"A1".to_string()));
+    assert!(cells.contains(&"D4".to_string()));
+}
+
+#[test]
 fn cell_key_encoding_round_trips() {
     for &(row, col) in &[
         (0, 0),

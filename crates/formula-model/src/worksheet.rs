@@ -432,6 +432,38 @@ impl Worksheet {
         self.cells.iter().map(|(k, v)| (k.to_ref(), v))
     }
 
+    /// Iterate over all stored cells that fall within `range`.
+    ///
+    /// This is O(n) in the number of stored cells.
+    pub fn iter_cells_in_range(&self, range: Range) -> impl Iterator<Item = (CellRef, &Cell)> {
+        self.cells.iter().filter_map(move |(k, v)| {
+            let cell_ref = k.to_ref();
+            range.contains(cell_ref).then_some((cell_ref, v))
+        })
+    }
+
+    /// Clear all stored cell records that fall within `range`.
+    ///
+    /// This recomputes the sheet's used range once after removals.
+    pub fn clear_range(&mut self, range: Range) {
+        let keys: Vec<CellKey> = self
+            .cells
+            .keys()
+            .filter(|k| range.contains(k.to_ref()))
+            .copied()
+            .collect();
+
+        if keys.is_empty() {
+            return;
+        }
+
+        for key in keys {
+            self.cells.remove(&key);
+        }
+
+        self.used_range = compute_used_range(&self.cells);
+    }
+
     fn on_cell_inserted(&mut self, cell_ref: CellRef) {
         match self.used_range {
             None => self.used_range = Some(Range::new(cell_ref, cell_ref)),
