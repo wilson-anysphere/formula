@@ -2,6 +2,15 @@
 
 Formula is a next-generation spreadsheet with a **desktop-first** product strategy (Tauri) and an **optional web target** used to keep the core engine/UI portable.
 
+## Python scripting
+
+Formula supports modern scripting with a stable Python API (`import formula`) designed to mirror the macro compatibility spec in [`docs/08-macro-compatibility.md`](./docs/08-macro-compatibility.md).
+
+- Python package (in-repo): `python/formula_api/`
+- Runtimes / bridges (JS): `packages/python-runtime/`
+  - Native Python subprocess (desktop/Node)
+  - Pyodide-in-Worker (web/webview)
+
 ## Platform strategy (high level)
 
 - **Primary target:** Tauri desktop app (Windows/macOS/Linux).
