@@ -33,6 +33,8 @@ def apply_sandbox(permissions: Dict[str, Any]) -> None:
     filesystem = permissions.get("filesystem", "none")
     network = permissions.get("network", "none")
 
+    block_process_execution = filesystem == "none" or network == "none"
+
     if filesystem == "none":
 
         def blocked_open(*_args: Any, **_kwargs: Any) -> Any:
@@ -40,12 +42,32 @@ def apply_sandbox(permissions: Dict[str, Any]) -> None:
 
         builtins.open = blocked_open  # type: ignore[assignment]
 
-        # Avoid obvious command execution / filesystem escape hatches.
         try:  # pragma: no cover - platform dependent
             import os
 
-            def blocked_os(*_args: Any, **_kwargs: Any) -> Any:
+            def blocked_fs(*_args: Any, **_kwargs: Any) -> Any:
                 raise PermissionError("Filesystem access is not permitted")
+
+            # Common filesystem-related helpers that allow reads/writes without
+            # going through builtins.open.
+            for attr in (
+                "open",
+                "fdopen",
+                "startfile",
+                "listdir",
+                "scandir",
+            ):
+                if hasattr(os, attr):
+                    setattr(os, attr, blocked_fs)
+        except Exception:
+            pass
+
+    if block_process_execution:
+        try:  # pragma: no cover - platform dependent
+            import os
+
+            def blocked_process(*_args: Any, **_kwargs: Any) -> Any:
+                raise PermissionError("Process execution is not permitted")
 
             for attr in (
                 "system",
@@ -66,12 +88,9 @@ def apply_sandbox(permissions: Dict[str, Any]) -> None:
                 "execve",
                 "execvp",
                 "execvpe",
-                "startfile",
-                "open",
-                "fdopen",
             ):
                 if hasattr(os, attr):
-                    setattr(os, attr, blocked_os)
+                    setattr(os, attr, blocked_process)
         except Exception:
             pass
 

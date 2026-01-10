@@ -60,7 +60,7 @@ import os
 os.system("echo should-not-run")
 `;
 
-    await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Filesystem access is not permitted/);
+    await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Process execution is not permitted/);
   });
 
   it("enforces script execution timeouts", async () => {
