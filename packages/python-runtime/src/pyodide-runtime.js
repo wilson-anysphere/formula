@@ -33,6 +33,9 @@ function writeSharedRpcResponse(sharedBuffer, { result, error }) {
 export class PyodideRuntime {
   constructor(options = {}) {
     this.workerUrl = options.workerUrl ?? new URL("./pyodide-worker.js", import.meta.url);
+    this.indexURL = options.indexURL;
+    this.rpcTimeoutMs = options.rpcTimeoutMs;
+    this.rpcBufferBytes = options.rpcBufferBytes;
     this.timeoutMs = options.timeoutMs ?? 5_000;
     this.maxMemoryBytes = options.maxMemoryBytes ?? 256 * 1024 * 1024;
     this.permissions = options.permissions ?? defaultPermissions();
@@ -72,6 +75,9 @@ export class PyodideRuntime {
     this.api = options.api ?? this.api;
     this.formulaFiles = options.formulaFiles ?? this.formulaFiles;
     this.permissions = options.permissions ?? this.permissions;
+    this.indexURL = options.indexURL ?? this.indexURL;
+    this.rpcTimeoutMs = options.rpcTimeoutMs ?? this.rpcTimeoutMs;
+    this.rpcBufferBytes = options.rpcBufferBytes ?? this.rpcBufferBytes;
 
     if (!this.formulaFiles) {
       throw new Error("PyodideRuntime.initialize requires { formulaFiles } to install the in-repo formula API");
@@ -140,9 +146,12 @@ export class PyodideRuntime {
       this.worker.addEventListener("error", onError, { once: true });
       this.worker.postMessage({
         type: "init",
+        indexURL: this.indexURL,
         maxMemoryBytes: this.maxMemoryBytes,
         permissions: this.permissions,
         formulaFiles: this.formulaFiles,
+        rpcTimeoutMs: this.rpcTimeoutMs,
+        rpcBufferBytes: this.rpcBufferBytes,
       });
     });
   }
@@ -207,6 +216,7 @@ export class PyodideRuntime {
         type: "execute",
         requestId,
         code,
+        indexURL: this.indexURL,
         timeoutMs: effectiveTimeout,
         maxMemoryBytes: effectiveMaxMemory,
         permissions: effectivePermissions,

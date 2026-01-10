@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import os from "node:os";
+import path from "node:path";
+import { promises as fs } from "node:fs";
+
 import { NativePythonRuntime } from "../src/native-python-runtime.js";
 import { MockWorkbook } from "../src/mock-workbook.js";
 
@@ -45,6 +49,42 @@ with open("some_file.txt", "w") as f:
 `;
 
     await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Filesystem access is not permitted/);
+  });
+
+  it("allows read-only filesystem access when permitted, but blocks writes", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-python-"));
+    const filePath = path.join(tmpDir, "hello.txt");
+    await fs.writeFile(filePath, "hello", "utf8");
+
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import formula
+
+with open(${JSON.stringify(filePath)}, "r") as f:
+    data = f.read()
+
+sheet = formula.active_sheet
+sheet["A1"] = len(data)
+
+try:
+    with open(${JSON.stringify(filePath)}, "w") as f:
+        f.write("nope")
+except Exception as e:
+    sheet["A2"] = str(e)
+`;
+
+    await runtime.execute(script, { api: workbook, permissions: { filesystem: "read", network: "none" } });
+
+    expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 0, col: 0 })).toBe(5);
+    expect(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 1, col: 0 })).toContain(
+      "Filesystem write access is not permitted",
+    );
   });
 
   it("blocks common filesystem escape hatches (io.open and os.remove)", async () => {
