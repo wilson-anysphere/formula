@@ -1,4 +1,4 @@
-use formula_engine::{Engine, Value};
+use formula_engine::{Engine, ErrorKind, Value};
 
 fn assert_close(actual: f64, expected: f64, tol: f64) {
     assert!(
@@ -108,4 +108,25 @@ fn evaluates_cashflow_financial_functions() {
         0.3733625335188314,
         1e-12,
     );
+}
+
+#[test]
+fn xirr_xnpv_length_mismatch_returns_num_error() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", -1000.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 1100.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 40_000.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=XIRR(A1:A2, B1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=XNPV(0.1, A1:A2, B1)")
+        .unwrap();
+
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Error(ErrorKind::Num));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Error(ErrorKind::Num));
 }
