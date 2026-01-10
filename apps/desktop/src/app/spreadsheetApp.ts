@@ -1,6 +1,9 @@
 import { CellEditorOverlay } from "../editor/cellEditorOverlay";
 import { FormulaBarView } from "../formula-bar/FormulaBarView";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
+import { parseA1Range } from "../charts/a1.js";
+import { anchorToRectPx } from "../charts/overlay.js";
+import { renderChartSvg } from "../charts/renderSvg.js";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
@@ -28,6 +31,35 @@ import * as Y from "yjs";
 import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
 
+type ChartSeriesDef = {
+  name?: string | null;
+  categories?: string | null;
+  values?: string | null;
+  xValues?: string | null;
+  yValues?: string | null;
+};
+
+type ChartDef = {
+  chartType: { kind: string; name?: string };
+  title?: string;
+  series: ChartSeriesDef[];
+  anchor: {
+    kind: string;
+    fromCol?: number;
+    fromRow?: number;
+    fromColOffEmu?: number;
+    fromRowOffEmu?: number;
+    toCol?: number;
+    toRow?: number;
+    toColOffEmu?: number;
+    toRowOffEmu?: number;
+    xEmu?: number;
+    yEmu?: number;
+    cxEmu?: number;
+    cyEmu?: number;
+  };
+};
+
 export interface SpreadsheetAppStatusElements {
   activeCell: HTMLElement;
   selectionRange: HTMLElement;
@@ -41,6 +73,7 @@ export class SpreadsheetApp {
   private limits: GridLimits;
 
   private gridCanvas: HTMLCanvasElement;
+  private chartLayer: HTMLDivElement;
   private referenceCanvas: HTMLCanvasElement;
   private selectionCanvas: HTMLCanvasElement;
   private gridCtx: CanvasRenderingContext2D;
@@ -83,6 +116,8 @@ export class SpreadsheetApp {
   private commentsPanelVisible = false;
   private stopCommentPersistence: (() => void) | null = null;
 
+  private charts: ChartDef[] = [];
+
   private commentsPanel!: HTMLDivElement;
   private commentsPanelThreads!: HTMLDivElement;
   private commentsPanelCell!: HTMLDivElement;
@@ -116,9 +151,24 @@ export class SpreadsheetApp {
     });
     this.document.setCellValue(this.sheetId, { row: 4, col: 3 }, "BottomRight");
 
+    // Seed a small data range for the demo chart without expanding the used range past D5.
+    this.document.setCellValue(this.sheetId, { row: 1, col: 0 }, "A");
+    this.document.setCellValue(this.sheetId, { row: 1, col: 1 }, 2);
+    this.document.setCellValue(this.sheetId, { row: 2, col: 0 }, "B");
+    this.document.setCellValue(this.sheetId, { row: 2, col: 1 }, 4);
+    this.document.setCellValue(this.sheetId, { row: 3, col: 0 }, "C");
+    this.document.setCellValue(this.sheetId, { row: 3, col: 1 }, 3);
+    this.document.setCellValue(this.sheetId, { row: 4, col: 0 }, "D");
+    this.document.setCellValue(this.sheetId, { row: 4, col: 1 }, 5);
+
     this.gridCanvas = document.createElement("canvas");
     this.gridCanvas.className = "grid-canvas";
     this.gridCanvas.setAttribute("aria-hidden", "true");
+
+    this.chartLayer = document.createElement("div");
+    this.chartLayer.className = "chart-layer";
+    this.chartLayer.setAttribute("aria-hidden", "true");
+
     this.referenceCanvas = document.createElement("canvas");
     this.referenceCanvas.className = "grid-canvas";
     this.referenceCanvas.setAttribute("aria-hidden", "true");
@@ -127,6 +177,7 @@ export class SpreadsheetApp {
     this.selectionCanvas.setAttribute("aria-hidden", "true");
 
     this.root.appendChild(this.gridCanvas);
+    this.root.appendChild(this.chartLayer);
     this.root.appendChild(this.referenceCanvas);
     this.root.appendChild(this.selectionCanvas);
 
@@ -154,6 +205,7 @@ export class SpreadsheetApp {
       onCommit: (commit) => {
         this.applyEdit(commit.cell, commit.value);
         this.renderGrid();
+        this.renderCharts();
 
         const next = navigateSelectionByKey(
           this.selection,
@@ -217,6 +269,31 @@ export class SpreadsheetApp {
         }
       });
     }
+
+    this.charts = [
+      {
+        chartType: { kind: "bar" },
+        title: "Example Chart",
+        series: [
+          {
+            categories: "Sheet1!$A$2:$A$5",
+            values: "Sheet1!$B$2:$B$5"
+          }
+        ],
+        // Anchor roughly over columns E..I and rows 2..12.
+        anchor: {
+          kind: "twoCell",
+          fromCol: 4,
+          fromRow: 1,
+          fromColOffEmu: 0,
+          fromRowOffEmu: 0,
+          toCol: 9,
+          toRow: 12,
+          toColOffEmu: 0,
+          toRowOffEmu: 0
+        }
+      }
+    ];
 
     // Initial layout + render.
     this.onResize();
@@ -515,6 +592,7 @@ export class SpreadsheetApp {
     }
 
     this.renderGrid();
+    this.renderCharts();
     this.renderReferencePreview();
     this.renderSelection();
     this.updateStatus();
@@ -666,6 +744,53 @@ export class SpreadsheetApp {
     ctx.restore();
 
     this.renderOutlineControls();
+  }
+
+  private renderCharts(): void {
+    this.chartLayer.replaceChildren();
+    if (this.charts.length === 0) return;
+
+    const provider = {
+      getRange: (rangeRef: string) => {
+        const parsed = parseA1Range(rangeRef);
+        if (!parsed) return [];
+
+        const out: unknown[][] = [];
+        for (let r = parsed.startRow; r <= parsed.endRow; r += 1) {
+          const row: unknown[] = [];
+          for (let c = parsed.startCol; c <= parsed.endCol; c += 1) {
+            const state = this.document.getCell(this.sheetId, { row: r, col: c }) as {
+              value: unknown;
+              formula: string | null;
+            };
+            row.push(state?.value ?? null);
+          }
+          out.push(row);
+        }
+        return out;
+      }
+    };
+
+    for (const chart of this.charts) {
+      const rect = anchorToRectPx(chart.anchor, {
+        defaultColWidthPx: this.cellWidth,
+        defaultRowHeightPx: this.cellHeight
+      });
+      if (!rect) continue;
+
+      const host = document.createElement("div");
+      host.setAttribute("data-testid", "chart-object");
+      host.style.position = "absolute";
+      host.style.left = `${rect.left}px`;
+      host.style.top = `${rect.top}px`;
+      host.style.width = `${rect.width}px`;
+      host.style.height = `${rect.height}px`;
+      host.style.pointerEvents = "none";
+      host.style.overflow = "hidden";
+
+      host.innerHTML = renderChartSvg(chart, provider, { width: rect.width, height: rect.height });
+      this.chartLayer.appendChild(host);
+    }
   }
 
   private renderSelection(): void {
@@ -1027,6 +1152,7 @@ export class SpreadsheetApp {
       e.preventDefault();
       this.clearSelectionContents();
       this.renderGrid();
+      this.renderCharts();
       this.renderSelection();
       this.updateStatus();
       return;
@@ -1206,6 +1332,7 @@ export class SpreadsheetApp {
     const target = this.formulaEditCell ?? this.selection.active;
     this.applyEdit(target, text);
     this.renderGrid();
+    this.renderCharts();
 
     this.selection = setActiveCell(this.selection, target, this.limits);
     this.formulaEditCell = null;
