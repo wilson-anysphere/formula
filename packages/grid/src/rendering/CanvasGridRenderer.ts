@@ -1029,6 +1029,23 @@ export class CanvasGridRenderer {
           }
         }
 
+        if (cell?.comment) {
+          const resolved = cell.comment.resolved ?? false;
+          const maxSize = Math.min(colWidth, rowHeight);
+          const size = Math.min(maxSize, Math.max(6, maxSize * 0.25));
+          if (size > 0) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(x + colWidth, y);
+            ctx.lineTo(x + colWidth - size, y);
+            ctx.lineTo(x + colWidth, y + size);
+            ctx.closePath();
+            ctx.fillStyle = resolved ? "#9ca3af" : "#f59e0b";
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+
         colXSheet += colWidth;
       }
 

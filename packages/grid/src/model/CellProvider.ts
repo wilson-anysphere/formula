@@ -28,6 +28,14 @@ export interface CellData {
   col: number;
   value: string | number | null;
   style?: CellStyle;
+  /**
+   * Optional comment metadata used for rendering a cell comment indicator.
+   *
+   * This is intentionally minimal: higher layers can store full comment threads
+   * elsewhere (e.g. in a Yjs doc) and only expose presence/resolved state here
+   * for fast grid rendering.
+   */
+  comment?: { resolved?: boolean } | null;
 }
 
 export interface CellRange {

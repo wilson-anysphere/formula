@@ -45,6 +45,13 @@ export class MockCellProvider implements CellProvider {
                 ? "مرحبا بالعالم hello — Arabic + English"
                 : `${row},${col}`;
 
-    return { row, col, value, style };
+    const comment =
+      row === 1 && col === 1
+        ? { resolved: false }
+        : row === 2 && col === 1
+          ? { resolved: true }
+          : null;
+
+    return { row, col, value, style, comment };
   }
 }
