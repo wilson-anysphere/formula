@@ -186,6 +186,34 @@ fn simplex_solves_integer_program_via_branch_and_bound() {
 }
 
 #[test]
+fn simplex_can_be_cancelled_via_progress_callback() {
+    let model = FnModel::new(vec![0.0], |vars| (vars[0], Vec::new()));
+    let mut model = model;
+
+    let problem = SolverProblem {
+        objective: Objective::maximize(),
+        variables: vec![VarSpec::continuous(0.0, 10.0)],
+        constraints: Vec::new(),
+    };
+
+    let mut progress_calls = 0usize;
+    let mut progress_cb = |_p: Progress| {
+        progress_calls += 1;
+        false
+    };
+
+    let mut options = SolveOptions::default();
+    options.method = SolveMethod::Simplex;
+    options.apply_solution = false;
+    options.progress = Some(&mut progress_cb);
+
+    let outcome = Solver::solve(&mut model, &problem, options).expect("solve");
+    assert_eq!(outcome.status, SolveStatus::Cancelled);
+    assert!(progress_calls >= 1);
+    assert!(!outcome.best_vars.is_empty());
+}
+
+#[test]
 fn grg_solves_nonlinear_constrained_problem() {
     // Minimize (x-1)^2 + (y-2)^2 subject to x + y = 3, 0<=x,y<=3.
     let model = FnModel::new(vec![0.5, 0.5], |vars| {

@@ -104,14 +104,21 @@ pub(crate) fn solve_simplex<M: SolverModel>(
 
     let mut nodes_searched = 0usize;
     let mut best_lp_solution: Option<LpSolution> = None;
+    let mut cancelled = false;
 
     branch_and_bound(
         &lp,
+        problem,
+        &objective_fn,
+        &constraint_fns,
+        &shift,
         decision_len,
         &integer_indices,
         options.simplex,
         &mut nodes_searched,
         &mut best_lp_solution,
+        &mut options.progress,
+        &mut cancelled,
     );
 
     let best_lp_solution = best_lp_solution.unwrap_or(LpSolution {
@@ -126,6 +133,14 @@ pub(crate) fn solve_simplex<M: SolverModel>(
         LpStatus::Unbounded => SolveStatus::Unbounded,
         LpStatus::IterationLimit => SolveStatus::IterationLimit,
     };
+
+    if cancelled {
+        status = SolveStatus::Cancelled;
+    } else if !integer_indices.is_empty() && nodes_searched >= options.simplex.max_bnb_nodes {
+        // Search was truncated by the node limit; the best solution we have is
+        // not guaranteed globally optimal.
+        status = SolveStatus::IterationLimit;
+    }
 
     if best_lp_solution.x.is_empty() {
         return Ok(SolveOutcome {
@@ -414,20 +429,26 @@ fn build_lp(
 
 fn branch_and_bound(
     lp: &LinearProgram,
+    problem: &SolverProblem,
+    objective_fn: &LinearFunction,
+    constraint_fns: &[LinearFunction],
+    shift: &[f64],
     decision_len: usize,
     integer_indices: &[usize],
     options: SimplexOptions,
     nodes_searched: &mut usize,
     best_solution: &mut Option<LpSolution>,
+    progress: &mut Option<&mut dyn FnMut(Progress) -> bool>,
+    cancelled: &mut bool,
 ) {
-    if *nodes_searched >= options.max_bnb_nodes {
+    if *cancelled || *nodes_searched >= options.max_bnb_nodes {
         return;
     }
     *nodes_searched += 1;
 
     let mut lp_solution = solve_lp(lp, options.max_pivots);
 
-    if lp_solution.status != LpStatus::Optimal {
+    if lp_solution.status != LpStatus::Optimal || *cancelled {
         return;
     }
 
@@ -437,6 +458,10 @@ fn branch_and_bound(
             return;
         }
     }
+
+    let current_objective = evaluate_objective_for_solution(objective_fn, shift, &lp_solution.x);
+    let current_violation =
+        evaluate_max_violation_for_solution(constraint_fns, shift, problem, &lp_solution.x);
 
     // Check integrality.
     let fractional_var = integer_indices
@@ -452,6 +477,38 @@ fn branch_and_bound(
                 None
             }
         });
+
+    if fractional_var.is_none() {
+        // Integer-feasible; accept if better.
+        if best_solution
+            .as_ref()
+            .map_or(true, |best| lp_solution.objective > best.objective)
+        {
+            // Ensure non-decision vars don't leak into the solution.
+            lp_solution.x.truncate(decision_len);
+            *best_solution = Some(lp_solution);
+        }
+    }
+
+    if let Some(callback) = progress.as_deref_mut() {
+        let best_objective = best_solution
+            .as_ref()
+            .map(|s| evaluate_objective_for_solution(objective_fn, shift, &s.x))
+            .unwrap_or(f64::NAN);
+
+        if !callback(Progress {
+            iteration: *nodes_searched,
+            best_objective,
+            current_objective,
+            max_constraint_violation: current_violation,
+        }) {
+            *cancelled = true;
+        }
+    }
+
+    if *cancelled {
+        return;
+    }
 
     if let Some((idx, value)) = fractional_var {
         let floor_v = value.floor();
@@ -469,11 +526,17 @@ fn branch_and_bound(
             });
             branch_and_bound(
                 &lp1,
+                problem,
+                objective_fn,
+                constraint_fns,
+                shift,
                 decision_len,
                 integer_indices,
                 options,
                 nodes_searched,
                 best_solution,
+                progress,
+                cancelled,
             );
         }
 
@@ -489,24 +552,19 @@ fn branch_and_bound(
             });
             branch_and_bound(
                 &lp2,
+                problem,
+                objective_fn,
+                constraint_fns,
+                shift,
                 decision_len,
                 integer_indices,
                 options,
                 nodes_searched,
                 best_solution,
+                progress,
+                cancelled,
             );
         }
-        return;
-    }
-
-    // Integer-feasible; accept if better.
-    if best_solution
-        .as_ref()
-        .map_or(true, |best| lp_solution.objective > best.objective)
-    {
-        // Ensure non-decision vars don't leak into the solution.
-        lp_solution.x.truncate(decision_len);
-        *best_solution = Some(lp_solution);
     }
 }
 
@@ -761,4 +819,31 @@ fn pivot(tableau: &mut [Vec<f64>], basis: &mut [usize], leaving_row: usize, ente
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
+fn evaluate_objective_for_solution(objective_fn: &LinearFunction, shift: &[f64], y: &[f64]) -> f64 {
+    let n = shift.len().min(y.len());
+    let mut acc = objective_fn.constant;
+    acc += dot(&objective_fn.coeffs[..n], &shift[..n]);
+    acc += dot(&objective_fn.coeffs[..n], &y[..n]);
+    acc
+}
+
+fn evaluate_max_violation_for_solution(
+    constraint_fns: &[LinearFunction],
+    shift: &[f64],
+    problem: &SolverProblem,
+    y: &[f64],
+) -> f64 {
+    let n = shift.len().min(y.len());
+    problem
+        .constraints
+        .iter()
+        .map(|c| {
+            let f = &constraint_fns[c.index];
+            let mut lhs = f.constant + dot(&f.coeffs[..n], &shift[..n]);
+            lhs += dot(&f.coeffs[..n], &y[..n]);
+            super::constraint_violation(lhs, c)
+        })
+        .fold(0.0, f64::max)
 }
