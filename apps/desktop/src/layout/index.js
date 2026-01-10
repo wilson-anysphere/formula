@@ -1,4 +1,5 @@
 export * from "./constants.js";
+export * from "./layoutController.js";
 export * from "./layoutGeometry.js";
 export * from "./layoutNormalization.js";
 export * from "./layoutPersistence.js";
