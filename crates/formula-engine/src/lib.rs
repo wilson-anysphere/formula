@@ -11,6 +11,7 @@
 
 pub mod date;
 pub mod display;
+pub mod editing;
 pub mod error;
 pub mod eval;
 pub mod functions;
@@ -18,8 +19,8 @@ pub mod graph;
 pub mod locale;
 pub mod pivot;
 pub mod solver;
-pub mod value;
 pub mod what_if;
+pub mod value;
 
 pub mod debug;
 pub mod sort_filter;
@@ -31,7 +32,8 @@ mod ast;
 pub mod parser;
 
 pub use ast::*;
-pub use error::{ExcelError, ExcelResult};
+pub use crate::error::{ExcelError, ExcelResult};
+pub use editing::{CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange};
 pub use engine::{Engine, EngineError, RecalcMode};
 pub use parser::{
     lex, parse_formula_partial, FunctionContext, ParseContext, PartialParse, Token, TokenKind,

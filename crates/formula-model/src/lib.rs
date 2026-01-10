@@ -46,3 +46,4 @@ pub use worksheet::{
 ///
 /// This is embedded into [`Workbook`] to enable forward-compatible IPC payloads.
 pub const SCHEMA_VERSION: u32 = 1;
+

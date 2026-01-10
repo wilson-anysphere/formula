@@ -1,11 +1,19 @@
 use crate::eval::{
     parse_a1, CellAddr, CompiledExpr, Expr, FormulaParseError, Parser, RangeRef, SheetReference,
 };
+use crate::editing::{
+    CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange,
+};
+use crate::editing::rewrite::{
+    rewrite_formula_for_copy_delta, rewrite_formula_for_range_map, rewrite_formula_for_structural_edit,
+    GridRange, RangeMapEdit, StructuralEdit,
+};
 use crate::locale::{canonicalize_formula, FormulaLocale};
 use crate::value::{ErrorKind, Value};
-use formula_model::Table;
+use formula_model::{CellRef, Range, Table};
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::cmp::max;
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use thiserror::Error;
 
 pub type SheetId = usize;
@@ -51,13 +59,13 @@ impl Default for Cell {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Sheet {
     cells: HashMap<CellAddr, Cell>,
     tables: Vec<Table>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Workbook {
     sheets: Vec<Sheet>,
     sheet_name_to_id: HashMap<String, SheetId>,
@@ -276,6 +284,273 @@ impl Engine {
         self.workbook.get_cell(key)?.formula.as_deref()
     }
 
+    pub fn apply_operation(&mut self, op: EditOp) -> Result<EditResult, EditError> {
+        let before = self.workbook.clone();
+        let mut formula_rewrites = Vec::new();
+        let mut moved_ranges = Vec::new();
+
+        let sheet_names = sheet_names_by_id(&self.workbook);
+
+        match op {
+            EditOp::InsertRows { sheet, row, count } => {
+                if count == 0 {
+                    return Err(EditError::InvalidCount);
+                }
+                let sheet_id = self
+                    .workbook
+                    .sheet_id(&sheet)
+                    .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                shift_rows(&mut self.workbook.sheets[sheet_id], row, count, true);
+                formula_rewrites.extend(rewrite_all_formulas_structural(
+                    &mut self.workbook,
+                    &sheet_names,
+                    StructuralEdit::InsertRows { sheet, row, count },
+                ));
+            }
+            EditOp::DeleteRows { sheet, row, count } => {
+                if count == 0 {
+                    return Err(EditError::InvalidCount);
+                }
+                let sheet_id = self
+                    .workbook
+                    .sheet_id(&sheet)
+                    .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                shift_rows(&mut self.workbook.sheets[sheet_id], row, count, false);
+                formula_rewrites.extend(rewrite_all_formulas_structural(
+                    &mut self.workbook,
+                    &sheet_names,
+                    StructuralEdit::DeleteRows { sheet, row, count },
+                ));
+            }
+            EditOp::InsertCols { sheet, col, count } => {
+                if count == 0 {
+                    return Err(EditError::InvalidCount);
+                }
+                let sheet_id = self
+                    .workbook
+                    .sheet_id(&sheet)
+                    .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                shift_cols(&mut self.workbook.sheets[sheet_id], col, count, true);
+                formula_rewrites.extend(rewrite_all_formulas_structural(
+                    &mut self.workbook,
+                    &sheet_names,
+                    StructuralEdit::InsertCols { sheet, col, count },
+                ));
+            }
+            EditOp::DeleteCols { sheet, col, count } => {
+                if count == 0 {
+                    return Err(EditError::InvalidCount);
+                }
+                let sheet_id = self
+                    .workbook
+                    .sheet_id(&sheet)
+                    .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                shift_cols(&mut self.workbook.sheets[sheet_id], col, count, false);
+                formula_rewrites.extend(rewrite_all_formulas_structural(
+                    &mut self.workbook,
+                    &sheet_names,
+                    StructuralEdit::DeleteCols { sheet, col, count },
+                ));
+            }
+            EditOp::InsertCellsShiftRight { sheet, range } => {
+                let width = range.width();
+                if width == 0 {
+                    return Err(EditError::InvalidRange);
+                }
+                let sheet_id = self
+                    .workbook
+                    .sheet_id(&sheet)
+                    .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                insert_cells_shift_right(&mut self.workbook.sheets[sheet_id], range, width);
+                let edit = RangeMapEdit {
+                    sheet,
+                    moved_region: GridRange::new(
+                        range.start.row,
+                        range.start.col,
+                        range.end.row,
+                        u32::MAX,
+                    ),
+                    delta_row: 0,
+                    delta_col: width as i32,
+                    deleted_region: None,
+                };
+                formula_rewrites.extend(rewrite_all_formulas_range_map(
+                    &mut self.workbook,
+                    &sheet_names,
+                    &edit,
+                ));
+            }
+            EditOp::InsertCellsShiftDown { sheet, range } => {
+                let height = range.height();
+                if height == 0 {
+                    return Err(EditError::InvalidRange);
+                }
+                let sheet_id = self
+                    .workbook
+                    .sheet_id(&sheet)
+                    .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                insert_cells_shift_down(&mut self.workbook.sheets[sheet_id], range, height);
+                let edit = RangeMapEdit {
+                    sheet,
+                    moved_region: GridRange::new(
+                        range.start.row,
+                        range.start.col,
+                        u32::MAX,
+                        range.end.col,
+                    ),
+                    delta_row: height as i32,
+                    delta_col: 0,
+                    deleted_region: None,
+                };
+                formula_rewrites.extend(rewrite_all_formulas_range_map(
+                    &mut self.workbook,
+                    &sheet_names,
+                    &edit,
+                ));
+            }
+            EditOp::DeleteCellsShiftLeft { sheet, range } => {
+                let width = range.width();
+                if width == 0 {
+                    return Err(EditError::InvalidRange);
+                }
+                let sheet_id = self
+                    .workbook
+                    .sheet_id(&sheet)
+                    .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                delete_cells_shift_left(&mut self.workbook.sheets[sheet_id], range, width);
+                let start_col = range.end.col.saturating_add(1);
+                let edit = RangeMapEdit {
+                    sheet,
+                    moved_region: GridRange::new(range.start.row, start_col, range.end.row, u32::MAX),
+                    delta_row: 0,
+                    delta_col: -(width as i32),
+                    deleted_region: Some(GridRange::new(
+                        range.start.row,
+                        range.start.col,
+                        range.end.row,
+                        range.end.col,
+                    )),
+                };
+                formula_rewrites.extend(rewrite_all_formulas_range_map(
+                    &mut self.workbook,
+                    &sheet_names,
+                    &edit,
+                ));
+            }
+            EditOp::DeleteCellsShiftUp { sheet, range } => {
+                let height = range.height();
+                if height == 0 {
+                    return Err(EditError::InvalidRange);
+                }
+                let sheet_id = self
+                    .workbook
+                    .sheet_id(&sheet)
+                    .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                delete_cells_shift_up(&mut self.workbook.sheets[sheet_id], range, height);
+                let start_row = range.end.row.saturating_add(1);
+                let edit = RangeMapEdit {
+                    sheet,
+                    moved_region: GridRange::new(start_row, range.start.col, u32::MAX, range.end.col),
+                    delta_row: -(height as i32),
+                    delta_col: 0,
+                    deleted_region: Some(GridRange::new(
+                        range.start.row,
+                        range.start.col,
+                        range.end.row,
+                        range.end.col,
+                    )),
+                };
+                formula_rewrites.extend(rewrite_all_formulas_range_map(
+                    &mut self.workbook,
+                    &sheet_names,
+                    &edit,
+                ));
+            }
+            EditOp::MoveRange {
+                sheet,
+                src,
+                dst_top_left,
+            } => {
+                let sheet_id = self
+                    .workbook
+                    .sheet_id(&sheet)
+                    .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                if src.width() == 0 || src.height() == 0 {
+                    return Err(EditError::InvalidRange);
+                }
+                let dst = Range::new(
+                    dst_top_left,
+                    CellRef::new(
+                        dst_top_left.row + src.height() - 1,
+                        dst_top_left.col + src.width() - 1,
+                    ),
+                );
+                if ranges_overlap(src, dst) {
+                    return Err(EditError::OverlappingMove);
+                }
+                move_range(&mut self.workbook.sheets[sheet_id], src, dst_top_left);
+                let edit = RangeMapEdit {
+                    sheet: sheet.clone(),
+                    moved_region: GridRange::new(src.start.row, src.start.col, src.end.row, src.end.col),
+                    delta_row: dst.start.row as i32 - src.start.row as i32,
+                    delta_col: dst.start.col as i32 - src.start.col as i32,
+                    deleted_region: None,
+                };
+                formula_rewrites.extend(rewrite_all_formulas_range_map(
+                    &mut self.workbook,
+                    &sheet_names,
+                    &edit,
+                ));
+                moved_ranges.push(MovedRange { sheet, from: src, to: dst });
+            }
+            EditOp::CopyRange {
+                sheet,
+                src,
+                dst_top_left,
+            } => {
+                let sheet_id = self
+                    .workbook
+                    .sheet_id(&sheet)
+                    .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                if src.width() == 0 || src.height() == 0 {
+                    return Err(EditError::InvalidRange);
+                }
+                copy_range(
+                    &mut self.workbook.sheets[sheet_id],
+                    &sheet,
+                    src,
+                    dst_top_left,
+                    &mut formula_rewrites,
+                );
+            }
+            EditOp::Fill { sheet, src, dst } => {
+                let sheet_id = self
+                    .workbook
+                    .sheet_id(&sheet)
+                    .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                fill_range(
+                    &mut self.workbook.sheets[sheet_id],
+                    &sheet,
+                    src,
+                    dst,
+                    &mut formula_rewrites,
+                );
+            }
+        }
+
+        self.rebuild_graph()
+            .map_err(|e| EditError::Engine(e.to_string()))?;
+
+        let sheet_names_after = sheet_names_by_id(&self.workbook);
+        let changed_cells = diff_workbooks(&before, &self.workbook, &sheet_names_after);
+
+        Ok(EditResult {
+            changed_cells,
+            moved_ranges,
+            formula_rewrites,
+        })
+    }
+
     pub fn recalculate(&mut self) {
         // Default to multithreaded when rayon is available.
         self.recalculate_with_mode(RecalcMode::MultiThreaded);
@@ -404,6 +679,31 @@ impl Engine {
             SheetReference::External(wb) => SheetReference::External(wb.clone()),
         };
         expr.map_sheets(&mut map)
+    }
+
+    fn rebuild_graph(&mut self) -> Result<(), EngineError> {
+        let sheet_names = sheet_names_by_id(&self.workbook);
+        let mut formulas: Vec<(String, CellAddr, String)> = Vec::new();
+        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            let Some(sheet_name) = sheet_names.get(&sheet_id).cloned() else {
+                continue;
+            };
+            for (addr, cell) in &sheet.cells {
+                if let Some(formula) = &cell.formula {
+                    formulas.push((sheet_name.clone(), *addr, formula.clone()));
+                }
+            }
+        }
+
+        self.graph = DependencyGraph::default();
+        self.dirty.clear();
+        self.dirty_reasons.clear();
+
+        for (sheet_name, addr, formula) in formulas {
+            let addr_a1 = cell_addr_to_a1(addr);
+            self.set_cell_formula(&sheet_name, &addr_a1, &formula)?;
+        }
+        Ok(())
     }
 
     /// Returns whether a cell is currently marked dirty (needs recalculation).
@@ -606,6 +906,427 @@ impl Engine {
                 }
             }
         }
+    }
+}
+
+fn sheet_names_by_id(workbook: &Workbook) -> HashMap<SheetId, String> {
+    workbook
+        .sheet_name_to_id
+        .iter()
+        .map(|(name, id)| (*id, name.clone()))
+        .collect()
+}
+
+fn cell_ref_from_addr(addr: CellAddr) -> CellRef {
+    CellRef::new(addr.row, addr.col)
+}
+
+fn cell_addr_from_cell_ref(cell: CellRef) -> CellAddr {
+    CellAddr { row: cell.row, col: cell.col }
+}
+
+fn cell_addr_to_a1(addr: CellAddr) -> String {
+    format!("{}{}", col_to_name(addr.col), addr.row + 1)
+}
+
+fn col_to_name(col: u32) -> String {
+    let mut n = col + 1;
+    let mut out = Vec::<u8>::new();
+    while n > 0 {
+        let rem = (n - 1) % 26;
+        out.push(b'A' + rem as u8);
+        n = (n - 1) / 26;
+    }
+    out.reverse();
+    String::from_utf8(out).expect("column letters are ASCII")
+}
+
+fn ranges_overlap(a: Range, b: Range) -> bool {
+    !(a.end.row < b.start.row
+        || a.start.row > b.end.row
+        || a.end.col < b.start.col
+        || a.start.col > b.end.col)
+}
+
+fn shift_rows(sheet: &mut Sheet, row: u32, count: u32, insert: bool) {
+    let del_end = row.saturating_add(count.saturating_sub(1));
+    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
+    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+        if insert {
+            if addr.row >= row {
+                new_cells.insert(
+                    CellAddr {
+                        row: addr.row + count,
+                        col: addr.col,
+                    },
+                    cell,
+                );
+            } else {
+                new_cells.insert(addr, cell);
+            }
+            continue;
+        }
+
+        if addr.row < row {
+            new_cells.insert(addr, cell);
+        } else if addr.row > del_end {
+            new_cells.insert(
+                CellAddr {
+                    row: addr.row - count,
+                    col: addr.col,
+                },
+                cell,
+            );
+        }
+    }
+    sheet.cells = new_cells;
+}
+
+fn shift_cols(sheet: &mut Sheet, col: u32, count: u32, insert: bool) {
+    let del_end = col.saturating_add(count.saturating_sub(1));
+    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
+    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+        if insert {
+            if addr.col >= col {
+                new_cells.insert(
+                    CellAddr {
+                        row: addr.row,
+                        col: addr.col + count,
+                    },
+                    cell,
+                );
+            } else {
+                new_cells.insert(addr, cell);
+            }
+            continue;
+        }
+
+        if addr.col < col {
+            new_cells.insert(addr, cell);
+        } else if addr.col > del_end {
+            new_cells.insert(
+                CellAddr {
+                    row: addr.row,
+                    col: addr.col - count,
+                },
+                cell,
+            );
+        }
+    }
+    sheet.cells = new_cells;
+}
+
+fn insert_cells_shift_right(sheet: &mut Sheet, range: Range, width: u32) {
+    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
+    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+        if addr.row >= range.start.row && addr.row <= range.end.row && addr.col >= range.start.col {
+            new_cells.insert(
+                CellAddr {
+                    row: addr.row,
+                    col: addr.col + width,
+                },
+                cell,
+            );
+        } else {
+            new_cells.insert(addr, cell);
+        }
+    }
+    sheet.cells = new_cells;
+}
+
+fn insert_cells_shift_down(sheet: &mut Sheet, range: Range, height: u32) {
+    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
+    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+        if addr.col >= range.start.col && addr.col <= range.end.col && addr.row >= range.start.row {
+            new_cells.insert(
+                CellAddr {
+                    row: addr.row + height,
+                    col: addr.col,
+                },
+                cell,
+            );
+        } else {
+            new_cells.insert(addr, cell);
+        }
+    }
+    sheet.cells = new_cells;
+}
+
+fn delete_cells_shift_left(sheet: &mut Sheet, range: Range, width: u32) {
+    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
+    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+        if addr.row >= range.start.row && addr.row <= range.end.row {
+            if addr.col >= range.start.col && addr.col <= range.end.col {
+                continue;
+            }
+            if addr.col > range.end.col {
+                new_cells.insert(
+                    CellAddr {
+                        row: addr.row,
+                        col: addr.col - width,
+                    },
+                    cell,
+                );
+            } else {
+                new_cells.insert(addr, cell);
+            }
+        } else {
+            new_cells.insert(addr, cell);
+        }
+    }
+    sheet.cells = new_cells;
+}
+
+fn delete_cells_shift_up(sheet: &mut Sheet, range: Range, height: u32) {
+    let mut new_cells = HashMap::with_capacity(sheet.cells.len());
+    for (addr, cell) in std::mem::take(&mut sheet.cells) {
+        if addr.col >= range.start.col && addr.col <= range.end.col {
+            if addr.row >= range.start.row && addr.row <= range.end.row {
+                continue;
+            }
+            if addr.row > range.end.row {
+                new_cells.insert(
+                    CellAddr {
+                        row: addr.row - height,
+                        col: addr.col,
+                    },
+                    cell,
+                );
+            } else {
+                new_cells.insert(addr, cell);
+            }
+        } else {
+            new_cells.insert(addr, cell);
+        }
+    }
+    sheet.cells = new_cells;
+}
+
+fn move_range(sheet: &mut Sheet, src: Range, dst_top_left: CellRef) {
+    let dst_top_left_addr = cell_addr_from_cell_ref(dst_top_left);
+    let dst = Range::new(
+        dst_top_left,
+        CellRef::new(
+            dst_top_left.row + src.height() - 1,
+            dst_top_left.col + src.width() - 1,
+        ),
+    );
+
+    let mut extracted: Vec<(CellRef, Option<Cell>)> = Vec::new();
+    for cell in src.iter() {
+        extracted.push((cell, sheet.cells.remove(&cell_addr_from_cell_ref(cell))));
+    }
+
+    for cell in dst.iter() {
+        sheet.cells.remove(&cell_addr_from_cell_ref(cell));
+    }
+
+    for (cell, value) in extracted {
+        let Some(value) = value else { continue };
+        let dr = cell.row - src.start.row;
+        let dc = cell.col - src.start.col;
+        sheet.cells.insert(
+            CellAddr {
+                row: dst_top_left_addr.row + dr,
+                col: dst_top_left_addr.col + dc,
+            },
+            value,
+        );
+    }
+}
+
+fn copy_range(
+    sheet: &mut Sheet,
+    sheet_name: &str,
+    src: Range,
+    dst_top_left: CellRef,
+    formula_rewrites: &mut Vec<FormulaRewrite>,
+) {
+    let dst = Range::new(
+        dst_top_left,
+        CellRef::new(
+            dst_top_left.row + src.height() - 1,
+            dst_top_left.col + src.width() - 1,
+        ),
+    );
+    let delta_row = dst.start.row as i32 - src.start.row as i32;
+    let delta_col = dst.start.col as i32 - src.start.col as i32;
+
+    let mut extracted: Vec<(CellRef, Option<Cell>)> = Vec::new();
+    for cell in src.iter() {
+        extracted.push((cell, sheet.cells.get(&cell_addr_from_cell_ref(cell)).cloned()));
+    }
+
+    for cell in dst.iter() {
+        sheet.cells.remove(&cell_addr_from_cell_ref(cell));
+    }
+
+    for (cell, value) in extracted {
+        let Some(mut value) = value else { continue };
+        let dr = cell.row - src.start.row;
+        let dc = cell.col - src.start.col;
+        let target = CellRef::new(dst.start.row + dr, dst.start.col + dc);
+
+        if let Some(formula) = &value.formula {
+            let (new_formula, _) =
+                rewrite_formula_for_copy_delta(formula, sheet_name, delta_row, delta_col);
+            if &new_formula != formula {
+                formula_rewrites.push(FormulaRewrite {
+                    sheet: sheet_name.to_string(),
+                    cell: target,
+                    before: formula.clone(),
+                    after: new_formula.clone(),
+                });
+            }
+            value.formula = Some(new_formula);
+        }
+
+        sheet.cells.insert(cell_addr_from_cell_ref(target), value);
+    }
+}
+
+fn fill_range(
+    sheet: &mut Sheet,
+    sheet_name: &str,
+    src: Range,
+    dst: Range,
+    formula_rewrites: &mut Vec<FormulaRewrite>,
+) {
+    let height = src.height() as i32;
+    let width = src.width() as i32;
+    if height <= 0 || width <= 0 {
+        return;
+    }
+
+    for cell in dst.iter() {
+        if src.contains(cell) {
+            continue;
+        }
+        sheet.cells.remove(&cell_addr_from_cell_ref(cell));
+
+        let rel_row = cell.row as i32 - src.start.row as i32;
+        let rel_col = cell.col as i32 - src.start.col as i32;
+        let src_row = src.start.row + rel_row.rem_euclid(height) as u32;
+        let src_col = src.start.col + rel_col.rem_euclid(width) as u32;
+        let src_cell = CellRef::new(src_row, src_col);
+
+        let Some(mut value) = sheet.cells.get(&cell_addr_from_cell_ref(src_cell)).cloned() else {
+            continue;
+        };
+        if let Some(formula) = &value.formula {
+            let delta_row = cell.row as i32 - src_cell.row as i32;
+            let delta_col = cell.col as i32 - src_cell.col as i32;
+            let (new_formula, _) =
+                rewrite_formula_for_copy_delta(formula, sheet_name, delta_row, delta_col);
+            if &new_formula != formula {
+                formula_rewrites.push(FormulaRewrite {
+                    sheet: sheet_name.to_string(),
+                    cell,
+                    before: formula.clone(),
+                    after: new_formula.clone(),
+                });
+            }
+            value.formula = Some(new_formula);
+        }
+        sheet.cells.insert(cell_addr_from_cell_ref(cell), value);
+    }
+}
+
+fn rewrite_all_formulas_structural(
+    workbook: &mut Workbook,
+    sheet_names: &HashMap<SheetId, String>,
+    edit: StructuralEdit,
+) -> Vec<FormulaRewrite> {
+    let mut rewrites = Vec::new();
+    for (sheet_id, sheet) in workbook.sheets.iter_mut().enumerate() {
+        let Some(ctx_sheet) = sheet_names.get(&sheet_id) else { continue };
+        for (addr, cell) in sheet.cells.iter_mut() {
+            let Some(formula) = &cell.formula else { continue };
+            let (new_formula, changed) =
+                rewrite_formula_for_structural_edit(formula, ctx_sheet, &edit);
+            if changed {
+                rewrites.push(FormulaRewrite {
+                    sheet: ctx_sheet.clone(),
+                    cell: cell_ref_from_addr(*addr),
+                    before: formula.clone(),
+                    after: new_formula.clone(),
+                });
+                cell.formula = Some(new_formula);
+            }
+        }
+    }
+    rewrites
+}
+
+fn rewrite_all_formulas_range_map(
+    workbook: &mut Workbook,
+    sheet_names: &HashMap<SheetId, String>,
+    edit: &RangeMapEdit,
+) -> Vec<FormulaRewrite> {
+    let mut rewrites = Vec::new();
+    for (sheet_id, sheet) in workbook.sheets.iter_mut().enumerate() {
+        let Some(ctx_sheet) = sheet_names.get(&sheet_id) else { continue };
+        for (addr, cell) in sheet.cells.iter_mut() {
+            let Some(formula) = &cell.formula else { continue };
+            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, edit);
+            if changed {
+                rewrites.push(FormulaRewrite {
+                    sheet: ctx_sheet.clone(),
+                    cell: cell_ref_from_addr(*addr),
+                    before: formula.clone(),
+                    after: new_formula.clone(),
+                });
+                cell.formula = Some(new_formula);
+            }
+        }
+    }
+    rewrites
+}
+
+fn diff_workbooks(
+    before: &Workbook,
+    after: &Workbook,
+    sheet_names: &HashMap<SheetId, String>,
+) -> Vec<CellChange> {
+    let mut out = Vec::new();
+    let max_sheets = max(before.sheets.len(), after.sheets.len());
+    for sheet_id in 0..max_sheets {
+        let sheet_name = sheet_names
+            .get(&sheet_id)
+            .cloned()
+            .unwrap_or_else(|| format!("Sheet{sheet_id}"));
+        let before_sheet = before.sheets.get(sheet_id);
+        let after_sheet = after.sheets.get(sheet_id);
+        let mut addrs: BTreeSet<CellAddr> = BTreeSet::new();
+        if let Some(sheet) = before_sheet {
+            addrs.extend(sheet.cells.keys().copied());
+        }
+        if let Some(sheet) = after_sheet {
+            addrs.extend(sheet.cells.keys().copied());
+        }
+        for addr in addrs {
+            let before_cell = before_sheet.and_then(|s| s.cells.get(&addr));
+            let after_cell = after_sheet.and_then(|s| s.cells.get(&addr));
+            let before_snap = before_cell.map(cell_snapshot);
+            let after_snap = after_cell.map(cell_snapshot);
+            if before_snap == after_snap {
+                continue;
+            }
+            out.push(CellChange {
+                sheet: sheet_name.clone(),
+                cell: cell_ref_from_addr(addr),
+                before: before_snap,
+                after: after_snap,
+            });
+        }
+    }
+    out
+}
+
+fn cell_snapshot(cell: &Cell) -> CellSnapshot {
+    CellSnapshot {
+        value: cell.value.clone(),
+        formula: cell.formula.clone(),
     }
 }
 
