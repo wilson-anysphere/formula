@@ -22,6 +22,13 @@ fn roundtrip_with_external_ref_and_array_literal() {
 }
 
 #[test]
+fn roundtrip_with_quoted_external_ref() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    roundtrip("='[Book Name.xlsx]Sheet 1'!A1+1", opts, ser);
+}
+
+#[test]
 fn roundtrip_with_xlfn_prefix_in_file_mode() {
     let opts = ParseOptions::default();
     let mut ser = SerializeOptions::default();

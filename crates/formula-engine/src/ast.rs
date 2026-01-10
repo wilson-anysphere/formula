@@ -710,14 +710,25 @@ fn fmt_sheet_name(out: &mut String, sheet: &str) {
 }
 
 fn fmt_ref_prefix(out: &mut String, workbook: &Option<String>, sheet: &Option<String>) {
-    if let Some(book) = workbook {
-        out.push('[');
-        out.push_str(book);
-        out.push(']');
-    }
-    if let Some(sheet) = sheet {
-        fmt_sheet_name(out, sheet);
-        out.push('!');
+    match (workbook.as_ref(), sheet.as_ref()) {
+        (Some(book), Some(sheet)) => {
+            // External references are written as `[Book.xlsx]Sheet1!A1`.
+            // Excel uses a single quoted string for the combined `[book]sheet` prefix when it
+            // contains spaces/special characters.
+            let combined = format!("[{book}]{sheet}");
+            fmt_sheet_name(out, &combined);
+            out.push('!');
+        }
+        (None, Some(sheet)) => {
+            fmt_sheet_name(out, sheet);
+            out.push('!');
+        }
+        (Some(book), None) => {
+            out.push('[');
+            out.push_str(book);
+            out.push(']');
+        }
+        (None, None) => {}
     }
 }
 

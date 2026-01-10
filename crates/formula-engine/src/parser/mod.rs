@@ -245,11 +245,23 @@ impl<'a> Lexer<'a> {
                     self.push(TokenKind::QuotedIdent(value), start, self.idx);
                 }
                 '#' => {
-                    self.bump();
-                    let rest = self.take_while(|c| !is_delim(c));
-                    let mut raw = String::from("#");
-                    raw.push_str(&rest);
-                    self.push(TokenKind::Error(raw), start, self.idx);
+                    if let Some(len) = match_error_literal(&self.src[start..]) {
+                        let end = start + len;
+                        while self.idx < end {
+                            self.bump();
+                        }
+                        let raw = self.src[start..end].to_string();
+                        self.push(TokenKind::Error(raw), start, self.idx);
+                    } else {
+                        self.bump(); // '#'
+                        let mut rest = self.take_while(is_error_body_char);
+                        if matches!(self.peek_char(), Some('!' | '?')) {
+                            rest.push(self.bump().expect("peek_char ensured char exists"));
+                        }
+                        let mut raw = String::from("#");
+                        raw.push_str(&rest);
+                        self.push(TokenKind::Error(raw), start, self.idx);
+                    }
                 }
                 '(' => {
                     self.bump();
@@ -608,33 +620,38 @@ fn is_digit(c: char) -> bool {
     matches!(c, '0'..='9')
 }
 
-fn is_delim(c: char) -> bool {
-    matches!(
-        c,
-        ' ' | '\t'
-            | '\r'
-            | '\n'
-            | '('
-            | ')'
-            | '{'
-            | '}'
-            | '['
-            | ']'
-            | '!'
-            | ':'
-            | '+'
-            | '-'
-            | '*'
-            | '/'
-            | '^'
-            | '&'
-            | '%'
-            | '='
-            | '<'
-            | '>'
-            | ','
-            | ';'
-    )
+const ERROR_LITERALS: &[&str] = &[
+    "#NULL!",
+    "#DIV/0!",
+    "#VALUE!",
+    "#REF!",
+    "#NAME?",
+    "#NUM!",
+    "#N/A",
+    "#GETTING_DATA",
+    "#SPILL!",
+    "#CALC!",
+    "#FIELD!",
+    "#CONNECT!",
+    "#BLOCKED!",
+    "#UNKNOWN!",
+];
+
+fn match_error_literal(input: &str) -> Option<usize> {
+    let mut best: Option<usize> = None;
+    for &lit in ERROR_LITERALS {
+        if input
+            .get(..lit.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(lit))
+        {
+            best = Some(best.map_or(lit.len(), |cur| cur.max(lit.len())));
+        }
+    }
+    best
+}
+
+fn is_error_body_char(c: char) -> bool {
+    matches!(c, '_' | '/' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9')
 }
 
 fn prev_significant(tokens: &[Token], idx: usize) -> Option<usize> {
@@ -945,7 +962,7 @@ impl<'a> Parser<'a> {
                 self.skip_trivia();
                 if matches!(self.peek_kind(), TokenKind::Bang) {
                     self.next();
-                    Some(name)
+                    Some(split_external_sheet_name(&name))
                 } else {
                     self.pos = save_pos;
                     None
@@ -954,8 +971,8 @@ impl<'a> Parser<'a> {
             _ => None,
         };
 
-        if let Some(sheet) = sheet_prefix {
-            return match self.parse_ref_after_prefix(None, Some(sheet)) {
+        if let Some((workbook, sheet)) = sheet_prefix {
+            return match self.parse_ref_after_prefix(workbook, Some(sheet)) {
                 Ok(e) => e,
                 Err(err) => {
                     self.record_error(err);
@@ -1247,7 +1264,8 @@ impl<'a> Parser<'a> {
                 self.skip_trivia();
                 if matches!(self.peek_kind(), TokenKind::Bang) {
                     self.next();
-                    (None, Some(name))
+                    let (workbook, sheet) = split_external_sheet_name(&name);
+                    (workbook, Some(sheet))
                 } else {
                     self.pos = save_pos;
                     (None, None)
@@ -1736,4 +1754,20 @@ fn parse_row_number_literal(raw: &str) -> Option<u32> {
         return None;
     }
     Some(row - 1)
+}
+
+fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
+    let Some(rest) = name.strip_prefix('[') else {
+        return (None, name.to_string());
+    };
+    let Some(end) = rest.find(']') else {
+        return (None, name.to_string());
+    };
+    let workbook = rest[..end].to_string();
+    let sheet = rest[end + 1..].to_string();
+    if sheet.is_empty() {
+        (None, name.to_string())
+    } else {
+        (Some(workbook), sheet)
+    }
 }
