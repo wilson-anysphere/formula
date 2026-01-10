@@ -1,0 +1,160 @@
+/**
+ * @typedef {{
+ *   isFormula: boolean,
+ *   inFunctionCall: boolean,
+ *   functionName?: string,
+ *   argIndex?: number,
+ *   expectingRange?: boolean,
+ *   functionNamePrefix?: { text: string, start: number, end: number },
+ *   currentArg?: { text: string, start: number, end: number }
+ * }} PartialFormulaContext
+ */
+
+/**
+ * Extremely lightweight "partial parser" used for tab-completion.
+ *
+ * This is not a full Excel parser. It exists solely to answer questions like:
+ * - Are we currently inside a function call?
+ * - What is the function name?
+ * - Which argument index are we on?
+ * - Does that argument typically want a range?
+ *
+ * @param {string} input
+ * @param {number} cursorPosition
+ * @param {{ isRangeArg: (fnName: string, argIndex: number) => boolean }} functionRegistry
+ * @returns {PartialFormulaContext}
+ */
+export function parsePartialFormula(input, cursorPosition, functionRegistry) {
+  const safeCursor = clampCursor(input, cursorPosition);
+  const prefix = input.slice(0, safeCursor);
+
+  if (!prefix.startsWith("=")) {
+    return { isFormula: false, inFunctionCall: false };
+  }
+
+  // Scan for unbalanced parentheses in the prefix to determine whether the
+  // cursor is currently inside a (...) argument list.
+  /** @type {number[]} */
+  const openParens = [];
+  for (let i = 0; i < prefix.length; i++) {
+    const ch = prefix[i];
+    if (ch === "(") {
+      openParens.push(i);
+    } else if (ch === ")") {
+      openParens.pop();
+    }
+  }
+
+  if (openParens.length === 0) {
+    // Not in a function call; still might be typing a function name.
+    const functionPrefix = findTokenAtCursor(prefix, safeCursor);
+    if (functionPrefix && functionPrefix.text.length > 0) {
+      return {
+        isFormula: true,
+        inFunctionCall: false,
+        functionNamePrefix: functionPrefix,
+      };
+    }
+    return { isFormula: true, inFunctionCall: false };
+  }
+
+  const openParenIndex = openParens[openParens.length - 1];
+  const fnName = findFunctionNameBeforeParen(prefix, openParenIndex);
+  const argContext = getArgContext(prefix, openParenIndex, safeCursor);
+
+  return {
+    isFormula: true,
+    inFunctionCall: Boolean(fnName),
+    functionName: fnName ?? undefined,
+    argIndex: argContext.argIndex,
+    currentArg: argContext.currentArg,
+    expectingRange: Boolean(fnName && functionRegistry?.isRangeArg?.(fnName, argContext.argIndex)),
+  };
+}
+
+function clampCursor(input, cursorPosition) {
+  const len = typeof input === "string" ? input.length : 0;
+  if (!Number.isInteger(cursorPosition)) return len;
+  if (cursorPosition < 0) return 0;
+  if (cursorPosition > len) return len;
+  return cursorPosition;
+}
+
+/**
+ * Finds a plausible function name token immediately preceding the given '('.
+ * @param {string} input
+ * @param {number} openParenIndex
+ * @returns {string | null}
+ */
+function findFunctionNameBeforeParen(input, openParenIndex) {
+  let i = openParenIndex - 1;
+  while (i >= 0 && /\s/.test(input[i])) i--;
+  const end = i + 1;
+  while (i >= 0 && /[A-Za-z0-9._]/.test(input[i])) i--;
+  const start = i + 1;
+  const token = input.slice(start, end);
+  if (!token) return null;
+  // Avoid returning something that is obviously a cell ref like "A1".
+  if (/^[A-Za-z]{1,3}\d+$/.test(token)) return null;
+  return token.toUpperCase();
+}
+
+/**
+ * Determine current argument index and span inside the current function call.
+ * @param {string} input
+ * @param {number} openParenIndex
+ * @param {number} cursorPosition
+ */
+function getArgContext(input, openParenIndex, cursorPosition) {
+  const baseDepth = 1;
+  let depth = baseDepth;
+  let argIndex = 0;
+  let lastCommaIndex = -1;
+
+  for (let i = openParenIndex + 1; i < cursorPosition; i++) {
+    const ch = input[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(baseDepth, depth - 1);
+    else if (ch === "," && depth === baseDepth) {
+      argIndex++;
+      lastCommaIndex = i;
+    }
+  }
+
+  let rawStart = lastCommaIndex === -1 ? openParenIndex + 1 : lastCommaIndex + 1;
+  let start = rawStart;
+  while (start < cursorPosition && /\s/.test(input[start])) start++;
+  const currentArg = {
+    start,
+    end: cursorPosition,
+    text: input.slice(start, cursorPosition),
+  };
+
+  return { argIndex, currentArg };
+}
+
+/**
+ * Finds the last token ending at cursor for function-name completion.
+ * @param {string} inputPrefix prefix up to cursor
+ * @param {number} cursorPosition
+ * @returns {{text:string,start:number,end:number} | null}
+ */
+function findTokenAtCursor(inputPrefix, cursorPosition) {
+  // When completing function names we look at the token at cursor in the formula.
+  // Example: "=VLO" => token "VLO" spanning [1, 4).
+  let i = cursorPosition - 1;
+  while (i >= 0 && /[A-Za-z0-9._]/.test(inputPrefix[i])) i--;
+  const start = i + 1;
+  const end = cursorPosition;
+  const text = inputPrefix.slice(start, end);
+
+  // Must be preceded by '=' or an operator/whitespace.
+  const before = start - 1 >= 0 ? inputPrefix[start - 1] : "";
+  if (before && !/[=\s(,+\-*/^]/.test(before)) return null;
+
+  if (!text) return null;
+  if (/^\d+$/.test(text)) return null;
+  // Avoid treating cell references (A1, BC23, etc.) as function name prefixes.
+  if (/^\$?[A-Za-z]{1,3}\$?\d+$/.test(text)) return null;
+  return { text, start, end };
+}
