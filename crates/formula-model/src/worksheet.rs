@@ -50,7 +50,7 @@ pub struct ColProperties {
 }
 
 /// A worksheet (sheet tab) containing sparse cells and per-row/column metadata.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Worksheet {
     /// Stable worksheet identifier.
     pub id: WorksheetId,
@@ -230,27 +230,76 @@ impl Worksheet {
     }
 
     fn recompute_used_range(&mut self) {
-        let mut iter = self.cells.keys();
-        let Some(first) = iter.next().copied() else {
-            self.used_range = None;
-            return;
-        };
+        self.used_range = compute_used_range(&self.cells);
+    }
+}
 
-        let mut min_row = first.row();
-        let mut max_row = first.row();
-        let mut min_col = first.col();
-        let mut max_col = first.col();
-
-        for key in iter.copied() {
-            min_row = min_row.min(key.row());
-            max_row = max_row.max(key.row());
-            min_col = min_col.min(key.col());
-            max_col = max_col.max(key.col());
+impl<'de> Deserialize<'de> for Worksheet {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Helper {
+            id: WorksheetId,
+            name: String,
+            #[serde(default)]
+            cells: HashMap<CellKey, Cell>,
+            #[serde(default = "default_row_count")]
+            row_count: u32,
+            #[serde(default = "default_col_count")]
+            col_count: u32,
+            #[serde(default)]
+            row_properties: BTreeMap<u32, RowProperties>,
+            #[serde(default)]
+            col_properties: BTreeMap<u32, ColProperties>,
+            #[serde(default)]
+            frozen_rows: u32,
+            #[serde(default)]
+            frozen_cols: u32,
+            #[serde(default = "default_zoom")]
+            zoom: f32,
         }
 
-        self.used_range = Some(Range::new(
-            CellRef::new(min_row, min_col),
-            CellRef::new(max_row, max_col),
-        ));
+        let helper = Helper::deserialize(deserializer)?;
+        let used_range = compute_used_range(&helper.cells);
+
+        Ok(Worksheet {
+            id: helper.id,
+            name: helper.name,
+            cells: helper.cells,
+            used_range,
+            row_count: helper.row_count,
+            col_count: helper.col_count,
+            row_properties: helper.row_properties,
+            col_properties: helper.col_properties,
+            frozen_rows: helper.frozen_rows,
+            frozen_cols: helper.frozen_cols,
+            zoom: helper.zoom,
+        })
     }
+}
+
+fn compute_used_range(cells: &HashMap<CellKey, Cell>) -> Option<Range> {
+    let mut iter = cells.keys();
+    let Some(first) = iter.next().copied() else {
+        return None;
+    };
+
+    let mut min_row = first.row();
+    let mut max_row = first.row();
+    let mut min_col = first.col();
+    let mut max_col = first.col();
+
+    for key in iter.copied() {
+        min_row = min_row.min(key.row());
+        max_row = max_row.max(key.row());
+        min_col = min_col.min(key.col());
+        max_col = max_col.max(key.col());
+    }
+
+    Some(Range::new(
+        CellRef::new(min_row, min_col),
+        CellRef::new(max_row, max_col),
+    ))
 }

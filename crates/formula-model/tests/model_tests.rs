@@ -51,6 +51,23 @@ fn used_range_updates_on_set_and_clear() {
 }
 
 #[test]
+fn used_range_is_recomputed_on_deserialize() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+
+    let a = CellRef::new(5, 2);
+    let b = CellRef::new(1, 10);
+    sheet.set_value(a, CellValue::Number(1.0));
+    sheet.set_value(b, CellValue::Boolean(true));
+
+    let mut json = serde_json::to_value(&sheet).unwrap();
+    let obj = json.as_object_mut().unwrap();
+    obj.remove("used_range");
+
+    let deserialized: Worksheet = serde_json::from_value(json).unwrap();
+    assert_eq!(deserialized.used_range(), sheet.used_range());
+}
+
+#[test]
 fn cell_key_encoding_round_trips() {
     for &(row, col) in &[
         (0, 0),
