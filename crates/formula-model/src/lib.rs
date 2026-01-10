@@ -7,6 +7,7 @@
 
 mod address;
 mod cell;
+pub mod charts;
 mod comments;
 mod display;
 pub mod conditional_formatting;

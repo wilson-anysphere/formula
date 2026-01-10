@@ -1009,7 +1009,7 @@ dependencies = [
  "anyhow",
  "calamine",
  "formula-xlsx",
- "rust_xlsxwriter",
+ "rust_xlsxwriter 0.79.4",
  "serde",
  "serde_json",
  "tauri",
@@ -1112,6 +1112,7 @@ dependencies = [
  "pretty_assertions",
  "quick-xml 0.37.5",
  "roxmltree",
+ "rust_xlsxwriter 0.64.2",
  "tempfile",
  "thiserror 1.0.69",
  "zip 2.4.2",
@@ -3139,6 +3140,17 @@ dependencies = [
  "libsqlite3-sys",
  "serde_json",
  "smallvec",
+]
+
+[[package]]
+name = "rust_xlsxwriter"
+version = "0.64.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5f47f5318c1e512e57c07781559367577b1eb9618325cf1574cd30d38b112c5"
+dependencies = [
+ "lazy_static",
+ "regex",
+ "zip 0.6.6",
 ]
 
 [[package]]

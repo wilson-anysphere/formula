@@ -37,6 +37,7 @@ impl XlsxPackage {
             if !file.is_file() {
                 continue;
             }
+
             let mut buf = Vec::new();
             file.read_to_end(&mut buf)?;
             parts.insert(file.name().to_string(), buf);
@@ -53,6 +54,10 @@ impl XlsxPackage {
         self.parts
             .iter()
             .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+    }
+
+    pub fn part_names(&self) -> impl Iterator<Item = &str> {
+        self.parts.keys().map(String::as_str)
     }
 
     pub fn set_part(&mut self, name: impl Into<String>, bytes: Vec<u8>) {

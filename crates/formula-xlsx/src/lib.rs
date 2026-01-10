@@ -8,7 +8,13 @@
 //! - Optionally parse `vbaProject.bin` to expose modules for UI display.
 
 mod package;
+mod path;
+mod relationships;
+mod workbook;
+
+pub mod charts;
 pub mod comments;
+pub mod drawingml;
 pub mod outline;
 pub mod pivots;
 pub mod print;
@@ -22,3 +28,4 @@ pub use conditional_formatting::*;
 pub use package::{XlsxError, XlsxPackage};
 pub use pivots::{PivotCacheDefinitionPart, PivotCacheRecordsPart, PivotTablePart, XlsxPivots};
 pub use styles::*;
+pub use workbook::ChartExtractionError;
