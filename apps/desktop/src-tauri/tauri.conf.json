@@ -13,6 +13,9 @@
     "allowlist": {
       "all": false
     },
+    "security": {
+      "csp": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'"
+    },
     "windows": [
       {
         "title": "Formula",
@@ -23,4 +26,3 @@
     ]
   }
 }
-
