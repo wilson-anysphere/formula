@@ -1,0 +1,162 @@
+export type SuggestionType = "formula" | "value" | "function_arg" | "range";
+
+export interface Suggestion {
+  text: string;
+  displayText: string;
+  type: SuggestionType;
+  confidence: number;
+  preview?: unknown;
+}
+
+export interface CellRefObject {
+  row: number;
+  col: number;
+}
+
+export type CellRef = CellRefObject | string;
+
+export interface SurroundingCellsContext {
+  getCellValue: (row: number, col: number) => unknown;
+  getCacheKey?: () => string;
+}
+
+export interface CompletionContext {
+  currentInput: string;
+  cursorPosition: number;
+  cellRef: CellRef;
+  surroundingCells: SurroundingCellsContext;
+}
+
+export class TabCompletionEngine {
+  constructor(options?: {
+    functionRegistry?: FunctionRegistry;
+    parsePartialFormula?: typeof parsePartialFormula;
+    localModel?: { complete: (prompt: string, options?: unknown) => Promise<string> } | null;
+    cache?: LRUCache<Suggestion[]>;
+    cacheSize?: number;
+    maxSuggestions?: number;
+    localModelTimeoutMs?: number;
+  });
+
+  getSuggestions(context: CompletionContext): Promise<Suggestion[]>;
+  buildCacheKey(context: CompletionContext): string;
+}
+
+export type ArgType = "range" | "value" | "number" | "string" | "boolean" | "any";
+
+export interface FunctionArgSpec {
+  name: string;
+  type: ArgType;
+  optional?: boolean;
+  repeating?: boolean;
+}
+
+export interface FunctionSpec {
+  name: string;
+  description?: string;
+  args: FunctionArgSpec[];
+}
+
+export class FunctionRegistry {
+  constructor(functions?: FunctionSpec[]);
+  register(spec: FunctionSpec): void;
+  list(): FunctionSpec[];
+  getFunction(name: string): FunctionSpec | undefined;
+  search(prefix: string, options?: { limit?: number }): FunctionSpec[];
+  getArgType(functionName: string, argIndex: number): ArgType | undefined;
+  isRangeArg(functionName: string, argIndex: number): boolean;
+}
+
+export interface PartialFormulaContext {
+  isFormula: boolean;
+  inFunctionCall: boolean;
+  functionName?: string;
+  argIndex?: number;
+  expectingRange?: boolean;
+  functionNamePrefix?: { text: string; start: number; end: number };
+  currentArg?: { text: string; start: number; end: number };
+}
+
+export function parsePartialFormula(
+  input: string,
+  cursorPosition: number,
+  functionRegistry: { isRangeArg: (fnName: string, argIndex: number) => boolean }
+): PartialFormulaContext;
+
+export class LRUCache<V = unknown> {
+  constructor(maxEntries?: number);
+  has(key: string): boolean;
+  get(key: string): V | undefined;
+  set(key: string, value: V): void;
+  delete(key: string): boolean;
+  clear(): void;
+  readonly size: number;
+}
+
+export interface CompletionOptions {
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+  stop?: string[];
+  timeoutMs?: number;
+}
+
+export class LocalModelManager {
+  constructor(params: {
+    ollamaClient: {
+      health: () => Promise<boolean>;
+      hasModel: (name: string) => Promise<boolean>;
+      pullModel: (name: string) => Promise<void>;
+      generate: (params: unknown) => Promise<unknown>;
+    };
+    requiredModels?: string[];
+    defaultModel?: string;
+    cacheSize?: number;
+  });
+
+  initialize(): Promise<void>;
+  complete(prompt: string, options?: CompletionOptions): Promise<string>;
+}
+
+export class OllamaClient {
+  constructor(options?: { baseUrl?: string; fetchImpl?: typeof fetch; timeoutMs?: number });
+  health(): Promise<boolean>;
+  listModels(): Promise<unknown[]>;
+  hasModel(modelName: string): Promise<boolean>;
+  pullModel(modelName: string): Promise<void>;
+  generate(params: { model: string; prompt: string; options?: Record<string, unknown>; stream?: boolean }): Promise<unknown>;
+}
+
+export interface RangeSuggestion {
+  range: string;
+  confidence: number;
+  reason: string;
+}
+
+export function suggestRanges(params: {
+  currentArgText: string;
+  cellRef: CellRef;
+  surroundingCells: SurroundingCellsContext;
+  maxScanRows?: number;
+}): RangeSuggestion[];
+
+export interface PatternSuggestion {
+  text: string;
+  confidence: number;
+}
+
+export function suggestPatternValues(params: {
+  currentInput: string;
+  cursorPosition: number;
+  cellRef: CellRef;
+  surroundingCells: SurroundingCellsContext;
+  maxScanRows?: number;
+}): PatternSuggestion[];
+
+export function columnIndexToLetter(index: number): string;
+export function columnLetterToIndex(letters: string): number;
+export function normalizeCellRef(cellRef: CellRef): CellRefObject;
+export function toA1(ref: CellRefObject): string;
+export function parseA1(a1: string): CellRefObject | null;
+export function isEmptyCell(value: unknown): boolean;
+

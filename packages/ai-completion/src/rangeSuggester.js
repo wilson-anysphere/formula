@@ -118,8 +118,8 @@ function findContiguousBlockAbove(ctx, col, fromRow, maxScanRows) {
   }
   startRow++;
 
-  const metrics = computeNumericRatio(ctx, col, startRow, endRow);
-  return { startRow, endRow, numericRatio: metrics.numericRatio };
+  const trimmed = trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow);
+  return { startRow: trimmed.startRow, endRow: trimmed.endRow, numericRatio: trimmed.numericRatio };
 }
 
 /**
@@ -141,21 +141,58 @@ function findContiguousBlockDown(ctx, col, startRow, maxScanRows) {
     scanned++;
   }
 
-  const metrics = computeNumericRatio(ctx, col, startRow, endRow);
+  const metrics = computeNumericStats(ctx, col, startRow, endRow);
   return { startRow, endRow, numericRatio: metrics.numericRatio };
 }
 
-function computeNumericRatio(ctx, col, startRow, endRow) {
+function trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow) {
+  const stats = computeNumericStats(ctx, col, startRow, endRow);
+  // Heuristic: if the range is almost entirely numeric, treat non-numeric cells
+  // at the edges as headers/footers and trim them (common in tables with a text
+  // header row).
+  if (stats.numericCount < 2) return stats;
+  if (stats.numericCount < stats.totalCount - 2) return stats;
+
+  let trimmedStart = startRow;
+  let trimmedEnd = endRow;
+
+  while (trimmedStart < trimmedEnd && !isNumericValue(ctx.getCellValue(trimmedStart, col))) {
+    trimmedStart++;
+  }
+  while (trimmedEnd > trimmedStart && !isNumericValue(ctx.getCellValue(trimmedEnd, col))) {
+    trimmedEnd--;
+  }
+
+  if (trimmedStart === startRow && trimmedEnd === endRow) return stats;
+  return computeNumericStats(ctx, col, trimmedStart, trimmedEnd);
+}
+
+function computeNumericStats(ctx, col, startRow, endRow) {
   let numeric = 0;
   let total = 0;
   for (let r = startRow; r <= endRow; r++) {
     const v = ctx.getCellValue(r, col);
     if (isEmptyCell(v)) continue;
     total++;
-    if (typeof v === "number" && Number.isFinite(v)) numeric++;
-    else if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) numeric++;
+    if (isNumericValue(v)) numeric++;
   }
-  return { numericRatio: total === 0 ? 0 : numeric / total };
+  return {
+    startRow,
+    endRow,
+    numericCount: numeric,
+    totalCount: total,
+    numericRatio: total === 0 ? 0 : numeric / total,
+  };
+}
+
+function isNumericValue(value) {
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return false;
+    return Number.isFinite(Number(trimmed));
+  }
+  return false;
 }
 
 function clamp01(v) {

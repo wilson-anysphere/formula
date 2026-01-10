@@ -30,3 +30,20 @@ test("suggestRanges returns contiguous range above current cell for a column pre
 
   assert.equal(suggestions[0].range, "A1:A3");
 });
+
+test("suggestRanges trims non-numeric header rows when the range is mostly numeric", () => {
+  const ctx = createColumnAContext([
+    [0, "Header"],
+    [1, 10],
+    [2, 20],
+    [3, 30],
+  ]);
+
+  const suggestions = suggestRanges({
+    currentArgText: "A",
+    cellRef: { row: 4, col: 0 }, // row 5, below data
+    surroundingCells: ctx,
+  });
+
+  assert.equal(suggestions[0].range, "A2:A4");
+});
