@@ -1,0 +1,49 @@
+export type Role = "system" | "user" | "assistant" | "tool";
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: any;
+}
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: any;
+  requiresApproval?: boolean;
+}
+
+export type LLMMessage =
+  | {
+      role: "system" | "user" | "assistant";
+      content: string;
+      toolCalls?: ToolCall[];
+    }
+  | {
+      role: "tool";
+      toolCallId: string;
+      content: string;
+    };
+
+export interface LLMClient {
+  chat: (request: any) => Promise<{ message: { role: "assistant"; content: string; toolCalls?: ToolCall[] } }>;
+}
+
+export interface ToolExecutor {
+  tools: ToolDefinition[];
+  execute: (call: ToolCall) => Promise<any>;
+}
+
+export function runChatWithTools(params: {
+  client: LLMClient;
+  toolExecutor: ToolExecutor;
+  messages: LLMMessage[];
+  maxIterations?: number;
+  onToolCall?: (call: ToolCall, meta: { requiresApproval: boolean }) => void;
+  onToolResult?: (call: ToolCall, result: unknown) => void;
+  requireApproval?: (call: ToolCall) => Promise<boolean>;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+}): Promise<{ messages: LLMMessage[]; final: string }>;
+
