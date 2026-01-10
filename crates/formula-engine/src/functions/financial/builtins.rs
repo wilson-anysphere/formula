@@ -562,6 +562,38 @@ fn irr_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "MIRR",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: mirr_fn,
+    }
+}
+
+fn mirr_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_irr_values_from_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let finance_rate = match eval_number_arg(ctx, &args[1]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let reinvest_rate = match eval_number_arg(ctx, &args[2]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(super::mirr(&values, finance_rate, reinvest_rate))
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "XNPV",
         min_args: 3,
         max_args: 3,

@@ -39,6 +39,56 @@ pub fn irr(values: &[f64], guess: Option<f64>) -> ExcelResult<f64> {
     newton_raphson(guess, MAX_ITER_IRR, f, df).ok_or(ExcelError::Num)
 }
 
+/// Modified internal rate of return.
+pub fn mirr(values: &[f64], finance_rate: f64, reinvest_rate: f64) -> ExcelResult<f64> {
+    if values.len() < 2 {
+        return Err(ExcelError::Div0);
+    }
+
+    if finance_rate == -1.0 || reinvest_rate == -1.0 {
+        return Err(ExcelError::Div0);
+    }
+    if finance_rate < -1.0 || reinvest_rate < -1.0 {
+        return Err(ExcelError::Num);
+    }
+
+    let has_positive = values.iter().any(|v| *v > 0.0);
+    let has_negative = values.iter().any(|v| *v < 0.0);
+    if !has_positive || !has_negative {
+        return Err(ExcelError::Div0);
+    }
+
+    let n = values.len() as i32;
+    let mut pv_neg = 0.0;
+    let mut fv_pos = 0.0;
+
+    for (t, v) in values.iter().enumerate() {
+        let t = t as i32;
+        if *v < 0.0 {
+            pv_neg += *v / (1.0 + finance_rate).powi(t);
+        } else if *v > 0.0 {
+            fv_pos += *v * (1.0 + reinvest_rate).powi(n - 1 - t);
+        }
+    }
+
+    if pv_neg == 0.0 || fv_pos == 0.0 {
+        return Err(ExcelError::Div0);
+    }
+
+    let ratio = fv_pos / (-pv_neg);
+    if ratio <= 0.0 || !ratio.is_finite() {
+        return Err(ExcelError::Num);
+    }
+
+    let exponent = 1.0 / ((values.len() - 1) as f64);
+    let result = ratio.powf(exponent) - 1.0;
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(ExcelError::Num)
+    }
+}
+
 fn irr_npv(values: &[f64], rate: f64) -> Option<f64> {
     if rate <= -1.0 {
         return None;

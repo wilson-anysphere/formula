@@ -1,5 +1,5 @@
 use formula_engine::error::ExcelError;
-use formula_engine::functions::financial::{irr, npv, xirr, xnpv};
+use formula_engine::functions::financial::{irr, mirr, npv, xirr, xnpv};
 
 fn assert_close(actual: f64, expected: f64, tol: f64) {
     assert!(
@@ -55,4 +55,19 @@ fn xirr_input_length_mismatch_is_value_error() {
     let values = [1.0, -2.0];
     let dates = [0.0];
     assert_eq!(xirr(&values, &dates, None), Err(ExcelError::Num));
+}
+
+#[test]
+fn mirr_matches_excel_example() {
+    // Excel docs example:
+    // MIRR({-120000, 39000, 30000, 21000, 37000, 46000}, 0.10, 0.12) -> 0.1260941304
+    let values = [-120_000.0, 39_000.0, 30_000.0, 21_000.0, 37_000.0, 46_000.0];
+    let result = mirr(&values, 0.10, 0.12).unwrap();
+    assert_close(result, 0.1260941303659051, 1e-12);
+}
+
+#[test]
+fn mirr_requires_sign_change() {
+    let values = [1.0, 2.0, 3.0];
+    assert_eq!(mirr(&values, 0.1, 0.1), Err(ExcelError::Div0));
 }

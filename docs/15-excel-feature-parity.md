@@ -389,7 +389,7 @@ This document tracks every Excel feature and our implementation status. Features
 | IRR | ✅ | P0 |
 | ISPMT | ⬜ | |
 | MDURATION | ⬜ | |
-| MIRR | ⬜ | |
+| MIRR | ✅ | |
 | NOMINAL | ⬜ | |
 | NPER | ✅ | |
 | NPV | ✅ | P0 |

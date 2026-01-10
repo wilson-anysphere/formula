@@ -85,6 +85,16 @@ fn evaluates_cashflow_financial_functions() {
         .set_cell_formula("Sheet1", "B4", "=XIRR(D1:D5, E1:E5)")
         .unwrap();
 
+    // MIRR example from Excel docs.
+    let mirr_values = [-120_000.0, 39_000.0, 30_000.0, 21_000.0, 37_000.0, 46_000.0];
+    for (i, v) in mirr_values.iter().enumerate() {
+        let addr = format!("F{}", i + 1);
+        engine.set_cell_value("Sheet1", &addr, *v).unwrap();
+    }
+    engine
+        .set_cell_formula("Sheet1", "B5", "=MIRR(F1:F6, 0.1, 0.12)")
+        .unwrap();
+
     engine.recalculate();
 
     assert_close(
@@ -108,6 +118,12 @@ fn evaluates_cashflow_financial_functions() {
         0.3733625335188314,
         1e-12,
     );
+
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "B5")),
+        0.1260941303659051,
+        1e-12,
+    );
 }
 
 #[test]
@@ -127,6 +143,12 @@ fn xirr_xnpv_length_mismatch_returns_num_error() {
 
     engine.recalculate();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Error(ErrorKind::Num));
-    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Error(ErrorKind::Num));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C2"),
+        Value::Error(ErrorKind::Num)
+    );
 }
