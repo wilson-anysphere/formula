@@ -126,7 +126,18 @@ fn registry() -> &'static HashMap<String, &'static FunctionSpec> {
 }
 
 pub fn lookup_function(name: &str) -> Option<&'static FunctionSpec> {
-    registry().get(&name.to_ascii_uppercase()).copied()
+    let upper = name.to_ascii_uppercase();
+    if let Some(spec) = registry().get(&upper).copied() {
+        return Some(spec);
+    }
+
+    // Excel stores newer functions in files with an `_xlfn.` prefix (e.g. `_xlfn.XLOOKUP`).
+    // For evaluation we treat these as aliases of the unprefixed built-in.
+    if let Some(stripped) = upper.strip_prefix("_XLFN.") {
+        return registry().get(stripped).copied();
+    }
+
+    None
 }
 
 pub fn call_function(ctx: &dyn FunctionContext, name: &str, args: &[CompiledExpr]) -> Value {

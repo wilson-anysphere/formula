@@ -34,6 +34,38 @@ fn xlookup_returns_if_not_found_when_provided() {
 }
 
 #[test]
+fn xmatch_and_xlookup_work_in_formulas_and_accept_xlfn_prefix() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Text("A".to_string()));
+    sheet.set("A2", Value::Text("b".to_string()));
+    sheet.set("A3", Value::Text("C".to_string()));
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 20.0);
+    sheet.set("B3", 30.0);
+
+    assert_eq!(sheet.eval("=XMATCH(\"B\", A1:A3)"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=_xlfn.XMATCH(\"B\", A1:A3)"), Value::Number(2.0));
+
+    assert_eq!(
+        sheet.eval("=XLOOKUP(\"B\", A1:A3, B1:B3)"),
+        Value::Number(20.0)
+    );
+    assert_eq!(
+        sheet.eval("=_xlfn.XLOOKUP(\"B\", A1:A3, B1:B3)"),
+        Value::Number(20.0)
+    );
+
+    assert_eq!(
+        sheet.eval("=XLOOKUP(\"missing\", A1:A3, B1:B3, \"no\")"),
+        Value::Text("no".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=XLOOKUP(\"missing\", A1:A3, B1:B3)"),
+        Value::Error(ErrorKind::NA)
+    );
+}
+
+#[test]
 fn vlookup_exact_match_and_errors() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);
@@ -104,4 +136,3 @@ fn index_and_match() {
     assert_eq!(sheet.eval("=MATCH(4, B2:B5, -1)"), Value::Number(2.0));
     assert_eq!(sheet.eval("=MATCH(11, B2:B5, -1)"), Value::Error(ErrorKind::NA));
 }
-

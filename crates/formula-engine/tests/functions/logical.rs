@@ -90,3 +90,18 @@ fn parser_preserves_original_function_name_for_display() {
     }
 }
 
+#[test]
+fn parser_strips_xlfn_prefix_for_lookup_but_preserves_original() {
+    let expr = eval::Parser::parse("=_xlfn.XLOOKUP(1,2,3)").unwrap();
+    match expr {
+        eval::Expr::FunctionCall {
+            name,
+            original_name,
+            ..
+        } => {
+            assert_eq!(name, "XLOOKUP");
+            assert_eq!(original_name, "_xlfn.XLOOKUP");
+        }
+        other => panic!("expected function call, got {other:?}"),
+    }
+}

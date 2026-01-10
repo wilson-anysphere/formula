@@ -224,7 +224,11 @@ impl ParserImpl {
 
     fn parse_function_call(&mut self) -> Result<ParsedExpr, FormulaParseError> {
         let (name, original_name) = match self.next() {
-            Token::Ident(s) => (s.to_ascii_uppercase(), s),
+            Token::Ident(s) => {
+                let upper = s.to_ascii_uppercase();
+                let base = upper.strip_prefix("_XLFN.").unwrap_or(&upper).to_string();
+                (base, s)
+            }
             other => {
                 return Err(FormulaParseError::Expected {
                     expected: "identifier".to_string(),

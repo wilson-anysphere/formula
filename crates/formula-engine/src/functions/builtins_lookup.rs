@@ -1,6 +1,7 @@
 use crate::eval::CompiledExpr;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
+use crate::functions::lookup;
 use crate::value::{ErrorKind, Value};
 
 inventory::submit! {
@@ -233,6 +234,132 @@ fn match_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "XMATCH",
+        min_args: 2,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: xmatch_fn,
+    }
+}
+
+fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let lookup_value = eval_scalar_arg(ctx, &args[0]);
+    if let Value::Error(e) = lookup_value {
+        return Value::Error(e);
+    }
+
+    let lookup_range = match ctx.eval_arg(&args[1]) {
+        ArgValue::Reference(r) => r.normalized(),
+        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+    };
+
+    // Only the most common XMATCH mode is implemented for now:
+    // - match_mode = 0 (exact)
+    // - search_mode = 1 (first-to-last)
+    if let Some(expr) = args.get(2) {
+        let mode = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        if mode != 0 {
+            return Value::Error(ErrorKind::Value);
+        }
+    }
+    if let Some(expr) = args.get(3) {
+        let mode = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        if mode != 1 {
+            return Value::Error(ErrorKind::Value);
+        }
+    }
+
+    let values = match flatten_1d_values(ctx, lookup_range) {
+        Some(values) => values,
+        None => return Value::Error(ErrorKind::Value),
+    };
+
+    match lookup::xmatch(&lookup_value, &values) {
+        Ok(pos) => Value::Number(pos as f64),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "XLOOKUP",
+        min_args: 3,
+        max_args: 6,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any],
+        implementation: xlookup_fn,
+    }
+}
+
+fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let lookup_value = eval_scalar_arg(ctx, &args[0]);
+    if let Value::Error(e) = lookup_value {
+        return Value::Error(e);
+    }
+
+    let lookup_range = match ctx.eval_arg(&args[1]) {
+        ArgValue::Reference(r) => r.normalized(),
+        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+    };
+    let return_range = match ctx.eval_arg(&args[2]) {
+        ArgValue::Reference(r) => r.normalized(),
+        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+    };
+
+    let if_not_found = args.get(3).map(|expr| eval_scalar_arg(ctx, expr));
+
+    // Only the most common XLOOKUP mode is implemented for now:
+    // - match_mode = 0 (exact)
+    // - search_mode = 1 (first-to-last)
+    if let Some(expr) = args.get(4) {
+        let mode = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        if mode != 0 {
+            return Value::Error(ErrorKind::Value);
+        }
+    }
+    if let Some(expr) = args.get(5) {
+        let mode = match eval_scalar_arg(ctx, expr).coerce_to_i64() {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        if mode != 1 {
+            return Value::Error(ErrorKind::Value);
+        }
+    }
+
+    let lookup_values = match flatten_1d_values(ctx, lookup_range) {
+        Some(values) => values,
+        None => return Value::Error(ErrorKind::Value),
+    };
+    let return_values = match flatten_1d_values(ctx, return_range) {
+        Some(values) => values,
+        None => return Value::Error(ErrorKind::Value),
+    };
+
+    match lookup::xlookup(&lookup_value, &lookup_values, &return_values, if_not_found) {
+        Ok(v) => v,
+        Err(e) => Value::Error(e),
+    }
+}
+
 fn flatten_1d(r: Reference) -> Option<Vec<crate::eval::CellAddr>> {
     if r.start.row == r.end.row {
         let cols = r.start.col..=r.end.col;
@@ -243,6 +370,17 @@ fn flatten_1d(r: Reference) -> Option<Vec<crate::eval::CellAddr>> {
     } else {
         None
     }
+}
+
+fn flatten_1d_values(ctx: &dyn FunctionContext, r: Reference) -> Option<Vec<Value>> {
+    let sheet_id = r.sheet_id;
+    let addrs = flatten_1d(r)?;
+    Some(
+        addrs
+            .into_iter()
+            .map(|addr| ctx.get_cell_value(sheet_id, addr))
+            .collect(),
+    )
 }
 
 fn exact_match_in_first_col(ctx: &dyn FunctionContext, lookup: &Value, table: Reference) -> Option<u32> {
