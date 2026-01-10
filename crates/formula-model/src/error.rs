@@ -46,6 +46,49 @@ impl ErrorValue {
             ErrorValue::Unknown => "#UNKNOWN!",
         }
     }
+
+    /// Numeric error code used by Excel in various internal representations.
+    ///
+    /// Values are based on the mapping documented in `docs/01-formula-engine.md`.
+    pub const fn code(self) -> u8 {
+        match self {
+            ErrorValue::Null => 1,
+            ErrorValue::Div0 => 2,
+            ErrorValue::Value => 3,
+            ErrorValue::Ref => 4,
+            ErrorValue::Name => 5,
+            ErrorValue::Num => 6,
+            ErrorValue::NA => 7,
+            ErrorValue::GettingData => 8,
+            ErrorValue::Spill => 9,
+            ErrorValue::Calc => 10,
+            ErrorValue::Field => 11,
+            ErrorValue::Connect => 12,
+            ErrorValue::Blocked => 13,
+            ErrorValue::Unknown => 14,
+        }
+    }
+
+    /// Convert from an Excel error code.
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            1 => Some(ErrorValue::Null),
+            2 => Some(ErrorValue::Div0),
+            3 => Some(ErrorValue::Value),
+            4 => Some(ErrorValue::Ref),
+            5 => Some(ErrorValue::Name),
+            6 => Some(ErrorValue::Num),
+            7 => Some(ErrorValue::NA),
+            8 => Some(ErrorValue::GettingData),
+            9 => Some(ErrorValue::Spill),
+            10 => Some(ErrorValue::Calc),
+            11 => Some(ErrorValue::Field),
+            12 => Some(ErrorValue::Connect),
+            13 => Some(ErrorValue::Blocked),
+            14 => Some(ErrorValue::Unknown),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ErrorValue {
@@ -137,5 +180,29 @@ mod tests {
             assert_eq!(err.to_string(), s);
             assert_eq!(s.parse::<ErrorValue>().unwrap(), err);
         }
+    }
+
+    #[test]
+    fn error_codes_roundtrip() {
+        for err in [
+            ErrorValue::Null,
+            ErrorValue::Div0,
+            ErrorValue::Value,
+            ErrorValue::Ref,
+            ErrorValue::Name,
+            ErrorValue::Num,
+            ErrorValue::NA,
+            ErrorValue::GettingData,
+            ErrorValue::Spill,
+            ErrorValue::Calc,
+            ErrorValue::Field,
+            ErrorValue::Connect,
+            ErrorValue::Blocked,
+            ErrorValue::Unknown,
+        ] {
+            assert_eq!(ErrorValue::from_code(err.code()), Some(err));
+        }
+        assert_eq!(ErrorValue::from_code(0), None);
+        assert_eq!(ErrorValue::from_code(255), None);
     }
 }
