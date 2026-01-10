@@ -23,6 +23,18 @@ impl CellRef {
         Self { row, col }
     }
 
+    /// Checked constructor for a [`CellRef`].
+    ///
+    /// Returns `None` if `row`/`col` are outside Excel's sheet bounds.
+    #[inline]
+    pub fn try_new(row: u32, col: u32) -> Option<Self> {
+        if row < crate::cell::EXCEL_MAX_ROWS && col < crate::cell::EXCEL_MAX_COLS {
+            Some(Self::new(row, col))
+        } else {
+            None
+        }
+    }
+
     /// Convert to Excel A1 notation (e.g. `A1`, `BC32`).
     pub fn to_a1(self) -> String {
         format!("{}{}", col_to_name(self.col), self.row + 1)
@@ -156,6 +168,49 @@ impl Range {
             && cell.col <= self.end.col
     }
 
+    /// Returns true if this range overlaps `other` (i.e., their intersection is non-empty).
+    #[inline]
+    pub const fn intersects(&self, other: &Range) -> bool {
+        self.start.row <= other.end.row
+            && self.end.row >= other.start.row
+            && self.start.col <= other.end.col
+            && self.end.col >= other.start.col
+    }
+
+    /// Returns the intersection of this range with `other`, or `None` if they do not overlap.
+    pub const fn intersection(&self, other: &Range) -> Option<Range> {
+        if !self.intersects(other) {
+            return None;
+        }
+        let start = CellRef::new(
+            max_u32(self.start.row, other.start.row),
+            max_u32(self.start.col, other.start.col),
+        );
+        let end = CellRef::new(
+            min_u32(self.end.row, other.end.row),
+            min_u32(self.end.col, other.end.col),
+        );
+        Some(Range::new(start, end))
+    }
+
+    /// Returns the bounding box that contains both this range and `other`.
+    pub const fn bounding_box(&self, other: &Range) -> Range {
+        let start = CellRef::new(
+            min_u32(self.start.row, other.start.row),
+            min_u32(self.start.col, other.start.col),
+        );
+        let end = CellRef::new(
+            max_u32(self.end.row, other.end.row),
+            max_u32(self.end.col, other.end.col),
+        );
+        Range::new(start, end)
+    }
+
+    /// Total number of cells in the range (`width * height`).
+    pub const fn cell_count(&self) -> u64 {
+        (self.width() as u64) * (self.height() as u64)
+    }
+
     /// Iterate over all cells in the range in row-major order (top-to-bottom, left-to-right).
     pub fn iter(self) -> RangeIter {
         RangeIter::new(self)
@@ -197,6 +252,22 @@ impl Range {
                 Ok(Range::new(start, end))
             }
         }
+    }
+}
+
+const fn min_u32(a: u32, b: u32) -> u32 {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+const fn max_u32(a: u32, b: u32) -> u32 {
+    if a > b {
+        a
+    } else {
+        b
     }
 }
 
@@ -413,5 +484,16 @@ mod tests {
         let range = serde_json::from_value::<Range>(json).unwrap();
         assert_eq!(range.start, CellRef::new(2, 2));
         assert_eq!(range.end, CellRef::new(5, 5));
+    }
+
+    #[test]
+    fn range_intersection_and_bbox() {
+        let a = Range::from_a1("A1:C3").unwrap();
+        let b = Range::from_a1("B2:D4").unwrap();
+
+        assert!(a.intersects(&b));
+        assert_eq!(a.intersection(&b), Some(Range::from_a1("B2:C3").unwrap()));
+        assert_eq!(a.bounding_box(&b), Range::from_a1("A1:D4").unwrap());
+        assert_eq!(a.cell_count(), 9);
     }
 }

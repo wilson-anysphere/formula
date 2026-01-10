@@ -35,6 +35,32 @@ impl CellKey {
         Self(((row as u64) << COL_BITS) | (col as u64))
     }
 
+    /// Checked version of [`CellKey::new`].
+    ///
+    /// Returns `None` if `row`/`col` are outside Excel's sheet bounds.
+    #[inline]
+    pub fn try_new(row: u32, col: u32) -> Option<Self> {
+        if row < EXCEL_MAX_ROWS && col < EXCEL_MAX_COLS {
+            Some(Self(((row as u64) << COL_BITS) | (col as u64)))
+        } else {
+            None
+        }
+    }
+
+    /// Attempt to construct a [`CellKey`] from a packed `u64`.
+    ///
+    /// Returns `None` if the decoded coordinates are outside Excel's sheet bounds.
+    #[inline]
+    pub fn try_from_u64(raw: u64) -> Option<Self> {
+        let row = raw >> COL_BITS;
+        let col = raw & COL_MASK;
+        if row < EXCEL_MAX_ROWS as u64 && col < EXCEL_MAX_COLS as u64 {
+            Some(CellKey(raw))
+        } else {
+            None
+        }
+    }
+
     /// Decode the row component (0-indexed).
     #[inline]
     pub const fn row(self) -> u32 {
@@ -190,5 +216,19 @@ mod tests {
         let err = serde_json::from_str::<CellKey>(&json).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("out of Excel bounds"));
+    }
+
+    #[test]
+    fn cell_key_try_new_enforces_excel_bounds() {
+        assert!(CellKey::try_new(EXCEL_MAX_ROWS, 0).is_none());
+        assert!(CellKey::try_new(0, EXCEL_MAX_COLS).is_none());
+        assert!(CellKey::try_new(0, 0).is_some());
+    }
+
+    #[test]
+    fn cell_key_try_from_u64_roundtrips() {
+        let key = CellKey::new(123, 456);
+        assert_eq!(CellKey::try_from_u64(key.as_u64()), Some(key));
+        assert!(CellKey::try_from_u64(((EXCEL_MAX_ROWS as u64) << COL_BITS) | 0).is_none());
     }
 }
