@@ -1,9 +1,9 @@
 //! Formula lexer and parser.
 
 use crate::{
-    ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellRef, Coord, Expr, FunctionCall, FunctionName,
-    LocaleConfig, ParseError, ParseOptions, PostfixExpr, PostfixOp, Span, StructuredRef, UnaryExpr,
-    UnaryOp,
+    ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellRef, ColRef, Coord, Expr, FunctionCall,
+    FunctionName, LocaleConfig, NameRef, ParseError, ParseOptions, PostfixExpr, PostfixOp, RowRef,
+    Span, StructuredRef, UnaryExpr, UnaryOp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,16 +61,20 @@ pub struct CellToken {
 }
 
 pub fn parse_formula(formula: &str, opts: ParseOptions) -> Result<Ast, ParseError> {
-    let (has_equals, expr_src) = if let Some(rest) = formula.strip_prefix('=') {
-        (true, rest)
+    let (has_equals, expr_src, span_offset) = if let Some(rest) = formula.strip_prefix('=') {
+        (true, rest, 1)
     } else {
-        (false, formula)
+        (false, formula, 0)
     };
 
-    let tokens = lex(expr_src, &opts.locale)?;
+    let tokens = lex(expr_src, &opts.locale).map_err(|e| e.add_offset(span_offset))?;
     let mut parser = Parser::new(expr_src, tokens, opts.locale.clone());
-    let expr = parser.parse_expression(0)?;
-    parser.expect(TokenKind::Eof)?;
+    let expr = parser
+        .parse_expression(0)
+        .map_err(|e| e.add_offset(span_offset))?;
+    parser
+        .expect(TokenKind::Eof)
+        .map_err(|e| e.add_offset(span_offset))?;
 
     let mut ast = Ast::new(has_equals, expr);
     if let Some(origin) = opts.normalize_relative_to {
@@ -105,10 +109,10 @@ pub struct PartialParse {
 /// - `context`: a coarse context (e.g. current function call + arg index)
 /// - `ast`: a partial AST with missing nodes filled as [`Expr::Missing`]
 pub fn parse_formula_partial(formula: &str, opts: ParseOptions) -> PartialParse {
-    let (has_equals, expr_src) = if let Some(rest) = formula.strip_prefix('=') {
-        (true, rest)
+    let (has_equals, expr_src, span_offset) = if let Some(rest) = formula.strip_prefix('=') {
+        (true, rest, 1)
     } else {
-        (false, formula)
+        (false, formula, 0)
     };
 
     let tokens = match lex(expr_src, &opts.locale) {
@@ -116,7 +120,7 @@ pub fn parse_formula_partial(formula: &str, opts: ParseOptions) -> PartialParse 
         Err(e) => {
             return PartialParse {
                 ast: Ast::new(has_equals, Expr::Missing),
-                error: Some(e),
+                error: Some(e.add_offset(span_offset)),
                 context: ParseContext::default(),
             };
         }
@@ -131,7 +135,7 @@ pub fn parse_formula_partial(formula: &str, opts: ParseOptions) -> PartialParse 
     }
 
     let context = parser.context();
-    let error = parser.first_error;
+    let error = parser.first_error.map(|e| e.add_offset(span_offset));
 
     PartialParse {
         ast,
@@ -525,7 +529,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_ident(&mut self) -> String {
-        self.take_while(|c| matches!(c, '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9'))
+        self.take_while(|c| {
+            matches!(
+                c,
+                '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9'
+            )
+        })
     }
 
     fn try_lex_cell_ref(&mut self) -> Option<CellToken> {
@@ -740,10 +749,15 @@ impl<'a> Parser<'a> {
             }
             self.next(); // consume operator
             let rhs = self.parse_expression(r_bp)?;
+            let (left, right) = if op == BinaryOp::Range {
+                coerce_range_operands(lhs, rhs)
+            } else {
+                (lhs, rhs)
+            };
             lhs = Expr::Binary(BinaryExpr {
                 op,
-                left: Box::new(lhs),
-                right: Box::new(rhs),
+                left: Box::new(left),
+                right: Box::new(right),
             });
         }
 
@@ -809,10 +823,15 @@ impl<'a> Parser<'a> {
             }
             self.next(); // consume operator
             let rhs = self.parse_expression_best_effort(r_bp);
+            let (left, right) = if op == BinaryOp::Range {
+                coerce_range_operands(lhs, rhs)
+            } else {
+                (lhs, rhs)
+            };
             lhs = Expr::Binary(BinaryExpr {
                 op,
-                left: Box::new(lhs),
-                right: Box::new(rhs),
+                left: Box::new(left),
+                right: Box::new(right),
             });
         }
 
@@ -953,7 +972,7 @@ impl<'a> Parser<'a> {
                 if matches!(self.peek_kind(), TokenKind::LParen) {
                     self.parse_function_call_best_effort(name)
                 } else if matches!(self.peek_kind(), TokenKind::LBracket) {
-                    match self.parse_structured_ref(Some(name)) {
+                    match self.parse_structured_ref(None, None, Some(name)) {
                         Ok(expr) => expr,
                         Err(err) => {
                             self.record_error(err);
@@ -961,7 +980,11 @@ impl<'a> Parser<'a> {
                         }
                     }
                 } else {
-                    Expr::Name(name)
+                    Expr::NameRef(NameRef {
+                        workbook: None,
+                        sheet: None,
+                        name,
+                    })
                 }
             }
             TokenKind::Cell(cell) => {
@@ -983,7 +1006,11 @@ impl<'a> Parser<'a> {
             TokenKind::QuotedIdent(name) => {
                 let name = name.clone();
                 self.next();
-                Expr::Name(name)
+                Expr::NameRef(NameRef {
+                    workbook: None,
+                    sheet: None,
+                    name,
+                })
             }
             _ => {
                 self.record_error(ParseError::new(
@@ -1243,9 +1270,13 @@ impl<'a> Parser<'a> {
                 if matches!(self.peek_kind(), TokenKind::LParen) {
                     self.parse_function_call(name)
                 } else if matches!(self.peek_kind(), TokenKind::LBracket) {
-                    self.parse_structured_ref(Some(name))
+                    self.parse_structured_ref(None, None, Some(name))
                 } else {
-                    Ok(Expr::Name(name))
+                    Ok(Expr::NameRef(NameRef {
+                        workbook: None,
+                        sheet: None,
+                        name,
+                    }))
                 }
             }
             TokenKind::Cell(cell) => {
@@ -1267,7 +1298,11 @@ impl<'a> Parser<'a> {
             TokenKind::QuotedIdent(name) => {
                 let name = name.clone();
                 self.next();
-                Ok(Expr::Name(name))
+                Ok(Expr::NameRef(NameRef {
+                    workbook: None,
+                    sheet: None,
+                    name,
+                }))
             }
             _ => Err(ParseError::new(
                 "Expected reference or name",
@@ -1299,51 +1334,37 @@ impl<'a> Parser<'a> {
                     },
                 }))
             }
+            TokenKind::Number(raw) => {
+                let span = self.current_span();
+                let raw = raw.clone();
+                self.next();
+                let Some(row) = parse_row_number_literal(&raw) else {
+                    return Err(ParseError::new("Invalid row reference", span));
+                };
+                Ok(Expr::RowRef(RowRef {
+                    workbook,
+                    sheet,
+                    row: Coord::A1 {
+                        index: row,
+                        abs: false,
+                    },
+                }))
+            }
             TokenKind::Ident(name) => {
                 let name = name.clone();
                 self.next();
                 self.skip_trivia();
                 if matches!(self.peek_kind(), TokenKind::LBracket) {
-                    Ok(Expr::StructuredRef(StructuredRef {
-                        table: Some(name),
-                        spec: self.parse_bracket_spec()?,
+                    self.parse_structured_ref(workbook, sheet, Some(name))
+                } else {
+                    Ok(Expr::NameRef(NameRef {
+                        workbook,
+                        sheet,
+                        name,
                     }))
-                } else {
-                    Ok(Expr::Name(format!(
-                        "{}!{}",
-                        sheet.unwrap_or_default(),
-                        name
-                    )))
                 }
             }
-            TokenKind::LBracket => {
-                let sr = self.parse_structured_ref(None)?;
-                if let Expr::StructuredRef(mut s) = sr {
-                    // Attach sheet/workbook prefix by serializing into a name-like string.
-                    // Excel structured references can be prefixed with sheet/workbook; we model this
-                    // as a name for now.
-                    let mut rendered = String::new();
-                    if let Some(book) = workbook {
-                        rendered.push('[');
-                        rendered.push_str(&book);
-                        rendered.push(']');
-                    }
-                    if let Some(sh) = sheet {
-                        rendered.push_str(&sh);
-                        rendered.push('!');
-                    }
-                    // structured ref itself
-                    if let Some(table) = s.table.take() {
-                        rendered.push_str(&table);
-                    }
-                    rendered.push('[');
-                    rendered.push_str(&s.spec);
-                    rendered.push(']');
-                    Ok(Expr::Name(rendered))
-                } else {
-                    Ok(sr)
-                }
-            }
+            TokenKind::LBracket => self.parse_structured_ref(workbook, sheet, None),
             _ => Err(ParseError::new(
                 "Expected reference after sheet prefix",
                 self.current_span(),
@@ -1460,19 +1481,24 @@ impl<'a> Parser<'a> {
             _ => {
                 // Not an external ref; rewind and parse as structured.
                 self.pos = save;
-                return self.parse_structured_ref(None);
+                return self.parse_structured_ref(None, None, None);
             }
         };
         self.skip_trivia();
         if !matches!(self.peek_kind(), TokenKind::Bang) {
             self.pos = save;
-            return self.parse_structured_ref(None);
+            return self.parse_structured_ref(None, None, None);
         }
         self.next(); // bang
         self.parse_ref_after_prefix(Some(workbook), Some(sheet))
     }
 
-    fn parse_structured_ref(&mut self, table: Option<String>) -> Result<Expr, ParseError> {
+    fn parse_structured_ref(
+        &mut self,
+        workbook: Option<String>,
+        sheet: Option<String>,
+        table: Option<String>,
+    ) -> Result<Expr, ParseError> {
         let spec = if matches!(self.peek_kind(), TokenKind::LBracket) {
             self.next();
             self.parse_bracket_spec()?
@@ -1480,7 +1506,12 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::LBracket)?;
             self.parse_bracket_spec()?
         };
-        Ok(Expr::StructuredRef(StructuredRef { table, spec }))
+        Ok(Expr::StructuredRef(StructuredRef {
+            workbook,
+            sheet,
+            table,
+            spec,
+        }))
     }
 
     fn parse_bracket_spec(&mut self) -> Result<String, ParseError> {
@@ -1619,4 +1650,90 @@ fn infix_binding_power(op: BinaryOp) -> (u8, u8) {
             (10, 11)
         }
     }
+}
+
+fn coerce_range_operands(left: Expr, right: Expr) -> (Expr, Expr) {
+    if let (Some(left), Some(right)) = (col_ref_from_expr(&left), col_ref_from_expr(&right)) {
+        return (Expr::ColRef(left), Expr::ColRef(right));
+    }
+    if let (Some(left), Some(right)) = (row_ref_from_expr(&left), row_ref_from_expr(&right)) {
+        return (Expr::RowRef(left), Expr::RowRef(right));
+    }
+    (left, right)
+}
+
+fn col_ref_from_expr(expr: &Expr) -> Option<ColRef> {
+    match expr {
+        Expr::ColRef(r) => Some(r.clone()),
+        Expr::NameRef(n) => {
+            let (col, abs) = parse_col_ref_name(&n.name)?;
+            Some(ColRef {
+                workbook: n.workbook.clone(),
+                sheet: n.sheet.clone(),
+                col: Coord::A1 { index: col, abs },
+            })
+        }
+        _ => None,
+    }
+}
+
+fn row_ref_from_expr(expr: &Expr) -> Option<RowRef> {
+    match expr {
+        Expr::RowRef(r) => Some(r.clone()),
+        Expr::NameRef(n) => {
+            let (row, abs) = parse_row_ref_name(&n.name)?;
+            Some(RowRef {
+                workbook: n.workbook.clone(),
+                sheet: n.sheet.clone(),
+                row: Coord::A1 { index: row, abs },
+            })
+        }
+        Expr::Number(raw) => {
+            let row = parse_row_number_literal(raw)?;
+            Some(RowRef {
+                workbook: None,
+                sheet: None,
+                row: Coord::A1 {
+                    index: row,
+                    abs: false,
+                },
+            })
+        }
+        _ => None,
+    }
+}
+
+fn parse_col_ref_name(raw: &str) -> Option<(u32, bool)> {
+    let (abs, letters) = raw
+        .strip_prefix('$')
+        .map(|rest| (true, rest))
+        .unwrap_or((false, raw));
+    if letters.is_empty() || !letters.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let col = col_from_a1(letters)?;
+    Some((col, abs))
+}
+
+fn parse_row_ref_name(raw: &str) -> Option<(u32, bool)> {
+    let (abs, digits) = raw
+        .strip_prefix('$')
+        .map(|rest| (true, rest))
+        .unwrap_or((false, raw));
+    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let row: u32 = digits.parse().ok()?;
+    if row == 0 {
+        return None;
+    }
+    Some((row - 1, abs))
+}
+
+fn parse_row_number_literal(raw: &str) -> Option<u32> {
+    let row: u32 = raw.parse().ok()?;
+    if row == 0 {
+        return None;
+    }
+    Some(row - 1)
 }

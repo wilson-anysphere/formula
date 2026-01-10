@@ -25,6 +25,14 @@ impl Span {
     pub fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
+
+    #[must_use]
+    pub fn add_offset(self, delta: usize) -> Self {
+        Self {
+            start: self.start.saturating_add(delta),
+            end: self.end.saturating_add(delta),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +47,14 @@ impl ParseError {
         Self {
             message: message.into(),
             span,
+        }
+    }
+
+    #[must_use]
+    pub fn add_offset(self, delta: usize) -> Self {
+        Self {
+            message: self.message,
+            span: self.span.add_offset(delta),
         }
     }
 }
@@ -170,8 +186,10 @@ pub enum Expr {
     String(String),
     Boolean(bool),
     Error(String),
-    Name(String),
+    NameRef(NameRef),
     CellRef(CellRef),
+    ColRef(ColRef),
+    RowRef(RowRef),
     StructuredRef(StructuredRef),
     Array(ArrayLiteral),
     FunctionCall(FunctionCall),
@@ -186,12 +204,14 @@ impl Expr {
     fn normalize_relative(&self, origin: CellAddr) -> Self {
         match self {
             Expr::CellRef(r) => Expr::CellRef(r.normalize_relative(origin)),
+            Expr::ColRef(r) => Expr::ColRef(r.normalize_relative(origin)),
+            Expr::RowRef(r) => Expr::RowRef(r.normalize_relative(origin)),
             Expr::StructuredRef(r) => Expr::StructuredRef(r.clone()),
             Expr::Number(v) => Expr::Number(v.clone()),
             Expr::String(v) => Expr::String(v.clone()),
             Expr::Boolean(v) => Expr::Boolean(*v),
             Expr::Error(v) => Expr::Error(v.clone()),
-            Expr::Name(v) => Expr::Name(v.clone()),
+            Expr::NameRef(v) => Expr::NameRef(v.clone()),
             Expr::Array(arr) => Expr::Array(arr.clone()),
             Expr::FunctionCall(call) => Expr::FunctionCall(FunctionCall {
                 name: call.name.clone(),
@@ -254,8 +274,10 @@ impl Expr {
             }
             Expr::Boolean(v) => out.push_str(if *v { "TRUE" } else { "FALSE" }),
             Expr::Error(v) => out.push_str(v),
-            Expr::Name(name) => out.push_str(name),
+            Expr::NameRef(name) => name.fmt(out),
             Expr::CellRef(r) => r.fmt(out, opts)?,
+            Expr::ColRef(r) => r.fmt(out, opts)?,
+            Expr::RowRef(r) => r.fmt(out, opts)?,
             Expr::StructuredRef(r) => r.fmt(out)?,
             Expr::Array(arr) => arr.fmt(out, opts)?,
             Expr::FunctionCall(call) => call.fmt(out, opts)?,
@@ -529,15 +551,7 @@ impl CellRef {
     }
 
     fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
-        if let Some(book) = &self.workbook {
-            out.push('[');
-            out.push_str(book);
-            out.push(']');
-        }
-        if let Some(sheet) = &self.sheet {
-            fmt_sheet_name(out, sheet);
-            out.push('!');
-        }
+        fmt_ref_prefix(out, &self.workbook, &self.sheet);
 
         let origin = opts.origin;
         let (col_idx, col_abs) = self.col.to_a1_index(origin.map(|o| o.col))?;
@@ -556,7 +570,85 @@ impl CellRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NameRef {
+    pub workbook: Option<String>,
+    pub sheet: Option<String>,
+    pub name: String,
+}
+
+impl NameRef {
+    fn fmt(&self, out: &mut String) {
+        fmt_ref_prefix(out, &self.workbook, &self.sheet);
+        out.push_str(&self.name);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColRef {
+    pub workbook: Option<String>,
+    pub sheet: Option<String>,
+    pub col: Coord,
+}
+
+impl ColRef {
+    fn normalize_relative(&self, origin: CellAddr) -> Self {
+        let (col_index, col_abs) = match self.col {
+            Coord::A1 { index, abs } => (index, abs),
+            Coord::Offset(_) => return self.clone(),
+        };
+        Self {
+            workbook: self.workbook.clone(),
+            sheet: self.sheet.clone(),
+            col: Coord::normalize(col_index, col_abs, origin.col),
+        }
+    }
+
+    fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
+        fmt_ref_prefix(out, &self.workbook, &self.sheet);
+        let (col_idx, col_abs) = self.col.to_a1_index(opts.origin.map(|o| o.col))?;
+        if col_abs {
+            out.push('$');
+        }
+        out.push_str(&col_to_a1(col_idx));
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RowRef {
+    pub workbook: Option<String>,
+    pub sheet: Option<String>,
+    pub row: Coord,
+}
+
+impl RowRef {
+    fn normalize_relative(&self, origin: CellAddr) -> Self {
+        let (row_index, row_abs) = match self.row {
+            Coord::A1 { index, abs } => (index, abs),
+            Coord::Offset(_) => return self.clone(),
+        };
+        Self {
+            workbook: self.workbook.clone(),
+            sheet: self.sheet.clone(),
+            row: Coord::normalize(row_index, row_abs, origin.row),
+        }
+    }
+
+    fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
+        fmt_ref_prefix(out, &self.workbook, &self.sheet);
+        let (row_idx, row_abs) = self.row.to_a1_index(opts.origin.map(|o| o.row))?;
+        if row_abs {
+            out.push('$');
+        }
+        out.push_str(&(row_idx + 1).to_string());
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StructuredRef {
+    pub workbook: Option<String>,
+    pub sheet: Option<String>,
     pub table: Option<String>,
     /// The raw specifier inside `[...]` (without the brackets).
     pub spec: String,
@@ -564,6 +656,7 @@ pub struct StructuredRef {
 
 impl StructuredRef {
     fn fmt(&self, out: &mut String) -> Result<(), SerializeError> {
+        fmt_ref_prefix(out, &self.workbook, &self.sheet);
         if let Some(table) = &self.table {
             out.push_str(table);
         }
@@ -613,6 +706,18 @@ fn fmt_sheet_name(out: &mut String, sheet: &str) {
         out.push('\'');
     } else {
         out.push_str(sheet);
+    }
+}
+
+fn fmt_ref_prefix(out: &mut String, workbook: &Option<String>, sheet: &Option<String>) {
+    if let Some(book) = workbook {
+        out.push('[');
+        out.push_str(book);
+        out.push(']');
+    }
+    if let Some(sheet) = sheet {
+        fmt_sheet_name(out, sheet);
+        out.push('!');
     }
 }
 
