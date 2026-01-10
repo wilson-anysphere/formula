@@ -18,6 +18,14 @@ export function parseSpreadsheetCellKey(key) {
     return { sheetId: colon[0], row, col };
   }
 
+  // Some internal modules use `${sheetId}:${row},${col}`.
+  if (colon.length === 2) {
+    const m = colon[1].match(/^(\d+),(\d+)$/);
+    if (m) {
+      return { sheetId: colon[0], row: Number(m[1]), col: Number(m[2]) };
+    }
+  }
+
   const m = key.match(/^r(\d+)c(\d+)$/);
   if (m) {
     return { sheetId: null, row: Number(m[1]), col: Number(m[2]) };
@@ -78,4 +86,3 @@ export function sheetStateFromYjsSnapshot(snapshot, opts = {}) {
   Y.applyUpdate(doc, snapshot);
   return sheetStateFromYjsDoc(doc, opts);
 }
-
