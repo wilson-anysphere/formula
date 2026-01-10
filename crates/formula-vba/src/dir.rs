@@ -1,4 +1,4 @@
-use encoding_rs::{UTF_16LE, WINDOWS_1252};
+use encoding_rs::{Encoding, UTF_16LE, WINDOWS_1252};
 use thiserror::Error;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -40,7 +40,10 @@ impl DirStream {
     /// - project name
     /// - constants
     /// - module list with stream names + text offsets
-    pub fn parse(decompressed: &[u8]) -> Result<Self, DirParseError> {
+    pub fn parse_with_encoding(
+        decompressed: &[u8],
+        encoding: &'static Encoding,
+    ) -> Result<Self, DirParseError> {
         let mut offset = 0usize;
         let mut project_name = None;
         let mut constants = None;
@@ -66,8 +69,8 @@ impl DirStream {
             offset += len;
 
             match id {
-                0x0004 => project_name = Some(decode_bytes(data)),
-                0x000C => constants = Some(decode_bytes(data)),
+                0x0004 => project_name = Some(decode_bytes(data, encoding)),
+                0x000C => constants = Some(decode_bytes(data, encoding)),
 
                 // Module records.
                 0x0019 => {
@@ -76,7 +79,7 @@ impl DirStream {
                         modules.push(m);
                     }
                     current_module = Some(ModuleRecord {
-                        name: decode_bytes(data),
+                        name: decode_bytes(data, encoding),
                         stream_name: String::new(),
                         module_type: ModuleType::Unknown(0),
                         text_offset: None,
@@ -85,7 +88,7 @@ impl DirStream {
                 0x001A => {
                     // MODULESTREAMNAME. Some files include a reserved u16 at the end.
                     if let Some(m) = current_module.as_mut() {
-                        m.stream_name = decode_bytes(trim_reserved_u16(data));
+                        m.stream_name = decode_bytes(trim_reserved_u16(data), encoding);
                     }
                 }
                 0x0031 => {
@@ -134,6 +137,11 @@ impl DirStream {
             modules,
         })
     }
+
+    /// Parse a decompressed `VBA/dir` stream assuming the default VBA codepage (Windows-1252).
+    pub fn parse(decompressed: &[u8]) -> Result<Self, DirParseError> {
+        Self::parse_with_encoding(decompressed, WINDOWS_1252)
+    }
 }
 
 fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {
@@ -144,7 +152,7 @@ fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {
     }
 }
 
-fn decode_bytes(bytes: &[u8]) -> String {
+fn decode_bytes(bytes: &[u8], encoding: &'static Encoding) -> String {
     // MS-OVBA strings are generally stored using the project codepage, but some
     // records may appear in UTF-16LE form. We do a lightweight heuristic to
     // decode UTF-16LE when it looks plausible (common for simple ASCII names).
@@ -153,7 +161,7 @@ fn decode_bytes(bytes: &[u8]) -> String {
         return cow.into_owned();
     }
 
-    let (cow, _, _) = WINDOWS_1252.decode(bytes);
+    let (cow, _, _) = encoding.decode(bytes);
     cow.into_owned()
 }
 

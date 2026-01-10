@@ -15,7 +15,11 @@ pub use ole::{OleError, OleFile};
 
 use std::collections::BTreeMap;
 
-use encoding_rs::WINDOWS_1252;
+use encoding_rs::{
+    Encoding, BIG5, EUC_KR, GBK, SHIFT_JIS, UTF_16LE, UTF_8, WINDOWS_1250, WINDOWS_1251,
+    WINDOWS_1252, WINDOWS_1253, WINDOWS_1254, WINDOWS_1255, WINDOWS_1256, WINDOWS_1257,
+    WINDOWS_1258, WINDOWS_874,
+};
 use thiserror::Error;
 
 /// Parsed representation of a VBA project. This model is intentionally minimal
@@ -68,10 +72,15 @@ impl VBAProject {
         let mut ole = OleFile::open(vba_project_bin)?;
 
         let project_text = ole.read_stream_opt("PROJECT")?;
+        let encoding = project_text
+            .as_deref()
+            .and_then(detect_project_codepage)
+            .unwrap_or(WINDOWS_1252);
+
         let mut references = Vec::new();
         let mut name_from_project_stream = None;
         if let Some(project_text) = project_text {
-            let text = decode_1252(&project_text);
+            let text = decode_with_encoding(&project_text, encoding);
             for line in text.lines() {
                 if let Some(rest) = line.strip_prefix("Name=") {
                     name_from_project_stream = Some(rest.trim_matches('"').to_owned());
@@ -85,7 +94,7 @@ impl VBAProject {
             .read_stream_opt("VBA/dir")?
             .ok_or(ParseError::MissingStream("VBA/dir"))?;
         let dir_decompressed = decompress_container(&dir_bytes)?;
-        let dir_stream = DirStream::parse(&dir_decompressed)?;
+        let dir_stream = DirStream::parse_with_encoding(&dir_decompressed, encoding)?;
 
         let mut modules = Vec::new();
         for module in &dir_stream.modules {
@@ -100,7 +109,7 @@ impl VBAProject {
             let text_offset = text_offset.min(module_stream.len());
             let source_container = &module_stream[text_offset..];
             let source_bytes = decompress_container(source_container)?;
-            let code = decode_1252(&source_bytes);
+            let code = decode_with_encoding(&source_bytes, encoding);
             let attributes = parse_attributes(&code);
 
             modules.push(VBAModule {
@@ -124,9 +133,73 @@ impl VBAProject {
     }
 }
 
-fn decode_1252(bytes: &[u8]) -> String {
-    let (cow, _, _) = WINDOWS_1252.decode(bytes);
+fn decode_with_encoding(bytes: &[u8], encoding: &'static Encoding) -> String {
+    // Module source is commonly stored as MBCS in the project codepage. If it
+    // looks like UTF-16LE, decode as UTF-16LE instead (some producers emit it).
+    if bytes.len() >= 2 && bytes.len() % 2 == 0 {
+        // Same heuristic as `dir` strings: if many high bytes are NUL, treat as UTF-16LE.
+        let total = bytes.len() / 2;
+        let nul_high = bytes.iter().skip(1).step_by(2).filter(|&&b| b == 0).count();
+        if nul_high >= total / 2 {
+            let (cow, _) = UTF_16LE.decode_without_bom_handling(bytes);
+            return cow.into_owned();
+        }
+    }
+
+    let (cow, _, _) = encoding.decode(bytes);
     cow.into_owned()
+}
+
+fn detect_project_codepage(project_stream_bytes: &[u8]) -> Option<&'static Encoding> {
+    // The `PROJECT` stream is plain text; we can find the codepage by scanning
+    // the raw bytes for the ASCII `CodePage=` line.
+    let mut haystack = project_stream_bytes;
+    while let Some(idx) = find_subslice(haystack, b"CodePage=") {
+        let after = &haystack[idx + "CodePage=".len()..];
+        let mut digits = Vec::new();
+        for &b in after {
+            if b.is_ascii_digit() {
+                digits.push(b);
+            } else {
+                break;
+            }
+        }
+        if let Ok(n) = std::str::from_utf8(&digits).ok()?.parse::<u32>() {
+            return Some(encoding_for_codepage(n));
+        }
+        haystack = after;
+    }
+    None
+}
+
+fn encoding_for_codepage(codepage: u32) -> &'static Encoding {
+    match codepage {
+        874 => WINDOWS_874,
+        932 => SHIFT_JIS,
+        936 => GBK,
+        949 => EUC_KR,
+        950 => BIG5,
+        1250 => WINDOWS_1250,
+        1251 => WINDOWS_1251,
+        1252 => WINDOWS_1252,
+        1253 => WINDOWS_1253,
+        1254 => WINDOWS_1254,
+        1255 => WINDOWS_1255,
+        1256 => WINDOWS_1256,
+        1257 => WINDOWS_1257,
+        1258 => WINDOWS_1258,
+        65001 => UTF_8,
+        _ => WINDOWS_1252,
+    }
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 fn parse_reference(raw: &str) -> VBAReference {
