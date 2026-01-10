@@ -205,6 +205,11 @@ try {
 
   $excel.Visible = [bool]$Visible
   $excel.DisplayAlerts = $false
+  try { $excel.ScreenUpdating = $false } catch {}
+  try { $excel.EnableEvents = $false } catch {}
+  try { $excel.AskToUpdateLinks = $false } catch {}
+  # msoAutomationSecurityForceDisable = 3 (disable macros)
+  try { $excel.AutomationSecurity = 3 } catch {}
 
   # Manual calculation for performance; we explicitly calculate after setting inputs.
   # xlCalculationManual = -4135, xlCalculationAutomatic = -4105
