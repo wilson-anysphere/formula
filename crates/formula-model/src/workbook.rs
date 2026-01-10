@@ -3,6 +3,7 @@ use core::fmt;
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 
+use crate::drawings::ImageStore;
 use crate::{
     rewrite_sheet_names_in_formula, SheetVisibility, Style, StyleTable, TabColor, Table, Worksheet,
     WorksheetId,
@@ -33,6 +34,10 @@ pub struct Workbook {
     /// Workbook style table (deduplicated).
     #[serde(default)]
     pub styles: StyleTable,
+
+    /// Workbook image store (shared across all sheets).
+    #[serde(default)]
+    pub images: ImageStore,
 
     /// Next worksheet id to allocate (runtime-only).
     #[serde(skip)]
@@ -73,6 +78,7 @@ impl Workbook {
             id: 0,
             sheets: Vec::new(),
             styles: StyleTable::new(),
+            images: ImageStore::default(),
             next_sheet_id: 1,
         }
     }
@@ -205,6 +211,8 @@ impl<'de> Deserialize<'de> for Workbook {
             sheets: Vec<Worksheet>,
             #[serde(default)]
             styles: StyleTable,
+            #[serde(default)]
+            images: ImageStore,
         }
 
         let helper = Helper::deserialize(deserializer)?;
@@ -230,6 +238,7 @@ impl<'de> Deserialize<'de> for Workbook {
             id: helper.id,
             sheets: helper.sheets,
             styles: helper.styles,
+            images: helper.images,
             next_sheet_id,
         })
     }

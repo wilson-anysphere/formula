@@ -11,6 +11,8 @@ pub mod charts;
 mod comments;
 pub mod conditional_formatting;
 mod display;
+/// Drawing primitives (images, shapes, charts, etc.).
+pub mod drawings;
 mod error;
 pub mod import;
 mod hyperlinks;

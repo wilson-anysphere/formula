@@ -1,0 +1,564 @@
+use std::collections::BTreeMap;
+
+use formula_model::drawings::{
+    Anchor, AnchorPoint, CellOffset, DrawingObject, DrawingObjectId, DrawingObjectKind, Emu,
+    EmuSize, ImageData, ImageId,
+};
+use formula_model::CellRef;
+use roxmltree::Document;
+
+use crate::path::resolve_target;
+use crate::relationships::{Relationship, Relationships};
+use crate::XlsxError;
+
+type Result<T> = std::result::Result<T, XlsxError>;
+
+const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const REL_TYPE_IMAGE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawingRef(pub usize);
+
+#[derive(Debug, Clone)]
+pub struct DrawingPart {
+    pub sheet_index: usize,
+    pub path: String,
+    pub rels_path: String,
+    pub objects: Vec<DrawingObject>,
+    relationships: Relationships,
+}
+
+impl DrawingPart {
+    pub fn new_empty(sheet_index: usize, path: String, rels_path: String) -> Self {
+        Self {
+            sheet_index,
+            path,
+            rels_path,
+            objects: Vec::new(),
+            relationships: Relationships::default(),
+        }
+    }
+
+    pub fn parse_from_parts(
+        sheet_index: usize,
+        path: &str,
+        parts: &BTreeMap<String, Vec<u8>>,
+        workbook: &mut formula_model::Workbook,
+    ) -> Result<Self> {
+        let rels_path = drawing_rels_path(path);
+        let rels_bytes = parts
+            .get(&rels_path)
+            .ok_or_else(|| XlsxError::MissingPart(format!("missing drawing rels: {rels_path}")))?;
+        let rels_xml = std::str::from_utf8(rels_bytes)
+            .map_err(|e| XlsxError::Invalid(format!("drawing rels not utf-8: {e}")))?;
+        let relationships = Relationships::from_xml(rels_xml)?;
+
+        let drawing_bytes = parts
+            .get(path)
+            .ok_or_else(|| XlsxError::MissingPart(path.to_string()))?;
+        let drawing_xml = std::str::from_utf8(drawing_bytes)
+            .map_err(|e| XlsxError::Invalid(format!("drawing xml not utf-8: {e}")))?;
+
+        let doc = Document::parse(drawing_xml)?;
+        let mut objects = Vec::new();
+
+        for (z, anchor_node) in doc
+            .root_element()
+            .children()
+            .filter(|n| n.is_element())
+            .enumerate()
+        {
+            let anchor_tag = anchor_node.tag_name().name();
+            if anchor_tag != "oneCellAnchor"
+                && anchor_tag != "twoCellAnchor"
+                && anchor_tag != "absoluteAnchor"
+            {
+                continue;
+            }
+
+            let anchor = parse_anchor(&anchor_node)?;
+
+            if let Some(pic) = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "pic")
+            {
+                let (id, pic_xml, embed) = parse_pic(&pic, drawing_xml)?;
+                let image_id = resolve_image_id(&relationships, &embed, path, parts, workbook)?;
+                let mut preserved = std::collections::HashMap::new();
+                preserved.insert("xlsx.embed_rel_id".to_string(), embed.clone());
+                preserved.insert("xlsx.pic_xml".to_string(), pic_xml);
+
+                let size = extract_size_from_pic(&pic).or_else(|| match anchor {
+                    Anchor::OneCell { ext, .. } | Anchor::Absolute { ext, .. } => Some(ext),
+                    Anchor::TwoCell { .. } => None,
+                });
+
+                objects.push(DrawingObject {
+                    id,
+                    kind: DrawingObjectKind::Image { image_id },
+                    anchor,
+                    z_order: z as i32,
+                    size,
+                    preserved,
+                });
+                continue;
+            }
+
+            if let Some(sp) = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "sp")
+            {
+                let (id, sp_xml) = parse_named_node(&sp, drawing_xml, "cNvPr")?;
+                objects.push(DrawingObject {
+                    id,
+                    kind: DrawingObjectKind::Shape { raw_xml: sp_xml },
+                    anchor,
+                    z_order: z as i32,
+                    size: None,
+                    preserved: Default::default(),
+                });
+                continue;
+            }
+
+            if let Some(frame) = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "graphicFrame")
+            {
+                let (id, frame_xml) = parse_named_node(&frame, drawing_xml, "cNvPr")?;
+                let chart_rel_id = frame
+                    .descendants()
+                    .find(|n| n.is_element() && n.tag_name().name() == "chart")
+                    .and_then(|n| n.attribute((REL_NS, "id")).or_else(|| n.attribute("r:id")))
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                objects.push(DrawingObject {
+                    id,
+                    kind: DrawingObjectKind::ChartPlaceholder {
+                        rel_id: chart_rel_id,
+                        raw_xml: frame_xml,
+                    },
+                    anchor,
+                    z_order: z as i32,
+                    size: None,
+                    preserved: Default::default(),
+                });
+                continue;
+            }
+
+            // Unknown anchor type: preserve the entire anchor subtree.
+            let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+            objects.push(DrawingObject {
+                id: DrawingObjectId((z + 1) as u32),
+                kind: DrawingObjectKind::Unknown {
+                    raw_xml: raw_anchor,
+                },
+                anchor,
+                z_order: z as i32,
+                size: None,
+                preserved: Default::default(),
+            });
+        }
+
+        Ok(Self {
+            sheet_index,
+            path: path.to_string(),
+            rels_path,
+            objects,
+            relationships,
+        })
+    }
+
+    pub fn create_new(sheet_index: usize) -> Result<(Self, String)> {
+        // Default new part names. Callers may rename by updating `path`/`rels_path`.
+        let path = format!("xl/drawings/drawing{}.xml", sheet_index + 1);
+        let rels_path = drawing_rels_path(&path);
+
+        let drawing_rel_id = "rId1".to_string();
+
+        Ok((
+            Self::new_empty(sheet_index, path, rels_path),
+            drawing_rel_id,
+        ))
+    }
+
+    pub fn insert_image_object(&mut self, image_id: &ImageId, anchor: Anchor) -> DrawingObject {
+        let next_object_id = self
+            .objects
+            .iter()
+            .map(|o| o.id.0)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+
+        let embed_rel_id = self.relationships.next_r_id();
+        let target = format!("../media/{}", image_id.as_str());
+        self.relationships.push(Relationship {
+            id: embed_rel_id.clone(),
+            type_: REL_TYPE_IMAGE.to_string(),
+            target,
+        });
+
+        let size = match anchor {
+            Anchor::OneCell { ext, .. } | Anchor::Absolute { ext, .. } => Some(ext),
+            Anchor::TwoCell { .. } => None,
+        };
+
+        let pic_xml = build_pic_xml(next_object_id, &embed_rel_id, size);
+        let mut preserved = std::collections::HashMap::new();
+        preserved.insert("xlsx.embed_rel_id".to_string(), embed_rel_id);
+        preserved.insert("xlsx.pic_xml".to_string(), pic_xml);
+
+        let object = DrawingObject {
+            id: DrawingObjectId(next_object_id),
+            kind: DrawingObjectKind::Image {
+                image_id: image_id.clone(),
+            },
+            anchor,
+            z_order: self.objects.len() as i32,
+            size,
+            preserved,
+        };
+
+        self.objects.push(object.clone());
+        object
+    }
+
+    pub fn write_into_parts(
+        &mut self,
+        parts: &mut BTreeMap<String, Vec<u8>>,
+        workbook: &formula_model::Workbook,
+    ) -> Result<()> {
+        // Keep objects ordered by z-order.
+        self.objects.sort_by_key(|o| o.z_order);
+
+        let mut xml = String::new();
+        xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
+        xml.push_str(
+            r#"<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
+        );
+
+        for object in &self.objects {
+            match &object.kind {
+                DrawingObjectKind::Unknown { raw_xml } => {
+                    xml.push_str(raw_xml);
+                }
+                DrawingObjectKind::Image { .. } => {
+                    let pic_xml = object
+                        .preserved
+                        .get("xlsx.pic_xml")
+                        .cloned()
+                        .unwrap_or_else(|| build_pic_xml(object.id.0, "rId1", object.size));
+                    xml.push_str(&build_anchor_xml(&object.anchor, &pic_xml));
+                }
+                DrawingObjectKind::Shape { raw_xml } => {
+                    xml.push_str(&build_anchor_xml(&object.anchor, raw_xml));
+                }
+                DrawingObjectKind::ChartPlaceholder { raw_xml, rel_id: _ } => {
+                    // Keep chart relationships as they existed in the source file.
+                    xml.push_str(&build_anchor_xml(&object.anchor, raw_xml));
+                }
+            }
+        }
+
+        xml.push_str("</xdr:wsDr>");
+        parts.insert(self.path.clone(), xml.into_bytes());
+        parts.insert(self.rels_path.clone(), self.relationships.to_xml());
+
+        // Ensure any images referenced by relationships are present in the package.
+        for rel in self.relationships.iter() {
+            if rel.type_ == REL_TYPE_IMAGE {
+                let target_path = resolve_target(&self.path, &rel.target);
+                let filename = target_path
+                    .strip_prefix("xl/media/")
+                    .unwrap_or(&target_path)
+                    .to_string();
+                let image_id = ImageId::new(filename);
+                if let Some(img) = workbook.images.get(&image_id) {
+                    parts.insert(target_path, img.bytes.clone());
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub fn load_media_parts(workbook: &mut formula_model::Workbook, parts: &BTreeMap<String, Vec<u8>>) {
+    for (path, bytes) in parts {
+        let Some(file_name) = path.strip_prefix("xl/media/") else {
+            continue;
+        };
+        let image_id = ImageId::new(file_name);
+        if workbook.images.get(&image_id).is_some() {
+            continue;
+        }
+
+        let ext = file_name.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
+        workbook.images.insert(
+            image_id,
+            ImageData {
+                bytes: bytes.clone(),
+                content_type: Some(content_type_for_extension(ext).to_string()),
+            },
+        );
+    }
+}
+
+pub fn content_type_for_extension(ext: &str) -> &'static str {
+    match ext.to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        _ => "application/octet-stream",
+    }
+}
+
+fn drawing_rels_path(drawing_path: &str) -> String {
+    let (dir, file) = drawing_path.rsplit_once('/').unwrap_or(("", drawing_path));
+    let dir = if dir.is_empty() {
+        "".to_string()
+    } else {
+        format!("{dir}/")
+    };
+    format!("{dir}_rels/{file}.rels")
+}
+
+fn parse_anchor(anchor_node: &roxmltree::Node<'_, '_>) -> Result<Anchor> {
+    let tag = anchor_node.tag_name().name();
+
+    let from = anchor_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "from")
+        .ok_or_else(|| XlsxError::Invalid(format!("{tag} missing <from>")))?;
+    let from = parse_anchor_point(&from)?;
+
+    match tag {
+        "oneCellAnchor" => {
+            let ext_node = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "ext")
+                .ok_or_else(|| XlsxError::Invalid("oneCellAnchor missing <ext>".to_string()))?;
+            let cx = parse_attr_i64(&ext_node, "cx")?;
+            let cy = parse_attr_i64(&ext_node, "cy")?;
+            Ok(Anchor::OneCell {
+                from,
+                ext: EmuSize::new(cx, cy),
+            })
+        }
+        "twoCellAnchor" => {
+            let to = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "to")
+                .ok_or_else(|| XlsxError::Invalid("twoCellAnchor missing <to>".to_string()))?;
+            let to = parse_anchor_point(&to)?;
+            Ok(Anchor::TwoCell { from, to })
+        }
+        "absoluteAnchor" => {
+            let pos = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "pos")
+                .ok_or_else(|| XlsxError::Invalid("absoluteAnchor missing <pos>".to_string()))?;
+            let x = parse_attr_i64(&pos, "x")?;
+            let y = parse_attr_i64(&pos, "y")?;
+
+            let ext_node = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "ext")
+                .ok_or_else(|| XlsxError::Invalid("absoluteAnchor missing <ext>".to_string()))?;
+            let cx = parse_attr_i64(&ext_node, "cx")?;
+            let cy = parse_attr_i64(&ext_node, "cy")?;
+
+            Ok(Anchor::Absolute {
+                pos: CellOffset::new(x, y),
+                ext: EmuSize::new(cx, cy),
+            })
+        }
+        other => Err(XlsxError::Invalid(format!(
+            "unsupported anchor tag: {other}"
+        ))),
+    }
+}
+
+fn parse_anchor_point(node: &roxmltree::Node<'_, '_>) -> Result<AnchorPoint> {
+    let col = parse_child_text_i64(node, "col")? as u32;
+    let row = parse_child_text_i64(node, "row")? as u32;
+    let col_off = parse_child_text_i64(node, "colOff")?;
+    let row_off = parse_child_text_i64(node, "rowOff")?;
+
+    Ok(AnchorPoint::new(
+        CellRef::new(row, col),
+        CellOffset::new(col_off, row_off),
+    ))
+}
+
+fn parse_child_text_i64(node: &roxmltree::Node<'_, '_>, child: &str) -> Result<Emu> {
+    let child_tag = child;
+    let child_node = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == child_tag)
+        .ok_or_else(|| XlsxError::Invalid(format!("missing <{child_tag}>")))?;
+    let value = child_node
+        .text()
+        .ok_or_else(|| XlsxError::Invalid(format!("<{child_tag}> missing text")))?;
+    value
+        .trim()
+        .parse::<i64>()
+        .map_err(|e| XlsxError::Invalid(format!("invalid {child} value {value:?}: {e}")))
+}
+
+fn parse_attr_i64(node: &roxmltree::Node<'_, '_>, attr: &str) -> Result<Emu> {
+    let value = node.attribute(attr).ok_or_else(|| {
+        XlsxError::Invalid(format!(
+            "missing attribute {attr} on <{}>",
+            node.tag_name().name()
+        ))
+    })?;
+    value
+        .trim()
+        .parse::<i64>()
+        .map_err(|e| XlsxError::Invalid(format!("invalid attr {attr} value {value:?}: {e}")))
+}
+
+fn parse_pic(
+    pic_node: &roxmltree::Node<'_, '_>,
+    drawing_xml: &str,
+) -> Result<(DrawingObjectId, String, String)> {
+    let (id, pic_xml) = parse_named_node(pic_node, drawing_xml, "cNvPr")?;
+    let blip = pic_node
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "blip")
+        .ok_or_else(|| XlsxError::Invalid("pic missing a:blip".to_string()))?;
+    let embed = blip
+        .attribute((REL_NS, "embed"))
+        .or_else(|| blip.attribute("r:embed"))
+        .ok_or_else(|| XlsxError::Invalid("blip missing r:embed".to_string()))?
+        .to_string();
+
+    Ok((id, pic_xml, embed))
+}
+
+fn parse_named_node(
+    node: &roxmltree::Node<'_, '_>,
+    doc_xml: &str,
+    name_tag: &str,
+) -> Result<(DrawingObjectId, String)> {
+    let nv_id = node
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == name_tag)
+        .and_then(|n| n.attribute("id"))
+        .unwrap_or("0");
+    let id = nv_id
+        .parse::<u32>()
+        .map_err(|e| XlsxError::Invalid(format!("invalid object id {nv_id:?}: {e}")))?;
+
+    let xml = slice_node_xml(node, doc_xml).unwrap_or_default();
+    Ok((DrawingObjectId(id), xml))
+}
+
+fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
+    let range = node.range();
+    doc.get(range).map(|s| s.to_string())
+}
+
+fn extract_size_from_pic(pic_node: &roxmltree::Node<'_, '_>) -> Option<EmuSize> {
+    let ext = pic_node
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
+    let cx = ext.attribute("cx")?.parse::<i64>().ok()?;
+    let cy = ext.attribute("cy")?.parse::<i64>().ok()?;
+    Some(EmuSize::new(cx, cy))
+}
+
+fn resolve_image_id(
+    relationships: &Relationships,
+    embed_rel_id: &str,
+    drawing_path: &str,
+    parts: &BTreeMap<String, Vec<u8>>,
+    workbook: &mut formula_model::Workbook,
+) -> Result<ImageId> {
+    let target = relationships.target_for(embed_rel_id).ok_or_else(|| {
+        XlsxError::Invalid(format!(
+            "drawing references missing image relationship {embed_rel_id}"
+        ))
+    })?;
+    let target_path = resolve_target(drawing_path, target);
+    let file_name = target_path
+        .strip_prefix("xl/media/")
+        .unwrap_or(&target_path)
+        .to_string();
+    let image_id = ImageId::new(file_name);
+
+    if workbook.images.get(&image_id).is_none() {
+        let bytes = parts
+            .get(&target_path)
+            .ok_or_else(|| XlsxError::MissingPart(target_path.clone()))?
+            .clone();
+        let ext = image_id
+            .as_str()
+            .rsplit_once('.')
+            .map(|(_, ext)| ext)
+            .unwrap_or("");
+        workbook.images.insert(
+            image_id.clone(),
+            ImageData {
+                bytes,
+                content_type: Some(content_type_for_extension(ext).to_string()),
+            },
+        );
+    }
+
+    Ok(image_id)
+}
+
+fn build_anchor_xml(anchor: &Anchor, inner_xml: &str) -> String {
+    let mut out = String::new();
+
+    match anchor {
+        Anchor::OneCell { from, ext } => {
+            out.push_str("<xdr:oneCellAnchor>");
+            out.push_str(&build_from_to_xml("from", from));
+            out.push_str(&format!(r#"<xdr:ext cx="{}" cy="{}"/>"#, ext.cx, ext.cy));
+        }
+        Anchor::TwoCell { from, to } => {
+            out.push_str("<xdr:twoCellAnchor>");
+            out.push_str(&build_from_to_xml("from", from));
+            out.push_str(&build_from_to_xml("to", to));
+        }
+        Anchor::Absolute { pos, ext } => {
+            out.push_str("<xdr:absoluteAnchor>");
+            out.push_str(&format!(
+                r#"<xdr:pos x="{}" y="{}"/>"#,
+                pos.x_emu, pos.y_emu
+            ));
+            out.push_str(&format!(r#"<xdr:ext cx="{}" cy="{}"/>"#, ext.cx, ext.cy));
+        }
+    }
+
+    out.push_str(inner_xml);
+    out.push_str("<xdr:clientData/>");
+
+    match anchor {
+        Anchor::OneCell { .. } => out.push_str("</xdr:oneCellAnchor>"),
+        Anchor::TwoCell { .. } => out.push_str("</xdr:twoCellAnchor>"),
+        Anchor::Absolute { .. } => out.push_str("</xdr:absoluteAnchor>"),
+    }
+
+    out
+}
+
+fn build_from_to_xml(tag: &str, point: &AnchorPoint) -> String {
+    format!(
+        "<xdr:{tag}><xdr:col>{}</xdr:col><xdr:colOff>{}</xdr:colOff><xdr:row>{}</xdr:row><xdr:rowOff>{}</xdr:rowOff></xdr:{tag}>",
+        point.cell.col, point.offset.x_emu, point.cell.row, point.offset.y_emu
+    )
+}
+
+fn build_pic_xml(object_id: u32, embed_rel_id: &str, size: Option<EmuSize>) -> String {
+    let (cx, cy) = size.map(|s| (s.cx, s.cy)).unwrap_or((0, 0));
+
+    format!(
+        r#"<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="{object_id}" name="Picture {object_id}"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="{embed_rel_id}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>"#
+    )
+}

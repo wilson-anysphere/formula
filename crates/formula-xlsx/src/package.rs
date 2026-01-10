@@ -13,6 +13,8 @@ pub enum XlsxError {
     Io(#[from] std::io::Error),
     #[error("xml error: {0}")]
     Xml(#[from] quick_xml::Error),
+    #[error("xml error: {0}")]
+    RoXml(#[from] roxmltree::Error),
     #[error("utf-8 error: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
     #[error("xml attribute error: {0}")]
@@ -70,6 +72,15 @@ impl XlsxPackage {
 
     pub fn part_names(&self) -> impl Iterator<Item = &str> {
         self.parts.keys().map(String::as_str)
+    }
+
+    /// Borrow the raw part map (useful for higher-fidelity operations).
+    pub fn parts_map(&self) -> &BTreeMap<String, Vec<u8>> {
+        &self.parts
+    }
+
+    pub fn parts_map_mut(&mut self) -> &mut BTreeMap<String, Vec<u8>> {
+        &mut self.parts
     }
 
     pub fn set_part(&mut self, name: impl Into<String>, bytes: Vec<u8>) {

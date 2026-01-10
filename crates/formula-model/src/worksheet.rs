@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 
+use crate::drawings::DrawingObject;
 use crate::{
     A1ParseError, Cell, CellKey, CellRef, CellValue, Hyperlink, MergeError, MergedRegions, Range,
     Table,
@@ -125,6 +126,9 @@ pub struct Worksheet {
     /// Optional tab color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tab_color: Option<TabColor>,
+    /// Floating drawings (images, shapes, chart placeholders) anchored to the sheet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drawings: Vec<DrawingObject>,
 
     /// Sparse cell storage; only non-empty cells are stored.
     #[serde(default)]
@@ -192,6 +196,7 @@ impl Worksheet {
             name: name.into(),
             visibility: SheetVisibility::Visible,
             tab_color: None,
+            drawings: Vec::new(),
             cells: HashMap::new(),
             used_range: None,
             merged_regions: MergedRegions::new(),
@@ -833,6 +838,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             #[serde(default)]
             tab_color: Option<TabColor>,
             #[serde(default)]
+            drawings: Vec<DrawingObject>,
+            #[serde(default)]
             cells: HashMap<CellKey, Cell>,
             #[serde(default)]
             tables: Vec<Table>,
@@ -926,6 +933,7 @@ impl<'de> Deserialize<'de> for Worksheet {
             name: helper.name,
             visibility: helper.visibility,
             tab_color: helper.tab_color,
+            drawings: helper.drawings,
             cells: helper.cells,
             used_range,
             merged_regions: helper.merged_regions,
