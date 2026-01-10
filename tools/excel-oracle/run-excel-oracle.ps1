@@ -73,25 +73,25 @@ function Encode-CellValue {
 
   $v = $CellRange.Value2
   if ($null -eq $v) {
-    return @{ t = "blank" }
+    return [ordered]@{ t = "blank" }
   }
 
   # PowerShell sometimes returns Excel errors as Int32 error codes; .Text is the
   # most reliable way to determine error strings (#DIV/0!, #N/A, #SPILL!, ...).
   $text = $CellRange.Text
   if ($text -is [string] -and $text.StartsWith("#") -and -not ($v -is [string])) {
-    return @{ t = "e"; v = $text }
+    return [ordered]@{ t = "e"; v = $text }
   }
 
   if ($v -is [bool]) {
-    return @{ t = "b"; v = [bool]$v }
+    return [ordered]@{ t = "b"; v = [bool]$v }
   }
 
   if ($v -is [double] -or $v -is [int] -or $v -is [decimal]) {
-    return @{ t = "n"; v = [double]$v }
+    return [ordered]@{ t = "n"; v = [double]$v }
   }
 
-  return @{ t = "s"; v = [string]$v }
+  return [ordered]@{ t = "s"; v = [string]$v }
 }
 
 function Encode-RangeValue {
@@ -102,7 +102,7 @@ function Encode-RangeValue {
 
   if ($rows -eq 1 -and $cols -eq 1) {
     $encoded = Encode-CellValue -CellRange $RangeObj
-    return @{
+    return [ordered]@{
       value = $encoded
       address = $RangeObj.Address($false, $false)
       displayText = [string]$RangeObj.Text
@@ -130,8 +130,8 @@ function Encode-RangeValue {
     Release-ComObject $topLeft
   }
 
-  return @{
-    value = @{ t = "arr"; rows = $outRows }
+  return [ordered]@{
+    value = [ordered]@{ t = "arr"; rows = $outRows }
     address = $RangeObj.Address($false, $false)
     displayText = $display
   }
@@ -230,7 +230,7 @@ try {
 
       $encoded = Encode-RangeValue -RangeObj $resultRange
 
-      $results.Add(@{
+      $results.Add([ordered]@{
         caseId = $case.id
         outputCell = $outputCell
         result = $encoded.value
@@ -243,16 +243,16 @@ try {
     }
   }
 
-  $payload = @{
+  $payload = [ordered]@{
     schemaVersion = 1
     generatedAt = (Get-Date).ToUniversalTime().ToString("o")
-    source = @{
+    source = [ordered]@{
       kind = "excel"
       version = [string]$excel.Version
       build = [string]$excel.Build
       operatingSystem = [string]$excel.OperatingSystem
     }
-    caseSet = @{
+    caseSet = [ordered]@{
       path = $CasesPath
       sha256 = $caseHash
       count = $caseList.Count
