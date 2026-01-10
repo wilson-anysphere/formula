@@ -56,7 +56,14 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
 
     // styles.xml is required by most files even if we don't model it.
     if !parts.contains_key("xl/styles.xml") {
-        parts.insert("xl/styles.xml".to_string(), minimal_styles_xml());
+        let max_style_id = doc
+            .workbook
+            .sheets
+            .iter()
+            .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id))
+            .max()
+            .unwrap_or(0);
+        parts.insert("xl/styles.xml".to_string(), minimal_styles_xml(max_style_id));
     }
 
     // Ensure core relationship/content types metadata exists when we synthesize new
@@ -967,20 +974,28 @@ fn shared_string_index(
     }
 }
 
-fn minimal_styles_xml() -> Vec<u8> {
-    br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+fn minimal_styles_xml(max_style_id: u32) -> Vec<u8> {
+    let cell_xfs_count = max_style_id.saturating_add(1).max(1) as usize;
+    let mut cell_xfs = String::new();
+    for _ in 0..cell_xfs_count {
+        cell_xfs.push_str(r#"<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>"#);
+    }
+
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <fonts count="1"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font></fonts>
   <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
   <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
+  <cellXfs count="{cell_xfs_count}">{cell_xfs}</cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
   <dxfs count="0"/>
   <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/>
 </styleSheet>
 "#
-    .to_vec()
+    )
+    .into_bytes()
 }
 
 fn generate_minimal_package(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteError> {

@@ -1,5 +1,7 @@
 use formula_model::{Cell, CellRef, CellValue, Workbook};
 use formula_xlsx::{load_from_bytes, XlsxDocument};
+use quick_xml::events::Event;
+use quick_xml::Reader;
 
 #[test]
 fn new_document_saves_and_loads_with_multiple_sheets() {
@@ -62,5 +64,39 @@ fn new_document_saves_and_loads_with_multiple_sheets() {
     .unwrap();
     assert!(content_types.contains("/xl/worksheets/sheet1.xml"));
     assert!(content_types.contains("/xl/worksheets/sheet2.xml"));
+
+    let styles = loaded
+        .parts()
+        .get("xl/styles.xml")
+        .expect("styles part present");
+    assert!(
+        cell_xfs_count(styles) >= 8,
+        "styles.xml should contain enough <xf> entries for the highest style_id"
+    );
 }
 
+fn cell_xfs_count(xml: &[u8]) -> u32 {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf).expect("read xml") {
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"cellXfs" => {
+                for attr in e.attributes().flatten() {
+                    if attr.key.as_ref() == b"count" {
+                        return attr
+                            .unescape_value()
+                            .expect("count")
+                            .parse()
+                            .unwrap_or(0);
+                    }
+                }
+                return 0;
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    0
+}
