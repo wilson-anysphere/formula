@@ -58,6 +58,34 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         parts.insert("xl/styles.xml".to_string(), minimal_styles_xml());
     }
 
+    // Ensure core relationship/content types metadata exists when we synthesize new
+    // parts for existing packages. For existing relationships we preserve IDs by
+    // only adding missing entries with a new `rIdN`.
+    if parts.contains_key("xl/sharedStrings.xml") {
+        ensure_content_types_override(
+            &mut parts,
+            "/xl/sharedStrings.xml",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
+        )?;
+        ensure_workbook_rels_has_relationship(
+            &mut parts,
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings",
+            "sharedStrings.xml",
+        )?;
+    }
+    if parts.contains_key("xl/styles.xml") {
+        ensure_content_types_override(
+            &mut parts,
+            "/xl/styles.xml",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
+        )?;
+        ensure_workbook_rels_has_relationship(
+            &mut parts,
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles",
+            "styles.xml",
+        )?;
+    }
+
     let workbook_orig = parts.get("xl/workbook.xml").map(|b| b.as_slice());
     parts.insert(
         "xl/workbook.xml".to_string(),
@@ -746,34 +774,150 @@ fn generate_minimal_package(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u
     // Minimal workbook relationships; existing packages preserve the original bytes.
     parts.insert(
         "xl/_rels/workbook.xml.rels".to_string(),
-        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
-</Relationships>
-"#
-        .to_vec(),
+        minimal_workbook_rels_xml(doc).into_bytes(),
     );
 
     parts.insert(
         "[Content_Types].xml".to_string(),
-        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
-</Types>
-"#
-        .to_vec(),
+        minimal_content_types_xml(doc).into_bytes(),
     );
 
+    Ok(parts)
+}
+
+fn minimal_workbook_rels_xml(doc: &XlsxDocument) -> String {
+    let mut xml = String::new();
+    xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
+    xml.push_str(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#);
+
     for sheet_meta in &doc.meta.sheets {
-        parts.insert(sheet_meta.path.clone(), Vec::new());
+        let target = rels_target_from_part_path(&sheet_meta.path);
+        xml.push_str(r#"<Relationship Id=""#);
+        xml.push_str(&escape_attr(&sheet_meta.relationship_id));
+        xml.push_str(r#"" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target=""#);
+        xml.push_str(&escape_attr(&target));
+        xml.push_str(r#""/>"#);
     }
 
-    Ok(parts)
+    let next = next_relationship_id(
+        doc.meta
+            .sheets
+            .iter()
+            .map(|s| s.relationship_id.as_str()),
+    );
+    xml.push_str(&format!(r#"<Relationship Id="rId{next}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>"#));
+    let next2 = next + 1;
+    xml.push_str(&format!(r#"<Relationship Id="rId{next2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>"#));
+    xml.push_str("</Relationships>");
+    xml
+}
+
+fn rels_target_from_part_path(path: &str) -> String {
+    // workbook.xml.rels is rooted at `xl/`, so worksheet targets are relative.
+    path.strip_prefix("xl/")
+        .or_else(|| path.strip_prefix("/xl/"))
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn minimal_content_types_xml(doc: &XlsxDocument) -> String {
+    let mut xml = String::new();
+    xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
+    xml.push_str(r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#);
+    xml.push_str(r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#);
+    xml.push_str(r#"<Default Extension="xml" ContentType="application/xml"/>"#);
+    xml.push_str(r#"<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>"#);
+    for sheet_meta in &doc.meta.sheets {
+        xml.push_str(r#"<Override PartName="/"#);
+        xml.push_str(&escape_attr(&sheet_meta.path));
+        xml.push_str(r#"" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>"#);
+    }
+    xml.push_str(r#"<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>"#);
+    xml.push_str(r#"<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>"#);
+    xml.push_str("</Types>");
+    xml
+}
+
+fn ensure_content_types_override(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    part_name: &str,
+    content_type: &str,
+) -> Result<(), WriteError> {
+    let Some(existing) = parts.get("[Content_Types].xml").cloned() else {
+        // Avoid synthesizing a full file for existing packages.
+        return Ok(());
+    };
+    let mut xml = String::from_utf8(existing)
+        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+    if xml.contains(&format!(r#"PartName="{part_name}""#)) {
+        parts.insert("[Content_Types].xml".to_string(), xml.into_bytes());
+        return Ok(());
+    }
+    if let Some(idx) = xml.rfind("</Types>") {
+        let insert = format!(
+            r#"<Override PartName="{part_name}" ContentType="{content_type}"/>"#
+        );
+        xml.insert_str(idx, &insert);
+    }
+    parts.insert("[Content_Types].xml".to_string(), xml.into_bytes());
+    Ok(())
+}
+
+fn ensure_workbook_rels_has_relationship(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    rel_type: &str,
+    target: &str,
+) -> Result<(), WriteError> {
+    let rels_name = "xl/_rels/workbook.xml.rels";
+    let Some(existing) = parts.get(rels_name).cloned() else {
+        return Ok(());
+    };
+    let mut xml = String::from_utf8(existing)
+        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+    if xml.contains(rel_type) {
+        parts.insert(rels_name.to_string(), xml.into_bytes());
+        return Ok(());
+    }
+    let next = next_relationship_id_in_xml(&xml);
+    let rel = format!(
+        r#"<Relationship Id="rId{next}" Type="{rel_type}" Target="{target}"/>"#
+    );
+    if let Some(idx) = xml.rfind("</Relationships>") {
+        xml.insert_str(idx, &rel);
+    }
+    parts.insert(rels_name.to_string(), xml.into_bytes());
+    Ok(())
+}
+
+fn next_relationship_id<'a>(ids: impl Iterator<Item = &'a str>) -> u32 {
+    let mut max_id = 0u32;
+    for id in ids {
+        if let Some(rest) = id.strip_prefix("rId") {
+            if let Ok(n) = rest.parse::<u32>() {
+                max_id = max_id.max(n);
+            }
+        }
+    }
+    max_id + 1
+}
+
+fn next_relationship_id_in_xml(xml: &str) -> u32 {
+    let mut max_id = 0u32;
+    let mut rest = xml;
+    while let Some(idx) = rest.find("Id=\"rId") {
+        let after = &rest[idx + "Id=\"rId".len()..];
+        let mut digits = String::new();
+        for ch in after.chars() {
+            if ch.is_ascii_digit() {
+                digits.push(ch);
+            } else {
+                break;
+            }
+        }
+        if let Ok(n) = digits.parse::<u32>() {
+            max_id = max_id.max(n);
+        }
+        rest = &after[digits.len()..];
+    }
+    max_id + 1
 }

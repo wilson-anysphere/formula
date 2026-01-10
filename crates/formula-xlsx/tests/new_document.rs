@@ -1,0 +1,66 @@
+use formula_model::{Cell, CellRef, CellValue, Workbook};
+use formula_xlsx::{load_from_bytes, XlsxDocument};
+
+#[test]
+fn new_document_saves_and_loads_with_multiple_sheets() {
+    let mut workbook = Workbook::new();
+    let sheet1 = workbook.add_sheet("First");
+    let sheet2 = workbook.add_sheet("Second");
+
+    {
+        let ws1 = workbook.sheet_mut(sheet1).unwrap();
+        ws1.set_cell(CellRef::from_a1("A1").unwrap(), Cell::new(CellValue::Number(1.0)));
+        ws1.set_cell(
+            CellRef::from_a1("B1").unwrap(),
+            Cell::new(CellValue::String("Hello".to_string())),
+        );
+    }
+
+    {
+        let ws2 = workbook.sheet_mut(sheet2).unwrap();
+        let mut cell = Cell::new(CellValue::Boolean(true));
+        cell.style_id = 7;
+        ws2.set_cell(CellRef::from_a1("C3").unwrap(), cell);
+    }
+
+    let doc = XlsxDocument::new(workbook);
+    let bytes = doc.save_to_vec().expect("write xlsx");
+
+    let loaded = load_from_bytes(&bytes).expect("read xlsx");
+
+    assert_eq!(loaded.workbook.sheets.len(), 2);
+    assert_eq!(loaded.workbook.sheets[0].name, "First");
+    assert_eq!(loaded.workbook.sheets[1].name, "Second");
+
+    let ws1 = loaded.workbook.sheet_by_name("First").unwrap();
+    assert_eq!(ws1.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        ws1.value_a1("B1").unwrap(),
+        CellValue::String("Hello".to_string())
+    );
+
+    let ws2 = loaded.workbook.sheet_by_name("Second").unwrap();
+    assert_eq!(ws2.value_a1("C3").unwrap(), CellValue::Boolean(true));
+    assert_eq!(ws2.cell_a1("C3").unwrap().unwrap().style_id, 7);
+
+    let rels = std::str::from_utf8(
+        loaded
+            .parts()
+            .get("xl/_rels/workbook.xml.rels")
+            .expect("workbook rels part present"),
+    )
+    .unwrap();
+    assert!(rels.contains("worksheets/sheet1.xml"));
+    assert!(rels.contains("worksheets/sheet2.xml"));
+
+    let content_types = std::str::from_utf8(
+        loaded
+            .parts()
+            .get("[Content_Types].xml")
+            .expect("content types part present"),
+    )
+    .unwrap();
+    assert!(content_types.contains("/xl/worksheets/sheet1.xml"));
+    assert!(content_types.contains("/xl/worksheets/sheet2.xml"));
+}
+
