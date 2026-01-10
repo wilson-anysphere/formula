@@ -11,7 +11,8 @@
   },
   "activationEvents": [
     "onCommand:sampleHello.sumSelection",
-    "onCommand:sampleHello.openPanel"
+    "onCommand:sampleHello.openPanel",
+    "onCustomFunction:SAMPLEHELLO_DOUBLE"
   ],
   "contributes": {
     "commands": [
@@ -31,6 +32,22 @@
         "id": "sampleHello.panel",
         "title": "Sample Hello Panel"
       }
+    ],
+    "customFunctions": [
+      {
+        "name": "SAMPLEHELLO_DOUBLE",
+        "description": "Doubles the input value",
+        "parameters": [
+          {
+            "name": "value",
+            "type": "number",
+            "description": "Value to double"
+          }
+        ],
+        "result": {
+          "type": "number"
+        }
+      }
     ]
   },
   "permissions": [
@@ -40,4 +57,3 @@
     "ui.panels"
   ]
 }
-

@@ -31,6 +31,8 @@ export interface Range {
 export interface PanelWebview {
   html: string;
   setHtml(html: string): Promise<void>;
+  postMessage(message: any): Promise<void>;
+  onDidReceiveMessage(handler: (message: any) => void): Disposable;
 }
 
 export interface Panel extends Disposable {
@@ -58,6 +60,21 @@ export namespace commands {
     handler: (...args: any[]) => any | Promise<any>
   ): Promise<Disposable>;
   function executeCommand(id: string, ...args: any[]): Promise<any>;
+}
+
+export namespace functions {
+  type CustomFunctionHandler = (...args: any[]) => any | Promise<any>;
+
+  interface CustomFunctionDefinition {
+    description?: string;
+    parameters?: Array<{ name: string; type: string; description?: string }>;
+    result?: { type: string };
+    isAsync?: boolean;
+    returnsArray?: boolean;
+    handler: CustomFunctionHandler;
+  }
+
+  function register(name: string, def: CustomFunctionDefinition): Promise<Disposable>;
 }
 
 export namespace ui {

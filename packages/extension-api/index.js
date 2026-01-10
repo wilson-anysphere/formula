@@ -6,6 +6,8 @@ const pendingRequests = new Map();
 
 const commandHandlers = new Map();
 const eventHandlers = new Map();
+const panelMessageHandlers = new Map();
+const customFunctionHandlers = new Map();
 
 function __setTransport(nextTransport) {
   transport = nextTransport;
@@ -109,6 +111,47 @@ function __handleMessage(message) {
         );
       return;
     }
+    case "invoke_custom_function": {
+      const { id, functionName, args } = message;
+      Promise.resolve()
+        .then(async () => {
+          const handler = customFunctionHandlers.get(functionName);
+          if (!handler) {
+            throw new Error(`Custom function not registered: ${functionName}`);
+          }
+          return handler(...(Array.isArray(args) ? args : []));
+        })
+        .then(
+          (result) => {
+            getTransportOrThrow().postMessage({
+              type: "custom_function_result",
+              id,
+              result
+            });
+          },
+          (error) => {
+            getTransportOrThrow().postMessage({
+              type: "custom_function_error",
+              id,
+              error: { message: String(error?.message ?? error), stack: error?.stack }
+            });
+          }
+        );
+      return;
+    }
+    case "panel_message": {
+      const panelId = String(message.panelId ?? "");
+      const handlers = panelMessageHandlers.get(panelId);
+      if (!handlers) return;
+      for (const handler of handlers) {
+        try {
+          handler(message.message);
+        } catch (err) {
+          notifyError(err);
+        }
+      }
+      return;
+    }
     case "event": {
       const handlers = eventHandlers.get(message.event);
       if (!handlers) return;
@@ -168,6 +211,21 @@ class PanelImpl {
       },
       async setHtml(html) {
         await rpcCall("ui", "setPanelHtml", [panelId, String(html)]);
+      },
+      async postMessage(message) {
+        await rpcCall("ui", "postMessageToPanel", [panelId, message]);
+      },
+      onDidReceiveMessage(handler) {
+        if (typeof handler !== "function") {
+          throw new Error("onDidReceiveMessage handler must be a function");
+        }
+        if (!panelMessageHandlers.has(panelId)) panelMessageHandlers.set(panelId, new Set());
+        const set = panelMessageHandlers.get(panelId);
+        set.add(handler);
+        return new DisposableImpl(() => {
+          set.delete(handler);
+          if (set.size === 0) panelMessageHandlers.delete(panelId);
+        });
       }
     };
   }
@@ -223,6 +281,32 @@ const commands = {
 
   async executeCommand(id, ...args) {
     return rpcCall("commands", "executeCommand", [String(id), ...args]);
+  }
+};
+
+const functions = {
+  async register(name, def) {
+    const fnName = String(name);
+    if (fnName.trim().length === 0) throw new Error("Function name must be a non-empty string");
+    if (!def || typeof def !== "object") throw new Error("Function definition must be an object");
+    if (typeof def.handler !== "function") throw new Error("Function definition must include handler()");
+
+    customFunctionHandlers.set(fnName, def.handler);
+    await rpcCall("functions", "register", [
+      fnName,
+      {
+        description: def.description,
+        parameters: def.parameters,
+        result: def.result,
+        isAsync: def.isAsync,
+        returnsArray: def.returnsArray
+      }
+    ]);
+
+    return new DisposableImpl(() => {
+      customFunctionHandlers.delete(fnName);
+      rpcCall("functions", "unregister", [fnName]).catch(notifyError);
+    });
   }
 };
 
@@ -285,6 +369,7 @@ module.exports = {
   sheets,
   cells,
   commands,
+  functions,
   ui,
   storage,
   config,

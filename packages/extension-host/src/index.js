@@ -22,7 +22,11 @@ const API_PERMISSIONS = {
 
   "ui.createPanel": ["ui.panels"],
   "ui.setPanelHtml": ["ui.panels"],
+  "ui.postMessageToPanel": ["ui.panels"],
   "ui.disposePanel": ["ui.panels"],
+
+  "functions.register": [],
+  "functions.unregister": [],
 
   "storage.get": ["storage"],
   "storage.set": ["storage"],
@@ -51,6 +55,7 @@ class ExtensionHost {
     this._extensions = new Map();
     this._commands = new Map(); // commandId -> extensionId
     this._panels = new Map(); // panelId -> { id, title, html }
+    this._customFunctions = new Map(); // functionName -> extensionId
     this._messages = [];
     this._pendingWorkerRequests = new Map();
     this._extensionStoragePath = extensionStoragePath;
@@ -111,6 +116,13 @@ class ExtensionHost {
     // Register contributed commands so the app can route executions before activation.
     for (const cmd of manifest.contributes.commands ?? []) {
       this._commands.set(cmd.command, extensionId);
+    }
+
+    for (const fn of manifest.contributes.customFunctions ?? []) {
+      if (this._customFunctions.has(fn.name)) {
+        throw new Error(`Duplicate custom function name: ${fn.name}`);
+      }
+      this._customFunctions.set(fn.name, extensionId);
     }
 
     this._extensions.set(extensionId, extension);
@@ -186,6 +198,51 @@ class ExtensionHost {
     return this._panels.get(panelId);
   }
 
+  getPanelOutgoingMessages(panelId) {
+    const panel = this._panels.get(panelId);
+    if (!panel) return [];
+    return [...(panel.outgoingMessages ?? [])];
+  }
+
+  dispatchPanelMessage(panelId, message) {
+    const panel = this._panels.get(panelId);
+    if (!panel) throw new Error(`Unknown panel: ${panelId}`);
+    const extension = this._extensions.get(panel.extensionId);
+    if (!extension) throw new Error(`Extension not loaded: ${panel.extensionId}`);
+    extension.worker.postMessage({ type: "panel_message", panelId, message });
+  }
+
+  async invokeCustomFunction(functionName, ...args) {
+    const name = String(functionName);
+    const extensionId = this._customFunctions.get(name);
+    if (!extensionId) throw new Error(`Unknown custom function: ${name}`);
+
+    const extension = this._extensions.get(extensionId);
+    if (!extension) throw new Error(`Extension not loaded: ${extensionId}`);
+
+    if (!extension.active) {
+      const activationEvent = `onCustomFunction:${name}`;
+      if (!(extension.manifest.activationEvents ?? []).includes(activationEvent)) {
+        throw new Error(`Extension ${extensionId} is not activated for ${activationEvent}`);
+      }
+      await this._activateExtension(extension, activationEvent);
+    }
+
+    const id = crypto.randomUUID();
+    const promise = new Promise((resolve, reject) => {
+      this._pendingWorkerRequests.set(id, { resolve, reject });
+    });
+
+    extension.worker.postMessage({
+      type: "invoke_custom_function",
+      id,
+      functionName: name,
+      args
+    });
+
+    return promise;
+  }
+
   getMessages() {
     return [...this._messages];
   }
@@ -195,6 +252,7 @@ class ExtensionHost {
     this._extensions.clear();
     this._commands.clear();
     this._panels.clear();
+    this._customFunctions.clear();
     this._messages = [];
 
     await Promise.allSettled(
@@ -255,9 +313,14 @@ class ExtensionHost {
         return null;
 
       case "commands.registerCommand":
+        if (this._commands.has(args[0]) && this._commands.get(args[0]) !== extension.id) {
+          throw new Error(`Command already registered by another extension: ${args[0]}`);
+        }
+        this._commands.set(args[0], extension.id);
         extension.registeredCommands.add(args[0]);
         return null;
       case "commands.unregisterCommand":
+        if (this._commands.get(args[0]) === extension.id) this._commands.delete(args[0]);
         extension.registeredCommands.delete(args[0]);
         return null;
       case "commands.executeCommand": {
@@ -273,7 +336,13 @@ class ExtensionHost {
         const panelId = String(args[0]);
         const options = args[1] ?? {};
         const title = String(options.title ?? panelId);
-        this._panels.set(panelId, { id: panelId, title, html: "" });
+        this._panels.set(panelId, {
+          id: panelId,
+          title,
+          html: "",
+          extensionId: extension.id,
+          outgoingMessages: []
+        });
         return { id: panelId };
       }
       case "ui.setPanelHtml": {
@@ -284,9 +353,37 @@ class ExtensionHost {
         panel.html = html;
         return null;
       }
+      case "ui.postMessageToPanel": {
+        const panelId = String(args[0]);
+        const message = args[1];
+        const panel = this._panels.get(panelId);
+        if (!panel) throw new Error(`Unknown panel: ${panelId}`);
+        if (panel.extensionId !== extension.id) {
+          throw new Error(`Panel ${panelId} does not belong to extension ${extension.id}`);
+        }
+        panel.outgoingMessages.push(message);
+        return null;
+      }
       case "ui.disposePanel": {
         const panelId = String(args[0]);
         this._panels.delete(panelId);
+        return null;
+      }
+
+      case "functions.register": {
+        const fnName = String(args[0]);
+        const contributed = (extension.manifest.contributes.customFunctions ?? []).some(
+          (f) => f.name === fnName
+        );
+        if (!contributed) {
+          throw new Error(`Custom function not declared in manifest: ${fnName}`);
+        }
+        this._customFunctions.set(fnName, extension.id);
+        return null;
+      }
+      case "functions.unregister": {
+        const fnName = String(args[0]);
+        if (this._customFunctions.get(fnName) === extension.id) this._customFunctions.delete(fnName);
         return null;
       }
 
@@ -374,6 +471,20 @@ class ExtensionHost {
         return;
       }
       case "command_error": {
+        const pending = this._pendingWorkerRequests.get(message.id);
+        if (!pending) return;
+        this._pendingWorkerRequests.delete(message.id);
+        pending.reject(new Error(String(message.error?.message ?? message.error)));
+        return;
+      }
+      case "custom_function_result": {
+        const pending = this._pendingWorkerRequests.get(message.id);
+        if (!pending) return;
+        this._pendingWorkerRequests.delete(message.id);
+        pending.resolve(message.result);
+        return;
+      }
+      case "custom_function_error": {
         const pending = this._pendingWorkerRequests.get(message.id);
         if (!pending) return;
         this._pendingWorkerRequests.delete(message.id);

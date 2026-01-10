@@ -6,9 +6,6 @@
   "dependencies": {
     "yjs": "^13.6.27"
   },
-  "workspaces": [
-    "packages/*"
-  ],
   "scripts": {
     "dev": "pnpm --dir packages/grid dev",
     "test": "vitest run && node scripts/run-node-tests.mjs",
