@@ -88,7 +88,7 @@ This document tracks every Excel feature and our implementation status. Features
 | SQRT | ⬜ | |
 | SQRTPI | ⬜ | |
 | SUBTOTAL | ⬜ | 11 function types |
-| SUM | ⬜ | Core function |
+| SUM | ✅ | Core function |
 | SUMIF | ⬜ | |
 | SUMIFS | ⬜ | |
 | SUMPRODUCT | ⬜ | |
@@ -197,8 +197,8 @@ This document tracks every Excel feature and our implementation status. Features
 | BYCOL | ⬜ | Lambda helper |
 | BYROW | ⬜ | Lambda helper |
 | FALSE | ⬜ | |
-| IF | ⬜ | Most used function |
-| IFERROR | ⬜ | |
+| IF | ✅ | Most used function |
+| IFERROR | ✅ | |
 | IFNA | ⬜ | |
 | IFS | ⬜ | Multiple conditions |
 | LAMBDA | ⬜ | User-defined functions |
@@ -376,45 +376,45 @@ This document tracks every Excel feature and our implementation status. Features
 | CUMIPMT | ⬜ | |
 | CUMPRINC | ⬜ | |
 | DB | ⬜ | |
-| DDB | ⬜ | |
+| DDB | ✅ | |
 | DISC | ⬜ | |
 | DOLLARDE | ⬜ | |
 | DOLLARFR | ⬜ | |
 | DURATION | ⬜ | |
 | EFFECT | ⬜ | |
-| FV | ⬜ | P0 |
+| FV | ✅ | P0 |
 | FVSCHEDULE | ⬜ | |
 | INTRATE | ⬜ | |
-| IPMT | ⬜ | |
-| IRR | ⬜ | P0 |
+| IPMT | ✅ | |
+| IRR | ✅ | P0 |
 | ISPMT | ⬜ | |
 | MDURATION | ⬜ | |
 | MIRR | ⬜ | |
 | NOMINAL | ⬜ | |
-| NPER | ⬜ | |
-| NPV | ⬜ | P0 |
+| NPER | ✅ | |
+| NPV | ✅ | P0 |
 | ODDFPRICE | ⬜ | |
 | ODDFYIELD | ⬜ | |
 | ODDLPRICE | ⬜ | |
 | ODDLYIELD | ⬜ | |
 | PDURATION | ⬜ | |
-| PMT | ⬜ | P0 |
-| PPMT | ⬜ | |
+| PMT | ✅ | P0 |
+| PPMT | ✅ | |
 | PRICE | ⬜ | |
 | PRICEDISC | ⬜ | |
 | PRICEMAT | ⬜ | |
-| PV | ⬜ | P0 |
-| RATE | ⬜ | |
+| PV | ✅ | P0 |
+| RATE | ✅ | |
 | RECEIVED | ⬜ | |
 | RRI | ⬜ | |
-| SLN | ⬜ | |
-| SYD | ⬜ | |
+| SLN | ✅ | |
+| SYD | ✅ | |
 | TBILLEQ | ⬜ | |
 | TBILLPRICE | ⬜ | |
 | TBILLYIELD | ⬜ | |
 | VDB | ⬜ | |
-| XIRR | ⬜ | P0 |
-| XNPV | ⬜ | P0 |
+| XIRR | ✅ | P0 |
+| XNPV | ✅ | P0 |
 | YIELD | ⬜ | |
 | YIELDDISC | ⬜ | |
 | YIELDMAT | ⬜ | |
