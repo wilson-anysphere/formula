@@ -8,6 +8,7 @@
 //! - Optionally parse `vbaProject.bin` to expose modules for UI display.
 
 mod package;
+pub mod comments;
 pub mod pivots;
 pub mod print;
 pub mod shared_strings;

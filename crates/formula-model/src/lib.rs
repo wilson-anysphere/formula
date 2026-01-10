@@ -7,6 +7,7 @@
 
 mod address;
 mod cell;
+mod comments;
 mod display;
 pub mod conditional_formatting;
 mod error;
@@ -18,6 +19,7 @@ mod worksheet;
 
 pub use address::{A1ParseError, CellRef, Range, RangeIter, RangeParseError};
 pub use cell::{Cell, CellId, CellKey, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
+pub use comments::{Comment, CommentAuthor, CommentKind, Mention, Reply, TimestampMs};
 pub use display::{format_cell_display, CellDisplay};
 pub use conditional_formatting::*;
 pub use error::ErrorValue;

@@ -49,6 +49,12 @@ impl XlsxPackage {
         self.parts.get(name).map(|v| v.as_slice())
     }
 
+    pub fn parts(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.parts
+            .iter()
+            .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+    }
+
     pub fn set_part(&mut self, name: impl Into<String>, bytes: Vec<u8>) {
         self.parts.insert(name.into(), bytes);
     }
