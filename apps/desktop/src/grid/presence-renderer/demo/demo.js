@@ -78,6 +78,25 @@ const getCellRect = createCellRectFn();
 
 let tick = 0;
 
+function mountOverlay(presenceManager, renderer, ctx) {
+  let scheduled = false;
+  let latest = [];
+
+  return presenceManager.subscribe((presences) => {
+    latest = presences;
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      renderer.clear(ctx);
+      renderer.render(ctx, latest, { getCellRect });
+    });
+  });
+}
+
+mountOverlay(presenceA, rendererA, overlayCtxA);
+mountOverlay(presenceB, rendererB, overlayCtxB);
+
 function updateSimulatedUsers() {
   tick += 1;
 
@@ -105,16 +124,9 @@ function updateSimulatedUsers() {
   }
 }
 
-function render() {
+function tickLoop() {
   updateSimulatedUsers();
-
-  rendererA.clear(overlayCtxA);
-  rendererB.clear(overlayCtxB);
-
-  rendererA.render(overlayCtxA, presenceA.getRemotePresences(), { getCellRect });
-  rendererB.render(overlayCtxB, presenceB.getRemotePresences(), { getCellRect });
-
-  requestAnimationFrame(render);
+  requestAnimationFrame(tickLoop);
 }
 
-render();
+tickLoop();

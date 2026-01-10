@@ -20,6 +20,17 @@ export class PresenceManager {
 
     this.awareness = awareness;
     this.now = now;
+    this._listeners = new Set();
+    this._awarenessChangeHandler = (change) => {
+      const localClientId = this.awareness.clientID;
+      const added = Array.isArray(change?.added) ? change.added : [];
+      const updated = Array.isArray(change?.updated) ? change.updated : [];
+      const removed = Array.isArray(change?.removed) ? change.removed : [];
+      const hasRemoteChange = [...added, ...updated, ...removed].some((clientId) => clientId !== localClientId);
+      if (!hasRemoteChange) return;
+      this._notify();
+    };
+    this._awarenessListenerAttached = false;
 
     this.localPresence = {
       id: user.id,
@@ -46,8 +57,49 @@ export class PresenceManager {
     this.awareness.setLocalStateField("presence", serializePresenceState(this.localPresence));
   }
 
+  _notify() {
+    if (this._listeners.size === 0) return;
+    const presences = this.getRemotePresences();
+    for (const listener of this._listeners) listener(presences);
+  }
+
+  /**
+   * Subscribe to remote presence changes.
+   *
+   * The callback is called immediately with the current remote presences, and
+   * then on any remote awareness update. Local cursor/selection updates are
+   * ignored to avoid causing unnecessary re-renders during pointer movement.
+   *
+   * @param {(presences: any[]) => void} listener
+   * @returns {() => void}
+   */
+  subscribe(listener) {
+    this._listeners.add(listener);
+
+    if (!this._awarenessListenerAttached && typeof this.awareness.on === "function") {
+      this.awareness.on("change", this._awarenessChangeHandler);
+      this._awarenessListenerAttached = true;
+    }
+
+    listener(this.getRemotePresences());
+
+    return () => {
+      this._listeners.delete(listener);
+      if (this._listeners.size > 0) return;
+      if (this._awarenessListenerAttached && typeof this.awareness.off === "function") {
+        this.awareness.off("change", this._awarenessChangeHandler);
+      }
+      this._awarenessListenerAttached = false;
+    };
+  }
+
   destroy() {
     this._broadcastThrottled?.cancel?.();
+    if (this._awarenessListenerAttached && typeof this.awareness.off === "function") {
+      this.awareness.off("change", this._awarenessChangeHandler);
+      this._awarenessListenerAttached = false;
+    }
+    this._listeners.clear();
     if (typeof this.awareness.setLocalState === "function") {
       this.awareness.setLocalState(null);
       return;
@@ -61,6 +113,7 @@ export class PresenceManager {
     this.localPresence.activeSheet = activeSheet;
     this.localPresence.lastActive = this.now();
     this._broadcastNow();
+    this._notify();
   }
 
   setUser(user) {
