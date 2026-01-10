@@ -187,6 +187,17 @@ export class FormulaBarView {
   #onKeyDown(e: KeyboardEvent): void {
     if (!this.model.isEditing) return;
 
+    if (e.key === "Tab") {
+      const accepted = this.model.acceptAiSuggestion();
+      if (accepted) {
+        e.preventDefault();
+        this.#render({ preserveTextareaValue: false });
+        this.#setTextareaSelectionFromModel();
+        this.#emitHover();
+        return;
+      }
+    }
+
     if (e.key === "Escape") {
       e.preventDefault();
       this.textarea.blur();
@@ -218,7 +229,17 @@ export class FormulaBarView {
       this.textarea.value = this.model.draft;
     }
 
-    this.#highlightEl.innerHTML = highlightFormulaToHtml(this.model.draft);
+    let highlightHtml = highlightFormulaToHtml(this.model.draft);
+    const ghost = this.model.aiSuggestion();
+    if (
+      this.model.isEditing &&
+      ghost &&
+      this.model.cursorStart === this.model.cursorEnd &&
+      this.model.cursorStart === this.model.draft.length
+    ) {
+      highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+    }
+    this.#highlightEl.innerHTML = highlightHtml;
 
     // When not editing, hide the textarea and allow hover interactions directly on the highlighted text.
     this.textarea.style.display = this.model.isEditing ? "block" : "none";
@@ -316,4 +337,8 @@ export class FormulaBarView {
     this.#hoverOverride = null;
     this.#emitHover();
   }
+}
+
+function escapeHtml(text: string): string {
+  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
