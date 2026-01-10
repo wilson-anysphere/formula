@@ -2,7 +2,17 @@
 const { parentPort, workerData } = require("node:worker_threads");
 const vm = require("node:vm");
 const util = require("node:util");
-const ts = require("typescript");
+let ts = null;
+try {
+  // The TypeScript compiler is a devDependency in the monorepo; when running in
+  // minimal environments (like CI/unit tests without `pnpm install`) it may be
+  // absent. In that case we still allow scripts that are valid JavaScript to run
+  // by skipping transpilation.
+  // eslint-disable-next-line global-require
+  ts = require("typescript");
+} catch {
+  ts = null;
+}
 
 if (!parentPort) {
   throw new Error("sandbox-worker must be run as a worker thread");
@@ -74,6 +84,7 @@ function createWorkbookProxy() {
 
 function compileTypeScript(tsSource) {
   const wrapped = `async function __formulaUserMain(ctx) {\n${tsSource}\n}\n__formulaUserMain(ctx)`;
+  if (!ts) return wrapped;
   const result = ts.transpileModule(wrapped, {
     compilerOptions: {
       target: ts.ScriptTarget.ES2022,
