@@ -54,6 +54,10 @@ The output JSON includes:
 
 1) Produce engine results JSON (same schema as Excel output). The intended flow is that your engine exposes a CLI that can evaluate the case corpus and emit results.
 
+This repo includes a reference implementation for the Rust `formula-engine` at:
+
+`crates/formula-excel-oracle/` (run with `cargo run -p formula-excel-oracle -- --cases ... --out ...`)
+
 2) Compare:
 
 ```bash

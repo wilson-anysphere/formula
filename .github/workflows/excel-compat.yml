@@ -32,6 +32,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@stable
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -59,11 +61,13 @@ jobs:
         env:
           FORMULA_ENGINE_CMD: ${{ inputs.engine_cmd }}
         run: |
+          $max = [int]"${{ inputs.max_cases }}"
           $engineCmd = "${{ inputs.engine_cmd }}"
           $args = @(
             "-CasesPath", "tests/compatibility/excel-oracle/cases.json",
             "-OutPath", "tests/compatibility/excel-oracle/datasets/engine-results.json"
           )
+          if ($max -gt 0) { $args += @("-MaxCases", $max) }
           if ($engineCmd -ne "") { $args += @("-EngineCommand", $engineCmd) }
           powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-engine.ps1 @args
 

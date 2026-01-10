@@ -3,6 +3,7 @@ members = [
   "apps/desktop/src-tauri",
   "crates/formula-dax",
   "crates/formula-engine",
+  "crates/formula-excel-oracle",
   "crates/formula-format",
   "crates/formula-io",
   "crates/formula-model",

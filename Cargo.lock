@@ -977,6 +977,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "formula-excel-oracle"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "formula-engine",
+ "serde",
+ "serde_json",
+ "sha2",
+ "time",
+]
+
+[[package]]
 name = "formula-format"
 version = "0.1.0"
 

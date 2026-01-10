@@ -23,9 +23,12 @@
 
   If omitted, the script uses $env:FORMULA_ENGINE_CMD.
 
+.PARAMETER MaxCases
+  Optional cap for debugging (run only the first N cases).
+
 .NOTES
-  Until a real engine CLI is wired up, this script will fail fast with a clear
-  error message.
+  If no engine command is provided, this script defaults to running the
+  in-repo Rust CLI (`cargo run -p formula-excel-oracle -- ...`).
 #>
 
 [CmdletBinding()]
@@ -35,6 +38,8 @@ param(
 
   [Parameter(Mandatory = $true)]
   [string]$OutPath,
+
+  [int]$MaxCases = 0,
 
   [string]$EngineCommand
 )
@@ -47,7 +52,20 @@ if (-not $EngineCommand) {
 }
 
 if (-not $EngineCommand) {
-  throw "No engine command provided. Set -EngineCommand or env var FORMULA_ENGINE_CMD to a CLI that can evaluate cases.json and write results JSON."
+  # Default: use the in-repo Rust CLI that evaluates the corpus via formula-engine.
+  $cargoArgs = @(
+    "run",
+    "-p", "formula-excel-oracle",
+    "--quiet",
+    "--",
+    "--cases", $CasesPath,
+    "--out", $OutPath
+  )
+  if ($MaxCases -gt 0) { $cargoArgs += @("--max-cases", $MaxCases) }
+
+  Write-Host ("Running engine via cargo: cargo {0}" -f ($cargoArgs -join " "))
+  & cargo @cargoArgs
+  exit $LASTEXITCODE
 }
 
 if (-not (Test-Path -LiteralPath $CasesPath)) {
@@ -64,7 +82,9 @@ if ($outDir -and -not (Test-Path -LiteralPath $outDir)) {
 #
 # This keeps the harness stable while allowing the underlying engine to evolve.
 $cmd = "$EngineCommand --cases `"$CasesPath`" --out `"$OutPath`""
+if ($MaxCases -gt 0) {
+  $cmd = "$cmd --max-cases $MaxCases"
+}
 Write-Host "Running engine: $cmd"
 
 Invoke-Expression $cmd
-
