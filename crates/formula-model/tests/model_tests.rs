@@ -68,6 +68,20 @@ fn used_range_is_recomputed_on_deserialize() {
 }
 
 #[test]
+fn worksheet_a1_helpers_work() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+
+    sheet.set_value_a1("B2", CellValue::Number(3.0)).unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(1, 1)), CellValue::Number(3.0));
+    assert_eq!(sheet.value_a1("B2").unwrap(), CellValue::Number(3.0));
+    assert_eq!(sheet.cell_a1("B2").unwrap().is_some(), true);
+
+    sheet.clear_cell_a1("$B$2").unwrap();
+    assert_eq!(sheet.value_a1("B2").unwrap(), CellValue::Empty);
+}
+
+#[test]
 fn cell_key_encoding_round_trips() {
     for &(row, col) in &[
         (0, 0),

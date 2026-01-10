@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Cell, CellKey, CellRef, CellValue, Range};
+use crate::{A1ParseError, Cell, CellKey, CellRef, CellValue, Range};
 
 /// Identifier for a worksheet within a workbook.
 pub type WorksheetId = u32;
@@ -129,11 +129,21 @@ impl Worksheet {
         self.cells.get(&CellKey::from(cell))
     }
 
+    /// Get a cell record from an A1 reference (e.g. `A1`, `$B$2`).
+    pub fn cell_a1(&self, a1: &str) -> Result<Option<&Cell>, A1ParseError> {
+        Ok(self.cell(CellRef::from_a1(a1)?))
+    }
+
     /// Get a cell's value, returning [`CellValue::Empty`] if unset.
     pub fn value(&self, cell: CellRef) -> CellValue {
         self.cell(cell)
             .map(|c| c.value.clone())
             .unwrap_or(CellValue::Empty)
+    }
+
+    /// Get a cell's value from an A1 reference, returning [`CellValue::Empty`] if unset.
+    pub fn value_a1(&self, a1: &str) -> Result<CellValue, A1ParseError> {
+        Ok(self.value(CellRef::from_a1(a1)?))
     }
 
     /// Set or replace a cell record.
@@ -185,12 +195,26 @@ impl Worksheet {
         }
     }
 
+    /// Set a cell value using an A1 reference (e.g. `C3`).
+    pub fn set_value_a1(&mut self, a1: &str, value: CellValue) -> Result<(), A1ParseError> {
+        let cell_ref = CellRef::from_a1(a1)?;
+        self.set_value(cell_ref, value);
+        Ok(())
+    }
+
     /// Remove any stored record for this cell.
     pub fn clear_cell(&mut self, cell_ref: CellRef) {
         let key = CellKey::from(cell_ref);
         if self.cells.remove(&key).is_some() {
             self.on_cell_removed(cell_ref);
         }
+    }
+
+    /// Remove any stored record for the cell addressed by an A1 reference.
+    pub fn clear_cell_a1(&mut self, a1: &str) -> Result<(), A1ParseError> {
+        let cell_ref = CellRef::from_a1(a1)?;
+        self.clear_cell(cell_ref);
+        Ok(())
     }
 
     /// Iterate over all stored cells.
