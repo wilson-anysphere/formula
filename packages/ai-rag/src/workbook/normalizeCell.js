@@ -77,7 +77,7 @@ export function getCellRaw(sheet, row, col) {
   const matrix = getSheetMatrix(sheet);
   if (matrix) return matrix[row]?.[col];
   const map = getSheetCellMap(sheet);
-  if (map) return map.get(`${row},${col}`) ?? null;
+  if (map) return map.get(`${row},${col}`) ?? map.get(`${row}:${col}`) ?? null;
   if (typeof sheet?.getCell === "function") return sheet.getCell(row, col);
   return null;
 }

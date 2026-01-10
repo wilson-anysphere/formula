@@ -104,7 +104,10 @@ function detectRegions(sheet, predicate) {
      * @param {string} key
      */
     function parseRowColKey(key) {
-      const parts = String(key).split(",");
+      const raw = String(key);
+      const delimiter = raw.includes(",") ? "," : raw.includes(":") ? ":" : null;
+      if (!delimiter) return null;
+      const parts = raw.split(delimiter);
       if (parts.length !== 2) return null;
       const row = Number(parts[0]);
       const col = Number(parts[1]);
