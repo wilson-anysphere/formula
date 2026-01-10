@@ -90,6 +90,9 @@ Legal holds override deletion when enabled in policy (`legalHoldOverridesRetenti
 Implementation:
 
 - `services/api/retention/retentionService.js`
+- `services/api/src/retention.ts` (Postgres retention sweep: archives `audit_log` → `audit_log_archive`, deletes old `document_versions`, purges soft-deleted `documents`)
+- `services/api/migrations/0002_enterprise_security_policies.sql` (adds `audit_log_archive` + `document_legal_holds` + org policy columns)
+- `services/api/src/routes/docs.ts` (`/docs/:docId/legal-hold` endpoints + soft-delete)
 
 ## Audit Logging
 

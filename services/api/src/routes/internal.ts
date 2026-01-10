@@ -11,4 +11,3 @@ export function registerInternalRoutes(app: FastifyInstance): void {
     return reply.send({ ok: true, ...result });
   });
 }
-

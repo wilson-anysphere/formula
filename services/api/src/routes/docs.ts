@@ -147,6 +147,139 @@ export function registerDocRoutes(app: FastifyInstance): void {
     return { document: doc.rows[0], role: membership.role };
   });
 
+  app.delete("/docs/:docId", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
+
+    await app.db.query(
+      `
+        UPDATE documents
+        SET deleted_at = COALESCE(deleted_at, now()), updated_at = now()
+        WHERE id = $1
+      `,
+      [docId]
+    );
+
+    await writeAuditEvent(app.db, {
+      orgId: membership.orgId,
+      userId: request.user!.id,
+      userEmail: request.user!.email,
+      eventType: "document.deleted",
+      resourceType: "document",
+      resourceId: docId,
+      sessionId: request.session?.id,
+      success: true,
+      details: { soft: true },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request)
+    });
+
+    return reply.send({ ok: true });
+  });
+
+  const LegalHoldBody = z.object({
+    reason: z.string().max(1000).optional()
+  });
+
+  app.get("/docs/:docId/legal-hold", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+
+    const hold = await app.db.query(
+      `
+        SELECT enabled, reason, created_at, created_by, released_at, released_by
+        FROM document_legal_holds
+        WHERE document_id = $1 AND org_id = $2
+      `,
+      [docId, membership.orgId]
+    );
+
+    return reply.send({ legalHold: hold.rowCount === 1 ? hold.rows[0] : null });
+  });
+
+  app.post("/docs/:docId/legal-hold", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
+
+    const parsed = LegalHoldBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    await app.db.query(
+      `
+        INSERT INTO document_legal_holds (document_id, org_id, enabled, reason, created_by)
+        VALUES ($1, $2, true, $3, $4)
+        ON CONFLICT (document_id)
+        DO UPDATE SET
+          enabled = true,
+          reason = EXCLUDED.reason,
+          created_by = EXCLUDED.created_by,
+          created_at = now(),
+          released_by = NULL,
+          released_at = NULL
+      `,
+      [docId, membership.orgId, parsed.data.reason ?? null, request.user!.id]
+    );
+
+    await writeAuditEvent(app.db, {
+      orgId: membership.orgId,
+      userId: request.user!.id,
+      userEmail: request.user!.email,
+      eventType: "retention.legal_hold_enabled",
+      resourceType: "document",
+      resourceId: docId,
+      sessionId: request.session?.id,
+      success: true,
+      details: { reason: parsed.data.reason ?? null },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request)
+    });
+
+    return reply.send({ ok: true });
+  });
+
+  app.delete("/docs/:docId/legal-hold", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
+
+    const released = await app.db.query(
+      `
+        UPDATE document_legal_holds
+        SET enabled = false,
+            released_by = $2,
+            released_at = now()
+        WHERE document_id = $1
+          AND org_id = $3
+          AND enabled = true
+      `,
+      [docId, request.user!.id, membership.orgId]
+    );
+
+    if ((released.rowCount ?? 0) === 0) return reply.code(404).send({ error: "legal_hold_not_found" });
+
+    await writeAuditEvent(app.db, {
+      orgId: membership.orgId,
+      userId: request.user!.id,
+      userEmail: request.user!.email,
+      eventType: "retention.legal_hold_released",
+      resourceType: "document",
+      resourceId: docId,
+      sessionId: request.session?.id,
+      success: true,
+      details: {},
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request)
+    });
+
+    return reply.send({ ok: true });
+  });
+
   const InviteBody = z.object({
     email: z.string().email(),
     role: z.enum(["owner", "admin", "editor", "commenter", "viewer"])

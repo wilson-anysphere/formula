@@ -6,6 +6,125 @@ import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
 
+function normalizeFingerprintHex(value: string): string {
+  return value.replaceAll(":", "").toLowerCase();
+}
+
+function isSha256FingerprintHex(value: string): boolean {
+  const normalized = normalizeFingerprintHex(value);
+  return /^[0-9a-f]{64}$/.test(normalized);
+}
+
+function uniqStrings(values: string[] | null | undefined): string[] {
+  if (!Array.isArray(values)) return [];
+  return Array.from(new Set(values.filter((v) => typeof v === "string" && v.length > 0)));
+}
+
+type OrgPolicySnapshot = {
+  encryption: {
+    cloudEncryptionAtRest: boolean;
+    kmsProvider: string;
+    kmsKeyId: string | null;
+    keyRotationDays: number;
+    certificatePinningEnabled: boolean;
+    certificatePins: string[];
+  };
+  dataResidency: {
+    region: string;
+    allowedRegions: string[];
+    allowCrossRegionProcessing: boolean;
+    aiProcessingRegion: string | null;
+  };
+  retention: {
+    auditLogRetentionDays: number;
+    documentVersionRetentionDays: number;
+    deletedDocumentRetentionDays: number;
+    legalHoldOverridesRetention: boolean;
+  };
+};
+
+function extractPolicy(settings: Record<string, any>): OrgPolicySnapshot {
+  const residencyRegion = String(settings.data_residency_region ?? "us");
+  return {
+    encryption: {
+      cloudEncryptionAtRest: Boolean(settings.cloud_encryption_at_rest),
+      kmsProvider: String(settings.kms_provider ?? "local"),
+      kmsKeyId: settings.kms_key_id == null ? null : String(settings.kms_key_id),
+      keyRotationDays: Number(settings.key_rotation_days ?? 90),
+      certificatePinningEnabled: Boolean(settings.certificate_pinning_enabled),
+      certificatePins: uniqStrings(settings.certificate_pins)
+    },
+    dataResidency: {
+      region: residencyRegion,
+      allowedRegions:
+        residencyRegion === "custom" ? uniqStrings(settings.data_residency_allowed_regions) : [],
+      allowCrossRegionProcessing: Boolean(settings.allow_cross_region_processing),
+      aiProcessingRegion: settings.ai_processing_region == null ? null : String(settings.ai_processing_region)
+    },
+    retention: {
+      auditLogRetentionDays: Number(settings.audit_log_retention_days ?? 365),
+      documentVersionRetentionDays: Number(settings.document_version_retention_days ?? 365),
+      deletedDocumentRetentionDays: Number(settings.deleted_document_retention_days ?? 30),
+      legalHoldOverridesRetention: Boolean(settings.legal_hold_overrides_retention)
+    }
+  };
+}
+
+function validatePolicy(policy: OrgPolicySnapshot): void {
+  const kmsProvider = policy.encryption.kmsProvider;
+  if (!["local", "aws", "gcp", "azure"].includes(kmsProvider)) {
+    throw new Error(`Unsupported kmsProvider: ${kmsProvider}`);
+  }
+  if (kmsProvider !== "local" && !policy.encryption.kmsKeyId) {
+    throw new Error("kmsKeyId is required when kmsProvider is not local");
+  }
+  if (!Number.isInteger(policy.encryption.keyRotationDays) || policy.encryption.keyRotationDays <= 0) {
+    throw new Error("keyRotationDays must be a positive integer");
+  }
+
+  const pins = policy.encryption.certificatePins.map(normalizeFingerprintHex);
+  if (policy.encryption.certificatePinningEnabled) {
+    if (pins.length === 0) {
+      throw new Error("certificatePins must be non-empty when certificate pinning is enabled");
+    }
+    for (const pin of pins) {
+      if (!isSha256FingerprintHex(pin)) {
+        throw new Error("certificatePins must be SHA-256 fingerprints (hex, optionally colon-separated)");
+      }
+    }
+  } else {
+    for (const pin of pins) {
+      if (pin.length > 0 && !isSha256FingerprintHex(pin)) {
+        throw new Error("certificatePins must be SHA-256 fingerprints (hex, optionally colon-separated)");
+      }
+    }
+  }
+
+  const region = policy.dataResidency.region;
+  const allowedRegions =
+    region === "custom"
+      ? uniqStrings(policy.dataResidency.allowedRegions)
+      : region
+        ? [region]
+        : [];
+  if (allowedRegions.length === 0) {
+    throw new Error("data residency requires at least one allowed region");
+  }
+  if (region !== "custom" && !["us", "eu", "apac"].includes(region)) {
+    throw new Error(`Unsupported data residency region: ${region}`);
+  }
+  if (region === "custom" && allowedRegions.length === 0) {
+    throw new Error("custom data residency requires dataResidencyAllowedRegions");
+  }
+
+  const aiRegion = policy.dataResidency.aiProcessingRegion;
+  if (!policy.dataResidency.allowCrossRegionProcessing && aiRegion && !allowedRegions.includes(aiRegion)) {
+    throw new Error(
+      `aiProcessingRegion ${aiRegion} violates allowCrossRegionProcessing=false (allowed: ${allowedRegions.join(", ")})`
+    );
+  }
+}
+
 async function requireOrgMember(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -68,11 +187,19 @@ export function registerOrgRoutes(app: FastifyInstance): void {
     aiEnabled: z.boolean().optional(),
     aiDataProcessingConsent: z.boolean().optional(),
     dataResidencyRegion: z.string().min(1).optional(),
+    dataResidencyAllowedRegions: z.array(z.string().min(1)).optional(),
     allowCrossRegionProcessing: z.boolean().optional(),
     aiProcessingRegion: z.string().min(1).nullable().optional(),
     auditLogRetentionDays: z.number().int().positive().optional(),
     documentVersionRetentionDays: z.number().int().positive().optional(),
-    deletedDocumentRetentionDays: z.number().int().positive().optional()
+    deletedDocumentRetentionDays: z.number().int().positive().optional(),
+    legalHoldOverridesRetention: z.boolean().optional(),
+    cloudEncryptionAtRest: z.boolean().optional(),
+    kmsProvider: z.enum(["local", "aws", "gcp", "azure"]).optional(),
+    kmsKeyId: z.string().min(1).nullable().optional(),
+    keyRotationDays: z.number().int().positive().optional(),
+    certificatePinningEnabled: z.boolean().optional(),
+    certificatePins: z.array(z.string().min(1)).optional()
   });
 
   app.patch("/orgs/:orgId/settings", { preHandler: requireAuth }, async (request, reply) => {
@@ -85,6 +212,51 @@ export function registerOrgRoutes(app: FastifyInstance): void {
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
 
     const updates = parsed.data;
+
+    const currentSettingsRes = await app.db.query("SELECT * FROM org_settings WHERE org_id = $1", [orgId]);
+    if (currentSettingsRes.rowCount !== 1) {
+      return reply.code(404).send({ error: "org_not_found" });
+    }
+    const currentSettings = currentSettingsRes.rows[0] as Record<string, any>;
+    const beforePolicy = extractPolicy(currentSettings);
+    const nextPolicy: OrgPolicySnapshot = structuredClone(beforePolicy);
+
+    if (updates.cloudEncryptionAtRest !== undefined)
+      nextPolicy.encryption.cloudEncryptionAtRest = updates.cloudEncryptionAtRest;
+    if (updates.kmsProvider !== undefined) nextPolicy.encryption.kmsProvider = updates.kmsProvider;
+    if (updates.kmsKeyId !== undefined) nextPolicy.encryption.kmsKeyId = updates.kmsKeyId;
+    if (updates.keyRotationDays !== undefined) nextPolicy.encryption.keyRotationDays = updates.keyRotationDays;
+    if (updates.certificatePinningEnabled !== undefined)
+      nextPolicy.encryption.certificatePinningEnabled = updates.certificatePinningEnabled;
+    if (updates.certificatePins !== undefined) nextPolicy.encryption.certificatePins = updates.certificatePins;
+
+    if (updates.dataResidencyRegion !== undefined) nextPolicy.dataResidency.region = updates.dataResidencyRegion;
+    if (updates.dataResidencyAllowedRegions !== undefined)
+      nextPolicy.dataResidency.allowedRegions = updates.dataResidencyAllowedRegions;
+    if (updates.allowCrossRegionProcessing !== undefined)
+      nextPolicy.dataResidency.allowCrossRegionProcessing = updates.allowCrossRegionProcessing;
+    if (updates.aiProcessingRegion !== undefined)
+      nextPolicy.dataResidency.aiProcessingRegion = updates.aiProcessingRegion;
+
+    if (updates.auditLogRetentionDays !== undefined)
+      nextPolicy.retention.auditLogRetentionDays = updates.auditLogRetentionDays;
+    if (updates.documentVersionRetentionDays !== undefined)
+      nextPolicy.retention.documentVersionRetentionDays = updates.documentVersionRetentionDays;
+    if (updates.deletedDocumentRetentionDays !== undefined)
+      nextPolicy.retention.deletedDocumentRetentionDays = updates.deletedDocumentRetentionDays;
+    if (updates.legalHoldOverridesRetention !== undefined)
+      nextPolicy.retention.legalHoldOverridesRetention = updates.legalHoldOverridesRetention;
+
+    if (nextPolicy.dataResidency.region !== "custom") {
+      nextPolicy.dataResidency.allowedRegions = [];
+    }
+
+    try {
+      validatePolicy(nextPolicy);
+    } catch (err) {
+      return reply.code(400).send({ error: "invalid_request", message: (err as Error).message });
+    }
+
     const sets: string[] = [];
     const values: unknown[] = [];
     const addSet = (sql: string, value: unknown) => {
@@ -103,6 +275,19 @@ export function registerOrgRoutes(app: FastifyInstance): void {
     if (updates.aiDataProcessingConsent !== undefined)
       addSet("ai_data_processing_consent", updates.aiDataProcessingConsent);
     if (updates.dataResidencyRegion !== undefined) addSet("data_residency_region", updates.dataResidencyRegion);
+    if (updates.dataResidencyAllowedRegions !== undefined) {
+      const effectiveRegion =
+        updates.dataResidencyRegion !== undefined
+          ? updates.dataResidencyRegion
+          : String(currentSettings.data_residency_region ?? "us");
+      if (effectiveRegion !== "custom") {
+        return reply.code(400).send({
+          error: "invalid_request",
+          message: "dataResidencyAllowedRegions is only valid when dataResidencyRegion is custom"
+        });
+      }
+      addSet("data_residency_allowed_regions", JSON.stringify(updates.dataResidencyAllowedRegions));
+    }
     if (updates.allowCrossRegionProcessing !== undefined)
       addSet("allow_cross_region_processing", updates.allowCrossRegionProcessing);
     if (updates.aiProcessingRegion !== undefined) addSet("ai_processing_region", updates.aiProcessingRegion);
@@ -112,6 +297,22 @@ export function registerOrgRoutes(app: FastifyInstance): void {
       addSet("document_version_retention_days", updates.documentVersionRetentionDays);
     if (updates.deletedDocumentRetentionDays !== undefined)
       addSet("deleted_document_retention_days", updates.deletedDocumentRetentionDays);
+    if (updates.legalHoldOverridesRetention !== undefined)
+      addSet("legal_hold_overrides_retention", updates.legalHoldOverridesRetention);
+
+    if (updates.cloudEncryptionAtRest !== undefined)
+      addSet("cloud_encryption_at_rest", updates.cloudEncryptionAtRest);
+    if (updates.kmsProvider !== undefined) addSet("kms_provider", updates.kmsProvider);
+    if (updates.kmsKeyId !== undefined) addSet("kms_key_id", updates.kmsKeyId);
+    if (updates.keyRotationDays !== undefined) addSet("key_rotation_days", updates.keyRotationDays);
+    if (updates.certificatePinningEnabled !== undefined)
+      addSet("certificate_pinning_enabled", updates.certificatePinningEnabled);
+    if (updates.certificatePins !== undefined) addSet("certificate_pins", JSON.stringify(updates.certificatePins));
+
+    // Normalize residency_allowed_regions: only meaningful for `custom`. Clear any stale values on region change.
+    if (updates.dataResidencyRegion !== undefined && updates.dataResidencyRegion !== "custom") {
+      addSet("data_residency_allowed_regions", null);
+    }
 
     if (sets.length === 0) return reply.send({ ok: true });
 
@@ -138,6 +339,42 @@ export function registerOrgRoutes(app: FastifyInstance): void {
       ipAddress: getClientIp(request),
       userAgent: getUserAgent(request)
     });
+
+    const policyChanged = {
+      encryption: JSON.stringify(beforePolicy.encryption) !== JSON.stringify(nextPolicy.encryption),
+      dataResidency: JSON.stringify(beforePolicy.dataResidency) !== JSON.stringify(nextPolicy.dataResidency),
+      retention: JSON.stringify(beforePolicy.retention) !== JSON.stringify(nextPolicy.retention)
+    };
+
+    const writePolicyEvent = async (
+      section: keyof OrgPolicySnapshot,
+      before: OrgPolicySnapshot[keyof OrgPolicySnapshot],
+      after: OrgPolicySnapshot[keyof OrgPolicySnapshot]
+    ) => {
+      await writeAuditEvent(app.db, {
+        orgId,
+        userId: request.user!.id,
+        userEmail: request.user!.email,
+        eventType: `org.policy.${String(section)}.updated`,
+        resourceType: "organization",
+        resourceId: orgId,
+        sessionId: request.session?.id,
+        success: true,
+        details: { before, after },
+        ipAddress: getClientIp(request),
+        userAgent: getUserAgent(request)
+      });
+    };
+
+    if (policyChanged.encryption) {
+      await writePolicyEvent("encryption", beforePolicy.encryption, nextPolicy.encryption);
+    }
+    if (policyChanged.dataResidency) {
+      await writePolicyEvent("dataResidency", beforePolicy.dataResidency, nextPolicy.dataResidency);
+    }
+    if (policyChanged.retention) {
+      await writePolicyEvent("retention", beforePolicy.retention, nextPolicy.retention);
+    }
 
     return reply.send({ ok: true });
   });
