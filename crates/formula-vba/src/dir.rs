@@ -69,6 +69,11 @@ impl DirStream {
             offset += len;
 
             match id {
+                0x0003 => {
+                    // PROJECTCODEPAGE (u16 LE). We currently use the `PROJECT` stream as the
+                    // primary source of the codepage, but exposing this record allows callers
+                    // to fall back when `CodePage=` is missing.
+                }
                 0x0004 => project_name = Some(decode_bytes(data, encoding)),
                 0x000C => constants = Some(decode_bytes(data, encoding)),
 
@@ -141,6 +146,30 @@ impl DirStream {
     /// Parse a decompressed `VBA/dir` stream assuming the default VBA codepage (Windows-1252).
     pub fn parse(decompressed: &[u8]) -> Result<Self, DirParseError> {
         Self::parse_with_encoding(decompressed, WINDOWS_1252)
+    }
+
+    /// Best-effort extraction of `PROJECTCODEPAGE` from a decompressed `VBA/dir` stream.
+    pub fn detect_codepage(decompressed: &[u8]) -> Option<u16> {
+        let mut offset = 0usize;
+        while offset + 6 <= decompressed.len() {
+            let id = u16::from_le_bytes([decompressed[offset], decompressed[offset + 1]]);
+            let len = u32::from_le_bytes([
+                decompressed[offset + 2],
+                decompressed[offset + 3],
+                decompressed[offset + 4],
+                decompressed[offset + 5],
+            ]) as usize;
+            offset += 6;
+            if offset + len > decompressed.len() {
+                break;
+            }
+            let data = &decompressed[offset..offset + len];
+            offset += len;
+            if id == 0x0003 && data.len() >= 2 {
+                return Some(u16::from_le_bytes([data[0], data[1]]));
+            }
+        }
+        None
     }
 }
 

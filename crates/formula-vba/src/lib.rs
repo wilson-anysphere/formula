@@ -71,16 +71,22 @@ impl VBAProject {
     pub fn parse(vba_project_bin: &[u8]) -> Result<Self, ParseError> {
         let mut ole = OleFile::open(vba_project_bin)?;
 
-        let project_text = ole.read_stream_opt("PROJECT")?;
-        let encoding = project_text
-            .as_deref()
-            .and_then(detect_project_codepage)
-            .unwrap_or(WINDOWS_1252);
-
+        let project_stream_bytes = ole.read_stream_opt("PROJECT")?;
         let mut references = Vec::new();
         let mut name_from_project_stream = None;
-        if let Some(project_text) = project_text {
-            let text = decode_with_encoding(&project_text, encoding);
+        let dir_bytes = ole
+            .read_stream_opt("VBA/dir")?
+            .ok_or(ParseError::MissingStream("VBA/dir"))?;
+        let dir_decompressed = decompress_container(&dir_bytes)?;
+
+        let encoding = project_stream_bytes
+            .as_deref()
+            .and_then(detect_project_codepage)
+            .or_else(|| DirStream::detect_codepage(&dir_decompressed).map(|cp| cp as u32).map(encoding_for_codepage))
+            .unwrap_or(WINDOWS_1252);
+
+        if let Some(project_stream_bytes) = project_stream_bytes.as_deref() {
+            let text = decode_with_encoding(project_stream_bytes, encoding);
             for line in text.lines() {
                 if let Some(rest) = line.strip_prefix("Name=") {
                     name_from_project_stream = Some(rest.trim_matches('"').to_owned());
@@ -90,10 +96,6 @@ impl VBAProject {
             }
         }
 
-        let dir_bytes = ole
-            .read_stream_opt("VBA/dir")?
-            .ok_or(ParseError::MissingStream("VBA/dir"))?;
-        let dir_decompressed = decompress_container(&dir_bytes)?;
         let dir_stream = DirStream::parse_with_encoding(&dir_decompressed, encoding)?;
 
         let mut modules = Vec::new();
@@ -382,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn respects_project_codepage_for_module_source() {
+    fn respects_dir_codepage_for_module_source() {
         use std::io::{Cursor, Write};
 
         let comment = "привет"; // "hello" in Russian
@@ -393,6 +395,8 @@ mod tests {
 
         let dir_decompressed = {
             let mut out = Vec::new();
+            // PROJECTCODEPAGE (u16 LE)
+            push_record(&mut out, 0x0003, &1251u16.to_le_bytes());
             // PROJECTNAME
             let (proj_name_bytes, _, _) = WINDOWS_1251.encode("Проект");
             push_record(&mut out, 0x0004, proj_name_bytes.as_ref());
@@ -413,7 +417,7 @@ mod tests {
         };
         let dir_container = compress_container(&dir_decompressed);
 
-        let project_stream_text = "CodePage=1251\r\nName=\"VBAProject\"\r\nModule=Module1\r\n";
+        let project_stream_text = "Name=\"VBAProject\"\r\nModule=Module1\r\n";
         let (project_stream_bytes, _, _) = WINDOWS_1251.encode(project_stream_text);
 
         let cursor = Cursor::new(Vec::new());
