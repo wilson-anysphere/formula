@@ -1,5 +1,6 @@
 use core::fmt;
 
+use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -207,6 +208,15 @@ impl<'de> Deserialize<'de> for Workbook {
         }
 
         let helper = Helper::deserialize(deserializer)?;
+
+        if helper.schema_version > crate::SCHEMA_VERSION {
+            return Err(D::Error::custom(format!(
+                "unsupported schema_version {} (max supported: {})",
+                helper.schema_version,
+                crate::SCHEMA_VERSION
+            )));
+        }
+
         let next_sheet_id = helper
             .sheets
             .iter()

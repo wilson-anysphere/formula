@@ -1,4 +1,6 @@
-use formula_model::{CellKey, CellRef, CellValue, ErrorValue, Range, Worksheet};
+use formula_model::{
+    CellKey, CellRef, CellValue, ErrorValue, Range, Workbook, Worksheet, SCHEMA_VERSION,
+};
 
 #[test]
 fn sparse_storage_is_proportional_to_stored_cells() {
@@ -217,4 +219,16 @@ fn serde_schema_for_cell_values_is_stable() {
         v,
         serde_json::json!({ "type": "error", "value": "#DIV/0!" })
     );
+}
+
+#[test]
+fn workbook_schema_version_is_enforced() {
+    let wb: Workbook = serde_json::from_value(serde_json::json!({})).unwrap();
+    assert_eq!(wb.schema_version, SCHEMA_VERSION);
+
+    let err = serde_json::from_value::<Workbook>(serde_json::json!({
+        "schema_version": SCHEMA_VERSION + 1
+    }))
+    .unwrap_err();
+    assert!(err.to_string().contains("unsupported schema_version"));
 }
