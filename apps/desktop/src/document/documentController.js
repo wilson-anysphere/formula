@@ -21,6 +21,37 @@ function sortKey(sheetId, row, col) {
     .padStart(10, "0")}`;
 }
 
+function parseRowColKey(key) {
+  const [rowStr, colStr] = key.split(",");
+  const row = Number(rowStr);
+  const col = Number(colStr);
+  if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) {
+    throw new Error(`Invalid cell key: ${key}`);
+  }
+  return { row, col };
+}
+
+function semanticDiffCellKey(row, col) {
+  return `r${row}c${col}`;
+}
+
+function decodeUtf8(bytes) {
+  if (typeof TextDecoder !== "undefined") {
+    return new TextDecoder().decode(bytes);
+  }
+  // Node fallback (Buffer is a Uint8Array).
+  // eslint-disable-next-line no-undef
+  return Buffer.from(bytes).toString("utf8");
+}
+
+function encodeUtf8(text) {
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(text);
+  }
+  // eslint-disable-next-line no-undef
+  return Buffer.from(text, "utf8");
+}
+
 /**
  * @typedef {{
  *   sheetId: string,
@@ -192,6 +223,7 @@ export class DocumentController {
    * - `change`: { deltas: CellDelta[] }
    * - `history`: { canUndo: boolean, canRedo: boolean }
    * - `dirty`: { isDirty: boolean }
+   * - `update`: emitted after any applied change (including undo/redo) for versioning adapters
    *
    * @template {string} T
    * @param {T} event
@@ -267,6 +299,24 @@ export class DocumentController {
   }
 
   /**
+   * Convenience labels for menu items ("Undo Paste", etc).
+   *
+   * @returns {string | null}
+   */
+  get undoLabel() {
+    if (!this.canUndo) return null;
+    return this.history[this.cursor - 1]?.label ?? null;
+  }
+
+  /**
+   * @returns {string | null}
+   */
+  get redoLabel() {
+    if (!this.canRedo) return null;
+    return this.history[this.cursor]?.label ?? null;
+  }
+
+  /**
    * @param {string} sheetId
    * @param {CellCoord | string} coord
    * @returns {CellState}
@@ -304,6 +354,18 @@ export class DocumentController {
     this.#applyUserDeltas([
       { sheetId, row: c.row, col: c.col, before, after: cloneCellState(after) },
     ], options);
+  }
+
+  /**
+   * Clear a single cell's contents (preserving formatting).
+   *
+   * @param {string} sheetId
+   * @param {CellCoord | string} coord
+   * @param {{ label?: string }} [options]
+   */
+  clearCell(sheetId, coord, options = {}) {
+    const c = typeof coord === "string" ? parseA1(coord) : coord;
+    this.clearRange(sheetId, { start: c, end: c }, options);
   }
 
   /**
@@ -404,6 +466,132 @@ export class DocumentController {
       }
     }
     this.#applyUserDeltas(deltas, { label: options.label });
+  }
+
+  /**
+   * Export a single sheet in the `SheetState` shape expected by the versioning `semanticDiff`.
+   *
+   * @param {string} sheetId
+   * @returns {{ cells: Map<string, { value?: any, formula?: string | null, format?: any }> }}
+   */
+  exportSheetForSemanticDiff(sheetId) {
+    const sheet = this.model.sheets.get(sheetId);
+    /** @type {Map<string, any>} */
+    const cells = new Map();
+    if (!sheet) return { cells };
+
+    for (const [key, cell] of sheet.cells.entries()) {
+      const { row, col } = parseRowColKey(key);
+      cells.set(semanticDiffCellKey(row, col), {
+        value: cell.value ?? null,
+        formula: cell.formula ?? null,
+        format: cell.format ?? null,
+      });
+    }
+    return { cells };
+  }
+
+  /**
+   * Encode the document's current cell inputs as a snapshot suitable for the VersionManager.
+   *
+   * Undo/redo history is intentionally *not* included; snapshots represent workbook contents.
+   *
+   * @returns {Uint8Array}
+   */
+  encodeState() {
+    const sheetIds = Array.from(this.model.sheets.keys()).sort();
+    const sheets = sheetIds.map((id) => {
+      const sheet = this.model.sheets.get(id);
+      const cells = Array.from(sheet?.cells.entries() ?? []).map(([key, cell]) => {
+        const { row, col } = parseRowColKey(key);
+        return {
+          row,
+          col,
+          value: cell.value ?? null,
+          formula: cell.formula ?? null,
+          format: cell.format ?? null,
+        };
+      });
+      cells.sort((a, b) => (a.row - b.row === 0 ? a.col - b.col : a.row - b.row));
+      return { id, cells };
+    });
+
+    return encodeUtf8(JSON.stringify({ schemaVersion: 1, sheets }));
+  }
+
+  /**
+   * Replace the workbook state from a snapshot produced by `encodeState`.
+   *
+   * This method clears undo/redo history (restoring a version is not itself undoable) and
+   * marks the document dirty until the host calls `markSaved()`.
+   *
+   * @param {Uint8Array} snapshot
+   */
+  applyState(snapshot) {
+    const parsed = JSON.parse(decodeUtf8(snapshot));
+    const sheets = Array.isArray(parsed?.sheets) ? parsed.sheets : [];
+
+    /** @type {Map<string, Map<string, CellState>>} */
+    const nextSheets = new Map();
+    for (const sheet of sheets) {
+      if (!sheet?.id) continue;
+      const cellList = Array.isArray(sheet.cells) ? sheet.cells : [];
+      /** @type {Map<string, CellState>} */
+      const cellMap = new Map();
+      for (const entry of cellList) {
+        const row = Number(entry?.row);
+        const col = Number(entry?.col);
+        if (!Number.isInteger(row) || row < 0) continue;
+        if (!Number.isInteger(col) || col < 0) continue;
+        const cell = {
+          value: entry?.value ?? null,
+          formula: entry?.formula ?? null,
+          format: entry?.format ?? null,
+        };
+        cellMap.set(`${row},${col}`, cloneCellState(cell));
+      }
+      nextSheets.set(sheet.id, cellMap);
+    }
+
+    const existingSheetIds = new Set(this.model.sheets.keys());
+    const nextSheetIds = new Set(nextSheets.keys());
+    const allSheetIds = new Set([...existingSheetIds, ...nextSheetIds]);
+
+    /** @type {CellDelta[]} */
+    const deltas = [];
+    for (const sheetId of allSheetIds) {
+      const nextCellMap = nextSheets.get(sheetId) ?? new Map();
+      const existingSheet = this.model.sheets.get(sheetId);
+      const existingKeys = existingSheet ? Array.from(existingSheet.cells.keys()) : [];
+      const nextKeys = Array.from(nextCellMap.keys());
+      const allKeys = new Set([...existingKeys, ...nextKeys]);
+
+      for (const key of allKeys) {
+        const { row, col } = parseRowColKey(key);
+        const before = this.model.getCell(sheetId, row, col);
+        const after = nextCellMap.get(key) ?? emptyCellState();
+        if (cellStateEquals(before, after)) continue;
+        deltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
+      }
+    }
+
+    // Clear history first: restoring content is not itself undoable.
+    this.history = [];
+    this.cursor = 0;
+    this.savedCursor = null;
+    this.batchDepth = 0;
+    this.activeBatch = null;
+    this.lastMergeKey = null;
+    this.lastMergeTime = 0;
+
+    // Apply changes as a single engine batch.
+    this.engine?.beginBatch?.();
+    this.#applyDeltas(deltas, { recalc: false, emitChange: true });
+    this.engine?.endBatch?.();
+    this.engine?.recalculate();
+
+    this.#emitHistory();
+    this.#emitDirty();
   }
 
   /**
@@ -657,6 +845,7 @@ export class DocumentController {
     if (options.emitChange) {
       this.#emit("change", { deltas: deltas.map(cloneDelta) });
     }
+
+    this.#emit("update", {});
   }
 }
-
