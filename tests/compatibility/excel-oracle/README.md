@@ -10,6 +10,12 @@ This directory holds the **inputs** to the Excel-oracle compatibility harness.
 - `datasets/versioned/` — optional version-tagged pinned datasets (useful when Excel behavior differs across versions/builds).
 - `reports/` — mismatch reports produced by `tools/excel-oracle/compare.py`.
 
+## Tags and filtering
+
+Each case has `tags` that can be used to include/exclude subsets when comparing.
+This is useful for incrementally expanding coverage (e.g. exclude `spill` until
+dynamic arrays are implemented in the engine).
+
 ## Regenerating cases
 
 From repo root:

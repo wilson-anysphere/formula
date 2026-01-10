@@ -91,6 +91,19 @@ The report includes `caseId`, `formula`, `inputs`, `expected`, `actual`, and a r
 
 `compare.py` also verifies that the `caseSet.sha256` embedded in the datasets matches the current `cases.json`, to prevent stale-oracle comparisons.
 
+### Tag filtering
+
+Cases include `tags` (e.g. `["logical","IF"]`). You can restrict comparisons to a subset:
+
+```bash
+python tools/excel-oracle/compare.py \
+  --cases tests/compatibility/excel-oracle/cases.json \
+  --expected tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json \
+  --actual tests/compatibility/excel-oracle/datasets/engine-results.json \
+  --report tests/compatibility/excel-oracle/reports/mismatch-report.json \
+  --include-tag IF --include-tag SUM --include-tag cmp
+```
+
 ## Value encoding
 
 Excel values are encoded to avoid ambiguity between:

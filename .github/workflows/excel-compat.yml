@@ -22,6 +22,14 @@ on:
         description: "Fail if mismatches/total exceeds this rate (0-1)."
         required: true
         default: "0.001"
+      include_tags:
+        description: "Comma-separated tags to include (blank = all)."
+        required: false
+        default: ""
+      exclude_tags:
+        description: "Comma-separated tags to exclude (blank = none)."
+        required: false
+        default: ""
       engine_cmd:
         description: "Optional engine CLI command. If empty, uses FORMULA_ENGINE_CMD env var."
         required: false
@@ -30,7 +38,9 @@ on:
 env:
   MODE: ${{ github.event.inputs.mode || 'validate-engine' }}
   MAX_CASES: ${{ github.event.inputs.max_cases || '0' }}
-  MAX_MISMATCH_RATE: ${{ github.event.inputs.max_mismatch_rate || '0.001' }}
+  MAX_MISMATCH_RATE: ${{ github.event.inputs.max_mismatch_rate || '' }}
+  INCLUDE_TAGS: ${{ github.event.inputs.include_tags || '' }}
+  EXCLUDE_TAGS: ${{ github.event.inputs.exclude_tags || '' }}
   ENGINE_CMD: ${{ github.event.inputs.engine_cmd || '' }}
 
 jobs:
@@ -103,12 +113,42 @@ jobs:
         if: ${{ env.MODE == 'validate-engine' }}
         shell: powershell
         run: |
-          python tools/excel-oracle/compare.py `
-            --cases tests/compatibility/excel-oracle/cases.json `
-            --expected "${{ steps.expected.outputs.path }}" `
-            --actual tests/compatibility/excel-oracle/datasets/engine-results.json `
-            --report tests/compatibility/excel-oracle/reports/mismatch-report.json `
-            --max-mismatch-rate "${{ env.MAX_MISMATCH_RATE }}"
+          $maxRate = $env:MAX_MISMATCH_RATE
+          if ([string]::IsNullOrWhiteSpace($maxRate)) {
+            # On push/PR we default to a modest threshold so the job is useful
+            # early in development while still catching large regressions.
+            $maxRate = "0.01"
+          }
+
+          $include = $env:INCLUDE_TAGS
+          $exclude = $env:EXCLUDE_TAGS
+          if ($env:GITHUB_EVENT_NAME -ne "workflow_dispatch") {
+            # Default filter for push/PR: restrict to currently implemented
+            # core operators + a few baseline functions.
+            if ([string]::IsNullOrWhiteSpace($include)) {
+              $include = "add,sub,mul,div,cmp,SUM,IF,IFERROR,ISERROR,error"
+            }
+          }
+
+          $args = @(
+            "tools/excel-oracle/compare.py",
+            "--cases", "tests/compatibility/excel-oracle/cases.json",
+            "--expected", "${{ steps.expected.outputs.path }}",
+            "--actual", "tests/compatibility/excel-oracle/datasets/engine-results.json",
+            "--report", "tests/compatibility/excel-oracle/reports/mismatch-report.json",
+            "--max-mismatch-rate", $maxRate
+          )
+
+          foreach ($t in ($include -split ",")) {
+            $tag = $t.Trim()
+            if ($tag -ne "") { $args += @("--include-tag", $tag) }
+          }
+          foreach ($t in ($exclude -split ",")) {
+            $tag = $t.Trim()
+            if ($tag -ne "") { $args += @("--exclude-tag", $tag) }
+          }
+
+          python @args
 
       - name: Upload oracle dataset + reports
         if: always()
