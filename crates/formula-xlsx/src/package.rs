@@ -3,12 +3,16 @@ use std::io::{Cursor, Read, Write};
 
 use thiserror::Error;
 
+use crate::pivots::XlsxPivots;
+
 #[derive(Debug, Error)]
 pub enum XlsxError {
     #[error("zip error: {0}")]
     Zip(#[from] zip::result::ZipError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("xml error: {0}")]
+    Xml(#[from] quick_xml::Error),
     #[error("utf-8 error: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
 }
@@ -79,6 +83,14 @@ impl XlsxPackage {
         let cursor = zip.finish()?;
         w.write_all(&cursor.into_inner())?;
         Ok(())
+    }
+
+    /// Parse pivot-related parts (pivot tables + pivot caches) from the package.
+    ///
+    /// This is a lightweight metadata parser; the raw XML parts remain preserved
+    /// verbatim in the package.
+    pub fn pivots(&self) -> Result<XlsxPivots, XlsxError> {
+        XlsxPivots::parse_from_entries(&self.parts)
     }
 }
 
@@ -208,4 +220,3 @@ mod tests {
         ));
     }
 }
-

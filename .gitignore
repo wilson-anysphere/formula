@@ -36,3 +36,7 @@ handoff.md
 # Python
 __pycache__/
 *.pyc
+
+*.swp
+.idea/
+.vscode/

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 formula-vba = { path = "../formula-vba" }
+quick-xml = "0.37"
 thiserror = "1"
 zip = "0.6"
 

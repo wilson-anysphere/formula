@@ -15,6 +15,7 @@ pub mod error;
 pub mod functions;
 pub mod locale;
 mod parser;
+pub mod pivot;
 
 pub use crate::error::{ExcelError, ExcelResult};
 pub use parser::{parse_formula, Expr, Formula, ParseError};

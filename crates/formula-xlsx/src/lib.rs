@@ -8,7 +8,8 @@
 //! - Optionally parse `vbaProject.bin` to expose modules for UI display.
 
 mod package;
+pub mod pivots;
 pub mod vba;
 
 pub use package::{XlsxError, XlsxPackage};
-
+pub use pivots::{PivotCacheDefinitionPart, PivotCacheRecordsPart, PivotTablePart, XlsxPivots};

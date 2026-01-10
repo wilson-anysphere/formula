@@ -1,0 +1,1304 @@
+//! Pivot table engine + cache.
+//!
+//! This module is intentionally self-contained: it operates on a cached
+//! rectangular dataset (headers + records) and produces a 2D grid that can be
+//! rendered into a worksheet range.
+//!
+//! The goal is an MVP pivot engine that supports the core spreadsheet workflow:
+//! - Create/refresh a `PivotCache` from a source range (headers + rows)
+//! - Configure row/column/value/filter fields
+//! - Compute aggregations (sum/count/avg/min/max + stddev/var variants)
+//! - Produce a table with grand totals and basic subtotals.
+
+use std::collections::{BTreeSet, HashMap, HashSet};
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[derive(Debug, Error)]
+pub enum PivotError {
+    #[error("missing field in pivot cache: {0}")]
+    MissingField(String),
+    #[error("pivot table must have at least one value field")]
+    NoValueFields,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AggregationType {
+    Sum,
+    Count,
+    Average,
+    Min,
+    Max,
+    Product,
+    CountNumbers,
+    StdDev,
+    StdDevP,
+    Var,
+    VarP,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Layout {
+    Compact,
+    Tabular,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtotalPosition {
+    Top,
+    Bottom,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrandTotals {
+    pub rows: bool,
+    pub columns: bool,
+}
+
+impl Default for GrandTotals {
+    fn default() -> Self {
+        Self {
+            rows: true,
+            columns: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum PivotValue {
+    Blank,
+    Number(f64),
+    Text(String),
+    Bool(bool),
+}
+
+impl PivotValue {
+    fn to_key_part(&self) -> PivotKeyPart {
+        match self {
+            PivotValue::Blank => PivotKeyPart::Blank,
+            PivotValue::Number(n) => PivotKeyPart::Number(n.to_bits()),
+            PivotValue::Text(s) => PivotKeyPart::Text(s.clone()),
+            PivotValue::Bool(b) => PivotKeyPart::Bool(*b),
+        }
+    }
+
+    fn display_string(&self) -> String {
+        match self {
+            PivotValue::Blank => String::new(),
+            PivotValue::Number(n) => {
+                // Keep it simple; Excel has more nuanced formatting.
+                if n.fract() == 0.0 {
+                    format!("{}", *n as i64)
+                } else {
+                    format!("{n}")
+                }
+            }
+            PivotValue::Text(s) => s.clone(),
+            PivotValue::Bool(b) => b.to_string(),
+        }
+    }
+
+    fn as_number(&self) -> Option<f64> {
+        match self {
+            PivotValue::Number(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    fn is_blank(&self) -> bool {
+        matches!(self, PivotValue::Blank)
+    }
+}
+
+impl From<&str> for PivotValue {
+    fn from(value: &str) -> Self {
+        PivotValue::Text(value.to_string())
+    }
+}
+
+impl From<String> for PivotValue {
+    fn from(value: String) -> Self {
+        PivotValue::Text(value)
+    }
+}
+
+impl From<f64> for PivotValue {
+    fn from(value: f64) -> Self {
+        PivotValue::Number(value)
+    }
+}
+
+impl From<i64> for PivotValue {
+    fn from(value: i64) -> Self {
+        PivotValue::Number(value as f64)
+    }
+}
+
+impl From<bool> for PivotValue {
+    fn from(value: bool) -> Self {
+        PivotValue::Bool(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum PivotKeyPart {
+    Blank,
+    Number(u64),
+    Text(String),
+    Bool(bool),
+}
+
+impl PivotKeyPart {
+    fn display_string(&self) -> String {
+        match self {
+            PivotKeyPart::Blank => String::new(),
+            PivotKeyPart::Number(bits) => PivotValue::Number(f64::from_bits(*bits)).display_string(),
+            PivotKeyPart::Text(s) => s.clone(),
+            PivotKeyPart::Bool(b) => b.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PivotKey(pub Vec<PivotKeyPart>);
+
+impl PivotKey {
+    fn display_strings(&self) -> Vec<String> {
+        self.0.iter().map(|p| p.display_string()).collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheField {
+    pub name: String,
+    pub index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotCache {
+    pub fields: Vec<CacheField>,
+    pub records: Vec<Vec<PivotValue>>,
+    pub unique_values: HashMap<String, Vec<PivotValue>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PivotFieldType {
+    Blank,
+    Number,
+    Text,
+    Bool,
+    Mixed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotSchemaField {
+    pub name: String,
+    pub field_type: PivotFieldType,
+    pub sample_values: Vec<PivotValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotSchema {
+    pub fields: Vec<PivotSchemaField>,
+    pub record_count: usize,
+}
+
+impl PivotCache {
+    pub fn from_range(range: &[Vec<PivotValue>]) -> Result<Self, PivotError> {
+        if range.is_empty() {
+            return Ok(Self {
+                fields: Vec::new(),
+                records: Vec::new(),
+                unique_values: HashMap::new(),
+            });
+        }
+
+        let headers = &range[0];
+        let mut fields = Vec::with_capacity(headers.len());
+        for (idx, header) in headers.iter().enumerate() {
+            fields.push(CacheField {
+                name: header.display_string(),
+                index: idx,
+            });
+        }
+
+        let records = range[1..].to_vec();
+
+        let mut unique_values: HashMap<String, BTreeSet<String>> = HashMap::new();
+        let mut unique_raw: HashMap<String, HashMap<String, PivotValue>> = HashMap::new();
+
+        for row in &records {
+            for field in &fields {
+                if let Some(value) = row.get(field.index) {
+                    let key = value.display_string();
+                    unique_values
+                        .entry(field.name.clone())
+                        .or_default()
+                        .insert(key.clone());
+                    unique_raw
+                        .entry(field.name.clone())
+                        .or_default()
+                        .entry(key)
+                        .or_insert_with(|| value.clone());
+                }
+            }
+        }
+
+        let mut unique_values_final = HashMap::new();
+        for field in &fields {
+            let mut values = Vec::new();
+            if let Some(sorted) = unique_values.get(&field.name) {
+                let raw_map = unique_raw.get(&field.name);
+                for k in sorted {
+                    if let Some(raw) = raw_map.and_then(|m| m.get(k)) {
+                        values.push(raw.clone());
+                    } else {
+                        values.push(PivotValue::Text(k.clone()));
+                    }
+                }
+            }
+            unique_values_final.insert(field.name.clone(), values);
+        }
+
+        Ok(Self {
+            fields,
+            records,
+            unique_values: unique_values_final,
+        })
+    }
+
+    pub fn field_index(&self, name: &str) -> Option<usize> {
+        self.fields.iter().find(|f| f.name == name).map(|f| f.index)
+    }
+
+    pub fn refresh_from_range(&mut self, range: &[Vec<PivotValue>]) -> Result<(), PivotError> {
+        *self = Self::from_range(range)?;
+        Ok(())
+    }
+
+    /// Returns a lightweight schema suitable for AI tool prompting.
+    pub fn schema(&self, sample_size: usize) -> PivotSchema {
+        let mut fields = Vec::with_capacity(self.fields.len());
+        for field in &self.fields {
+            let mut samples = Vec::new();
+            let mut saw_number = false;
+            let mut saw_text = false;
+            let mut saw_bool = false;
+            let mut saw_blank = false;
+
+            for row in self.records.iter().take(sample_size) {
+                let value = row.get(field.index).cloned().unwrap_or(PivotValue::Blank);
+                match &value {
+                    PivotValue::Blank => saw_blank = true,
+                    PivotValue::Number(_) => saw_number = true,
+                    PivotValue::Text(_) => saw_text = true,
+                    PivotValue::Bool(_) => saw_bool = true,
+                }
+                samples.push(value);
+            }
+
+            let field_type = match (saw_number, saw_text, saw_bool, saw_blank) {
+                (false, false, false, true) => PivotFieldType::Blank,
+                (true, false, false, _) => PivotFieldType::Number,
+                (false, true, false, _) => PivotFieldType::Text,
+                (false, false, true, _) => PivotFieldType::Bool,
+                _ => PivotFieldType::Mixed,
+            };
+
+            fields.push(PivotSchemaField {
+                name: field.name.clone(),
+                field_type,
+                sample_values: samples,
+            });
+        }
+
+        PivotSchema {
+            fields,
+            record_count: self.records.len(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotField {
+    pub source_field: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValueField {
+    pub source_field: String,
+    pub name: String,
+    pub aggregation: AggregationType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterField {
+    pub source_field: String,
+    /// Allowed values. `None` means allow all.
+    pub allowed: Option<HashSet<PivotKeyPart>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotConfig {
+    pub row_fields: Vec<PivotField>,
+    pub column_fields: Vec<PivotField>,
+    pub value_fields: Vec<ValueField>,
+    pub filter_fields: Vec<FilterField>,
+    pub layout: Layout,
+    pub subtotals: SubtotalPosition,
+    pub grand_totals: GrandTotals,
+}
+
+impl Default for PivotConfig {
+    fn default() -> Self {
+        Self {
+            row_fields: Vec::new(),
+            column_fields: Vec::new(),
+            value_fields: Vec::new(),
+            filter_fields: Vec::new(),
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotResult {
+    pub data: Vec<Vec<PivotValue>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CellRef {
+    pub row: u32,
+    pub col: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CellWrite {
+    pub row: u32,
+    pub col: u32,
+    pub value: PivotValue,
+}
+
+impl PivotResult {
+    /// Converts the computed pivot into a list of worksheet cell writes.
+    pub fn to_cell_writes(&self, destination: CellRef) -> Vec<CellWrite> {
+        let mut out = Vec::new();
+        for (r, row) in self.data.iter().enumerate() {
+            for (c, value) in row.iter().enumerate() {
+                out.push(CellWrite {
+                    row: destination.row + r as u32,
+                    col: destination.col + c as u32,
+                    value: value.clone(),
+                });
+            }
+        }
+        out
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePivotValueSpec {
+    pub field: String,
+    pub aggregation: AggregationType,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePivotFilterSpec {
+    pub field: String,
+    pub allowed: Option<Vec<PivotValue>>,
+}
+
+/// Request payload for an AI/tooling layer.
+///
+/// The orchestrator (or an LLM) can create a `CreatePivotTableRequest` from a
+/// natural language prompt using the output of [`PivotCache::schema`]. The core
+/// engine then validates field names at compute time (via `PivotEngine`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePivotTableRequest {
+    pub name: Option<String>,
+    pub row_fields: Vec<String>,
+    pub column_fields: Vec<String>,
+    pub value_fields: Vec<CreatePivotValueSpec>,
+    pub filter_fields: Vec<CreatePivotFilterSpec>,
+    pub layout: Option<Layout>,
+    pub subtotals: Option<SubtotalPosition>,
+    pub grand_totals: Option<GrandTotals>,
+}
+
+impl CreatePivotTableRequest {
+    pub fn into_config(self) -> PivotConfig {
+        PivotConfig {
+            row_fields: self
+                .row_fields
+                .into_iter()
+                .map(|source_field| PivotField { source_field })
+                .collect(),
+            column_fields: self
+                .column_fields
+                .into_iter()
+                .map(|source_field| PivotField { source_field })
+                .collect(),
+            value_fields: self
+                .value_fields
+                .into_iter()
+                .map(|vf| ValueField {
+                    name: vf
+                        .name
+                        .unwrap_or_else(|| format!("{:?} of {}", vf.aggregation, vf.field)),
+                    source_field: vf.field,
+                    aggregation: vf.aggregation,
+                })
+                .collect(),
+            filter_fields: self
+                .filter_fields
+                .into_iter()
+                .map(|f| FilterField {
+                    source_field: f.field,
+                    allowed: f.allowed.map(|vals| vals.into_iter().map(|v| v.to_key_part()).collect()),
+                })
+                .collect(),
+            layout: self.layout.unwrap_or(Layout::Tabular),
+            subtotals: self.subtotals.unwrap_or(SubtotalPosition::None),
+            grand_totals: self.grand_totals.unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotTable {
+    pub id: String,
+    pub name: String,
+    pub config: PivotConfig,
+    pub cache: PivotCache,
+}
+
+impl PivotTable {
+    pub fn new(name: impl Into<String>, source: &[Vec<PivotValue>], config: PivotConfig) -> Result<Self, PivotError> {
+        Ok(Self {
+            id: next_pivot_id(),
+            name: name.into(),
+            config,
+            cache: PivotCache::from_range(source)?,
+        })
+    }
+
+    pub fn refresh_cache(&mut self, source: &[Vec<PivotValue>]) -> Result<(), PivotError> {
+        self.cache.refresh_from_range(source)
+    }
+
+    pub fn calculate(&self) -> Result<PivotResult, PivotError> {
+        PivotEngine::calculate(&self.cache, &self.config)
+    }
+}
+
+fn next_pivot_id() -> String {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    format!("pivot-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
+}
+
+#[derive(Debug, Clone)]
+struct Accumulator {
+    count: u64,
+    count_numbers: u64,
+    sum: f64,
+    product: f64,
+    min: f64,
+    max: f64,
+    mean: f64,
+    m2: f64,
+}
+
+impl Accumulator {
+    fn new() -> Self {
+        Self {
+            count: 0,
+            count_numbers: 0,
+            sum: 0.0,
+            product: 1.0,
+            min: f64::INFINITY,
+            max: f64::NEG_INFINITY,
+            mean: 0.0,
+            m2: 0.0,
+        }
+    }
+
+    fn update(&mut self, value: &PivotValue) {
+        if !value.is_blank() {
+            self.count += 1;
+        }
+        if let Some(x) = value.as_number() {
+            self.count_numbers += 1;
+            self.sum += x;
+            self.product *= x;
+            if x < self.min {
+                self.min = x;
+            }
+            if x > self.max {
+                self.max = x;
+            }
+
+            // Welford variance
+            let n = self.count_numbers as f64;
+            let delta = x - self.mean;
+            self.mean += delta / n;
+            let delta2 = x - self.mean;
+            self.m2 += delta * delta2;
+        }
+    }
+
+    fn merge(&mut self, other: &Accumulator) {
+        // Merge counts that include non-blank values.
+        self.count += other.count;
+
+        if other.count_numbers == 0 {
+            return;
+        }
+
+        if self.count_numbers == 0 {
+            *self = other.clone();
+            return;
+        }
+
+        // Merge numeric aggregates.
+        let n1 = self.count_numbers as f64;
+        let n2 = other.count_numbers as f64;
+        let n = n1 + n2;
+        let delta = other.mean - self.mean;
+
+        self.sum += other.sum;
+        self.product *= other.product;
+        self.min = self.min.min(other.min);
+        self.max = self.max.max(other.max);
+
+        self.mean = (n1 * self.mean + n2 * other.mean) / n;
+        self.m2 += other.m2 + delta * delta * (n1 * n2) / n;
+        self.count_numbers += other.count_numbers;
+    }
+
+    fn finalize(&self, agg: AggregationType) -> PivotValue {
+        match agg {
+            AggregationType::Count => PivotValue::Number(self.count as f64),
+            AggregationType::CountNumbers => PivotValue::Number(self.count_numbers as f64),
+            AggregationType::Sum => PivotValue::Number(self.sum),
+            AggregationType::Product => {
+                if self.count_numbers == 0 {
+                    PivotValue::Blank
+                } else {
+                    PivotValue::Number(self.product)
+                }
+            }
+            AggregationType::Average => {
+                if self.count_numbers == 0 {
+                    PivotValue::Blank
+                } else {
+                    PivotValue::Number(self.sum / self.count_numbers as f64)
+                }
+            }
+            AggregationType::Min => {
+                if self.count_numbers == 0 {
+                    PivotValue::Blank
+                } else {
+                    PivotValue::Number(self.min)
+                }
+            }
+            AggregationType::Max => {
+                if self.count_numbers == 0 {
+                    PivotValue::Blank
+                } else {
+                    PivotValue::Number(self.max)
+                }
+            }
+            AggregationType::Var => {
+                if self.count_numbers < 2 {
+                    PivotValue::Blank
+                } else {
+                    PivotValue::Number(self.m2 / (self.count_numbers as f64 - 1.0))
+                }
+            }
+            AggregationType::VarP => {
+                if self.count_numbers == 0 {
+                    PivotValue::Blank
+                } else {
+                    PivotValue::Number(self.m2 / (self.count_numbers as f64))
+                }
+            }
+            AggregationType::StdDev => {
+                if self.count_numbers < 2 {
+                    PivotValue::Blank
+                } else {
+                    PivotValue::Number((self.m2 / (self.count_numbers as f64 - 1.0)).sqrt())
+                }
+            }
+            AggregationType::StdDevP => {
+                if self.count_numbers == 0 {
+                    PivotValue::Blank
+                } else {
+                    PivotValue::Number((self.m2 / (self.count_numbers as f64)).sqrt())
+                }
+            }
+        }
+    }
+}
+
+pub struct PivotEngine;
+
+impl PivotEngine {
+    pub fn calculate(cache: &PivotCache, cfg: &PivotConfig) -> Result<PivotResult, PivotError> {
+        if cfg.value_fields.is_empty() {
+            return Err(PivotError::NoValueFields);
+        }
+
+        let indices = FieldIndices::new(cache, cfg)?;
+
+        let mut cube: HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>> = HashMap::new();
+        let mut row_keys: HashSet<PivotKey> = HashSet::new();
+        let mut col_keys: HashSet<PivotKey> = HashSet::new();
+
+        for record in &cache.records {
+            if !indices.passes_filters(record, cfg) {
+                continue;
+            }
+
+            let row_key = indices.build_key(record, &indices.row_indices);
+            let col_key = indices.build_key(record, &indices.col_indices);
+
+            row_keys.insert(row_key.clone());
+            col_keys.insert(col_key.clone());
+
+            let row_entry = cube.entry(row_key).or_default();
+            let cell = row_entry
+                .entry(col_key)
+                .or_insert_with(|| (0..cfg.value_fields.len()).map(|_| Accumulator::new()).collect());
+
+            for (vf_idx, _vf) in cfg.value_fields.iter().enumerate() {
+                let val = record.get(indices.value_indices[vf_idx]).unwrap_or(&PivotValue::Blank);
+                cell[vf_idx].update(val);
+            }
+        }
+
+        let mut row_keys: Vec<PivotKey> = row_keys.into_iter().collect();
+        row_keys.sort_by(|a, b| a.display_strings().cmp(&b.display_strings()));
+
+        let mut col_keys: Vec<PivotKey> = col_keys.into_iter().collect();
+        col_keys.sort_by(|a, b| a.display_strings().cmp(&b.display_strings()));
+
+        // Ensure at least one column key exists to simplify output logic.
+        if cfg.column_fields.is_empty() && col_keys.is_empty() {
+            col_keys.push(PivotKey(Vec::new()));
+        }
+
+        let mut data = Vec::new();
+        data.push(Self::build_header_row(&col_keys, cfg));
+
+        // Subtotal accumulators per row-field level (excluding leaf level).
+        let subtotal_levels = cfg.row_fields.len().saturating_sub(1);
+        let mut group_accs: Vec<Option<GroupAccumulator>> = vec![None; subtotal_levels];
+        let mut current_group_prefix: Vec<Option<PivotKeyPart>> = vec![None; subtotal_levels];
+        let mut grand_acc: Option<GroupAccumulator> = if cfg.grand_totals.rows {
+            Some(GroupAccumulator::new())
+        } else {
+            None
+        };
+
+        let mut prev_row_key: Option<PivotKey> = None;
+        for row_key in &row_keys {
+            // Close groups if needed before emitting leaf row.
+            if cfg.subtotals != SubtotalPosition::None && subtotal_levels > 0 {
+                let common_prefix = prev_row_key
+                    .as_ref()
+                    .map(|prev| common_prefix_len(&prev.0, &row_key.0))
+                    .unwrap_or(0);
+                Self::close_groups_bottom(
+                    cfg,
+                    &col_keys,
+                    common_prefix,
+                    &mut group_accs,
+                    &mut current_group_prefix,
+                    &mut data,
+                );
+
+                // Open new groups for changed prefixes.
+                for level in common_prefix..subtotal_levels {
+                    current_group_prefix[level] = row_key.0.get(level).cloned();
+                    group_accs[level] = Some(GroupAccumulator::new());
+                }
+            }
+
+            let row_map = cube.get(row_key);
+            let row_cells = Self::render_row(row_key, row_map, &col_keys, cfg, /*label*/ None);
+            data.push(row_cells.clone());
+
+            // Update subtotal accumulators & grand accumulator.
+            if subtotal_levels > 0 {
+                for level in 0..subtotal_levels {
+                    if let Some(acc) = group_accs[level].as_mut() {
+                        acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
+                    }
+                }
+            }
+            if let Some(acc) = grand_acc.as_mut() {
+                acc.merge_row(row_map, &col_keys, cfg.value_fields.len());
+            }
+
+            prev_row_key = Some(row_key.clone());
+        }
+
+        // Close remaining groups.
+        if cfg.subtotals != SubtotalPosition::None && subtotal_levels > 0 {
+            Self::close_groups_bottom(
+                cfg,
+                &col_keys,
+                0,
+                &mut group_accs,
+                &mut current_group_prefix,
+                &mut data,
+            );
+        }
+
+        // Grand total row.
+        if let Some(grand) = grand_acc {
+            let label = PivotValue::Text("Grand Total".to_string());
+            let row_key = PivotKey(vec![label.to_key_part()]);
+            let rendered = Self::render_totals_row(
+                &row_key,
+                &grand,
+                &col_keys,
+                cfg,
+                Some(PivotValue::Text("Grand Total".to_string())),
+            );
+            data.push(rendered);
+        }
+
+        Ok(PivotResult { data })
+    }
+
+    fn build_header_row(col_keys: &[PivotKey], cfg: &PivotConfig) -> Vec<PivotValue> {
+        let mut row = Vec::new();
+
+        match cfg.layout {
+            Layout::Compact => {
+                row.push(PivotValue::Text("Row Labels".to_string()));
+            }
+            Layout::Tabular => {
+                for f in &cfg.row_fields {
+                    row.push(PivotValue::Text(f.source_field.clone()));
+                }
+            }
+        }
+
+        // Flatten column keys × value fields.
+        for col_key in col_keys {
+            let col_label = if cfg.column_fields.is_empty() {
+                String::new()
+            } else {
+                col_key
+                    .display_strings()
+                    .into_iter()
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" / ")
+            };
+            for vf in &cfg.value_fields {
+                let base = if vf.name.is_empty() {
+                    format!("{:?} of {}", vf.aggregation, vf.source_field)
+                } else {
+                    vf.name.clone()
+                };
+                let header = if col_label.is_empty() {
+                    base
+                } else {
+                    format!("{col_label} - {base}")
+                };
+                row.push(PivotValue::Text(header));
+            }
+        }
+
+        if cfg.grand_totals.columns {
+            for vf in &cfg.value_fields {
+                let base = if vf.name.is_empty() {
+                    format!("{:?} of {}", vf.aggregation, vf.source_field)
+                } else {
+                    vf.name.clone()
+                };
+                row.push(PivotValue::Text(format!("Grand Total - {base}")));
+            }
+        }
+
+        row
+    }
+
+    fn render_row(
+        row_key: &PivotKey,
+        row_map: Option<&HashMap<PivotKey, Vec<Accumulator>>>,
+        col_keys: &[PivotKey],
+        cfg: &PivotConfig,
+        label: Option<PivotValue>,
+    ) -> Vec<PivotValue> {
+        let mut row = Vec::new();
+
+        match cfg.layout {
+            Layout::Compact => {
+                // Compact: join row keys into one cell.
+                let s = row_key
+                    .display_strings()
+                    .into_iter()
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" / ");
+                row.push(label.unwrap_or_else(|| PivotValue::Text(s)));
+            }
+            Layout::Tabular => {
+                for (idx, part) in row_key.0.iter().enumerate() {
+                    if idx == 0 {
+                        if let Some(l) = label.as_ref() {
+                            row.push(l.clone());
+                            continue;
+                        }
+                    }
+                    row.push(PivotValue::Text(part.display_string()));
+                }
+
+                // If row key shorter than row_fields (shouldn't happen), pad.
+                while row.len() < cfg.row_fields.len() {
+                    row.push(PivotValue::Blank);
+                }
+            }
+        }
+
+        let mut row_total_accs: Vec<Accumulator> = (0..cfg.value_fields.len()).map(|_| Accumulator::new()).collect();
+
+        for col_key in col_keys {
+            let maybe_cell = row_map.and_then(|m| m.get(col_key));
+            for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
+                if let Some(cell_accs) = maybe_cell {
+                    row_total_accs[vf_idx].merge(&cell_accs[vf_idx]);
+                    row.push(cell_accs[vf_idx].finalize(vf.aggregation));
+                } else {
+                    row.push(PivotValue::Blank);
+                }
+            }
+        }
+
+        if cfg.grand_totals.columns {
+            for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
+                row.push(row_total_accs[vf_idx].finalize(vf.aggregation));
+            }
+        }
+
+        row
+    }
+
+    fn render_totals_row(
+        row_key: &PivotKey,
+        totals: &GroupAccumulator,
+        col_keys: &[PivotKey],
+        cfg: &PivotConfig,
+        label: Option<PivotValue>,
+    ) -> Vec<PivotValue> {
+        let mut row = Vec::new();
+
+        match cfg.layout {
+            Layout::Compact => {
+                row.push(label.unwrap_or_else(|| PivotValue::Text("Total".to_string())));
+            }
+            Layout::Tabular => {
+                // Put label in first column, blanks for the rest.
+                if let Some(l) = label {
+                    row.push(l);
+                } else {
+                    row.push(PivotValue::Text(row_key.0.get(0).map(|p| p.display_string()).unwrap_or_default()));
+                }
+                for _ in 1..cfg.row_fields.len() {
+                    row.push(PivotValue::Blank);
+                }
+            }
+        }
+
+        let mut row_total_accs: Vec<Accumulator> = (0..cfg.value_fields.len()).map(|_| Accumulator::new()).collect();
+
+        for col_key in col_keys {
+            let cell_accs = totals
+                .cells
+                .get(col_key)
+                .cloned()
+                .unwrap_or_else(|| (0..cfg.value_fields.len()).map(|_| Accumulator::new()).collect());
+
+            for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
+                row_total_accs[vf_idx].merge(&cell_accs[vf_idx]);
+                row.push(cell_accs[vf_idx].finalize(vf.aggregation));
+            }
+        }
+
+        if cfg.grand_totals.columns {
+            for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
+                row.push(row_total_accs[vf_idx].finalize(vf.aggregation));
+            }
+        }
+
+        row
+    }
+
+    fn close_groups_bottom(
+        cfg: &PivotConfig,
+        col_keys: &[PivotKey],
+        keep_prefix_len: usize,
+        group_accs: &mut [Option<GroupAccumulator>],
+        current_group_prefix: &mut [Option<PivotKeyPart>],
+        out: &mut Vec<Vec<PivotValue>>,
+    ) {
+        // Close from deepest to keep_prefix_len.
+        for level in (keep_prefix_len..group_accs.len()).rev() {
+            if let Some(acc) = group_accs[level].take() {
+                // Only show subtotals for levels that correspond to a row field.
+                let label = current_group_prefix[level]
+                    .as_ref()
+                    .map(|p| format!("{} Total", p.display_string()))
+                    .unwrap_or_else(|| "Total".to_string());
+
+                out.push(Self::render_totals_row(
+                    &PivotKey(vec![PivotKeyPart::Text(label.clone())]),
+                    &acc,
+                    col_keys,
+                    cfg,
+                    Some(PivotValue::Text(label)),
+                ));
+            }
+            current_group_prefix[level] = None;
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct GroupAccumulator {
+    cells: HashMap<PivotKey, Vec<Accumulator>>,
+}
+
+impl GroupAccumulator {
+    fn new() -> Self {
+        Self {
+            cells: HashMap::new(),
+        }
+    }
+
+    fn merge_row(
+        &mut self,
+        row_map: Option<&HashMap<PivotKey, Vec<Accumulator>>>,
+        col_keys: &[PivotKey],
+        value_field_count: usize,
+    ) {
+        for col_key in col_keys {
+            let src = row_map.and_then(|m| m.get(col_key));
+            if let Some(src_accs) = src {
+                let dst = self
+                    .cells
+                    .entry(col_key.clone())
+                    .or_insert_with(|| (0..value_field_count).map(|_| Accumulator::new()).collect());
+                for i in 0..value_field_count {
+                    dst[i].merge(&src_accs[i]);
+                }
+            }
+        }
+    }
+}
+
+struct FieldIndices {
+    row_indices: Vec<usize>,
+    col_indices: Vec<usize>,
+    value_indices: Vec<usize>,
+    filter_indices: Vec<(usize, Option<HashSet<PivotKeyPart>>)>,
+}
+
+impl FieldIndices {
+    fn new(cache: &PivotCache, cfg: &PivotConfig) -> Result<Self, PivotError> {
+        let mut row_indices = Vec::new();
+        for f in &cfg.row_fields {
+            row_indices.push(cache.field_index(&f.source_field).ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?);
+        }
+        let mut col_indices = Vec::new();
+        for f in &cfg.column_fields {
+            col_indices.push(cache.field_index(&f.source_field).ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?);
+        }
+        let mut value_indices = Vec::new();
+        for f in &cfg.value_fields {
+            value_indices.push(cache.field_index(&f.source_field).ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?);
+        }
+        let mut filter_indices = Vec::new();
+        for f in &cfg.filter_fields {
+            let idx = cache.field_index(&f.source_field).ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?;
+            filter_indices.push((idx, f.allowed.clone()));
+        }
+        Ok(Self {
+            row_indices,
+            col_indices,
+            value_indices,
+            filter_indices,
+        })
+    }
+
+    fn build_key(&self, record: &[PivotValue], indices: &[usize]) -> PivotKey {
+        PivotKey(
+            indices
+                .iter()
+                .map(|idx| record.get(*idx).unwrap_or(&PivotValue::Blank).to_key_part())
+                .collect(),
+        )
+    }
+
+    fn passes_filters(&self, record: &[PivotValue], _cfg: &PivotConfig) -> bool {
+        for (idx, allowed) in &self.filter_indices {
+            if let Some(set) = allowed {
+                let val = record.get(*idx).unwrap_or(&PivotValue::Blank).to_key_part();
+                if !set.contains(&val) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+fn common_prefix_len(a: &[PivotKeyPart], b: &[PivotKeyPart]) -> usize {
+    let mut i = 0;
+    while i < a.len() && i < b.len() && a[i] == b[i] {
+        i += 1;
+    }
+    i
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use pretty_assertions::assert_eq;
+
+    fn pv_row(values: &[PivotValue]) -> Vec<PivotValue> {
+        values.to_vec()
+    }
+
+    #[test]
+    fn calculates_sum_by_single_row_field_with_grand_total() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), 100.into()]),
+            pv_row(&["East".into(), "B".into(), 150.into()]),
+            pv_row(&["West".into(), "A".into(), 200.into()]),
+            pv_row(&["West".into(), "B".into(), 250.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: "Region".to_string(),
+            }],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+            }],
+            column_fields: vec![],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "Sum of Sales".into()],
+                vec!["East".into(), 250.into()],
+                vec!["West".into(), 450.into()],
+                vec!["Grand Total".into(), 700.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn respects_filters() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), 100.into()]),
+            pv_row(&["East".into(), "B".into(), 150.into()]),
+            pv_row(&["West".into(), "A".into(), 200.into()]),
+            pv_row(&["West".into(), "B".into(), 250.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let mut allowed = HashSet::new();
+        allowed.insert(PivotKeyPart::Text("East".to_string()));
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: "Region".to_string(),
+            }],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+            }],
+            filter_fields: vec![FilterField {
+                source_field: "Region".to_string(),
+                allowed: Some(allowed),
+            }],
+            column_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "Sum of Sales".into()],
+                vec!["East".into(), 250.into()],
+                vec!["Grand Total".into(), 250.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn supports_column_fields_and_column_grand_totals() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), 100.into()]),
+            pv_row(&["East".into(), "B".into(), 150.into()]),
+            pv_row(&["West".into(), "A".into(), 200.into()]),
+            pv_row(&["West".into(), "B".into(), 250.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: "Region".to_string(),
+            }],
+            column_fields: vec![PivotField {
+                source_field: "Product".to_string(),
+            }],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: true,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        // Column ordering is alphabetical A, B.
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Region".into(),
+                    "A - Sum of Sales".into(),
+                    "B - Sum of Sales".into(),
+                    "Grand Total - Sum of Sales".into()
+                ],
+                vec!["East".into(), 100.into(), 150.into(), 250.into()],
+                vec!["West".into(), 200.into(), 250.into(), 450.into()],
+                vec!["Grand Total".into(), 300.into(), 400.into(), 700.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn produces_basic_subtotals_for_multiple_row_fields() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), 100.into()]),
+            pv_row(&["East".into(), "B".into(), 150.into()]),
+            pv_row(&["West".into(), "A".into(), 200.into()]),
+            pv_row(&["West".into(), "B".into(), 250.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![
+                PivotField {
+                    source_field: "Region".to_string(),
+                },
+                PivotField {
+                    source_field: "Product".to_string(),
+                },
+            ],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::Bottom,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "Product".into(), "Sum of Sales".into()],
+                vec!["East".into(), "A".into(), 100.into()],
+                vec!["East".into(), "B".into(), 150.into()],
+                vec!["East Total".into(), PivotValue::Blank, 250.into()],
+                vec!["West".into(), "A".into(), 200.into()],
+                vec!["West".into(), "B".into(), 250.into()],
+                vec!["West Total".into(), PivotValue::Blank, 450.into()],
+                vec!["Grand Total".into(), PivotValue::Blank, 700.into()],
+            ]
+        );
+    }
+}
