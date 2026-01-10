@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 #[test]
 fn roundtrip_fixtures_no_critical_diffs() -> Result<()> {
@@ -14,9 +14,21 @@ fn roundtrip_fixtures_no_critical_diffs() -> Result<()> {
 
     for fixture in fixtures {
         let tmpdir = tempfile::tempdir()?;
-        let roundtripped = tmpdir.path().join("roundtripped.xlsx");
+        let extension = fixture.extension().and_then(|ext| ext.to_str()).unwrap_or("xlsx");
+        let roundtripped = tmpdir
+            .path()
+            .join(format!("roundtripped.{extension}"));
 
-        xlsx_diff::roundtrip_zip_copy(&fixture, &roundtripped)?;
+        // Round-trip via the current XLSX package implementation (OPC-level).
+        let original_bytes =
+            std::fs::read(&fixture).with_context(|| format!("read fixture {}", fixture.display()))?;
+        let pkg = formula_xlsx::XlsxPackage::from_bytes(&original_bytes)
+            .with_context(|| format!("parse fixture {}", fixture.display()))?;
+        let written_bytes = pkg
+            .write_to_bytes()
+            .with_context(|| format!("write roundtripped fixture {}", fixture.display()))?;
+        std::fs::write(&roundtripped, written_bytes)
+            .with_context(|| format!("write temp file {}", roundtripped.display()))?;
 
         let report = xlsx_diff::diff_workbooks(&fixture, &roundtripped)?;
         if report.has_at_least(xlsx_diff::Severity::Critical) {

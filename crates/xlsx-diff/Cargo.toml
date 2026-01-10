@@ -12,5 +12,5 @@ walkdir = "2.5"
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+formula-xlsx = { path = "../formula-xlsx" }
 pretty_assertions = "1.4"
-

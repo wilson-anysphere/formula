@@ -1055,6 +1055,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "formula-xlsx",
  "pretty_assertions",
  "roxmltree",
  "tempfile",
