@@ -15,6 +15,7 @@ def main() -> None:
     # prints don't corrupt the JSON stream.
     protocol_out = sys.stdout
     sys.stdout = sys.stderr  # type: ignore[assignment]
+    sys.__stdout__ = sys.stderr  # type: ignore[assignment]
 
     first_line = sys.stdin.readline()
     if not first_line:
