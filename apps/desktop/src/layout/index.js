@@ -6,5 +6,6 @@ export * from "./layoutPersistence.js";
 export * from "./layoutSerializer.js";
 export * from "./layoutState.js";
 export * from "./windowingPersistence.js";
+export * from "./windowingController.js";
 export * from "./windowingSerializer.js";
 export * from "./windowingState.js";
