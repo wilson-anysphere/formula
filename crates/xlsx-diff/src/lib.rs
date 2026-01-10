@@ -261,9 +261,9 @@ fn severity_for_part(part: &str) -> Severity {
 
 /// A minimal “load → save” round-trip that preserves each part byte-for-byte.
 ///
-/// This is used by the CI harness today while the full fidelity XLSX writer
-/// evolves. It still exercises the archive reader/writer, and the diff harness
-/// will immediately begin catching regressions once the real writer is wired in.
+/// This is a convenience helper for situations where you want to validate the
+/// diff tooling itself without invoking a higher-level XLSX writer. The CI
+/// harness uses `formula-xlsx` for its round-trip path.
 pub fn roundtrip_zip_copy(original: &Path, out_path: &Path) -> Result<()> {
     let src_file =
         File::open(original).with_context(|| format!("open workbook {}", original.display()))?;

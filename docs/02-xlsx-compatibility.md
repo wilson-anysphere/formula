@@ -596,6 +596,9 @@ Run the fixture harness (used by CI):
 cargo test -p xlsx-diff --test roundtrip_fixtures
 ```
 
+The harness performs a real load → save using `formula-xlsx::XlsxPackage` (OPC-level
+package handling) and then diffs the original vs written output.
+
 Current normalization rules (to reduce false positives):
 
 - Ignore whitespace-only XML text nodes unless `xml:space="preserve"` is set.

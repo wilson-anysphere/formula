@@ -19,7 +19,8 @@ fixtures/xlsx/
   macros/
 ```
 
-`charts/`, `pivots/`, and `macros/` are currently scaffolds for future expansion.
+`charts/` and `pivots/` are currently scaffolds for future expansion. `macros/`
+contains small `.xlsm` fixtures used to validate VBA project preservation.
 
 ## Regenerating the initial fixtures
 
@@ -30,4 +31,3 @@ python3 fixtures/xlsx/generate_fixtures.py
 ```
 
 The generator uses deterministic timestamps so diffs are stable.
-
