@@ -306,6 +306,18 @@ impl DaxEngine {
                 };
                 self.eval_average(model, arg, filter)
             }
+            "MAX" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval("MAX expects 1 argument".into()));
+                };
+                self.eval_max(model, arg, filter)
+            }
+            "MIN" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval("MIN expects 1 argument".into()));
+                };
+                self.eval_min(model, arg, filter)
+            }
             "SUMX" => {
                 let [table_expr, value_expr] = args else {
                     return Err(DaxError::Eval("SUMX expects 2 arguments".into()));
@@ -330,6 +342,32 @@ impl DaxEngine {
                     filter,
                     row_ctx,
                     IteratorKind::Average,
+                )
+            }
+            "MAXX" => {
+                let [table_expr, value_expr] = args else {
+                    return Err(DaxError::Eval("MAXX expects 2 arguments".into()));
+                };
+                self.eval_iterator(
+                    model,
+                    table_expr,
+                    value_expr,
+                    filter,
+                    row_ctx,
+                    IteratorKind::Max,
+                )
+            }
+            "MINX" => {
+                let [table_expr, value_expr] = args else {
+                    return Err(DaxError::Eval("MINX expects 2 arguments".into()));
+                };
+                self.eval_iterator(
+                    model,
+                    table_expr,
+                    value_expr,
+                    filter,
+                    row_ctx,
+                    IteratorKind::Min,
                 )
             }
             "COUNTROWS" => {
@@ -447,6 +485,66 @@ impl DaxEngine {
         }
     }
 
+    fn eval_max(&self, model: &DataModel, expr: &Expr, filter: &FilterContext) -> DaxResult<Value> {
+        let (table, column) = match expr {
+            Expr::ColumnRef { table, column } => (table.as_str(), column.as_str()),
+            _ => {
+                return Err(DaxError::Type(
+                    "MAX currently only supports a column reference".into(),
+                ))
+            }
+        };
+
+        let rows = resolve_table_rows(model, filter, table)?;
+        let table_ref = model
+            .table(table)
+            .ok_or_else(|| DaxError::UnknownTable(table.into()))?;
+        let idx = table_ref
+            .column_idx(column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: table.to_string(),
+                column: column.to_string(),
+            })?;
+
+        let mut best: Option<f64> = None;
+        for row in rows {
+            if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
+                best = Some(best.map_or(n.0, |current| current.max(n.0)));
+            }
+        }
+        Ok(best.map(Value::from).unwrap_or(Value::Blank))
+    }
+
+    fn eval_min(&self, model: &DataModel, expr: &Expr, filter: &FilterContext) -> DaxResult<Value> {
+        let (table, column) = match expr {
+            Expr::ColumnRef { table, column } => (table.as_str(), column.as_str()),
+            _ => {
+                return Err(DaxError::Type(
+                    "MIN currently only supports a column reference".into(),
+                ))
+            }
+        };
+
+        let rows = resolve_table_rows(model, filter, table)?;
+        let table_ref = model
+            .table(table)
+            .ok_or_else(|| DaxError::UnknownTable(table.into()))?;
+        let idx = table_ref
+            .column_idx(column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: table.to_string(),
+                column: column.to_string(),
+            })?;
+
+        let mut best: Option<f64> = None;
+        for row in rows {
+            if let Some(Value::Number(n)) = table_ref.value_by_idx(row, idx) {
+                best = Some(best.map_or(n.0, |current| current.min(n.0)));
+            }
+        }
+        Ok(best.map(Value::from).unwrap_or(Value::Blank))
+    }
+
     fn eval_iterator(
         &self,
         model: &DataModel,
@@ -459,6 +557,7 @@ impl DaxEngine {
         let table_result = self.eval_table(model, table_expr, filter, row_ctx)?;
         let mut sum = 0.0;
         let mut count = 0usize;
+        let mut best: Option<f64> = None;
 
         for row in table_result.rows {
             let mut inner_ctx = row_ctx.clone();
@@ -482,6 +581,23 @@ impl DaxEngine {
                         count += 1;
                     }
                 }
+                IteratorKind::Max | IteratorKind::Min => match value {
+                    Value::Number(n) => {
+                        best = Some(match (kind, best) {
+                            (IteratorKind::Max, Some(current)) => current.max(n.0),
+                            (IteratorKind::Min, Some(current)) => current.min(n.0),
+                            (_, None) => n.0,
+                            _ => unreachable!(),
+                        });
+                        count += 1;
+                    }
+                    Value::Blank => {}
+                    other => {
+                        return Err(DaxError::Type(format!(
+                            "iterator expected numeric expression, got {other}"
+                        )))
+                    }
+                },
             };
         }
 
@@ -501,6 +617,9 @@ impl DaxEngine {
                 }
             }
             IteratorKind::Count => Ok(Value::from(count as i64)),
+            IteratorKind::Max | IteratorKind::Min => {
+                Ok(best.map(Value::from).unwrap_or(Value::Blank))
+            }
         }
     }
 
@@ -764,6 +883,8 @@ enum IteratorKind {
     Sum,
     Average,
     Count,
+    Max,
+    Min,
 }
 
 fn resolve_table_rows(

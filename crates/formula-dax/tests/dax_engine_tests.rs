@@ -302,3 +302,40 @@ fn countx_respects_filter_propagation() {
         .unwrap();
     assert_eq!(empty_count, 0.into());
 }
+
+#[test]
+fn maxx_iterates_relatedtable() {
+    let mut model = build_model();
+    model
+        .add_calculated_column(
+            "Customers",
+            "Max Order Amount",
+            "MAXX(RELATEDTABLE(Orders), Orders[Amount])",
+        )
+        .unwrap();
+
+    let customers = model.table("Customers").unwrap();
+    let values: Vec<Value> = (0..customers.row_count())
+        .map(|row| customers.value(row, "Max Order Amount").unwrap().clone())
+        .collect();
+
+    assert_eq!(values, vec![20.0.into(), 5.0.into(), 8.0.into()]);
+}
+
+#[test]
+fn max_respects_filter_propagation() {
+    let mut model = build_model();
+    model
+        .add_measure("Max Sale", "MAX(Orders[Amount])")
+        .unwrap();
+
+    let west_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "West".into());
+    let west_max = model.evaluate_measure("Max Sale", &west_filter).unwrap();
+    assert_eq!(west_max, 5.0.into());
+
+    let empty_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "Nowhere".into());
+    let empty_max = model.evaluate_measure("Max Sale", &empty_filter).unwrap();
+    assert_eq!(empty_max, Value::Blank);
+}
