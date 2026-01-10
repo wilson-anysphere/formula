@@ -165,3 +165,30 @@ fn multithreaded_recalc_matches_single_threaded() {
     assert_eq!(multi.get_cell_value("Sheet1", "C1"), single.get_cell_value("Sheet1", "C1"));
 }
 
+#[test]
+fn evaluates_selected_financial_functions() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=PV(0, 3, -10)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=PMT(0, 2, 10)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=SLN(30, 0, 3)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=SLN(30, 0, 0)")
+        .unwrap();
+
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(30.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(-5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(10.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A4"),
+        Value::Error(ErrorKind::Div0)
+    );
+}

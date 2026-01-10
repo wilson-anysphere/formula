@@ -492,5 +492,21 @@ fn is_volatile_function(name: &str) -> bool {
 
 fn is_known_thread_safe_function(name: &str) -> bool {
     // For now we only implement a small set of built-ins, all thread-safe.
-    matches!(name, "IF" | "IFERROR" | "ISERROR" | "SUM")
+    matches!(
+        name,
+        "IF"
+            | "IFERROR"
+            | "ISERROR"
+            | "SUM"
+            | "PV"
+            | "FV"
+            | "PMT"
+            | "NPER"
+            | "RATE"
+            | "IPMT"
+            | "PPMT"
+            | "SLN"
+            | "SYD"
+            | "DDB"
+    )
 }

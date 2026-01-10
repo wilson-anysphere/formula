@@ -1,5 +1,7 @@
 use crate::eval::address::CellAddr;
 use crate::eval::ast::{BinaryOp, CompiledExpr, CompareOp, Expr, SheetReference, UnaryOp};
+use crate::error::ExcelError;
+use crate::functions::financial;
 use crate::value::{ErrorKind, Value};
 use std::cmp::Ordering;
 
@@ -243,6 +245,16 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             "IFERROR" => self.fn_iferror(args),
             "ISERROR" => self.fn_iserror(args),
             "SUM" => self.fn_sum(args),
+            "PV" => self.fn_pv(args),
+            "FV" => self.fn_fv(args),
+            "PMT" => self.fn_pmt(args),
+            "NPER" => self.fn_nper(args),
+            "RATE" => self.fn_rate(args),
+            "IPMT" => self.fn_ipmt(args),
+            "PPMT" => self.fn_ppmt(args),
+            "SLN" => self.fn_sln(args),
+            "SYD" => self.fn_syd(args),
+            "DDB" => self.fn_ddb(args),
             _ => Value::Error(ErrorKind::Name),
         }
     }
@@ -324,6 +336,302 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
 
         Value::Number(acc)
+    }
+
+    fn eval_number_arg(&self, expr: &CompiledExpr) -> Result<f64, ErrorKind> {
+        let v = self.eval_scalar(expr);
+        match v {
+            Value::Error(e) => Err(e),
+            other => coerce_to_number(&other),
+        }
+    }
+
+    fn eval_optional_number_arg(&self, expr: Option<&CompiledExpr>) -> Result<Option<f64>, ErrorKind> {
+        match expr {
+            Some(e) => Ok(Some(self.eval_number_arg(e)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn excel_result_number(res: Result<f64, ExcelError>) -> Value {
+        match res {
+            Ok(n) => Value::Number(n),
+            Err(e) => Value::Error(match e {
+                ExcelError::Div0 => ErrorKind::Div0,
+                ExcelError::Value => ErrorKind::Value,
+                ExcelError::Num => ErrorKind::Num,
+            }),
+        }
+    }
+
+    fn fn_pv(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() < 3 || args.len() > 5 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let rate = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let nper = match self.eval_number_arg(&args[1]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let pmt = match self.eval_number_arg(&args[2]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let fv = match self.eval_optional_number_arg(args.get(3)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let typ = match self.eval_optional_number_arg(args.get(4)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        Self::excel_result_number(financial::pv(rate, nper, pmt, fv, typ))
+    }
+
+    fn fn_fv(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() < 3 || args.len() > 5 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let rate = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let nper = match self.eval_number_arg(&args[1]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let pmt = match self.eval_number_arg(&args[2]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let pv = match self.eval_optional_number_arg(args.get(3)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let typ = match self.eval_optional_number_arg(args.get(4)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        Self::excel_result_number(financial::fv(rate, nper, pmt, pv, typ))
+    }
+
+    fn fn_pmt(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() < 3 || args.len() > 5 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let rate = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let nper = match self.eval_number_arg(&args[1]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let pv = match self.eval_number_arg(&args[2]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let fv = match self.eval_optional_number_arg(args.get(3)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let typ = match self.eval_optional_number_arg(args.get(4)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        Self::excel_result_number(financial::pmt(rate, nper, pv, fv, typ))
+    }
+
+    fn fn_nper(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() < 3 || args.len() > 5 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let rate = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let pmt = match self.eval_number_arg(&args[1]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let pv = match self.eval_number_arg(&args[2]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let fv = match self.eval_optional_number_arg(args.get(3)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let typ = match self.eval_optional_number_arg(args.get(4)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        Self::excel_result_number(financial::nper(rate, pmt, pv, fv, typ))
+    }
+
+    fn fn_rate(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() < 3 || args.len() > 6 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let nper = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let pmt = match self.eval_number_arg(&args[1]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let pv = match self.eval_number_arg(&args[2]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let fv = match self.eval_optional_number_arg(args.get(3)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let typ = match self.eval_optional_number_arg(args.get(4)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let guess = match self.eval_optional_number_arg(args.get(5)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        Self::excel_result_number(financial::rate(nper, pmt, pv, fv, typ, guess))
+    }
+
+    fn fn_ipmt(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() < 4 || args.len() > 6 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let rate = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let per = match self.eval_number_arg(&args[1]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let nper = match self.eval_number_arg(&args[2]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let pv = match self.eval_number_arg(&args[3]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let fv = match self.eval_optional_number_arg(args.get(4)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let typ = match self.eval_optional_number_arg(args.get(5)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        Self::excel_result_number(financial::ipmt(rate, per, nper, pv, fv, typ))
+    }
+
+    fn fn_ppmt(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() < 4 || args.len() > 6 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let rate = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let per = match self.eval_number_arg(&args[1]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let nper = match self.eval_number_arg(&args[2]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let pv = match self.eval_number_arg(&args[3]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let fv = match self.eval_optional_number_arg(args.get(4)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let typ = match self.eval_optional_number_arg(args.get(5)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        Self::excel_result_number(financial::ppmt(rate, per, nper, pv, fv, typ))
+    }
+
+    fn fn_sln(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() != 3 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let cost = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let salvage = match self.eval_number_arg(&args[1]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let life = match self.eval_number_arg(&args[2]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        Self::excel_result_number(financial::sln(cost, salvage, life))
+    }
+
+    fn fn_syd(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() != 4 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let cost = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let salvage = match self.eval_number_arg(&args[1]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let life = match self.eval_number_arg(&args[2]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let per = match self.eval_number_arg(&args[3]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        Self::excel_result_number(financial::syd(cost, salvage, life, per))
+    }
+
+    fn fn_ddb(&self, args: &[CompiledExpr]) -> Value {
+        if args.len() < 4 || args.len() > 5 {
+            return Value::Error(ErrorKind::Value);
+        }
+        let cost = match self.eval_number_arg(&args[0]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let salvage = match self.eval_number_arg(&args[1]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let life = match self.eval_number_arg(&args[2]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let period = match self.eval_number_arg(&args[3]) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let factor = match self.eval_optional_number_arg(args.get(4)) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        Self::excel_result_number(financial::ddb(cost, salvage, life, period, factor))
     }
 }
 
@@ -425,4 +733,3 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         (Value::Error(_), _) | (_, Value::Error(_)) => Ordering::Equal,
     })
 }
-
