@@ -6,6 +6,8 @@ use roxmltree::{Document, Node};
 
 use crate::Severity;
 
+const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedXml {
     pub root: XmlNode,
@@ -159,6 +161,23 @@ fn normalize_child_order(parent: &QName, children: &mut Vec<XmlNode>, part_name:
             ka.cmp(&kb)
         });
     }
+
+    // Worksheet cell storage order is not semantically meaningful. Normalize the most
+    // common containers so diffs focus on actual content changes rather than writer
+    // iteration order.
+    if part_name.starts_with("xl/worksheets/")
+        && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
+        && parent.local == "sheetData"
+    {
+        children.sort_by_key(sheetdata_child_sort_key);
+    }
+
+    if part_name.starts_with("xl/worksheets/")
+        && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
+        && parent.local == "row"
+    {
+        children.sort_by_key(row_child_sort_key);
+    }
 }
 
 fn relationship_sort_key(node: &XmlNode) -> (String, String, String) {
@@ -205,6 +224,68 @@ fn content_type_sort_key(node: &XmlNode) -> (String, String) {
         XmlNode::Element(el) => (el.name.local.clone(), String::new()),
         _ => (String::new(), String::new()),
     }
+}
+
+fn sheetdata_child_sort_key(node: &XmlNode) -> (u8, u32, String) {
+    match node {
+        XmlNode::Element(el) if el.name.local == "row" => (0, row_index(el), String::new()),
+        XmlNode::Element(el) => (1, u32::MAX, el.name.local.clone()),
+        XmlNode::Text(_) => (2, u32::MAX, String::new()),
+    }
+}
+
+fn row_child_sort_key(node: &XmlNode) -> (u8, u32, u32, String) {
+    match node {
+        XmlNode::Element(el) if el.name.local == "c" => {
+            let (row, col) = cell_ref_key(el);
+            (0, row, col, String::new())
+        }
+        XmlNode::Element(el) => (1, u32::MAX, u32::MAX, el.name.local.clone()),
+        XmlNode::Text(_) => (2, u32::MAX, u32::MAX, String::new()),
+    }
+}
+
+fn row_index(el: &XmlElement) -> u32 {
+    attr_value(el, "r")
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(u32::MAX)
+}
+
+fn cell_ref_key(el: &XmlElement) -> (u32, u32) {
+    attr_value(el, "r")
+        .and_then(parse_a1_reference)
+        .unwrap_or((u32::MAX, u32::MAX))
+}
+
+fn attr_value<'a>(el: &'a XmlElement, local: &str) -> Option<&'a str> {
+    el.attrs
+        .iter()
+        .find(|(k, _)| k.local == local)
+        .map(|(_, v)| v.as_str())
+}
+
+fn parse_a1_reference(reference: &str) -> Option<(u32, u32)> {
+    let mut col: u32 = 0;
+    let mut row_start = 0;
+    let stripped = reference.replace('$', "");
+    for (idx, ch) in stripped.char_indices() {
+        if ch.is_ascii_alphabetic() {
+            let upper = ch.to_ascii_uppercase();
+            col = col
+                .checked_mul(26)?
+                .checked_add((upper as u8 - b'A' + 1) as u32)?;
+        } else {
+            row_start = idx;
+            break;
+        }
+    }
+
+    if col == 0 {
+        return None;
+    }
+
+    let row: u32 = stripped.get(row_start..)?.parse().ok()?;
+    Some((row, col))
 }
 
 #[derive(Debug, Clone)]

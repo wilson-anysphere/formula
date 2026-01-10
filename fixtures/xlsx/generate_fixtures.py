@@ -24,34 +24,83 @@ def _zip_write(zf: zipfile.ZipFile, name: str, data: str) -> None:
     zf.writestr(info, data.encode("utf-8"))
 
 
-def write_xlsx(path: pathlib.Path, sheet_xml: str, styles_xml: str) -> None:
+def write_xlsx(
+    path: pathlib.Path,
+    sheet_xmls: list[str],
+    styles_xml: str,
+    *,
+    sheet_names: list[str] | None = None,
+    shared_strings_xml: str | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         path.unlink()
 
+    if sheet_names is None:
+        sheet_names = [f"Sheet{i+1}" for i in range(len(sheet_xmls))]
+    if len(sheet_names) != len(sheet_xmls):
+        raise ValueError("sheet_names must match sheet_xmls length")
+
     with zipfile.ZipFile(path, "w") as zf:
-        _zip_write(zf, "[Content_Types].xml", content_types_xml())
+        _zip_write(
+            zf,
+            "[Content_Types].xml",
+            content_types_xml(
+                sheet_count=len(sheet_xmls),
+                include_shared_strings=shared_strings_xml is not None,
+            ),
+        )
         _zip_write(zf, "_rels/.rels", package_rels_xml())
         _zip_write(zf, "docProps/core.xml", core_props_xml())
-        _zip_write(zf, "docProps/app.xml", app_props_xml())
-        _zip_write(zf, "xl/workbook.xml", workbook_xml())
-        _zip_write(zf, "xl/_rels/workbook.xml.rels", workbook_rels_xml())
-        _zip_write(zf, "xl/worksheets/sheet1.xml", sheet_xml)
+        _zip_write(zf, "docProps/app.xml", app_props_xml(sheet_names))
+        _zip_write(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        _zip_write(
+            zf,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml(
+                sheet_count=len(sheet_xmls),
+                include_shared_strings=shared_strings_xml is not None,
+            ),
+        )
+        for idx, sheet_xml in enumerate(sheet_xmls, start=1):
+            _zip_write(zf, f"xl/worksheets/sheet{idx}.xml", sheet_xml)
         _zip_write(zf, "xl/styles.xml", styles_xml)
+        if shared_strings_xml is not None:
+            _zip_write(zf, "xl/sharedStrings.xml", shared_strings_xml)
 
 
-def content_types_xml() -> str:
-    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+def content_types_xml(*, sheet_count: int, include_shared_strings: bool) -> str:
+    overrides = [
+        '  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+    ]
+    for idx in range(1, sheet_count + 1):
+        overrides.append(
+            f'  <Override PartName="/xl/worksheets/sheet{idx}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        )
+    overrides.append(
+        '  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+    )
+    if include_shared_strings:
+        overrides.append(
+            '  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
+        )
+    overrides.append(
+        '  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+    )
+    overrides.append(
+        '  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
+    )
+
+    return (
+        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+%s
 </Types>
 """
+        % "\n".join(overrides)
+    )
 
 
 def package_rels_xml() -> str:
@@ -64,24 +113,49 @@ def package_rels_xml() -> str:
 """
 
 
-def workbook_xml() -> str:
-    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+def workbook_xml(sheet_names: list[str]) -> str:
+    sheets = []
+    for idx, name in enumerate(sheet_names, start=1):
+        sheets.append(f'    <sheet name="{xml_escape(name)}" sheetId="{idx}" r:id="rId{idx}"/>')
+    return (
+        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheets>
-    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+%s
   </sheets>
 </workbook>
 """
+        % "\n".join(sheets)
+    )
 
 
-def workbook_rels_xml() -> str:
-    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+def workbook_rels_xml(*, sheet_count: int, include_shared_strings: bool) -> str:
+    rels = []
+    for idx in range(1, sheet_count + 1):
+        rels.append(
+            f'  <Relationship Id="rId{idx}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{idx}.xml"/>'
+        )
+
+    next_id = sheet_count + 1
+    rels.append(
+        f'  <Relationship Id="rId{next_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+    )
+    next_id += 1
+
+    if include_shared_strings:
+        rels.append(
+            f'  <Relationship Id="rId{next_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
+        )
+
+    return (
+        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+%s
 </Relationships>
 """
+        % "\n".join(rels)
+    )
 
 
 def core_props_xml() -> str:
@@ -99,8 +173,13 @@ def core_props_xml() -> str:
 """
 
 
-def app_props_xml() -> str:
-    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+def app_props_xml(sheet_names: list[str]) -> str:
+    titles = []
+    for name in sheet_names:
+        titles.append(f"      <vt:lpstr>{xml_escape(name)}</vt:lpstr>")
+
+    return (
+        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
             xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
   <Application>Formula Fixtures</Application>
@@ -109,12 +188,12 @@ def app_props_xml() -> str:
   <HeadingPairs>
     <vt:vector size="2" baseType="variant">
       <vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant>
-      <vt:variant><vt:i4>1</vt:i4></vt:variant>
+      <vt:variant><vt:i4>%d</vt:i4></vt:variant>
     </vt:vector>
   </HeadingPairs>
   <TitlesOfParts>
-    <vt:vector size="1" baseType="lpstr">
-      <vt:lpstr>Sheet1</vt:lpstr>
+    <vt:vector size="%d" baseType="lpstr">
+%s
     </vt:vector>
   </TitlesOfParts>
   <Company></Company>
@@ -124,6 +203,29 @@ def app_props_xml() -> str:
   <AppVersion>1.0</AppVersion>
 </Properties>
 """
+        % (len(sheet_names), len(sheet_names), "\n".join(titles))
+    )
+
+
+def xml_escape(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
+
+
+def shared_strings_xml(strings: list[str]) -> str:
+    sis = []
+    for s in strings:
+        sis.append(f"  <si><t>{xml_escape(s)}</t></si>")
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="%d" uniqueCount="%d">
+%s
+</sst>
+""" % (len(strings), len(strings), "\n".join(sis))
 
 
 def styles_minimal_xml() -> str:
@@ -265,15 +367,64 @@ def sheet_styles_xml() -> str:
 """
 
 
+def sheet_shared_strings_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="s"><v>0</v></c>
+      <c r="B1" t="s"><v>1</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
+def sheet_two_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>2</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
 def main() -> None:
-    write_xlsx(ROOT / "basic" / "basic.xlsx", sheet_basic_xml(), styles_minimal_xml())
-    write_xlsx(ROOT / "formulas" / "formulas.xlsx", sheet_formulas_xml(), styles_minimal_xml())
     write_xlsx(
-        ROOT / "conditional-formatting" / "conditional-formatting.xlsx",
-        sheet_conditional_formatting_xml(),
+        ROOT / "basic" / "basic.xlsx",
+        [sheet_basic_xml()],
         styles_minimal_xml(),
     )
-    write_xlsx(ROOT / "styles" / "styles.xlsx", sheet_styles_xml(), styles_bold_cell_xml())
+    write_xlsx(
+        ROOT / "basic" / "shared-strings.xlsx",
+        [sheet_shared_strings_xml()],
+        styles_minimal_xml(),
+        shared_strings_xml=shared_strings_xml(["Hello", "World"]),
+    )
+    write_xlsx(
+        ROOT / "basic" / "multi-sheet.xlsx",
+        [sheet_basic_xml(), sheet_two_xml()],
+        styles_minimal_xml(),
+        sheet_names=["Sheet1", "Sheet2"],
+    )
+    write_xlsx(
+        ROOT / "formulas" / "formulas.xlsx",
+        [sheet_formulas_xml()],
+        styles_minimal_xml(),
+    )
+    write_xlsx(
+        ROOT / "conditional-formatting" / "conditional-formatting.xlsx",
+        [sheet_conditional_formatting_xml()],
+        styles_minimal_xml(),
+    )
+    write_xlsx(
+        ROOT / "styles" / "styles.xlsx",
+        [sheet_styles_xml()],
+        styles_bold_cell_xml(),
+    )
 
     # Directory scaffold for future corpora (kept empty for now).
     for name in ["charts", "pivots", "macros"]:
@@ -284,4 +435,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

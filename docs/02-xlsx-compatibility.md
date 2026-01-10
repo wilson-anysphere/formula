@@ -576,6 +576,40 @@ async function compareWorkbooks(
 }
 ```
 
+### Implemented Round-Trip Harness (xlsx-diff)
+
+This repository includes a small XLSX fixture corpus and a part-level diff tool to
+validate load → save → diff round-trips:
+
+- Fixtures live under `fixtures/xlsx/**` (kept intentionally small).
+- The diff tool is implemented in Rust: `crates/xlsx-diff`.
+
+Run a diff locally:
+
+```bash
+cargo run -p xlsx-diff --bin xlsx_diff -- original.xlsx roundtripped.xlsx
+```
+
+Run the fixture harness (used by CI):
+
+```bash
+cargo test -p xlsx-diff --test roundtrip_fixtures
+```
+
+Current normalization rules (to reduce false positives):
+
+- Ignore whitespace-only XML text nodes unless `xml:space="preserve"` is set.
+- Sort XML attributes (namespace declarations are ignored; resolved URIs are used instead).
+- Sort `<Relationships>` entries by `(Id, Type, Target)`.
+- Sort `[Content_Types].xml` entries by `(Default.Extension | Override.PartName)`.
+- Sort worksheet `<sheetData>` rows/cells by their `r` attributes.
+
+Current severity policy (subject to refinement as the writer matures):
+
+- **critical**: missing parts, changes in `[Content_Types].xml`, changes in `*.rels`, any binary part diffs.
+- **warning**: non-essential parts like themes / calcChain, extra parts.
+- **info**: metadata-only changes under `docProps/*`.
+
 ---
 
 ## Performance Considerations
