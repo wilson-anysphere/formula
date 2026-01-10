@@ -9,6 +9,8 @@ export interface TokenUsage {
 export interface ToolCallLog {
   name: string;
   parameters: unknown;
+  requires_approval?: boolean;
+  approved?: boolean;
   ok?: boolean;
   duration_ms?: number;
   result?: unknown;
@@ -39,4 +41,3 @@ export interface AuditListFilters {
   session_id?: string;
   limit?: number;
 }
-

@@ -22,6 +22,8 @@ describe("SqliteAIAuditStore", () => {
         {
           name: "write_cell",
           parameters: { cell: "Sheet1!A1", value: 1 },
+          requires_approval: true,
+          approved: true,
           ok: true,
           duration_ms: 7
         }
@@ -39,7 +41,7 @@ describe("SqliteAIAuditStore", () => {
     expect(entries[0]!.model).toBe("unit-test-model");
     expect(entries[0]!.token_usage?.total_tokens).toBe(15);
     expect(entries[0]!.tool_calls[0]?.name).toBe("write_cell");
+    expect(entries[0]!.tool_calls[0]?.approved).toBe(true);
     expect(entries[0]!.user_feedback).toBe("accepted");
   });
 });
-
