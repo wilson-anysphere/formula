@@ -8,18 +8,25 @@ use std::io::Cursor;
 
 pub fn write_autofilter(filter: &AutoFilter) -> Result<String, quick_xml::Error> {
     let mut writer = Writer::new(Cursor::new(Vec::new()));
+    write_autofilter_to(&mut writer, filter)?;
+    let bytes = writer.into_inner().into_inner();
+    Ok(String::from_utf8_lossy(&bytes).to_string())
+}
 
+pub(crate) fn write_autofilter_to<W: std::io::Write>(
+    writer: &mut Writer<W>,
+    filter: &AutoFilter,
+) -> Result<(), quick_xml::Error> {
     let mut auto_filter = BytesStart::new("autoFilter");
     auto_filter.push_attribute(("ref", to_a1_range(filter.range).as_str()));
     writer.write_event(Event::Start(auto_filter))?;
 
     for (col_id, col_filter) in &filter.columns {
-        write_filter_column(&mut writer, *col_id, col_filter)?;
+        write_filter_column(writer, *col_id, col_filter)?;
     }
 
     writer.write_event(Event::End(BytesEnd::new("autoFilter")))?;
-    let bytes = writer.into_inner().into_inner();
-    Ok(String::from_utf8_lossy(&bytes).to_string())
+    Ok(())
 }
 
 fn write_filter_column<W: std::io::Write>(

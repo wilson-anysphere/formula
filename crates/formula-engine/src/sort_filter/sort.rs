@@ -79,52 +79,32 @@ pub fn sort_range(range: &mut RangeData, spec: &SortSpec) -> RowPermutation {
         return identity_permutation(row_count);
     }
 
-    let header_rows = match spec.header {
-        HeaderOption::None => 0,
-        HeaderOption::HasHeader => 1.min(row_count),
-        HeaderOption::Auto => detect_header_row(range, &spec.keys).unwrap_or(0),
-    };
+    let header_rows = compute_header_rows(row_count, spec.header, &spec.keys, |row, col| {
+        range
+            .rows
+            .get(row)
+            .and_then(|r| r.get(col))
+            .cloned()
+            .unwrap_or(CellValue::Blank)
+    });
 
-    let mut sortable: Vec<SortRow> = (header_rows..row_count)
-        .map(|row_index| SortRow {
-            original_index: row_index,
-            key_values: spec
-                .keys
-                .iter()
-                .map(|key| {
-                    let cell = range
-                        .rows
-                        .get(row_index)
-                        .and_then(|r| r.get(key.column))
-                        .unwrap_or(&CellValue::Blank);
-                    detect_key_value(cell, key)
-                })
-                .collect(),
-        })
+    let perm = compute_row_permutation(row_count, header_rows, &spec.keys, |row, col| {
+        range
+            .rows
+            .get(row)
+            .and_then(|r| r.get(col))
+            .cloned()
+            .unwrap_or(CellValue::Blank)
+    });
+
+    range.rows = perm
+        .new_to_old
+        .iter()
+        .copied()
+        .map(|old_row| range.rows[old_row].clone())
         .collect();
 
-    sortable.sort_by(|a, b| compare_rows(a, b, &spec.keys));
-
-    let mut new_rows: Vec<Vec<CellValue>> = Vec::with_capacity(row_count);
-    let mut new_to_old: Vec<usize> = Vec::with_capacity(row_count);
-
-    for row in 0..header_rows {
-        new_rows.push(range.rows[row].clone());
-        new_to_old.push(row);
-    }
-    for entry in &sortable {
-        new_rows.push(range.rows[entry.original_index].clone());
-        new_to_old.push(entry.original_index);
-    }
-
-    range.rows = new_rows;
-
-    let mut old_to_new = vec![0usize; row_count];
-    for (new_index, old_index) in new_to_old.iter().copied().enumerate() {
-        old_to_new[old_index] = new_index;
-    }
-
-    RowPermutation { new_to_old, old_to_new }
+    perm
 }
 
 fn compare_rows(a: &SortRow, b: &SortRow, keys: &[SortKey]) -> Ordering {
@@ -163,32 +143,95 @@ fn compare_key_value(a: &SortKeyValue, b: &SortKeyValue, key: &SortKey) -> Order
     }
 }
 
-fn detect_header_row(range: &RangeData, keys: &[SortKey]) -> Option<usize> {
-    if range.rows.len() < 2 {
-        return None;
+pub(crate) fn compute_header_rows(
+    row_count: usize,
+    header: HeaderOption,
+    keys: &[SortKey],
+    mut cell_at: impl FnMut(usize, usize) -> CellValue,
+) -> usize {
+    match header {
+        HeaderOption::None => 0,
+        HeaderOption::HasHeader => 1.min(row_count),
+        HeaderOption::Auto => detect_header_row(row_count, keys, &mut cell_at),
+    }
+}
+
+pub(crate) fn compute_row_permutation(
+    row_count: usize,
+    header_rows: usize,
+    keys: &[SortKey],
+    mut cell_at: impl FnMut(usize, usize) -> CellValue,
+) -> RowPermutation {
+    if row_count == 0 {
+        return RowPermutation {
+            new_to_old: Vec::new(),
+            old_to_new: Vec::new(),
+        };
+    }
+
+    if row_count <= 1 || keys.is_empty() {
+        return identity_permutation(row_count);
+    }
+
+    let mut sortable: Vec<SortRow> = (header_rows..row_count)
+        .map(|row_index| SortRow {
+            original_index: row_index,
+            key_values: keys
+                .iter()
+                .map(|key| {
+                    let cell = cell_at(row_index, key.column);
+                    detect_key_value(&cell, key)
+                })
+                .collect(),
+        })
+        .collect();
+
+    sortable.sort_by(|a, b| compare_rows(a, b, keys));
+
+    let mut new_to_old: Vec<usize> = Vec::with_capacity(row_count);
+
+    for row in 0..header_rows {
+        new_to_old.push(row);
+    }
+    for entry in &sortable {
+        new_to_old.push(entry.original_index);
+    }
+
+    let mut old_to_new = vec![0usize; row_count];
+    for (new_index, old_index) in new_to_old.iter().copied().enumerate() {
+        old_to_new[old_index] = new_index;
+    }
+
+    RowPermutation { new_to_old, old_to_new }
+}
+
+fn detect_header_row(
+    row_count: usize,
+    keys: &[SortKey],
+    cell_at: &mut dyn FnMut(usize, usize) -> CellValue,
+) -> usize {
+    if row_count < 2 {
+        return 0;
     }
 
     // A conservative heuristic:
     // - If the first row contains text and the second row contains numbers/dates for any sort key,
     //   treat the first row as a header.
     // - Otherwise, assume no header.
-    let row0 = range.rows.get(0)?;
-    let row1 = range.rows.get(1)?;
-
     for key in keys {
-        let v0 = row0.get(key.column)?;
-        let v1 = row1.get(key.column)?;
+        let v0 = cell_at(0, key.column);
+        let v1 = cell_at(1, key.column);
 
         let is_text0 = matches!(v0, CellValue::Text(_));
         let is_number_or_date1 = matches!(v1, CellValue::Number(_) | CellValue::DateTime(_))
-            || matches!(v1, CellValue::Text(s) if parse_number(s).is_some() || parse_datetime(s).is_some());
+            || matches!(v1, CellValue::Text(s) if parse_number(&s).is_some() || parse_datetime(&s).is_some());
 
         if is_text0 && is_number_or_date1 {
-            return Some(1);
+            return 1;
         }
     }
 
-    Some(0)
+    0
 }
 
 fn detect_key_value(cell: &CellValue, key: &SortKey) -> SortKeyValue {

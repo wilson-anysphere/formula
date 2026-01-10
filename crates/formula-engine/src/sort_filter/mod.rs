@@ -3,6 +3,7 @@ mod filter;
 mod sort;
 mod types;
 mod visibility;
+mod worksheet;
 
 pub use a1::{parse_a1_range, to_a1_range, A1ParseError};
 pub use filter::{
@@ -12,4 +13,4 @@ pub use filter::{
 pub use sort::{sort_range, RowPermutation, SortKey, SortOrder, SortSpec, SortValueType};
 pub use types::{CellValue, HeaderOption, RangeData, RangeDataError, RangeRef};
 pub use visibility::{HiddenRows, RowVisibility};
-
+pub use worksheet::sort_worksheet_range;
