@@ -8,10 +8,68 @@ use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
-    CellRef, CellValue, ErrorValue, Range, SheetVisibility, Workbook, EXCEL_MAX_COLS,
+    CellRef, CellValue, ErrorValue, Range, SheetVisibility, Style, Workbook, EXCEL_MAX_COLS,
     EXCEL_MAX_ROWS,
 };
 use thiserror::Error;
+
+#[derive(Clone, Copy, Debug)]
+struct DateTimeStyleIds {
+    date: u32,
+    datetime: u32,
+    time: u32,
+    duration: u32,
+}
+
+impl DateTimeStyleIds {
+    fn new(workbook: &mut Workbook) -> Self {
+        let date = workbook.intern_style(Style {
+            number_format: Some("m/d/yy".to_string()),
+            ..Default::default()
+        });
+        let datetime = workbook.intern_style(Style {
+            number_format: Some("m/d/yy h:mm:ss".to_string()),
+            ..Default::default()
+        });
+        let time = workbook.intern_style(Style {
+            number_format: Some("h:mm:ss".to_string()),
+            ..Default::default()
+        });
+        let duration = workbook.intern_style(Style {
+            number_format: Some("[h]:mm:ss".to_string()),
+            ..Default::default()
+        });
+
+        Self {
+            date,
+            datetime,
+            time,
+            duration,
+        }
+    }
+
+    fn style_for_excel_datetime(self, dt: &calamine::ExcelDateTime) -> u32 {
+        if dt.is_duration() {
+            return self.duration;
+        }
+
+        // Calamine tells us the cell should be interpreted as a date/time (as
+        // opposed to a raw number) but does not preserve the exact number format
+        // string. Use a best-effort heuristic to pick a reasonable default.
+        let serial = dt.as_f64();
+        let frac = serial.abs().fract();
+
+        if serial.abs() < 1.0 && frac != 0.0 {
+            return self.time;
+        }
+
+        if frac == 0.0 {
+            return self.date;
+        }
+
+        self.datetime
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceFormat {
@@ -89,6 +147,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     let sheets: Vec<Sheet> = workbook.sheets_metadata().to_vec();
 
     let mut out = Workbook::new();
+    let date_time_styles = DateTimeStyleIds::new(&mut out);
     let mut warnings = Vec::new();
     let mut merged_ranges = Vec::new();
 
@@ -120,11 +179,14 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         continue;
                     };
 
-                    let Some(value) = convert_value(value) else {
+                    let Some((value, style_id)) = convert_value(value, date_time_styles) else {
                         continue;
                     };
 
                     sheet.set_value(cell_ref, value);
+                    if let Some(style_id) = style_id {
+                        sheet.set_style_id(cell_ref, style_id);
+                    }
                 }
             }
             Err(err) => warnings.push(ImportWarning::new(format!(
@@ -218,17 +280,23 @@ fn normalize_formula(formula: &str) -> String {
     }
 }
 
-fn convert_value(value: &Data) -> Option<CellValue> {
+fn convert_value(
+    value: &Data,
+    date_time_styles: DateTimeStyleIds,
+) -> Option<(CellValue, Option<u32>)> {
     match value {
         Data::Empty => None,
-        Data::Bool(v) => Some(CellValue::Boolean(*v)),
-        Data::Int(v) => Some(CellValue::Number(*v as f64)),
-        Data::Float(v) => Some(CellValue::Number(*v)),
-        Data::String(v) => Some(CellValue::String(v.clone())),
-        Data::Error(e) => Some(CellValue::Error(cell_error_to_error_value(e.clone()))),
-        Data::DateTime(v) => Some(CellValue::Number(v.as_f64())),
-        Data::DateTimeIso(v) => Some(CellValue::String(v.clone())),
-        Data::DurationIso(v) => Some(CellValue::String(v.clone())),
+        Data::Bool(v) => Some((CellValue::Boolean(*v), None)),
+        Data::Int(v) => Some((CellValue::Number(*v as f64), None)),
+        Data::Float(v) => Some((CellValue::Number(*v), None)),
+        Data::String(v) => Some((CellValue::String(v.clone()), None)),
+        Data::Error(e) => Some((CellValue::Error(cell_error_to_error_value(e.clone())), None)),
+        Data::DateTime(v) => Some((
+            CellValue::Number(v.as_f64()),
+            Some(date_time_styles.style_for_excel_datetime(v)),
+        )),
+        Data::DateTimeIso(v) => Some((CellValue::String(v.clone()), None)),
+        Data::DurationIso(v) => Some((CellValue::String(v.clone()), None)),
     }
 }
 
