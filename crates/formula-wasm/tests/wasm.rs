@@ -1,0 +1,32 @@
+#![cfg(target_arch = "wasm32")]
+
+use formula_core::CellChange;
+use serde_json::json;
+use wasm_bindgen::JsValue;
+use wasm_bindgen_test::wasm_bindgen_test;
+
+use formula_wasm::WasmWorkbook;
+
+#[wasm_bindgen_test]
+fn recalculate_reports_changed_cells() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
+        .unwrap();
+    wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), None)
+        .unwrap();
+
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert_eq!(
+        changes,
+        vec![CellChange {
+            sheet: formula_core::DEFAULT_SHEET.to_string(),
+            address: "A2".to_string(),
+            value: json!(2.0),
+        }]
+    );
+
+    let cell_js = wb.get_cell("A2".to_string(), None).unwrap();
+    let cell: formula_core::CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.value, json!(2.0));
+}

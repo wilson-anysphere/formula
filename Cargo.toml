@@ -12,5 +12,7 @@ members = [
   "crates/formula-xlsb",
   "crates/formula-xlsx",
   "crates/xlsx-diff",
+  "crates/formula-core",
+  "crates/formula-wasm",
 ]
 resolver = "2"

@@ -36,6 +36,10 @@ pnpm-debug.log*
 .DS_Store
 **/.DS_Store
 
+# wasm-pack output
+/pkg/
+**/pkg/
+
 # Lockfiles
 package-lock.json
 
