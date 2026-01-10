@@ -1,0 +1,632 @@
+use serde::{Deserialize, Serialize};
+
+/// 0-indexed cell address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CellAddr {
+    pub row: u32,
+    pub col: u32,
+}
+
+impl CellAddr {
+    #[must_use]
+    pub fn new(row: u32, col: u32) -> Self {
+        Self { row, col }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Span {
+    #[must_use]
+    pub fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParseError {
+    pub message: String,
+    pub span: Span,
+}
+
+impl ParseError {
+    #[must_use]
+    pub fn new(message: impl Into<String>, span: Span) -> Self {
+        Self {
+            message: message.into(),
+            span,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SerializeError {
+    pub message: String,
+}
+
+impl SerializeError {
+    #[must_use]
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+/// Locale-specific configuration for tokenization and serialization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocaleConfig {
+    pub decimal_separator: char,
+    pub arg_separator: char,
+    pub array_col_separator: char,
+    pub array_row_separator: char,
+}
+
+impl LocaleConfig {
+    #[must_use]
+    pub fn en_us() -> Self {
+        Self {
+            decimal_separator: '.',
+            arg_separator: ',',
+            array_col_separator: ',',
+            array_row_separator: ';',
+        }
+    }
+
+    #[must_use]
+    pub fn de_de() -> Self {
+        Self {
+            decimal_separator: ',',
+            arg_separator: ';',
+            array_col_separator: '\\',
+            array_row_separator: ';',
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParseOptions {
+    pub locale: LocaleConfig,
+    /// If provided, normalize relative A1 references into row/col offsets.
+    pub normalize_relative_to: Option<CellAddr>,
+}
+
+impl Default for ParseOptions {
+    fn default() -> Self {
+        Self {
+            locale: LocaleConfig::en_us(),
+            normalize_relative_to: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SerializeOptions {
+    pub locale: LocaleConfig,
+    /// When `true`, serialize functions with `_xlfn.` prefix if present.
+    pub include_xlfn_prefix: bool,
+    /// Origin cell used to render relative offsets.
+    pub origin: Option<CellAddr>,
+    /// When `true`, omit a leading `=` in the output.
+    pub omit_equals: bool,
+}
+
+impl Default for SerializeOptions {
+    fn default() -> Self {
+        Self {
+            locale: LocaleConfig::en_us(),
+            include_xlfn_prefix: false,
+            origin: None,
+            omit_equals: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ast {
+    pub has_equals: bool,
+    pub expr: Expr,
+}
+
+impl Ast {
+    #[must_use]
+    pub fn new(has_equals: bool, expr: Expr) -> Self {
+        Self { has_equals, expr }
+    }
+
+    /// Normalize relative A1 references into row/col offsets relative to `origin`.
+    #[must_use]
+    pub fn normalize_relative(&self, origin: CellAddr) -> Self {
+        Self {
+            has_equals: self.has_equals,
+            expr: self.expr.normalize_relative(origin),
+        }
+    }
+
+    /// Serialize the AST back into a formula string.
+    pub fn to_string(&self, opts: SerializeOptions) -> Result<String, SerializeError> {
+        let mut out = String::new();
+        if !opts.omit_equals && self.has_equals {
+            out.push('=');
+        }
+        self.expr.fmt(&mut out, &opts, None)?;
+        Ok(out)
+    }
+
+    /// Stable JSON serialization useful for debugging/tests.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).expect("Ast should be JSON-serializable")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Expr {
+    Number(String),
+    String(String),
+    Boolean(bool),
+    Error(String),
+    Name(String),
+    CellRef(CellRef),
+    StructuredRef(StructuredRef),
+    Array(ArrayLiteral),
+    FunctionCall(FunctionCall),
+    Unary(UnaryExpr),
+    Postfix(PostfixExpr),
+    Binary(BinaryExpr),
+    /// Missing expression/argument (used by partial parsing and empty args like `IF(,1,2)`).
+    Missing,
+}
+
+impl Expr {
+    fn normalize_relative(&self, origin: CellAddr) -> Self {
+        match self {
+            Expr::CellRef(r) => Expr::CellRef(r.normalize_relative(origin)),
+            Expr::StructuredRef(r) => Expr::StructuredRef(r.clone()),
+            Expr::Number(v) => Expr::Number(v.clone()),
+            Expr::String(v) => Expr::String(v.clone()),
+            Expr::Boolean(v) => Expr::Boolean(*v),
+            Expr::Error(v) => Expr::Error(v.clone()),
+            Expr::Name(v) => Expr::Name(v.clone()),
+            Expr::Array(arr) => Expr::Array(arr.clone()),
+            Expr::FunctionCall(call) => Expr::FunctionCall(FunctionCall {
+                name: call.name.clone(),
+                args: call
+                    .args
+                    .iter()
+                    .map(|e| e.normalize_relative(origin))
+                    .collect(),
+            }),
+            Expr::Unary(u) => Expr::Unary(UnaryExpr {
+                op: u.op,
+                expr: Box::new(u.expr.normalize_relative(origin)),
+            }),
+            Expr::Postfix(p) => Expr::Postfix(PostfixExpr {
+                op: p.op,
+                expr: Box::new(p.expr.normalize_relative(origin)),
+            }),
+            Expr::Binary(b) => Expr::Binary(BinaryExpr {
+                op: b.op,
+                left: Box::new(b.left.normalize_relative(origin)),
+                right: Box::new(b.right.normalize_relative(origin)),
+            }),
+            Expr::Missing => Expr::Missing,
+        }
+    }
+
+    fn precedence(&self) -> u8 {
+        match self {
+            Expr::Binary(b) => b.op.precedence(),
+            Expr::Unary(_) => 70,
+            Expr::Postfix(_) => 60,
+            _ => 100,
+        }
+    }
+
+    fn fmt(
+        &self,
+        out: &mut String,
+        opts: &SerializeOptions,
+        parent_prec: Option<u8>,
+    ) -> Result<(), SerializeError> {
+        let my_prec = self.precedence();
+        let needs_parens = parent_prec.is_some_and(|p| my_prec < p);
+        if needs_parens {
+            out.push('(');
+        }
+        match self {
+            Expr::Number(raw) => out.push_str(raw),
+            Expr::String(value) => {
+                out.push('"');
+                for ch in value.chars() {
+                    if ch == '"' {
+                        out.push('"');
+                        out.push('"');
+                    } else {
+                        out.push(ch);
+                    }
+                }
+                out.push('"');
+            }
+            Expr::Boolean(v) => out.push_str(if *v { "TRUE" } else { "FALSE" }),
+            Expr::Error(v) => out.push_str(v),
+            Expr::Name(name) => out.push_str(name),
+            Expr::CellRef(r) => r.fmt(out, opts)?,
+            Expr::StructuredRef(r) => r.fmt(out)?,
+            Expr::Array(arr) => arr.fmt(out, opts)?,
+            Expr::FunctionCall(call) => call.fmt(out, opts)?,
+            Expr::Unary(u) => {
+                out.push_str(u.op.as_str());
+                u.expr.fmt(out, opts, Some(my_prec))?;
+            }
+            Expr::Postfix(p) => {
+                p.expr.fmt(out, opts, Some(my_prec))?;
+                out.push_str(p.op.as_str());
+            }
+            Expr::Binary(b) => {
+                b.left.fmt(out, opts, Some(my_prec))?;
+                out.push_str(&b.op.as_str(opts));
+                b.right.fmt(out, opts, Some(my_prec))?;
+            }
+            Expr::Missing => {}
+        }
+        if needs_parens {
+            out.push(')');
+        }
+        Ok(())
+    }
+
+    fn contains_union(&self) -> bool {
+        match self {
+            Expr::Binary(b) => {
+                b.op == BinaryOp::Union || b.left.contains_union() || b.right.contains_union()
+            }
+            Expr::Unary(u) => u.expr.contains_union(),
+            Expr::Postfix(p) => p.expr.contains_union(),
+            Expr::FunctionCall(call) => call.args.iter().any(Expr::contains_union),
+            Expr::Array(arr) => arr.rows.iter().flatten().any(Expr::contains_union),
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UnaryOp {
+    Plus,
+    Minus,
+    ImplicitIntersection,
+}
+
+impl UnaryOp {
+    fn as_str(self) -> &'static str {
+        match self {
+            UnaryOp::Plus => "+",
+            UnaryOp::Minus => "-",
+            UnaryOp::ImplicitIntersection => "@",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnaryExpr {
+    pub op: UnaryOp,
+    pub expr: Box<Expr>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PostfixOp {
+    Percent,
+}
+
+impl PostfixOp {
+    fn as_str(self) -> &'static str {
+        match self {
+            PostfixOp::Percent => "%",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PostfixExpr {
+    pub op: PostfixOp,
+    pub expr: Box<Expr>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BinaryOp {
+    Range,
+    Intersect,
+    Union,
+    Pow,
+    Mul,
+    Div,
+    Add,
+    Sub,
+    Concat,
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+}
+
+impl BinaryOp {
+    fn precedence(self) -> u8 {
+        match self {
+            BinaryOp::Range => 82,
+            BinaryOp::Intersect => 81,
+            BinaryOp::Union => 80,
+            BinaryOp::Pow => 50,
+            BinaryOp::Mul | BinaryOp::Div => 40,
+            BinaryOp::Add | BinaryOp::Sub => 30,
+            BinaryOp::Concat => 20,
+            BinaryOp::Eq
+            | BinaryOp::Ne
+            | BinaryOp::Lt
+            | BinaryOp::Gt
+            | BinaryOp::Le
+            | BinaryOp::Ge => 10,
+        }
+    }
+
+    fn as_str(self, opts: &SerializeOptions) -> String {
+        match self {
+            BinaryOp::Range => ":".to_string(),
+            BinaryOp::Intersect => " ".to_string(),
+            BinaryOp::Union => opts.locale.arg_separator.to_string(),
+            BinaryOp::Pow => "^".to_string(),
+            BinaryOp::Mul => "*".to_string(),
+            BinaryOp::Div => "/".to_string(),
+            BinaryOp::Add => "+".to_string(),
+            BinaryOp::Sub => "-".to_string(),
+            BinaryOp::Concat => "&".to_string(),
+            BinaryOp::Eq => "=".to_string(),
+            BinaryOp::Ne => "<>".to_string(),
+            BinaryOp::Lt => "<".to_string(),
+            BinaryOp::Gt => ">".to_string(),
+            BinaryOp::Le => "<=".to_string(),
+            BinaryOp::Ge => ">=".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BinaryExpr {
+    pub op: BinaryOp,
+    pub left: Box<Expr>,
+    pub right: Box<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FunctionName {
+    pub original: String,
+    pub name_upper: String,
+    pub has_xlfn_prefix: bool,
+}
+
+impl FunctionName {
+    #[must_use]
+    pub fn new(original: String) -> Self {
+        let upper = original.to_ascii_uppercase();
+        let (has_prefix, base_upper) = upper
+            .strip_prefix("_XLFN.")
+            .map(|s| (true, s.to_string()))
+            .unwrap_or((false, upper.clone()));
+
+        Self {
+            original,
+            name_upper: base_upper,
+            has_xlfn_prefix: has_prefix,
+        }
+    }
+
+    fn fmt(&self, out: &mut String, opts: &SerializeOptions) {
+        if self.has_xlfn_prefix && opts.include_xlfn_prefix {
+            out.push_str("_xlfn.");
+        }
+        out.push_str(&self.name_upper);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FunctionCall {
+    pub name: FunctionName,
+    pub args: Vec<Expr>,
+}
+
+impl FunctionCall {
+    fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
+        self.name.fmt(out, opts);
+        out.push('(');
+        for (i, arg) in self.args.iter().enumerate() {
+            if i > 0 {
+                out.push(opts.locale.arg_separator);
+            }
+            // The union operator uses the locale list separator, which is also the function
+            // argument separator. Excel disambiguates union inside arguments by requiring
+            // explicit parentheses (e.g. `SUM((A1,B1))`).
+            //
+            // For round-trip safety, wrap any argument expression that contains a union
+            // operator in parentheses so it re-parses as an expression rather than being
+            // split into multiple args.
+            if arg.contains_union() {
+                out.push('(');
+                arg.fmt(out, opts, None)?;
+                out.push(')');
+            } else {
+                arg.fmt(out, opts, None)?;
+            }
+        }
+        out.push(')');
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Coord {
+    /// A coordinate as written in A1 notation (0-indexed) with a `$` marker flag.
+    A1 { index: u32, abs: bool },
+    /// A relative offset from an origin cell.
+    Offset(i32),
+}
+
+impl Coord {
+    fn normalize(index: u32, abs: bool, origin: u32) -> Self {
+        if abs {
+            Coord::A1 { index, abs }
+        } else {
+            Coord::Offset(index as i32 - origin as i32)
+        }
+    }
+
+    fn to_a1_index(&self, origin: Option<u32>) -> Result<(u32, bool), SerializeError> {
+        match self {
+            Coord::A1 { index, abs } => Ok((*index, *abs)),
+            Coord::Offset(delta) => {
+                let origin = origin.ok_or_else(|| {
+                    SerializeError::new("Cannot render relative offset without an origin cell")
+                })?;
+                let idx = origin as i32 + *delta;
+                if idx < 0 {
+                    return Err(SerializeError::new("Relative reference moved before A1"));
+                }
+                Ok((idx as u32, false))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CellRef {
+    pub workbook: Option<String>,
+    pub sheet: Option<String>,
+    pub col: Coord,
+    pub row: Coord,
+}
+
+impl CellRef {
+    fn normalize_relative(&self, origin: CellAddr) -> Self {
+        let (col_index, col_abs) = match self.col {
+            Coord::A1 { index, abs } => (index, abs),
+            Coord::Offset(_) => return self.clone(),
+        };
+        let (row_index, row_abs) = match self.row {
+            Coord::A1 { index, abs } => (index, abs),
+            Coord::Offset(_) => return self.clone(),
+        };
+
+        Self {
+            workbook: self.workbook.clone(),
+            sheet: self.sheet.clone(),
+            col: Coord::normalize(col_index, col_abs, origin.col),
+            row: Coord::normalize(row_index, row_abs, origin.row),
+        }
+    }
+
+    fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
+        if let Some(book) = &self.workbook {
+            out.push('[');
+            out.push_str(book);
+            out.push(']');
+        }
+        if let Some(sheet) = &self.sheet {
+            fmt_sheet_name(out, sheet);
+            out.push('!');
+        }
+
+        let origin = opts.origin;
+        let (col_idx, col_abs) = self.col.to_a1_index(origin.map(|o| o.col))?;
+        let (row_idx, row_abs) = self.row.to_a1_index(origin.map(|o| o.row))?;
+
+        if col_abs {
+            out.push('$');
+        }
+        out.push_str(&col_to_a1(col_idx));
+        if row_abs {
+            out.push('$');
+        }
+        out.push_str(&(row_idx + 1).to_string());
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StructuredRef {
+    pub table: Option<String>,
+    /// The raw specifier inside `[...]` (without the brackets).
+    pub spec: String,
+}
+
+impl StructuredRef {
+    fn fmt(&self, out: &mut String) -> Result<(), SerializeError> {
+        if let Some(table) = &self.table {
+            out.push_str(table);
+        }
+        out.push('[');
+        out.push_str(&self.spec);
+        out.push(']');
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArrayLiteral {
+    pub rows: Vec<Vec<Expr>>,
+}
+
+impl ArrayLiteral {
+    fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
+        out.push('{');
+        for (r, row) in self.rows.iter().enumerate() {
+            if r > 0 {
+                out.push(opts.locale.array_row_separator);
+            }
+            for (c, el) in row.iter().enumerate() {
+                if c > 0 {
+                    out.push(opts.locale.array_col_separator);
+                }
+                el.fmt(out, opts, None)?;
+            }
+        }
+        out.push('}');
+        Ok(())
+    }
+}
+
+fn fmt_sheet_name(out: &mut String, sheet: &str) {
+    let needs_quotes = sheet.chars().any(|c| matches!(c, ' ' | '!' | '\'')) || sheet.is_empty();
+    if needs_quotes {
+        out.push('\'');
+        for ch in sheet.chars() {
+            if ch == '\'' {
+                out.push('\'');
+                out.push('\'');
+            } else {
+                out.push(ch);
+            }
+        }
+        out.push('\'');
+    } else {
+        out.push_str(sheet);
+    }
+}
+
+fn col_to_a1(mut col: u32) -> String {
+    // Excel-style base-26 letters.
+    let mut out = String::new();
+    loop {
+        let rem = (col % 26) as u8;
+        out.push((b'A' + rem) as char);
+        col /= 26;
+        if col == 0 {
+            break;
+        }
+        col -= 1;
+    }
+    out.chars().rev().collect()
+}
