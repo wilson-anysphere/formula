@@ -1,6 +1,23 @@
 const NON_BREAKING_SPACES = new Set(["\u00A0", "\u202F", "\u2060"]);
 const WHITESPACE_RE = /\s/u;
 
+/** @type {Map<string, Intl.Segmenter>} */
+const SEGMENTER_CACHE = new Map();
+
+/**
+ * @param {string | undefined} locale
+ * @param {"grapheme" | "word"} granularity
+ */
+function getSegmenter(locale, granularity) {
+  const normalizedLocale = locale ?? "und";
+  const key = `${granularity}:${normalizedLocale}`;
+  const cached = SEGMENTER_CACHE.get(key);
+  if (cached) return cached;
+  const segmenter = new Intl.Segmenter(normalizedLocale, { granularity });
+  SEGMENTER_CACHE.set(key, segmenter);
+  return segmenter;
+}
+
 /**
  * @param {string} ch
  * @returns {boolean}
@@ -40,7 +57,7 @@ export function graphemeBreakPositions(text, locale) {
     return positions.length ? positions : [text.length];
   }
 
-  const segmenter = new Intl.Segmenter(locale ?? "und", { granularity: "grapheme" });
+  const segmenter = getSegmenter(locale, "grapheme");
   const positions = [];
   for (const seg of segmenter.segment(text)) {
     positions.push(seg.index + seg.segment.length);
@@ -72,7 +89,7 @@ export function wordBreakPositions(text, locale) {
     return { breaks, wordBreakSet };
   }
 
-  const segmenter = new Intl.Segmenter(locale ?? "und", { granularity: "word" });
+  const segmenter = getSegmenter(locale, "word");
   for (const seg of segmenter.segment(text)) {
     if (!WHITESPACE_RE.test(seg.segment)) continue;
     if (!isBreakableWhitespaceSegment(seg.segment)) continue;
@@ -95,4 +112,3 @@ export function skipBreakableWhitespace(text, index, end) {
   while (i < end && isBreakableWhitespaceChar(text[i])) i++;
   return i;
 }
-

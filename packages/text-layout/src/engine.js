@@ -62,6 +62,19 @@ export class TextLayoutEngine {
   }
 
   /**
+   * Cached measurement for a single text run.
+   *
+   * Useful for consumers that need fast width measurement but not full wrapping/layout.
+   *
+   * @param {string} text
+   * @param {FontSpec} font
+   * @returns {TextMeasurement}
+   */
+  measure(text, font) {
+    return this.#measureCached(text, font);
+  }
+
+  /**
    * @param {LayoutOptions} options
    * @returns {TextLayout}
    */

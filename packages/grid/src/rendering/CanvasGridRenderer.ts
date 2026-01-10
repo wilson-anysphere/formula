@@ -5,6 +5,14 @@ import { LruCache } from "../utils/LruCache";
 import type { GridPresence } from "../presence/types";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
 import { VirtualScrollManager } from "../virtualization/VirtualScrollManager";
+import {
+  TextLayoutEngine,
+  createCanvasTextMeasurer,
+  detectBaseDirection,
+  drawTextLayout,
+  resolveAlign,
+  toCanvasFontString
+} from "@formula/text-layout";
 
 type Layer = "background" | "content" | "selection";
 
@@ -91,7 +99,7 @@ export class CanvasGridRenderer {
   private remotePresences: GridPresence[] = [];
 
   private readonly formattedCache = new LruCache<string, string>(50_000);
-  private readonly textWidthCache = new LruCache<string, number>(50_000);
+  private textLayoutEngine?: TextLayoutEngine;
 
   private readonly presenceFont = "12px system-ui, sans-serif";
 
@@ -127,6 +135,14 @@ export class CanvasGridRenderer {
 
     if (!this.gridCtx || !this.contentCtx || !this.selectionCtx) {
       throw new Error("Failed to acquire canvas 2D contexts.");
+    }
+
+    if (!this.textLayoutEngine) {
+      // Dedicated measurer canvas avoids mutating the render context state during layout.
+      this.textLayoutEngine = new TextLayoutEngine(createCanvasTextMeasurer(), {
+        maxMeasureCacheEntries: 50_000,
+        maxLayoutCacheEntries: 10_000
+      });
     }
 
     this.gridCanvas.style.position = "absolute";
@@ -855,11 +871,14 @@ export class CanvasGridRenderer {
     if (!this.contentCtx) return;
     const ctx = this.contentCtx;
 
-    ctx.textBaseline = "middle";
+    const layoutEngine = this.textLayoutEngine;
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
 
     let currentFont = "";
     let currentFillStyle = "";
-    let currentAlign: CanvasTextAlign = "left";
+    const paddingX = 4;
+    const paddingY = 2;
 
     let rowYSheet = this.scroll.rows.positionOf(startRow);
     for (let row = startRow; row < endRow; row++) {
@@ -877,7 +896,8 @@ export class CanvasGridRenderer {
           const fontSize = style?.fontSize ?? 12;
           const fontFamily = style?.fontFamily ?? "system-ui";
           const fontWeight = style?.fontWeight ?? "400";
-          const font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+          const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
+          const font = toCanvasFontString(fontSpec);
 
           if (font !== currentFont) {
             ctx.font = font;
@@ -897,37 +917,115 @@ export class CanvasGridRenderer {
             this.formattedCache.set(formattedKey, text);
           }
 
-          const metricsKey = `${font}::${text}`;
-          let textWidth = this.textWidthCache.get(metricsKey);
-          if (textWidth === undefined) {
-            textWidth = ctx.measureText(text).width;
-            this.textWidthCache.set(metricsKey, textWidth);
-          }
+          const wrapMode = style?.wrapMode ?? "none";
+          const direction = style?.direction ?? "auto";
+          const verticalAlign = style?.verticalAlign ?? "middle";
+          const rotationDeg = style?.rotationDeg ?? 0;
 
-          const padding = 4;
-          const align = style?.textAlign ?? "left";
-          if (align !== currentAlign) {
-            ctx.textAlign = align;
-            currentAlign = align;
-          }
+          const availableWidth = Math.max(0, colWidth - paddingX * 2);
+          const availableHeight = Math.max(0, rowHeight - paddingY * 2);
+          const lineHeight = Math.ceil(fontSize * 1.2);
+          const maxLines = Math.max(1, Math.floor(availableHeight / lineHeight));
 
-          const textX =
-            align === "left"
-              ? x + padding
-              : align === "center"
-                ? x + colWidth / 2
-                : x + colWidth - padding;
-          const textY = y + rowHeight / 2;
+          const align: CanvasTextAlign =
+            style?.textAlign ?? (typeof cell.value === "number" ? "end" : "start");
+          const layoutAlign =
+            align === "left" || align === "right" || align === "center" || align === "start" || align === "end"
+              ? (align as "left" | "right" | "center" | "start" | "end")
+              : "start";
 
-          if (textWidth > colWidth - padding * 2) {
+          const hasExplicitNewline = /[\r\n]/.test(text);
+          const rotationRad = (rotationDeg * Math.PI) / 180;
+
+          if (wrapMode === "none" && !hasExplicitNewline && rotationDeg === 0) {
+            // Fast path for the common case: single-line text with clipping, using cached metrics.
+            const baseDirection = direction === "auto" ? detectBaseDirection(text) : direction;
+            const resolvedAlign =
+              layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
+                ? layoutAlign
+                : resolveAlign(layoutAlign, baseDirection);
+
+            const measurement = layoutEngine?.measure(text, fontSpec);
+            const textWidth = measurement?.width ?? ctx.measureText(text).width;
+            const ascent = measurement?.ascent ?? fontSize * 0.8;
+            const descent = measurement?.descent ?? fontSize * 0.2;
+
+            let textX = x + paddingX;
+            if (resolvedAlign === "center") {
+              textX = x + paddingX + (availableWidth - textWidth) / 2;
+            } else if (resolvedAlign === "right") {
+              textX = x + paddingX + (availableWidth - textWidth);
+            }
+
+            let baselineY = y + paddingY + ascent;
+            if (verticalAlign === "middle") {
+              baselineY = y + rowHeight / 2 + (ascent - descent) / 2;
+            } else if (verticalAlign === "bottom") {
+              baselineY = y + rowHeight - paddingY - descent;
+            }
+
+            const shouldClip = textWidth > availableWidth;
+            if (shouldClip) {
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(x, y, colWidth, rowHeight);
+              ctx.clip();
+              ctx.fillText(text, textX, baselineY);
+              ctx.restore();
+            } else {
+              ctx.fillText(text, textX, baselineY);
+            }
+          } else if (layoutEngine && availableWidth > 0) {
+            const layout = layoutEngine.layout({
+              text,
+              font: fontSpec,
+              maxWidth: availableWidth,
+              wrapMode,
+              align: layoutAlign,
+              direction,
+              lineHeightPx: lineHeight,
+              maxLines
+            });
+
+            let originY = y + paddingY;
+            if (verticalAlign === "middle") {
+              originY = y + paddingY + Math.max(0, (availableHeight - layout.height) / 2);
+            } else if (verticalAlign === "bottom") {
+              originY = y + rowHeight - paddingY - layout.height;
+            }
+
+            const originX = x + paddingX;
+            const shouldClip = layout.width > availableWidth || layout.height > availableHeight || rotationDeg !== 0;
+
+            if (shouldClip) {
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(x, y, colWidth, rowHeight);
+              ctx.clip();
+
+              if (rotationRad) {
+                const cx = x + colWidth / 2;
+                const cy = y + rowHeight / 2;
+                ctx.translate(cx, cy);
+                ctx.rotate(rotationRad);
+                ctx.translate(-cx, -cy);
+              }
+
+              drawTextLayout(ctx, layout, originX, originY);
+              ctx.restore();
+            } else {
+              drawTextLayout(ctx, layout, originX, originY);
+            }
+          } else {
+            // Fallback: no layout engine available (shouldn't happen in supported environments).
             ctx.save();
             ctx.beginPath();
             ctx.rect(x, y, colWidth, rowHeight);
             ctx.clip();
-            ctx.fillText(text, textX, textY);
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, x + paddingX, y + rowHeight / 2);
+            ctx.textBaseline = "alphabetic";
             ctx.restore();
-          } else {
-            ctx.fillText(text, textX, textY);
           }
         }
 

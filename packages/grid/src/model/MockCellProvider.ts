@@ -16,21 +16,35 @@ export class MockCellProvider implements CellProvider {
   getCell(row: number, col: number): CellData | null {
     if (row < 0 || col < 0 || row >= this.rowCount || col >= this.colCount) return null;
 
-    const style: CellStyle | undefined =
+    const baseStyle: CellStyle | undefined =
       row === 0
         ? { fill: "#f5f5f5", fontWeight: "600" }
         : row % 2 === 0
           ? { fill: "#ffffff" }
           : { fill: "#fcfcfc" };
 
+    let style = baseStyle;
+    if (row === 1 && col === 1) {
+      style = { ...baseStyle, wrapMode: "word", textAlign: "start" };
+    } else if (row === 2 && col === 1) {
+      style = { ...baseStyle, wrapMode: "word", textAlign: "start" };
+    } else if (row === 3 && col === 1) {
+      style = { ...baseStyle, wrapMode: "word", textAlign: "start" };
+    }
+
     const value =
       row === 0
         ? `Column ${col + 1}`
         : col === 0
           ? row
-          : `${row},${col}`;
+          : row === 1 && col === 1
+            ? "This is a long piece of text that should wrap in the cell (word wrap)."
+            : row === 2 && col === 1
+              ? "שלום world 123 — mixed RTL/LTR"
+              : row === 3 && col === 1
+                ? "مرحبا بالعالم hello — Arabic + English"
+                : `${row},${col}`;
 
     return { row, col, value, style };
   }
 }
-

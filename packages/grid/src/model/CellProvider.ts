@@ -5,6 +5,22 @@ export interface CellStyle {
   fontSize?: number;
   fontWeight?: string;
   textAlign?: CanvasTextAlign;
+  /**
+   * Wrapping strategy for cell text.
+   *
+   * - `"none"`: single line (clip overflow)
+   * - `"word"`: wrap at whitespace with char-wrap fallback
+   * - `"char"`: wrap at grapheme cluster boundaries
+   */
+  wrapMode?: "none" | "word" | "char";
+  /**
+   * Explicit base direction for text rendering. `"auto"` uses the first strong
+   * directional character to choose LTR/RTL.
+   */
+  direction?: "ltr" | "rtl" | "auto";
+  verticalAlign?: "top" | "middle" | "bottom";
+  /** Basic rotation support (clockwise, degrees). */
+  rotationDeg?: number;
 }
 
 export interface CellData {
