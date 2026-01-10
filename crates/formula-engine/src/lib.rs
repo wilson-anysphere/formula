@@ -13,6 +13,7 @@
 pub mod date;
 pub mod error;
 pub mod functions;
+pub mod graph;
 pub mod locale;
 mod parser;
 pub mod pivot;
