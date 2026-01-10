@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
@@ -806,6 +807,68 @@ impl<'de> Deserialize<'de> for Worksheet {
         let helper = Helper::deserialize(deserializer)?;
         let used_range = compute_used_range(&helper.cells);
 
+        if helper.row_count == 0 {
+            return Err(D::Error::custom("row_count must be >= 1"));
+        }
+        if helper.col_count == 0 {
+            return Err(D::Error::custom("col_count must be >= 1"));
+        }
+        if helper.row_count > crate::cell::EXCEL_MAX_ROWS {
+            return Err(D::Error::custom(format!(
+                "row_count out of Excel bounds: {}",
+                helper.row_count
+            )));
+        }
+        if helper.col_count > crate::cell::EXCEL_MAX_COLS {
+            return Err(D::Error::custom(format!(
+                "col_count out of Excel bounds: {}",
+                helper.col_count
+            )));
+        }
+
+        for row in helper.row_properties.keys() {
+            if *row >= crate::cell::EXCEL_MAX_ROWS {
+                return Err(D::Error::custom(format!(
+                    "row_properties row out of Excel bounds: {row}"
+                )));
+            }
+        }
+        for col in helper.col_properties.keys() {
+            if *col >= crate::cell::EXCEL_MAX_COLS {
+                return Err(D::Error::custom(format!(
+                    "col_properties col out of Excel bounds: {col}"
+                )));
+            }
+        }
+
+        let mut row_count = helper.row_count;
+        let mut col_count = helper.col_count;
+
+        if let Some(used) = used_range {
+            row_count = row_count.max(used.end.row + 1);
+            col_count = col_count.max(used.end.col + 1);
+        }
+
+        if helper.frozen_rows > row_count {
+            return Err(D::Error::custom(format!(
+                "frozen_rows exceeds row_count: {} > {row_count}",
+                helper.frozen_rows
+            )));
+        }
+        if helper.frozen_cols > col_count {
+            return Err(D::Error::custom(format!(
+                "frozen_cols exceeds col_count: {} > {col_count}",
+                helper.frozen_cols
+            )));
+        }
+
+        if helper.zoom <= 0.0 {
+            return Err(D::Error::custom(format!(
+                "zoom must be > 0 (got {})",
+                helper.zoom
+            )));
+        }
+
         Ok(Worksheet {
             id: helper.id,
             name: helper.name,
@@ -813,8 +876,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             tab_color: helper.tab_color,
             cells: helper.cells,
             used_range,
-            row_count: helper.row_count,
-            col_count: helper.col_count,
+            row_count,
+            col_count,
             row_properties: helper.row_properties,
             col_properties: helper.col_properties,
             frozen_rows: helper.frozen_rows,

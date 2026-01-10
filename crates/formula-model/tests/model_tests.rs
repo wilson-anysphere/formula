@@ -1,5 +1,6 @@
 use formula_model::{
-    CellKey, CellRef, CellValue, ErrorValue, Range, Workbook, Worksheet, SCHEMA_VERSION,
+    CellKey, CellRef, CellValue, ErrorValue, Range, Workbook, Worksheet, EXCEL_MAX_ROWS,
+    SCHEMA_VERSION,
 };
 
 #[test]
@@ -231,4 +232,25 @@ fn workbook_schema_version_is_enforced() {
     }))
     .unwrap_err();
     assert!(err.to_string().contains("unsupported schema_version"));
+}
+
+#[test]
+fn worksheet_deserialize_validates_dimensions() {
+    let err = serde_json::from_value::<Worksheet>(serde_json::json!({
+        "id": 1,
+        "name": "Sheet1",
+        "row_count": 0,
+        "col_count": 1
+    }))
+    .unwrap_err();
+    assert!(err.to_string().contains("row_count"));
+
+    let err = serde_json::from_value::<Worksheet>(serde_json::json!({
+        "id": 1,
+        "name": "Sheet1",
+        "row_count": EXCEL_MAX_ROWS + 1,
+        "col_count": 1
+    }))
+    .unwrap_err();
+    assert!(err.to_string().contains("out of Excel bounds"));
 }
