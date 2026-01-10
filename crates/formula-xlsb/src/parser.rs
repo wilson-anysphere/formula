@@ -297,9 +297,18 @@ pub(crate) fn parse_shared_strings<R: Read>(shared_strings_bin: &mut R) -> Resul
 }
 
 pub(crate) fn parse_sheet<R: Read>(sheet_bin: &mut R, shared_strings: &[String]) -> Result<SheetData, Error> {
+    let mut cells = Vec::new();
+    let dimension = parse_sheet_stream(sheet_bin, shared_strings, |cell| cells.push(cell))?;
+    Ok(SheetData { dimension, cells })
+}
+
+pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
+    sheet_bin: &mut R,
+    shared_strings: &[String],
+    mut on_cell: F,
+) -> Result<Option<Dimension>, Error> {
     let mut reader = Biff12Reader::new(sheet_bin);
     let mut buf = Vec::new();
-    let mut cells = Vec::new();
     let mut dimension: Option<Dimension> = None;
 
     let mut in_sheet_data = false;
@@ -377,7 +386,7 @@ pub(crate) fn parse_sheet<R: Read>(sheet_bin: &mut R, shared_strings: &[String])
                     _ => unreachable!(),
                 };
 
-                cells.push(Cell {
+                on_cell(Cell {
                     row,
                     col,
                     style,
@@ -389,7 +398,7 @@ pub(crate) fn parse_sheet<R: Read>(sheet_bin: &mut R, shared_strings: &[String])
         }
     }
 
-    Ok(SheetData { dimension, cells })
+    Ok(dimension)
 }
 
 fn normalize_sheet_target(target: &str) -> String {

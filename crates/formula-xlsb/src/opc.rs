@@ -1,4 +1,7 @@
-use crate::parser::{parse_shared_strings, parse_sheet, parse_workbook_sheets, Cell, SheetData, SheetMeta};
+use crate::parser::{
+    parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook_sheets, Cell, SheetData,
+    SheetMeta,
+};
 use crate::parser::Error as ParseError;
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
@@ -47,7 +50,6 @@ pub struct XlsbWorkbook {
     sheets: Vec<SheetMeta>,
     shared_strings: Vec<String>,
     preserved_parts: HashMap<String, Vec<u8>>,
-    styles: Option<Vec<u8>>,
 }
 
 impl XlsbWorkbook {
@@ -60,9 +62,21 @@ impl XlsbWorkbook {
         let file = File::open(&path)?;
         let mut zip = ZipArchive::new(file)?;
 
-        let workbook_rels = read_relationships(&mut zip, "xl/_rels/workbook.bin.rels")?;
-
         let mut preserved_parts = HashMap::new();
+
+        // Preserve package-level plumbing we don't parse but will need to re-emit on round-trip.
+        preserve_part(&mut zip, &mut preserved_parts, "[Content_Types].xml")?;
+        preserve_part(&mut zip, &mut preserved_parts, "_rels/.rels")?;
+
+        let workbook_rels_bytes = read_zip_entry(&mut zip, "xl/_rels/workbook.bin.rels")?
+            .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?;
+        preserved_parts.insert("xl/_rels/workbook.bin.rels".to_string(), workbook_rels_bytes.clone());
+        let workbook_rels = parse_relationships(&workbook_rels_bytes)?;
+
+        // Styles are required for round-trip, but we don't parse them yet.
+        if let Some(styles) = read_zip_entry(&mut zip, "xl/styles.bin")? {
+            preserved_parts.insert("xl/styles.bin".to_string(), styles);
+        }
 
         let workbook_bin = {
             let mut wb = zip.by_name("xl/workbook.bin")?;
@@ -87,16 +101,6 @@ impl XlsbWorkbook {
                 strings
             }
             Err(zip::result::ZipError::FileNotFound) => Vec::new(),
-            Err(e) => return Err(e.into()),
-        };
-
-        let styles = match zip.by_name("xl/styles.bin") {
-            Ok(mut styles) => {
-                let mut bytes = Vec::with_capacity(styles.size() as usize);
-                styles.read_to_end(&mut bytes)?;
-                Some(bytes)
-            }
-            Err(zip::result::ZipError::FileNotFound) => None,
             Err(e) => return Err(e.into()),
         };
 
@@ -141,7 +145,6 @@ impl XlsbWorkbook {
             sheets,
             shared_strings,
             preserved_parts,
-            styles,
         })
     }
 
@@ -165,7 +168,9 @@ impl XlsbWorkbook {
 
     /// Raw `xl/styles.bin`, preserved for round-trip.
     pub fn styles_bin(&self) -> Option<&[u8]> {
-        self.styles.as_deref()
+        self.preserved_parts
+            .get("xl/styles.bin")
+            .map(|v| v.as_slice())
     }
 
     /// Read a worksheet by index and return all discovered cells.
@@ -189,22 +194,22 @@ impl XlsbWorkbook {
     where
         F: FnMut(Cell),
     {
-        let data = self.read_sheet(sheet_index)?;
-        for cell in data.cells {
-            f(cell);
-        }
+        let meta = self
+            .sheets
+            .get(sheet_index)
+            .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
+
+        let file = File::open(&self.path)?;
+        let mut zip = ZipArchive::new(file)?;
+        let mut sheet = zip.by_name(&meta.part_path)?;
+
+        parse_sheet_stream(&mut sheet, &self.shared_strings, |cell| f(cell))?;
         Ok(())
     }
 }
 
-fn read_relationships<R: Read + Seek>(
-    zip: &mut ZipArchive<R>,
-    part: &str,
-) -> Result<HashMap<String, String>, ParseError> {
-    let mut rels = zip.by_name(part)?;
-    let mut xml = String::new();
-    rels.read_to_string(&mut xml)?;
-
+fn parse_relationships(xml_bytes: &[u8]) -> Result<HashMap<String, String>, ParseError> {
+    let xml = String::from_utf8_lossy(xml_bytes);
     let mut reader = XmlReader::from_str(&xml);
     reader.trim_text(true);
     let mut buf = Vec::new();
@@ -232,4 +237,30 @@ fn read_relationships<R: Read + Seek>(
         buf.clear();
     }
     Ok(out)
+}
+
+fn read_zip_entry<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Option<Vec<u8>>, ParseError> {
+    match zip.by_name(name) {
+        Ok(mut entry) => {
+            let mut bytes = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut bytes)?;
+            Ok(Some(bytes))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn preserve_part<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    preserved: &mut HashMap<String, Vec<u8>>,
+    name: &str,
+) -> Result<(), ParseError> {
+    if let Some(bytes) = read_zip_entry(zip, name)? {
+        preserved.insert(name.to_string(), bytes);
+    }
+    Ok(())
 }
