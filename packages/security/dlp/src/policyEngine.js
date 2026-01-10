@@ -52,22 +52,12 @@ export function evaluatePolicy({ action, classification, policy, options = {} })
   }
 
   const overThreshold = compareClassification(normalized, { level: maxAllowed, labels: [] }) === 1;
-  if (!overThreshold) {
-    return {
-      action,
-      decision: DLP_DECISION.ALLOW,
-      classification: normalized,
-      maxAllowed,
-    };
-  }
 
-  // AI requests can redact rather than block, as long as the caller is not attempting to
-  // include Restricted content and the policy indicates redaction is acceptable.
-  if (action === DLP_ACTION.AI_CLOUD_PROCESSING && rule.redactDisallowed) {
-    // If the caller explicitly requests sending Restricted content, we must enforce the
-    // allowRestrictedContent guard, regardless of maxAllowed threshold.
-    if (options.includeRestrictedContent) {
-      if (!rule.allowRestrictedContent && normalized.level === "Restricted") {
+  // AI cloud processing supports a "redact instead of block" mode, plus an explicit
+  // exception for Restricted content when a user/admin has opted in.
+  if (action === DLP_ACTION.AI_CLOUD_PROCESSING) {
+    if (normalized.level === "Restricted" && options.includeRestrictedContent) {
+      if (!rule.allowRestrictedContent) {
         return {
           action,
           decision: DLP_DECISION.BLOCK,
@@ -76,12 +66,46 @@ export function evaluatePolicy({ action, classification, policy, options = {} })
           maxAllowed,
         };
       }
+      return {
+        action,
+        decision: DLP_DECISION.ALLOW,
+        classification: normalized,
+        maxAllowed,
+      };
+    }
+
+    if (!overThreshold) {
+      return {
+        action,
+        decision: DLP_DECISION.ALLOW,
+        classification: normalized,
+        maxAllowed,
+      };
+    }
+
+    if (rule.redactDisallowed) {
+      return {
+        action,
+        decision: DLP_DECISION.REDACT,
+        reasonCode: DLP_REASON_CODE.BLOCKED_BY_POLICY,
+        classification: normalized,
+        maxAllowed,
+      };
     }
 
     return {
       action,
-      decision: DLP_DECISION.REDACT,
+      decision: DLP_DECISION.BLOCK,
       reasonCode: DLP_REASON_CODE.BLOCKED_BY_POLICY,
+      classification: normalized,
+      maxAllowed,
+    };
+  }
+
+  if (!overThreshold) {
+    return {
+      action,
+      decision: DLP_DECISION.ALLOW,
       classification: normalized,
       maxAllowed,
     };
@@ -107,4 +131,3 @@ export function isClassificationAllowed(classification, maxAllowed) {
   const level = normalizeClassification(classification).level;
   return classificationRank(level) <= classificationRank(maxAllowed);
 }
-

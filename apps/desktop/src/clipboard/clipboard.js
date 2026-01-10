@@ -1,6 +1,7 @@
 import { normalizeRange, parseA1, parseRangeA1 } from "../document/coords.js";
 import { parseHtmlToCellGrid, serializeCellGridToHtml } from "./html.js";
 import { parseTsvToCellGrid, serializeCellGridToTsv } from "./tsv.js";
+import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
 
 /**
  * @typedef {import("./types.js").CellGrid} CellGrid
@@ -75,10 +76,24 @@ export function getCellGridFromRange(doc, sheetId, range) {
  * @param {DocumentController} doc
  * @param {string} sheetId
  * @param {CellRange | string} range
+ * @param {{ dlp?: { documentId: string, classificationStore: any, policy: any } }} [options]
  * @returns {ClipboardWritePayload}
  */
-export function copyRangeToClipboardPayload(doc, sheetId, range) {
-  const grid = getCellGridFromRange(doc, sheetId, range);
+export function copyRangeToClipboardPayload(doc, sheetId, range, options = {}) {
+  const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
+  const dlp = options.dlp;
+
+  if (dlp && typeof dlp === "object") {
+    enforceClipboardCopy({
+      documentId: dlp.documentId,
+      sheetId,
+      range: r,
+      classificationStore: dlp.classificationStore,
+      policy: dlp.policy,
+    });
+  }
+
+  const grid = getCellGridFromRange(doc, sheetId, r);
   return serializeCellGridToClipboardPayload(grid);
 }
 

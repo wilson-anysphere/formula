@@ -51,6 +51,23 @@ test("policy merge: document overrides can tighten org policy", () => {
   assert.equal(effective.rules[DLP_ACTION.CLIPBOARD_COPY].maxAllowed, CLASSIFICATION_LEVEL.INTERNAL);
 });
 
+test("policy merge: document overrides can disable AI restricted-content exception", () => {
+  const orgPolicy = createDefaultOrgPolicy();
+  orgPolicy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
+    ...orgPolicy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
+    allowRestrictedContent: true,
+  };
+
+  const documentPolicy = createDefaultOrgPolicy();
+  documentPolicy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
+    ...documentPolicy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
+    allowRestrictedContent: false,
+  };
+
+  const { policy: effective } = mergePolicies({ orgPolicy, documentPolicy });
+  assert.equal(effective.rules[DLP_ACTION.AI_CLOUD_PROCESSING].allowRestrictedContent, false);
+});
+
 test("AI policy: redact disallowed content instead of blocking by default", () => {
   const policy = createDefaultOrgPolicy();
   const decision = evaluatePolicy({
@@ -72,3 +89,20 @@ test("AI policy: explicitly including restricted content is blocked unless allow
   assert.equal(decision.decision, DLP_DECISION.BLOCK);
 });
 
+test("AI policy: restricted content can be allowed when explicitly opted-in and permitted by policy", () => {
+  const policy = createDefaultOrgPolicy();
+  policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
+    ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
+    allowRestrictedContent: true,
+    redactDisallowed: true,
+  };
+
+  const decision = evaluatePolicy({
+    action: DLP_ACTION.AI_CLOUD_PROCESSING,
+    classification: { level: CLASSIFICATION_LEVEL.RESTRICTED },
+    policy,
+    options: { includeRestrictedContent: true },
+  });
+
+  assert.equal(decision.decision, DLP_DECISION.ALLOW);
+});

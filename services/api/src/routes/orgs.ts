@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { writeAuditEvent } from "../audit/audit";
+import { validateDlpPolicy } from "../dlp/dlp";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
@@ -139,5 +140,60 @@ export function registerOrgRoutes(app: FastifyInstance): void {
     });
 
     return reply.send({ ok: true });
+  });
+
+  app.get("/orgs/:orgId/dlp-policy", { preHandler: requireAuth }, async (request, reply) => {
+    const orgId = (request.params as { orgId: string }).orgId;
+    const member = await requireOrgMember(request, reply, orgId);
+    if (!member) return;
+
+    const res = await app.db.query("SELECT policy FROM org_dlp_policies WHERE org_id = $1", [orgId]);
+    if (res.rowCount !== 1) return reply.code(404).send({ error: "dlp_policy_not_found" });
+    return reply.send({ policy: res.rows[0].policy });
+  });
+
+  const PutDlpPolicyBody = z.object({ policy: z.unknown() });
+
+  app.put("/orgs/:orgId/dlp-policy", { preHandler: requireAuth }, async (request, reply) => {
+    const orgId = (request.params as { orgId: string }).orgId;
+    const member = await requireOrgMember(request, reply, orgId);
+    if (!member) return;
+    if (!isOrgAdmin(member.role)) return reply.code(403).send({ error: "forbidden" });
+
+    const parsed = PutDlpPolicyBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    try {
+      validateDlpPolicy(parsed.data.policy);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid policy";
+      return reply.code(400).send({ error: "invalid_policy", message });
+    }
+
+    await app.db.query(
+      `
+        INSERT INTO org_dlp_policies (org_id, policy)
+        VALUES ($1, $2)
+        ON CONFLICT (org_id)
+        DO UPDATE SET policy = EXCLUDED.policy, updated_at = now()
+      `,
+      [orgId, JSON.stringify(parsed.data.policy)]
+    );
+
+    await writeAuditEvent(app.db, {
+      orgId,
+      userId: request.user!.id,
+      userEmail: request.user!.email,
+      eventType: "admin.settings_changed",
+      resourceType: "organization",
+      resourceId: orgId,
+      sessionId: request.session?.id,
+      success: true,
+      details: { updates: { dlpPolicy: true } },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request)
+    });
+
+    return reply.send({ policy: parsed.data.policy });
   });
 }

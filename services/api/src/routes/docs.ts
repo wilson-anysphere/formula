@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { z } from "zod";
 import { writeAuditEvent } from "../audit/audit";
 import { isMfaEnforcedForOrg } from "../auth/mfa";
+import { normalizeClassification, selectorKey, validateDlpPolicy } from "../dlp/dlp";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { canDocument, type DocumentRole } from "../rbac/roles";
 import { signSyncToken } from "../sync/token";
@@ -558,8 +559,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     };
 
     const byRange = new Map<string, Restriction>();
-    const keyFor = (r: any) =>
-      `${r.sheet_name}:${r.start_row}:${r.start_col}:${r.end_row}:${r.end_col}`;
+    const keyFor = (r: any) => `${r.sheet_name}:${r.start_row}:${r.start_col}:${r.end_row}:${r.end_col}`;
 
     for (const row of rows.rows as any[]) {
       const key = keyFor(row);
@@ -586,5 +586,145 @@ export function registerDocRoutes(app: FastifyInstance): void {
         rangeRestrictions: Array.from(byRange.values())
       }
     });
+  });
+
+  app.get("/docs/:docId/dlp-policy", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
+
+    const res = await app.db.query("SELECT policy FROM document_dlp_policies WHERE document_id = $1", [docId]);
+    if (res.rowCount !== 1) return reply.code(404).send({ error: "dlp_policy_not_found" });
+    return reply.send({ policy: res.rows[0].policy });
+  });
+
+  const PutDocDlpPolicyBody = z.object({ policy: z.unknown() });
+
+  app.put("/docs/:docId/dlp-policy", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
+
+    const parsed = PutDocDlpPolicyBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    try {
+      validateDlpPolicy(parsed.data.policy);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid policy";
+      return reply.code(400).send({ error: "invalid_policy", message });
+    }
+
+    await app.db.query(
+      `
+        INSERT INTO document_dlp_policies (document_id, policy)
+        VALUES ($1, $2)
+        ON CONFLICT (document_id)
+        DO UPDATE SET policy = EXCLUDED.policy, updated_at = now()
+      `,
+      [docId, JSON.stringify(parsed.data.policy)]
+    );
+
+    await writeAuditEvent(app.db, {
+      orgId: membership.orgId,
+      userId: request.user!.id,
+      userEmail: request.user!.email,
+      eventType: "admin.settings_changed",
+      resourceType: "document",
+      resourceId: docId,
+      sessionId: request.session?.id,
+      success: true,
+      details: { type: "dlp-policy" },
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request)
+    });
+
+    return reply.send({ policy: parsed.data.policy });
+  });
+
+  app.get("/docs/:docId/classifications", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
+
+    const res = await app.db.query(
+      `
+        SELECT selector, classification, updated_at
+        FROM document_classifications
+        WHERE document_id = $1
+        ORDER BY updated_at DESC
+      `,
+      [docId]
+    );
+
+    return {
+      classifications: res.rows.map((row) => ({
+        selector: row.selector,
+        classification: row.classification,
+        updatedAt: row.updated_at
+      }))
+    };
+  });
+
+  const UpsertClassificationBody = z.object({
+    selector: z.unknown(),
+    classification: z.unknown()
+  });
+
+  app.put("/docs/:docId/classifications", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "edit")) return reply.code(403).send({ error: "forbidden" });
+
+    const parsed = UpsertClassificationBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    let selector;
+    let classification;
+    let key;
+
+    try {
+      selector = parsed.data.selector;
+      if (typeof selector !== "object" || selector === null) throw new Error("Selector must be an object");
+      if ((selector as any).documentId !== docId) throw new Error("Selector documentId must match route docId");
+
+      classification = normalizeClassification(parsed.data.classification);
+      key = selectorKey(selector);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid classification";
+      return reply.code(400).send({ error: "invalid_request", message });
+    }
+
+    const id = crypto.randomUUID();
+    await app.db.query(
+      `
+        INSERT INTO document_classifications (id, document_id, selector_key, selector, classification)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (document_id, selector_key)
+        DO UPDATE SET selector = EXCLUDED.selector, classification = EXCLUDED.classification, updated_at = now()
+      `,
+      [id, docId, key, JSON.stringify(selector), JSON.stringify(classification)]
+    );
+
+    return reply.send({ ok: true });
+  });
+
+  app.delete("/docs/:docId/classifications/:selectorKey", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string; selectorKey: string }).docId;
+    const selectorKeyParam = (request.params as { docId: string; selectorKey: string }).selectorKey;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "edit")) return reply.code(403).send({ error: "forbidden" });
+
+    const res = await app.db.query(
+      "DELETE FROM document_classifications WHERE document_id = $1 AND selector_key = $2",
+      [docId, selectorKeyParam]
+    );
+    if (res.rowCount !== 1) return reply.code(404).send({ error: "not_found" });
+    return reply.send({ ok: true });
   });
 }

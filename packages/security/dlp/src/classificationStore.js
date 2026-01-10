@@ -108,14 +108,14 @@ export class CloudClassificationStore {
    * @param {string} documentId
    */
   async list(documentId) {
-    const res = await this.fetchImpl(`${this.baseUrl}/documents/${encodeURIComponent(documentId)}/classifications`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/docs/${encodeURIComponent(documentId)}/classifications`, {
       method: "GET",
       headers: this.headers(),
     });
     if (!res.ok) throw new Error(`Failed to list classifications: ${res.status}`);
     const data = await res.json();
-    if (!Array.isArray(data)) return [];
-    return data;
+    const list = Array.isArray(data) ? data : Array.isArray(data?.classifications) ? data.classifications : [];
+    return list;
   }
 
   /**
@@ -125,7 +125,7 @@ export class CloudClassificationStore {
    */
   async upsert(documentId, selector, classification) {
     const payload = { selector, classification: normalizeClassification(classification) };
-    const res = await this.fetchImpl(`${this.baseUrl}/documents/${encodeURIComponent(documentId)}/classifications`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/docs/${encodeURIComponent(documentId)}/classifications`, {
       method: "PUT",
       headers: this.headers(),
       body: JSON.stringify(payload),
@@ -139,7 +139,7 @@ export class CloudClassificationStore {
    */
   async remove(documentId, selector) {
     const res = await this.fetchImpl(
-      `${this.baseUrl}/documents/${encodeURIComponent(documentId)}/classifications/${encodeURIComponent(selectorKey(selector))}`,
+      `${this.baseUrl}/docs/${encodeURIComponent(documentId)}/classifications/${encodeURIComponent(selectorKey(selector))}`,
       {
         method: "DELETE",
         headers: this.headers(),
@@ -188,4 +188,3 @@ export class HybridClassificationStore {
     await this.cloud.remove(documentId, selector);
   }
 }
-

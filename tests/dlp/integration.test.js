@@ -5,18 +5,21 @@ import { LocalClassificationStore, createMemoryStorage } from "../../packages/se
 import { CLASSIFICATION_LEVEL } from "../../packages/security/dlp/src/classification.js";
 import { CLASSIFICATION_SCOPE } from "../../packages/security/dlp/src/selectors.js";
 import { createDefaultOrgPolicy } from "../../packages/security/dlp/src/policy.js";
-import { enforceClipboardCopy } from "../../apps/desktop/src/dlp/enforceClipboardCopy.js";
+import { DocumentController } from "../../apps/desktop/src/document/documentController.js";
+import { copyRangeToClipboardPayload } from "../../apps/desktop/src/clipboard/clipboard.js";
+import { exportDocumentRangeToCsv } from "../../apps/desktop/src/import-export/csv/export.js";
 import { InMemoryAuditLogger } from "../../packages/security/dlp/src/audit.js";
 import { AiContextManager } from "../../packages/security/dlp/src/aiContextManager.js";
 import { DlpViolationError } from "../../packages/security/dlp/src/errors.js";
 
-test("integration: Restricted range blocks clipboard copy and redacts AI context", () => {
+test("integration: Restricted range blocks clipboard + export and redacts AI context", () => {
   const storage = createMemoryStorage();
   const classificationStore = new LocalClassificationStore({ storage });
   const policy = createDefaultOrgPolicy();
 
   const documentId = "doc_1";
   const sheetId = "sheet_1";
+  const doc = new DocumentController();
   const restrictedRangeSelector = {
     scope: CLASSIFICATION_SCOPE.RANGE,
     documentId,
@@ -34,11 +37,27 @@ test("integration: Restricted range blocks clipboard copy and redacts AI context
 
   const range = restrictedRangeSelector.range;
 
+  doc.setCellValue(sheetId, { row: 0, col: 0 }, "Alice");
+  doc.setCellValue(sheetId, { row: 0, col: 1 }, "111-22-3333");
+  doc.setCellValue(sheetId, { row: 1, col: 0 }, "Bob");
+  doc.setCellValue(sheetId, { row: 1, col: 1 }, "444-55-6666");
+
   assert.throws(
     () => {
-      enforceClipboardCopy({ documentId, sheetId, range, classificationStore, policy });
+      copyRangeToClipboardPayload(doc, sheetId, range, {
+        dlp: { documentId, classificationStore, policy },
+      });
     },
     (err) => err instanceof DlpViolationError && /Clipboard copy is blocked/.test(err.message),
+  );
+
+  assert.throws(
+    () => {
+      exportDocumentRangeToCsv(doc, sheetId, range, {
+        dlp: { documentId, classificationStore, policy },
+      });
+    },
+    (err) => err instanceof DlpViolationError && /Export is blocked/.test(err.message),
   );
 
   const auditLogger = new InMemoryAuditLogger();
@@ -66,4 +85,3 @@ test("integration: Restricted range blocks clipboard copy and redacts AI context
   assert.equal(events.length, 1);
   assert.equal(events[0].redactedCellCount, 4);
 });
-

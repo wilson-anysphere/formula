@@ -1,6 +1,7 @@
 import { normalizeRange, parseRangeA1 } from "../../document/coords.js";
 import { excelSerialToDate } from "../../shared/valueParsing.js";
 import { stringifyCsv } from "./csv.js";
+import { enforceExport } from "../../dlp/enforceExport.js";
 
 /**
  * @typedef {import("../../document/cell.js").CellState} CellState
@@ -8,7 +9,11 @@ import { stringifyCsv } from "./csv.js";
  * @typedef {import("../../document/coords.js").CellRange} CellRange
  * @typedef {import("../../document/documentController.js").DocumentController} DocumentController
  *
- * @typedef {{ delimiter?: string, newline?: "\n" | "\r\n" }} CsvExportOptions
+ * @typedef {{
+ *  delimiter?: string,
+ *  newline?: "\n" | "\r\n",
+ *  dlp?: { documentId: string, classificationStore: any, policy: any }
+ * }} CsvExportOptions
  */
 
 function isLikelyDateNumberFormat(fmt) {
@@ -60,6 +65,17 @@ export function exportCellGridToCsv(grid, options = {}) {
 export function exportDocumentRangeToCsv(doc, sheetId, range, options = {}) {
   const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
 
+  if (options?.dlp) {
+    enforceExport({
+      documentId: options.dlp.documentId,
+      sheetId,
+      range: r,
+      format: "csv",
+      classificationStore: options.dlp.classificationStore,
+      policy: options.dlp.policy,
+    });
+  }
+
   /** @type {CellGrid} */
   const grid = [];
 
@@ -74,4 +90,3 @@ export function exportDocumentRangeToCsv(doc, sheetId, range, options = {}) {
 
   return exportCellGridToCsv(grid, options);
 }
-

@@ -6,5 +6,5 @@ export * from "./src/classificationStore.js";
 export * from "./src/errors.js";
 export * from "./src/policy.js";
 export * from "./src/policyEngine.js";
+export * from "./src/policyStore.js";
 export * from "./src/selectors.js";
-

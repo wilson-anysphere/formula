@@ -5,6 +5,10 @@ import { randomSampleRows, stratifiedSampleRows } from "./sampling.js";
 import { classifyText, redactText } from "./dlp.js";
 
 import { indexWorkbook } from "../../ai-rag/src/pipeline/indexWorkbook.js";
+import { DLP_ACTION } from "../../security/dlp/src/actions.js";
+import { evaluatePolicy, DLP_DECISION } from "../../security/dlp/src/policyEngine.js";
+import { effectiveCellClassification, effectiveRangeClassification } from "../../security/dlp/src/selectors.js";
+import { DlpViolationError } from "../../security/dlp/src/errors.js";
 
 /**
  * @typedef {{ type: "range"|"formula"|"table"|"chart", reference: string, data?: any }} Attachment
@@ -44,18 +48,95 @@ export class ContextManager {
    *   attachments?: Attachment[],
    *   sampleRows?: number,
    *   samplingStrategy?: "random" | "stratified",
-   *   stratifyByColumn?: number
+   *   stratifyByColumn?: number,
+   *   dlp?: {
+   *     documentId: string,
+   *     sheetId?: string,
+   *     policy: any,
+   *     classificationRecords?: Array<{ selector: any, classification: any }>,
+   *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
+   *     includeRestrictedContent?: boolean,
+   *     auditLogger?: { log(event: any): void }
+   *   }
    * }} params
    */
   async buildContext(params) {
-    const schema = extractSheetSchema(params.sheet);
+    const dlp = params.dlp;
+    const rawSheet = params.sheet;
+
+    const safeRowCap = 1_000;
+    const valuesForContext = rawSheet.values.slice(0, safeRowCap);
+    let sheetForContext = { ...rawSheet, values: valuesForContext };
+
+    let dlpRedactedCells = 0;
+    let dlpSelectionClassification = null;
+    let dlpDecision = null;
+
+    if (dlp) {
+      const records = dlp.classificationRecords ?? dlp.classificationStore?.list(dlp.documentId) ?? [];
+      const sheetId = dlp.sheetId ?? rawSheet.name;
+      const includeRestrictedContent = dlp.includeRestrictedContent ?? false;
+
+      const maxCols = valuesForContext.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
+      const rangeRef = {
+        documentId: dlp.documentId,
+        sheetId,
+        range: {
+          start: { row: 0, col: 0 },
+          end: { row: Math.max(valuesForContext.length - 1, 0), col: Math.max(maxCols - 1, 0) },
+        },
+      };
+
+      dlpSelectionClassification = effectiveRangeClassification(rangeRef, records);
+      dlpDecision = evaluatePolicy({
+        action: DLP_ACTION.AI_CLOUD_PROCESSING,
+        classification: dlpSelectionClassification,
+        policy: dlp.policy,
+        options: { includeRestrictedContent },
+      });
+
+      if (dlpDecision.decision === DLP_DECISION.BLOCK) {
+        dlp.auditLogger?.log({
+          type: "ai.context",
+          documentId: dlp.documentId,
+          sheetId,
+          decision: dlpDecision,
+          selectionClassification: dlpSelectionClassification,
+          redactedCellCount: 0,
+        });
+        throw new DlpViolationError(dlpDecision);
+      }
+
+      // Redact at cell level (deterministic placeholder).
+      const redactedValues = valuesForContext.map((row, r) =>
+        (row ?? []).map((value, c) => {
+          const classification = effectiveCellClassification(
+            { documentId: dlp.documentId, sheetId, row: r, col: c },
+            records,
+          );
+          const cellDecision = evaluatePolicy({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            classification,
+            policy: dlp.policy,
+            options: { includeRestrictedContent },
+          });
+          if (cellDecision.decision === DLP_DECISION.ALLOW) return value;
+          dlpRedactedCells++;
+          return "[REDACTED]";
+        }),
+      );
+
+      sheetForContext = { ...rawSheet, name: sheetId, values: redactedValues };
+    }
+
+    const schema = extractSheetSchema(sheetForContext);
 
     // Index once per build for now; in the app this should be cached per sheet.
-    await this.ragIndex.indexSheet(params.sheet);
+    await this.ragIndex.indexSheet(sheetForContext);
     const retrieved = await this.ragIndex.search(params.query, 5);
 
     const sampleRows = params.sampleRows ?? 20;
-    const dataForSampling = params.sheet.values.slice(0, 1_000); // safety cap
+    const dataForSampling = sheetForContext.values; // already capped
     const sampled =
       params.samplingStrategy === "stratified"
         ? stratifiedSampleRows(dataForSampling, sampleRows, {
@@ -65,6 +146,15 @@ export class ContextManager {
         : randomSampleRows(dataForSampling, sampleRows, { seed: 1 });
 
     const sections = [
+      ...(dlpRedactedCells > 0
+        ? [
+            {
+              key: "dlp",
+              priority: 5,
+              text: `DLP: ${dlpRedactedCells} cells were redacted due to policy.`,
+            },
+          ]
+        : []),
       {
         key: "schema",
         priority: 3,
@@ -92,6 +182,18 @@ export class ContextManager {
     ].filter((s) => s.text);
 
     const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens);
+
+    if (dlp) {
+      dlp.auditLogger?.log({
+        type: "ai.context",
+        documentId: dlp.documentId,
+        sheetId: dlp.sheetId ?? rawSheet.name,
+        decision: dlpDecision,
+        selectionClassification: dlpSelectionClassification,
+        redactedCellCount: dlpRedactedCells,
+      });
+    }
+
     return {
       schema,
       retrieved,

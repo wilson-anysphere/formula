@@ -112,14 +112,24 @@ export function mergePolicies({ orgPolicy, documentPolicy }) {
 
     // For AI, do not allow a doc override to enable sending Restricted data if org disallows it.
     if (action === DLP_ACTION.AI_CLOUD_PROCESSING) {
+      const overrideAllowRestricted =
+        Object.prototype.hasOwnProperty.call(overrideRule, "allowRestrictedContent") && typeof overrideRule.allowRestrictedContent === "boolean"
+          ? overrideRule.allowRestrictedContent
+          : undefined;
+      const overrideRedactDisallowed =
+        Object.prototype.hasOwnProperty.call(overrideRule, "redactDisallowed") && typeof overrideRule.redactDisallowed === "boolean"
+          ? overrideRule.redactDisallowed
+          : undefined;
+
+      // Document overrides can only tighten org policy:
+      // - They may disable allowRestrictedContent / redactDisallowed.
+      // - They may not enable them if the org policy has them disabled.
       merged.rules[action].allowRestrictedContent =
-        Boolean(baseRule.allowRestrictedContent) && Boolean(overrideRule.allowRestrictedContent);
-      merged.rules[action].redactDisallowed =
-        Boolean(baseRule.redactDisallowed) || Boolean(overrideRule.redactDisallowed);
+        Boolean(baseRule.allowRestrictedContent) && overrideAllowRestricted !== false;
+      merged.rules[action].redactDisallowed = Boolean(baseRule.redactDisallowed) && overrideRedactDisallowed !== false;
     }
   }
 
   validatePolicy(merged);
   return { policy: merged, source: POLICY_SOURCE.EFFECTIVE };
 }
-
