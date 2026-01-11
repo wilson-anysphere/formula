@@ -1227,4 +1227,69 @@ mod tests {
         assert!(changed);
         assert_eq!(out, "=SUM(Sheet1!A2:B3)");
     }
+
+    #[test]
+    fn structural_edit_updates_column_ranges_and_preserves_ref_errors() {
+        let insert = StructuralEdit::InsertCols {
+            sheet: "Sheet1".to_string(),
+            col: 0,
+            count: 1,
+        };
+        let (out, changed) = rewrite_formula_for_structural_edit("=A:A", "Sheet1", &insert);
+        assert!(changed);
+        assert_eq!(out, "=B:B");
+
+        let delete = StructuralEdit::DeleteCols {
+            sheet: "Sheet1".to_string(),
+            col: 0,
+            count: 1,
+        };
+        let (out, changed) = rewrite_formula_for_structural_edit("=A:B", "Sheet1", &delete);
+        assert!(changed);
+        assert_eq!(out, "=A:A");
+
+        let (out, changed) = rewrite_formula_for_structural_edit("=A:A", "Sheet1", &delete);
+        assert!(changed);
+        assert_eq!(out, "=#REF!");
+    }
+
+    #[test]
+    fn external_workbook_refs_are_not_rewritten() {
+        let edit = StructuralEdit::InsertRows {
+            sheet: "Sheet1".to_string(),
+            row: 0,
+            count: 1,
+        };
+        let (out, changed) = rewrite_formula_for_structural_edit("=[Book.xlsx]Sheet1!A1", "Sheet1", &edit);
+        assert!(!changed);
+        assert_eq!(out, "=[Book.xlsx]Sheet1!A1");
+    }
+
+    #[test]
+    fn range_map_can_split_ranges_into_union() {
+        let edit = RangeMapEdit {
+            sheet: "Sheet1".to_string(),
+            moved_region: GridRange::new(10, 10, 10, 10),
+            delta_row: 0,
+            delta_col: 0,
+            deleted_region: Some(GridRange::new(0, 1, 0, 1)), // delete B1
+        };
+        let (out, changed) = rewrite_formula_for_range_map("=A1:C1", "Sheet1", &edit);
+        assert!(changed);
+        assert_eq!(out, "=A1,C1");
+    }
+
+    #[test]
+    fn range_map_moves_cell_references() {
+        let edit = RangeMapEdit {
+            sheet: "Sheet1".to_string(),
+            moved_region: GridRange::new(0, 0, 0, 0),
+            delta_row: 1,
+            delta_col: 1,
+            deleted_region: None,
+        };
+        let (out, changed) = rewrite_formula_for_range_map("=A1", "Sheet1", &edit);
+        assert!(changed);
+        assert_eq!(out, "=B2");
+    }
 }
