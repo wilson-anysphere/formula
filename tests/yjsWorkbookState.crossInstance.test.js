@@ -1,0 +1,44 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+
+import * as Y from "yjs";
+
+import { sheetStateFromYjsDoc } from "../packages/versioning/src/yjs/sheetState.js";
+import { workbookStateFromYjsDoc } from "../packages/versioning/src/yjs/workbookState.js";
+
+test("Yjs state extractors handle cross-instance nested Y.Maps (CJS updates applied into ESM doc)", () => {
+  const require = createRequire(import.meta.url);
+  // eslint-disable-next-line import/no-named-as-default-member
+  const Ycjs = require("yjs");
+
+  const remote = new Ycjs.Doc();
+  const sheets = remote.getArray("sheets");
+  const sheet = new Ycjs.Map();
+  sheet.set("id", "sheet1");
+  sheet.set("name", "Sheet1");
+  sheets.push([sheet]);
+
+  const cells = remote.getMap("cells");
+  remote.transact(() => {
+    const cell = new Ycjs.Map();
+    cell.set("value", 42);
+    cell.set("formula", "=1+1");
+    cells.set("sheet1:0:0", cell);
+  });
+
+  const update = Ycjs.encodeStateAsUpdate(remote);
+
+  const doc = new Y.Doc();
+  // Apply using the CJS Yjs instance to simulate y-websocket applying updates.
+  Ycjs.applyUpdate(doc, update);
+
+  const sheetState = sheetStateFromYjsDoc(doc, { sheetId: "sheet1" });
+  assert.equal(sheetState.cells.get("r0c0")?.value, 42);
+  assert.equal(sheetState.cells.get("r0c0")?.formula, "=1+1");
+
+  const workbookState = workbookStateFromYjsDoc(doc);
+  assert.ok(workbookState.sheets.some((s) => s.id === "sheet1"));
+  assert.equal(workbookState.cellsBySheet.get("sheet1")?.cells.get("r0c0")?.value, 42);
+});
+

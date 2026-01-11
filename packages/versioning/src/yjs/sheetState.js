@@ -2,6 +2,30 @@ import * as Y from "yjs";
 import { cellKey } from "../diff/semanticDiff.js";
 import { parseCellKey } from "../../../collab/session/src/cell-key.js";
 
+function isYMap(value) {
+  if (value instanceof Y.Map) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YMap") return false;
+  return (
+    typeof maybe.get === "function" &&
+    typeof maybe.set === "function" &&
+    typeof maybe.delete === "function" &&
+    typeof maybe.forEach === "function"
+  );
+}
+
+/**
+ * @param {Y.Doc} doc
+ * @param {string} name
+ */
+function getMapRoot(doc, name) {
+  const existing = doc.share.get(name);
+  if (isYMap(existing)) return existing;
+  // Placeholder / missing roots are safe to instantiate via Yjs' constructors.
+  return doc.getMap(name);
+}
+
 /**
  * Parse a spreadsheet cell key. Supports:
  * - `${sheetId}:${row}:${col}` (docs/06-collaboration.md)
@@ -22,7 +46,7 @@ export function parseSpreadsheetCellKey(key, opts = {}) {
  * @param {any} cellData
  */
 function extractCell(cellData) {
-  if (cellData instanceof Y.Map) {
+  if (isYMap(cellData)) {
     return {
       value: cellData.get("value") ?? null,
       formula: cellData.get("formula") ?? null,
@@ -47,7 +71,7 @@ function extractCell(cellData) {
  */
 export function sheetStateFromYjsDoc(doc, opts = {}) {
   const targetSheetId = opts.sheetId ?? null;
-  const cellsMap = doc.getMap("cells");
+  const cellsMap = getMapRoot(doc, "cells");
 
   /** @type {Map<string, any>} */
   const cells = new Map();

@@ -15,12 +15,71 @@ import { parseSpreadsheetCellKey, sheetStateFromYjsDoc } from "./sheetState.js";
  * }} WorkbookState
  */
 
+function isYMap(value) {
+  if (value instanceof Y.Map) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YMap") return false;
+  return (
+    typeof maybe.get === "function" &&
+    typeof maybe.set === "function" &&
+    typeof maybe.delete === "function" &&
+    typeof maybe.keys === "function" &&
+    typeof maybe.forEach === "function"
+  );
+}
+
+function isYArray(value) {
+  if (value instanceof Y.Array) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YArray") return false;
+  return (
+    typeof maybe.get === "function" &&
+    typeof maybe.toArray === "function" &&
+    typeof maybe.push === "function" &&
+    typeof maybe.delete === "function"
+  );
+}
+
+function isYText(value) {
+  if (value instanceof Y.Text) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YText") return false;
+  return (
+    typeof maybe.toString === "function" &&
+    typeof maybe.toDelta === "function" &&
+    typeof maybe.applyDelta === "function"
+  );
+}
+
+/**
+ * @param {Y.Doc} doc
+ * @param {string} name
+ */
+function getMapRoot(doc, name) {
+  const existing = doc.share.get(name);
+  if (isYMap(existing)) return existing;
+  return doc.getMap(name);
+}
+
+/**
+ * @param {Y.Doc} doc
+ * @param {string} name
+ */
+function getArrayRoot(doc, name) {
+  const existing = doc.share.get(name);
+  if (isYArray(existing)) return existing;
+  return doc.getArray(name);
+}
+
 /**
  * @param {any} value
  * @param {string} key
  */
 function readYMapOrObject(value, key) {
-  if (value instanceof Y.Map) return value.get(key);
+  if (isYMap(value)) return value.get(key);
   if (value && typeof value === "object") return value[key];
   return undefined;
 }
@@ -29,7 +88,7 @@ function readYMapOrObject(value, key) {
  * @param {any} value
  */
 function coerceString(value) {
-  if (value instanceof Y.Text) return value.toString();
+  if (isYText(value)) return value.toString();
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);
@@ -46,9 +105,9 @@ function coerceString(value) {
  * @returns {any}
  */
 function yjsValueToJson(value) {
-  if (value instanceof Y.Text) return value.toString();
-  if (value instanceof Y.Array) return value.toArray().map((v) => yjsValueToJson(v));
-  if (value instanceof Y.Map) {
+  if (isYText(value)) return value.toString();
+  if (isYArray(value)) return value.toArray().map((v) => yjsValueToJson(v));
+  if (isYMap(value)) {
     /** @type {Record<string, any>} */
     const out = {};
     const keys = Array.from(value.keys()).sort();
@@ -91,7 +150,7 @@ function commentSummaryFromValue(value, mapKey) {
 
   const replies = readYMapOrObject(value, "replies");
   let repliesLength = 0;
-  if (replies instanceof Y.Array) repliesLength = replies.length;
+  if (isYArray(replies)) repliesLength = replies.length;
   else if (Array.isArray(replies)) repliesLength = replies.length;
 
   return { id, cellRef, content, resolved, repliesLength };
@@ -117,7 +176,7 @@ function legacyListCommentsFromMapRoot(mapType) {
     if (!item.deleted && item.parentSub === null) {
       const content = item.content?.getContent?.() ?? [];
       for (const value of content) {
-        if (value instanceof Y.Map) out.push(value);
+        if (isYMap(value)) out.push(value);
       }
     }
     item = item.right;
@@ -132,7 +191,7 @@ function legacyListCommentsFromMapRoot(mapType) {
  * @returns {WorkbookState}
  */
 export function workbookStateFromYjsDoc(doc) {
-  const sheetsArray = doc.getArray("sheets");
+  const sheetsArray = getArrayRoot(doc, "sheets");
   /** @type {SheetMeta[]} */
   const sheets = [];
   /** @type {string[]} */
@@ -147,7 +206,7 @@ export function workbookStateFromYjsDoc(doc) {
   sheets.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   const sheetIds = new Set(sheets.map((s) => s.id));
-  const cellsMap = doc.getMap("cells");
+  const cellsMap = getMapRoot(doc, "cells");
   cellsMap.forEach((_, rawKey) => {
     const parsed = parseSpreadsheetCellKey(rawKey);
     if (!parsed?.sheetId) return;
@@ -164,7 +223,7 @@ export function workbookStateFromYjsDoc(doc) {
   const metadata = new Map();
   if (doc.share.has("metadata")) {
     try {
-      const metadataMap = doc.getMap("metadata");
+      const metadataMap = getMapRoot(doc, "metadata");
       for (const key of Array.from(metadataMap.keys()).sort()) {
         metadata.set(key, yjsValueToJson(metadataMap.get(key)));
       }
@@ -177,7 +236,7 @@ export function workbookStateFromYjsDoc(doc) {
   const namedRanges = new Map();
   if (doc.share.has("namedRanges")) {
     try {
-      const namedRangesMap = doc.getMap("namedRanges");
+      const namedRangesMap = getMapRoot(doc, "namedRanges");
       for (const key of Array.from(namedRangesMap.keys()).sort()) {
         namedRanges.set(key, yjsValueToJson(namedRangesMap.get(key)));
       }
@@ -200,7 +259,7 @@ export function workbookStateFromYjsDoc(doc) {
     const existing = doc.share.get("comments");
 
     // Canonical schema: Y.Map keyed by comment id.
-    if (existing instanceof Y.Map) {
+    if (isYMap(existing)) {
       const byId = new Map();
       for (const key of Array.from(existing.keys()).sort()) {
         byId.set(key, commentSummaryFromValue(existing.get(key), key));
@@ -215,7 +274,7 @@ export function workbookStateFromYjsDoc(doc) {
       for (const id of Array.from(byId.keys()).sort()) {
         comments.set(id, byId.get(id));
       }
-    } else if (existing instanceof Y.Array) {
+    } else if (isYArray(existing)) {
       /** @type {[string, CommentSummary][]} */
       const entries = [];
       for (const item of existing.toArray()) {
@@ -234,7 +293,7 @@ export function workbookStateFromYjsDoc(doc) {
       const kind = hasStart && mapSize === 0 ? "array" : "map";
 
       if (kind === "map") {
-        const commentsMap = doc.getMap("comments");
+        const commentsMap = getMapRoot(doc, "comments");
         const byId = new Map();
         for (const key of Array.from(commentsMap.keys()).sort()) {
           byId.set(key, commentSummaryFromValue(commentsMap.get(key), key));
@@ -249,7 +308,7 @@ export function workbookStateFromYjsDoc(doc) {
           comments.set(id, byId.get(id));
         }
       } else {
-        const commentsArray = doc.getArray("comments");
+        const commentsArray = getArrayRoot(doc, "comments");
         /** @type {[string, CommentSummary][]} */
         const entries = [];
         for (const item of commentsArray.toArray()) {
