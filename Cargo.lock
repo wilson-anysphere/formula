@@ -1320,9 +1320,13 @@ version = "0.1.0"
 name = "formula-io"
 version = "0.1.0"
 dependencies = [
+ "formula-model",
  "formula-xls",
  "formula-xlsb",
+ "formula-xlsx",
+ "tempfile",
  "thiserror 1.0.69",
+ "xlsx-diff",
 ]
 
 [[package]]

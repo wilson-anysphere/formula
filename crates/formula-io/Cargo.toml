@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+formula-model = { path = "../formula-model" }
+formula-xlsx = { path = "../formula-xlsx" }
 formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
 thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3.10"
+xlsx-diff = { path = "../xlsx-diff" }
