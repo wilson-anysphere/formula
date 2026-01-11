@@ -72,3 +72,31 @@ fn engine_renders_stored_a1_formula_as_r1c1_for_cell() {
         Some("=R1C1".to_string())
     );
 }
+
+#[test]
+fn engine_evaluates_r1c1_sheet_range_refs() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+    engine
+        .set_cell_formula_r1c1("Summary", "A1", "=SUM(Sheet1:Sheet3!R1C1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(6.0));
+}
+
+#[test]
+fn engine_evaluates_r1c1_sheet_range_refs_with_quoted_span() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet 1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet 2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet 3", "A1", 3.0).unwrap();
+    engine
+        .set_cell_formula_r1c1("Summary", "A1", "=SUM('Sheet 1:Sheet 3'!R1C1)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(6.0));
+}
