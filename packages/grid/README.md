@@ -70,6 +70,11 @@ renderer.attach({ grid, content, selection });
 
 // Theme from CSS vars on an element:
 renderer.setTheme(resolveGridThemeFromCssVars(containerEl));
+
+// Optional: treat the first row/col as headers for styling.
+// When unset, the renderer uses legacy behavior and treats the first frozen
+// row/col (if any) as the header region.
+renderer.setHeaders(1, 1);
 ```
 
 ## Accessibility
@@ -118,6 +123,7 @@ When the grid container is focused, `CanvasGrid` supports spreadsheet-like navig
 - Ctrl/Cmd+A selects all; Ctrl/Cmd+Space selects a column; Shift+Space selects a row.
 - Header pointer selection (when headers are enabled): click corner header selects all; click row/col headers select entire row/column.
 - Ctrl/Cmd+click adds a new selection range (multi-range selection); Shift+click/drag extends the active range without clearing others.
+- Header rows/cols (as defined by `headerRows`/`headerCols`) are styled using the `headerBg`/`headerText` theme tokens.
 
 ## `GridApi` (React)
 
@@ -165,4 +171,4 @@ Notes:
 - Ranges use **exclusive end** coordinates (`endRow/endCol`).
 - The merged “anchor” is always the top-left cell (`startRow/startCol`).
 - The renderer only draws text for anchor cells and suppresses interior gridlines.
-- Keyboard navigation and `scrollToCell` treat merged ranges as a single cell (jumping over interior merged cells).
+- Keyboard navigation and `scrollToCell` treat merged ranges as a single cell (jumping over interior merged cells). If a merge crosses frozen boundaries, `scrollToCell` will still try to reveal the scrollable portion of the merge.

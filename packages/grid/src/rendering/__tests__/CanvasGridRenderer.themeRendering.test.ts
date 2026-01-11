@@ -137,5 +137,63 @@ describe("CanvasGridRenderer theme usage (render path)", () => {
     expect(contentFillStyles).toContain("cyan");
     expect(contentFillStyles).toContain("yellow");
   });
-});
 
+  it("treats explicit headerRows/headerCols as headers even when no rows/cols are frozen", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 1) return { row, col, value: "A" }; // header row
+        if (row === 1 && col === 1) return { row, col, value: "hello" }; // normal cell
+        if (row === 1 && col === 2) return { row, col, value: "#DIV/0!" }; // error cell
+        return null;
+      }
+    };
+
+    const contentFillStyles: string[] = [];
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createMock2dContext({ canvas: gridCanvas }));
+    contexts.set(
+      contentCanvas,
+      createMock2dContext({
+        canvas: contentCanvas,
+        onFillStyle: (value) => {
+          if (typeof value === "string") contentFillStyles.push(value);
+        }
+      })
+    );
+    contexts.set(selectionCanvas, createMock2dContext({ canvas: selectionCanvas }));
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const ctx = contexts.get(this);
+      return ctx ?? createMock2dContext({ canvas: this });
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 10,
+      colCount: 10,
+      headerRows: 1,
+      headerCols: 1,
+      theme: {
+        headerText: "magenta",
+        cellText: "cyan",
+        errorText: "yellow",
+        headerBg: "#111111",
+        gridBg: "#000000",
+        gridLine: "#222222"
+      }
+    });
+
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(400, 200, 1);
+    renderer.renderImmediately();
+
+    expect(contentFillStyles).toContain("magenta");
+    expect(contentFillStyles).toContain("cyan");
+    expect(contentFillStyles).toContain("yellow");
+  });
+});

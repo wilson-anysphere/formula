@@ -286,6 +286,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     return Math.max(0, Math.min(max, Math.floor(value)));
   };
 
+  const headersControlled = props.headerRows !== undefined || props.headerCols !== undefined;
   const headerRows = sanitizeHeaderCount(props.headerRows, props.rowCount);
   const headerCols = sanitizeHeaderCount(props.headerCols, props.colCount);
   const headerRowsRef = useRef(headerRows);
@@ -640,6 +641,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     setCssTheme((prev) => (partialThemeEqual(prev, nextCssTheme) ? prev : nextCssTheme));
 
     const renderer = rendererFactory();
+    renderer.setHeaders(headersControlled ? headerRows : null, headersControlled ? headerCols : null);
     rendererRef.current = renderer;
 
     renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
@@ -664,6 +666,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       rendererRef.current = null;
     };
   }, [rendererFactory, frozenRows, frozenCols]);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setHeaders(headersControlled ? headerRows : null, headersControlled ? headerCols : null);
+  }, [headersControlled, headerRows, headerCols]);
 
   useEffect(() => {
     const container = containerRef.current;

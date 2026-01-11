@@ -174,6 +174,12 @@ export class CanvasGridRenderer {
   private readonly provider: CellProvider;
   scroll: VirtualScrollManager;
 
+  // Header rows/cols affect *styling* only (header background + header text color).
+  // When unset, the renderer falls back to legacy behavior: treat the first frozen row/col
+  // (if any) as the header region.
+  private headerRowsOverride: number | null = null;
+  private headerColsOverride: number | null = null;
+
   private readonly prefetchOverscanRows: number;
   private readonly prefetchOverscanCols: number;
   private lastPrefetchRanges: CellRange[] | null = null;
@@ -298,6 +304,8 @@ export class CanvasGridRenderer {
     provider: CellProvider;
     rowCount: number;
     colCount: number;
+    headerRows?: number | null;
+    headerCols?: number | null;
     defaultRowHeight?: number;
     defaultColWidth?: number;
     prefetchOverscanRows?: number;
@@ -316,6 +324,10 @@ export class CanvasGridRenderer {
       defaultRowHeight: this.baseDefaultRowHeight,
       defaultColWidth: this.baseDefaultColWidth
     });
+
+    if (options.headerRows !== undefined || options.headerCols !== undefined) {
+      this.setHeaders(options.headerRows ?? null, options.headerCols ?? null);
+    }
 
     // Enable stats by default in dev builds where `import.meta.env.PROD` (Vite) is false.
     // In production builds this stays disabled to minimize overhead.
@@ -342,6 +354,36 @@ export class CanvasGridRenderer {
 
   getTheme(): GridTheme {
     return this.theme;
+  }
+
+  /**
+   * Configure the number of header rows/cols for styling.
+   *
+   * - When set (including `0`), header styling is determined solely by these counts.
+   * - When `null`, the renderer falls back to legacy behavior: treat the first frozen
+   *   row/col (if any) as the header region.
+   */
+  setHeaders(headerRows: number | null, headerCols: number | null): void {
+    const { rowCount, colCount } = this.scroll.getCounts();
+
+    const sanitize = (value: number | null, max: number): number | null => {
+      if (value === null) return null;
+      if (!Number.isFinite(value)) return 0;
+      return clampIndex(value, 0, max);
+    };
+
+    const nextHeaderRows = sanitize(headerRows, rowCount);
+    const nextHeaderCols = sanitize(headerCols, colCount);
+
+    if (nextHeaderRows === this.headerRowsOverride && nextHeaderCols === this.headerColsOverride) return;
+
+    this.headerRowsOverride = nextHeaderRows;
+    this.headerColsOverride = nextHeaderCols;
+
+    // If we're not attached yet, defer the repaint until the initial `attach()`/`resize()`.
+    if (this.gridCtx) {
+      this.markAllDirty();
+    }
   }
 
   getZoom(): number {
@@ -1946,8 +1988,8 @@ export class CanvasGridRenderer {
       contentCtx.rect(intersection.x, intersection.y, intersection.width, intersection.height);
       contentCtx.clip();
 
-      const headerRows = viewport.frozenRows > 0 ? 1 : 0;
-      const headerCols = viewport.frozenCols > 0 ? 1 : 0;
+      const headerRows = this.headerRowsOverride ?? (viewport.frozenRows > 0 ? 1 : 0);
+      const headerCols = this.headerColsOverride ?? (viewport.frozenCols > 0 ? 1 : 0);
       this.renderGridQuadrant(quadrant, mergedIndex, startRow, endRow, startCol, endCol, headerRows, headerCols, perf);
 
       contentCtx.restore();
