@@ -11,6 +11,329 @@ use crate::value::ErrorKind;
 const MAX_COL: u32 = 16_383;
 const MAX_ROW: u32 = 1_048_575;
 
+fn parse_number(raw: &str) -> Option<f64> {
+    match raw.parse::<f64>() {
+        Ok(n) if n.is_finite() => Some(n),
+        _ => None,
+    }
+}
+
+/// Lower a canonical parser [`crate::Ast`] into the evaluation IR used by the engine.
+///
+/// This is primarily used for defined-name formulas, which need to preserve
+/// [`SheetReference::Current`] so they can be evaluated relative to the sheet where the name is
+/// used.
+pub fn lower_ast(ast: &crate::Ast, origin: Option<crate::CellAddr>) -> Expr<String> {
+    lower_expr(&ast.expr, origin)
+}
+
+/// Lower a canonical parser [`crate::Expr`] into the evaluation IR used by the engine.
+pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<String> {
+    match expr {
+        crate::Expr::Number(raw) => match parse_number(raw) {
+            Some(n) => Expr::Number(n),
+            None => Expr::Error(ErrorKind::Value),
+        },
+        crate::Expr::String(s) => Expr::Text(s.clone()),
+        crate::Expr::Boolean(b) => Expr::Bool(*b),
+        crate::Expr::Error(raw) => Expr::Error(parse_error_kind(raw)),
+        crate::Expr::Missing => Expr::Blank,
+        crate::Expr::NameRef(r) => Expr::NameRef(NameRef {
+            sheet: lower_sheet_reference(&r.workbook, &r.sheet),
+            name: r.name.clone(),
+        }),
+        crate::Expr::CellRef(r) => {
+            let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
+            let Some(col) = coord_to_index_opt(&r.col, origin.map(|o| o.col), MAX_COL) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
+            let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
+            Expr::CellRef(CellRef {
+                sheet,
+                addr: CellAddr { row, col },
+            })
+        }
+        crate::Expr::ColRef(r) => {
+            let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
+            let Some(col) = coord_to_index_opt(&r.col, origin.map(|o| o.col), MAX_COL) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
+            Expr::RangeRef(RangeRef {
+                sheet,
+                start: CellAddr { row: 0, col },
+                end: CellAddr { row: MAX_ROW, col },
+            })
+        }
+        crate::Expr::RowRef(r) => {
+            let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
+            let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW) else {
+                return Expr::Error(ErrorKind::Ref);
+            };
+            Expr::RangeRef(RangeRef {
+                sheet,
+                start: CellAddr { row, col: 0 },
+                end: CellAddr { row, col: MAX_COL },
+            })
+        }
+        crate::Expr::StructuredRef(r) => lower_structured_ref(r),
+        crate::Expr::Array(arr) => lower_array_literal(arr, origin),
+        crate::Expr::FunctionCall(call) => Expr::FunctionCall {
+            name: call.name.name_upper.clone(),
+            original_name: call.name.original.clone(),
+            args: call.args.iter().map(|a| lower_expr(a, origin)).collect(),
+        },
+        crate::Expr::Unary(u) => match u.op {
+            crate::UnaryOp::Plus => Expr::Unary {
+                op: UnaryOp::Plus,
+                expr: Box::new(lower_expr(&u.expr, origin)),
+            },
+            crate::UnaryOp::Minus => Expr::Unary {
+                op: UnaryOp::Minus,
+                expr: Box::new(lower_expr(&u.expr, origin)),
+            },
+            crate::UnaryOp::ImplicitIntersection => {
+                Expr::ImplicitIntersection(Box::new(lower_expr(&u.expr, origin)))
+            }
+        },
+        crate::Expr::Postfix(p) => match p.op {
+            crate::PostfixOp::Percent => Expr::Postfix {
+                op: PostfixOp::Percent,
+                expr: Box::new(lower_expr(&p.expr, origin)),
+            },
+            crate::PostfixOp::SpillRange => {
+                Expr::SpillRange(Box::new(lower_expr(&p.expr, origin)))
+            }
+        },
+        crate::Expr::Binary(b) => lower_binary(b, origin),
+    }
+}
+
+fn lower_binary(b: &crate::BinaryExpr, origin: Option<crate::CellAddr>) -> Expr<String> {
+    match b.op {
+        crate::BinaryOp::Eq
+        | crate::BinaryOp::Ne
+        | crate::BinaryOp::Lt
+        | crate::BinaryOp::Le
+        | crate::BinaryOp::Gt
+        | crate::BinaryOp::Ge => {
+            let op = match b.op {
+                crate::BinaryOp::Eq => CompareOp::Eq,
+                crate::BinaryOp::Ne => CompareOp::Ne,
+                crate::BinaryOp::Lt => CompareOp::Lt,
+                crate::BinaryOp::Le => CompareOp::Le,
+                crate::BinaryOp::Gt => CompareOp::Gt,
+                crate::BinaryOp::Ge => CompareOp::Ge,
+                _ => unreachable!("handled by match guard"),
+            };
+            Expr::Compare {
+                op,
+                left: Box::new(lower_expr(&b.left, origin)),
+                right: Box::new(lower_expr(&b.right, origin)),
+            }
+        }
+        crate::BinaryOp::Range => {
+            if let Some(range) = try_lower_static_range_ref(&b.left, &b.right, origin) {
+                return Expr::RangeRef(range);
+            }
+
+            Expr::Binary {
+                op: BinaryOp::Range,
+                left: Box::new(lower_expr(&b.left, origin)),
+                right: Box::new(lower_expr(&b.right, origin)),
+            }
+        }
+        crate::BinaryOp::Intersect => Expr::Binary {
+            op: BinaryOp::Intersect,
+            left: Box::new(lower_expr(&b.left, origin)),
+            right: Box::new(lower_expr(&b.right, origin)),
+        },
+        crate::BinaryOp::Union => Expr::Binary {
+            op: BinaryOp::Union,
+            left: Box::new(lower_expr(&b.left, origin)),
+            right: Box::new(lower_expr(&b.right, origin)),
+        },
+        crate::BinaryOp::Pow => Expr::Binary {
+            op: BinaryOp::Pow,
+            left: Box::new(lower_expr(&b.left, origin)),
+            right: Box::new(lower_expr(&b.right, origin)),
+        },
+        crate::BinaryOp::Mul => Expr::Binary {
+            op: BinaryOp::Mul,
+            left: Box::new(lower_expr(&b.left, origin)),
+            right: Box::new(lower_expr(&b.right, origin)),
+        },
+        crate::BinaryOp::Div => Expr::Binary {
+            op: BinaryOp::Div,
+            left: Box::new(lower_expr(&b.left, origin)),
+            right: Box::new(lower_expr(&b.right, origin)),
+        },
+        crate::BinaryOp::Add => Expr::Binary {
+            op: BinaryOp::Add,
+            left: Box::new(lower_expr(&b.left, origin)),
+            right: Box::new(lower_expr(&b.right, origin)),
+        },
+        crate::BinaryOp::Sub => Expr::Binary {
+            op: BinaryOp::Sub,
+            left: Box::new(lower_expr(&b.left, origin)),
+            right: Box::new(lower_expr(&b.right, origin)),
+        },
+        crate::BinaryOp::Concat => Expr::Binary {
+            op: BinaryOp::Concat,
+            left: Box::new(lower_expr(&b.left, origin)),
+            right: Box::new(lower_expr(&b.right, origin)),
+        },
+    }
+}
+
+fn lower_sheet_reference(workbook: &Option<String>, sheet: &Option<String>) -> SheetReference<String> {
+    match (workbook.as_ref(), sheet.as_ref()) {
+        (Some(book), Some(sheet)) => SheetReference::External(format!("[{book}]{sheet}")),
+        (Some(book), None) => SheetReference::External(format!("[{book}]")),
+        (None, Some(sheet)) => SheetReference::Sheet(sheet.clone()),
+        (None, None) => SheetReference::Current,
+    }
+}
+
+fn coord_to_index_opt(coord: &crate::Coord, origin: Option<u32>, max: u32) -> Option<u32> {
+    let idx = match coord {
+        crate::Coord::A1 { index, .. } => *index,
+        crate::Coord::Offset(delta) => origin?.checked_add_signed(*delta)?,
+    };
+    if idx > max {
+        return None;
+    }
+    Some(idx)
+}
+
+fn lower_structured_ref(r: &crate::StructuredRef) -> Expr<String> {
+    // External workbook structured refs are accepted syntactically but not supported.
+    if r.workbook.is_some() {
+        return Expr::Error(ErrorKind::Ref);
+    }
+
+    // The structured-ref resolver is table-name driven when available, so we ignore any `sheet`
+    // prefix for now.
+    let mut text = String::new();
+    if let Some(table) = &r.table {
+        text.push_str(table);
+    }
+    text.push('[');
+    text.push_str(&r.spec);
+    text.push(']');
+
+    match crate::structured_refs::parse_structured_ref(&text, 0) {
+        Some((sref, end)) if end == text.len() => Expr::StructuredRef(sref),
+        _ => Expr::Error(ErrorKind::Name),
+    }
+}
+
+fn lower_array_literal(arr: &crate::ArrayLiteral, origin: Option<crate::CellAddr>) -> Expr<String> {
+    let rows = arr.rows.len();
+    let cols = arr.rows.first().map(|r| r.len()).unwrap_or(0);
+
+    if rows == 0 || cols == 0 {
+        return Expr::Error(ErrorKind::Value);
+    }
+
+    if arr.rows.iter().any(|r| r.len() != cols) {
+        return Expr::Error(ErrorKind::Value);
+    }
+
+    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    for row in &arr.rows {
+        for el in row {
+            values.push(lower_expr(el, origin));
+        }
+    }
+
+    Expr::ArrayLiteral {
+        rows,
+        cols,
+        values: values.into(),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StaticRangeOperandUnresolved {
+    workbook: Option<String>,
+    sheet: Option<String>,
+    start: CellAddr,
+    end: CellAddr,
+}
+
+impl StaticRangeOperandUnresolved {
+    fn is_unprefixed(&self) -> bool {
+        self.workbook.is_none() && self.sheet.is_none()
+    }
+}
+
+fn try_lower_static_range_ref(
+    left: &crate::Expr,
+    right: &crate::Expr,
+    origin: Option<crate::CellAddr>,
+) -> Option<RangeRef<String>> {
+    let left_op = try_lower_static_range_operand(left, origin)?;
+    let right_op = try_lower_static_range_operand(right, origin)?;
+
+    if left_op.workbook == right_op.workbook && left_op.sheet == right_op.sheet {
+        let sheet = lower_sheet_reference(&left_op.workbook, &left_op.sheet);
+        let (start, end) = bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
+        return Some(RangeRef { sheet, start, end });
+    }
+
+    let explicit = if left_op.is_unprefixed() && !right_op.is_unprefixed() {
+        &right_op
+    } else if right_op.is_unprefixed() && !left_op.is_unprefixed() {
+        &left_op
+    } else {
+        return None;
+    };
+
+    let sheet = lower_sheet_reference(&explicit.workbook, &explicit.sheet);
+    let (start, end) = bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
+    Some(RangeRef { sheet, start, end })
+}
+
+fn try_lower_static_range_operand(
+    expr: &crate::Expr,
+    origin: Option<crate::CellAddr>,
+) -> Option<StaticRangeOperandUnresolved> {
+    match expr {
+        crate::Expr::CellRef(r) => {
+            let col = coord_to_index_opt(&r.col, origin.map(|o| o.col), MAX_COL)?;
+            let row = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW)?;
+            let addr = CellAddr { row, col };
+            Some(StaticRangeOperandUnresolved {
+                workbook: r.workbook.clone(),
+                sheet: r.sheet.clone(),
+                start: addr,
+                end: addr,
+            })
+        }
+        crate::Expr::ColRef(r) => {
+            let col = coord_to_index_opt(&r.col, origin.map(|o| o.col), MAX_COL)?;
+            Some(StaticRangeOperandUnresolved {
+                workbook: r.workbook.clone(),
+                sheet: r.sheet.clone(),
+                start: CellAddr { row: 0, col },
+                end: CellAddr { row: MAX_ROW, col },
+            })
+        }
+        crate::Expr::RowRef(r) => {
+            let row = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW)?;
+            Some(StaticRangeOperandUnresolved {
+                workbook: r.workbook.clone(),
+                sheet: r.sheet.clone(),
+                start: CellAddr { row, col: 0 },
+                end: CellAddr { row, col: MAX_COL },
+            })
+        }
+        _ => None,
+    }
+}
+
 /// Compile a canonical parser [`crate::Expr`] into the calc-time [`CompiledExpr`] used by
 /// [`crate::eval::Evaluator`].
 ///
@@ -36,9 +359,9 @@ fn compile_expr_inner(
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
 ) -> CompiledExpr {
     match expr {
-        crate::Expr::Number(raw) => match raw.parse::<f64>() {
-            Ok(n) => Expr::Number(n),
-            Err(_) => Expr::Error(ErrorKind::Value),
+        crate::Expr::Number(raw) => match parse_number(raw) {
+            Some(n) => Expr::Number(n),
+            None => Expr::Error(ErrorKind::Value),
         },
         crate::Expr::String(s) => Expr::Text(s.clone()),
         crate::Expr::Boolean(b) => Expr::Bool(*b),
@@ -412,7 +735,7 @@ fn compile_sheet_reference(
 }
 
 fn parse_error_kind(raw: &str) -> ErrorKind {
-    match raw.to_ascii_uppercase().as_str() {
+    match raw.trim().to_ascii_uppercase().as_str() {
         "#NULL!" => ErrorKind::Null,
         "#DIV/0!" => ErrorKind::Div0,
         "#VALUE!" => ErrorKind::Value,

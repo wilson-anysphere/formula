@@ -1,6 +1,6 @@
 use crate::bytecode;
 use crate::eval::{
-    compile_canonical_expr, parse_a1, CellAddr, CompiledExpr, Expr, FormulaParseError, Parser,
+    compile_canonical_expr, lower_ast, parse_a1, CellAddr, CompiledExpr, Expr, FormulaParseError,
     RangeRef, SheetReference,
 };
 use crate::editing::{
@@ -447,7 +447,15 @@ impl Engine {
         let compiled = match &definition {
             NameDefinition::Constant(_) => None,
             NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
-                let parsed = Parser::parse(formula)?;
+                let ast = crate::parse_formula(
+                    formula,
+                    crate::ParseOptions {
+                        locale: crate::LocaleConfig::en_us(),
+                        reference_style: crate::ReferenceStyle::A1,
+                        normalize_relative_to: None,
+                    },
+                )?;
+                let parsed = lower_ast(&ast, None);
                 Some(self.compile_name_expr(&parsed))
             }
         };
@@ -531,7 +539,15 @@ impl Engine {
         self.clear_spill_for_cell(key);
         self.clear_blocked_spill_for_origin(key);
 
-        let parsed = crate::parse_formula(formula, crate::ParseOptions::default())?;
+        let origin = crate::CellAddr::new(addr.row, addr.col);
+        let parsed = crate::parse_formula(
+            formula,
+            crate::ParseOptions {
+                locale: crate::LocaleConfig::en_us(),
+                reference_style: crate::ReferenceStyle::A1,
+                normalize_relative_to: Some(origin),
+            },
+        )?;
         let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
         let compiled = compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet);
         let tables_by_sheet: Vec<Vec<Table>> =
@@ -4041,7 +4057,15 @@ fn rewrite_defined_name_structural(
         NameDefinition::Reference(f) | NameDefinition::Formula(f) => f,
         NameDefinition::Constant(_) => unreachable!("handled above"),
     };
-    let parsed = Parser::parse(formula)?;
+    let ast = crate::parse_formula(
+        formula,
+        crate::ParseOptions {
+            locale: crate::LocaleConfig::en_us(),
+            reference_style: crate::ReferenceStyle::A1,
+            normalize_relative_to: None,
+        },
+    )?;
+    let parsed = lower_ast(&ast, None);
     let compiled = engine.compile_name_expr(&parsed);
     Ok(Some((new_def, compiled)))
 }
@@ -4073,7 +4097,15 @@ fn rewrite_defined_name_range_map(
         NameDefinition::Reference(f) | NameDefinition::Formula(f) => f,
         NameDefinition::Constant(_) => unreachable!("handled above"),
     };
-    let parsed = Parser::parse(formula)?;
+    let ast = crate::parse_formula(
+        formula,
+        crate::ParseOptions {
+            locale: crate::LocaleConfig::en_us(),
+            reference_style: crate::ReferenceStyle::A1,
+            normalize_relative_to: None,
+        },
+    )?;
+    let parsed = lower_ast(&ast, None);
     let compiled = engine.compile_name_expr(&parsed);
     Ok(Some((new_def, compiled)))
 }
