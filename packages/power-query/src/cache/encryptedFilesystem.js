@@ -22,6 +22,9 @@ import {
  * Notes:
  * - This store is tolerant of mixed-mode directories (some plaintext JSON files,
  *   some encrypted blobs) to support migration.
+ * - When caching Arrow IPC results, the store writes a separate `.bin` blob to
+ *   avoid JSON inflation (and to preserve raw bytes). The `.json` entry file
+ *   contains metadata plus a marker pointing at the companion `.bin`.
  * - `enableEncryption()` / `disableEncryption()` migrate existing entries and
  *   can be expensive for large cache directories.
  */
@@ -46,6 +49,8 @@ export class EncryptedFileSystemCacheStore {
     this.directory = options.directory;
     this.encryption = options.encryption ?? null;
     this._encryptionEnabled = Boolean(options.encryption?.enabled);
+
+    this._binaryMarkerKey = "__pq_cache_binary";
 
     /** @type {{ fs: typeof import("node:fs/promises"), path: typeof import("node:path") } | null} */
     this._deps = null;
@@ -162,12 +167,28 @@ export class EncryptedFileSystemCacheStore {
 
   /**
    * @param {string} key
+   * @returns {Promise<{ jsonPath: string, binPath: string, binFileName: string }>}
+   */
+  async pathsForKey(key) {
+    const hashed = fnv1a64(key);
+    const { path } = await this.deps();
+    return {
+      jsonPath: path.join(this.directory, `${hashed}.json`),
+      binPath: path.join(this.directory, `${hashed}.bin`),
+      binFileName: `${hashed}.bin`,
+    };
+  }
+
+  /**
+   * Backwards-compatible helper for callers that relied on the original JSON-only
+   * implementation.
+   *
+   * @param {string} key
    * @returns {Promise<string>}
    */
   async filePathForKey(key) {
-    const hashed = fnv1a64(key);
-    const { path } = await this.deps();
-    return path.join(this.directory, `${hashed}.json`);
+    const { jsonPath } = await this.pathsForKey(key);
+    return jsonPath;
   }
 
   async ensureDir() {
@@ -176,14 +197,32 @@ export class EncryptedFileSystemCacheStore {
   }
 
   /**
-   * @param {string} filePath
+   * @param {string} finalPath
    * @param {Buffer} bytes
    */
-  async _atomicWrite(filePath, bytes) {
-    const { fs } = await this.deps();
-    const tmp = `${filePath}.${crypto.randomBytes(8).toString("hex")}.tmp`;
-    await fs.writeFile(tmp, bytes);
-    await fs.rename(tmp, filePath);
+  async _atomicWrite(finalPath, bytes) {
+    const { fs, path } = await this.deps();
+    const tmp = path.join(
+      path.dirname(finalPath),
+      `${path.basename(finalPath)}.tmp-${Date.now()}-${crypto.randomBytes(8).toString("hex")}`,
+    );
+    try {
+      await fs.writeFile(tmp, bytes);
+      try {
+        await fs.rename(tmp, finalPath);
+      } catch (err) {
+        // On Windows, rename does not reliably overwrite existing files.
+        if (err && typeof err === "object" && "code" in err && (err.code === "EEXIST" || err.code === "EPERM")) {
+          await fs.rm(finalPath, { force: true });
+          await fs.rename(tmp, finalPath);
+          return;
+        }
+        throw err;
+      }
+    } catch (err) {
+      await fs.rm(tmp, { force: true }).catch(() => {});
+      throw err;
+    }
   }
 
   /**
@@ -200,19 +239,11 @@ export class EncryptedFileSystemCacheStore {
       return null;
     }
 
-    try {
-      if (isEncryptedFileBytes(bytes)) {
-        if (!this.encryption) return null;
-        const ring = await this._loadKeyRing();
-        if (!ring) return null;
-        const decoded = decodeEncryptedFileBytes(bytes);
-        const plaintext = ring.decryptBytes(decoded, { aadContext: this._aadContext() });
-        const parsed = JSON.parse(plaintext.toString("utf8"));
-        if (!parsed || typeof parsed.key !== "string" || !parsed.entry) return null;
-        return { key: parsed.key, entry: parsed.entry };
-      }
+    const plaintext = await this._decryptFileBytes(bytes);
+    if (!plaintext) return null;
 
-      const parsed = JSON.parse(bytes.toString("utf8"));
+    try {
+      const parsed = JSON.parse(plaintext.toString("utf8"));
       if (!parsed || typeof parsed.key !== "string" || !parsed.entry) return null;
       return { key: parsed.key, entry: parsed.entry };
     } catch {
@@ -221,15 +252,100 @@ export class EncryptedFileSystemCacheStore {
   }
 
   /**
+   * @param {Buffer} bytes
+   * @returns {Promise<Buffer | null>}
+   */
+  async _decryptFileBytes(bytes) {
+    if (!isEncryptedFileBytes(bytes)) return bytes;
+    if (!this.encryption) return null;
+    const ring = await this._loadKeyRing();
+    if (!ring) return null;
+    try {
+      const decoded = decodeEncryptedFileBytes(bytes);
+      return ring.decryptBytes(decoded, { aadContext: this._aadContext() });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * @param {Buffer} plaintext
+   * @returns {Promise<Buffer>}
+   */
+  async _encryptFileBytes(plaintext) {
+    if (!this._encryptionEnabled) return plaintext;
+    if (!this.encryption) throw new Error("encryption is not configured");
+    const ring = await this._ensureKeyRing();
+    const encrypted = ring.encryptBytes(plaintext, { aadContext: this._aadContext() });
+    return encodeEncryptedFileBytes({
+      keyVersion: encrypted.keyVersion,
+      iv: encrypted.iv,
+      tag: encrypted.tag,
+      ciphertext: encrypted.ciphertext,
+    });
+  }
+
+  /**
+   * If the cache entry refers to a companion `.bin` blob, load it and hydrate the
+   * entry payload.
+   *
+   * @param {string} key
+   * @param {CacheEntry} entry
+   * @returns {Promise<CacheEntry | null>}
+   */
+  async _hydrateBinary(key, entry) {
+    const value = entry?.value;
+    const bytesMarker = value?.version === 2 && value?.table?.kind === "arrow" ? value?.table?.bytes : null;
+    if (
+      !bytesMarker ||
+      typeof bytesMarker !== "object" ||
+      Array.isArray(bytesMarker) ||
+      typeof bytesMarker[this._binaryMarkerKey] !== "string"
+    ) {
+      return entry;
+    }
+
+    const { fs } = await this.deps();
+    const { binPath, binFileName } = await this.pathsForKey(key);
+    const markerFileName = bytesMarker[this._binaryMarkerKey];
+    // Only allow loading from within the cache directory.
+    if (markerFileName !== binFileName) return null;
+
+    /** @type {Buffer} */
+    let bytes;
+    try {
+      bytes = await fs.readFile(binPath);
+    } catch {
+      return null;
+    }
+
+    const plaintext = await this._decryptFileBytes(bytes);
+    if (!plaintext) return null;
+
+    const restored = new Uint8Array(plaintext.buffer, plaintext.byteOffset, plaintext.byteLength);
+    return {
+      ...entry,
+      value: {
+        ...value,
+        table: {
+          ...value.table,
+          bytes: restored,
+        },
+      },
+    };
+  }
+
+  /**
    * @param {string} key
    * @returns {Promise<CacheEntry | null>}
    */
   async get(key) {
     await this.ensureDir();
-    const filePath = await this.filePathForKey(key);
-    const parsed = await this._readAndParseFile(filePath);
+    const { jsonPath } = await this.pathsForKey(key);
+    const parsed = await this._readAndParseFile(jsonPath);
     if (!parsed || parsed.key !== key) return null;
-    return parsed.entry ?? null;
+    const hydrated = await this._hydrateBinary(key, parsed.entry);
+    return hydrated ?? null;
   }
 
   /**
@@ -238,23 +354,39 @@ export class EncryptedFileSystemCacheStore {
    */
   async set(key, entry) {
     await this.ensureDir();
-    const filePath = await this.filePathForKey(key);
-    const payload = Buffer.from(JSON.stringify({ key, entry }), "utf8");
-    let out = payload;
+    const { fs } = await this.deps();
+    const { jsonPath, binPath, binFileName } = await this.pathsForKey(key);
 
-    if (this._encryptionEnabled) {
-      if (!this.encryption) throw new Error("encryption is not configured");
-      const ring = await this._ensureKeyRing();
-      const encrypted = ring.encryptBytes(payload, { aadContext: this._aadContext() });
-      out = encodeEncryptedFileBytes({
-        keyVersion: encrypted.keyVersion,
-        iv: encrypted.iv,
-        tag: encrypted.tag,
-        ciphertext: encrypted.ciphertext
-      });
+    const value = entry?.value;
+    const arrowBytes =
+      value?.version === 2 && value?.table?.kind === "arrow" && value?.table?.bytes instanceof Uint8Array
+        ? value.table.bytes
+        : null;
+
+    if (arrowBytes) {
+      const binPlaintext = Buffer.from(arrowBytes);
+      const binOut = await this._encryptFileBytes(binPlaintext);
+      await this._atomicWrite(binPath, binOut);
+
+      const patchedValue = {
+        ...value,
+        table: {
+          ...value.table,
+          bytes: { [this._binaryMarkerKey]: binFileName },
+        },
+      };
+
+      const jsonPlaintext = Buffer.from(JSON.stringify({ key, entry: { ...entry, value: patchedValue } }), "utf8");
+      const jsonOut = await this._encryptFileBytes(jsonPlaintext);
+      await this._atomicWrite(jsonPath, jsonOut);
+      return;
     }
 
-    await this._atomicWrite(filePath, out);
+    // If we are writing a JSON-only entry, clean up any previous binary blob.
+    await fs.rm(binPath, { force: true });
+    const jsonPlaintext = Buffer.from(JSON.stringify({ key, entry }), "utf8");
+    const jsonOut = await this._encryptFileBytes(jsonPlaintext);
+    await this._atomicWrite(jsonPath, jsonOut);
   }
 
   /**
@@ -262,8 +394,9 @@ export class EncryptedFileSystemCacheStore {
    */
   async delete(key) {
     const { fs } = await this.deps();
-    const filePath = await this.filePathForKey(key);
-    await fs.rm(filePath, { force: true });
+    const { jsonPath, binPath } = await this.pathsForKey(key);
+    await fs.rm(jsonPath, { force: true });
+    await fs.rm(binPath, { force: true });
   }
 
   async clear() {
@@ -280,7 +413,9 @@ export class EncryptedFileSystemCacheStore {
     const { fs, path } = await this.deps();
     try {
       const entries = await fs.readdir(this.directory, { withFileTypes: true });
-      return entries.filter((e) => e.isFile()).map((e) => path.join(this.directory, e.name));
+      return entries
+        .filter((e) => e.isFile() && e.name.endsWith(".json"))
+        .map((e) => path.join(this.directory, e.name));
     } catch {
       return [];
     }
@@ -316,9 +451,13 @@ export class EncryptedFileSystemCacheStore {
       if (!parsed || typeof parsed.key !== "string" || !parsed.entry) continue;
 
       const expectedPath = await this.filePathForKey(parsed.key);
-      await this.set(parsed.key, parsed.entry);
+      const hydrated = await this._hydrateBinary(parsed.key, parsed.entry);
+      if (hydrated) {
+        await this.set(parsed.key, hydrated);
+      }
       if (expectedPath !== filePath) {
         await fs.rm(filePath, { force: true });
+        await fs.rm(filePath.replace(/\.json$/, ".bin"), { force: true }).catch(() => {});
       }
     }
   }
@@ -350,6 +489,7 @@ export class EncryptedFileSystemCacheStore {
         // Cache data is optional; if we can't decrypt, drop the entry so we don't
         // leave behind unreadable encrypted blobs.
         await fs.rm(filePath, { force: true });
+        await fs.rm(filePath.replace(/\.json$/, ".bin"), { force: true }).catch(() => {});
         continue;
       }
 
@@ -359,16 +499,27 @@ export class EncryptedFileSystemCacheStore {
         const parsed = JSON.parse(plaintext.toString("utf8"));
         if (!parsed || typeof parsed.key !== "string" || !parsed.entry) {
           await fs.rm(filePath, { force: true });
+          // Best-effort cleanup of any companion blob.
+          await fs.rm(filePath.replace(/\.json$/, ".bin"), { force: true }).catch(() => {});
           continue;
         }
 
         const expectedPath = await this.filePathForKey(parsed.key);
-        await this.set(parsed.key, parsed.entry);
+        const hydrated = await this._hydrateBinary(parsed.key, parsed.entry);
+        if (hydrated) {
+          await this.set(parsed.key, hydrated);
+        } else {
+          await fs.rm(filePath, { force: true });
+          await fs.rm(filePath.replace(/\.json$/, ".bin"), { force: true }).catch(() => {});
+          continue;
+        }
         if (expectedPath !== filePath) {
           await fs.rm(filePath, { force: true });
+          await fs.rm(filePath.replace(/\.json$/, ".bin"), { force: true }).catch(() => {});
         }
       } catch {
         await fs.rm(filePath, { force: true });
+        await fs.rm(filePath.replace(/\.json$/, ".bin"), { force: true }).catch(() => {});
       }
     }
 
@@ -394,4 +545,3 @@ export class EncryptedFileSystemCacheStore {
     await this._storeKeyRing(ring);
   }
 }
-
