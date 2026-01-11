@@ -30,6 +30,10 @@ enum Direction {
     ToLocalized,
 }
 
+fn bool_literal(value: bool) -> &'static str {
+    if value { "TRUE" } else { "FALSE" }
+}
+
 fn translate_formula(
     formula: &str,
     locale: &FormulaLocale,
@@ -101,6 +105,13 @@ fn translate_formula(
                 out.push_str(token_slice(expr_src, tok)?);
                 idx += 1;
             }
+            TokenKind::Boolean(value) => {
+                match dir {
+                    Direction::ToCanonical => out.push_str(bool_literal(*value)),
+                    Direction::ToLocalized => out.push_str(locale.localized_boolean_literal(*value)),
+                }
+                idx += 1;
+            }
             TokenKind::Number(raw) => {
                 out.push_str(&translate_number(
                     raw,
@@ -113,6 +124,14 @@ fn translate_formula(
                 match dir {
                     Direction::ToCanonical => out.push_str(&locale.canonical_function_name(raw)),
                     Direction::ToLocalized => out.push_str(&locale.localized_function_name(raw)),
+                }
+                idx += 1;
+            }
+            TokenKind::Ident(raw) if matches!(dir, Direction::ToCanonical) => {
+                if let Some(value) = locale.canonical_boolean_literal(raw) {
+                    out.push_str(bool_literal(value));
+                } else {
+                    out.push_str(token_slice(expr_src, tok)?);
                 }
                 idx += 1;
             }

@@ -76,6 +76,24 @@ fn structured_reference_separators_are_not_translated() {
 }
 
 #[test]
+fn canonicalize_and_localize_boolean_literals() {
+    let de = "=WENN(WAHR;1;0)";
+    let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
+    assert_eq!(canon, "=IF(TRUE,1,0)");
+    assert_eq!(locale::localize_formula(&canon, &locale::DE_DE).unwrap(), de);
+
+    let fr = "=SI(VRAI;1;0)";
+    let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
+    assert_eq!(canon, "=IF(TRUE,1,0)");
+    assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), fr);
+
+    let es = "=SI(VERDADERO;1;0)";
+    let canon = locale::canonicalize_formula(es, &locale::ES_ES).unwrap();
+    assert_eq!(canon, "=IF(TRUE,1,0)");
+    assert_eq!(locale::localize_formula(&canon, &locale::ES_ES).unwrap(), es);
+}
+
+#[test]
 fn engine_accepts_localized_formulas_and_persists_canonical() {
     let mut engine = Engine::new();
     engine

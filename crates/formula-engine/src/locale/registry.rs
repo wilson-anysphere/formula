@@ -89,6 +89,9 @@ pub struct FormulaLocale {
     pub config: LocaleConfig,
     /// `true` when this locale is right-to-left in the UI (formula language is still left-to-right).
     pub is_rtl: bool,
+    /// Localized boolean literals (Excel keywords).
+    pub boolean_true: &'static str,
+    pub boolean_false: &'static str,
     functions: &'static FunctionTranslations,
 }
 
@@ -128,6 +131,24 @@ impl FormulaLocale {
         out.push_str(mapped);
         out
     }
+
+    pub fn canonical_boolean_literal(&self, ident: &str) -> Option<bool> {
+        if ident.eq_ignore_ascii_case(self.boolean_true) {
+            Some(true)
+        } else if ident.eq_ignore_ascii_case(self.boolean_false) {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
+    pub fn localized_boolean_literal(&self, value: bool) -> &'static str {
+        if value {
+            self.boolean_true
+        } else {
+            self.boolean_false
+        }
+    }
 }
 
 fn split_xlfn_prefix(name: &str) -> (bool, &str) {
@@ -147,6 +168,8 @@ pub static EN_US: FormulaLocale = FormulaLocale {
     id: "en-US",
     config: LocaleConfig::en_us(),
     is_rtl: false,
+    boolean_true: "TRUE",
+    boolean_false: "FALSE",
     functions: &EMPTY_FUNCTIONS,
 };
 
@@ -159,6 +182,8 @@ pub static DE_DE: FormulaLocale = FormulaLocale {
     id: "de-DE",
     config: LocaleConfig::de_de(),
     is_rtl: false,
+    boolean_true: "WAHR",
+    boolean_false: "FALSCH",
     functions: &DE_DE_FUNCTIONS,
 };
 
@@ -174,6 +199,8 @@ pub static FR_FR: FormulaLocale = FormulaLocale {
         thousands_separator: None,
     },
     is_rtl: false,
+    boolean_true: "VRAI",
+    boolean_false: "FAUX",
     functions: &FR_FR_FUNCTIONS,
 };
 
@@ -188,6 +215,8 @@ pub static ES_ES: FormulaLocale = FormulaLocale {
         thousands_separator: Some('.'),
     },
     is_rtl: false,
+    boolean_true: "VERDADERO",
+    boolean_false: "FALSO",
     functions: &ES_ES_FUNCTIONS,
 };
 
