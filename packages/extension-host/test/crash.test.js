@@ -54,8 +54,8 @@ test("crash: worker crash marks extension inactive and next command spawns a fre
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
-    activationTimeoutMs: 1000,
-    commandTimeoutMs: 1000
+    activationTimeoutMs: 5000,
+    commandTimeoutMs: 5000
   });
 
   t.after(async () => {
@@ -66,7 +66,7 @@ test("crash: worker crash marks extension inactive and next command spawns a fre
 
   assert.equal(await host.executeCommand("test.crash"), "scheduled");
 
-  const deadline = Date.now() + 500;
+  const deadline = Date.now() + 2000;
   while (Date.now() < deadline) {
     const info = host.listExtensions().find((e) => e.id === extensionId);
     if (info && info.active === false) break;

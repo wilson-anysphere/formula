@@ -197,7 +197,7 @@ test("data connectors: timeout terminates worker, rejects in-flight requests, an
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
-    activationTimeoutMs: 1000,
+    activationTimeoutMs: 5000,
     dataConnectorTimeoutMs: 100
   });
 

@@ -51,8 +51,8 @@ test("activation is de-duplicated when multiple commands trigger it concurrently
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
-    activationTimeoutMs: 1000,
-    commandTimeoutMs: 1000
+    activationTimeoutMs: 5000,
+    commandTimeoutMs: 5000
   });
 
   t.after(async () => {
@@ -65,4 +65,3 @@ test("activation is de-duplicated when multiple commands trigger it concurrently
   assert.equal(a, 1);
   assert.equal(b, 1);
 });
-

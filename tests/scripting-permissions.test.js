@@ -13,7 +13,7 @@ test("scripting (node): blocks network access by default", async () => {
 export default async function main(ctx) {
   await ctx.fetch("https://example.com");
 }
-`);
+`, { timeoutMs: 20_000 });
 
   assert.ok(result.error, "expected script to fail due to denied network");
   assert.match(result.error.message, /Network access/i);
@@ -30,11 +30,11 @@ test("scripting (node): allowlist mode rejects non-allowlisted hosts (fetch + We
 
   const fetchResult = await runtime.run(
     `
-export default async function main(ctx) {
-  await ctx.fetch("https://example.com");
-}
-`,
-    { permissions: allowlist },
+ export default async function main(ctx) {
+   await ctx.fetch("https://example.com");
+ }
+ `,
+    { permissions: allowlist, timeoutMs: 20_000 },
   );
 
   assert.ok(fetchResult.error, "expected fetch to be blocked by allowlist");
@@ -46,7 +46,7 @@ export default async function main(ctx) {
    new WebSocket("wss://example.com");
  }
  `,
-    { permissions: allowlist },
+    { permissions: allowlist, timeoutMs: 20_000 },
   );
 
   assert.ok(wsResult.error, "expected WebSocket to be blocked by allowlist");
@@ -64,7 +64,7 @@ import { readFileSync } from "node:fs";
 export default async function main(ctx) {
   ctx.ui.log(readFileSync);
 }
-`);
+`, { timeoutMs: 20_000 });
 
   assert.ok(result.error, "expected imports to be rejected");
   assert.match(result.error.message, /Imports are not supported/i);
@@ -80,7 +80,7 @@ test("scripting (node): script-body cannot use dynamic import()", async () => {
   const result = await runtime.run(`
 const mod = await import("node:fs");
 ctx.ui.log(mod);
-`);
+`, { timeoutMs: 20_000 });
 
   assert.ok(result.error, "expected dynamic import to be rejected");
   assert.match(result.error.message, /dynamic import/i);

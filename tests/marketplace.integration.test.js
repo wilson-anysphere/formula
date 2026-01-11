@@ -13,12 +13,14 @@ import { MarketplaceClient } from "../apps/desktop/src/marketplace/client.js";
 import { ExtensionManager } from "../apps/desktop/src/marketplace/extensionManager.js";
 import { ExtensionHostManager } from "../apps/desktop/src/extensions/ExtensionHostManager.js";
 import extensionPackagePkg from "../shared/extension-package/index.js";
+import v2CorePkg from "../shared/extension-package/core/v2-core.js";
 import signingPkg from "../shared/crypto/signing.js";
 
 const { createMarketplaceServer } = marketplaceServerPkg;
 const { publishExtension, packageExtension } = publisherPkg;
 const { ExtensionHost } = extensionHostPkg;
 const { createExtensionPackageV1, createExtensionPackageV2, verifyExtensionPackageV2 } = extensionPackagePkg;
+const { iterateTarEntries } = v2CorePkg;
 const { signBytes, verifyBytesSignature, sha256 } = signingPkg;
 
 const EXTENSION_TIMEOUT_MS = 20_000;
@@ -2111,8 +2113,28 @@ test("client refuses install when signature verification fails", async () => {
     tamperingClient.downloadPackage = async (id, version) => {
       const pkg = await originalDownload(id, version);
       const bytes = Buffer.from(pkg.bytes);
-      bytes[0] ^= 0xff;
-      return { ...pkg, bytes };
+      // Tamper with a byte inside signature.json while keeping the tar structure valid.
+      // (Flipping a byte in the tar header would fail parsing before we ever reach signature verification.)
+      let tampered = false;
+      for (const entry of iterateTarEntries(bytes)) {
+        if (entry.name !== "signature.json") continue;
+        const signatureData = Buffer.from(entry.data.buffer, entry.data.byteOffset, entry.data.byteLength);
+        const prefix = Buffer.from('"signatureBase64":"');
+        const start = signatureData.indexOf(prefix);
+        if (start === -1) {
+          throw new Error("Failed to locate signatureBase64 field while tampering extension package");
+        }
+        const charOffset = start + prefix.length;
+        signatureData[charOffset] = signatureData[charOffset] === 0x41 ? 0x42 : 0x41; // 'A' <-> 'B'
+        tampered = true;
+        break;
+      }
+      if (!tampered) {
+        throw new Error("Failed to locate signature.json entry while tampering extension package");
+      }
+      // Keep the marketplace sha256 consistent so the client reaches signature verification.
+      const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+      return { ...pkg, bytes, sha256 };
     };
 
     const manager = new ExtensionManager({ marketplaceClient: tamperingClient, extensionsDir, statePath });

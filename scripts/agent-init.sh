@@ -61,10 +61,31 @@ mkdir -p "$CARGO_HOME"
 
 # Ensure tools installed via `cargo install` under this CARGO_HOME are available.
 mkdir -p "$CARGO_HOME/bin"
-case ":$PATH:" in
-  *":$CARGO_HOME/bin:"*) ;;
-  *) export PATH="$CARGO_HOME/bin:$PATH" ;;
-esac
+# Ensure `$CARGO_HOME/bin` is the *first* PATH entry, even if it already exists
+# later in the PATH (e.g. from a login shell's profile).
+_formula_path_without_cargo_bin=""
+_formula_old_ifs="${IFS}"
+IFS=:
+for _formula_entry in ${PATH:-}; do
+  if [ "${_formula_entry}" = "${CARGO_HOME}/bin" ]; then
+    continue
+  fi
+  if [ -z "${_formula_path_without_cargo_bin}" ]; then
+    _formula_path_without_cargo_bin="${_formula_entry}"
+  else
+    _formula_path_without_cargo_bin="${_formula_path_without_cargo_bin}:${_formula_entry}"
+  fi
+done
+IFS="${_formula_old_ifs}"
+unset _formula_old_ifs
+unset _formula_entry
+
+if [ -n "${_formula_path_without_cargo_bin}" ]; then
+  export PATH="${CARGO_HOME}/bin:${_formula_path_without_cargo_bin}"
+else
+  export PATH="${CARGO_HOME}/bin"
+fi
+unset _formula_path_without_cargo_bin
 
 # ============================================================================
 # Shared Caching (Optional - reduces disk duplication)

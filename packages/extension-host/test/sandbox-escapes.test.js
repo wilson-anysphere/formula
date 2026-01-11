@@ -162,23 +162,26 @@ test("sandbox: WebSocket events cannot be used as a vm escape hatch", async (t) 
     `
       const formula = require("@formula/extension-api");
 
-      exports.activate = async (context) => {
-        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async (port) => {
-          return await new Promise((resolve) => {
-            const ws = new WebSocket(\`ws://127.0.0.1:\${Number(port)}/\`);
-            ws._handleHostClose = (evt) => {
-              try {
-                const proc = evt?.constructor?.constructor?.("return process")();
-                resolve({ escaped: true, pid: proc?.pid ?? null });
-              } catch (error) {
-                resolve({ escaped: false, error: String(error?.message ?? error) });
-              }
-            };
-            setTimeout(() => resolve({ escaped: false, error: "timeout" }), 500);
-          });
-        }));
-      };
-    `,
+       exports.activate = async (context) => {
+         context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async (port) => {
+           return await new Promise((resolve) => {
+             const ws = new WebSocket(\`ws://127.0.0.1:\${Number(port)}/\`);
+             const on = ws.addEventListener ? (name, fn) => ws.addEventListener(name, fn) : (name, fn) => (ws[\`on\${name}\`] = fn);
+             const handler = (evt) => {
+               try {
+                 const proc = evt?.constructor?.constructor?.("return process")();
+                 resolve({ escaped: true, pid: proc?.pid ?? null });
+               } catch (error) {
+                 resolve({ escaped: false, error: String(error?.message ?? error) });
+               }
+             };
+             on("close", handler);
+             on("error", handler);
+             setTimeout(() => resolve({ escaped: false, error: "timeout" }), 2000);
+           });
+         }));
+       };
+     `,
     "utf8"
   );
 

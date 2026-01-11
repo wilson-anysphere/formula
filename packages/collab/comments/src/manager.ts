@@ -96,6 +96,64 @@ export function getCommentsRoot(doc: Y.Doc): CommentsRoot {
   return { kind: "map", map: doc.getMap("comments") as YCommentsMap };
 }
 
+function cloneToLocalYjsValue(value: unknown): unknown {
+  const map = getYMap(value);
+  if (map) {
+    const out = new Y.Map();
+    map.forEach((v, k) => out.set(k, cloneToLocalYjsValue(v)));
+    return out;
+  }
+
+  const array = getYArray(value);
+  if (array) {
+    const out = new Y.Array();
+    for (const item of array.toArray()) {
+      out.push([cloneToLocalYjsValue(item)]);
+    }
+    return out;
+  }
+
+  if (isYText(value)) {
+    const out = new Y.Text();
+    out.applyDelta(structuredClone(value.toDelta()));
+    return out;
+  }
+
+  if (value && typeof value === "object") {
+    return structuredClone(value);
+  }
+
+  return value;
+}
+
+function normalizeCommentsRootToLocalTypes(doc: Y.Doc): void {
+  const root = getCommentsRoot(doc);
+  if (root.kind !== "map") return;
+
+  // Only normalize when the root itself is from the local Yjs module instance.
+  // If the root was created by a foreign build (CJS vs ESM) we cannot safely
+  // mix local Yjs types into it.
+  if (!(root.map instanceof Y.Map)) return;
+
+  const replacements: Array<{ key: string; cloned: unknown }> = [];
+  root.map.forEach((value, key) => {
+    const map = getYMap(value);
+    if (!map) return;
+    // Already local.
+    if (map instanceof Y.Map) return;
+    replacements.push({ key, cloned: cloneToLocalYjsValue(map) });
+  });
+  if (replacements.length === 0) return;
+
+  // Use a non-local origin so collaborative undo managers don't capture this
+  // normalization as a user edit.
+  doc.transact(() => {
+    for (const { key, cloned } of replacements) {
+      root.map.set(key, cloned);
+    }
+  });
+}
+
 export class CommentManager {
   private readonly doc: Y.Doc;
   private readonly transact: (fn: () => void) => void;
@@ -388,6 +446,19 @@ export class CommentManager {
 }
 
 export function createCommentManagerForSession(session: { doc: Y.Doc; transactLocal: (fn: () => void) => void }): CommentManager {
+  // In Node environments, remote updates can be applied using a different Yjs
+  // module instance (CJS vs ESM). This can leave nested comment maps (the values
+  // inside the `comments` root map) backed by foreign Item constructors, which
+  // breaks collaborative undo (Y.UndoManager relies on strict `instanceof` checks
+  // when applying undo/redo).
+  //
+  // Normalize any foreign nested types into local Yjs instances so comment edits
+  // are undoable even when the doc was hydrated by a foreign Yjs build.
+  try {
+    normalizeCommentsRootToLocalTypes(session.doc);
+  } catch {
+    // Best-effort; never block comment usage on normalization.
+  }
   return new CommentManager(session.doc, { transact: (fn) => session.transactLocal(fn) });
 }
 

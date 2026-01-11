@@ -5,6 +5,40 @@ import { cloneYjsValue } from "./cloneYjsValue.js";
  * @typedef {{ name: string, kind: "map" | "array" | "text" }} RootTypeSpec
  */
 
+/**
+ * @typedef {{ Map: new () => any, Array: new () => any, Text: new () => any }} YjsTypeConstructors
+ */
+
+/**
+ * Return constructors for Y.Map/Y.Array/Y.Text that match the module instance
+ * used to create `doc`.
+ *
+ * In pnpm workspaces it is possible to load both the ESM + CJS builds of Yjs in
+ * the same process (for example via y-websocket). Yjs types cannot be moved
+ * across module instances; the safest approach is to clone nested types using
+ * constructors from the target doc's module instance.
+ *
+ * @param {any} doc
+ * @returns {YjsTypeConstructors}
+ */
+function getDocConstructors(doc) {
+  const DocCtor = /** @type {any} */ (doc)?.constructor;
+  if (typeof DocCtor !== "function") {
+    return { Map: Y.Map, Array: Y.Array, Text: Y.Text };
+  }
+
+  try {
+    const probe = new DocCtor();
+    return {
+      Map: probe.getMap("__ctor_probe_map").constructor,
+      Array: probe.getArray("__ctor_probe_array").constructor,
+      Text: probe.getText("__ctor_probe_text").constructor,
+    };
+  } catch {
+    return { Map: Y.Map, Array: Y.Array, Text: Y.Text };
+  }
+}
+
 function isYMap(value) {
   if (value instanceof Y.Map) return true;
   if (!value || typeof value !== "object") return false;
@@ -285,6 +319,8 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
       }
 
       const snapshotDoc = new Y.Doc();
+      /** @type {YjsTypeConstructors} */
+      const snapshotConstructors = { Map: Y.Map, Array: Y.Array, Text: Y.Text };
 
       /** @type {Map<string, { kind: RootTypeSpec["kind"], source: string }>} */
       const roots = new Map();
@@ -337,7 +373,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
           const source = getMapRoot(doc, name);
           const target = snapshotDoc.getMap(name);
           source.forEach((value, key) => {
-            target.set(key, cloneYjsValue(value));
+            target.set(key, cloneYjsValue(value, snapshotConstructors));
           });
           continue;
         }
@@ -346,7 +382,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
           const source = getArrayRoot(doc, name);
           const target = snapshotDoc.getArray(name);
           for (const value of source.toArray()) {
-            target.push([cloneYjsValue(value)]);
+            target.push([cloneYjsValue(value, snapshotConstructors)]);
           }
           continue;
         }
@@ -367,6 +403,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
     applyState(snapshot) {
       const restored = new Y.Doc();
       Y.applyUpdate(restored, snapshot);
+      const docConstructors = getDocConstructors(doc);
 
       /** @type {Map<string, { kind: RootTypeSpec["kind"], source: string }>} */
       const roots = new Map();
@@ -440,23 +477,6 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
         // When the target doc comes from a different Yjs module instance (e.g. CJS vs ESM),
         // we must construct cloned values using the target instance's constructors. Otherwise
         // `target.set(key, value)` throws ("Unexpected content type").
-        //
-        // Derive the constructors from roots that exist in (or will be created on) the target
-        // document during this restore.
-        /** @type {typeof Y.Map | null} */
-        let mapCtor = null;
-        /** @type {typeof Y.Array | null} */
-        let arrayCtor = null;
-        /** @type {typeof Y.Text | null} */
-        let textCtor = null;
-        for (const [name, { kind }] of roots.entries()) {
-          if (kind === "map" && !mapCtor) mapCtor = getMapRoot(doc, name).constructor;
-          if (kind === "array" && !arrayCtor) arrayCtor = getArrayRoot(doc, name).constructor;
-          if (kind === "text" && !textCtor) textCtor = getTextRoot(doc, name).constructor;
-          if (mapCtor && arrayCtor && textCtor) break;
-        }
-        const cloneCtors = { Map: mapCtor ?? Y.Map, Array: arrayCtor ?? Y.Array, Text: textCtor ?? Y.Text };
-
         for (const [name, { kind }] of roots.entries()) {
           if (kind === "map") {
             const target = getMapRoot(doc, name);
@@ -473,7 +493,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
             }
 
             source.forEach((value, key) => {
-              target.set(key, cloneYjsValue(value, cloneCtors));
+              target.set(key, cloneYjsValue(value, docConstructors));
             });
 
             // Special-case: comments historically existed as a list (Array) but
@@ -486,7 +506,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
                 const id = coerceString(item.get("id"));
                 if (!id) continue;
                 if (target.has(id)) continue;
-                target.set(id, cloneYjsValue(item, cloneCtors));
+                target.set(id, cloneYjsValue(item, docConstructors));
               }
             }
             continue;
@@ -505,7 +525,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
             }
 
             for (const value of source.toArray()) {
-              target.push([cloneYjsValue(value, cloneCtors)]);
+              target.push([cloneYjsValue(value, docConstructors)]);
             }
             continue;
           }

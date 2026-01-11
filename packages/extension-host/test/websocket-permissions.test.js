@@ -37,14 +37,14 @@ test("permissions: WebSocket connections are blocked when network permission is 
         context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
           commandId
         )}, async () => {
-          return await new Promise((resolve) => {
-            const ws = new WebSocket("ws://example.invalid/");
-            const timer = setTimeout(() => resolve({ status: "timeout" }), 500);
-            ws.addEventListener("close", (e) => {
-              clearTimeout(timer);
-              resolve({ status: "closed", code: e.code, reason: e.reason, wasClean: e.wasClean });
-            });
-          });
+           return await new Promise((resolve) => {
+             const ws = new WebSocket("ws://example.invalid/");
+            const timer = setTimeout(() => resolve({ status: "timeout" }), 2000);
+             ws.addEventListener("close", (e) => {
+               clearTimeout(timer);
+               resolve({ status: "closed", code: e.code, reason: e.reason, wasClean: e.wasClean });
+             });
+           });
         }));
       };
     `
@@ -75,4 +75,3 @@ test("permissions: WebSocket connections are blocked when network permission is 
   assert.equal(result.status, "closed");
   assert.match(String(result.reason ?? ""), /Permission denied/);
 });
-

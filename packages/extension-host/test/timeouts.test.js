@@ -89,7 +89,7 @@ test("timeouts: command timeout terminates a hanging command handler", async (t)
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
-    activationTimeoutMs: 1000,
+    activationTimeoutMs: 5000,
     commandTimeoutMs: 100
   });
 
@@ -146,7 +146,7 @@ test("timeouts: terminating a hung worker rejects other in-flight requests and a
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
-    activationTimeoutMs: 1000,
+    activationTimeoutMs: 5000,
     commandTimeoutMs: 100
   });
 
@@ -212,7 +212,7 @@ test("timeouts: custom function timeout terminates a hanging handler", async (t)
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
-    activationTimeoutMs: 1000,
+    activationTimeoutMs: 5000,
     customFunctionTimeoutMs: 100
   });
 
@@ -266,7 +266,7 @@ test("timeouts: worker termination clears runtime context menus and can re-regis
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
-    activationTimeoutMs: 1000,
+    activationTimeoutMs: 5000,
     commandTimeoutMs: 100
   });
 

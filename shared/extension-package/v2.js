@@ -37,12 +37,32 @@ async function walkFiles(rootDir) {
       if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) continue;
 
       if (entry.isDirectory()) {
-        if (entry.name === "node_modules" || entry.name === ".git") continue;
+        if (
+          entry.name === "node_modules" ||
+          entry.name === ".git" ||
+          entry.name === "__tests__" ||
+          entry.name === "test" ||
+          entry.name === "tests"
+        ) {
+          continue;
+        }
         await visit(abs);
         continue;
       }
 
       if (!entry.isFile()) continue;
+
+      const lowerName = entry.name.toLowerCase();
+      if (
+        lowerName.endsWith(".test.js") ||
+        lowerName.endsWith(".test.cjs") ||
+        lowerName.endsWith(".test.mjs") ||
+        lowerName.endsWith(".spec.js") ||
+        lowerName.endsWith(".spec.cjs") ||
+        lowerName.endsWith(".spec.mjs")
+      ) {
+        continue;
+      }
       results.push({ abs, rel: normalizePath(rel) });
     }
   }
