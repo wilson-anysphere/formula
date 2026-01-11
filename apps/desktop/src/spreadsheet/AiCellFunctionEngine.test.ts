@@ -172,6 +172,55 @@ describe("AiCellFunctionEngine", () => {
     expect(events.some((e: any) => e.details?.type === "ai.cell_function")).toBe(true);
   });
 
+  it("does not persist restricted prompt text in audit logs for blocked runs", async () => {
+    const llmClient = { chat: vi.fn() };
+
+    const policy = createDefaultOrgPolicy();
+    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = {
+      ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING],
+      redactDisallowed: false,
+    };
+
+    const documentId = "unit-test-doc";
+    const storage = createMemoryStorage();
+    const classificationStore = new LocalClassificationStore({ storage });
+    classificationStore.upsert(
+      documentId,
+      { scope: CLASSIFICATION_SCOPE.CELL, documentId, sheetId: "Sheet1", row: 0, col: 0 },
+      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
+    );
+
+    const auditStore = new MemoryAIAuditStore();
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore,
+      sessionId: "test-session-blocked",
+      dlp: {
+        policy,
+        documentId,
+        classificationStore,
+        classify: () => ({ level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] }),
+      },
+    });
+
+    const value = evaluateFormula('=AI(A1, "hello")', (ref) => (ref === "A1" ? "top secret" : null), {
+      ai: engine,
+      cellAddress: "Sheet1!B1",
+    });
+    expect(value).toBe(AI_CELL_DLP_ERROR);
+    expect(llmClient.chat).not.toHaveBeenCalled();
+
+    await engine.waitForIdle();
+    const entries = await auditStore.listEntries({ session_id: "test-session-blocked" });
+    expect(entries).toHaveLength(1);
+    const input = entries[0]?.input as any;
+    expect(input?.prompt).toBe("[REDACTED]");
+    expect(input?.prompt).not.toContain("top secret");
+    expect(input?.inputs_preview).toBeUndefined();
+    expect(input?.inputs_hash).toMatch(/^[0-9a-f]{8}$/);
+    expect(input?.blocked).toBe(true);
+  });
+
   it("DLP does not allow restricted cells to be smuggled via nested formulas (e.g. IF)", () => {
     const llmClient = { chat: vi.fn() };
 

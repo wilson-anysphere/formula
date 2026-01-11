@@ -102,6 +102,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
 
   private readonly cache = new Map<string, CacheEntry>();
   private readonly inFlightByKey = new Map<string, Promise<void>>();
+  private readonly pendingAudits = new Set<Promise<void>>();
 
   private readonly dlpPolicy: any;
   private readonly classifyForDlp: (value: SpreadsheetValue) => { level: string; labels?: string[] };
@@ -183,14 +184,16 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       });
 
       // Deterministic cell error for blocked content.
-      void this.auditBlockedRun({
+      const audit = this.auditBlockedRun({
         functionName: fn,
         prompt,
         inputsHash,
         inputsPreview,
         cellAddress,
         dlp: { decision, selectionClassification, redactedCount },
-      });
+      }).catch(() => undefined);
+      this.pendingAudits.add(audit);
+      audit.finally(() => this.pendingAudits.delete(audit));
 
       return AI_CELL_DLP_ERROR;
     }
@@ -234,8 +237,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
    */
   async waitForIdle(): Promise<void> {
     // Keep draining in case awaiting a promise schedules more work.
-    while (this.inFlightByKey.size > 0) {
-      const snapshot = Array.from(this.inFlightByKey.values());
+    while (this.inFlightByKey.size > 0 || this.pendingAudits.size > 0) {
+      const snapshot = [...this.inFlightByKey.values(), ...this.pendingAudits];
       await Promise.all(snapshot.map((p) => p.catch(() => undefined)));
     }
   }
@@ -539,15 +542,17 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     });
 
     let redactedCount = 0;
-    if (decision.decision === DLP_DECISION.REDACT) {
+    const sanitizeDecision =
+      decision.decision === DLP_DECISION.BLOCK ? ({ ...decision, decision: DLP_DECISION.REDACT } as any) : decision;
+    if (sanitizeDecision.decision === DLP_DECISION.REDACT) {
       for (const item of prompt.items) {
-        item.value = redactIfNeeded(item.value, item.classification, decision, this.dlpPolicy, () => {
+        item.value = redactIfNeeded(item.value, item.classification, sanitizeDecision, this.dlpPolicy, () => {
           redactedCount += 1;
         }) as SpreadsheetValue;
       }
       for (const arg of inputs) {
         for (const item of arg.items) {
-          item.value = redactIfNeeded(item.value, item.classification, decision, this.dlpPolicy, () => {
+          item.value = redactIfNeeded(item.value, item.classification, sanitizeDecision, this.dlpPolicy, () => {
             redactedCount += 1;
           }) as SpreadsheetValue;
         }
