@@ -110,6 +110,29 @@ test("RefreshOrchestrator: merge dependency ordering (B merge depends on A)", as
   await handle.promise;
 });
 
+test("RefreshOrchestrator: merge dependency does not re-execute rightQuery inside merge step", async () => {
+  let reads = 0;
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        reads += 1;
+        return ["Key,Value", "1,a", "2,b"].join("\n");
+      },
+    },
+  });
+
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "csv", path: "file.csv", options: { hasHeaders: true } }));
+  orchestrator.registerQuery(
+    makeQuery("B", { type: "range", range: { values: [["Key"], [1]], hasHeaders: true } }, [
+      { id: "merge", name: "Merge", operation: { type: "merge", rightQuery: "A", joinType: "left", leftKey: "Key", rightKey: "Key" } },
+    ]),
+  );
+
+  await orchestrator.refreshAll(["B"]).promise;
+  assert.equal(reads, 1, "merge step should reuse precomputed dependency result");
+});
+
 test("RefreshOrchestrator: events include sessionId + dependency/target phase", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
@@ -168,6 +191,29 @@ test("RefreshOrchestrator: append dependency ordering (B append depends on A)", 
 
   engine.calls[1].deferred.resolve(makeResult("B"));
   await handle.promise;
+});
+
+test("RefreshOrchestrator: append dependencies do not re-execute appended queries inside append step", async () => {
+  let reads = 0;
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        reads += 1;
+        return ["Value", "1"].join("\n");
+      },
+    },
+  });
+
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "csv", path: "file.csv", options: { hasHeaders: true } }));
+  orchestrator.registerQuery(
+    makeQuery("B", { type: "range", range: { values: [["Value"], [2]], hasHeaders: true } }, [
+      { id: "append", name: "Append", operation: { type: "append", queries: ["A"] } },
+    ]),
+  );
+
+  await orchestrator.refreshAll(["B"]).promise;
+  assert.equal(reads, 1, "append step should reuse precomputed dependency result");
 });
 
 test("RefreshOrchestrator: runs independent queries concurrently", async () => {
