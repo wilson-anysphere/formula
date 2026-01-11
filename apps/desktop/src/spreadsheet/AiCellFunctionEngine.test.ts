@@ -149,6 +149,34 @@ describe("AiCellFunctionEngine", () => {
     expect(stored).not.toContain(legacyPrompt);
   });
 
+  it("persists AI cell cache keys using hashes (no raw prompt/input strings)", async () => {
+    const persistKey = "ai-cache-hashed";
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      model: "test-model",
+      cache: { persistKey },
+    });
+
+    const pending = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const stored = globalThis.localStorage?.getItem(persistKey) ?? "";
+    expect(stored).not.toContain("summarize");
+    expect(stored).not.toContain("hello");
+
+    // Keys should be `${model}\0${fn}\0${promptHash}\0${inputsHash}`.
+    expect(stored).toMatch(/test-model\\u0000AI\\u0000[0-9a-f]{8}\\u0000[0-9a-f]{8}/);
+  });
+
   it("changing referenced cells invalidates the cache key", async () => {
     const deferred1 = defer<any>();
     const deferred2 = defer<any>();
