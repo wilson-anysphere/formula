@@ -534,7 +534,9 @@ fn name_to_id() -> &'static HashMap<&'static str, u16> {
 
 /// Return the canonical Excel function name for a BIFF `iftab` id.
 pub fn function_name_from_id(id: u16) -> Option<&'static str> {
-    FTAB.get(id as usize).copied().filter(|name| !name.is_empty())
+    FTAB.get(id as usize)
+        .copied()
+        .filter(|name| !name.is_empty())
 }
 
 /// Return the BIFF `iftab` id for a given function name.
@@ -570,12 +572,17 @@ pub fn function_id_from_name(name: &str) -> Option<u16> {
 //
 // These are typically stored by Excel as `_xlfn.` functions and encoded in BIFF as
 // user-defined function calls (`iftab = 255`) with an accompanying name token.
-const FUTURE_UDF_FUNCTIONS: [&str; 7] = [
+const FUTURE_UDF_FUNCTIONS: [&str; 12] = [
     "CONCAT",
+    "FILTER",
     "IFNA",
+    "NETWORKDAYS.INTL",
     "NUMBERVALUE",
+    "SORT",
     "SEQUENCE",
     "TEXTJOIN",
+    "UNIQUE",
+    "WORKDAY.INTL",
     "XLOOKUP",
     "XMATCH",
 ];
