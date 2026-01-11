@@ -285,7 +285,9 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     ];
 
     const toolResults: ToolExecutionResult[] = [];
-    const toolPolicy = options.toolExecutorOptions?.toolPolicy ?? getDesktopToolPolicy({ mode: "chat", prompt: text });
+    const toolPolicy =
+      options.toolExecutorOptions?.toolPolicy ??
+      getDesktopToolPolicy({ mode: "chat", prompt: text, hasAttachments: attachments.length > 0 });
     const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
       ...(options.toolExecutorOptions ?? {}),
       toolPolicy,

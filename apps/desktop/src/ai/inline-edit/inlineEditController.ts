@@ -180,7 +180,7 @@ export class InlineEditController {
         prompt: params.prompt
       });
 
-      const toolPolicy = getDesktopToolPolicy({ mode: "inline_edit" });
+      const toolPolicy = getDesktopToolPolicy({ mode: "inline_edit", prompt: params.prompt });
       const toolExecutor = new SpreadsheetLLMToolExecutor(api, {
         default_sheet: params.sheetId,
         require_approval_for_mutations: true,

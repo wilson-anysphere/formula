@@ -1,79 +1,49 @@
-import type { ToolPolicy, ToolName } from "../../../../packages/ai-tools/src/tool-schema.js";
+import { decideAllowedTools } from "../../../../packages/ai-tools/src/llm/toolPolicy.js";
+import { ToolNameSchema, type ToolName, type ToolPolicy } from "../../../../packages/ai-tools/src/tool-schema.js";
 
 export type DesktopAiMode = "chat" | "inline_edit" | "agent";
 
-const CHAT_READ_ONLY_POLICY: ToolPolicy = {
-  allowCategories: ["read", "analysis"],
-  externalNetworkAllowed: false
-};
+const CHAT_READ_ONLY_TOOLS: ToolName[] = ["read_range", "filter_range", "detect_anomalies", "compute_statistics"];
 
-const CHAT_WRITE_INTENT_RE = new RegExp(
-  String.raw`\b(` +
-    [
-      "replace",
-      "fill",
-      "write",
-      "insert",
-      "update",
-      "set",
-      "edit",
-      "change",
-      "delete",
-      "remove",
-      "clear",
-      "sort",
-      "apply"
-    ].join("|") +
-    String.raw`)\b`,
-  "i"
-);
-
-const CHAT_FORMAT_INTENT_RE = /\b(format|bold|italic|underline|font|color|colour|highlight|background|number\s*format|currency|percent|percentage|align|alignment)\b/i;
-const CHAT_CHART_INTENT_RE = /\b(chart|plot|graph)\b/i;
-const CHAT_PIVOT_INTENT_RE = /\bpivot\b/i;
-
-const INLINE_EDIT_ALLOWED_TOOLS: ToolName[] = [
-  "read_range",
-  "write_cell",
-  "set_range",
-  "apply_formula_column",
-  "sort_range",
-  "filter_range",
-  "apply_formatting",
-  "detect_anomalies",
-  "compute_statistics"
-];
-
-const INLINE_EDIT_POLICY: ToolPolicy = {
-  allowTools: INLINE_EDIT_ALLOWED_TOOLS,
-  externalNetworkAllowed: false
-};
+function uniqueInToolOrder(names: Iterable<ToolName>): ToolName[] {
+  const set = new Set(names);
+  return (ToolNameSchema.options as ToolName[]).filter((name) => set.has(name));
+}
 
 const AGENT_POLICY: ToolPolicy = {};
 
-export function getDesktopToolPolicy(params: { mode: DesktopAiMode; prompt?: string }): ToolPolicy {
+export function getDesktopToolPolicy(params: {
+  mode: DesktopAiMode;
+  prompt?: string;
+  hasAttachments?: boolean;
+}): ToolPolicy {
   switch (params.mode) {
     case "agent":
       return AGENT_POLICY;
-    case "inline_edit":
-      return INLINE_EDIT_POLICY;
+    case "inline_edit": {
+      const prompt = String(params.prompt ?? "").trim();
+      const policy = decideAllowedTools({
+        mode: "inline_edit",
+        user_text: prompt,
+        // Inline edit is always attached to a concrete selection.
+        has_attachments: true,
+        allow_external_data: false
+      });
+      return { allowTools: policy.allowed_tools, externalNetworkAllowed: false };
+    }
     case "chat": {
       const prompt = String(params.prompt ?? "").trim();
-      if (!prompt) return CHAT_READ_ONLY_POLICY;
-
-      const wantsWrite = CHAT_WRITE_INTENT_RE.test(prompt);
-      const wantsFormat = CHAT_FORMAT_INTENT_RE.test(prompt);
-      const wantsChart = CHAT_CHART_INTENT_RE.test(prompt);
-      const wantsPivot = CHAT_PIVOT_INTENT_RE.test(prompt);
-
-      if (!wantsWrite && !wantsFormat && !wantsChart && !wantsPivot) return CHAT_READ_ONLY_POLICY;
-
-      const allowCategories: NonNullable<ToolPolicy["allowCategories"]> = ["read", "analysis"];
-      if (wantsWrite) allowCategories.push("mutate");
-      if (wantsFormat) allowCategories.push("format");
-      if (wantsChart) allowCategories.push("chart");
-      if (wantsPivot) allowCategories.push("pivot");
-      return { allowCategories, externalNetworkAllowed: false };
+      const policy = decideAllowedTools({
+        mode: "chat",
+        user_text: prompt,
+        has_attachments: Boolean(params.hasAttachments),
+        // Desktop chat blocks external fetch by default (host-controlled, agent-only for now).
+        allow_external_data: false
+      });
+      // Always allow safe read+analysis tools for grounding and post-response verification,
+      // even when the user's prompt is an edit instruction.
+      const allowTools = uniqueInToolOrder([...CHAT_READ_ONLY_TOOLS, ...policy.allowed_tools]);
+      return { allowTools, externalNetworkAllowed: false };
     }
     default: {
       const exhaustive: never = params.mode;

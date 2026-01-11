@@ -705,6 +705,9 @@ describe("ai chat orchestrator", () => {
     // Least privilege: don't expose chart/pivot tools for basic range edits.
     expect(toolNames).not.toContain("create_chart");
     expect(toolNames).not.toContain("create_pivot_table");
+    // Least privilege: avoid unrelated mutation helpers unless explicitly requested.
+    expect(toolNames).not.toContain("apply_formula_column");
+    expect(toolNames).not.toContain("sort_range");
 
     const writeCell = toolDefs.find((t: any) => t.name === "write_cell");
     expect(writeCell?.requiresApproval).toBe(true);
