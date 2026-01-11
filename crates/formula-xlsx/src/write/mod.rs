@@ -1189,7 +1189,6 @@ fn render_sheet_data(
         }
 
         let meta = doc.meta.cell_meta.get(&(sheet_meta.worksheet_id, cell_ref));
-        let raw_value = meta.and_then(|m| m.raw_value.as_deref());
         let value_kind = effective_value_kind(meta, cell);
 
         if !matches!(cell.value, CellValue::Empty) {
@@ -1263,12 +1262,10 @@ fn render_sheet_data(
 
         match &cell.value {
             CellValue::Empty => {}
-            _ if matches!(value_kind, CellValueKind::Other { .. }) => {
-                if let Some(raw) = raw_value {
-                    out.push_str("<v>");
-                    out.push_str(&escape_text(raw));
-                    out.push_str("</v>");
-                }
+            value @ CellValue::String(s) if matches!(value_kind, CellValueKind::Other { .. }) => {
+                out.push_str("<v>");
+                out.push_str(&escape_text(&raw_or_other(meta, s)));
+                out.push_str("</v>");
             }
             CellValue::Number(n) => {
                 out.push_str("<v>");
@@ -1360,7 +1357,7 @@ fn effective_value_kind(meta: Option<&crate::CellMeta>, cell: &formula_model::Ce
             // to round-trip safely. If we don't have it, fall back to the inferred kind so we emit
             // a valid SpreadsheetML representation.
             if matches!(kind, CellValueKind::Other { .. }) {
-                if meta.raw_value.is_some() {
+                if meta.raw_value.is_some() && matches!(cell.value, CellValue::String(_)) {
                     return kind;
                 }
             } else if value_kind_compatible(&kind, &cell.value) {
@@ -1448,6 +1445,12 @@ fn raw_or_str(meta: Option<&crate::CellMeta>, s: &str) -> String {
         }
     }
     s.to_string()
+}
+
+fn raw_or_other(meta: Option<&crate::CellMeta>, s: &str) -> String {
+    // Unknown/less-common `t=` types store their payload as text; preserve the original `<v>`
+    // content when it still matches the in-memory value.
+    raw_or_str(meta, s)
 }
 
 fn shared_string_index(
