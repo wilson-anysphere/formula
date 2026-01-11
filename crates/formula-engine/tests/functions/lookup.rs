@@ -477,6 +477,26 @@ fn hlookup_exact_match() {
 }
 
 #[test]
+fn hlookup_supports_wildcard_exact_matching() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "apple");
+    sheet.set("B1", "banana");
+    sheet.set("C1", "*");
+    sheet.set("A2", 10.0);
+    sheet.set("B2", 20.0);
+    sheet.set("C2", 30.0);
+
+    assert_eq!(
+        sheet.eval("=HLOOKUP(\"b*\", A1:C2, 2, FALSE)"),
+        Value::Number(20.0)
+    );
+    assert_eq!(
+        sheet.eval("=HLOOKUP(\"~*\", A1:C2, 2, FALSE)"),
+        Value::Number(30.0)
+    );
+}
+
+#[test]
 fn index_and_match() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", Value::Text("A".to_string()));
