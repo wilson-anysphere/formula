@@ -513,3 +513,101 @@ test("content conflicts (value vs formula) are still detected after restarting t
   assert.equal(conflict.local.type, "value");
   assert.equal(conflict.local.value, "bob");
 });
+
+test("content conflicts (formula vs value) are still detected after restarting the monitor", () => {
+  // Value writer has higher clientID and wins.
+  const alice = createClient("alice", { clientID: 1, mode: "formula+value" });
+  const bob = createClient("bob", { clientID: 2, mode: "formula+value" });
+
+  // Establish a shared base cell map.
+  bob.monitor.setLocalValue("s:0:0", "base");
+  syncDocs(alice.doc, bob.doc);
+
+  // Offline concurrent edits: alice writes formula; bob writes value (bob wins).
+  alice.monitor.setLocalFormula("s:0:0", "=1");
+  bob.monitor.setLocalValue("s:0:0", "bob");
+
+  // Restart only the losing side (formula writer).
+  restartMonitor(alice, { mode: "formula+value" });
+
+  syncDocs(alice.doc, bob.doc);
+
+  const conflict = alice.conflicts.find((c) => c.kind === "content") ?? null;
+  assert.ok(conflict, "expected a content conflict on alice after restart");
+  assert.equal(conflict.local.type, "formula");
+  assert.equal(conflict.local.formula, "=1");
+  assert.equal(conflict.remote.type, "value");
+  assert.equal(conflict.remote.value, "bob");
+});
+
+test("value conflicts are still detected after restarting the monitor", () => {
+  // Ensure deterministic tie-breaking for concurrent map-entry overwrites:
+  // higher clientID wins in Yjs.
+  const alice = createClient("alice", { clientID: 2, mode: "formula+value" });
+  const bob = createClient("bob", { clientID: 1, mode: "formula+value" });
+
+  // Establish a shared base cell map.
+  alice.monitor.setLocalValue("s:0:0", "base");
+  syncDocs(alice.doc, bob.doc);
+
+  // Offline concurrent edits: alice writes "alice"; bob writes "bob".
+  // Alice wins, so bob should see a value conflict.
+  alice.monitor.setLocalValue("s:0:0", "alice");
+  bob.monitor.setLocalValue("s:0:0", "bob");
+
+  restartMonitor(bob, { mode: "formula+value" });
+
+  syncDocs(alice.doc, bob.doc);
+
+  const conflict = bob.conflicts.find((c) => c.kind === "value") ?? null;
+  assert.ok(conflict, "expected a value conflict on bob after restart");
+  assert.equal(conflict.localValue, "bob");
+  assert.equal(conflict.remoteValue, "alice");
+});
+
+test("legacy content conflicts are still detected after restarting the monitor", () => {
+  // Ensure deterministic tie-breaking for concurrent map-entry overwrites:
+  // higher clientID wins in Yjs.
+  const alice = createClient("alice", { clientID: 1, mode: "formula+value" });
+
+  // Simulate a legacy client that writes values and attempts `delete(\"formula\")`
+  // when the key is missing (no-op), leaving both formula + value present.
+  const bobDoc = new Y.Doc();
+  bobDoc.clientID = 2;
+  const bobCells = bobDoc.getMap("cells");
+
+  // Establish a base cell map with no `formula` key on bob.
+  alice.doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "base");
+    cell.set("modifiedBy", "alice");
+    cell.set("modified", Date.now());
+    alice.cells.set("s:0:0", cell);
+  }, alice.monitor.origin);
+  syncDocs(alice.doc, bobDoc);
+
+  const bobCell = /** @type {Y.Map<any>} */ (bobCells.get("s:0:0"));
+  assert.ok(bobCell, "expected base cell map on bob");
+  assert.equal(bobCell.get("formula"), undefined);
+
+  // Offline concurrent edits: alice writes formula (also sets value=null); bob writes a value
+  // and attempts to delete formula (no-op because it doesn't exist on bob).
+  alice.monitor.setLocalFormula("s:0:0", "=1");
+  bobDoc.transact(() => {
+    bobCell.set("value", "bob");
+    bobCell.delete("formula");
+    bobCell.set("modifiedBy", "bob");
+    bobCell.set("modified", Date.now());
+  });
+
+  restartMonitor(alice, { mode: "formula+value" });
+
+  syncDocs(alice.doc, bobDoc);
+
+  const conflict = alice.conflicts.find((c) => c.kind === "content") ?? null;
+  assert.ok(conflict, "expected a legacy content conflict on alice after restart");
+  assert.equal(conflict.local.type, "formula");
+  assert.equal(conflict.local.formula, "=1");
+  assert.equal(conflict.remote.type, "value");
+  assert.equal(conflict.remote.value, "bob");
+});

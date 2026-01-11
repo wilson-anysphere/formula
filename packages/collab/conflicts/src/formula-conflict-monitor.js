@@ -575,6 +575,45 @@ export class FormulaConflictMonitor {
       return;
     }
 
+    // Fallback when the monitor restarts (or local edit tracking is otherwise lost):
+    // local formula write vs remote value write where the remote value wins and clears the
+    // formula (formula=null marker). Without the in-memory local edit log we can still
+    // surface a content conflict based on the previous `modifiedBy` value.
+    if (
+      this.includeValueConflicts &&
+      hasValueChange &&
+      !lastContent &&
+      !remoteFormula &&
+      currentValue !== null &&
+      oldModifiedBy === this.localUserId &&
+      !formulasRoughlyEqual(localFormula, "")
+    ) {
+      const cell = cellRefFromKey(cellKey);
+      const conflict = /** @type {FormulaConflict} */ ({
+        id: crypto.randomUUID(),
+        kind: "content",
+        cell,
+        cellKey,
+        local: { type: "formula", formula: localFormula },
+        remote: { type: "value", value: currentValue },
+        remoteUserId,
+        detectedAt: Date.now()
+      });
+
+      if (this.getCellValue) {
+        const localPreview = tryEvaluateFormula(localFormula, {
+          getCellValue: ({ col, row }) => this.getCellValue({ sheetId: cell.sheetId, col, row })
+        });
+        if (conflict.local.type === "formula") {
+          conflict.local.preview = localPreview.ok ? localPreview.value : null;
+        }
+      }
+
+      this._conflicts.set(conflict.id, conflict);
+      this.onConflict(conflict);
+      return;
+    }
+
     const decision = resolveFormulaConflict({
       localFormula,
       remoteFormula
@@ -627,12 +666,27 @@ export class FormulaConflictMonitor {
    * @param {any} input.newValue
    * @param {"add" | "update" | "delete"} input.action
    * @param {string} input.remoteUserId
+   * @param {string} [input.oldModifiedBy]
    * @param {any} input.origin
    * @param {{ client: number, clock: number } | null} input.itemId
    * @param {{ client: number, clock: number } | null} input.newItemOriginId
+   * @param {{ client: number, clock: number } | null} [input.itemLeftId]
+   * @param {string} [input.currentFormula]
    */
   _handleValueChange(input) {
-    const { cellKey, oldValue, newValue, action, remoteUserId, origin, itemId, newItemOriginId } = input;
+    const {
+      cellKey,
+      oldValue,
+      newValue,
+      action,
+      remoteUserId,
+      oldModifiedBy = "",
+      origin,
+      itemId,
+      newItemOriginId,
+      itemLeftId = null,
+      currentFormula = ""
+    } = input;
 
     const isLocal = this.localOrigins.has(origin);
     if (isLocal) return;
@@ -688,10 +742,85 @@ export class FormulaConflictMonitor {
         this.onConflict(conflict);
         return;
       }
+
+      // Fallback when the monitor restarts (or local edit tracking is otherwise lost):
+      // local formula write vs legacy remote value write that overwrote the value key
+      // without clearing the formula key (e.g. remote attempted `delete("formula")`
+      // but the key was missing, leaving both `formula` and `value` present).
+      if (
+        !lastContent &&
+        oldModifiedBy === this.localUserId &&
+        valuesDeeplyEqual(oldValue, null) &&
+        newValue !== null &&
+        currentFormula.trim()
+      ) {
+        // Sequential overwrite (remote saw our value=null marker) - ignore.
+        if (itemLeftId && idsEqual(newItemOriginId, itemLeftId)) return;
+
+        const cell = cellRefFromKey(cellKey);
+        const localFormula = currentFormula.trim();
+        const conflict = /** @type {FormulaConflict} */ ({
+          id: crypto.randomUUID(),
+          kind: "content",
+          cell,
+          cellKey,
+          local: { type: "formula", formula: localFormula },
+          remote: { type: "value", value: newValue },
+          remoteUserId,
+          detectedAt: Date.now()
+        });
+
+        if (this.getCellValue) {
+          const localPreview = tryEvaluateFormula(localFormula, {
+            getCellValue: ({ col, row }) => this.getCellValue({ sheetId: cell.sheetId, col, row })
+          });
+          if (conflict.local.type === "formula") {
+            conflict.local.preview = localPreview.ok ? localPreview.value : null;
+          }
+        }
+
+        this._conflicts.set(conflict.id, conflict);
+        this.onConflict(conflict);
+        return;
+      }
+
+      // If the cell currently has a formula, value edits are either formula-side markers
+      // (`value=null`) or legacy/split-key content conflicts (handled above). Don't emit a
+      // standalone value conflict in that case.
+      if (currentFormula.trim()) return;
     }
 
     const lastLocal = this._lastLocalValueEditByCellKey.get(cellKey);
-    if (!lastLocal) return;
+    if (!lastLocal) {
+      // Restart fallback: infer "this was my local value" from the previous `modifiedBy`
+      // and the overwritten value itself. We intentionally only do this when the old
+      // value is non-null; `null` is ambiguous (it could be from a formula edit or a clear).
+      if (oldModifiedBy !== this.localUserId) return;
+      if (oldValue === null) return;
+      if (action === "delete") return;
+
+      // Sequential overwrite (remote saw our write) - ignore.
+      if (itemLeftId && idsEqual(newItemOriginId, itemLeftId)) return;
+
+      // Auto-resolve when the values are deep-equal.
+      if (valuesDeeplyEqual(newValue, oldValue)) return;
+
+      const cell = cellRefFromKey(cellKey);
+      const conflict = /** @type {FormulaConflict} */ ({
+        id: crypto.randomUUID(),
+        kind: "value",
+        cell,
+        cellKey,
+        localValue: oldValue,
+        remoteValue: newValue,
+        remoteUserId,
+        detectedAt: Date.now()
+      });
+
+      this._conflicts.set(conflict.id, conflict);
+      this.onConflict(conflict);
+      return;
+    }
 
     if (!valuesDeeplyEqual(oldValue, lastLocal.value)) return;
 
