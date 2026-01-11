@@ -270,7 +270,12 @@ const BRIDGE_API_KEY = "__formulaPyodideBridgeApi";
 const BRIDGE_REGISTERED_KEY = "__formulaPyodideBridgeRegistered";
 
 export function setFormulaBridgeApi(runtime, api) {
-  runtime[BRIDGE_API_KEY] = api;
+  Object.defineProperty(runtime, BRIDGE_API_KEY, {
+    value: api,
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  });
 }
 
 function coercePyProxy(value) {
@@ -377,7 +382,12 @@ export function registerFormulaBridge(runtime) {
     set_range_format: (range, format) => call("set_range_format", { range, format }),
     get_range_format: (range) => call("get_range_format", { range }),
   });
-  runtime[BRIDGE_REGISTERED_KEY] = true;
+  Object.defineProperty(runtime, BRIDGE_REGISTERED_KEY, {
+    value: true,
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  });
 }
  
 export function installFormulaFiles(runtime, formulaFiles) {
