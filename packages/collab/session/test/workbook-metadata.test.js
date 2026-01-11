@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import * as Y from "yjs";
 
 import { REMOTE_ORIGIN } from "@formula/collab-undo";
-import { NamedRangeManager, SheetManager } from "@formula/collab-workbook";
+import { MetadataManager, NamedRangeManager, SheetManager } from "@formula/collab-workbook";
 
 import { createCollabSession } from "../src/index.ts";
 
@@ -54,6 +54,7 @@ test("CollabSession workbook metadata: sheets + namedRanges sync and local undo 
 
   const sheetsA = new SheetManager({ doc: docA, transact: sessionA.undo?.transact });
   const namedRangesA = new NamedRangeManager({ doc: docA, transact: sessionA.undo?.transact });
+  const metadataA = new MetadataManager({ doc: docA, transact: sessionA.undo?.transact });
 
   // Default schema initialization should ensure at least one sheet.
   assert.equal(sessionA.sheets.length >= 1, true);
@@ -79,7 +80,15 @@ test("CollabSession workbook metadata: sheets + namedRanges sync and local undo 
   sessionA.undo?.stopCapturing();
   assert.deepEqual(sessionB.namedRanges.get("MyRange"), { sheetId: "Sheet2", range: "A1:C3" });
 
+  metadataA.set("title", "Quarterly Budget");
+  sessionA.undo?.stopCapturing();
+  assert.equal(sessionB.metadata.get("title"), "Quarterly Budget");
+
   // Undo should only revert local-origin changes (and sync that undo update to peers).
+  sessionA.undo?.undo();
+  assert.equal(sessionA.metadata.has("title"), false);
+  assert.equal(sessionB.metadata.has("title"), false);
+
   sessionA.undo?.undo();
   assert.deepEqual(sessionA.namedRanges.get("MyRange"), { sheetId: "Sheet2", range: "A1:B2" });
   assert.deepEqual(sessionB.namedRanges.get("MyRange"), { sheetId: "Sheet2", range: "A1:B2" });
@@ -106,4 +115,3 @@ test("CollabSession workbook metadata: sheets + namedRanges sync and local undo 
   docA.destroy();
   docB.destroy();
 });
-

@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 
 import WebSocket from "ws";
 
-import { NamedRangeManager, SheetManager } from "@formula/collab-workbook";
+import { MetadataManager, NamedRangeManager, SheetManager } from "@formula/collab-workbook";
 
 import { createCollabSession } from "../src/index.ts";
 import {
@@ -87,10 +87,12 @@ test("CollabSession workbook metadata persists via sync-server (sheets + namedRa
     doc: sessionA.doc,
     transact: (fn) => sessionA.doc.transact(fn, sessionA.origin),
   });
+  const metadataA = new MetadataManager({ doc: sessionA.doc, transact: (fn) => sessionA.doc.transact(fn, sessionA.origin) });
 
   sheetsA.addSheet({ id: "Sheet2", name: "Budget" });
   sheetsA.moveSheet("Sheet2", 0);
   namedRangesA.set("MyRange", { sheetId: "Sheet2", range: "A1:B2" });
+  metadataA.set("title", "Quarterly Budget");
 
   await waitForCondition(() => {
     const bSheets = snapshotSheets(sessionB);
@@ -98,11 +100,13 @@ test("CollabSession workbook metadata persists via sync-server (sheets + namedRa
     if (bSheets[0]?.id !== "Sheet2" || bSheets[0]?.name !== "Budget") return false;
     if (bSheets[1]?.id !== "Sheet1") return false;
     const nr = sessionB.namedRanges.get("MyRange");
-    return nr?.sheetId === "Sheet2" && nr?.range === "A1:B2";
+    const title = sessionB.metadata.get("title");
+    return nr?.sheetId === "Sheet2" && nr?.range === "A1:B2" && title === "Quarterly Budget";
   }, 10_000);
 
   assert.deepEqual(snapshotSheets(sessionB).map((s) => s.id), ["Sheet2", "Sheet1"]);
   assert.deepEqual(sessionB.namedRanges.get("MyRange"), { sheetId: "Sheet2", range: "A1:B2" });
+  assert.equal(sessionB.metadata.get("title"), "Quarterly Budget");
 
   // Tear down clients and restart the server, keeping the same data directory.
   sessionA.destroy();
@@ -140,9 +144,11 @@ test("CollabSession workbook metadata persists via sync-server (sheets + namedRa
     if (sheets[0]?.id !== "Sheet2" || sheets[0]?.name !== "Budget") return false;
     if (sheets[1]?.id !== "Sheet1") return false;
     const nr = sessionC.namedRanges.get("MyRange");
-    return nr?.sheetId === "Sheet2" && nr?.range === "A1:B2";
+    const title = sessionC.metadata.get("title");
+    return nr?.sheetId === "Sheet2" && nr?.range === "A1:B2" && title === "Quarterly Budget";
   }, 10_000);
 
   assert.deepEqual(snapshotSheets(sessionC).map((s) => s.id), ["Sheet2", "Sheet1"]);
   assert.deepEqual(sessionC.namedRanges.get("MyRange"), { sheetId: "Sheet2", range: "A1:B2" });
+  assert.equal(sessionC.metadata.get("title"), "Quarterly Budget");
 });
