@@ -246,6 +246,7 @@ describe("SAML provider admin APIs", () => {
         payload: {
           entryPoint: "http://idp.example.test/sso",
           issuer: "http://sp.example.test/metadata",
+          idpIssuer: "https://idp.example.test/metadata",
           idpCertPem: TEST_CERT_PEM,
           wantAssertionsSigned: true,
           wantResponseSigned: false,
@@ -263,6 +264,7 @@ describe("SAML provider admin APIs", () => {
         payload: {
           entryPoint: "http://idp.example.test/sso2",
           issuer: "http://sp.example.test/metadata",
+          idpIssuer: "https://idp.example.test/metadata",
           idpCertPem: TEST_CERT_PEM,
           wantAssertionsSigned: true,
           wantResponseSigned: false,
@@ -326,6 +328,7 @@ describe("SAML SSO", () => {
         payload: {
           entryPoint: "http://idp.example.test/sso",
           issuer: "http://sp.example.test/metadata",
+          idpIssuer: "https://idp.example.test/metadata",
           idpCertPem: TEST_CERT_PEM,
           wantAssertionsSigned: true,
           wantResponseSigned: false,
@@ -407,6 +410,49 @@ describe("SAML SSO", () => {
       });
       expect(replayRes.statusCode).toBe(401);
       expect((replayRes.json() as any).error).toBe("invalid_saml_response");
+
+      // If an IdP issuer is configured, responses from a different issuer should be rejected.
+      const updateProvider = await app.inject({
+        method: "PUT",
+        url: `/orgs/${orgId}/saml/providers/test`,
+        headers: { cookie },
+        payload: {
+          entryPoint: "http://idp.example.test/sso",
+          issuer: "http://sp.example.test/metadata",
+          idpIssuer: "https://idp.other.example.test/metadata",
+          idpCertPem: TEST_CERT_PEM,
+          wantAssertionsSigned: true,
+          wantResponseSigned: false,
+          attributeMapping: { email: "email", name: "name" },
+          enabled: true
+        }
+      });
+      expect(updateProvider.statusCode).toBe(200);
+
+      const issuerStart = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+      expect(issuerStart.statusCode).toBe(302);
+      const issuerUrl = new URL(issuerStart.headers.location as string);
+      const issuerRequestId = extractAuthnRequestId(issuerUrl.searchParams.get("SAMLRequest")!);
+      const issuerRelayState = issuerUrl.searchParams.get("RelayState");
+      expect(issuerRelayState).toBeTruthy();
+
+      const issuerResponse = buildSignedSamlResponse({
+        callbackUrl,
+        audience: "http://sp.example.test/metadata",
+        inResponseTo: issuerRequestId,
+        nameId: "saml-subject-123",
+        email: "saml-user@example.com",
+        name: "SAML User"
+      });
+
+      const issuerCallback = await app.inject({
+        method: "POST",
+        url: `/auth/saml/${orgId}/test/callback`,
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({ SAMLResponse: issuerResponse, RelayState: issuerRelayState! }).toString()
+      });
+      expect(issuerCallback.statusCode).toBe(401);
+      expect((issuerCallback.json() as any).error).toBe("invalid_saml_response");
     } finally {
       await app.close();
       await db.end();

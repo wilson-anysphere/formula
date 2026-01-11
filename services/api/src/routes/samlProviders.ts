@@ -11,6 +11,7 @@ type OrgSamlProviderRow = {
   provider_id: string;
   entry_point: string;
   issuer: string;
+  idp_issuer: string | null;
   idp_cert_pem: string;
   want_assertions_signed: boolean;
   want_response_signed: boolean;
@@ -106,6 +107,7 @@ async function requireOrgAdmin(
 const PutProviderBody = z.object({
   entryPoint: z.string().min(1),
   issuer: z.string().min(1),
+  idpIssuer: z.string().min(1).optional(),
   idpCertPem: z.string().min(1),
   wantAssertionsSigned: z.boolean().optional(),
   wantResponseSigned: z.boolean().optional(),
@@ -129,7 +131,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
     const providers = await app.db.query<OrgSamlProviderRow>(
       `
         SELECT org_id, provider_id, entry_point, issuer, idp_cert_pem,
-               want_assertions_signed, want_response_signed, attribute_mapping,
+               idp_issuer, want_assertions_signed, want_response_signed, attribute_mapping,
                enabled, created_at, updated_at
         FROM org_saml_providers
         WHERE org_id = $1
@@ -144,6 +146,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
         providerId: row.provider_id,
         entryPoint: row.entry_point,
         issuer: row.issuer,
+        idpIssuer: row.idp_issuer,
         idpCertPem: row.idp_cert_pem,
         wantAssertionsSigned: Boolean(row.want_assertions_signed),
         wantResponseSigned: Boolean(row.want_response_signed),
@@ -176,9 +179,13 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
 
       let entryPoint: string;
       let issuer: string;
+      let idpIssuer: string | null = null;
       try {
         entryPoint = validateHttpsUrl(parsed.data.entryPoint, requireHttps);
         issuer = validateIssuer(parsed.data.issuer, requireHttps);
+        if (parsed.data.idpIssuer !== undefined) {
+          idpIssuer = validateIssuer(parsed.data.idpIssuer, requireHttps);
+        }
       } catch (err) {
         const code = err instanceof Error ? err.message : "invalid_request";
         return reply.code(400).send({ error: code });
@@ -203,24 +210,26 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
             provider_id,
             entry_point,
             issuer,
+            idp_issuer,
             idp_cert_pem,
             want_assertions_signed,
             want_response_signed,
             attribute_mapping,
             enabled
           )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
           ON CONFLICT (org_id, provider_id)
           DO UPDATE SET
             entry_point = EXCLUDED.entry_point,
             issuer = EXCLUDED.issuer,
+            idp_issuer = EXCLUDED.idp_issuer,
             idp_cert_pem = EXCLUDED.idp_cert_pem,
             want_assertions_signed = EXCLUDED.want_assertions_signed,
             want_response_signed = EXCLUDED.want_response_signed,
             attribute_mapping = EXCLUDED.attribute_mapping,
             enabled = EXCLUDED.enabled,
             updated_at = now()
-          RETURNING org_id, provider_id, entry_point, issuer, idp_cert_pem,
+          RETURNING org_id, provider_id, entry_point, issuer, idp_issuer, idp_cert_pem,
                     want_assertions_signed, want_response_signed, attribute_mapping,
                     enabled, created_at, updated_at
         `,
@@ -229,6 +238,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
           providerId,
           entryPoint,
           issuer,
+          idpIssuer,
           parsed.data.idpCertPem,
           wantAssertionsSigned,
           wantResponseSigned,
@@ -264,6 +274,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
           providerId: row.provider_id,
           entryPoint: row.entry_point,
           issuer: row.issuer,
+          idpIssuer: row.idp_issuer,
           idpCertPem: row.idp_cert_pem,
           wantAssertionsSigned: Boolean(row.want_assertions_signed),
           wantResponseSigned: Boolean(row.want_response_signed),

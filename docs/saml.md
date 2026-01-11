@@ -14,6 +14,7 @@ SAML providers are stored in `org_saml_providers` and managed through org-admin 
 - `providerId` (path param): A short identifier for the IdP configuration (e.g. `okta`, `azuread`).
 - `entryPoint`: IdP SSO URL (must be a valid URL; **HTTPS required in production**).
 - `issuer`: Service Provider issuer / Entity ID. This is also used as the SAML **audience** when validating assertions.
+- `idpIssuer` (optional): Expected IdP EntityID / Issuer. When set, Formula rejects assertions whose `<saml:Issuer>` does not match.
 - `idpCertPem`: IdP signing certificate in PEM format (the public cert used to validate XML signatures).
 - `wantAssertionsSigned`: Require `<Assertion>` signatures (default `true`).
 - `wantResponseSigned`: Require `<Response>` signatures (default `true`).
@@ -75,7 +76,8 @@ Accepts `application/x-www-form-urlencoded` POSTs containing:
 On success, Formula:
 
 1. Validates response/assertion signatures, issuer/audience, and time conditions.
-   - If the IdP includes `InResponseTo`, Formula validates it against a short-lived request cache and consumes it (replay protection).
+    - If the IdP includes `InResponseTo`, Formula validates it against a short-lived request cache and consumes it (replay protection).
+    - If the assertion includes a `SubjectConfirmationData Recipient`, Formula requires it to match the ACS URL.
 2. Extracts identity via `attributeMapping` and normalizes email.
 3. Links the identity in `user_identities` (`provider = providerId`, `subject = NameID`, `org_id = orgId`).
 4. Provisions the user + org membership if needed.

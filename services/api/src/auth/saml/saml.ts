@@ -14,6 +14,7 @@ type OrgSamlProviderRow = {
   provider_id: string;
   entry_point: string;
   issuer: string;
+  idp_issuer: string | null;
   idp_cert_pem: string;
   want_assertions_signed: boolean;
   want_response_signed: boolean;
@@ -190,6 +191,7 @@ async function loadOrgProvider(
 ): Promise<{
   entryPoint: string;
   issuer: string;
+  idpIssuer: string | null;
   idpCertPem: string;
   wantAssertionsSigned: boolean;
   wantResponseSigned: boolean;
@@ -198,7 +200,7 @@ async function loadOrgProvider(
 } | null> {
   const res = await request.server.db.query<OrgSamlProviderRow>(
     `
-      SELECT org_id, provider_id, entry_point, issuer, idp_cert_pem,
+      SELECT org_id, provider_id, entry_point, issuer, idp_issuer, idp_cert_pem,
              want_assertions_signed, want_response_signed, attribute_mapping, enabled
       FROM org_saml_providers
       WHERE org_id = $1 AND provider_id = $2
@@ -213,6 +215,7 @@ async function loadOrgProvider(
   return {
     entryPoint: String(row.entry_point),
     issuer: String(row.issuer),
+    idpIssuer: row.idp_issuer ? String(row.idp_issuer) : null,
     idpCertPem: String(row.idp_cert_pem),
     wantAssertionsSigned: Boolean(row.want_assertions_signed),
     wantResponseSigned: Boolean(row.want_response_signed),
@@ -300,6 +303,41 @@ function extractName(profile: Record<string, unknown>, mapping: AttributeMapping
 
   const local = email.split("@")[0];
   return local && local.length > 0 ? local : "User";
+}
+
+function assertionRecipientsMatch(profile: Record<string, unknown>, callbackUrl: string): boolean {
+  const getAssertion = (profile as any).getAssertion;
+  if (typeof getAssertion !== "function") return true;
+
+  let assertionDoc: any;
+  try {
+    assertionDoc = getAssertion.call(profile);
+  } catch {
+    return true;
+  }
+
+  const assertion = assertionDoc?.Assertion;
+  if (!assertion) return true;
+
+  const subjects = Array.isArray(assertion.Subject) ? assertion.Subject : [];
+  let sawRecipient = false;
+
+  for (const subject of subjects) {
+    const confirmations = Array.isArray(subject?.SubjectConfirmation) ? subject.SubjectConfirmation : [];
+    for (const confirmation of confirmations) {
+      const dataNodes = Array.isArray(confirmation?.SubjectConfirmationData) ? confirmation.SubjectConfirmationData : [];
+      for (const node of dataNodes) {
+        const recipient = node?.$?.Recipient;
+        if (typeof recipient === "string" && recipient.trim().length > 0) {
+          sawRecipient = true;
+          if (recipient.trim() === callbackUrl) return true;
+        }
+      }
+    }
+  }
+
+  // If the assertion did not include a Recipient, don't fail; some IdPs omit it.
+  return !sawRecipient;
 }
 
 function samlIndicatesMfa(profile: Record<string, unknown>): boolean {
@@ -597,6 +635,17 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
       } catch {
         // ignore cache cleanup failures; replay protection is best-effort
       }
+    }
+
+    if (provider.idpIssuer) {
+      const issuer = firstStringValue((profile as any).issuer);
+      if (!issuer || issuer !== provider.idpIssuer) {
+        throw new Error(`SAML issuer mismatch (expected ${provider.idpIssuer}, got ${issuer ?? "missing"})`);
+      }
+    }
+
+    if (!assertionRecipientsMatch(profile, callbackUrl)) {
+      throw new Error("SAML assertion recipient mismatch");
     }
   } catch (err) {
     request.server.metrics.authFailuresTotal.inc({ reason: "invalid_saml_response" });
