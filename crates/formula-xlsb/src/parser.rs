@@ -736,6 +736,84 @@ mod tests {
     }
 
     #[test]
+    fn parse_workbook_populates_defined_names_brtname() {
+        let mut workbook_bin = Vec::new();
+
+        // Sheet1 (rId1).
+        let mut sheet1 = Vec::new();
+        sheet1.extend_from_slice(&0u32.to_le_bytes()); // flags/state
+        sheet1.extend_from_slice(&1u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet1, "rId1");
+        write_utf16_string(&mut sheet1, "Sheet1");
+        write_record(&mut workbook_bin, biff12::SHEET, &sheet1);
+
+        // Sheet2 (rId2).
+        let mut sheet2 = Vec::new();
+        sheet2.extend_from_slice(&0u32.to_le_bytes()); // flags/state
+        sheet2.extend_from_slice(&2u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet2, "rId2");
+        write_utf16_string(&mut sheet2, "Sheet2");
+        write_record(&mut workbook_bin, biff12::SHEET, &sheet2);
+
+        write_record(&mut workbook_bin, biff12::SHEETS_END, &[]);
+
+        // Defined names using BIFF12 `BrtName` (record id `0x0027`).
+        // Index 1: workbook-scope "MyName" with refersTo = 42.
+        let mut name1 = Vec::new();
+        name1.extend_from_slice(&0u32.to_le_bytes()); // flags
+        name1.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes()); // workbook scope sentinel
+        name1.push(0); // reserved
+        write_utf16_string(&mut name1, "MyName");
+        let rgce1: Vec<u8> = vec![0x1E, 42u16.to_le_bytes()[0], 42u16.to_le_bytes()[1]]; // PtgInt(42)
+        name1.extend_from_slice(&(rgce1.len() as u32).to_le_bytes());
+        name1.extend_from_slice(&rgce1);
+        write_record(&mut workbook_bin, biff12::NAME, &name1);
+
+        // Index 2: sheet-scope "LocalName" on Sheet2 with refersTo = 7.
+        let mut name2 = Vec::new();
+        name2.extend_from_slice(&0u32.to_le_bytes()); // flags
+        name2.extend_from_slice(&1u32.to_le_bytes()); // 0-based sheet index (Sheet2)
+        name2.push(0); // reserved
+        write_utf16_string(&mut name2, "LocalName");
+        let rgce2: Vec<u8> = vec![0x1E, 7u16.to_le_bytes()[0], 7u16.to_le_bytes()[1]]; // PtgInt(7)
+        name2.extend_from_slice(&(rgce2.len() as u32).to_le_bytes());
+        name2.extend_from_slice(&rgce2);
+        write_record(&mut workbook_bin, biff12::NAME, &name2);
+
+        let rels: HashMap<String, String> = HashMap::from([
+            ("rId1".to_string(), "worksheets/sheet1.bin".to_string()),
+            ("rId2".to_string(), "worksheets/sheet2.bin".to_string()),
+        ]);
+
+        let (_sheets, ctx, _props, defined_names) =
+            parse_workbook(&mut Cursor::new(&workbook_bin), &rels).expect("parse workbook.bin");
+
+        assert_eq!(ctx.name_index("MyName", None), Some(1));
+        assert_eq!(ctx.name_index("LocalName", Some("Sheet2")), Some(2));
+
+        assert_eq!(defined_names.len(), 2);
+        assert_eq!(defined_names[0].name, "MyName");
+        assert_eq!(defined_names[0].scope_sheet, None);
+        assert_eq!(
+            defined_names[0]
+                .formula
+                .as_ref()
+                .and_then(|f| f.text.as_deref()),
+            Some("42")
+        );
+
+        assert_eq!(defined_names[1].name, "LocalName");
+        assert_eq!(defined_names[1].scope_sheet, Some(1));
+        assert_eq!(
+            defined_names[1]
+                .formula
+                .as_ref()
+                .and_then(|f| f.text.as_deref()),
+            Some("7")
+        );
+    }
+
+    #[test]
     fn parses_shared_string_phonetic_tail_as_opaque_bytes() {
         // SI with phonetic flag set: [flags][xlWideString][phonetic bytes...]
         let mut payload = Vec::new();
