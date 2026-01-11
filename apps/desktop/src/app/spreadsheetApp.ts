@@ -9,6 +9,12 @@ import { ChartStore, type ChartRecord } from "../charts/chartStore";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
+import {
+  copyRangeToClipboardPayload,
+  createClipboardProvider,
+  parseClipboardContentToCellGrid,
+  pasteClipboardContent
+} from "../clipboard/index.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
 import { navigateSelectionByKey } from "../selection/navigation";
 import { SelectionRenderer } from "../selection/renderer";
@@ -336,6 +342,8 @@ export class SpreadsheetApp {
   private renderScheduled = false;
   private pendingRenderMode: "full" | "scroll" = "full";
   private windowKeyDownListener: ((e: KeyboardEvent) => void) | null = null;
+  private clipboardProviderPromise: ReturnType<typeof createClipboardProvider> | null = null;
+  private dlpContext: ReturnType<typeof createDesktopDlpContext> | null = null;
 
   private readonly chartElements = new Map<string, HTMLDivElement>();
 
@@ -659,6 +667,7 @@ export class SpreadsheetApp {
 
     const workbookId = opts.workbookId ?? "local-workbook";
     const dlp = createDesktopDlpContext({ documentId: workbookId });
+    this.dlpContext = dlp;
     this.aiCellFunctions = new AiCellFunctionEngine({
       onUpdate: () => this.refresh(),
       workbookId,
@@ -2866,6 +2875,7 @@ export class SpreadsheetApp {
 
     if (this.handleUndoRedoShortcut(e)) return;
     if (this.handleShowFormulasShortcut(e)) return;
+    if (this.handleClipboardShortcut(e)) return;
 
     // Editing
     if (e.key === "F2") {
@@ -3049,6 +3059,182 @@ export class SpreadsheetApp {
     this.renderSelection();
     this.updateStatus();
     if (didScroll) this.refresh("scroll");
+  }
+
+  private handleClipboardShortcut(e: KeyboardEvent): boolean {
+    const primary = e.ctrlKey || e.metaKey;
+    if (!primary || e.altKey || e.shiftKey) return false;
+
+    if (this.formulaBar?.isEditing() || this.formulaEditCell) return false;
+
+    const target = e.target as HTMLElement | null;
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
+    }
+
+    const key = e.key.toLowerCase();
+
+    if (key === "c") {
+      e.preventDefault();
+      this.idle.track(this.copySelectionToClipboard());
+      return true;
+    }
+
+    if (key === "x") {
+      e.preventDefault();
+      this.idle.track(this.cutSelectionToClipboard());
+      return true;
+    }
+
+    if (key === "v") {
+      e.preventDefault();
+      this.idle.track(this.pasteClipboardToSelection());
+      return true;
+    }
+
+    return false;
+  }
+
+  private async getClipboardProvider(): Promise<Awaited<ReturnType<typeof createClipboardProvider>>> {
+    if (!this.clipboardProviderPromise) {
+      this.clipboardProviderPromise = createClipboardProvider();
+    }
+    return this.clipboardProviderPromise;
+  }
+
+  private getClipboardCopyRange(): Range {
+    const activeRange = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
+    const activeCellFallback: Range = {
+      startRow: this.selection.active.row,
+      endRow: this.selection.active.row,
+      startCol: this.selection.active.col,
+      endCol: this.selection.active.col
+    };
+
+    if (!activeRange) return activeCellFallback;
+
+    if (this.selection.type === "row" || this.selection.type === "column" || this.selection.type === "all") {
+      const used = this.computeUsedRange();
+      const clipped = used ? intersectRanges(activeRange, used) : null;
+      if (clipped) return clipped;
+
+      // If a user selects an entire row/column with no used-range overlap, still copy a
+      // bounded slice (the selected row/column within the UI's grid limits). For an
+      // entirely empty sheet (`all`), fall back to the active cell to avoid generating
+      // a massive empty payload.
+      return this.selection.type === "all" ? activeCellFallback : activeRange;
+    }
+
+    return activeRange;
+  }
+
+  private async copySelectionToClipboard(): Promise<void> {
+    try {
+      const range = this.getClipboardCopyRange();
+      const dlp = this.dlpContext;
+      const payload = copyRangeToClipboardPayload(
+        this.document,
+        this.sheetId,
+        {
+          start: { row: range.startRow, col: range.startCol },
+          end: { row: range.endRow, col: range.endCol }
+        },
+        dlp
+          ? {
+              dlp: {
+                documentId: dlp.documentId,
+                classificationStore: dlp.classificationStore,
+                policy: dlp.policy
+              }
+            }
+          : undefined
+      );
+      const provider = await this.getClipboardProvider();
+      await provider.write(payload);
+    } catch {
+      // Ignore clipboard failures (permissions, platform restrictions).
+    }
+  }
+
+  private async pasteClipboardToSelection(): Promise<void> {
+    try {
+      const provider = await this.getClipboardProvider();
+      const content = await provider.read();
+      const grid = parseClipboardContentToCellGrid(content);
+      if (!grid) return;
+
+      const rowCount = grid.length;
+      const colCount = Math.max(...grid.map((row) => row.length));
+      if (rowCount === 0 || colCount === 0) return;
+
+      const start = { ...this.selection.active };
+      const didPaste = pasteClipboardContent(this.document, this.sheetId, start, content, { mode: "all" });
+      if (!didPaste) return;
+
+      const range: Range = {
+        startRow: start.row,
+        endRow: start.row + rowCount - 1,
+        startCol: start.col,
+        endCol: start.col + colCount - 1
+      };
+      this.selection = buildSelection({ ranges: [range], active: start, anchor: start, activeRangeIndex: 0 }, this.limits);
+
+      this.syncEngineNow();
+      this.refresh();
+      this.focus();
+    } catch {
+      // Ignore clipboard failures (permissions, platform restrictions).
+    }
+  }
+
+  private async cutSelectionToClipboard(): Promise<void> {
+    try {
+      const range = this.getClipboardCopyRange();
+      const dlp = this.dlpContext;
+      const payload = copyRangeToClipboardPayload(
+        this.document,
+        this.sheetId,
+        {
+          start: { row: range.startRow, col: range.startCol },
+          end: { row: range.endRow, col: range.endCol }
+        },
+        dlp
+          ? {
+              dlp: {
+                documentId: dlp.documentId,
+                classificationStore: dlp.classificationStore,
+                policy: dlp.policy
+              }
+            }
+          : undefined
+      );
+
+      const provider = await this.getClipboardProvider();
+      await provider.write(payload);
+
+      const label = (() => {
+        const translated = t("clipboard.cut");
+        return translated === "clipboard.cut" ? "Cut" : translated;
+      })();
+
+      this.document.beginBatch({ label });
+      this.document.clearRange(
+        this.sheetId,
+        {
+          start: { row: range.startRow, col: range.startCol },
+          end: { row: range.endRow, col: range.endCol }
+        },
+        { label }
+      );
+      this.document.endBatch();
+
+      this.syncEngineNow();
+      this.refresh();
+      this.focus();
+    } catch {
+      // Ignore clipboard failures (permissions, platform restrictions).
+    }
   }
 
   private getCellDisplayValue(cell: CellCoord): string {
