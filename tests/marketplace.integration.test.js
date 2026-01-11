@@ -601,6 +601,7 @@ test("publish-bin accepts v2 extension packages without X-Package-Signature", as
       body: packaged.packageBytes,
     });
     assert.equal(publishRes.status, 200);
+    assert.equal(publishRes.headers.get("cache-control"), "no-store");
     const published = await publishRes.json();
     assert.deepEqual(published, { id: extensionId, version: manifest.version });
   } finally {
@@ -782,6 +783,7 @@ test("publish-bin accepts v1 extension packages with detached X-Package-Signatur
       body: packageBytes,
     });
     assert.equal(publishRes.status, 200);
+    assert.equal(publishRes.headers.get("cache-control"), "no-store");
     const published = await publishRes.json();
     assert.deepEqual(published, { id: extensionId, version: manifest.version });
 
@@ -1046,18 +1048,21 @@ test("marketplace responses include ETag and honor If-None-Match (304)", async (
     const extUrl = `${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}`;
     const extRes = await fetch(extUrl);
     assert.equal(extRes.status, 200);
+    assert.equal(extRes.headers.get("cache-control"), "public, max-age=0, must-revalidate");
     const extEtag = extRes.headers.get("etag");
     assert.ok(extEtag);
     await extRes.text();
 
     const extRes304 = await fetch(extUrl, { headers: { "If-None-Match": extEtag } });
     assert.equal(extRes304.status, 304);
+    assert.equal(extRes304.headers.get("cache-control"), "public, max-age=0, must-revalidate");
     assert.equal(extRes304.headers.get("etag"), extEtag);
     assert.equal(await extRes304.text(), "");
 
     const dlUrl = `${baseUrl}/api/extensions/${encodeURIComponent(extensionId)}/download/${encodeURIComponent(manifest.version)}`;
     const dlRes = await fetch(dlUrl);
     assert.equal(dlRes.status, 200);
+    assert.equal(dlRes.headers.get("cache-control"), "public, max-age=0, must-revalidate");
     const pkgEtag = dlRes.headers.get("etag");
     const pkgSha = dlRes.headers.get("x-package-sha256");
     assert.ok(pkgEtag);
@@ -1066,6 +1071,7 @@ test("marketplace responses include ETag and honor If-None-Match (304)", async (
 
     const dlRes304 = await fetch(dlUrl, { headers: { "If-None-Match": pkgEtag } });
     assert.equal(dlRes304.status, 304);
+    assert.equal(dlRes304.headers.get("cache-control"), "public, max-age=0, must-revalidate");
     assert.equal(dlRes304.headers.get("etag"), pkgEtag);
     assert.equal(dlRes304.headers.get("x-package-sha256"), pkgSha);
     assert.equal(await dlRes304.arrayBuffer().then((b) => b.byteLength), 0);
