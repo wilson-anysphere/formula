@@ -226,3 +226,37 @@ fn prefers_verified_signature_stream_over_invalid_candidate() {
         sig.signer_subject
     );
 }
+
+#[test]
+fn unparseable_signature_stream_is_reported_as_parse_error() {
+    let blob = b"not-a-pkcs7".to_vec();
+    let vba = build_vba_project_bin_with_signature_streams(&[("\u{0005}DigitalSignature", &blob)]);
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedParseError);
+}
+
+#[test]
+fn prefers_verified_stream_over_parse_error_candidate() {
+    let bad = b"not-a-pkcs7".to_vec();
+    let valid = make_pkcs7_signed_message(b"formula-vba-test");
+
+    let vba = build_vba_project_bin_with_signature_streams(&[
+        ("\u{0005}DigitalSignature", &bad),
+        ("\u{0005}DigitalSignatureEx", &valid),
+    ]);
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert!(
+        sig.stream_path.contains("DigitalSignatureEx"),
+        "expected to pick verified signature stream, got {}",
+        sig.stream_path
+    );
+}
