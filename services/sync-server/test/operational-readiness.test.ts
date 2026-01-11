@@ -71,6 +71,8 @@ test("exposes Prometheus metrics in text format", async (t) => {
   assert.match(res.headers.get("content-type") ?? "", /text\/plain/);
   const body = await res.text();
   assert.match(body, /sync_server_ws_connections_total/);
+  assert.match(body, /sync_server_ws_closes_total/);
+  assert.match(body, /sync_server_ws_messages_too_large_total/);
   assert.match(body, /sync_server_persistence_info/);
 
   const internalMissing = await fetch(`${server.httpUrl}/internal/metrics`);

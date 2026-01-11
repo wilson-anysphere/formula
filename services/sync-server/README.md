@@ -151,7 +151,10 @@ Notable metrics (prefix `sync_server_`):
 - `sync_server_ws_connections_total` / `sync_server_ws_connections_current`
 - `sync_server_ws_connections_rejected_total{reason=...}`
 - `sync_server_ws_messages_rate_limited_total`
+- `sync_server_ws_messages_too_large_total`
+- `sync_server_ws_closes_total{code=...}`
 - `sync_server_retention_docs_purged_total{sweep=...}`
+- `sync_server_retention_sweep_errors_total{sweep=...}`
 - `sync_server_persistence_info{backend=...,encryption=...}`
 
 ## Limits & hardening
