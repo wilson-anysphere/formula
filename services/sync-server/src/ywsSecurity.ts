@@ -145,12 +145,15 @@ type CellAddress = { sheetId: string; row: number; col: number };
 function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddress | null {
   if (typeof key !== "string" || key.length === 0) return null;
 
+  const isValidIndex = (value: number): boolean =>
+    Number.isSafeInteger(value) && value >= 0;
+
   const parts = key.split(":");
   if (parts.length === 3) {
     const sheetId = parts[0] || defaultSheetId;
     const row = Number(parts[1]);
     const col = Number(parts[2]);
-    if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) return null;
+    if (!isValidIndex(row) || !isValidIndex(col)) return null;
     return { sheetId, row, col };
   }
 
@@ -159,13 +162,19 @@ function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddre
     const sheetId = parts[0] || defaultSheetId;
     const m = parts[1]?.match(/^(\d+),(\d+)$/);
     if (m) {
-      return { sheetId, row: Number(m[1]), col: Number(m[2]) };
+      const row = Number(m[1]);
+      const col = Number(m[2]);
+      if (!isValidIndex(row) || !isValidIndex(col)) return null;
+      return { sheetId, row, col };
     }
   }
 
   const m = key.match(/^r(\d+)c(\d+)$/);
   if (m) {
-    return { sheetId: defaultSheetId, row: Number(m[1]), col: Number(m[2]) };
+    const row = Number(m[1]);
+    const col = Number(m[2]);
+    if (!isValidIndex(row) || !isValidIndex(col)) return null;
+    return { sheetId: defaultSheetId, row, col };
   }
 
   return null;
@@ -614,16 +623,27 @@ export function installYwsSecurity(
             return { drop: true };
           }
 
-          const { canEdit } = getCellPermissions({
-            role,
-            restrictions: rangeRestrictions,
-            userId,
-            cell: {
-              sheetId: parsed.sheetId,
-              row: parsed.row,
-              col: parsed.col,
-            },
-          });
+          let canEdit: boolean;
+          try {
+            ({ canEdit } = getCellPermissions({
+              role,
+              restrictions: rangeRestrictions,
+              userId,
+              cell: {
+                sheetId: parsed.sheetId,
+                row: parsed.row,
+                col: parsed.col,
+              },
+            }));
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.warn(
+              { docName, userId, role, cellKey, err: message },
+              "range_restriction_permission_check_failed"
+            );
+            ws.close(1008, "range restrictions validation failed");
+            return { drop: true };
+          }
 
           if (!canEdit) {
             logger.warn({ docName, userId, role, cellKey }, "permission_violation");

@@ -520,6 +520,103 @@ test("strict mode rejects updates when cell keys cannot be parsed", async (t) =>
   assert.equal(docObserver.getMap("cells").has("not-a-cell-key"), false);
 });
 
+test("rangeRestrictions: rejects invalid numeric cell keys (Infinity) without crashing", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const port = await getAvailablePort();
+  const server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
+    env: { SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS: "1" },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const docName = `doc-${Math.random().toString(16).slice(2)}`;
+
+  const seedToken = signJwt({ sub: "seed", docId: docName, role: "editor" });
+  const attackerToken = signJwt({
+    sub: "attacker",
+    docId: docName,
+    role: "editor",
+    // Any non-empty array enables enforcement for this token.
+    rangeRestrictions: [
+      {
+        range: { sheetId: "Sheet1", startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+        editAllowlist: ["attacker"],
+      },
+    ],
+  });
+
+  const seedDoc = new Y.Doc();
+  const attackerDoc = new Y.Doc();
+
+  const seedProvider = new WebsocketProvider(server.wsUrl, docName, seedDoc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: seedToken },
+  });
+  const attackerProvider = new WebsocketProvider(server.wsUrl, docName, attackerDoc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: attackerToken },
+  });
+
+  t.after(() => {
+    seedProvider.destroy();
+    attackerProvider.destroy();
+    seedDoc.destroy();
+    attackerDoc.destroy();
+  });
+
+  await waitForProviderSync(seedProvider);
+  await waitForProviderSync(attackerProvider);
+
+  // Ensure we have something persisted to disk to validate later.
+  setCellValue(seedDoc, "Sheet1:0:0", "seed");
+  await waitForCondition(() => getCellValue(attackerDoc, "Sheet1:0:0") === "seed", 10_000);
+
+  const hugeKey = `Sheet1:${"9".repeat(400)},1`;
+  const ws = attackerProvider.ws;
+  assert.ok(ws, "expected attacker provider to have an underlying ws");
+  const closePromise = waitForWsCloseWithTimeout(ws, 10_000);
+
+  // This key used to parse into `{ row: Infinity }` and could crash the server when the
+  // permission check tried to validate row/col types. The server should now fail closed.
+  setCellValue(attackerDoc, hugeKey, "evil");
+
+  const closed = await closePromise;
+  assert.equal(closed.code, 1008);
+
+  await expectConditionToStayFalse(() => getCellsMap(seedDoc).has(hugeKey), 1_000);
+  assert.equal(getCellsMap(seedDoc).has(hugeKey), false);
+
+  const healthRes = await fetch(`${server.httpUrl}/healthz`);
+  assert.equal(healthRes.status, 200);
+
+  await waitForCondition(async () => {
+    try {
+      const persisted = await loadPersistedDoc(dataDir, docName);
+      const ok =
+        getCellValue(persisted, "Sheet1:0:0") === "seed" && getCellsMap(persisted).has(hugeKey) === false;
+      persisted.destroy();
+      return ok;
+    } catch {
+      return false;
+    }
+  }, 10_000);
+
+  const persisted = await loadPersistedDoc(dataDir, docName);
+  t.after(() => persisted.destroy());
+  assert.equal(getCellValue(persisted, "Sheet1:0:0"), "seed");
+  assert.equal(getCellsMap(persisted).has(hugeKey), false);
+});
+
 test("rangeRestrictions: allows edits outside protected ranges", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
   t.after(async () => {
