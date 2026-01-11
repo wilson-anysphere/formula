@@ -35,7 +35,9 @@ mod worksheet;
 pub use address::{A1ParseError, CellRef, Range, RangeIter, RangeParseError};
 pub use calc_settings::{CalcSettings, CalculationMode, IterativeCalculationSettings};
 pub use cell::{Cell, CellId, CellKey, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
-pub use comments::{Comment, CommentAuthor, CommentKind, Mention, Reply, TimestampMs};
+pub use comments::{
+    Comment, CommentAuthor, CommentError, CommentKind, CommentPatch, Mention, Reply, TimestampMs,
+};
 pub use conditional_formatting::*;
 pub use data_validation::*;
 pub use display::{format_cell_display, CellDisplay};

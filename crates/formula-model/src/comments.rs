@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::CellRef;
 
@@ -74,6 +75,35 @@ pub struct Comment {
     pub mentions: Vec<Mention>,
     #[serde(default)]
     pub replies: Vec<Reply>,
+}
+
+/// Partial update payload for editing an existing [`Comment`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommentPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<CommentAuthor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<TimestampMs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<CommentKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mentions: Option<Vec<Mention>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum CommentError {
+    #[error("comment not found: {0}")]
+    CommentNotFound(String),
+    #[error("reply not found: {0}")]
+    ReplyNotFound(String),
+    #[error("duplicate comment id: {0}")]
+    DuplicateCommentId(String),
+    #[error("duplicate reply id: {0}")]
+    DuplicateReplyId(String),
 }
 
 impl Default for Comment {

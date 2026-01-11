@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::de::Error as _;
@@ -8,9 +8,9 @@ use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as Colum
 
 use crate::drawings::DrawingObject;
 use crate::{
-    A1ParseError, Cell, CellKey, CellRef, CellValue, DataValidation, DataValidationAssignment,
-    DataValidationId, Hyperlink, MergeError, MergedRegions, Range, SheetProtection,
-    SheetProtectionAction, StyleTable, Table,
+    A1ParseError, Cell, CellKey, CellRef, CellValue, Comment, CommentError, CommentPatch,
+    DataValidation, DataValidationAssignment, DataValidationId, Hyperlink, MergeError, MergedRegions,
+    Range, Reply, SheetProtection, SheetProtectionAction, StyleTable, Table,
 };
 
 /// Identifier for a worksheet within a workbook.
@@ -203,6 +203,10 @@ pub struct Worksheet {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub data_validations: Vec<DataValidationAssignment>,
 
+    /// Cell comments (legacy notes + modern threaded comments) anchored to this worksheet.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    comments: BTreeMap<CellKey, Vec<Comment>>,
+
     /// Next data validation id to allocate (runtime-only).
     #[serde(skip)]
     next_data_validation_id: DataValidationId,
@@ -236,6 +240,7 @@ impl Worksheet {
             columnar: None,
             hyperlinks: Vec::new(),
             data_validations: Vec::new(),
+            comments: BTreeMap::new(),
             next_data_validation_id: 1,
             sheet_protection: SheetProtection::default(),
         }
@@ -768,17 +773,31 @@ impl Worksheet {
 
         let anchor = range.start;
         let mut removed_any = false;
+        let mut moved_comments: Vec<Comment> = Vec::new();
         for row in range.start.row..=range.end.row {
             for col in range.start.col..=range.end.col {
                 let cell = CellRef::new(row, col);
                 if cell != anchor {
                     removed_any |= self.cells.remove(&CellKey::from(cell)).is_some();
+                    if let Some(mut comments) = self.comments.remove(&CellKey::from(cell)) {
+                        for comment in &mut comments {
+                            comment.cell_ref = anchor;
+                        }
+                        moved_comments.append(&mut comments);
+                    }
                 }
             }
         }
 
         if removed_any {
             self.recompute_used_range();
+        }
+
+        if !moved_comments.is_empty() {
+            self.comments
+                .entry(CellKey::from(anchor))
+                .or_default()
+                .extend(moved_comments);
         }
 
         self.merged_regions.add(range)
@@ -834,6 +853,233 @@ impl Worksheet {
     /// Return the first hyperlink whose anchor range contains `cell`.
     pub fn hyperlink_at(&self, cell: CellRef) -> Option<&Hyperlink> {
         self.hyperlinks.iter().find(|h| h.range.contains(cell))
+    }
+
+    /// Normalize a cell reference for comment anchoring.
+    ///
+    /// Excel treats merged cells as a single cell anchored at the region's top-left.
+    /// Comments inside a merged region are anchored to that top-left cell.
+    pub fn normalize_comment_anchor(&self, cell_ref: CellRef) -> CellRef {
+        self.merged_regions.resolve_cell(cell_ref)
+    }
+
+    /// Get all comments anchored to `cell_ref`.
+    ///
+    /// If `cell_ref` lies inside a merged region, this returns the comments anchored to the
+    /// merged region's top-left cell.
+    pub fn comments_for_cell(&self, cell_ref: CellRef) -> &[Comment] {
+        let anchor = self.normalize_comment_anchor(cell_ref);
+        let key = CellKey::from(anchor);
+        self.comments
+            .get(&key)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Iterate over all comments in this worksheet, in deterministic order.
+    ///
+    /// Ordering is row-major by anchor cell, then insertion order within each cell.
+    pub fn iter_comments(&self) -> impl Iterator<Item = (CellRef, &Comment)> {
+        self.comments
+            .iter()
+            .flat_map(|(k, comments)| comments.iter().map(move |c| (k.to_ref(), c)))
+    }
+
+    fn comment_id_exists(&self, comment_id: &str) -> bool {
+        self.iter_comments().any(|(_, c)| c.id == comment_id)
+    }
+
+    fn reply_id_exists(&self, reply_id: &str) -> bool {
+        self.iter_comments()
+            .flat_map(|(_, c)| c.replies.iter())
+            .any(|r| r.id == reply_id)
+    }
+
+    fn normalize_comment_storage(&mut self) -> Result<(), CommentError> {
+        if self.comments.is_empty() {
+            return Ok(());
+        }
+
+        let existing = std::mem::take(&mut self.comments);
+        let mut normalized: BTreeMap<CellKey, Vec<Comment>> = BTreeMap::new();
+        let mut comment_ids: HashSet<String> = HashSet::new();
+        let mut reply_ids: HashSet<String> = HashSet::new();
+
+        for (key, comments) in existing {
+            let anchor = self.normalize_comment_anchor(key.to_ref());
+            let anchor_key = CellKey::from(anchor);
+
+            for mut comment in comments {
+                if comment.id.is_empty() {
+                    comment.id = uuid::Uuid::new_v4().to_string();
+                }
+                if !comment_ids.insert(comment.id.clone()) {
+                    return Err(CommentError::DuplicateCommentId(comment.id));
+                }
+
+                comment.cell_ref = anchor;
+
+                let mut local_reply_ids: HashSet<String> = HashSet::new();
+                for reply in &mut comment.replies {
+                    if reply.id.is_empty() {
+                        reply.id = uuid::Uuid::new_v4().to_string();
+                    }
+                    if !local_reply_ids.insert(reply.id.clone()) || !reply_ids.insert(reply.id.clone()) {
+                        return Err(CommentError::DuplicateReplyId(reply.id.clone()));
+                    }
+                }
+
+                normalized.entry(anchor_key).or_default().push(comment);
+            }
+        }
+
+        self.comments = normalized;
+        Ok(())
+    }
+
+    /// Add a comment (note or threaded) anchored to `cell_ref`.
+    ///
+    /// If `cell_ref` lies inside a merged region, the comment is anchored to the merged region's
+    /// top-left cell. If `comment.id` is empty, an id is generated.
+    pub fn add_comment(
+        &mut self,
+        cell_ref: CellRef,
+        mut comment: Comment,
+    ) -> Result<String, CommentError> {
+        let anchor = self.normalize_comment_anchor(cell_ref);
+        let key = CellKey::from(anchor);
+
+        if comment.id.is_empty() {
+            comment.id = uuid::Uuid::new_v4().to_string();
+        }
+        if self.comment_id_exists(&comment.id) {
+            return Err(CommentError::DuplicateCommentId(comment.id));
+        }
+
+        comment.cell_ref = anchor;
+
+        // Ensure reply ids are unique (and usable for global lookup APIs).
+        let mut reply_ids = HashSet::new();
+        for reply in &mut comment.replies {
+            if reply.id.is_empty() {
+                reply.id = uuid::Uuid::new_v4().to_string();
+            }
+            if !reply_ids.insert(reply.id.clone()) || self.reply_id_exists(&reply.id) {
+                return Err(CommentError::DuplicateReplyId(reply.id.clone()));
+            }
+        }
+
+        let id = comment.id.clone();
+        self.comments.entry(key).or_default().push(comment);
+        Ok(id)
+    }
+
+    /// Apply a partial update to an existing comment.
+    pub fn update_comment(
+        &mut self,
+        comment_id: &str,
+        patch: CommentPatch,
+    ) -> Result<(), CommentError> {
+        for comments in self.comments.values_mut() {
+            for comment in comments.iter_mut() {
+                if comment.id != comment_id {
+                    continue;
+                }
+
+                if let Some(author) = patch.author {
+                    comment.author = author;
+                }
+                if let Some(updated_at) = patch.updated_at {
+                    comment.updated_at = updated_at;
+                }
+                if let Some(resolved) = patch.resolved {
+                    comment.resolved = resolved;
+                }
+                if let Some(kind) = patch.kind {
+                    comment.kind = kind;
+                }
+                if let Some(content) = patch.content {
+                    comment.content = content;
+                }
+                if let Some(mentions) = patch.mentions {
+                    comment.mentions = mentions;
+                }
+
+                return Ok(());
+            }
+        }
+
+        Err(CommentError::CommentNotFound(comment_id.to_string()))
+    }
+
+    /// Delete a comment by id, returning the removed comment.
+    pub fn delete_comment(&mut self, comment_id: &str) -> Result<Comment, CommentError> {
+        let mut target: Option<(CellKey, usize)> = None;
+        for (key, comments) in &self.comments {
+            if let Some(idx) = comments.iter().position(|c| c.id == comment_id) {
+                target = Some((*key, idx));
+                break;
+            }
+        }
+
+        let Some((key, idx)) = target else {
+            return Err(CommentError::CommentNotFound(comment_id.to_string()));
+        };
+
+        let comments = self
+            .comments
+            .get_mut(&key)
+            .expect("comment key must exist");
+        let removed = comments.remove(idx);
+        if comments.is_empty() {
+            self.comments.remove(&key);
+        }
+        Ok(removed)
+    }
+
+    /// Add a reply to an existing comment.
+    ///
+    /// If `reply.id` is empty, an id is generated.
+    pub fn add_reply(
+        &mut self,
+        comment_id: &str,
+        mut reply: Reply,
+    ) -> Result<String, CommentError> {
+        if reply.id.is_empty() {
+            reply.id = uuid::Uuid::new_v4().to_string();
+        }
+        if self.reply_id_exists(&reply.id) {
+            return Err(CommentError::DuplicateReplyId(reply.id));
+        }
+
+        for comments in self.comments.values_mut() {
+            for comment in comments.iter_mut() {
+                if comment.id != comment_id {
+                    continue;
+                }
+                if comment.replies.iter().any(|r| r.id == reply.id) {
+                    return Err(CommentError::DuplicateReplyId(reply.id));
+                }
+                let reply_id = reply.id.clone();
+                comment.replies.push(reply);
+                return Ok(reply_id);
+            }
+        }
+
+        Err(CommentError::CommentNotFound(comment_id.to_string()))
+    }
+
+    /// Delete a reply by id.
+    pub fn delete_reply(&mut self, reply_id: &str) -> Result<Reply, CommentError> {
+        for comments in self.comments.values_mut() {
+            for comment in comments.iter_mut() {
+                if let Some(idx) = comment.replies.iter().position(|r| r.id == reply_id) {
+                    return Ok(comment.replies.remove(idx));
+                }
+            }
+        }
+
+        Err(CommentError::ReplyNotFound(reply_id.to_string()))
     }
 
     fn on_cell_inserted(&mut self, cell_ref: CellRef) {
@@ -1011,6 +1257,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             #[serde(default)]
             data_validations: Vec<DataValidationAssignment>,
             #[serde(default)]
+            comments: BTreeMap<CellKey, Vec<Comment>>,
+            #[serde(default)]
             sheet_protection: SheetProtection,
         }
 
@@ -1081,7 +1329,7 @@ impl<'de> Deserialize<'de> for Worksheet {
             .unwrap_or(0)
             .wrapping_add(1);
 
-        Ok(Worksheet {
+        let mut sheet = Worksheet {
             id: helper.id,
             name: helper.name,
             xlsx_sheet_id: helper.xlsx_sheet_id,
@@ -1103,9 +1351,16 @@ impl<'de> Deserialize<'de> for Worksheet {
             columnar: None,
             hyperlinks: helper.hyperlinks,
             data_validations: helper.data_validations,
+            comments: helper.comments,
             next_data_validation_id,
             sheet_protection: helper.sheet_protection,
-        })
+        };
+
+        sheet
+            .normalize_comment_storage()
+            .map_err(D::Error::custom)?;
+
+        Ok(sheet)
     }
 }
 
