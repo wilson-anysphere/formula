@@ -228,6 +228,48 @@ test("DesktopPowerQueryRefreshManager refreshAll shares credential prompts acros
   mgr.dispose();
 });
 
+test("DesktopPowerQueryRefreshManager refreshAll updates lastRunAtMs in the refresh stateStore", async () => {
+  const table = DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true });
+  const engine = new StaticEngine(table);
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  /** @type {any[]} */
+  const savedStates = [];
+  const stateStore = {
+    load: async () => ({}),
+    save: async (state) => {
+      savedStates.push(state);
+    },
+  };
+
+  const mgr = new DesktopPowerQueryRefreshManager({ engine, document: doc, concurrency: 1, batchSize: 1, stateStore });
+
+  const query = {
+    id: "q_interval",
+    name: "Interval",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+    refreshPolicy: { type: "interval", intervalMs: 10_000 },
+  };
+
+  mgr.registerQuery(query);
+  await mgr.manager.ready;
+  await new Promise((resolve) => queueMicrotask(resolve));
+
+  const before = savedStates.at(-1)?.[query.id]?.lastRunAtMs;
+  assert.equal(before, undefined);
+
+  await mgr.refreshAll([query.id]).promise;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const afterEntry = savedStates.at(-1)?.[query.id];
+  assert.ok(afterEntry);
+  assert.equal(afterEntry.policy?.type, "interval");
+  assert.equal(typeof afterEntry.lastRunAtMs, "number");
+
+  mgr.dispose();
+});
+
 test("DesktopPowerQueryRefreshManager dispose cancels in-flight refreshAll sessions", async () => {
   const engine = new ControlledEngine();
   const doc = new DocumentController({ engine: new MockEngine() });

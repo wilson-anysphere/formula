@@ -138,6 +138,16 @@ export class DesktopPowerQueryRefreshManager {
     this.orchestrator.onEvent((evt: any) => {
       this.emitter.emit(evt);
       if (evt?.type === "completed") {
+        // Best-effort: keep the RefreshManager state store's last-run timestamps in sync
+        // with dependency-aware refreshAll sessions so interval/cron policies can restore
+        // accurately on the next app launch.
+        const queryId = evt?.job?.queryId;
+        const completedAt = evt?.job?.completedAt;
+        if (typeof queryId === "string" && completedAt instanceof Date && !Number.isNaN(completedAt.getTime())) {
+          // `recordSuccessfulRun` is intentionally internal to RefreshManager, but using
+          // it here avoids duplicating the state-store persistence logic.
+          (this.manager as any).recordSuccessfulRun?.(queryId, completedAt.getTime());
+        }
         void this.applyCompletedJob(evt);
       }
     });
