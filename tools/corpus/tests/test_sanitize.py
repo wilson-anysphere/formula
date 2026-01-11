@@ -115,6 +115,77 @@ def _make_minimal_xlsx_with_secrets() -> bytes:
     return buf.getvalue()
 
 
+def _make_minimal_xlsx_for_sheet_rename() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>
+""",
+        )
+        z.writestr(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sensitive Sheet" sheetId="1" r:id="rId1"/>
+    <sheet name="Other" sheetId="2" r:id="rId2"/>
+  </sheets>
+</workbook>
+""",
+        )
+        z.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>123</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+""",
+        )
+        z.writestr(
+            "xl/worksheets/sheet2.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><f>'Sensitive Sheet'!A1</f><v>123</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+""",
+        )
+    return buf.getvalue()
+
+
 class SanitizeTests(unittest.TestCase):
     def test_sanitize_removes_common_secret_bearing_parts(self) -> None:
         original = _make_minimal_xlsx_with_secrets()
@@ -266,6 +337,23 @@ class SanitizeTests(unittest.TestCase):
             expected = sanitize_mod._hash_text("alice@example.com", salt="unit-test-salt")
             sheet_xml = za.read("xl/worksheets/sheet1.xml").decode("utf-8", errors="ignore")
             self.assertIn(expected, sheet_xml)
+
+    def test_rename_sheets_updates_workbook_and_formulas(self) -> None:
+        original = _make_minimal_xlsx_for_sheet_rename()
+        sanitized, _ = sanitize_xlsx_bytes(original, options=SanitizeOptions(rename_sheets=True))
+
+        with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
+            from xml.etree import ElementTree as ET
+
+            wb = ET.fromstring(z.read("xl/workbook.xml"))
+            sheets = [el for el in wb.iter() if el.tag.split("}")[-1] == "sheet"]
+            self.assertEqual([s.attrib.get("name") for s in sheets], ["Sheet1", "Sheet2"])
+
+            sheet2 = ET.fromstring(z.read("xl/worksheets/sheet2.xml"))
+            ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+            f = sheet2.find(".//m:c[@r='A1']/m:f", ns)
+            self.assertIsNotNone(f)
+            self.assertEqual(f.text, "Sheet1!A1")
 
 
 if __name__ == "__main__":
