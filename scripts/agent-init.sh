@@ -40,7 +40,23 @@ if [ -z "${CARGO_HOME:-}" ] || {
     [ -z "${FORMULA_ALLOW_GLOBAL_CARGO_HOME:-}" ] &&
     [ "${CARGO_HOME}" = "${DEFAULT_GLOBAL_CARGO_HOME}" ];
 }; then
-  export CARGO_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/target/cargo-home"
+  # Prefer `git rev-parse --show-toplevel` to locate the repo root. This works
+  # even when sourced from `sh` (our agent runner shell), where bash-only
+  # variables like `BASH_SOURCE` are unavailable.
+  #
+  # Fall back to `BASH_SOURCE` when running in bash (e.g. local dev), and finally
+  # to `pwd` if neither is available.
+  REPO_ROOT=""
+  if command -v git >/dev/null 2>&1; then
+    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  fi
+  if [ -z "${REPO_ROOT}" ] && [ -n "${BASH_VERSION:-}" ]; then
+    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  fi
+  if [ -z "${REPO_ROOT}" ]; then
+    REPO_ROOT="$(pwd)"
+  fi
+  export CARGO_HOME="${REPO_ROOT}/target/cargo-home"
 fi
 mkdir -p "$CARGO_HOME"
 
@@ -86,7 +102,7 @@ setup_display() {
 }
 
 # Only setup display if Xvfb is available
-if command -v Xvfb &> /dev/null; then
+if command -v Xvfb >/dev/null 2>&1; then
   setup_display
 fi
 
