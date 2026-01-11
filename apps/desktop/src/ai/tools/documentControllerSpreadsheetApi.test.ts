@@ -79,6 +79,27 @@ describe("DocumentControllerSpreadsheetApi", () => {
     });
   });
 
+  it("merges incremental apply_formatting patches like ai-tools (does not clobber prior fields)", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", 1);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+
+    await executor.execute({
+      name: "apply_formatting",
+      parameters: { range: "A1", format: { bold: true } }
+    });
+
+    await executor.execute({
+      name: "apply_formatting",
+      parameters: { range: "A1", format: { italic: true } }
+    });
+
+    const cell = api.getCell({ sheet: "Sheet1", row: 1, col: 1 });
+    expect(cell.format).toEqual({ bold: true, italic: true });
+  });
+
   it("filters out cells that are empty per ai-tools semantics (no value, formula, or supported format)", () => {
     const controller = new DocumentController();
     controller.setRangeFormat(
@@ -104,6 +125,16 @@ describe("DocumentControllerSpreadsheetApi", () => {
 
     const api = new DocumentControllerSpreadsheetApi(controller);
     expect(api.getLastUsedRow("Sheet1")).toBe(5);
+  });
+
+  it("includes supported formatting-only cells in listNonEmptyCells()", () => {
+    const controller = new DocumentController();
+    controller.setRangeFormat("Sheet1", "A1", { font: { bold: true } }, { label: "Bold" });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    expect(api.listNonEmptyCells("Sheet1")).toEqual([
+      { address: { sheet: "Sheet1", row: 1, col: 1 }, cell: { value: null, format: { bold: true } } }
+    ]);
   });
 
   it("applies per-cell formatting provided to writeRange()", () => {
