@@ -633,22 +633,54 @@ test("publish-bin rejects invalid manifests (matches client validation)", async 
     assert.equal(regRes.status, 200);
 
     // Patch the on-disk manifest to be invalid and bypass the extension-publisher's local
-    // validation by building a v2 package directly.
-    await patchManifest(extSource, { permissions: ["totally.not.real"] });
-    const packageBytes = await createExtensionPackageV2(extSource, { privateKeyPem });
+    // validation by building v2 packages directly.
+    async function publishInvalidManifest(patch, expectedErrorRe) {
+      await patchManifest(extSource, patch);
+      const packageBytes = await createExtensionPackageV2(extSource, { privateKeyPem });
 
-    const publishRes = await fetch(`${baseUrl}/api/publish-bin`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${publisherToken}`,
-        "Content-Type": "application/vnd.formula.extension-package",
-        "X-Package-Sha256": sha256(packageBytes),
+      const publishRes = await fetch(`${baseUrl}/api/publish-bin`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${publisherToken}`,
+          "Content-Type": "application/vnd.formula.extension-package",
+          "X-Package-Sha256": sha256(packageBytes),
+        },
+        body: packageBytes,
+      });
+      assert.equal(publishRes.status, 400);
+      const body = await publishRes.json();
+      assert.match(String(body?.error || ""), expectedErrorRe);
+    }
+
+    await publishInvalidManifest({ permissions: ["totally.not.real"] }, /invalid permission/i);
+
+    await publishInvalidManifest(
+      {
+        permissions: manifest.permissions ?? [],
+        activationEvents: ["onView:missing.panel"],
+        contributes: { panels: [] },
       },
-      body: packageBytes,
-    });
-    assert.equal(publishRes.status, 400);
-    const body = await publishRes.json();
-    assert.ok(/invalid permission/i.test(String(body?.error || "")));
+      /unknown view\/panel/i
+    );
+
+    await publishInvalidManifest(
+      {
+        permissions: manifest.permissions ?? [],
+        activationEvents: ["onCustomFunction:missing.func"],
+        contributes: { customFunctions: [] },
+      },
+      /unknown custom function/i
+    );
+
+    await publishInvalidManifest(
+      {
+        permissions: manifest.permissions ?? [],
+        activationEvents: [],
+        contributes: { commands: [] },
+        browser: "./dist/missing-browser.mjs",
+      },
+      /browser entrypoint is missing/i
+    );
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmpRoot, { recursive: true, force: true });
