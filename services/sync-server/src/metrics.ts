@@ -1,4 +1,12 @@
-import promClient from "prom-client";
+import { createRequire } from "node:module";
+import type { Counter, Gauge, Registry } from "prom-client";
+
+// prom-client is a CommonJS package. Using createRequire avoids Vite/Vitest SSR
+// interop edge cases when the sync-server source is imported from other
+// workspaces (e.g. API integration tests).
+const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const promClient: typeof import("prom-client") = require("prom-client");
 
 export type WsConnectionRejectionReason =
   | "rate_limit"
@@ -9,20 +17,20 @@ export type WsConnectionRejectionReason =
 export type RetentionSweepKind = "leveldb" | "tombstone";
 
 export type SyncServerMetrics = {
-  registry: promClient.Registry;
+  registry: Registry;
 
-  wsConnectionsTotal: promClient.Counter<string>;
-  wsConnectionsCurrent: promClient.Gauge<string>;
-  wsConnectionsRejectedTotal: promClient.Counter<"reason">;
+  wsConnectionsTotal: Counter<string>;
+  wsConnectionsCurrent: Gauge<string>;
+  wsConnectionsRejectedTotal: Counter<"reason">;
 
-  wsMessagesRateLimitedTotal: promClient.Counter<string>;
-  wsMessagesTooLargeTotal: promClient.Counter<string>;
+  wsMessagesRateLimitedTotal: Counter<string>;
+  wsMessagesTooLargeTotal: Counter<string>;
 
-  retentionSweepsTotal: promClient.Counter<"sweep">;
-  retentionDocsPurgedTotal: promClient.Counter<"sweep">;
-  retentionSweepErrorsTotal: promClient.Counter<"sweep">;
+  retentionSweepsTotal: Counter<"sweep">;
+  retentionDocsPurgedTotal: Counter<"sweep">;
+  retentionSweepErrorsTotal: Counter<"sweep">;
 
-  persistenceInfo: promClient.Gauge<"backend" | "encryption">;
+  persistenceInfo: Gauge<"backend" | "encryption">;
   setPersistenceInfo: (params: {
     backend: "file" | "leveldb";
     encryptionEnabled: boolean;
