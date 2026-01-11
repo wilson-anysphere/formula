@@ -686,7 +686,16 @@ class ExtensionHost {
     if (!this._securityModulePromise) {
       const fallbackPath = pathToFileURL(path.resolve(__dirname, "../../security/src/index.js")).href;
       this._securityModulePromise = import("@formula/security")
-        .catch(() => import(fallbackPath))
+        .catch(async (error) => {
+          // In monorepo/test environments we may not have workspace packages linked into node_modules.
+          // Fall back to importing the source package directly so the extension host can run without
+          // a full package manager install.
+          if (error && typeof error === "object" && error.code && error.code !== "ERR_MODULE_NOT_FOUND") {
+            throw error;
+          }
+
+          return import(fallbackPath);
+        })
         .then((security) => {
           const { AuditLogger, PermissionManager, SqliteAuditLogStore } = security;
           const store = new SqliteAuditLogStore({ path: this._securityAuditDbPath });

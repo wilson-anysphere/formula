@@ -1,0 +1,238 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const os = require("node:os");
+const path = require("node:path");
+const fs = require("node:fs/promises");
+const { spawn } = require("node:child_process");
+
+const { ExtensionHost } = require("../src");
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function writeJson(filePath, value) {
+  await fs.writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
+}
+
+async function createRequireTestExtension(rootDir) {
+  const extDir = path.join(rootDir, "require-test-ext");
+  const distDir = path.join(extDir, "dist");
+  await fs.mkdir(distDir, { recursive: true });
+
+  await writeJson(path.join(extDir, "package.json"), {
+    name: "require-test",
+    publisher: "formula",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: ["onCommand:sandboxTest.require"],
+    contributes: {
+      commands: [
+        {
+          command: "sandboxTest.require",
+          title: "Sandbox require test"
+        }
+      ]
+    },
+    permissions: ["ui.commands"]
+  });
+
+  await fs.writeFile(
+    path.join(distDir, "extension.js"),
+    `const formula = require("formula");
+
+async function activate(context) {
+  context.subscriptions.push(
+    await formula.commands.registerCommand("sandboxTest.require", (moduleName) => {
+      require(String(moduleName));
+      return "ok";
+    })
+  );
+}
+
+module.exports = { activate };
+`,
+    "utf8"
+  );
+
+  return extDir;
+}
+
+test("sandbox: blocks disallowed Node builtin modules (including subpaths)", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sandbox-builtin-"));
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  const extPath = await createRequireTestExtension(dir);
+  await host.loadExtension(extPath);
+
+  const denied = ["fs/promises", "http2", "dns/promises", "inspector"];
+  for (const mod of denied) {
+    await assert.rejects(
+      () => host.executeCommand("sandboxTest.require", mod),
+      new RegExp(`Access to Node builtin module '${escapeRegExp(mod)}'`)
+    );
+  }
+});
+
+test("sandbox: blocks require() through symlinks (even with --preserve-symlinks)", async (t) => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sandbox-symlink-"));
+
+  // Gate if symlinks are not supported (e.g. some Windows CI setups).
+  const outside = path.join(tmpRoot, "outside.js");
+  const probeLink = path.join(tmpRoot, "probe-link.js");
+  await fs.writeFile(outside, "module.exports = 123;\n", "utf8");
+  try {
+    await fs.symlink(outside, probeLink, process.platform === "win32" ? "file" : undefined);
+    await fs.unlink(probeLink);
+  } catch (error) {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    const code = error && typeof error === "object" ? error.code : null;
+    if (code === "EPERM" || code === "EACCES" || code === "ENOSYS") {
+      t.skip(`Symlinks not supported in this environment (${code})`);
+      return;
+    }
+    throw error;
+  }
+
+  t.after(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  const extensionHostEntry = require.resolve("../src");
+  const scriptPath = path.join(tmpRoot, "symlink-sandbox-runner.js");
+
+  await fs.writeFile(
+    scriptPath,
+    `const { ExtensionHost } = require(${JSON.stringify(extensionHostEntry)});
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+
+async function writeJson(filePath, value) {
+  await fs.writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
+}
+
+async function main() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sandbox-symlink-child-"));
+  try {
+    const outsidePath = path.join(root, "outside.js");
+    await fs.writeFile(outsidePath, "module.exports = { ok: true };\\n", "utf8");
+
+    const extDir = path.join(root, "symlink-ext");
+    const distDir = path.join(extDir, "dist");
+    await fs.mkdir(distDir, { recursive: true });
+
+    // Symlink inside the extension pointing to code outside.
+    await fs.symlink(outsidePath, path.join(extDir, "linked.js"), process.platform === "win32" ? "file" : undefined);
+
+    await writeJson(path.join(extDir, "package.json"), {
+      name: "symlink-test",
+      publisher: "formula",
+      version: "1.0.0",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: ["onCommand:symlinkTest.escape"],
+      contributes: {
+        commands: [
+          {
+            command: "symlinkTest.escape",
+            title: "Symlink escape"
+          }
+        ]
+      },
+      permissions: ["ui.commands"]
+    });
+
+    await fs.writeFile(
+      path.join(distDir, "extension.js"),
+      \`const formula = require("formula");
+async function activate(context) {
+  context.subscriptions.push(
+    await formula.commands.registerCommand("symlinkTest.escape", () => {
+      require("../linked.js");
+      return "ok";
+    })
+  );
+}
+module.exports = { activate };
+\`,
+      "utf8"
+    );
+
+    const host = new ExtensionHost({
+      engineVersion: "1.0.0",
+      permissionsStoragePath: path.join(root, "permissions.json"),
+      extensionStoragePath: path.join(root, "storage.json"),
+      permissionPrompt: async () => true
+    });
+
+    try {
+      await host.loadExtension(extDir);
+      await host.executeCommand("symlinkTest.escape");
+      console.error("Expected symlink require to be blocked, but it succeeded");
+      process.exitCode = 1;
+    } catch (error) {
+      const msg = String(error?.message ?? error);
+      if (/outside their extension folder/.test(msg)) {
+        process.exitCode = 0;
+      } else {
+        console.error("Unexpected error:", msg);
+        process.exitCode = 1;
+      }
+    } finally {
+      await host.dispose().catch(() => {});
+    }
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exitCode = 1;
+});
+`,
+    "utf8"
+  );
+
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["--preserve-symlinks", "--no-warnings", scriptPath], {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      resolve({ code, signal, stdout, stderr });
+    });
+  });
+
+  if (result.signal) {
+    assert.fail(`child exited with signal ${result.signal}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  }
+
+  assert.equal(
+    result.code,
+    0,
+    `expected child to exit 0\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
+  );
+});
