@@ -920,23 +920,12 @@ export class CanvasGridRenderer {
     const contentCtx = this.contentCtx;
 
     for (const region of toRender) {
-      gridCtx.save();
-      gridCtx.beginPath();
-      gridCtx.rect(region.x, region.y, region.width, region.height);
-      gridCtx.clip();
       gridCtx.fillStyle = this.theme.gridBg;
       gridCtx.fillRect(region.x, region.y, region.width, region.height);
 
-      contentCtx.save();
-      contentCtx.beginPath();
-      contentCtx.rect(region.x, region.y, region.width, region.height);
-      contentCtx.clip();
       contentCtx.clearRect(region.x, region.y, region.width, region.height);
 
       this.renderGridQuadrants(viewport, region, perf);
-
-      contentCtx.restore();
-      gridCtx.restore();
     }
   }
 
@@ -1138,9 +1127,7 @@ export class CanvasGridRenderer {
       if (endRow <= startRow || endCol <= startCol) continue;
 
       if (perf?.enabled) {
-        const cellCount = (endRow - startRow) * (endCol - startCol);
-        perf.cellsPainted += cellCount;
-        perf.cellFetches += cellCount;
+        perf.cellsPainted += (endRow - startRow) * (endCol - startCol);
       }
 
       // Clip to the quadrant intersection so partially-visible edge cells don't bleed into other quadrants.
@@ -1154,7 +1141,16 @@ export class CanvasGridRenderer {
       contentCtx.rect(intersection.x, intersection.y, intersection.width, intersection.height);
       contentCtx.clip();
 
-      this.renderGridQuadrant(quadrant, startRow, endRow, startCol, endCol, viewport.frozenRows, viewport.frozenCols);
+      this.renderGridQuadrant(
+        quadrant,
+        startRow,
+        endRow,
+        startCol,
+        endCol,
+        viewport.frozenRows,
+        viewport.frozenCols,
+        perf
+      );
 
       contentCtx.restore();
       gridCtx.restore();
@@ -1173,12 +1169,22 @@ export class CanvasGridRenderer {
     startCol: number,
     endCol: number,
     frozenRows: number,
-    frozenCols: number
+    frozenCols: number,
+    perf: GridPerfStats | null
   ): void {
     if (!this.gridCtx || !this.contentCtx) return;
     const gridCtx = this.gridCtx;
     const contentCtx = this.contentCtx;
-    const headerTextTheme = { cellText: this.theme.headerText, errorText: this.theme.errorText };
+    const theme = this.theme;
+    const gridBg = theme.gridBg;
+    const textColor = theme.cellText;
+    const headerBg = theme.headerBg;
+    const headerTextColor = theme.headerText;
+    const errorTextColor = theme.errorText;
+    const commentIndicator = theme.commentIndicator;
+    const commentIndicatorResolved = theme.commentIndicatorResolved;
+    const trackCellFetches = perf?.enabled === true;
+    let cellFetches = 0;
 
     // Content layer state.
     const layoutEngine = this.textLayoutEngine;
@@ -1209,14 +1215,6 @@ export class CanvasGridRenderer {
       let fillRunColor: string | null = null;
       let fillRunX = 0;
       let fillRunWidth = 0;
-      const flushFillRun = () => {
-        if (!fillRunColor || fillRunWidth <= 0) return;
-        if (fillRunColor !== currentGridFill) {
-          gridCtx.fillStyle = fillRunColor;
-          currentGridFill = fillRunColor;
-        }
-        gridCtx.fillRect(fillRunX, y, fillRunWidth, rowHeight);
-      };
 
       let colXSheet = startColXSheet;
       for (let col = startCol; col < endCol; col++) {
@@ -1224,16 +1222,23 @@ export class CanvasGridRenderer {
         const x = colXSheet - quadrant.scrollBaseX + quadrant.originX;
 
         const cell = this.provider.getCell(row, col);
+        if (trackCellFetches) cellFetches += 1;
         const style = cell?.style;
 
         const isHeader = row < frozenRows || col < frozenCols;
 
         // Background fill (grid layer).
-        const fill = style?.fill ?? (isHeader ? this.theme.headerBg : undefined);
-        const fillToDraw = fill && fill !== this.theme.gridBg ? fill : null;
+        const fill = style?.fill ?? (isHeader ? headerBg : undefined);
+        const fillToDraw = fill && fill !== gridBg ? fill : null;
         if (fillToDraw) {
           if (fillToDraw !== fillRunColor) {
-            flushFillRun();
+            if (fillRunColor && fillRunWidth > 0) {
+              if (fillRunColor !== currentGridFill) {
+                gridCtx.fillStyle = fillRunColor;
+                currentGridFill = fillRunColor;
+              }
+              gridCtx.fillRect(fillRunX, y, fillRunWidth, rowHeight);
+            }
             fillRunColor = fillToDraw;
             fillRunX = x;
             fillRunWidth = colWidth;
@@ -1241,7 +1246,13 @@ export class CanvasGridRenderer {
             fillRunWidth += colWidth;
           }
         } else if (fillRunColor) {
-          flushFillRun();
+          if (fillRunWidth > 0) {
+            if (fillRunColor !== currentGridFill) {
+              gridCtx.fillStyle = fillRunColor;
+              currentGridFill = fillRunColor;
+            }
+            gridCtx.fillRect(fillRunX, y, fillRunWidth, rowHeight);
+          }
           fillRunColor = null;
           fillRunWidth = 0;
         }
@@ -1260,7 +1271,15 @@ export class CanvasGridRenderer {
             contentCtx.font = toCanvasFontString(fontSpec);
           }
 
-          const fillStyle = resolveCellTextColorWithTheme(cell.value, style?.color, isHeader ? headerTextTheme : this.theme);
+          const explicitColor = style?.color;
+          const fillStyle =
+            explicitColor !== undefined
+              ? explicitColor
+              : typeof cell.value === "string" && cell.value.startsWith("#")
+                ? errorTextColor
+                : isHeader
+                  ? headerTextColor
+                  : textColor;
           if (fillStyle !== currentTextFill) {
             contentCtx.fillStyle = fillStyle;
             currentTextFill = fillStyle;
@@ -1390,7 +1409,7 @@ export class CanvasGridRenderer {
             contentCtx.lineTo(x + colWidth - size, y);
             contentCtx.lineTo(x + colWidth, y + size);
             contentCtx.closePath();
-            contentCtx.fillStyle = resolved ? this.theme.commentIndicatorResolved : this.theme.commentIndicator;
+            contentCtx.fillStyle = resolved ? commentIndicatorResolved : commentIndicator;
             contentCtx.fill();
             contentCtx.restore();
           }
@@ -1399,12 +1418,22 @@ export class CanvasGridRenderer {
         colXSheet += colWidth;
       }
 
-      flushFillRun();
+      if (fillRunColor && fillRunWidth > 0) {
+        if (fillRunColor !== currentGridFill) {
+          gridCtx.fillStyle = fillRunColor;
+          currentGridFill = fillRunColor;
+        }
+        gridCtx.fillRect(fillRunX, y, fillRunWidth, rowHeight);
+      }
       rowYSheet += rowHeight;
     }
 
+    if (trackCellFetches) {
+      perf!.cellFetches += cellFetches;
+    }
+
     // Gridlines (grid layer), drawn after fills.
-    gridCtx.strokeStyle = this.theme.gridLine;
+    gridCtx.strokeStyle = theme.gridLine;
     gridCtx.lineWidth = 1;
 
     const xStart = this.scroll.cols.positionOf(startCol) - quadrant.scrollBaseX + quadrant.originX;
