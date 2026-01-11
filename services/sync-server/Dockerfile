@@ -76,6 +76,15 @@ COPY --from=build /app/packages/security/crypto /app/packages/security/crypto
 RUN mkdir -p /app/services/sync-server/.sync-server-data \
   && chown -R node:node /app/services/sync-server/.sync-server-data
 
+# Support `SYNC_SERVER_DATA_DIR=/data` (used by docker-compose). When a fresh
+# named volume is mounted at `/data`, Docker copies the directory contents from
+# the image into the volume. Keep a placeholder file so ownership is preserved
+# (otherwise Docker creates the empty directory as root-owned, which prevents
+# the non-root `node` user from writing persistence files).
+RUN mkdir -p /data \
+  && touch /data/.keep \
+  && chown -R node:node /data
+
 USER node
 
 EXPOSE 1234

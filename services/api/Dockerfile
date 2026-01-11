@@ -4,7 +4,16 @@ WORKDIR /app/services/api
 
 COPY services/api/package.json services/api/package-lock.json ./
 
+# The API depends on some monorepo packages via `workspace:*` (pnpm protocol),
+# which npm does not understand. For the Docker build, strip `workspace:*`
+# dependencies and vendor those packages into `node_modules` manually.
+RUN node -e 'const fs=require("fs");const pkg=JSON.parse(fs.readFileSync("package.json","utf8"));if(pkg.dependencies){for(const [name,ver] of Object.entries(pkg.dependencies)){if(typeof ver==="string"&&ver.startsWith("workspace:")) delete pkg.dependencies[name];}}fs.writeFileSync("package.json",JSON.stringify(pkg,null,2));'
+
 RUN npm ci
+
+# Vendored workspace deps (must match what we stripped above).
+RUN mkdir -p node_modules/@formula
+COPY packages/audit-core ./node_modules/@formula/audit-core
 
 FROM node:20-alpine AS build
 

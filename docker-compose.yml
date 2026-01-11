@@ -33,10 +33,6 @@ services:
     build:
       context: .
       dockerfile: services/sync-server/Dockerfile
-    # The sync server image runs as the non-root `node` user, but Docker named
-    # volumes are created as root-owned directories. Run as root in local
-    # docker-compose so the server can write its persistence files.
-    user: "0:0"
     environment:
       SYNC_SERVER_HOST: 0.0.0.0
       SYNC_SERVER_PORT: "1234"
