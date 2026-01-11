@@ -10,11 +10,14 @@ thiserror = "1"
 x509-parser = "0.17"
 
 [target.'cfg(all(not(target_arch = "wasm32"), windows))'.dependencies]
-# Use a vendored OpenSSL build on Windows to avoid requiring developers/CI to have
+# Use a vendored OpenSSL build on Windows/macOS to avoid requiring developers/CI to have
 # OpenSSL installed system-wide.
 openssl = { version = "0.10", features = ["vendored"] }
 
-[target.'cfg(all(not(target_arch = "wasm32"), not(windows)))'.dependencies]
+[target.'cfg(all(not(target_arch = "wasm32"), target_os = "macos"))'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(any(windows, target_os = "macos"))))'.dependencies]
 openssl = "0.10"
 
 [dev-dependencies]
