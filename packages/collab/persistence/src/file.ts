@@ -71,6 +71,15 @@ export class FileCollabPersistence implements CollabPersistence {
       })
       .then(task);
     this.queues.set(docId, next);
+    // Prevent unbounded growth of `this.queues` and ensure queued tasks don't
+    // trigger unhandled rejections when invoked in a fire-and-forget manner
+    // (e.g. from Yjs `doc.on("update")` handlers).
+    const cleanup = () => {
+      if (this.queues.get(docId) === next) {
+        this.queues.delete(docId);
+      }
+    };
+    void next.then(cleanup, cleanup);
     return next;
   }
 
