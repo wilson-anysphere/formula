@@ -135,8 +135,12 @@ export class BranchService {
     // doesn't exist yet. Creating a new document is an admin-level action, but
     // calling `init` on an existing document is safe for any role (it becomes a
     // no-op in the store).
-    const existingMain = await this.#store.getBranch(this.#docId, "main");
-    if (!existingMain) {
+    const store = this.#store;
+    const exists =
+      store && typeof store.hasDocument === "function"
+        ? await store.hasDocument(this.#docId)
+        : Boolean(await store.getBranch(this.#docId, "main"));
+    if (!exists) {
       assertCanManageBranches(actor, "init");
     }
     await this.#store.ensureDocument(this.#docId, actor, initialState);

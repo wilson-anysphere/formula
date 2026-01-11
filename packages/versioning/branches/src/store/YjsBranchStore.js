@@ -175,6 +175,22 @@ export class YjsBranchStore {
     });
   }
 
+  /**
+   * @param {string} docId
+   * @returns {Promise<boolean>}
+   */
+  async hasDocument(docId) {
+    const root = this.#meta.get("rootCommitId");
+    if (typeof root !== "string" || root.length === 0) return false;
+    const commit = getYMap(this.#commits.get(root));
+    if (!commit) return false;
+    const commitDocId = commit.get("docId");
+    if (typeof commitDocId === "string" && commitDocId.length > 0) {
+      return commitDocId === docId;
+    }
+    return true;
+  }
+
   async getCurrentBranchName(docId) {
     const raw = this.#meta.get("currentBranchName");
     const name = typeof raw === "string" && raw.length > 0 ? raw : "main";

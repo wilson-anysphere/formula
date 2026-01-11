@@ -23,6 +23,6 @@ test("YjsBranchStore.ensureDocument repairs missing main branch + invalid curren
   assert.ok(ydoc.getMap("branching:branches").has("main"));
   assert.equal(ydoc.getMap("branching:meta").get("currentBranchName"), "main");
   assert.equal(await store.getCurrentBranchName(docId), "main");
+  assert.equal(await store.hasDocument(docId), true);
   assert.ok(await store.getBranch(docId, "main"));
 });
-
