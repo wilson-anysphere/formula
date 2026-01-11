@@ -421,6 +421,16 @@ fn cross_sheet_formulas_recalculate() {
     let cell_js = wb.get_cell("A1".to_string(), Some("Sheet2".to_string())).unwrap();
     let cell: formula_core::CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
     assert_eq!(cell.value.as_f64(), Some(2.0));
+
+    // Sheet-scoped recalculation should still surface cross-sheet formula deltas.
+    wb.set_cell("A1".to_string(), JsValue::from_f64(2.0), Some("Sheet1".to_string()))
+        .unwrap();
+    let changes_js = wb.recalculate(Some("Sheet1".to_string())).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].sheet, "Sheet2");
+    assert_eq!(changes[0].address, "A1");
+    assert_eq!(changes[0].value.as_f64(), Some(4.0));
 }
 
 #[wasm_bindgen_test]
