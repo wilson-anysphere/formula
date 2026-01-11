@@ -24,9 +24,19 @@ fn concat_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut out = String::new();
     for arg in args {
         match ctx.eval_arg(arg) {
-            ArgValue::Scalar(v) => match v.coerce_to_string() {
-                Ok(s) => out.push_str(&s),
-                Err(e) => return Value::Error(e),
+            ArgValue::Scalar(v) => match v {
+                Value::Array(arr) => {
+                    for v in arr.iter() {
+                        match v.coerce_to_string() {
+                            Ok(s) => out.push_str(&s),
+                            Err(e) => return Value::Error(e),
+                        }
+                    }
+                }
+                other => match other.coerce_to_string() {
+                    Ok(s) => out.push_str(&s),
+                    Err(e) => return Value::Error(e),
+                },
             },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {

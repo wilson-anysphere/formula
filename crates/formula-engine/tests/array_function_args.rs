@@ -33,3 +33,20 @@ fn functions_accept_array_results_from_operator_expressions() {
     assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Number(40.0));
 }
 
+#[test]
+fn concat_flattens_array_results_from_operators() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=CONCAT(A1:A3*10)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Text("102030".to_string())
+    );
+}
