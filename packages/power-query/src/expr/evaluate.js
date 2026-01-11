@@ -7,6 +7,14 @@ import { parseDateLiteral } from "./date.js";
  */
 
 /**
+ * @param {unknown} value
+ * @returns {value is Date}
+ */
+function isDate(value) {
+  return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
+/**
  * @param {ExprNode} expr
  * @param {(name: string) => number} getColumnIndex
  * @returns {ExprNode}
@@ -129,14 +137,18 @@ export function evaluateExpr(expr, values, columnIndex = null, value = undefined
         case ">=":
           return /** @type {any} */ (left) >= /** @type {any} */ (right);
         case "==":
+          if (isDate(left) && isDate(right)) return left.getTime() === right.getTime();
           // eslint-disable-next-line eqeqeq
           return /** @type {any} */ (left) == /** @type {any} */ (right);
         case "!=":
+          if (isDate(left) && isDate(right)) return left.getTime() !== right.getTime();
           // eslint-disable-next-line eqeqeq
           return /** @type {any} */ (left) != /** @type {any} */ (right);
         case "===":
+          if (isDate(left) && isDate(right)) return left.getTime() === right.getTime();
           return left === right;
         case "!==":
+          if (isDate(left) && isDate(right)) return left.getTime() !== right.getTime();
           return left !== right;
         default:
           throw new Error(`Unsupported binary operator '${expr.op}'`);

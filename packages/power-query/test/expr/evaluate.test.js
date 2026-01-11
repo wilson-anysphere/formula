@@ -53,6 +53,13 @@ test("expr evaluate: date() literal", () => {
   assert.equal(value.toISOString(), "2020-01-01T00:00:00.000Z");
 });
 
+test("expr evaluate: date equality compares by timestamp (not identity)", () => {
+  assert.equal(evaluateExpr(parseFormula('date("2020-01-01") == date("2020-01-01")'), []), true);
+  assert.equal(evaluateExpr(parseFormula('date("2020-01-01") != date("2020-01-01")'), []), false);
+  assert.equal(evaluateExpr(parseFormula('date("2020-01-01") === date("2020-01-01")'), []), true);
+  assert.equal(evaluateExpr(parseFormula('date("2020-01-01") !== date("2020-01-01")'), []), false);
+});
+
 test("expr evaluate: date() rejects invalid formats", () => {
   const expr = parseFormula('date("2020-02-30")');
   assert.throws(() => evaluateExpr(expr, []), /Invalid date literal/);
