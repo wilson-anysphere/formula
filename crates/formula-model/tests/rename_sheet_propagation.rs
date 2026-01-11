@@ -36,7 +36,7 @@ fn rename_sheet_rewrites_all_modeled_surfaces() {
     });
 
     // Conditional formatting formulas.
-    other_sheet.conditional_formatting.extend([
+    other_sheet.conditional_formatting_rules.extend([
         CfRule {
             schema: CfRuleSchema::Office2007,
             id: None,
@@ -150,7 +150,7 @@ fn rename_sheet_rewrites_all_modeled_surfaces() {
     );
 
     let expr_rule = other_sheet
-        .conditional_formatting
+        .conditional_formatting_rules
         .iter()
         .find(|r| matches!(r.kind, CfRuleKind::Expression { .. }))
         .expect("expression rule");
@@ -160,7 +160,7 @@ fn rename_sheet_rewrites_all_modeled_surfaces() {
     }
 
     let cell_is_rule = other_sheet
-        .conditional_formatting
+        .conditional_formatting_rules
         .iter()
         .find(|r| matches!(r.kind, CfRuleKind::CellIs { .. }))
         .expect("cellIs rule");
@@ -172,7 +172,7 @@ fn rename_sheet_rewrites_all_modeled_surfaces() {
     }
 
     let data_bar_rule = other_sheet
-        .conditional_formatting
+        .conditional_formatting_rules
         .iter()
         .find(|r| matches!(r.kind, CfRuleKind::DataBar(_)))
         .expect("dataBar rule");

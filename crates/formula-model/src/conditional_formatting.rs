@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::{A1ParseError, CellRef, CellValue, Color, ErrorValue, Range};
+use crate::{
+    A1ParseError, CellRef, CellValue, Color, ErrorValue, Fill, FillPattern, Font, Range, Style,
+    StyleTable,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CfRuleSchema {
@@ -341,12 +344,24 @@ pub trait CellValueProvider {
     fn get_value(&self, cell: CellRef) -> Option<CellValue>;
 }
 
+impl CellValueProvider for crate::Worksheet {
+    fn get_value(&self, cell: CellRef) -> Option<CellValue> {
+        Some(self.value(cell))
+    }
+}
+
 pub trait FormulaEvaluator {
     fn eval(&self, formula: &str, ctx: CellRef) -> Option<CellValue>;
 }
 
 pub trait DifferentialFormatProvider {
     fn get_dxf(&self, dxf_id: u32) -> Option<CfStyleOverride>;
+}
+
+impl DifferentialFormatProvider for Vec<CfStyleOverride> {
+    fn get_dxf(&self, dxf_id: u32) -> Option<CfStyleOverride> {
+        self.get(dxf_id as usize).cloned()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -414,27 +429,80 @@ impl CfEvaluationResult {
     }
 }
 
-#[derive(Default)]
+/// Fully resolved formatting for a cell after applying conditional formatting.
+///
+/// This is intended for viewport rendering: callers can resolve the base style
+/// from the workbook [`StyleTable`] and apply the [`CellFormatResult`] overlay
+/// from [`CfEvaluationResult`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ResolvedCellFormat {
+    pub style: Style,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_bar: Option<DataBarRender>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<IconRender>,
+}
+
+/// Apply a conditional formatting style override on top of an existing [`Style`].
+pub fn apply_cf_style_override(style: &mut Style, overlay: &CfStyleOverride) {
+    if let Some(fill) = overlay.fill {
+        let fill_style = style.fill.get_or_insert_with(Fill::default);
+        fill_style.pattern = FillPattern::Solid;
+        fill_style.fg_color = Some(fill);
+        fill_style.bg_color = None;
+    }
+
+    if overlay.font_color.is_some() || overlay.bold.is_some() || overlay.italic.is_some() {
+        let font = style.font.get_or_insert_with(Font::default);
+        if let Some(color) = overlay.font_color {
+            font.color = Some(color);
+        }
+        if let Some(bold) = overlay.bold {
+            font.bold = bold;
+        }
+        if let Some(italic) = overlay.italic {
+            font.italic = italic;
+        }
+    }
+}
+
+/// Resolve the final per-cell formatting to render by merging:
+/// - the base cell style (via [`StyleTable`])
+/// - the conditional formatting result (`cf`)
+///
+/// This helper is pure (no UI dependencies) and is suitable for building a
+/// renderer-facing payload.
+pub fn resolve_cell_formatting(
+    styles: &StyleTable,
+    base_style_id: u32,
+    cf: &CellFormatResult,
+) -> ResolvedCellFormat {
+    let mut style = styles.get(base_style_id).cloned().unwrap_or_default();
+    apply_cf_style_override(&mut style, &cf.style);
+    ResolvedCellFormat {
+        style,
+        data_bar: cf.data_bar.clone(),
+        icon: cf.icon.clone(),
+    }
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct ConditionalFormattingEngine {
-    rules: Vec<CfRule>,
     cache: HashMap<Range, CachedEvaluation>,
 }
 
+#[derive(Clone, Debug)]
 struct CachedEvaluation {
     dependencies: Vec<Range>,
     result: CfEvaluationResult,
 }
 
 impl ConditionalFormattingEngine {
-    pub fn new(rules: Vec<CfRule>) -> Self {
-        Self {
-            rules,
-            cache: HashMap::new(),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn set_rules(&mut self, rules: Vec<CfRule>) {
-        self.rules = rules;
+    pub fn clear_cache(&mut self) {
         self.cache.clear();
     }
 
@@ -449,14 +517,14 @@ impl ConditionalFormattingEngine {
 
     pub fn evaluate_visible_range(
         &mut self,
+        rules: &[CfRule],
         visible: Range,
         values: &dyn CellValueProvider,
         formula_evaluator: Option<&dyn FormulaEvaluator>,
         dxfs: Option<&dyn DifferentialFormatProvider>,
     ) -> &CfEvaluationResult {
         if !self.cache.contains_key(&visible) {
-            let (deps, result) =
-                evaluate_rules(&self.rules, visible, values, formula_evaluator, dxfs);
+            let (deps, result) = evaluate_rules(rules, visible, values, formula_evaluator, dxfs);
             self.cache.insert(
                 visible,
                 CachedEvaluation {
@@ -1418,13 +1486,15 @@ mod tests {
             ..percent_rule.clone()
         };
 
-        let mut engine = ConditionalFormattingEngine::new(vec![percent_rule]);
-        let eval = engine.evaluate_visible_range(visible, &values, None, None);
+        let rules = vec![percent_rule];
+        let mut engine = ConditionalFormattingEngine::new();
+        let eval = engine.evaluate_visible_range(&rules, visible, &values, None, None);
         assert_eq!(eval.get(CellRef::from_a1("A1").unwrap()).unwrap().icon.as_ref().unwrap().index, 0);
         assert_eq!(eval.get(CellRef::from_a1("A2").unwrap()).unwrap().icon.as_ref().unwrap().index, 0);
 
-        let mut engine = ConditionalFormattingEngine::new(vec![percentile_rule]);
-        let eval = engine.evaluate_visible_range(visible, &values, None, None);
+        let rules = vec![percentile_rule];
+        let mut engine = ConditionalFormattingEngine::new();
+        let eval = engine.evaluate_visible_range(&rules, visible, &values, None, None);
         assert_eq!(eval.get(CellRef::from_a1("A1").unwrap()).unwrap().icon.as_ref().unwrap().index, 1);
         assert_eq!(eval.get(CellRef::from_a1("A2").unwrap()).unwrap().icon.as_ref().unwrap().index, 1);
     }
@@ -1466,8 +1536,9 @@ mod tests {
             dependencies: vec![],
         };
 
-        let mut engine = ConditionalFormattingEngine::new(vec![rule]);
-        let eval = engine.evaluate_visible_range(visible, &values, None, None);
+        let rules = vec![rule];
+        let mut engine = ConditionalFormattingEngine::new();
+        let eval = engine.evaluate_visible_range(&rules, visible, &values, None, None);
         assert_eq!(
             eval.get(CellRef::from_a1("A2").unwrap()).unwrap().style.fill,
             Some(Color::new_argb(0xFFFFFF00)),
@@ -1509,8 +1580,9 @@ mod tests {
             dependencies: vec![],
         };
 
-        let mut engine = ConditionalFormattingEngine::new(vec![rule]);
-        let eval = engine.evaluate_visible_range(visible, &values, Some(&evaluator), None);
+        let rules = vec![rule];
+        let mut engine = ConditionalFormattingEngine::new();
+        let eval = engine.evaluate_visible_range(&rules, visible, &values, Some(&evaluator), None);
 
         let bar1 = eval.get(CellRef::from_a1("B1").unwrap()).unwrap().data_bar.as_ref().unwrap();
         assert!((bar1.fill_ratio - 0.5).abs() < 1e-6);
@@ -1553,8 +1625,9 @@ mod tests {
             dependencies: vec![],
         };
 
-        let mut engine = ConditionalFormattingEngine::new(vec![rule]);
-        let eval = engine.evaluate_visible_range(visible, &values, None, None);
+        let rules = vec![rule];
+        let mut engine = ConditionalFormattingEngine::new();
+        let eval = engine.evaluate_visible_range(&rules, visible, &values, None, None);
         let c1 = eval.get(CellRef::from_a1("C1").unwrap()).unwrap().icon.as_ref().unwrap();
         let c3 = eval.get(CellRef::from_a1("C3").unwrap()).unwrap().icon.as_ref().unwrap();
         assert_eq!(c1.index, 2);
@@ -1592,8 +1665,9 @@ mod tests {
             dependencies: vec![],
         };
 
-        let mut engine = ConditionalFormattingEngine::new(vec![rule]);
-        let eval = engine.evaluate_visible_range(visible, &values, None, None);
+        let rules = vec![rule];
+        let mut engine = ConditionalFormattingEngine::new();
+        let eval = engine.evaluate_visible_range(&rules, visible, &values, None, None);
         let d1 = eval.get(CellRef::from_a1("D1").unwrap()).unwrap().data_bar.as_ref().unwrap();
         assert!((d1.fill_ratio - 0.5).abs() < 1e-6);
     }

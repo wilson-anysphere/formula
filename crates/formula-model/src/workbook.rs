@@ -200,7 +200,7 @@ impl Workbook {
                 table.rewrite_sheet_references(old_name, new_name);
             }
 
-            for rule in &mut sheet.conditional_formatting {
+            for rule in &mut sheet.conditional_formatting_rules {
                 rule.rewrite_sheet_references(old_name, new_name);
             }
 
@@ -343,7 +343,7 @@ impl Workbook {
                 table.invalidate_deleted_sheet_references(&deleted_name, &sheet_order);
             }
 
-            for rule in &mut sheet.conditional_formatting {
+            for rule in &mut sheet.conditional_formatting_rules {
                 rule.invalidate_deleted_sheet_references(&deleted_name, &sheet_order);
             }
 

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -8,10 +9,11 @@ use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as Colum
 
 use crate::drawings::DrawingObject;
 use crate::{
-    A1ParseError, Cell, CellKey, CellRef, CellValue, CfRule, Comment, CommentError, CommentPatch,
-    DataValidation, DataValidationAssignment, DataValidationId, Hyperlink, MergeError, MergedRegions,
-    Outline, OutlineEntry, Range, Reply, SheetProtection, SheetProtectionAction, StyleTable, Table,
-    SheetSelection, SheetView,
+    A1ParseError, Cell, CellKey, CellRef, CellValue, CellValueProvider, CfEvaluationResult, CfRule,
+    CfStyleOverride, Comment, CommentError, CommentPatch, ConditionalFormattingEngine,
+    DataValidation, DataValidationAssignment, DataValidationId, DifferentialFormatProvider,
+    FormulaEvaluator, Hyperlink, MergeError, MergedRegions, Outline, OutlineEntry, Range, Reply,
+    SheetProtection, SheetProtectionAction, SheetSelection, SheetView, StyleTable, Table,
 };
 
 /// Identifier for a worksheet within a workbook.
@@ -213,9 +215,19 @@ pub struct Worksheet {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tables: Vec<Table>,
 
-    /// Conditional formatting rules hosted on this worksheet.
+    /// Conditional formatting rules for this worksheet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", alias = "conditional_formatting")]
+    pub conditional_formatting_rules: Vec<CfRule>,
+
+    /// Differential formats referenced by conditional formatting rules.
+    ///
+    /// [`CfRule::dxf_id`] indexes into this vector.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub conditional_formatting: Vec<CfRule>,
+    pub conditional_formatting_dxfs: Vec<CfStyleOverride>,
+
+    /// Runtime cache for conditional formatting evaluation.
+    #[serde(skip)]
+    conditional_formatting_engine: RefCell<ConditionalFormattingEngine>,
 
     /// Optional columnar backing store for large imported datasets.
     ///
@@ -274,7 +286,9 @@ impl Worksheet {
             zoom,
             view,
             tables: Vec::new(),
-            conditional_formatting: Vec::new(),
+            conditional_formatting_rules: Vec::new(),
+            conditional_formatting_dxfs: Vec::new(),
+            conditional_formatting_engine: RefCell::new(ConditionalFormattingEngine::default()),
             columnar: None,
             hyperlinks: Vec::new(),
             data_validations: Vec::new(),
@@ -282,6 +296,80 @@ impl Worksheet {
             next_data_validation_id: 1,
             sheet_protection: SheetProtection::default(),
         }
+    }
+
+    /// Replace all conditional formatting rules and differential formats.
+    ///
+    /// This clears any cached evaluation results.
+    pub fn set_conditional_formatting(&mut self, rules: Vec<CfRule>, dxfs: Vec<CfStyleOverride>) {
+        self.conditional_formatting_rules = rules;
+        self.conditional_formatting_dxfs = dxfs;
+        self.clear_conditional_formatting_cache();
+    }
+
+    /// Append a conditional formatting rule.
+    ///
+    /// This clears any cached evaluation results.
+    pub fn add_conditional_formatting_rule(&mut self, rule: CfRule) {
+        self.conditional_formatting_rules.push(rule);
+        self.clear_conditional_formatting_cache();
+    }
+
+    /// Remove all conditional formatting rules and differential formats.
+    ///
+    /// This clears any cached evaluation results.
+    pub fn clear_conditional_formatting(&mut self) {
+        self.conditional_formatting_rules.clear();
+        self.conditional_formatting_dxfs.clear();
+        self.clear_conditional_formatting_cache();
+    }
+
+    /// Invalidate cached conditional formatting results affected by the given changed cells.
+    pub fn invalidate_conditional_formatting_cells<I: IntoIterator<Item = CellRef>>(
+        &self,
+        changed: I,
+    ) {
+        self.conditional_formatting_engine
+            .borrow_mut()
+            .invalidate_cells(changed);
+    }
+
+    /// Clear all cached conditional formatting evaluations.
+    pub fn clear_conditional_formatting_cache(&self) {
+        self.conditional_formatting_engine.borrow_mut().clear_cache();
+    }
+
+    /// Evaluate conditional formatting rules for a visible viewport range.
+    ///
+    /// Results are cached per-visible-range and can be invalidated via
+    /// [`Worksheet::invalidate_conditional_formatting_cells`].
+    pub fn evaluate_conditional_formatting(
+        &self,
+        visible: Range,
+        values: &dyn CellValueProvider,
+        formula_evaluator: Option<&dyn FormulaEvaluator>,
+    ) -> CfEvaluationResult {
+        if self.conditional_formatting_rules.is_empty() {
+            return CfEvaluationResult::new(visible);
+        }
+
+        let dxfs: Option<&dyn DifferentialFormatProvider> =
+            if self.conditional_formatting_dxfs.is_empty() {
+                None
+            } else {
+                Some(&self.conditional_formatting_dxfs)
+            };
+
+        self.conditional_formatting_engine
+            .borrow_mut()
+            .evaluate_visible_range(
+                &self.conditional_formatting_rules,
+                visible,
+                values,
+                formula_evaluator,
+                dxfs,
+            )
+            .clone()
     }
 
     /// Returns whether a cell can be edited (i.e. its value/formula changed) given the current
@@ -427,11 +515,13 @@ impl Worksheet {
         self.row_count = self.row_count.max(origin.row.saturating_add(table_rows));
         self.col_count = self.col_count.max(origin.col.saturating_add(table_cols));
         self.columnar = Some(ColumnarBackend { origin, table });
+        self.clear_conditional_formatting_cache();
     }
 
     /// Remove any columnar backing table.
     pub fn clear_columnar_table(&mut self) {
         self.columnar = None;
+        self.clear_conditional_formatting_cache();
     }
 
     /// Returns the backing columnar table, if present.
@@ -825,6 +915,8 @@ impl Worksheet {
                 self.on_cell_inserted(cell_ref);
             }
         }
+
+        self.invalidate_conditional_formatting_cells([cell_ref]);
     }
 
     /// Set a cell formula using an A1 reference.
@@ -863,6 +955,8 @@ impl Worksheet {
                 self.on_cell_inserted(cell_ref);
             }
         }
+
+        self.invalidate_conditional_formatting_cells([cell_ref]);
     }
 
     /// Set the cell's style id using an A1 reference.
@@ -887,6 +981,7 @@ impl Worksheet {
             let removed = self.cells.remove(&key).is_some();
             if removed {
                 self.on_cell_removed(anchor);
+                self.invalidate_conditional_formatting_cells([anchor]);
             }
             return;
         }
@@ -900,6 +995,8 @@ impl Worksheet {
                 self.used_range = Some(Range::new(anchor, anchor));
             }
         }
+
+        self.invalidate_conditional_formatting_cells([anchor]);
     }
 
     /// Convenience: set only the value for a cell.
@@ -925,6 +1022,8 @@ impl Worksheet {
                 self.on_cell_inserted(anchor);
             }
         }
+
+        self.invalidate_conditional_formatting_cells([anchor]);
     }
 
     /// Set a cell value using an A1 reference (e.g. `C3`).
@@ -940,6 +1039,7 @@ impl Worksheet {
         let key = CellKey::from(anchor);
         if self.cells.remove(&key).is_some() {
             self.on_cell_removed(anchor);
+            self.invalidate_conditional_formatting_cells([anchor]);
         }
     }
 
@@ -991,12 +1091,18 @@ impl Worksheet {
                 .extend(moved_comments);
         }
 
-        self.merged_regions.add(range)
+        let res = self.merged_regions.add(range);
+        self.clear_conditional_formatting_cache();
+        res
     }
 
     /// Unmerge any merged regions that intersect `range`.
     pub fn unmerge_range(&mut self, range: Range) -> usize {
-        self.merged_regions.unmerge_range(range)
+        let count = self.merged_regions.unmerge_range(range);
+        if count > 0 {
+            self.clear_conditional_formatting_cache();
+        }
+        count
     }
 
     /// Iterate over all stored cells.
@@ -1034,6 +1140,7 @@ impl Worksheet {
         }
 
         self.used_range = compute_used_range(&self.cells);
+        self.clear_conditional_formatting_cache();
     }
 
     /// Iterate over all stored cells mutably.
@@ -1427,8 +1534,10 @@ impl<'de> Deserialize<'de> for Worksheet {
             cells: HashMap<CellKey, Cell>,
             #[serde(default)]
             tables: Vec<Table>,
+            #[serde(default, alias = "conditional_formatting")]
+            conditional_formatting_rules: Vec<CfRule>,
             #[serde(default)]
-            conditional_formatting: Vec<CfRule>,
+            conditional_formatting_dxfs: Vec<CfStyleOverride>,
             #[serde(default = "default_row_count")]
             row_count: u32,
             #[serde(default = "default_col_count")]
@@ -1574,7 +1683,9 @@ impl<'de> Deserialize<'de> for Worksheet {
             zoom,
             view,
             tables: helper.tables,
-            conditional_formatting: helper.conditional_formatting,
+            conditional_formatting_rules: helper.conditional_formatting_rules,
+            conditional_formatting_dxfs: helper.conditional_formatting_dxfs,
+            conditional_formatting_engine: RefCell::new(ConditionalFormattingEngine::default()),
             columnar: None,
             hyperlinks: helper.hyperlinks,
             data_validations: helper.data_validations,

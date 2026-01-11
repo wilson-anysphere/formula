@@ -136,12 +136,12 @@ fn evaluates_visible_range_and_renders_snapshot() {
     let values = parse_sheet_values(sheet_xml);
     let cf = parse_worksheet_conditional_formatting(sheet_xml).unwrap();
     let rules = cf.rules.clone();
-    let mut engine = ConditionalFormattingEngine::new(rules);
+    let mut engine = ConditionalFormattingEngine::new();
     let styles = Styles::parse(styles_xml).unwrap();
     let dxf_provider = DxfProvider { styles: &styles };
 
     let visible = parse_range_a1("A1:D3").unwrap();
-    let eval = engine.evaluate_visible_range(visible, &values, None, Some(&dxf_provider));
+    let eval = engine.evaluate_visible_range(&rules, visible, &values, None, Some(&dxf_provider));
 
     let snapshot = format_render_plan(visible, eval);
     insta::assert_snapshot!("conditional_formatting_render_plan", snapshot);
