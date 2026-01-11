@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::io::{BufReader, Read, Seek, Write};
+use std::io::{BufRead, BufReader, Read, Seek, Write};
 
 use formula_model::{CellRef, CellValue};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
@@ -167,21 +167,10 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
 
     let mut row_state: Option<RowState> = None;
 
-    // When replacing an existing `<c>` we skip its original contents.
-    let mut skip_depth: usize = 0;
-
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Eof => break,
-            _ if skip_depth > 0 => {
-                match &event {
-                    Event::Start(_) => skip_depth += 1,
-                    Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
-                    Event::Empty(_) => {}
-                    _ => {}
-                }
-            }
 
             Event::Start(ref e) if e.name().as_ref() == b"sheetData" => {
                 saw_sheet_data = true;
@@ -297,9 +286,7 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 insert_pending_before_cell(&mut writer, state, col_0)?;
 
                 if let Some(patch) = take_patch_for_col(state, col_0) {
-                    // Replace existing cell content.
-                    write_patched_cell(&mut writer, Some(e), &cell_ref, &patch)?;
-                    skip_depth = 1;
+                    patch_existing_cell(&mut reader, &mut writer, e, &cell_ref, &patch)?;
                 } else {
                     writer.write_event(Event::Start(e.to_owned()))?;
                 }
@@ -462,6 +449,237 @@ fn take_patch_for_col(state: &mut RowState, col_0: u32) -> Option<CellPatch> {
     } else {
         None
     }
+}
+
+fn patch_existing_cell<R: BufRead, W: Write>(
+    reader: &mut Reader<R>,
+    writer: &mut Writer<W>,
+    cell_start: &BytesStart<'_>,
+    cell_ref: &CellRef,
+    patch: &CellPatch,
+) -> Result<(), StreamingPatchError> {
+    let (cell_t, body_kind) = cell_representation(&patch.value, patch.formula.as_deref())?;
+    let patch_formula = patch
+        .formula
+        .as_deref()
+        .map(|f| f.strip_prefix('=').unwrap_or(f));
+
+    let mut c = BytesStart::new("c");
+    let mut has_r = false;
+    for attr in cell_start.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"t" {
+            continue;
+        }
+        if attr.key.as_ref() == b"r" {
+            has_r = true;
+        }
+        c.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+    }
+    if !has_r {
+        let a1 = cell_ref.to_a1();
+        c.push_attribute(("r", a1.as_str()));
+    }
+    if let Some(t) = cell_t {
+        c.push_attribute(("t", t));
+    }
+
+    writer.write_event(Event::Start(c))?;
+
+    let mut inner_buf = Vec::new();
+    let mut inner_events: Vec<Event<'static>> = Vec::new();
+    loop {
+        let ev = reader.read_event_into(&mut inner_buf)?;
+        match ev {
+            Event::End(ref e) if e.name().as_ref() == b"c" => break,
+            Event::Eof => break,
+            ev => inner_events.push(ev.into_owned()),
+        }
+        inner_buf.clear();
+    }
+
+    write_patched_cell_children(writer, &inner_events, patch_formula, &body_kind)?;
+    writer.write_event(Event::End(BytesEnd::new("c")))?;
+    Ok(())
+}
+
+fn write_patched_cell_children<W: Write>(
+    writer: &mut Writer<W>,
+    inner_events: &[Event<'static>],
+    patch_formula: Option<&str>,
+    body_kind: &CellBodyKind,
+) -> Result<(), StreamingPatchError> {
+    let mut formula_written = patch_formula.is_none();
+    let mut value_written = matches!(body_kind, CellBodyKind::None);
+    let mut saw_formula = false;
+    let mut saw_value = false;
+
+    let mut idx = 0usize;
+    while idx < inner_events.len() {
+        match &inner_events[idx] {
+            Event::Start(e) if e.name().as_ref() == b"f" => {
+                saw_formula = true;
+                if !formula_written {
+                    if let Some(formula) = patch_formula {
+                        write_formula_element(writer, Some(e), formula)?;
+                        formula_written = true;
+                    }
+                }
+                idx = skip_owned_subtree(inner_events, idx);
+                continue;
+            }
+            Event::Empty(e) if e.name().as_ref() == b"f" => {
+                saw_formula = true;
+                if !formula_written {
+                    if let Some(formula) = patch_formula {
+                        write_formula_element(writer, Some(e), formula)?;
+                        formula_written = true;
+                    }
+                }
+                idx += 1;
+                continue;
+            }
+            Event::Start(e)
+                if e.name().as_ref() == b"v" || e.name().as_ref() == b"is" =>
+            {
+                saw_value = true;
+
+                if !formula_written {
+                    if let Some(formula) = patch_formula {
+                        // Original cell has no <f> before the value; insert one.
+                        write_formula_element(writer, None, formula)?;
+                        formula_written = true;
+                    }
+                }
+                if !value_written {
+                    write_value_element(writer, body_kind)?;
+                    value_written = true;
+                }
+
+                idx = skip_owned_subtree(inner_events, idx);
+                continue;
+            }
+            Event::Empty(e) if e.name().as_ref() == b"v" || e.name().as_ref() == b"is" => {
+                saw_value = true;
+
+                if !formula_written {
+                    if let Some(formula) = patch_formula {
+                        write_formula_element(writer, None, formula)?;
+                        formula_written = true;
+                    }
+                }
+                if !value_written {
+                    write_value_element(writer, body_kind)?;
+                    value_written = true;
+                }
+
+                idx += 1;
+                continue;
+            }
+            ev => {
+                if !formula_written && !saw_formula {
+                    if let Some(formula) = patch_formula {
+                        write_formula_element(writer, None, formula)?;
+                        formula_written = true;
+                    }
+                }
+                if !value_written && !saw_value {
+                    write_value_element(writer, body_kind)?;
+                    value_written = true;
+                }
+                writer.write_event(ev.clone())?;
+            }
+        }
+        idx += 1;
+    }
+
+    if !formula_written {
+        if let Some(formula) = patch_formula {
+            write_formula_element(writer, None, formula)?;
+        }
+    }
+    if !value_written {
+        write_value_element(writer, body_kind)?;
+    }
+
+    Ok(())
+}
+
+fn skip_owned_subtree(events: &[Event<'static>], mut idx: usize) -> usize {
+    match &events[idx] {
+        Event::Start(_) => {
+            let mut depth = 1usize;
+            idx += 1;
+            while idx < events.len() {
+                match &events[idx] {
+                    Event::Start(_) => depth += 1,
+                    Event::End(_) => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            idx += 1;
+                            break;
+                        }
+                    }
+                    Event::Empty(_) => {}
+                    _ => {}
+                }
+                idx += 1;
+            }
+            idx
+        }
+        _ => idx + 1,
+    }
+}
+
+fn write_formula_element<W: Write>(
+    writer: &mut Writer<W>,
+    original: Option<&BytesStart<'_>>,
+    formula: &str,
+) -> Result<(), StreamingPatchError> {
+    let formula = formula.strip_prefix('=').unwrap_or(formula);
+    let mut f = BytesStart::new("f");
+    if let Some(orig) = original {
+        for attr in orig.attributes() {
+            let attr = attr?;
+            f.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+        }
+    }
+
+    if formula.is_empty() {
+        writer.write_event(Event::Empty(f))?;
+    } else {
+        writer.write_event(Event::Start(f))?;
+        writer.write_event(Event::Text(BytesText::new(formula)))?;
+        writer.write_event(Event::End(BytesEnd::new("f")))?;
+    }
+    Ok(())
+}
+
+fn write_value_element<W: Write>(
+    writer: &mut Writer<W>,
+    body_kind: &CellBodyKind,
+) -> Result<(), StreamingPatchError> {
+    match body_kind {
+        CellBodyKind::V(text) => {
+            writer.write_event(Event::Start(BytesStart::new("v")))?;
+            writer.write_event(Event::Text(BytesText::new(text)))?;
+            writer.write_event(Event::End(BytesEnd::new("v")))?;
+        }
+        CellBodyKind::InlineStr(text) => {
+            writer.write_event(Event::Start(BytesStart::new("is")))?;
+            let mut t = BytesStart::new("t");
+            if needs_space_preserve(text) {
+                t.push_attribute(("xml:space", "preserve"));
+            }
+            writer.write_event(Event::Start(t))?;
+            writer.write_event(Event::Text(BytesText::new(text)))?;
+            writer.write_event(Event::End(BytesEnd::new("t")))?;
+            writer.write_event(Event::End(BytesEnd::new("is")))?;
+        }
+        CellBodyKind::None => {}
+    }
+
+    Ok(())
 }
 
 fn write_patched_cell<W: Write>(
