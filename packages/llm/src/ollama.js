@@ -213,6 +213,8 @@ export class OllamaChatClient {
 
       const decoder = new TextDecoder();
       let buffer = "";
+      /** @type {{ promptTokens?: number, completionTokens?: number, totalTokens?: number } | null} */
+      let usage = null;
 
       /** @type {Map<string, { name?: string, args: string, started: boolean }>} */
       const toolCallsById = new Map();
@@ -281,14 +283,26 @@ export class OllamaChatClient {
 
           if (json.done) {
             for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
-            yield { type: "done" };
+            const promptTokens = json.prompt_eval_count;
+            const completionTokens = json.eval_count;
+            if (typeof promptTokens === "number" || typeof completionTokens === "number") {
+              usage = {
+                promptTokens: typeof promptTokens === "number" ? promptTokens : undefined,
+                completionTokens: typeof completionTokens === "number" ? completionTokens : undefined,
+                totalTokens:
+                  typeof promptTokens === "number" && typeof completionTokens === "number"
+                    ? promptTokens + completionTokens
+                    : undefined,
+              };
+            }
+            yield usage ? { type: "done", usage } : { type: "done" };
             return;
           }
         }
       }
 
       for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
-      yield { type: "done" };
+      yield usage ? { type: "done", usage } : { type: "done" };
     } finally {
       clearTimeout(timeout);
       removeRequestAbortListener?.();

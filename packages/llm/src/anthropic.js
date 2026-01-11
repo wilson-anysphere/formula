@@ -269,12 +269,24 @@ export class AnthropicClient {
           if (args) yield { type: "tool_call_delta", id: call.id, delta: args };
           yield { type: "tool_call_end", id: call.id };
         }
-        yield { type: "done" };
+        const usage = full.usage
+          ? {
+              promptTokens: full.usage.promptTokens,
+              completionTokens: full.usage.completionTokens,
+              totalTokens:
+                full.usage.promptTokens != null && full.usage.completionTokens != null
+                  ? full.usage.promptTokens + full.usage.completionTokens
+                  : undefined,
+            }
+          : undefined;
+        yield usage ? { type: "done", usage } : { type: "done" };
         return;
       }
 
       const decoder = new TextDecoder();
       let buffer = "";
+      /** @type {{ promptTokens?: number, completionTokens?: number, totalTokens?: number } | null} */
+      let usage = null;
 
       /** @type {Map<number, { id: string, type: "text" | "tool_use" }>} */
       const blocksByIndex = new Map();
@@ -299,6 +311,17 @@ export class AnthropicClient {
           const data = extractSSEData(ev);
           if (!data) continue;
           const json = JSON.parse(data);
+ 
+          const maybeUsage = json?.message?.usage ?? json?.usage;
+          if (maybeUsage && typeof maybeUsage === "object") {
+            const next = usage ?? {};
+            if (maybeUsage.input_tokens != null) next.promptTokens = maybeUsage.input_tokens;
+            if (maybeUsage.output_tokens != null) next.completionTokens = maybeUsage.output_tokens;
+            if (next.promptTokens != null && next.completionTokens != null) {
+              next.totalTokens = next.promptTokens + next.completionTokens;
+            }
+            usage = next;
+          }
 
           if (json.type === "content_block_start") {
             const index = json.index;
@@ -350,14 +373,14 @@ export class AnthropicClient {
 
           if (json.type === "message_stop") {
             for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
-            yield { type: "done" };
+            yield usage ? { type: "done", usage } : { type: "done" };
             return;
           }
         }
       }
 
       for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
-      yield { type: "done" };
+      yield usage ? { type: "done", usage } : { type: "done" };
     } finally {
       clearTimeout(timeout);
       removeRequestAbortListener?.();

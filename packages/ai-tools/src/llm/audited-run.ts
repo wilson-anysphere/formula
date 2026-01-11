@@ -135,14 +135,18 @@ export async function runChatWithToolsAuditedVerified(
           try {
             for await (const event of params.client.streamChat!(request)) {
               if (!recordedUsage && event && typeof event === "object" && event.type === "done" && event.usage) {
-                const prompt = Number(event.usage.promptTokens ?? 0);
-                const completion = Number(event.usage.completionTokens ?? 0);
-                const total = Number(event.usage.totalTokens ?? prompt + completion);
-                if (Number.isFinite(prompt) || Number.isFinite(completion)) {
+                const promptRaw = event.usage.promptTokens;
+                const completionRaw = event.usage.completionTokens;
+                const totalRaw = event.usage.totalTokens;
+                const prompt = typeof promptRaw === "number" && Number.isFinite(promptRaw) ? promptRaw : null;
+                const completion =
+                  typeof completionRaw === "number" && Number.isFinite(completionRaw) ? completionRaw : null;
+                const total = typeof totalRaw === "number" && Number.isFinite(totalRaw) ? totalRaw : null;
+                if (prompt != null || completion != null) {
                   recorder.recordTokenUsage({
-                    prompt_tokens: Number.isFinite(prompt) ? prompt : 0,
-                    completion_tokens: Number.isFinite(completion) ? completion : 0,
-                    total_tokens: Number.isFinite(total) ? total : undefined
+                    prompt_tokens: prompt ?? 0,
+                    completion_tokens: completion ?? 0,
+                    total_tokens: total ?? (prompt != null && completion != null ? prompt + completion : undefined)
                   });
                 }
                 recordedUsage = true;
