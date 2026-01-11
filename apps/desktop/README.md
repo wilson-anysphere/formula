@@ -49,6 +49,21 @@ used by Node integration tests and are intended to be bridged into the real desk
 
 See `docs/10-extensibility.md` for the end-to-end flow and hot-reload behavior.
 
+## Power Query caching + credentials (security)
+
+The desktop app persists some Power Query state across restarts:
+
+- Query-result cache (IndexedDB)
+- Connector credentials (OS keychain-backed encrypted store)
+- Refresh scheduling state
+
+All of this is encrypted-at-rest in production builds:
+
+- Query-result caching is wrapped in `EncryptedCacheStore` (AES-256-GCM). The 32-byte
+  cache key is generated once and stored in the OS keychain via a Tauri command.
+- Credential + refresh-state stores are encrypted blobs on disk with key material in
+  the OS keychain (Rust/Tauri storage layer).
+
 ## Formula bar AI tab-completion (local model)
 
 The formula bar has an “AI-native” tab completion layer that combines:
