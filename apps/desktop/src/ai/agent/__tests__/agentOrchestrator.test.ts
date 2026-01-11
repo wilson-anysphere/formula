@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { MemoryAIAuditStore } from "@formula/ai-audit";
+import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../../packages/ai-context/src/tokenBudget.js";
 
 import { DocumentController } from "../../../document/documentController.js";
 import { runAgentTask } from "../agentOrchestrator.js";
@@ -332,5 +333,63 @@ describe("runAgentTask (agent mode orchestrator)", () => {
       approved: false,
       ok: false
     });
+  });
+
+  it("trims large tool results between planning iterations to stay under the context window", async () => {
+    const documentController = new DocumentController();
+    // Seed a large vertical range so `read_range` returns a big tool payload.
+    const values = Array.from({ length: 2000 }, (_, i) => [i]);
+    documentController.setRangeValues("Sheet1", "A1", values);
+
+    const estimator = createHeuristicTokenEstimator();
+    const contextWindowTokens = 3_000;
+    const reserveForOutputTokens = 400;
+
+    let callCount = 0;
+    const llmClient = {
+      async chat(request: any) {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "read_range", arguments: { range: "Sheet1!A1:A2000", include_formulas: false } }]
+            }
+          };
+        }
+
+        const promptTokens =
+          estimator.estimateMessagesTokens(request.messages) + estimateToolDefinitionTokens(request.tools, estimator);
+        expect(promptTokens).toBeLessThanOrEqual(contextWindowTokens - reserveForOutputTokens);
+
+        const toolMsg = request.messages.find((m: any) => m?.role === "tool" && typeof m.content === "string");
+        expect(toolMsg).toBeTruthy();
+        // The raw JSON payload for 2000 cells is large; the orchestrator should trim it
+        // down rather than passing the full tool output back to the model.
+        expect(String(toolMsg.content).length).toBeLessThan(5_000);
+
+        return { message: { role: "assistant", content: "done" } };
+      }
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+
+    const result = await runAgentTask({
+      goal: "Read A1:A2000",
+      workbookId: "wb-budget",
+      documentController,
+      llmClient: llmClient as any,
+      auditStore,
+      maxIterations: 4,
+      maxDurationMs: 10_000,
+      model: "unit-test-model",
+      contextWindowTokens,
+      reserveForOutputTokens,
+      tokenEstimator: estimator as any
+    });
+
+    expect(result.status).toBe("complete");
+    expect(result.final).toBe("done");
   });
 });

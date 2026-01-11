@@ -8,13 +8,17 @@ import { PreviewEngine } from "../../../../../packages/ai-tools/src/preview/prev
 import { runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
+import type { TokenEstimator } from "../../../../../packages/ai-context/src/tokenBudget.js";
+import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
+import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 import type { LLMClient, ToolCall } from "../../../../../packages/llm/src/types.js";
 import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
 
-import { getAiCloudDlpOptions } from "../dlp/aiDlp.js";
+import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
 
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
+import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
 
 export interface AgentApprovalRequest {
   call: ToolCall;
@@ -115,6 +119,14 @@ export interface RunAgentTaskParams {
 
   ragService?: DesktopRagService;
   ragOptions?: Omit<DesktopRagServiceOptions, "documentController" | "workbookId">;
+  /**
+   * Optional override for the model context window used to budget prompts.
+   * If omitted, a best-effort default is derived from `model`.
+   */
+  contextWindowTokens?: number;
+  reserveForOutputTokens?: number;
+  keepLastMessages?: number;
+  tokenEstimator?: TokenEstimator;
 }
 
 class AgentCancelledError extends Error {
@@ -232,10 +244,17 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
   try {
     throwIfCancelled();
 
+    const estimator = params.tokenEstimator ?? createHeuristicTokenEstimator();
+    const modelName = params.model ?? "unknown";
+    const contextWindowTokens = params.contextWindowTokens ?? getModeContextWindowTokens("agent", modelName);
+    const reserveForOutputTokens =
+      params.reserveForOutputTokens ?? getDefaultReserveForOutputTokens("agent", contextWindowTokens);
+    const keepLastMessages = params.keepLastMessages ?? 60;
+
     const defaultSheetId = params.defaultSheetId ?? "Sheet1";
     const spreadsheet = new DocumentControllerSpreadsheetApi(params.documentController, { createChart: params.createChart });
 
-    const dlp = getAiCloudDlpOptions({ documentId: params.workbookId, sheetId: defaultSheetId });
+    const dlp = maybeGetAiCloudDlpOptions({ documentId: params.workbookId, sheetId: defaultSheetId }) ?? undefined;
 
     const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
       default_sheet: defaultSheetId,
@@ -294,6 +313,24 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
         iteration += 1;
         emit({ type: "planning", iteration });
         await refreshSystemMessage(request.messages);
+
+        const toolTokens = estimateToolDefinitionTokens(request?.tools as any, estimator);
+        const maxMessageTokens = Math.max(0, contextWindowTokens - toolTokens);
+        const trimmed = await trimMessagesToBudget({
+          messages: request.messages as any,
+          maxTokens: maxMessageTokens,
+          reserveForOutputTokens,
+          estimator,
+          keepLastMessages
+        });
+        if (Array.isArray(request.messages)) {
+          const next = trimmed === request.messages ? trimmed.slice() : trimmed;
+          request.messages.length = 0;
+          request.messages.push(...next);
+        } else {
+          request.messages = trimmed;
+        }
+
         const response = await guard(params.llmClient.chat({ ...request, model: request.model ?? params.model }));
         const content = response?.message?.content;
         if (typeof content === "string" && content.trim()) {

@@ -18,6 +18,10 @@ import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpr
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { getAiCloudDlpOptions } from "../dlp/aiDlp.js";
 import { InlineEditOverlay } from "./inlineEditOverlay";
+import type { TokenEstimator } from "../../../../../packages/ai-context/src/tokenBudget.js";
+import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
+import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
+import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
 
 const OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
 
@@ -41,6 +45,15 @@ export interface InlineEditControllerOptions {
   llmClient?: InlineEditLLMClient;
   model?: string;
   auditStore?: AIAuditStore;
+
+  /**
+   * Optional override for the strict inline-edit prompt budget. The effective
+   * budget is always capped to the inline-edit maximum (see `getModeContextWindowTokens`).
+   */
+  contextWindowTokens?: number;
+  reserveForOutputTokens?: number;
+  keepLastMessages?: number;
+  tokenEstimator?: TokenEstimator;
 }
 
 export class InlineEditController {
@@ -132,6 +145,12 @@ export class InlineEditController {
         this.overlay.showError(formatDlpDecisionMessage(selectionDecision));
         return;
       }
+      const estimator = this.options.tokenEstimator ?? createHeuristicTokenEstimator();
+      const strictContextWindowTokens = getModeContextWindowTokens("inline_edit", model);
+      const contextWindowTokens = Math.min(this.options.contextWindowTokens ?? strictContextWindowTokens, strictContextWindowTokens);
+      const reserveForOutputTokens =
+        this.options.reserveForOutputTokens ?? getDefaultReserveForOutputTokens("inline_edit", contextWindowTokens);
+      const keepLastMessages = this.options.keepLastMessages ?? 20;
 
       const baseApi = new DocumentControllerSpreadsheetApi(this.options.document);
       const api = createAbortableSpreadsheetApi(baseApi, signal);
@@ -183,6 +202,22 @@ export class InlineEditController {
           client: {
             chat: async (request: any) => {
               throwIfAborted(signal);
+              const toolTokens = estimateToolDefinitionTokens(request?.tools as any, estimator);
+              const maxMessageTokens = Math.max(0, contextWindowTokens - toolTokens);
+              const trimmed = await trimMessagesToBudget({
+                messages: request.messages as any,
+                maxTokens: maxMessageTokens,
+                reserveForOutputTokens,
+                estimator,
+                keepLastMessages
+              });
+              if (Array.isArray(request.messages)) {
+                const next = trimmed === request.messages ? trimmed.slice() : trimmed;
+                request.messages.length = 0;
+                request.messages.push(...next);
+              } else {
+                request.messages = trimmed;
+              }
               const response = await client.chat({ ...request, signal });
               throwIfAborted(signal);
               return response;

@@ -4,6 +4,8 @@ import { DocumentController } from "../../../document/documentController.js";
 
 import { LocalStorageAIAuditStore } from "../../../../../../packages/ai-audit/src/local-storage-store.js";
 import { ContextManager } from "../../../../../../packages/ai-context/src/contextManager.js";
+import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../../packages/ai-context/src/tokenBudget.js";
+import { CONTEXT_SUMMARY_MARKER } from "../../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 import { HashEmbedder } from "../../../../../../packages/ai-rag/src/embedding/hashEmbedder.js";
 import { InMemoryVectorStore } from "../../../../../../packages/ai-rag/src/store/inMemoryVectorStore.js";
 
@@ -564,5 +566,64 @@ describe("ai chat orchestrator", () => {
       categories: "Sheet1!$A$2:$A$3",
       values: "Sheet1!$B$2:$B$3",
     });
+  });
+
+  it("trims long history to the configured context window and injects a summary instead of sending unbounded messages", async () => {
+    const controller = new DocumentController();
+    seed2x2(controller);
+
+    const embedder = new HashEmbedder({ dimension: 64 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+    const contextManager = new ContextManager({
+      tokenBudgetTokens: 800,
+      workbookRag: { vectorStore, embedder, topK: 3 },
+    });
+
+    const mock = createMockLlmClient({ cell: "A1", value: 123 });
+
+    const estimator = createHeuristicTokenEstimator();
+    const contextWindowTokens = 6_000;
+    const reserveForOutputTokens = 600;
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_budget",
+      llmClient: mock.client as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      contextManager,
+      onApprovalRequired: async () => true,
+      previewOptions: { approval_cell_threshold: 0 },
+      contextWindowTokens,
+      reserveForOutputTokens,
+      keepLastMessages: 20,
+      tokenEstimator: estimator as any,
+    });
+
+    const longHistory = Array.from({ length: 200 }, (_v, i) => ({
+      role: i % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      content: `m${i}: ` + "x".repeat(300),
+    }));
+
+    await orchestrator.sendMessage({
+      text: "Set A1 to 123",
+      history: longHistory as any,
+    });
+
+    const firstRequest = mock.requests[0];
+    expect(firstRequest).toBeTruthy();
+    expect(Array.isArray(firstRequest.messages)).toBe(true);
+
+    // History should be trimmed (avoid sending the full unbounded array).
+    expect(firstRequest.messages.length).toBeLessThan(longHistory.length);
+
+    const summary = firstRequest.messages.find(
+      (m: any) => m?.role === "system" && typeof m.content === "string" && m.content.startsWith(CONTEXT_SUMMARY_MARKER),
+    );
+    expect(summary).toBeTruthy();
+
+    const promptTokens =
+      estimator.estimateMessagesTokens(firstRequest.messages) + estimateToolDefinitionTokens(firstRequest.tools, estimator);
+    expect(promptTokens).toBeLessThanOrEqual(contextWindowTokens - reserveForOutputTokens);
   });
 });

@@ -4,6 +4,9 @@ import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js
 import type { AIAuditEntry, AuditListFilters } from "../../../../../packages/ai-audit/src/types.js";
 
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
+import type { TokenEstimator } from "../../../../../packages/ai-context/src/tokenBudget.js";
+import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
+import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 
 import { rectToA1 } from "../../../../../packages/ai-rag/src/workbook/rect.js";
 
@@ -25,7 +28,8 @@ import type { DocumentController } from "../../document/documentController.js";
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
-import { getAiCloudDlpOptions } from "../dlp/aiDlp.js";
+import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
+import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
 
 export type AiChatAttachment =
   | { type: "range"; reference: string; data?: unknown }
@@ -127,6 +131,28 @@ export interface AiChatOrchestratorOptions {
    * `default_sheet` is supplied automatically per message.
    */
   toolExecutorOptions?: Omit<SpreadsheetLLMToolExecutorOptions, "default_sheet" | "require_approval_for_mutations">;
+
+  /**
+   * Optional override for the model context window used to budget prompts.
+   * If omitted, a best-effort default is derived from `model`.
+   */
+  contextWindowTokens?: number;
+  /**
+   * Tokens to reserve for the model's completion. Used when trimming messages to
+   * avoid "prompt too long" errors from providers.
+   */
+  reserveForOutputTokens?: number;
+  /**
+   * Count-based cap: keep at most the most recent N non-system messages even if
+   * they would fit under the token budget.
+   */
+  keepLastMessages?: number;
+  /**
+   * Token estimator used for context budgeting. Defaults to a lightweight
+   * heuristic (4 chars/token) but can be overridden with provider-specific
+   * tokenizers.
+   */
+  tokenEstimator?: TokenEstimator;
 }
 
 /**
@@ -138,6 +164,11 @@ export interface AiChatOrchestratorOptions {
 export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
   const auditStore = options.auditStore ?? getDesktopAIAuditStore();
   const sessionId = options.sessionId ?? createSessionId(options.workbookId);
+  const estimator = options.tokenEstimator ?? createHeuristicTokenEstimator();
+  const contextWindowTokens = options.contextWindowTokens ?? getModeContextWindowTokens("chat", options.model);
+  const reserveForOutputTokens =
+    options.reserveForOutputTokens ?? getDefaultReserveForOutputTokens("chat", contextWindowTokens);
+  const keepLastMessages = options.keepLastMessages ?? 40;
 
   const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, { createChart: options.createChart });
 
@@ -162,12 +193,12 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     const activeSheetId = options.getActiveSheetId?.() ?? "Sheet1";
     const attachments = params.attachments ?? [];
 
-    const dlp = getAiCloudDlpOptions({ documentId: options.workbookId, sheetId: activeSheetId });
+    const dlp = maybeGetAiCloudDlpOptions({ documentId: options.workbookId, sheetId: activeSheetId }) ?? undefined;
     // DLP context building triggers a full workbook scan for redaction before indexing.
     // Preserve the desktop RAG service's incremental indexing fast path when there are
     // no classifications and the policy doesn't outright forbid cloud processing.
     const aiRule = (dlp as any)?.policy?.rules?.["ai.cloudProcessing"];
-    const shouldApplyDlpToContext = dlp.classificationRecords.length > 0 || aiRule?.maxAllowed == null;
+    const shouldApplyDlpToContext = dlp ? dlp.classificationRecords.length > 0 || aiRule?.maxAllowed == null : false;
     const dlpForContext = shouldApplyDlpToContext ? dlp : undefined;
 
     let workbookContext: any;
@@ -210,6 +241,17 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
       dlp
     });
 
+    const toolTokens = estimateToolDefinitionTokens(toolExecutor.tools as any, estimator);
+    const maxMessageTokens = Math.max(0, contextWindowTokens - toolTokens);
+
+    const budgetedInitialMessages = await trimMessagesToBudget({
+      messages: llmMessages as any,
+      maxTokens: maxMessageTokens,
+      reserveForOutputTokens,
+      estimator,
+      keepLastMessages
+    });
+
     const requireApproval = createPreviewApprovalHandler({
       spreadsheet,
       preview_options: options.previewOptions,
@@ -228,7 +270,26 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     try {
       const result = await runChatWithToolsAudited({
         client: {
-          chat: (request: any) => options.llmClient.chat({ ...request, model: request?.model ?? options.model } as any)
+          chat: async (request: any) => {
+            const requestToolTokens = estimateToolDefinitionTokens(request?.tools as any, estimator);
+            const requestMaxMessageTokens = Math.max(0, contextWindowTokens - requestToolTokens);
+            const trimmed = await trimMessagesToBudget({
+              messages: request.messages as any,
+              maxTokens: requestMaxMessageTokens,
+              reserveForOutputTokens,
+              estimator,
+              keepLastMessages
+            });
+
+            if (Array.isArray(request.messages)) {
+              const next = trimmed === request.messages ? trimmed.slice() : trimmed;
+              request.messages.length = 0;
+              request.messages.push(...next);
+            } else {
+              request.messages = trimmed;
+            }
+            return options.llmClient.chat({ ...request, model: request?.model ?? options.model } as any);
+          }
         } as any,
         tool_executor: {
           tools: toolExecutor.tools,
@@ -238,7 +299,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
             return out;
           }
         },
-        messages: llmMessages as any,
+        messages: budgetedInitialMessages as any,
         attachments,
         require_approval: requireApproval as any,
         on_tool_call: params.onToolCall as any,
@@ -261,7 +322,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
       return {
         finalText: result.final,
-        messages: stripLeadingSystemMessage(result.messages as LLMMessage[]),
+        messages: stripLeadingSystemMessages(result.messages as LLMMessage[]),
         toolResults,
         context: {
           workbookId: options.workbookId,
@@ -379,8 +440,12 @@ function createSessionId(workbookId: string): string {
 }
 
 function stripLeadingSystemMessage(messages: LLMMessage[]): LLMMessage[] {
+  return stripLeadingSystemMessages(messages);
+}
+
+function stripLeadingSystemMessages(messages: LLMMessage[]): LLMMessage[] {
   const out = messages.slice();
-  if (out[0]?.role === "system") out.shift();
+  while (out[0]?.role === "system") out.shift();
   return out;
 }
 

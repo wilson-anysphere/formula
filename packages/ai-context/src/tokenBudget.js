@@ -6,9 +6,163 @@
  * @param {string} text
  */
 export function estimateTokens(text) {
-  if (!text) return 0;
-  // A common approximation: 4 chars/token for English-like text.
-  return Math.ceil(text.length / 4);
+  return DEFAULT_TOKEN_ESTIMATOR.estimateTextTokens(text);
+}
+
+/**
+ * @typedef {{
+ *   /**
+ *    * Estimate tokens for plain text.
+ *    *\/
+ *   estimateTextTokens: (text: string) => number,
+ *   /**
+ *    * Estimate tokens for a single LLM message.
+ *    *\/
+ *   estimateMessageTokens: (message: any) => number,
+ *   /**
+ *    * Estimate tokens for an array of LLM messages.
+ *    *\/
+ *   estimateMessagesTokens: (messages: any[]) => number
+ * }} TokenEstimator
+ */
+
+/**
+ * Deterministic JSON stringification with stable key ordering.
+ * Useful for token estimation that shouldn't depend on object insertion order.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function stableJsonStringify(value) {
+  try {
+    return JSON.stringify(stabilizeJson(value));
+  } catch {
+    try {
+      return JSON.stringify(String(value));
+    } catch {
+      return String(value);
+    }
+  }
+}
+
+/**
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function stabilizeJson(value) {
+  if (value === undefined) return null;
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "symbol") return value.toString();
+  if (typeof value === "function") return `[Function ${value.name || "anonymous"}]`;
+  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Map) return Array.from(value.entries()).map(([k, v]) => [stabilizeJson(k), stabilizeJson(v)]);
+  if (value instanceof Set) return Array.from(value.values()).map((v) => stabilizeJson(v));
+
+  if (Array.isArray(value)) return value.map((v) => stabilizeJson(v));
+
+  if (value && typeof value === "object") {
+    const obj = /** @type {Record<string, unknown>} */ (value);
+    const keys = Object.keys(obj).sort();
+    /** @type {Record<string, unknown>} */
+    const out = {};
+    for (const key of keys) out[key] = stabilizeJson(obj[key]);
+    return out;
+  }
+
+  return value;
+}
+
+/**
+ * Create a fast, heuristic TokenEstimator.
+ *
+ * The default implementation assumes ~4 chars/token for English-like text.
+ * Message arrays are estimated by counting content + a small per-message overhead,
+ * plus JSON-stringified tool call payloads.
+ *
+ * @param {{
+ *   charsPerToken?: number,
+ *   tokensPerMessageOverhead?: number
+ * }} [options]
+ * @returns {TokenEstimator}
+ */
+export function createHeuristicTokenEstimator(options = {}) {
+  const charsPerToken = options.charsPerToken ?? 4;
+  const tokensPerMessageOverhead = options.tokensPerMessageOverhead ?? 4;
+
+  /**
+   * @param {string} text
+   */
+  function estimateTextTokens(text) {
+    if (!text) return 0;
+    return Math.ceil(text.length / charsPerToken);
+  }
+
+  /**
+   * @param {any} message
+   */
+  function estimateMessageTokens(message) {
+    if (!message || typeof message !== "object") return 0;
+
+    const role = typeof message.role === "string" ? message.role : "";
+    const content = typeof message.content === "string" ? message.content : "";
+    /** @type {string[]} */
+    const parts = [role, content];
+
+    if (message.role === "tool") {
+      const toolCallId = typeof message.toolCallId === "string" ? message.toolCallId : "";
+      parts.push(toolCallId);
+    }
+
+    if (message.role === "assistant" && Array.isArray(message.toolCalls) && message.toolCalls.length) {
+      // Tool calls are structured, but we conservatively count the JSON payload size.
+      parts.push(stableJsonStringify(message.toolCalls));
+    }
+
+    return estimateTextTokens(parts.join("\n")) + tokensPerMessageOverhead;
+  }
+
+  /**
+   * @param {any[]} messages
+   */
+  function estimateMessagesTokens(messages) {
+    if (!Array.isArray(messages) || messages.length === 0) return 0;
+    let total = 0;
+    for (const msg of messages) total += estimateMessageTokens(msg);
+    return total;
+  }
+
+  return {
+    estimateTextTokens,
+    estimateMessageTokens,
+    estimateMessagesTokens
+  };
+}
+
+/** @type {TokenEstimator} */
+export const DEFAULT_TOKEN_ESTIMATOR = createHeuristicTokenEstimator();
+
+/**
+ * Estimate tokens for an array of LLM messages.
+ *
+ * @param {any[]} messages
+ * @param {TokenEstimator} [estimator]
+ */
+export function estimateMessagesTokens(messages, estimator = DEFAULT_TOKEN_ESTIMATOR) {
+  return estimator.estimateMessagesTokens(messages);
+}
+
+/**
+ * Estimate tokens for tool definitions passed via `ChatRequest.tools`.
+ *
+ * This is necessarily heuristic (providers tokenize tool schemas differently),
+ * but helps prevent runaway prompts due to large JSON schemas.
+ *
+ * @param {any[] | null | undefined} tools
+ * @param {TokenEstimator} [estimator]
+ */
+export function estimateToolDefinitionTokens(tools, estimator = DEFAULT_TOKEN_ESTIMATOR) {
+  if (!Array.isArray(tools) || tools.length === 0) return 0;
+  return estimator.estimateTextTokens(stableJsonStringify(tools));
 }
 
 /**

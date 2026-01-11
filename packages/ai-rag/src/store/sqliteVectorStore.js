@@ -165,6 +165,9 @@ export class SqliteVectorStore {
 
   async _persist() {
     const data = this._db.export();
+    // sql.js drops custom scalar functions (like our `dot`) after `export()`. Re-register
+    // them so subsequent queries can still prepare statements that reference `dot(...)`.
+    this._registerFunctions();
     await this._storage.save(data);
   }
 

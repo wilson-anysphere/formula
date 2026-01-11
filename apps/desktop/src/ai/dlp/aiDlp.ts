@@ -127,6 +127,16 @@ export type AiCloudDlpOptions = {
   audit_logger: { log(event: any): void };
 };
 
+function hasDlpConfig(params: { storage: StorageLike; documentId: string; orgId?: string }): boolean {
+  const policyStore = new LocalPolicyStore({ storage: params.storage });
+  const orgId = params.orgId ?? loadActiveOrgId(params.storage);
+  const storedOrg = policyStore.getOrgPolicy(orgId);
+  const storedDoc = policyStore.getDocumentPolicy(params.documentId);
+  const classificationStore = new LocalClassificationStore({ storage: params.storage });
+  const classificationRecords = classificationStore.list(params.documentId);
+  return Boolean(storedOrg || storedDoc || classificationRecords.length > 0);
+}
+
 /**
  * Returns a DLP options object that can be passed to both:
  * - `ContextManager.buildWorkbookContextFromSpreadsheetApi({ dlp: ... })`
@@ -159,4 +169,21 @@ export function getAiCloudDlpOptions(params: { documentId: string; sheetId?: str
     include_restricted_content: false,
     audit_logger: auditLogger
   };
+}
+
+/**
+ * Returns DLP options only when DLP has been configured in localStorage.
+ *
+ * Desktop AI surfaces treat DLP as an enterprise feature; when no org/document policy
+ * or classification metadata is configured, we omit `dlp` entirely so downstream
+ * systems (notably RAG indexing) can use their cheaper "no DLP" paths.
+ */
+export function maybeGetAiCloudDlpOptions(params: {
+  documentId: string;
+  sheetId?: string;
+  orgId?: string;
+}): AiCloudDlpOptions | null {
+  const storage = getLocalStorageOrNull() ?? createMemoryStorage();
+  if (!hasDlpConfig({ storage, documentId: params.documentId, orgId: params.orgId })) return null;
+  return getAiCloudDlpOptions(params);
 }

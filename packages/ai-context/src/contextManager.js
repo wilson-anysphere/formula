@@ -381,6 +381,20 @@ export class ContextManager {
 
     /** @type {{level: string, labels: string[]} } */
     let overallClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+    // Structured DLP classifications are scoped to specific selectors (cell/range/etc).
+    // When cloud AI processing is fully blocked (redactDisallowed=false), we need to
+    // short-circuit even if no chunks are retrieved (e.g. a workbook with a single
+    // classified cell that doesn't form a multi-cell RAG chunk). Treat the document's
+    // overall classification as the max of all structured records so we can enforce
+    // policies deterministically before sending anything to a cloud model.
+    if (dlp && classificationRecords.length) {
+      for (const record of classificationRecords) {
+        const classification = record?.classification;
+        if (classification && typeof classification === "object") {
+          overallClassification = maxClassification(overallClassification, classification);
+        }
+      }
+    }
     /** @type {ReturnType<typeof evaluatePolicy> | null} */
     let overallDecision = null;
     let redactedChunkCount = 0;

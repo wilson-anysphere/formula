@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../../../app/spreadsheetApp";
+import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../../packages/ai-context/src/tokenBudget.js";
+import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../../contextBudget.js";
 
 import { LocalStorageBinaryStorage } from "@formula/ai-audit/browser";
 import { SqliteAIAuditStore } from "@formula/ai-audit/sqlite";
@@ -379,6 +381,92 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
     expect(doc.getCell("Sheet1", "C3").value).toBe(3);
 
     expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("trims oversized inline-edit prompts to stay under the strict context budget", async () => {
+    const root = document.createElement("div");
+    root.tabIndex = 0;
+    root.getBoundingClientRect = () =>
+      ({
+        width: 800,
+        height: 600,
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => {}
+      }) as any;
+    document.body.appendChild(root);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div")
+    };
+
+    const estimator = createHeuristicTokenEstimator();
+    const model = "unit-test-model";
+    const contextWindowTokens = getModeContextWindowTokens("inline_edit", model);
+    const reserveForOutputTokens = getDefaultReserveForOutputTokens("inline_edit", contextWindowTokens);
+
+    let callCount = 0;
+    const llmClient = {
+      async chat(request: any) {
+        callCount += 1;
+        const promptTokens =
+          estimator.estimateMessagesTokens(request.messages) + estimateToolDefinitionTokens(request.tools, estimator);
+        expect(promptTokens).toBeLessThanOrEqual(contextWindowTokens - reserveForOutputTokens);
+
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [
+                {
+                  id: "call-1",
+                  name: "set_range",
+                  arguments: { range: "C1:C3", values: [[1], [2], [3]] }
+                }
+              ]
+            }
+          };
+        }
+
+        return { message: { role: "assistant", content: "done" } };
+      }
+    };
+
+    const app = new SpreadsheetApp(root, status, {
+      inlineEdit: { llmClient, model }
+    });
+
+    // Select an empty range so preview diffs are deterministic.
+    app.selectRange({ range: { startRow: 0, endRow: 2, startCol: 2, endCol: 2 } }); // C1:C3
+
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+
+    const overlay = await waitFor(() => document.querySelector<HTMLElement>('[data-testid="inline-edit-overlay"]'));
+    const input = overlay.querySelector<HTMLInputElement>('[data-testid="inline-edit-prompt"]');
+    expect(input).toBeTruthy();
+    input!.value = "Fill with 1..3\n" + "x".repeat(20_000);
+
+    overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-run"]')!.click();
+
+    await waitFor(() => {
+      const el = overlay.querySelector<HTMLElement>('[data-testid="inline-edit-preview-summary"]');
+      return el && el.textContent?.includes("Changes:") ? el : null;
+    });
+
+    overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-approve"]')!.click();
+
+    const doc = app.getDocument();
+    await waitFor(() => (doc.getCell("Sheet1", "C3").value === 3 ? doc : null));
+    expect(doc.getCell("Sheet1", "C1").value).toBe(1);
+    expect(doc.getCell("Sheet1", "C2").value).toBe(2);
+    expect(doc.getCell("Sheet1", "C3").value).toBe(3);
   });
 
   it("cancels an in-flight inline edit run without hanging or applying changes", async () => {
