@@ -62,6 +62,7 @@ fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTree
         | eval::Expr::Error(_)
         | eval::Expr::CellRef(_)
         | eval::Expr::RangeRef(_)
-        | eval::Expr::StructuredRef(_) => {}
+        | eval::Expr::StructuredRef(_)
+        | eval::Expr::NameRef(_) => {}
     }
 }

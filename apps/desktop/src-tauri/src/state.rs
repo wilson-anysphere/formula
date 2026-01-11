@@ -340,8 +340,10 @@ impl AppState {
             .sheet(sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
         let cell = sheet.get_cell(row, col);
+        let addr = coord_to_a1(row, col);
+        let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
         Ok(CellData {
-            value: cell.computed_value,
+            value,
             formula: cell.formula,
         })
     }
@@ -370,20 +372,20 @@ impl AppState {
         let sheet = workbook
             .sheet(sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
-
-        let rows = sheet
-            .get_range_cells(start_row, start_col, end_row, end_col)
-            .into_iter()
-            .map(|row| {
-                row.into_iter()
-                    .map(|cell| CellData {
-                        value: cell.computed_value,
-                        formula: cell.formula,
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-
+        let mut rows = Vec::with_capacity(end_row - start_row + 1);
+        for r in start_row..=end_row {
+            let mut row_out = Vec::with_capacity(end_col - start_col + 1);
+            for c in start_col..=end_col {
+                let cell = sheet.get_cell(r, c);
+                let addr = coord_to_a1(r, c);
+                let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
+                row_out.push(CellData {
+                    value,
+                    formula: cell.formula,
+                });
+            }
+            rows.push(row_out);
+        }
         Ok(rows)
     }
 
@@ -1221,6 +1223,8 @@ fn engine_value_to_scalar(value: EngineValue) -> CellScalar {
         EngineValue::Text(s) => CellScalar::Text(s),
         EngineValue::Bool(b) => CellScalar::Bool(b),
         EngineValue::Error(e) => CellScalar::Error(e.as_code().to_string()),
+        EngineValue::Array(arr) => engine_value_to_scalar(arr.top_left()),
+        EngineValue::Spill { .. } => CellScalar::Error("#SPILL!".to_string()),
     }
 }
 

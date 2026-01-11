@@ -25,10 +25,10 @@ pub(crate) struct Criteria {
     pub(crate) rhs: CriteriaRhs,
 }
 
-impl Criteria {
-    pub(crate) fn parse(input: &Value) -> Result<Self, ErrorKind> {
-        match input {
-            Value::Number(n) => Ok(Criteria {
+    impl Criteria {
+        pub(crate) fn parse(input: &Value) -> Result<Self, ErrorKind> {
+            match input {
+                Value::Number(n) => Ok(Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Number(*n),
             }),
@@ -40,13 +40,14 @@ impl Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Error(*e),
             }),
-            Value::Blank => Ok(Criteria {
-                op: CriteriaOp::Eq,
-                rhs: CriteriaRhs::Blank,
-            }),
-            Value::Text(s) => parse_criteria_string(s),
+                Value::Blank => Ok(Criteria {
+                    op: CriteriaOp::Eq,
+                    rhs: CriteriaRhs::Blank,
+                }),
+                Value::Text(s) => parse_criteria_string(s),
+                Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+            }
         }
-    }
 
     pub(crate) fn matches(&self, value: &Value) -> bool {
         match &self.rhs {
@@ -173,7 +174,7 @@ fn coerce_to_number(value: &Value) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Blank => Some(0.0),
         Value::Text(s) => s.trim().parse::<f64>().ok(),
-        Value::Error(_) => None,
+        Value::Error(_) | Value::Array(_) | Value::Spill { .. } => None,
     }
 }
 
@@ -191,7 +192,7 @@ fn coerce_to_bool(value: &Value) -> Option<bool> {
             }
         }
         Value::Blank => Some(false),
-        Value::Error(_) => None,
+        Value::Error(_) | Value::Array(_) | Value::Spill { .. } => None,
     }
 }
 
@@ -208,6 +209,8 @@ fn coerce_to_text(value: &Value) -> String {
             }
         }
         Value::Error(e) => e.to_string(),
+        Value::Array(arr) => arr.top_left().to_string(),
+        Value::Spill { .. } => ErrorKind::Spill.to_string(),
     }
 }
 

@@ -34,5 +34,6 @@ pub fn r#type(value: &Value) -> i32 {
         Value::Text(_) => 2,
         Value::Bool(_) => 4,
         Value::Error(_) => 16,
+        Value::Array(_) | Value::Spill { .. } => 64,
     }
 }

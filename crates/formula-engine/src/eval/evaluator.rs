@@ -2,7 +2,7 @@ use crate::eval::address::CellAddr;
 use crate::eval::ast::{BinaryOp, CompiledExpr, CompareOp, Expr, SheetReference, UnaryOp};
 use crate::error::ExcelError;
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference};
-use crate::value::{ErrorKind, Value};
+use crate::value::{Array, ErrorKind, Value};
 use std::cmp::Ordering;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -94,7 +94,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
     /// Evaluate a compiled AST as a scalar formula result.
     pub fn eval_formula(&self, expr: &CompiledExpr) -> Value {
-        self.eval_scalar(expr)
+        match self.eval_value(expr) {
+            EvalValue::Scalar(v) => v,
+            EvalValue::Reference(range) => self.deref_reference_dynamic(range),
+        }
     }
 
     fn eval_value(&self, expr: &CompiledExpr) -> EvalValue {
@@ -292,6 +295,25 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
     }
 
+    fn deref_reference_dynamic(&self, range: ResolvedRange) -> Value {
+        if range.is_single_cell() {
+            return self.resolver.get_cell_value(range.sheet_id, range.start);
+        }
+        let range = range.normalized();
+        let rows = (range.end.row - range.start.row + 1) as usize;
+        let cols = (range.end.col - range.start.col + 1) as usize;
+        let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+        for row in range.start.row..=range.end.row {
+            for col in range.start.col..=range.end.col {
+                values.push(
+                    self.resolver
+                        .get_cell_value(range.sheet_id, CellAddr { row, col }),
+                );
+            }
+        }
+        Value::Array(Array::new(rows, cols, values))
+    }
+
     fn apply_implicit_intersection(&self, range: ResolvedRange) -> Value {
         if range.is_single_cell() {
             return self.resolver.get_cell_value(range.sheet_id, range.start);
@@ -393,6 +415,11 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     if let Value::Error(e) = right {
         return Err(*e);
     }
+    if matches!(left, Value::Array(_) | Value::Spill { .. })
+        || matches!(right, Value::Array(_) | Value::Spill { .. })
+    {
+        return Err(ErrorKind::Value);
+    }
 
     // Blank coerces to the other type for comparisons.
     let (l, r) = match (left, right) {
@@ -424,5 +451,10 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         (_, Value::Blank) => Ordering::Greater,
         // Errors are handled above.
         (Value::Error(_), _) | (_, Value::Error(_)) => Ordering::Equal,
+        // Arrays/spill markers are rejected above.
+        (Value::Array(_), _)
+        | (_, Value::Array(_))
+        | (Value::Spill { .. }, _)
+        | (_, Value::Spill { .. }) => Ordering::Equal,
     })
 }

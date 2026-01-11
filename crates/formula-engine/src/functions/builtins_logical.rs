@@ -75,6 +75,7 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Blank => {}
                 Value::Text(_) => return Value::Error(ErrorKind::Value),
+                Value::Array(_) | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
@@ -94,7 +95,7 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                         }
                         // Text and blanks in references are ignored.
-                        Value::Text(_) | Value::Blank => {}
+                        Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
                     }
                 }
             }
@@ -143,6 +144,7 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Blank => {}
                 Value::Text(_) => return Value::Error(ErrorKind::Value),
+                Value::Array(_) | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
@@ -161,7 +163,7 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 any_true = true;
                             }
                         }
-                        Value::Text(_) | Value::Blank => {}
+                        Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
                     }
                 }
             }

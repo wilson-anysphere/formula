@@ -104,6 +104,26 @@ impl From<Value> for EncodedValue {
                 v: kind.as_code().to_string(),
                 detail: None,
             },
+            Value::Array(arr) => {
+                let mut rows = Vec::with_capacity(arr.rows);
+                for r in 0..arr.rows {
+                    let mut row = Vec::with_capacity(arr.cols);
+                    for c in 0..arr.cols {
+                        row.push(
+                            arr.get(r, c)
+                                .cloned()
+                                .unwrap_or(Value::Blank)
+                                .into(),
+                        );
+                    }
+                    rows.push(row);
+                }
+                EncodedValue::Array { rows }
+            }
+            Value::Spill { .. } => EncodedValue::Error {
+                v: "#SPILL!".to_string(),
+                detail: None,
+            },
         }
     }
 }
@@ -164,6 +184,21 @@ fn encode_json_value(value: serde_json::Value) -> Result<Value> {
         serde_json::Value::String(s) => Ok(Value::Text(s)),
         other => Err(anyhow!("unsupported input value type: {other}")),
     }
+}
+
+fn coord_to_a1(row: u32, col: u32) -> String {
+    fn col_to_name(col: u32) -> String {
+        let mut n = col + 1;
+        let mut out = Vec::<u8>::new();
+        while n > 0 {
+            let rem = (n - 1) % 26;
+            out.push(b'A' + rem as u8);
+            n = (n - 1) / 26;
+        }
+        out.reverse();
+        String::from_utf8(out).expect("column letters are ASCII")
+    }
+    format!("{}{}", col_to_name(col), row + 1)
 }
 
 fn main() -> Result<()> {
@@ -301,12 +336,32 @@ fn main() -> Result<()> {
                 }
             }
             Value::Error(e) => e.as_code().to_string(),
+            Value::Array(arr) => arr.top_left().to_string(),
+            Value::Spill { .. } => "#SPILL!".to_string(),
+        };
+
+        let result = match engine.spill_range(&default_sheet, &case.output_cell) {
+            Some((start, end)) => {
+                let rows = (end.row - start.row + 1) as usize;
+                let cols = (end.col - start.col + 1) as usize;
+                let mut out_rows = Vec::with_capacity(rows);
+                for r in 0..rows {
+                    let mut row = Vec::with_capacity(cols);
+                    for c in 0..cols {
+                        let addr = coord_to_a1(start.row + r as u32, start.col + c as u32);
+                        row.push(engine.get_cell_value(&default_sheet, &addr).into());
+                    }
+                    out_rows.push(row);
+                }
+                EncodedValue::Array { rows: out_rows }
+            }
+            None => value.clone().into(),
         };
 
         results.push(ResultEntry {
             case_id: case.id,
             output_cell: case.output_cell.clone(),
-            result: value.into(),
+            result,
             address: case.output_cell,
             display_text,
         });

@@ -34,6 +34,16 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     Ok(n) => acc += n,
                     Err(e) => return Value::Error(e),
                 },
+                Value::Array(arr) => {
+                    for v in arr.iter() {
+                        match v {
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Number(n) => acc += n,
+                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
+                    }
+                }
+                Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
@@ -42,7 +52,7 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => acc += n,
                         // Excel quirk: logicals/text in references are ignored by SUM.
-                        Value::Bool(_) | Value::Text(_) | Value::Blank => {}
+                        Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
                     }
                 }
             }
@@ -90,6 +100,19 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                     Err(e) => return Value::Error(e),
                 },
+                Value::Array(arr) => {
+                    for v in arr.iter() {
+                        match v {
+                            Value::Error(e) => return Value::Error(*e),
+                            Value::Number(n) => {
+                                acc += n;
+                                count += 1;
+                            }
+                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
+                    }
+                }
+                Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
@@ -101,7 +124,7 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             count += 1;
                         }
                         // Ignore logical/text/blank in references.
-                        Value::Bool(_) | Value::Text(_) | Value::Blank => {}
+                        Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
                     }
                 }
             }
@@ -142,16 +165,16 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
-                    match v {
-                        Value::Error(e) => return Value::Error(e),
-                        Value::Number(n) => best = Some(best.map(|b| b.min(n)).unwrap_or(n)),
-                        Value::Bool(_) | Value::Text(_) | Value::Blank => {}
+                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                        match v {
+                            Value::Error(e) => return Value::Error(e),
+                            Value::Number(n) => best = Some(best.map(|b| b.min(n)).unwrap_or(n)),
+                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
                     }
                 }
             }
         }
-    }
 
     Value::Number(best.unwrap_or(0.0))
 }
@@ -184,16 +207,16 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
-                    let v = ctx.get_cell_value(r.sheet_id, addr);
-                    match v {
-                        Value::Error(e) => return Value::Error(e),
-                        Value::Number(n) => best = Some(best.map(|b| b.max(n)).unwrap_or(n)),
-                        Value::Bool(_) | Value::Text(_) | Value::Blank => {}
+                        let v = ctx.get_cell_value(r.sheet_id, addr);
+                        match v {
+                            Value::Error(e) => return Value::Error(e),
+                            Value::Number(n) => best = Some(best.map(|b| b.max(n)).unwrap_or(n)),
+                            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {}
+                        }
                     }
                 }
             }
         }
-    }
 
     Value::Number(best.unwrap_or(0.0))
 }

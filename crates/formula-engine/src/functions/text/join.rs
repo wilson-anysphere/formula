@@ -18,6 +18,8 @@ pub fn textjoin(delimiter: &str, ignore_empty: bool, values: &[Value]) -> Result
                 }
             }
             Value::Error(e) => return Err(*e),
+            Value::Array(arr) => arr.top_left().to_string(),
+            Value::Spill { .. } => return Err(ErrorKind::Spill),
         };
 
         if ignore_empty && piece.is_empty() {

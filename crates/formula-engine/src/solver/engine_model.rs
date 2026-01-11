@@ -177,6 +177,6 @@ fn coerce_value_to_number(value: &Value) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Blank => Some(0.0),
         Value::Text(s) => s.trim().parse::<f64>().ok(),
-        Value::Error(_) => None,
+        Value::Error(_) | Value::Array(_) | Value::Spill { .. } => None,
     }
 }

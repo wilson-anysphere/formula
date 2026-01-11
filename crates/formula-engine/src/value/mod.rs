@@ -1,5 +1,7 @@
 use std::fmt;
 
+use formula_model::CellRef;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {
     Null,
@@ -36,12 +38,53 @@ impl fmt::Display for ErrorKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Array {
+    pub rows: usize,
+    pub cols: usize,
+    /// Row-major order values (length = rows * cols).
+    pub values: Vec<Value>,
+}
+
+impl Array {
+    #[must_use]
+    pub fn new(rows: usize, cols: usize, values: Vec<Value>) -> Self {
+        debug_assert_eq!(rows.saturating_mul(cols), values.len());
+        Self { rows, cols, values }
+    }
+
+    #[must_use]
+    pub fn get(&self, row: usize, col: usize) -> Option<&Value> {
+        if row >= self.rows || col >= self.cols {
+            return None;
+        }
+        self.values.get(row * self.cols + col)
+    }
+
+    #[must_use]
+    pub fn top_left(&self) -> Value {
+        self.get(0, 0).cloned().unwrap_or(Value::Blank)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Value> {
+        self.values.iter()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Number(f64),
     Text(String),
     Bool(bool),
     Blank,
     Error(ErrorKind),
+    /// Dynamic array result.
+    Array(Array),
+    /// Marker for a cell that belongs to a spilled range.
+    ///
+    /// The engine generally resolves spill markers to the concrete spilled value
+    /// when reading cell values; this variant is primarily used internally to
+    /// track spill occupancy.
+    Spill { origin: CellRef },
 }
 
 impl Value {
@@ -56,6 +99,7 @@ impl Value {
             Value::Blank => Ok(0.0),
             Value::Text(s) => parse_number_from_text(s).ok_or(ErrorKind::Value),
             Value::Error(e) => Err(*e),
+            Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
 
@@ -83,6 +127,7 @@ impl Value {
                 Err(ErrorKind::Value)
             }
             Value::Error(e) => Err(*e),
+            Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
 
@@ -93,6 +138,7 @@ impl Value {
             Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
             Value::Blank => Ok(String::new()),
             Value::Error(e) => Err(*e),
+            Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
 }
@@ -152,6 +198,8 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Blank => f.write_str(""),
             Value::Error(e) => write!(f, "{e}"),
+            Value::Array(arr) => write!(f, "{}", arr.top_left()),
+            Value::Spill { .. } => f.write_str(ErrorKind::Spill.as_code()),
         }
     }
 }

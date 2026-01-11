@@ -50,6 +50,7 @@ fn collect_npv_values_from_arg(
             Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }]),
             Value::Blank => Ok(vec![0.0]),
             Value::Text(s) => Ok(vec![s.trim().parse::<f64>().unwrap_or(0.0)]),
+            Value::Array(_) | Value::Spill { .. } => Ok(vec![0.0]),
         },
         ArgValue::Reference(r) => {
             let mut out = Vec::new();
@@ -58,7 +59,9 @@ fn collect_npv_values_from_arg(
                 match v {
                     Value::Error(e) => return Err(e),
                     Value::Number(n) => out.push(n),
-                    Value::Bool(_) | Value::Text(_) | Value::Blank => out.push(0.0),
+                    Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {
+                        out.push(0.0)
+                    }
                 }
             }
             Ok(out)
@@ -77,7 +80,9 @@ fn collect_irr_values_from_arg(
         ArgValue::Scalar(v) => match v {
             Value::Error(e) => Err(e),
             Value::Number(n) => Ok(vec![n]),
-            Value::Bool(_) | Value::Text(_) | Value::Blank => Ok(vec![0.0]),
+            Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {
+                Ok(vec![0.0])
+            }
         },
         ArgValue::Reference(r) => {
             let mut out = Vec::new();
@@ -86,7 +91,9 @@ fn collect_irr_values_from_arg(
                 match v {
                     Value::Error(e) => return Err(e),
                     Value::Number(n) => out.push(n),
-                    Value::Bool(_) | Value::Text(_) | Value::Blank => out.push(0.0),
+                    Value::Bool(_) | Value::Text(_) | Value::Blank | Value::Array(_) | Value::Spill { .. } => {
+                        out.push(0.0)
+                    }
                 }
             }
             Ok(out)

@@ -10,7 +10,7 @@ use crate::editing::rewrite::{
 };
 use crate::graph::{CellDeps, DependencyGraph as CalcGraph, Precedent, SheetRange};
 use crate::locale::{canonicalize_formula, FormulaLocale};
-use crate::value::{ErrorKind, Value};
+use crate::value::{Array, ErrorKind, Value};
 use crate::calc_settings::{CalcSettings, CalculationMode};
 use crate::iterative;
 use formula_model::{CellId, CellRef, Range, Table};
@@ -194,6 +194,18 @@ impl AuditGraph {
     }
 }
 
+#[derive(Debug, Clone)]
+struct Spill {
+    end: CellAddr,
+    array: Array,
+}
+
+#[derive(Debug, Default, Clone)]
+struct SpillState {
+    by_origin: HashMap<CellKey, Spill>,
+    origin_by_cell: HashMap<CellKey, CellKey>,
+}
+
 pub struct Engine {
     workbook: Workbook,
     name_dependents: HashMap<String, HashSet<CellKey>>,
@@ -206,6 +218,7 @@ pub struct Engine {
     dirty_reasons: HashMap<CellKey, CellKey>,
     calc_settings: CalcSettings,
     circular_references: HashSet<CellKey>,
+    spills: SpillState,
 }
 
 impl Default for Engine {
@@ -231,6 +244,7 @@ impl Engine {
                 ..CalcSettings::default()
             },
             circular_references: HashSet::new(),
+            spills: SpillState::default(),
         }
     }
 
@@ -269,6 +283,8 @@ impl Engine {
         let addr = parse_a1(addr)?;
         let key = CellKey { sheet: sheet_id, addr };
         let cell_id = cell_id_from_key(key);
+
+        self.clear_spill_for_cell(key);
 
         // Replace any existing formula and dependencies.
         self.graph.clear_cell(key);
@@ -438,7 +454,8 @@ impl Engine {
         let addr = parse_a1(addr)?;
         let key = CellKey { sheet: sheet_id, addr };
         let cell_id = cell_id_from_key(key);
- 
+        self.clear_spill_for_cell(key);
+
         let parsed = Parser::parse(formula)?;
         let compiled = self.compile_expr(&parsed, sheet_id);
         self.clear_cell_name_refs(key);
@@ -558,8 +575,32 @@ impl Engine {
         let Ok(addr) = parse_a1(addr) else {
             return Value::Error(ErrorKind::Ref);
         };
-        self.workbook
-            .get_cell_value(CellKey { sheet: sheet_id, addr })
+        let key = CellKey { sheet: sheet_id, addr };
+        if let Some(v) = self.spilled_cell_value(key) {
+            return v;
+        }
+        self.workbook.get_cell_value(key)
+    }
+
+    /// Returns the spill range (origin inclusive) for a cell if it is an array-spill
+    /// origin or belongs to a spilled range.
+    pub fn spill_range(&self, sheet: &str, addr: &str) -> Option<(CellAddr, CellAddr)> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        let addr = parse_a1(addr).ok()?;
+        let key = CellKey { sheet: sheet_id, addr };
+        let origin = self.spill_origin_key(key)?;
+        let spill = self.spills.by_origin.get(&origin)?;
+        Some((origin.addr, spill.end))
+    }
+
+    /// Returns the spill origin for a cell if it is an array-spill origin or belongs
+    /// to a spilled range.
+    pub fn spill_origin(&self, sheet: &str, addr: &str) -> Option<(SheetId, CellAddr)> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        let addr = parse_a1(addr).ok()?;
+        let key = CellKey { sheet: sheet_id, addr };
+        let origin = self.spill_origin_key(key)?;
+        Some((origin.sheet, origin.addr))
     }
 
     pub fn get_cell_formula(&self, sheet: &str, addr: &str) -> Option<&str> {
@@ -849,77 +890,92 @@ impl Engine {
     }
 
     fn recalculate_with_mode(&mut self, mode: RecalcMode) {
-        let levels = match self.calc_graph.calc_levels_for_dirty() {
-            Ok(levels) => levels,
-            Err(_) => {
-                self.recalculate_with_cycles(mode);
+        loop {
+            let levels = match self.calc_graph.calc_levels_for_dirty() {
+                Ok(levels) => levels,
+                Err(_) => {
+                    self.recalculate_with_cycles(mode);
+                    return;
+                }
+            };
+
+            if levels.is_empty() {
                 return;
             }
-        };
 
-        if levels.is_empty() {
-            return;
-        }
+            self.circular_references.clear();
 
-        self.circular_references.clear();
+            let mut snapshot = Snapshot::from_workbook(&self.workbook, &self.spills);
+            let mut spill_dirty_roots: Vec<CellId> = Vec::new();
 
-        let mut snapshot = Snapshot::from_workbook(&self.workbook);
-
-        for level in levels {
-            let keys: Vec<CellKey> = level.into_iter().map(cell_key_from_id).collect();
-            let has_barrier = keys.iter().any(|&k| {
-                self.workbook
-                    .get_cell(k)
-                    .map(|c| c.volatile || !c.thread_safe)
-                    .unwrap_or(false)
-            });
-
-            let tasks: Vec<(CellKey, CompiledExpr)> = keys
-                .iter()
-                .filter_map(|&k| {
+            for level in levels {
+                let mut keys: Vec<CellKey> = level.into_iter().map(cell_key_from_id).collect();
+                keys.sort_by_key(|k| (k.sheet, k.addr.row, k.addr.col));
+                let has_barrier = keys.iter().any(|&k| {
                     self.workbook
                         .get_cell(k)
-                        .and_then(|c| c.ast.clone().map(|a| (k, a)))
-                })
-                .collect();
+                        .map(|c| c.volatile || !c.thread_safe)
+                        .unwrap_or(false)
+                });
 
-            let results: Vec<(CellKey, Value)> =
-                if mode == RecalcMode::MultiThreaded && !has_barrier {
-                    tasks
-                        .par_iter()
-                        .map(|(k, expr)| {
-                            let ctx = crate::eval::EvalContext {
-                                current_sheet: k.sheet,
-                                current_cell: k.addr,
-                            };
-                            let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
-                            (*k, evaluator.eval_formula(expr))
-                        })
-                        .collect()
-                } else {
-                    tasks
-                        .iter()
-                        .map(|(k, expr)| {
-                            let ctx = crate::eval::EvalContext {
-                                current_sheet: k.sheet,
-                                current_cell: k.addr,
-                            };
-                            let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
-                            (*k, evaluator.eval_formula(expr))
-                        })
-                        .collect()
-                };
+                let tasks: Vec<(CellKey, CompiledExpr)> = keys
+                    .iter()
+                    .filter_map(|&k| {
+                        self.workbook
+                            .get_cell(k)
+                            .and_then(|c| c.ast.clone().map(|a| (k, a)))
+                    })
+                    .collect();
 
-            for (k, v) in &results {
-                let cell = self.workbook.get_or_create_cell_mut(*k);
-                cell.value = v.clone();
-                snapshot.values.insert(*k, v.clone());
+                let mut results: Vec<(CellKey, Value)> =
+                    if mode == RecalcMode::MultiThreaded && !has_barrier {
+                        tasks
+                            .par_iter()
+                            .map(|(k, expr)| {
+                                let ctx = crate::eval::EvalContext {
+                                    current_sheet: k.sheet,
+                                    current_cell: k.addr,
+                                };
+                                let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
+                                (*k, evaluator.eval_formula(expr))
+                            })
+                            .collect()
+                    } else {
+                        tasks
+                            .iter()
+                            .map(|(k, expr)| {
+                                let ctx = crate::eval::EvalContext {
+                                    current_sheet: k.sheet,
+                                    current_cell: k.addr,
+                                };
+                                let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
+                                (*k, evaluator.eval_formula(expr))
+                            })
+                            .collect()
+                    };
+
+                results.sort_by_key(|(k, _)| (k.sheet, k.addr.row, k.addr.col));
+
+                for (k, v) in results {
+                    self.apply_eval_result(k, v, &mut snapshot, &mut spill_dirty_roots);
+                }
+            }
+
+            self.calc_graph.clear_dirty();
+            self.dirty.clear();
+            self.dirty_reasons.clear();
+
+            if spill_dirty_roots.is_empty() {
+                return;
+            }
+
+            // Spills can change which cells are considered inputs vs computed spill outputs.
+            // When the spill footprint changes (new cells gain/lose values), mark the affected
+            // coordinates dirty so any dependents recalculate with the updated spill state.
+            for cell in spill_dirty_roots.drain(..) {
+                self.calc_graph.mark_dirty(cell);
             }
         }
-
-        self.calc_graph.clear_dirty();
-        self.dirty.clear();
-        self.dirty_reasons.clear();
     }
 
     fn recalculate_with_cycles(&mut self, _mode: RecalcMode) {
@@ -959,7 +1015,8 @@ impl Engine {
         let sccs = iterative::strongly_connected_components(&impacted, &edges);
         let order = iterative::topo_sort_sccs(&sccs, &edges);
 
-        let mut snapshot = Snapshot::from_workbook(&self.workbook);
+        let mut snapshot = Snapshot::from_workbook(&self.workbook, &self.spills);
+        let mut spill_dirty_roots: Vec<CellId> = Vec::new();
 
         for scc_idx in order {
             let mut scc = sccs[scc_idx].clone();
@@ -989,9 +1046,7 @@ impl Engine {
                 };
                 let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
                 let v = evaluator.eval_formula(&expr);
-                let cell = self.workbook.get_or_create_cell_mut(k);
-                cell.value = v.clone();
-                snapshot.values.insert(k, v);
+                self.apply_eval_result(k, v, &mut snapshot, &mut spill_dirty_roots);
                 continue;
             }
 
@@ -1002,9 +1057,7 @@ impl Engine {
             if !self.calc_settings.iterative.enabled {
                 for &k in &scc {
                     let v = Value::Number(0.0);
-                    let cell = self.workbook.get_or_create_cell_mut(k);
-                    cell.value = v.clone();
-                    snapshot.values.insert(k, v);
+                    self.apply_eval_result(k, v, &mut snapshot, &mut spill_dirty_roots);
                 }
                 continue;
             }
@@ -1030,10 +1083,7 @@ impl Engine {
                     let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
                     let new_val = evaluator.eval_formula(&expr);
                     max_delta = max_delta.max(value_delta(&old, &new_val));
-
-                    let cell = self.workbook.get_or_create_cell_mut(k);
-                    cell.value = new_val.clone();
-                    snapshot.values.insert(k, new_val);
+                    self.apply_eval_result(k, new_val, &mut snapshot, &mut spill_dirty_roots);
                 }
 
                 if max_delta <= tol {
@@ -1045,6 +1095,228 @@ impl Engine {
         self.calc_graph.clear_dirty();
         self.dirty.clear();
         self.dirty_reasons.clear();
+    }
+
+    fn apply_eval_result(
+        &mut self,
+        key: CellKey,
+        value: Value,
+        snapshot: &mut Snapshot,
+        spill_dirty_roots: &mut Vec<CellId>,
+    ) {
+        match value {
+            Value::Array(array) => {
+                if array.rows == 0 || array.cols == 0 {
+                    self.apply_eval_result(key, Value::Error(ErrorKind::Calc), snapshot, spill_dirty_roots);
+                    return;
+                }
+
+                let end = CellAddr {
+                    row: key.addr.row + array.rows.saturating_sub(1) as u32,
+                    col: key.addr.col + array.cols.saturating_sub(1) as u32,
+                };
+
+                // Fast path: if the spill shape is unchanged, update the stored array and
+                // overwrite spill cell values in the snapshot without reshaping dependency nodes.
+                if let Some(existing) = self.spills.by_origin.get_mut(&key) {
+                    if existing.end == end {
+                        existing.array = array.clone();
+
+                        let top_left = array.top_left();
+                        let cell = self.workbook.get_or_create_cell_mut(key);
+                        cell.value = top_left.clone();
+                        snapshot.values.insert(key, top_left);
+
+                        for r in 0..array.rows {
+                            for c in 0..array.cols {
+                                if r == 0 && c == 0 {
+                                    continue;
+                                }
+                                let addr = CellAddr {
+                                    row: key.addr.row + r as u32,
+                                    col: key.addr.col + c as u32,
+                                };
+                                let spill_key = CellKey { sheet: key.sheet, addr };
+                                if let Some(v) = array.get(r, c).cloned() {
+                                    snapshot.values.insert(spill_key, v);
+                                }
+                            }
+                        }
+                        return;
+                    }
+                }
+
+                // Spill footprint change: clear the previous spill range (if any) before attempting
+                // to write the new one.
+                let cleared = self.clear_spill_for_origin(key);
+                for cleared_key in cleared {
+                    snapshot.values.remove(&cleared_key);
+                    spill_dirty_roots.push(cell_id_from_key(cleared_key));
+                }
+
+                if self.spill_is_blocked(key, &array) {
+                    let cell = self.workbook.get_or_create_cell_mut(key);
+                    cell.value = Value::Error(ErrorKind::Spill);
+                    snapshot.values.insert(key, Value::Error(ErrorKind::Spill));
+                    return;
+                }
+
+                self.apply_new_spill(key, end, array, snapshot, spill_dirty_roots);
+            }
+            other => {
+                let cleared = self.clear_spill_for_origin(key);
+                for cleared_key in cleared {
+                    snapshot.values.remove(&cleared_key);
+                    spill_dirty_roots.push(cell_id_from_key(cleared_key));
+                }
+
+                let cell = self.workbook.get_or_create_cell_mut(key);
+                cell.value = other.clone();
+                snapshot.values.insert(key, other);
+            }
+        }
+    }
+
+    fn spill_origin_key(&self, key: CellKey) -> Option<CellKey> {
+        if self.spills.by_origin.contains_key(&key) {
+            return Some(key);
+        }
+        self.spills.origin_by_cell.get(&key).copied()
+    }
+
+    fn spilled_cell_value(&self, key: CellKey) -> Option<Value> {
+        let origin = self.spills.origin_by_cell.get(&key).copied()?;
+        let spill = self.spills.by_origin.get(&origin)?;
+        let row_off = key.addr.row.checked_sub(origin.addr.row)? as usize;
+        let col_off = key.addr.col.checked_sub(origin.addr.col)? as usize;
+        spill.array.get(row_off, col_off).cloned()
+    }
+
+    fn clear_spill_for_cell(&mut self, key: CellKey) {
+        let origin = match self.spill_origin_key(key) {
+            Some(origin) => origin,
+            None => return,
+        };
+
+        let cleared = self.clear_spill_for_origin(origin);
+        for cleared_key in cleared {
+            self.calc_graph.mark_dirty(cell_id_from_key(cleared_key));
+        }
+
+        // If a user edits any cell in a spill range, the origin needs to be re-evaluated
+        // to either re-spill (if the blockage was removed) or surface #SPILL! (if blocked).
+        if origin != key {
+            self.calc_graph.mark_dirty(cell_id_from_key(origin));
+        }
+    }
+
+    fn clear_spill_for_origin(&mut self, origin: CellKey) -> Vec<CellKey> {
+        let Some(spill) = self.spills.by_origin.remove(&origin) else {
+            return Vec::new();
+        };
+
+        let mut cleared = Vec::new();
+        for r in 0..spill.array.rows {
+            for c in 0..spill.array.cols {
+                if r == 0 && c == 0 {
+                    continue;
+                }
+                let addr = CellAddr {
+                    row: origin.addr.row + r as u32,
+                    col: origin.addr.col + c as u32,
+                };
+                let key = CellKey {
+                    sheet: origin.sheet,
+                    addr,
+                };
+                self.spills.origin_by_cell.remove(&key);
+                self.calc_graph.remove_cell(cell_id_from_key(key));
+                cleared.push(key);
+            }
+        }
+        cleared
+    }
+
+    fn spill_is_blocked(&self, origin: CellKey, array: &Array) -> bool {
+        for r in 0..array.rows {
+            for c in 0..array.cols {
+                if r == 0 && c == 0 {
+                    continue;
+                }
+                let addr = CellAddr {
+                    row: origin.addr.row + r as u32,
+                    col: origin.addr.col + c as u32,
+                };
+                let key = CellKey {
+                    sheet: origin.sheet,
+                    addr,
+                };
+
+                // Blocked by non-empty user cell (literal or formula).
+                if let Some(cell) = self.workbook.get_cell(key) {
+                    if cell.formula.is_some() {
+                        return true;
+                    }
+                    if cell.value != Value::Blank {
+                        return true;
+                    }
+                }
+
+                // Blocked by another spill.
+                if let Some(other_origin) = self.spills.origin_by_cell.get(&key) {
+                    if *other_origin != origin {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn apply_new_spill(
+        &mut self,
+        origin: CellKey,
+        end: CellAddr,
+        array: Array,
+        snapshot: &mut Snapshot,
+        spill_dirty_roots: &mut Vec<CellId>,
+    ) {
+        let top_left = array.top_left();
+
+        let cell = self.workbook.get_or_create_cell_mut(origin);
+        cell.value = top_left.clone();
+        snapshot.values.insert(origin, top_left);
+
+        self.spills.by_origin.insert(origin, Spill { end, array: array.clone() });
+
+        let origin_id = cell_id_from_key(origin);
+        for r in 0..array.rows {
+            for c in 0..array.cols {
+                if r == 0 && c == 0 {
+                    continue;
+                }
+                let addr = CellAddr {
+                    row: origin.addr.row + r as u32,
+                    col: origin.addr.col + c as u32,
+                };
+                let key = CellKey {
+                    sheet: origin.sheet,
+                    addr,
+                };
+                self.spills.origin_by_cell.insert(key, origin);
+
+                if let Some(v) = array.get(r, c).cloned() {
+                    snapshot.values.insert(key, v);
+                }
+
+                // Register spill cells as formula nodes that depend on the origin so they participate in
+                // calculation ordering and dirty marking.
+                let deps = CellDeps::new(vec![Precedent::Cell(origin_id)]);
+                self.calc_graph.update_cell_dependencies(cell_id_from_key(key), deps);
+
+                spill_dirty_roots.push(cell_id_from_key(key));
+            }
+        }
     }
 
     fn compile_expr(&mut self, expr: &Expr<String>, current_sheet: SheetId) -> CompiledExpr {
@@ -1171,6 +1443,7 @@ impl Engine {
         self.cell_name_refs.clear();
         self.dirty.clear();
         self.dirty_reasons.clear();
+        self.spills = SpillState::default();
 
         for (sheet_name, addr, formula) in formulas {
             let addr_a1 = cell_addr_to_a1(addr);
@@ -1279,7 +1552,7 @@ impl Engine {
             )));
         };
 
-        let snapshot = Snapshot::from_workbook(&self.workbook);
+        let snapshot = Snapshot::from_workbook(&self.workbook, &self.spills);
         let ctx = crate::eval::EvalContext {
             current_sheet: sheet_id,
             current_cell: addr,
@@ -1843,12 +2116,35 @@ struct Snapshot {
 }
 
 impl Snapshot {
-    fn from_workbook(workbook: &Workbook) -> Self {
+    fn from_workbook(workbook: &Workbook, spills: &SpillState) -> Self {
         let sheets: HashSet<SheetId> = (0..workbook.sheets.len()).collect();
         let mut values = HashMap::new();
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
             for (addr, cell) in &sheet.cells {
                 values.insert(CellKey { sheet: sheet_id, addr: *addr }, cell.value.clone());
+            }
+        }
+
+        // Overlay spilled values so formula evaluation can observe dynamic array results even
+        // when the workbook map doesn't contain explicit cell records.
+        for (origin, spill) in &spills.by_origin {
+            for r in 0..spill.array.rows {
+                for c in 0..spill.array.cols {
+                    if r == 0 && c == 0 {
+                        continue;
+                    }
+                    let addr = CellAddr {
+                        row: origin.addr.row + r as u32,
+                        col: origin.addr.col + c as u32,
+                    };
+                    let key = CellKey {
+                        sheet: origin.sheet,
+                        addr,
+                    };
+                    if let Some(v) = spill.array.get(r, c).cloned() {
+                        values.insert(key, v);
+                    }
+                }
             }
         }
         let tables = workbook.sheets.iter().map(|s| s.tables.clone()).collect();
@@ -2288,7 +2584,7 @@ fn numeric_value(value: &Value) -> Option<f64> {
         Value::Number(n) => Some(*n),
         Value::Blank => Some(0.0),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        Value::Text(_) | Value::Error(_) => None,
+        Value::Text(_) | Value::Error(_) | Value::Array(_) | Value::Spill { .. } => None,
     }
 }
 
