@@ -20,7 +20,7 @@ mod types;
 pub use autosave::{AutoSaveConfig, AutoSaveManager};
 pub use cache::{MemoryManager, MemoryManagerConfig, SheetData};
 pub use encryption::{EncryptionError, InMemoryKeyProvider, KeyProvider, KeyProviderError, KeyRing};
-pub use storage::Storage;
+pub use storage::{Storage, StorageError};
 pub use types::{
     CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, SheetVisibility, Style, WorkbookMeta,
 };
