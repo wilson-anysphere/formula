@@ -157,7 +157,7 @@ impl<'de> Deserialize<'de> for KeyBytes {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyRing {
     pub current_version: u32,
@@ -171,6 +171,35 @@ impl std::fmt::Debug for KeyRing {
             .field("current_version", &self.current_version)
             .field("key_versions", &versions)
             .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for KeyRing {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct RawKeyRing {
+            current_version: u32,
+            keys: BTreeMap<u32, KeyBytes>,
+        }
+
+        let raw = RawKeyRing::deserialize(deserializer)?;
+        if raw.current_version < 1 {
+            return Err(D::Error::custom("currentVersion must be >= 1"));
+        }
+        if raw.keys.is_empty() {
+            return Err(D::Error::custom("keys must be non-empty"));
+        }
+        if raw.keys.keys().any(|v| *v < 1) {
+            return Err(D::Error::custom("key versions must be >= 1"));
+        }
+        if !raw.keys.contains_key(&raw.current_version) {
+            return Err(D::Error::custom("keys must include currentVersion"));
+        }
+        Ok(KeyRing {
+            current_version: raw.current_version,
+            keys: raw.keys,
+        })
     }
 }
 
