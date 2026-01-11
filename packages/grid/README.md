@@ -99,6 +99,10 @@ Dragging the fill handle:
 
 `target` is the full extended range **including** `source`.
 
+If you need to compute pixel-accurate drag start points (for custom UI or tests), the imperative `GridApi` exposes:
+
+- `getFillHandleRect(): { x; y; width; height } | null` (viewport coordinates relative to the grid canvases)
+
 Note: `@formula/grid` only handles interaction + rendering. Consumers are responsible for actually writing filled values/formulas into their backing store.
 
 ## Selection + keyboard navigation
