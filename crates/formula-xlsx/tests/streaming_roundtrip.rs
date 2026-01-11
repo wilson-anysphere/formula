@@ -477,6 +477,22 @@ fn streaming_patch_preserves_shared_string_cells() -> Result<(), Box<dyn std::er
         shared_strings_xml.contains("Patched"),
         "sharedStrings.xml should contain the new string"
     );
+    let shared_doc = roxmltree::Document::parse(&shared_strings_xml)?;
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let sst = shared_doc
+        .descendants()
+        .find(|n| n.has_tag_name((ns, "sst")))
+        .expect("sharedStrings.xml should contain <sst>");
+    assert_eq!(
+        sst.attribute("count"),
+        Some("2"),
+        "sharedStrings/@count should remain the original reference count"
+    );
+    assert_eq!(
+        sst.attribute("uniqueCount"),
+        Some("3"),
+        "sharedStrings/@uniqueCount should reflect the appended entry"
+    );
 
     let tmpdir = tempfile::tempdir()?;
     let out_path = tmpdir.path().join("patched.xlsx");

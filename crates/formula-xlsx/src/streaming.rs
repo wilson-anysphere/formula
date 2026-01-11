@@ -433,6 +433,23 @@ fn plan_shared_strings<R: Read + Seek>(
         return Ok((Some(shared_strings_part), HashMap::new(), None));
     }
 
+    let mut count_delta: i32 = 0;
+    for (part, patches) in patches_by_part {
+        for patch in patches {
+            let existing_t = existing_types
+                .get(part)
+                .and_then(|m| m.get(&(patch.cell.row, patch.cell.col)))
+                .and_then(|t| t.as_deref());
+            let old_uses_shared = matches!(existing_t, Some("s"));
+            let new_uses_shared = patch_wants_shared_string(patch, existing_t, true);
+            match (old_uses_shared, new_uses_shared) {
+                (true, false) => count_delta -= 1,
+                (false, true) => count_delta += 1,
+                _ => {}
+            }
+        }
+    }
+
     let mut shared_strings_bytes = Vec::new();
     {
         let mut file = archive.by_name(&shared_strings_part)?;
@@ -440,6 +457,7 @@ fn plan_shared_strings<R: Read + Seek>(
     }
     let existing_shared_indices = scan_existing_shared_string_indices(archive, patches_by_part)?;
     let mut shared_strings = SharedStringsState::from_part(&shared_strings_bytes)?;
+    shared_strings.count_delta = count_delta;
 
     // Deterministic insertion order: sort by (worksheet part, row, col).
     let mut shared_patches: Vec<(&str, &WorksheetCellPatch)> = patches_by_part
@@ -540,9 +558,7 @@ fn scan_existing_cell_types<R: Read + Seek>(
     for (part, patches) in patches_by_part {
         let mut targets: HashMap<String, (u32, u32)> = HashMap::new();
         for patch in patches {
-            if matches!(patch.value, CellValue::String(_) | CellValue::RichText(_)) {
-                targets.insert(patch.cell.to_a1(), (patch.cell.row, patch.cell.col));
-            }
+            targets.insert(patch.cell.to_a1(), (patch.cell.row, patch.cell.col));
         }
         if targets.is_empty() {
             continue;
@@ -932,6 +948,8 @@ fn read_zip_part<R: Read + Seek>(
 #[derive(Debug)]
 struct SharedStringsState {
     editor: SharedStringsEditor,
+    // Best-effort shared-string reference count delta from cell patches.
+    count_delta: i32,
 }
 
 impl SharedStringsState {
@@ -939,7 +957,10 @@ impl SharedStringsState {
         let editor = SharedStringsEditor::parse(bytes).map_err(|e| {
             crate::XlsxError::Invalid(format!("sharedStrings.xml parse error: {e}"))
         })?;
-        Ok(Self { editor })
+        Ok(Self {
+            editor,
+            count_delta: 0,
+        })
     }
 
     fn get_or_insert_plain(&mut self, text: &str) -> u32 {
@@ -955,11 +976,10 @@ impl SharedStringsState {
             return Ok(None);
         }
 
-        let unique_count = self.editor.len() as u32;
         let count_hint = self
             .editor
             .original_count()
-            .map(|base| base.max(unique_count));
+            .map(|base| base.saturating_add_signed(self.count_delta));
         let updated = self.editor.to_xml_bytes(count_hint).map_err(|e| {
             crate::XlsxError::Invalid(format!("sharedStrings.xml write error: {e}"))
         })?;
@@ -1743,10 +1763,10 @@ fn write_patched_cell<W: Write>(
             }
             c.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
         }
-        } else {
-            let a1 = inserted_a1.as_ref().expect("just set");
-            c.push_attribute(("r", a1.as_str()));
-        }
+    } else {
+        let a1 = inserted_a1.as_ref().expect("just set");
+        c.push_attribute(("r", a1.as_str()));
+    }
 
     let (cell_t_owned, body_kind) = cell_representation(
         &patch.value,
