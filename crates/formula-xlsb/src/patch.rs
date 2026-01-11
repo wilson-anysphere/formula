@@ -129,17 +129,18 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 let c1 = read_u32(payload, 8)?;
                 let c2 = read_u32(payload, 12)?;
 
-                // `BrtWsDim` appears before `BrtSheetData` in valid worksheet streams, and
-                // `patch_sheet_bin` only inserts records *within* `BrtSheetData`. That means the
-                // output up to this point is byte-identical, so `record_start` is also the
-                // output offset.
-                dim_record = Some(DimensionRecordInfo {
-                    out_payload_offset: record_start
-                        .checked_add(header_len)
-                        .ok_or(Error::UnexpectedEof)?,
-                    r1,
-                    r2,
-                    c1,
+                 // Record offsets may diverge from the input stream once we start patching and/or
+                 // inserting records. Capture the output offset before writing the raw DIMENSION
+                 // record so we can patch the payload in-place later even if BrtWsDim appears
+                 // after other rewritten records (non-standard but possible in malformed streams).
+                 let out_record_start = writer.bytes_written();
+                 dim_record = Some(DimensionRecordInfo {
+                     out_payload_offset: out_record_start
+                         .checked_add(header_len)
+                         .ok_or(Error::UnexpectedEof)?,
+                     r1,
+                     r2,
+                     c1,
                     c2,
                 });
                 writer.write_raw(&sheet_bin[record_start..record_end])?;

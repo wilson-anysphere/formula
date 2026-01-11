@@ -12,6 +12,12 @@ pub(crate) struct Biff12Writer<W: Write> {
     inner: W,
 }
 
+impl<'a> Biff12Writer<&'a mut Vec<u8>> {
+    pub(crate) fn bytes_written(&self) -> usize {
+        self.inner.len()
+    }
+}
+
 impl<W: Write> Biff12Writer<W> {
     pub(crate) fn new(inner: W) -> Self {
         Self { inner }
