@@ -6,6 +6,7 @@ vi.mock("../http/tls", () => {
   };
 });
 
+import { createAuditEvent } from "@formula/audit-core";
 import { sendSiemBatch } from "../siem/sender";
 import { fetchWithOrgTls } from "../http/tls";
 
@@ -19,34 +20,30 @@ describe("SIEM sender TLS failures", () => {
 
     const config = {
       endpointUrl: "https://example.invalid/ingest",
+      format: "json",
       retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 1, jitter: false }
     };
 
-    const event = {
-      id: "11111111-1111-4111-8111-111111111111",
-      timestamp: new Date("2025-01-01T00:00:00.000Z").toISOString(),
-      orgId: null,
-      userId: null,
-      userEmail: null,
+    const event = createAuditEvent({
       eventType: "test.tls_error",
-      resourceType: "organization",
-      resourceId: null,
-      ipAddress: null,
-      userAgent: null,
-      sessionId: null,
-      success: true,
-      errorCode: null,
-      errorMessage: null,
-      details: {}
-    };
+      actor: { type: "system", id: "unit-test" },
+      context: { orgId: null },
+      resource: { type: "integration", id: "siem", name: "siem" },
+      success: true
+    });
 
     await expect(
-      sendSiemBatch(config as any, [event] as any, {
+      sendSiemBatch(config as any, [event], {
         tls: { certificatePinningEnabled: false, certificatePins: [] }
       })
     ).rejects.toMatchObject({ retriable: false });
 
     expect(fetchWithOrgTls).toHaveBeenCalledTimes(1);
+
+    const call = (fetchWithOrgTls as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call).toBeTruthy();
+    const init = call![1] as any;
+    expect(Buffer.isBuffer(init.body)).toBe(true);
+    expect(init.headers?.["Content-Type"]).toBe("application/json");
   });
 });
-
