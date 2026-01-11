@@ -476,6 +476,7 @@ enum FormulaToken {
     Minus,
     Star,
     Slash,
+    OtherOp(String),
     LParen,
     RParen,
     Comma,
@@ -791,6 +792,31 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
             '/' => {
                 chars.next();
                 tokens.push(FormulaToken::Slash);
+            }
+            '>' => {
+                chars.next();
+                if chars.peek().is_some_and(|next| *next == '=') {
+                    chars.next();
+                    tokens.push(FormulaToken::OtherOp(">=".to_string()));
+                } else {
+                    tokens.push(FormulaToken::OtherOp(">".to_string()));
+                }
+            }
+            '<' => {
+                chars.next();
+                if chars.peek().is_some_and(|next| *next == '=') {
+                    chars.next();
+                    tokens.push(FormulaToken::OtherOp("<=".to_string()));
+                } else if chars.peek().is_some_and(|next| *next == '>') {
+                    chars.next();
+                    tokens.push(FormulaToken::OtherOp("<>".to_string()));
+                } else {
+                    tokens.push(FormulaToken::OtherOp("<".to_string()));
+                }
+            }
+            '=' | '^' | '&' => {
+                chars.next();
+                tokens.push(FormulaToken::OtherOp(ch.to_string()));
             }
             '(' => {
                 chars.next();
@@ -1214,6 +1240,20 @@ mod tests {
 
         wb.recalculate(None).unwrap();
         assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(2.0));
+        assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(3.0));
+    }
+
+    #[test]
+    fn comparison_operators_terminate_expression_like_js_evaluator() {
+        let mut wb = Workbook::new();
+        // The current JS evaluator tokenizes comparison operators but doesn't
+        // evaluate them, so parsing stops at the operator and the left-hand
+        // side is returned.
+        wb.set_cell("A1", json!("=1>0"), None).unwrap();
+        wb.set_cell("A2", json!("=SUM(1,2)>0"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(1.0));
         assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(3.0));
     }
 
