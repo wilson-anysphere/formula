@@ -494,7 +494,7 @@ export class ContextManager {
         score: hit.score,
         metadata: safeMeta,
         text: outText,
-        dlp: classifyText(outText),
+        dlp: meta.dlpHeuristic ?? classifyText(outText),
       };
     });
 
