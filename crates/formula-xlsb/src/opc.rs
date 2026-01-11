@@ -1,8 +1,9 @@
 use crate::parser::Error as ParseError;
 use crate::parser::{
-    parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook_sheets, Cell, SheetData,
-    SheetMeta,
+    parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook_sheets, Cell, CellValue,
+    SheetData, SheetMeta,
 };
+use crate::patch::{patch_sheet_bin, CellEdit};
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use std::collections::{HashMap, HashSet};
@@ -239,16 +240,49 @@ impl XlsbWorkbook {
         self.save_with_part_overrides(dest, &HashMap::new())
     }
 
-    /// Save the workbook while overriding specific part payloads.
+    /// Save the workbook with an updated numeric cell value.
     ///
-    /// This is an alias for [`XlsbWorkbook::save_with_part_overrides`], provided as a more
-    /// user-facing name for the "patch some parts, preserve the rest" round-trip flow.
+    /// This is a convenience wrapper around the streaming worksheet patcher
+    /// ([`patch_sheet_bin`]) plus the part override writer
+    /// ([`XlsbWorkbook::save_with_part_overrides`]).
+    ///
+    /// Note: this only supports updating an existing cell; it does not insert rows/columns.
     pub fn save_with_edits(
         &self,
         dest: impl AsRef<Path>,
-        overrides: &HashMap<String, Vec<u8>>,
+        sheet_index: usize,
+        row: u32,
+        col: u32,
+        value: f64,
     ) -> Result<(), ParseError> {
-        self.save_with_part_overrides(dest, overrides)
+        let meta = self
+            .sheets
+            .get(sheet_index)
+            .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
+        let sheet_part = meta.part_path.clone();
+
+        let sheet_bytes = if let Some(bytes) = self.preserved_parts.get(&sheet_part) {
+            bytes.clone()
+        } else {
+            let file = File::open(&self.path)?;
+            let mut zip = ZipArchive::new(file)?;
+            let mut entry = zip.by_name(&sheet_part)?;
+            let mut bytes = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut bytes)?;
+            bytes
+        };
+
+        let patched = patch_sheet_bin(
+            &sheet_bytes,
+            &[CellEdit {
+                row,
+                col,
+                new_value: CellValue::Number(value),
+                new_formula: None,
+            }],
+        )?;
+
+        self.save_with_part_overrides(dest, &HashMap::from([(sheet_part, patched)]))
     }
 
     /// Save the workbook while overriding specific part payloads.

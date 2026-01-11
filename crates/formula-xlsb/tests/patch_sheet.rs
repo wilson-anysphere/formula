@@ -52,7 +52,7 @@ fn patch_sheet_bin_round_trips_numeric_cell_preserving_formula() {
     let tmpdir = tempdir().expect("create temp dir");
     let out_path = tmpdir.path().join("patched.xlsb");
 
-    wb.save_with_edits(
+    wb.save_with_part_overrides(
         &out_path,
         &HashMap::from([(sheet_part.clone(), patched_sheet_bin)]),
     )
@@ -114,7 +114,7 @@ fn patch_sheet_bin_can_update_formula_cached_result() {
     let tmpdir = tempdir().expect("create temp dir");
     let out_path = tmpdir.path().join("patched-formula.xlsb");
 
-    wb.save_with_edits(
+    wb.save_with_part_overrides(
         &out_path,
         &HashMap::from([(sheet_part.clone(), patched_sheet_bin)]),
     )

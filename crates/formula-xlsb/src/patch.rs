@@ -76,7 +76,11 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 current_row = Some(read_u32(payload, 0)?);
                 writer.write_raw(&sheet_bin[record_start..record_end])?;
             }
-            biff12::FLOAT | biff12::STRING | biff12::CELL_ST | biff12::FORMULA_FLOAT
+            biff12::NUM
+            | biff12::FLOAT
+            | biff12::STRING
+            | biff12::CELL_ST
+            | biff12::FORMULA_FLOAT
                 if in_sheet_data =>
             {
                 let row = current_row.unwrap_or(0);
