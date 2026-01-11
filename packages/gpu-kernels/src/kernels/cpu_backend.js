@@ -147,7 +147,14 @@ export class CpuBackend {
     for (let i = 0; i < values.length; i++) {
       const v = values[i];
       if (Number.isNaN(v)) continue;
-      let bin = Math.floor((v - min) * invWidth);
+      let bin;
+      if (v <= min) {
+        bin = 0;
+      } else if (v >= max) {
+        bin = bins - 1;
+      } else {
+        bin = Math.floor((v - min) * invWidth);
+      }
       if (bin < 0) bin = 0;
       if (bin >= bins) bin = bins - 1;
       counts[bin] += 1;
