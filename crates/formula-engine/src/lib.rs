@@ -15,6 +15,7 @@
 
 pub mod bytecode;
 pub mod calc_settings;
+mod coercion;
 pub mod date;
 pub mod debug;
 pub mod display;

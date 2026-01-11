@@ -61,6 +61,12 @@ fn value_and_numbervalue_parse_common_inputs() {
     assert_eq!(text::value("1,234.5").unwrap(), 1234.5);
     assert_eq!(text::value("(1,000)").unwrap(), -1000.0);
     assert_eq!(text::value("10%").unwrap(), 0.1);
+    assert_eq!(text::value("10%%").unwrap(), 0.001);
+    assert_eq!(text::value("$1,234.50").unwrap(), 1234.5);
+    assert_eq!(text::value("$ 1,234.50").unwrap(), 1234.5);
+    assert_eq!(text::value("1\u{00A0}234.5").unwrap(), 1234.5);
+    assert_eq!(text::value("").unwrap_err(), ExcelError::Value);
+    assert_eq!(text::value("1e9999").unwrap_err(), ExcelError::Num);
 
     assert_eq!(
         text::numbervalue("1.234,5", Some(','), Some('.')).unwrap(),

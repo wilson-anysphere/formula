@@ -10,7 +10,7 @@ use formula_model::CellRef;
 mod number_parse;
 
 pub use number_parse::NumberLocale;
-pub(crate) use number_parse::{parse_number, parse_number_with_separators};
+pub(crate) use number_parse::parse_number;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {

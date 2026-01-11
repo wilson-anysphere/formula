@@ -1,5 +1,5 @@
 use crate::error::{ExcelError, ExcelResult};
-use crate::value::parse_number_with_separators;
+use crate::coercion::number::parse_number_strict;
 
 /// VALUE(text)
 ///
@@ -23,7 +23,5 @@ pub fn numbervalue(
         return Err(ExcelError::Value);
     }
 
-    parse_number_with_separators(number_text, decimal_separator, Some(group_separator))
+    parse_number_strict(number_text, decimal_separator, Some(group_separator))
 }
-
-// NOTE: Parsing logic is shared with implicit coercions in `crate::value`.
