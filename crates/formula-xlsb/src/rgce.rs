@@ -122,18 +122,44 @@ pub struct DecodedFormula {
 
 /// Best-effort decode of an XLSB `rgce` token stream to Excel formula text.
 pub fn decode_formula_rgce(rgce: &[u8]) -> DecodedFormula {
-    decode_formula_rgce_impl(rgce, None, None)
+    decode_formula_rgce_impl(rgce, &[], None, None)
+}
+
+/// Best-effort decode of an XLSB `rgce` token stream to Excel formula text, using trailing `rgcb`
+/// data blocks referenced by certain ptgs (e.g. `PtgArray`).
+pub fn decode_formula_rgce_with_rgcb(rgce: &[u8], rgcb: &[u8]) -> DecodedFormula {
+    decode_formula_rgce_impl(rgce, rgcb, None, None)
 }
 
 /// Best-effort decode of an XLSB `rgce` token stream, using workbook context.
 pub fn decode_formula_rgce_with_context(rgce: &[u8], ctx: &WorkbookContext) -> DecodedFormula {
-    decode_formula_rgce_impl(rgce, Some(ctx), None)
+    decode_formula_rgce_impl(rgce, &[], Some(ctx), None)
+}
+
+/// Best-effort decode of an XLSB `rgce` token stream, using workbook context and trailing `rgcb`
+/// data blocks referenced by certain ptgs (e.g. `PtgArray`).
+pub fn decode_formula_rgce_with_context_and_rgcb(
+    rgce: &[u8],
+    rgcb: &[u8],
+    ctx: &WorkbookContext,
+) -> DecodedFormula {
+    decode_formula_rgce_impl(rgce, rgcb, Some(ctx), None)
 }
 
 /// Best-effort decode of an `rgce` token stream using the (0-indexed) origin cell for
 /// relative-reference tokens like `PtgRefN` / `PtgAreaN`.
 pub fn decode_formula_rgce_with_base(rgce: &[u8], base: CellCoord) -> DecodedFormula {
-    decode_formula_rgce_impl(rgce, None, Some(base))
+    decode_formula_rgce_impl(rgce, &[], None, Some(base))
+}
+
+/// Best-effort decode of an `rgce` token stream using trailing `rgcb` data blocks and the
+/// (0-indexed) origin cell for relative-reference tokens like `PtgRefN` / `PtgAreaN`.
+pub fn decode_formula_rgce_with_rgcb_and_base(
+    rgce: &[u8],
+    rgcb: &[u8],
+    base: CellCoord,
+) -> DecodedFormula {
+    decode_formula_rgce_impl(rgce, rgcb, None, Some(base))
 }
 
 /// Best-effort decode of an `rgce` token stream using both workbook context (for 3D refs / names)
@@ -143,34 +169,73 @@ pub fn decode_formula_rgce_with_context_and_base(
     ctx: &WorkbookContext,
     base: CellCoord,
 ) -> DecodedFormula {
-    decode_formula_rgce_impl(rgce, Some(ctx), Some(base))
+    decode_formula_rgce_impl(rgce, &[], Some(ctx), Some(base))
+}
+
+/// Best-effort decode of an `rgce` token stream using workbook context, trailing `rgcb` data
+/// blocks, and a base cell (for relative-reference tokens like `PtgRefN` / `PtgAreaN`).
+pub fn decode_formula_rgce_with_context_and_rgcb_and_base(
+    rgce: &[u8],
+    rgcb: &[u8],
+    ctx: &WorkbookContext,
+    base: CellCoord,
+) -> DecodedFormula {
+    decode_formula_rgce_impl(rgce, rgcb, Some(ctx), Some(base))
 }
 
 fn decode_formula_rgce_impl(
     rgce: &[u8],
+    rgcb: &[u8],
     ctx: Option<&WorkbookContext>,
     base: Option<CellCoord>,
 ) -> DecodedFormula {
     let mut warnings = Vec::new();
-    let text = decode_rgce_impl(rgce, ctx, base, Some(&mut warnings)).ok();
+    let text = decode_rgce_impl(rgce, rgcb, ctx, base, Some(&mut warnings)).ok();
     DecodedFormula { text, warnings }
 }
 
 /// Decode an `rgce` token stream into best-effort Excel formula text (without leading `=`).
 pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeError> {
-    decode_rgce_impl(rgce, None, None, None)
+    decode_rgce_impl(rgce, &[], None, None, None)
+}
+
+/// Decode an `rgce` token stream into best-effort Excel formula text (without leading `=`),
+/// using trailing `rgcb` data blocks referenced by certain ptgs (e.g. `PtgArray`).
+pub fn decode_rgce_with_rgcb(rgce: &[u8], rgcb: &[u8]) -> Result<String, DecodeError> {
+    decode_rgce_impl(rgce, rgcb, None, None, None)
 }
 
 /// Decode an `rgce` token stream into best-effort Excel formula text (without leading `=`),
 /// using workbook context to resolve sheet indices (`ixti`) and defined names.
 pub fn decode_rgce_with_context(rgce: &[u8], ctx: &WorkbookContext) -> Result<String, DecodeError> {
-    decode_rgce_impl(rgce, Some(ctx), None, None)
+    decode_rgce_impl(rgce, &[], Some(ctx), None, None)
+}
+
+/// Decode an `rgce` token stream into best-effort Excel formula text (without leading `=`),
+/// using workbook context and trailing `rgcb` data blocks referenced by certain ptgs (e.g.
+/// `PtgArray`).
+pub fn decode_rgce_with_context_and_rgcb(
+    rgce: &[u8],
+    rgcb: &[u8],
+    ctx: &WorkbookContext,
+) -> Result<String, DecodeError> {
+    decode_rgce_impl(rgce, rgcb, Some(ctx), None, None)
 }
 
 /// Decode an `rgce` token stream using the (0-indexed) origin cell for relative-reference tokens
 /// like `PtgRefN` / `PtgAreaN`.
 pub fn decode_rgce_with_base(rgce: &[u8], base: CellCoord) -> Result<String, DecodeError> {
-    decode_rgce_impl(rgce, None, Some(base), None)
+    decode_rgce_impl(rgce, &[], None, Some(base), None)
+}
+
+/// Decode an `rgce` token stream using trailing `rgcb` data blocks and the (0-indexed) origin cell
+/// for relative-reference tokens like `PtgRefN` / `PtgAreaN`.
+pub fn decode_rgce_with_rgcb_and_base(
+    rgce: &[u8],
+    rgcb: &[u8],
+    base: CellCoord,
+) -> Result<String, DecodeError> {
+    decode_rgce_impl(rgce, rgcb, None, Some(base), None)
 }
 
 /// Decode an `rgce` token stream using both workbook context (for 3D refs / names) and a base cell
@@ -180,11 +245,23 @@ pub fn decode_rgce_with_context_and_base(
     ctx: &WorkbookContext,
     base: CellCoord,
 ) -> Result<String, DecodeError> {
-    decode_rgce_impl(rgce, Some(ctx), Some(base), None)
+    decode_rgce_impl(rgce, &[], Some(ctx), Some(base), None)
+}
+
+/// Decode an `rgce` token stream using workbook context, trailing `rgcb` data blocks, and a base
+/// cell (for relative-reference tokens like `PtgRefN` / `PtgAreaN`).
+pub fn decode_rgce_with_context_and_rgcb_and_base(
+    rgce: &[u8],
+    rgcb: &[u8],
+    ctx: &WorkbookContext,
+    base: CellCoord,
+) -> Result<String, DecodeError> {
+    decode_rgce_impl(rgce, rgcb, Some(ctx), Some(base), None)
 }
 
 fn decode_rgce_impl(
     rgce: &[u8],
+    rgcb: &[u8],
     ctx: Option<&WorkbookContext>,
     base: Option<CellCoord>,
     mut warnings: Option<&mut Vec<DecodeWarning>>,
@@ -195,11 +272,18 @@ fn decode_rgce_impl(
 
     // Prevent pathological expansion (e.g. from future token support).
     const MAX_OUTPUT_FACTOR: usize = 10;
-    let max_len = rgce.len().saturating_mul(MAX_OUTPUT_FACTOR);
+    // Some ptgs (notably `PtgArray`) reference additional data stored in the trailing `rgcb`
+    // buffer. Include it when deriving an upper bound for decoded output so we don't reject
+    // legitimate array constants whose `rgce` stream is tiny but `rgcb` is not.
+    let max_len = rgce
+        .len()
+        .saturating_add(rgcb.len())
+        .saturating_mul(MAX_OUTPUT_FACTOR);
 
     let mut i = 0usize;
     let mut last_ptg_offset = 0usize;
     let mut last_ptg = rgce[0];
+    let mut rgcb_pos = 0usize;
 
     let mut stack: Vec<String> = Vec::new();
 
@@ -441,6 +525,25 @@ fn decode_rgce_impl(
                 bytes.copy_from_slice(&rgce[i..i + 8]);
                 i += 8;
                 stack.push(f64::from_le_bytes(bytes).to_string());
+            }
+            0x20 | 0x40 | 0x60 => {
+                // PtgArray: [unused: 7 bytes] + serialized array constant stored in rgcb.
+                if rgce.len().saturating_sub(i) < 7 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 7,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 7;
+
+                let arr = decode_array_constant(rgcb, &mut rgcb_pos).ok_or(DecodeError::InvalidConstant {
+                    offset: ptg_offset,
+                    ptg,
+                    value: 0xFF,
+                })?;
+                stack.push(arr);
             }
             0x24 | 0x44 | 0x64 => {
                 // PtgRef: [row: u32][col: u16 (with relative flags in high bits)]
@@ -907,6 +1010,145 @@ fn decode_rgce_impl(
     }
 }
 
+fn escape_excel_string(value: &str) -> String {
+    // Excel escapes `"` inside a string literal by doubling it.
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch == '"' {
+            out.push('"');
+            out.push('"');
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn error_literal(code: u8) -> Option<&'static str> {
+    match code {
+        0x00 => Some("#NULL!"),
+        0x07 => Some("#DIV/0!"),
+        0x0F => Some("#VALUE!"),
+        0x17 => Some("#REF!"),
+        0x1D => Some("#NAME?"),
+        0x24 => Some("#NUM!"),
+        0x2A => Some("#N/A"),
+        0x2B => Some("#GETTING_DATA"),
+        _ => None,
+    }
+}
+
+fn error_code_from_literal(literal: &str) -> Option<u8> {
+    match literal.trim().to_ascii_uppercase().as_str() {
+        "#NULL!" => Some(0x00),
+        "#DIV/0!" => Some(0x07),
+        "#VALUE!" => Some(0x0F),
+        "#REF!" => Some(0x17),
+        "#NAME?" => Some(0x1D),
+        "#NUM!" => Some(0x24),
+        "#N/A" => Some(0x2A),
+        "#GETTING_DATA" => Some(0x2B),
+        _ => None,
+    }
+}
+
+fn decode_array_constant(rgcb: &[u8], pos: &mut usize) -> Option<String> {
+    // MS-XLSB 2.5.198.8 PtgArray references an Array constant serialized in `rgcb`.
+    // The exact structure differs from the BIFF8-era format (larger row/col counts),
+    // but at a high level it is:
+    //
+    //   [cols_minus1: u16][rows_minus1: u16][values...]
+    //
+    // Values are stored row-major and each starts with a type byte:
+    //   0x00 = empty
+    //   0x01 = number (f64)
+    //   0x02 = string ([cch: u16][utf16 chars...])
+    //   0x04 = bool ([b: u8])
+    //   0x10 = error ([code: u8])
+    //
+    // We decode a minimal subset that is sufficient for common array constants.
+
+    let mut i = *pos;
+    if rgcb.len().saturating_sub(i) < 4 {
+        return None;
+    }
+
+    let cols_minus1 = u16::from_le_bytes([rgcb[i], rgcb[i + 1]]) as usize;
+    let rows_minus1 = u16::from_le_bytes([rgcb[i + 2], rgcb[i + 3]]) as usize;
+    i += 4;
+
+    let cols = cols_minus1.saturating_add(1);
+    let rows = rows_minus1.saturating_add(1);
+    if cols == 0 || rows == 0 {
+        return None;
+    }
+
+    let mut row_texts = Vec::with_capacity(rows);
+    for _ in 0..rows {
+        let mut col_texts = Vec::with_capacity(cols);
+        for _ in 0..cols {
+            if i >= rgcb.len() {
+                return None;
+            }
+            let ty = rgcb[i];
+            i += 1;
+            match ty {
+                0x00 => col_texts.push(String::new()),
+                0x01 => {
+                    if rgcb.len().saturating_sub(i) < 8 {
+                        return None;
+                    }
+                    let mut bytes = [0u8; 8];
+                    bytes.copy_from_slice(&rgcb[i..i + 8]);
+                    i += 8;
+                    col_texts.push(f64::from_le_bytes(bytes).to_string());
+                }
+                0x02 => {
+                    if rgcb.len().saturating_sub(i) < 2 {
+                        return None;
+                    }
+                    let cch = u16::from_le_bytes([rgcb[i], rgcb[i + 1]]) as usize;
+                    i += 2;
+                    let byte_len = cch.checked_mul(2)?;
+                    if rgcb.len().saturating_sub(i) < byte_len {
+                        return None;
+                    }
+                    let raw = &rgcb[i..i + byte_len];
+                    i += byte_len;
+
+                    let mut units = Vec::with_capacity(cch);
+                    for chunk in raw.chunks_exact(2) {
+                        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                    }
+                    let s = String::from_utf16_lossy(&units);
+                    col_texts.push(format!("\"{}\"", escape_excel_string(&s)));
+                }
+                0x04 => {
+                    if rgcb.len().saturating_sub(i) < 1 {
+                        return None;
+                    }
+                    let b = rgcb[i];
+                    i += 1;
+                    col_texts.push(if b == 0 { "FALSE" } else { "TRUE" }.to_string());
+                }
+                0x10 => {
+                    if rgcb.len().saturating_sub(i) < 1 {
+                        return None;
+                    }
+                    let code = rgcb[i];
+                    i += 1;
+                    col_texts.push(error_literal(code)?.to_string());
+                }
+                _ => return None,
+            }
+        }
+        row_texts.push(col_texts.join(","));
+    }
+
+    *pos = i;
+    Some(format!("{{{}}}", row_texts.join(";")))
+}
+
 fn format_cell_ref(row1: u64, col: u32, flags: u8) -> String {
     let mut out = String::new();
     if flags & 0x80 != 0x80 {
@@ -993,11 +1235,12 @@ pub fn encode_rgce_with_context(
     let mut parser = FormulaParser::new(body);
     let expr = parser.parse().map_err(EncodeError::Parse)?;
 
-    let mut out = Vec::new();
-    emit_expr(&expr, ctx, &mut out)?;
+    let mut rgce = Vec::new();
+    let mut rgcb = Vec::new();
+    emit_expr(&expr, ctx, &mut rgce, &mut rgcb)?;
     Ok(EncodedRgce {
-        rgce: out,
-        rgcb: Vec::new(),
+        rgce,
+        rgcb,
     })
 }
 
@@ -1009,6 +1252,7 @@ const PTG_UPLUS: u8 = 0x12;
 const PTG_UMINUS: u8 = 0x13;
 const PTG_INT: u8 = 0x1E;
 const PTG_NUM: u8 = 0x1F;
+const PTG_ARRAY: u8 = 0x20;
 
 const PTG_FUNCVAR: u8 = 0x22;
 const PTG_NAME: u8 = 0x23;
@@ -1044,10 +1288,25 @@ enum Expr {
     Number(f64),
     Ref(Ref),
     Name(NameRef),
+    Array(ArrayConst),
     Func { name: String, args: Vec<Expr> },
     SpillRange(Box<Expr>),
     Unary { op: UnaryOp, expr: Box<Expr> },
     Binary { op: BinaryOp, left: Box<Expr>, right: Box<Expr> },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ArrayConst {
+    rows: Vec<Vec<ArrayElem>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum ArrayElem {
+    Empty,
+    Number(f64),
+    Bool(bool),
+    Str(String),
+    Error(u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1097,20 +1356,26 @@ struct NameRef {
     name: String,
 }
 
-fn emit_expr(expr: &Expr, ctx: &WorkbookContext, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+fn emit_expr(
+    expr: &Expr,
+    ctx: &WorkbookContext,
+    rgce: &mut Vec<u8>,
+    rgcb: &mut Vec<u8>,
+) -> Result<(), EncodeError> {
     match expr {
-        Expr::Number(n) => emit_number(*n, out),
-        Expr::Ref(r) => emit_ref(r, ctx, out, PtgClass::Ref)?,
-        Expr::Name(n) => emit_name(n, ctx, out, PtgClass::Ref)?,
+        Expr::Number(n) => emit_number(*n, rgce),
+        Expr::Ref(r) => emit_ref(r, ctx, rgce, PtgClass::Ref)?,
+        Expr::Name(n) => emit_name(n, ctx, rgce, PtgClass::Ref)?,
+        Expr::Array(a) => emit_array(a, rgce, rgcb)?,
         Expr::Func { name, args } => {
             for arg in args {
-                emit_expr(arg, ctx, out)?;
+                emit_expr(arg, ctx, rgce, rgcb)?;
             }
-            emit_func(name, args.len(), ctx, out)?;
+            emit_func(name, args.len(), ctx, rgce)?;
         }
         Expr::SpillRange(inner) => {
-            emit_expr(inner, ctx, out)?;
-            out.push(PTG_SPILL);
+            emit_expr(inner, ctx, rgce, rgcb)?;
+            rgce.push(PTG_SPILL);
         }
         Expr::Unary { op, expr } => {
             match op {
@@ -1118,8 +1383,8 @@ fn emit_expr(expr: &Expr, ctx: &WorkbookContext, out: &mut Vec<u8>) -> Result<()
                     // Encode `@` by emitting value-class reference tokens. This matches Excel's
                     // legacy implicit-intersection encoding, and round-trips through
                     // `decode_rgce*` as an explicit `@`.
-                    Expr::Ref(r) => emit_ref(r, ctx, out, PtgClass::Value)?,
-                    Expr::Name(n) => emit_name(n, ctx, out, PtgClass::Value)?,
+                    Expr::Ref(r) => emit_ref(r, ctx, rgce, PtgClass::Value)?,
+                    Expr::Name(n) => emit_name(n, ctx, rgce, PtgClass::Value)?,
                     _ => {
                         return Err(EncodeError::Parse(
                             "implicit intersection (@) is only supported on references".to_string(),
@@ -1127,19 +1392,19 @@ fn emit_expr(expr: &Expr, ctx: &WorkbookContext, out: &mut Vec<u8>) -> Result<()
                     }
                 },
                 UnaryOp::Plus => {
-                    emit_expr(expr, ctx, out)?;
-                    out.push(PTG_UPLUS);
+                    emit_expr(expr, ctx, rgce, rgcb)?;
+                    rgce.push(PTG_UPLUS);
                 }
                 UnaryOp::Minus => {
-                    emit_expr(expr, ctx, out)?;
-                    out.push(PTG_UMINUS);
+                    emit_expr(expr, ctx, rgce, rgcb)?;
+                    rgce.push(PTG_UMINUS);
                 }
             }
         }
         Expr::Binary { op, left, right } => {
-            emit_expr(left, ctx, out)?;
-            emit_expr(right, ctx, out)?;
-            out.push(match op {
+            emit_expr(left, ctx, rgce, rgcb)?;
+            emit_expr(right, ctx, rgce, rgcb)?;
+            rgce.push(match op {
                 BinaryOp::Add => PTG_ADD,
                 BinaryOp::Sub => PTG_SUB,
                 BinaryOp::Mul => PTG_MUL,
@@ -1158,6 +1423,66 @@ fn emit_number(n: f64, out: &mut Vec<u8>) {
         out.push(PTG_NUM);
         out.extend_from_slice(&n.to_le_bytes());
     }
+}
+
+fn emit_array(array: &ArrayConst, rgce: &mut Vec<u8>, rgcb: &mut Vec<u8>) -> Result<(), EncodeError> {
+    rgce.push(ptg_with_class(PTG_ARRAY, PtgClass::Array));
+    rgce.extend_from_slice(&[0u8; 7]); // reserved
+    encode_array_constant(array, rgcb)
+}
+
+fn encode_array_constant(array: &ArrayConst, rgcb: &mut Vec<u8>) -> Result<(), EncodeError> {
+    let rows = array.rows.len();
+    let cols = array.rows.first().map(|r| r.len()).unwrap_or(0);
+    if rows == 0 || cols == 0 {
+        return Err(EncodeError::Parse("array constant cannot be empty".to_string()));
+    }
+    if array.rows.iter().any(|r| r.len() != cols) {
+        return Err(EncodeError::Parse(
+            "array constant rows must have the same number of columns".to_string(),
+        ));
+    }
+
+    let cols_minus1 = u16::try_from(cols - 1)
+        .map_err(|_| EncodeError::Parse("array constant is too wide".to_string()))?;
+    let rows_minus1 = u16::try_from(rows - 1)
+        .map_err(|_| EncodeError::Parse("array constant is too tall".to_string()))?;
+
+    rgcb.extend_from_slice(&cols_minus1.to_le_bytes());
+    rgcb.extend_from_slice(&rows_minus1.to_le_bytes());
+
+    for row in &array.rows {
+        for elem in row {
+            match elem {
+                ArrayElem::Empty => rgcb.push(0x00),
+                ArrayElem::Number(n) => {
+                    rgcb.push(0x01);
+                    rgcb.extend_from_slice(&n.to_le_bytes());
+                }
+                ArrayElem::Str(s) => {
+                    rgcb.push(0x02);
+                    let units: Vec<u16> = s.encode_utf16().collect();
+                    let len: u16 = units
+                        .len()
+                        .try_into()
+                        .map_err(|_| EncodeError::Parse("array string literal is too long".to_string()))?;
+                    rgcb.extend_from_slice(&len.to_le_bytes());
+                    for u in units {
+                        rgcb.extend_from_slice(&u.to_le_bytes());
+                    }
+                }
+                ArrayElem::Bool(b) => {
+                    rgcb.push(0x04);
+                    rgcb.push(if *b { 1 } else { 0 });
+                }
+                ArrayElem::Error(code) => {
+                    rgcb.push(0x10);
+                    rgcb.push(*code);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn emit_func(
@@ -1381,6 +1706,7 @@ impl<'a> FormulaParser<'a> {
     fn parse_primary(&mut self) -> Result<Expr, String> {
         self.skip_ws();
         let mut expr = match self.peek_char() {
+            Some('{') => self.parse_array_literal()?,
             Some('(') => {
                 self.next_char();
                 let expr = self.parse_add_sub()?;
@@ -1404,6 +1730,137 @@ impl<'a> FormulaParser<'a> {
         }
 
         Ok(expr)
+    }
+
+    fn parse_array_literal(&mut self) -> Result<Expr, String> {
+        if self.next_char() != Some('{') {
+            return Err("expected '{'".to_string());
+        }
+
+        let mut rows: Vec<Vec<ArrayElem>> = Vec::new();
+        loop {
+            self.skip_ws();
+
+            let mut row: Vec<ArrayElem> = Vec::new();
+            row.push(self.parse_array_elem_or_empty()?);
+            self.skip_ws();
+
+            while self.peek_char() == Some(',') {
+                self.next_char();
+                row.push(self.parse_array_elem_or_empty()?);
+                self.skip_ws();
+            }
+
+            rows.push(row);
+
+            match self.peek_char() {
+                Some(';') => {
+                    self.next_char();
+                    continue;
+                }
+                Some('}') => {
+                    self.next_char();
+                    break;
+                }
+                _ => return Err("expected ';' or '}' in array literal".to_string()),
+            }
+        }
+
+        if rows.is_empty() {
+            return Err("array literal cannot be empty".to_string());
+        }
+
+        let cols = rows[0].len();
+        if cols == 0 {
+            return Err("array literal cannot be empty".to_string());
+        }
+        if rows.iter().any(|r| r.len() != cols) {
+            return Err("array literal rows must have the same number of columns".to_string());
+        }
+
+        Ok(Expr::Array(ArrayConst { rows }))
+    }
+
+    fn parse_array_elem_or_empty(&mut self) -> Result<ArrayElem, String> {
+        self.skip_ws();
+        match self.peek_char() {
+            Some(',') | Some(';') | Some('}') => Ok(ArrayElem::Empty),
+            _ => self.parse_array_elem(),
+        }
+    }
+
+    fn parse_array_elem(&mut self) -> Result<ArrayElem, String> {
+        self.skip_ws();
+        match self.peek_char() {
+            Some('"') => Ok(ArrayElem::Str(self.parse_string_literal()?)),
+            Some('#') => Ok(ArrayElem::Error(self.parse_error_literal()?)),
+            Some('+') => {
+                self.next_char();
+                self.skip_ws();
+                match self.parse_number()? {
+                    Expr::Number(n) => Ok(ArrayElem::Number(n)),
+                    _ => Err("expected number".to_string()),
+                }
+            }
+            Some('-') => {
+                self.next_char();
+                self.skip_ws();
+                match self.parse_number()? {
+                    Expr::Number(n) => Ok(ArrayElem::Number(-n)),
+                    _ => Err("expected number".to_string()),
+                }
+            }
+            Some(ch) if ch.is_ascii_digit() || ch == '.' => match self.parse_number()? {
+                Expr::Number(n) => Ok(ArrayElem::Number(n)),
+                _ => Err("expected number".to_string()),
+            },
+            Some(ch) if is_ident_start(ch) => {
+                let ident = self
+                    .parse_identifier()?
+                    .ok_or_else(|| "expected identifier".to_string())?;
+                match ident.to_ascii_uppercase().as_str() {
+                    "TRUE" => Ok(ArrayElem::Bool(true)),
+                    "FALSE" => Ok(ArrayElem::Bool(false)),
+                    _ => Err(format!("unexpected identifier in array literal: {ident}")),
+                }
+            }
+            _ => Err("unexpected token in array literal".to_string()),
+        }
+    }
+
+    fn parse_string_literal(&mut self) -> Result<String, String> {
+        if self.next_char() != Some('"') {
+            return Err("expected string literal".to_string());
+        }
+
+        let mut out = String::new();
+        loop {
+            match self.next_char() {
+                Some('"') => {
+                    if self.peek_char() == Some('"') {
+                        self.next_char();
+                        out.push('"');
+                        continue;
+                    }
+                    break;
+                }
+                Some(ch) => out.push(ch),
+                None => return Err("unterminated string literal".to_string()),
+            }
+        }
+        Ok(out)
+    }
+
+    fn parse_error_literal(&mut self) -> Result<u8, String> {
+        let start = self.pos;
+        while let Some(ch) = self.peek_char() {
+            if matches!(ch, ',' | ';' | '}' ) || ch.is_whitespace() {
+                break;
+            }
+            self.next_char();
+        }
+        let raw = &self.input[start..self.pos];
+        error_code_from_literal(raw).ok_or_else(|| format!("unknown error literal: {raw}"))
     }
 
     fn parse_ident_or_ref(&mut self) -> Result<Expr, String> {

@@ -45,9 +45,13 @@ fn opens_fixture_and_reads_cells() {
 
     let formula_cell = cells.remove(&(0, 2)).unwrap();
     assert_eq!(formula_cell.value, CellValue::Number(85.0));
-    let formula = formula_cell.formula.as_ref().expect("formula payload preserved");
+    let formula = formula_cell
+        .formula
+        .as_ref()
+        .expect("formula payload preserved");
     assert_eq!(formula.text.as_deref(), Some("B1*2"));
     assert_eq!(formula.rgce.len(), 11);
+    assert!(formula.extra.is_empty());
 }
 
 #[test]
@@ -92,7 +96,11 @@ fn generated_fixture_reads_number_and_formula_cells() {
     assert_eq!(formula_cell.value, CellValue::Number(85.0));
     let formula = formula_cell.formula.as_ref().expect("formula payload preserved");
     assert_eq!(formula.text.as_deref(), Some("B1*2"));
-    assert_eq!(formula.rgce, rgce_bytes);
+    assert_eq!(
+        formula.rgce,
+        vec![0x24, 0, 0, 0, 0, 0x01, 0xC0, 0x1E, 0x02, 0x00, 0x05]
+    );
+    assert!(formula.extra.is_empty());
 
 }
 
@@ -144,6 +152,7 @@ fn generated_fixture_supports_shared_strings_and_absolute_refs() {
     assert_eq!(formula_cell.value, CellValue::Number(3.0));
     let formula = formula_cell.formula.as_ref().expect("formula payload preserved");
     assert_eq!(formula.text.as_deref(), Some("$A$1+$B1"));
+    assert!(formula.extra.is_empty());
 
 }
 
@@ -154,12 +163,12 @@ fn generated_fixture_preserves_formula_extra_bytes_for_array_constants() {
 
     // `PtgArray` (0x20) is a placeholder token that typically requires extra bytes
     // after `rgce` (the `rgcb` stream) to describe the constant array. Our decoder
-    // doesn't understand it yet, but the reader should still preserve `rgce` and
-    // successfully load the sheet.
+    // requires a valid payload, but the reader should still preserve `rgce` and
+    // the unknown bytes for round-tripping.
     let rgce = rgce::array_placeholder();
     let extra = vec![0xDE, 0xAD, 0xBE, 0xEF];
 
-    builder.set_cell_formula_num(0, 0, 1.0, rgce.clone(), extra);
+    builder.set_cell_formula_num(0, 0, 1.0, rgce.clone(), extra.clone());
 
     let bytes = builder.build_bytes();
     let tmp = write_temp_xlsb(&bytes);
@@ -175,6 +184,7 @@ fn generated_fixture_preserves_formula_extra_bytes_for_array_constants() {
     let formula = formula_cell.formula.as_ref().expect("formula payload preserved");
     assert_eq!(formula.text.as_deref(), None);
     assert_eq!(formula.rgce, rgce);
+    assert_eq!(formula.extra, extra);
 
 }
 

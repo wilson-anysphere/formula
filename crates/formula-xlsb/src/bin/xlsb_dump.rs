@@ -3,7 +3,7 @@ use std::io;
 use std::path::PathBuf;
 
 use formula_xlsb::format::{format_a1, format_hex};
-use formula_xlsb::rgce::decode_rgce;
+use formula_xlsb::rgce::decode_rgce_with_rgcb;
 use formula_xlsb::{CellValue, Formula, SheetMeta, XlsbWorkbook};
 
 #[derive(Debug)]
@@ -184,7 +184,7 @@ fn print_cell(cell: formula_xlsb::Cell, args: &Args) {
 
     match cell.formula {
         None => println!("{addr}: {value}"),
-        Some(Formula { rgce, text, .. }) => {
+        Some(Formula { rgce, text, extra, .. }) => {
             match text {
                 Some(text) => {
                     if args.rgce {
@@ -193,7 +193,7 @@ fn print_cell(cell: formula_xlsb::Cell, args: &Args) {
                         println!("{addr}: {value}  formula={text}");
                     }
                 }
-                None => match decode_rgce(&rgce) {
+                None => match decode_rgce_with_rgcb(&rgce, &extra) {
                     Ok(decoded) => {
                         // Should be rare (the parser uses the same decoder), but keep output sensible.
                         println!(

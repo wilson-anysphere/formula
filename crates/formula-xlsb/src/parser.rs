@@ -901,26 +901,56 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
+                        let extra = rr.data[rr.offset..].to_vec();
                         let base = crate::rgce::CellCoord::new(row, col);
-                        let decoded = decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
+                        let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
+                            &rgce, &extra, ctx, base,
+                        );
                         let decoded = if decoded.text.is_some() {
                             decoded
                         } else {
-                            let decoded = decode_formula_rgce_with_base(&rgce, base);
+                            let decoded = decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
                             if decoded.text.is_some() {
                                 decoded
                             } else {
-                                let decoded = decode_formula_rgce_with_context(&rgce, ctx);
+                                let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
+                                    &rgce, &extra, base,
+                                );
                                 if decoded.text.is_some() {
                                     decoded
                                 } else {
-                                    decode_formula_rgce(&rgce)
+                                    let decoded = decode_formula_rgce_with_base(&rgce, base);
+                                    if decoded.text.is_some() {
+                                        decoded
+                                    } else {
+                                        let decoded =
+                                            crate::rgce::decode_formula_rgce_with_context_and_rgcb(
+                                                &rgce, &extra, ctx,
+                                            );
+                                        if decoded.text.is_some() {
+                                            decoded
+                                        } else {
+                                            let decoded = decode_formula_rgce_with_context(&rgce, ctx);
+                                            if decoded.text.is_some() {
+                                                decoded
+                                            } else {
+                                                let decoded =
+                                                    crate::rgce::decode_formula_rgce_with_rgcb(
+                                                        &rgce, &extra,
+                                                    );
+                                                if decoded.text.is_some() {
+                                                    decoded
+                                                } else {
+                                                    decode_formula_rgce(&rgce)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         };
                         let text = decoded.text;
                         let warnings = decoded.warnings;
-                        let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Text(v),
                             Some(Formula {
@@ -943,26 +973,56 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
+                        let extra = rr.data[rr.offset..].to_vec();
                         let base = crate::rgce::CellCoord::new(row, col);
-                        let decoded = decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
+                        let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
+                            &rgce, &extra, ctx, base,
+                        );
                         let decoded = if decoded.text.is_some() {
                             decoded
                         } else {
-                            let decoded = decode_formula_rgce_with_base(&rgce, base);
+                            let decoded = decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
                             if decoded.text.is_some() {
                                 decoded
                             } else {
-                                let decoded = decode_formula_rgce_with_context(&rgce, ctx);
+                                let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
+                                    &rgce, &extra, base,
+                                );
                                 if decoded.text.is_some() {
                                     decoded
                                 } else {
-                                    decode_formula_rgce(&rgce)
+                                    let decoded = decode_formula_rgce_with_base(&rgce, base);
+                                    if decoded.text.is_some() {
+                                        decoded
+                                    } else {
+                                        let decoded =
+                                            crate::rgce::decode_formula_rgce_with_context_and_rgcb(
+                                                &rgce, &extra, ctx,
+                                            );
+                                        if decoded.text.is_some() {
+                                            decoded
+                                        } else {
+                                            let decoded = decode_formula_rgce_with_context(&rgce, ctx);
+                                            if decoded.text.is_some() {
+                                                decoded
+                                            } else {
+                                                let decoded =
+                                                    crate::rgce::decode_formula_rgce_with_rgcb(
+                                                        &rgce, &extra,
+                                                    );
+                                                if decoded.text.is_some() {
+                                                    decoded
+                                                } else {
+                                                    decode_formula_rgce(&rgce)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         };
                         let text = decoded.text;
                         let warnings = decoded.warnings;
-                        let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Number(v),
                             Some(Formula {
@@ -985,26 +1045,56 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
+                        let extra = rr.data[rr.offset..].to_vec();
                         let base = crate::rgce::CellCoord::new(row, col);
-                        let decoded = decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
+                        let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
+                            &rgce, &extra, ctx, base,
+                        );
                         let decoded = if decoded.text.is_some() {
                             decoded
                         } else {
-                            let decoded = decode_formula_rgce_with_base(&rgce, base);
+                            let decoded = decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
                             if decoded.text.is_some() {
                                 decoded
                             } else {
-                                let decoded = decode_formula_rgce_with_context(&rgce, ctx);
+                                let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
+                                    &rgce, &extra, base,
+                                );
                                 if decoded.text.is_some() {
                                     decoded
                                 } else {
-                                    decode_formula_rgce(&rgce)
+                                    let decoded = decode_formula_rgce_with_base(&rgce, base);
+                                    if decoded.text.is_some() {
+                                        decoded
+                                    } else {
+                                        let decoded =
+                                            crate::rgce::decode_formula_rgce_with_context_and_rgcb(
+                                                &rgce, &extra, ctx,
+                                            );
+                                        if decoded.text.is_some() {
+                                            decoded
+                                        } else {
+                                            let decoded = decode_formula_rgce_with_context(&rgce, ctx);
+                                            if decoded.text.is_some() {
+                                                decoded
+                                            } else {
+                                                let decoded =
+                                                    crate::rgce::decode_formula_rgce_with_rgcb(
+                                                        &rgce, &extra,
+                                                    );
+                                                if decoded.text.is_some() {
+                                                    decoded
+                                                } else {
+                                                    decode_formula_rgce(&rgce)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         };
                         let text = decoded.text;
                         let warnings = decoded.warnings;
-                        let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Bool(v),
                             Some(Formula {
@@ -1027,26 +1117,56 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
+                        let extra = rr.data[rr.offset..].to_vec();
                         let base = crate::rgce::CellCoord::new(row, col);
-                        let decoded = decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
+                        let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
+                            &rgce, &extra, ctx, base,
+                        );
                         let decoded = if decoded.text.is_some() {
                             decoded
                         } else {
-                            let decoded = decode_formula_rgce_with_base(&rgce, base);
+                            let decoded = decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
                             if decoded.text.is_some() {
                                 decoded
                             } else {
-                                let decoded = decode_formula_rgce_with_context(&rgce, ctx);
+                                let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
+                                    &rgce, &extra, base,
+                                );
                                 if decoded.text.is_some() {
                                     decoded
                                 } else {
-                                    decode_formula_rgce(&rgce)
+                                    let decoded = decode_formula_rgce_with_base(&rgce, base);
+                                    if decoded.text.is_some() {
+                                        decoded
+                                    } else {
+                                        let decoded =
+                                            crate::rgce::decode_formula_rgce_with_context_and_rgcb(
+                                                &rgce, &extra, ctx,
+                                            );
+                                        if decoded.text.is_some() {
+                                            decoded
+                                        } else {
+                                            let decoded = decode_formula_rgce_with_context(&rgce, ctx);
+                                            if decoded.text.is_some() {
+                                                decoded
+                                            } else {
+                                                let decoded =
+                                                    crate::rgce::decode_formula_rgce_with_rgcb(
+                                                        &rgce, &extra,
+                                                    );
+                                                if decoded.text.is_some() {
+                                                    decoded
+                                                } else {
+                                                    decode_formula_rgce(&rgce)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         };
                         let text = decoded.text;
                         let warnings = decoded.warnings;
-                        let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Error(v),
                             Some(Formula {
