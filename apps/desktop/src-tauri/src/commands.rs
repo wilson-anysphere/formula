@@ -578,11 +578,11 @@ pub async fn save_workbook(
 
     if let Some(autosave) = autosave.as_ref() {
         autosave.flush().await.map_err(|e| e.to_string())?;
-    } else {
-        memory
-            .flush_dirty_pages()
-            .map_err(|e| e.to_string())?;
     }
+
+    // Always flush the paging cache before exporting to ensure changes are
+    // applied even if the autosave task has exited unexpectedly.
+    memory.flush_dirty_pages().map_err(|e| e.to_string())?;
 
     let save_path_clone = save_path.clone();
     let written_bytes = tauri::async_runtime::spawn_blocking(move || {
