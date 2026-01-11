@@ -30,7 +30,7 @@ function snapshotSheets(session) {
   }));
 }
 
-test("CollabSession workbook metadata persists via sync-server (sheets + namedRanges)", async (t) => {
+test("CollabSession workbook metadata persists via sync-server (sheets + namedRanges + metadata)", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "collab-session-workbook-metadata-"));
 
   /** @type {import("../src/index.ts").CollabSession | null} */
