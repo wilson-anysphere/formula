@@ -38,8 +38,15 @@ function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
   // choosing a constructor.
   const existing = doc.share.get("comments");
   if (!existing) return doc.getMap("comments");
-  if (existing instanceof Y.Map) return existing;
-  if (existing instanceof Y.Array) return existing;
+
+  // When multiple `yjs` module instances are loaded (ESM vs CJS), roots can be
+  // valid Yjs types that fail `instanceof` checks. Avoid calling `doc.getMap`
+  // / `doc.getArray` in that case: Yjs does strict constructor equality checks
+  // and can throw when the existing root was created by a different module
+  // instance.
+  if (existing instanceof Y.Map || (existing as any)?.constructor?.name === "YMap") return existing as any;
+  if (existing instanceof Y.Array || (existing as any)?.constructor?.name === "YArray") return existing as any;
+
   const placeholder = existing as any;
   const hasStart = placeholder?._start != null; // sequence item => likely array
   const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
