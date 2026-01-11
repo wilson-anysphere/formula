@@ -4,7 +4,7 @@ import test from "node:test";
 import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { MacroRecorder, generateTypeScriptMacro } from "../apps/desktop/src/macro-recorder/index.js";
 import { DocumentControllerWorkbookAdapter } from "../apps/desktop/src/scripting/documentControllerWorkbookAdapter.js";
-import { ScriptRuntime } from "../packages/scripting/src/index.js";
+import { ScriptRuntime } from "@formula/scripting/node";
 
 test("macro recorder generates runnable TypeScript that replays edits against DocumentController", async () => {
   const controller = new DocumentController();
