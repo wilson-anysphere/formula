@@ -1038,6 +1038,13 @@ export class SpreadsheetApp {
       getCellRect: (cell) => this.getCellRect(cell),
       visibleRows: this.visibleRows,
       visibleCols: this.visibleCols,
+    }, {
+      clipRect: {
+        x: this.rowHeaderWidth,
+        y: this.colHeaderHeight,
+        width: this.viewportWidth(),
+        height: this.viewportHeight(),
+      },
     });
   }
 
@@ -2722,11 +2729,23 @@ export class SpreadsheetApp {
       return;
     }
 
-    const fillHandle = this.selectionRenderer.getFillHandleRect(this.selection, {
-      getCellRect: (cell) => this.getCellRect(cell),
-      visibleRows: this.visibleRows,
-      visibleCols: this.visibleCols,
-    });
+    this.ensureViewportMappingCurrent();
+    const fillHandle = this.selectionRenderer.getFillHandleRect(
+      this.selection,
+      {
+        getCellRect: (cell) => this.getCellRect(cell),
+        visibleRows: this.visibleRows,
+        visibleCols: this.visibleCols,
+      },
+      {
+        clipRect: {
+          x: this.rowHeaderWidth,
+          y: this.colHeaderHeight,
+          width: this.viewportWidth(),
+          height: this.viewportHeight(),
+        },
+      }
+    );
     const overFillHandle =
       fillHandle &&
       x >= fillHandle.x &&

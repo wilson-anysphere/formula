@@ -69,9 +69,9 @@ export class SelectionRenderer {
     return this.lastDebug;
   }
 
-  getFillHandleRect(selection: SelectionState, metrics: GridMetrics): Rect | null {
+  getFillHandleRect(selection: SelectionState, metrics: GridMetrics, options: SelectionRenderOptions = {}): Rect | null {
     const style = this.style ?? defaultStyleFromTheme();
-    return this.computeFillHandleRect(selection, metrics, style);
+    return this.computeFillHandleRect(selection, metrics, style, options);
   }
 
   render(
@@ -110,7 +110,7 @@ export class SelectionRenderer {
     this.renderFill(ctx, visibleRanges, style);
     this.renderBorders(ctx, visibleRanges, style);
     this.renderActiveCell(ctx, selection.active, metrics, style);
-    this.renderFillHandle(ctx, selection, metrics, style);
+    this.renderFillHandle(ctx, selection, metrics, style, options);
 
     if (options.clipRect) {
       ctx.restore();
@@ -160,8 +160,9 @@ export class SelectionRenderer {
     selection: SelectionState,
     metrics: GridMetrics,
     style: SelectionRenderStyle,
+    options: SelectionRenderOptions,
   ): void {
-    const rect = this.computeFillHandleRect(selection, metrics, style);
+    const rect = this.computeFillHandleRect(selection, metrics, style, options);
     if (!rect) return;
 
     ctx.save();
@@ -170,22 +171,28 @@ export class SelectionRenderer {
     ctx.restore();
   }
 
-  private computeFillHandleRect(selection: SelectionState, metrics: GridMetrics, style: SelectionRenderStyle): Rect | null {
+  private computeFillHandleRect(
+    selection: SelectionState,
+    metrics: GridMetrics,
+    style: SelectionRenderStyle,
+    options: SelectionRenderOptions
+  ): Rect | null {
     if (selection.type === "row" || selection.type === "column" || selection.type === "all") return null;
 
     const range = selection.ranges[selection.activeRangeIndex] ?? selection.ranges[0];
     if (!range) return null;
 
-    if (!metrics.visibleRows.includes(range.endRow) || !metrics.visibleCols.includes(range.endCol)) return null;
-
-    const cellRect = metrics.getCellRect({ row: range.endRow, col: range.endCol });
-    if (!cellRect) return null;
-    if (cellRect.width <= 0 || cellRect.height <= 0) return null;
+    const info = this.rangeToVisibleRange(range, metrics, {
+      clipRect: options.clipRect,
+      borderWidth: style.borderWidth,
+    });
+    if (!info) return null;
+    if (!info.edges.bottom || !info.edges.right) return null;
 
     const size = style.fillHandleSize;
     return {
-      x: cellRect.x + cellRect.width - size / 2,
-      y: cellRect.y + cellRect.height - size / 2,
+      x: info.rect.x + info.rect.width - size / 2,
+      y: info.rect.y + info.rect.height - size / 2,
       width: size,
       height: size,
     };
