@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Formula Pyodide runtime test</title>
+  </head>
+  <body>
+    <main>Pyodide runtime test page</main>
+    <script type="module">
+      import { PyodideRuntime } from "@formula/python-runtime";
+      import { MockWorkbook } from "@formula/python-runtime/test-utils";
+
+      globalThis.__formulaPythonRuntime = { PyodideRuntime, MockWorkbook };
+      globalThis.__pyodideIndexURL = "/pyodide/v0.25.1/full/";
+    </script>
+  </body>
+</html>
+

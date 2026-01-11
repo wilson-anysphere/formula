@@ -76,8 +76,21 @@ formula.active_sheet["A1"] = 123
 The Pyodide runtime keeps the Python `formula` API synchronous by using a
 SharedArrayBuffer + Atomics-based RPC between the Worker (Pyodide) and the host.
 
-That typically requires `crossOriginIsolated` in browsers. If SharedArrayBuffer
-is not available, scripts can still run, but calls into `formula` will raise.
+That typically requires `crossOriginIsolated` in browsers, which means serving
+your app with COOP/COEP headers:
+
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`)
+
+If SharedArrayBuffer is not available, scripts can still run, but calls into
+`formula` will raise.
+
+For the `apps/desktop` Vite webview in this repository:
+
+- `apps/desktop/vite.config.ts` sets these headers for dev/preview servers.
+- `apps/desktop/scripts/ensure-pyodide-assets.mjs` downloads Pyodide
+  `v0.25.1/full/*` into `apps/desktop/public/pyodide/v0.25.1/full/` so Pyodide
+  can be loaded from the same origin (required under COEP).
 
 ## Host spreadsheet bridge contract
 

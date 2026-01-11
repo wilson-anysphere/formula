@@ -25,7 +25,10 @@ let executeQueue = Promise.resolve();
 async function loadPyodideOnce({ indexURL } = {}) {
   if (pyodide) return pyodide;
 
-  const resolvedIndexUrl = indexURL ?? "https://cdn.jsdelivr.net/pyodide/v0.25.1/full/";
+  let resolvedIndexUrl = indexURL ?? "https://cdn.jsdelivr.net/pyodide/v0.25.1/full/";
+  if (!resolvedIndexUrl.endsWith("/")) {
+    resolvedIndexUrl += "/";
+  }
 
   // Load Pyodide from the official CDN by default. Integrators can host this
   // locally and override `indexURL` when bundling.
@@ -166,10 +169,66 @@ function applyNetworkSandbox(permissions) {
   self.WebSocket = originalWebSocket;
 }
 
+function coercePyProxy(value) {
+  if (!value || (typeof value !== "object" && typeof value !== "function")) return value;
+  if (typeof value.toJs !== "function") return value;
+
+  // When called from Python, Pyodide may pass dict/list values as PyProxy
+  // instances. Those are not structured-cloneable, so convert to plain JS before
+  // sending across the worker boundary.
+  let converted;
+  try {
+    converted = value.toJs({ dict_converter: Object.fromEntries });
+  } catch {
+    converted = value.toJs();
+  }
+
+  if (typeof value.destroy === "function") {
+    try {
+      value.destroy();
+    } catch {
+      // ignore
+    }
+  }
+
+  return converted;
+}
+
+function normalizeRpcParams(params) {
+  const maybeConverted = coercePyProxy(params);
+  if (maybeConverted === null || typeof maybeConverted !== "object") {
+    return maybeConverted;
+  }
+
+  if (maybeConverted instanceof Map) {
+    const out = {};
+    for (const [key, value] of maybeConverted.entries()) {
+      out[String(key)] = normalizeRpcParams(value);
+    }
+    return out;
+  }
+
+  if (maybeConverted instanceof Set) {
+    return Array.from(maybeConverted, (entry) => normalizeRpcParams(entry));
+  }
+
+  if (Array.isArray(maybeConverted)) {
+    return maybeConverted.map((entry) => normalizeRpcParams(entry));
+  }
+
+  const out = {};
+  for (const [key, value] of Object.entries(maybeConverted)) {
+    out[key] = normalizeRpcParams(value);
+  }
+  return out;
+}
+
 function rpcCallSync(method, params) {
   if (typeof SharedArrayBuffer === "undefined") {
     throw new Error("SharedArrayBuffer is required for the Pyodide formula bridge (enable crossOriginIsolated)");
   }
+
+  const normalizedParams = normalizeRpcParams(params);
 
   const responseBuffer = new SharedArrayBuffer(8 + rpcBufferBytes);
   const header = new Int32Array(responseBuffer, 0, 2);
@@ -178,7 +237,7 @@ function rpcCallSync(method, params) {
   header[0] = 0;
   header[1] = 0;
 
-  self.postMessage({ type: "rpc", method, params, responseBuffer });
+  self.postMessage({ type: "rpc", method, params: normalizedParams, responseBuffer });
 
   const waitResult = Atomics.wait(header, 0, 0, rpcTimeoutMs);
   if (waitResult === "timed-out") {
@@ -186,7 +245,9 @@ function rpcCallSync(method, params) {
   }
 
   const length = Atomics.load(header, 1);
-  const text = decoder.decode(payload.subarray(0, length));
+  // Chromium's TextDecoder does not accept views backed by SharedArrayBuffer.
+  // Copy into an ArrayBuffer-backed Uint8Array before decoding.
+  const text = decoder.decode(payload.slice(0, length));
   const parsed = JSON.parse(text);
   if (parsed.error) {
     throw new Error(parsed.error);

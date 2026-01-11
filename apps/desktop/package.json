@@ -4,10 +4,11 @@
   "type": "module",
   "scripts": {
     "predev": "pnpm -w build:wasm",
-    "dev": "vite --port 4174 --strictPort",
     "prebuild": "pnpm -w build:wasm",
-    "build": "vite build",
+    "dev": "node scripts/ensure-pyodide-assets.mjs && vite --port 4174 --strictPort",
+    "build": "node scripts/ensure-pyodide-assets.mjs && vite build",
     "preview": "vite preview --port 4174 --strictPort",
+    "pyodide:setup": "node scripts/ensure-pyodide-assets.mjs",
     "test:node": "node --test",
     "test": "vitest run",
     "test:e2e": "playwright test"
@@ -17,6 +18,7 @@
     "@formula/collab-comments": "workspace:*",
     "@formula/data-io": "workspace:*",
     "@formula/engine": "workspace:*",
+    "@formula/python-runtime": "workspace:*",
     "@formula/scripting": "workspace:*",
     "@formula/text-layout": "workspace:*",
     "react": "^18.2.0",

@@ -12,6 +12,12 @@ const isE2E = process.env.FORMULA_E2E === "1";
 if (isE2E && typeof tauriCsp !== "string") {
   throw new Error("Missing `app.security.csp` in src-tauri/tauri.conf.json (required for CSP e2e tests)");
 }
+const crossOriginIsolationHeaders = {
+  // Required for SharedArrayBuffer in Chromium (crossOriginIsolated === true).
+  // PyodideRuntime relies on SharedArrayBuffer + Atomics for synchronous RPC.
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "require-corp",
+};
 
 export default defineConfig({
   root: ".",
@@ -27,15 +33,20 @@ export default defineConfig({
       // Allow serving workspace packages during dev (`packages/*`).
       allow: [repoRoot],
     },
+    // Always enable COOP/COEP so the webview can use SharedArrayBuffer.
+    headers: {
+      ...crossOriginIsolationHeaders,
+      ...(isE2E && typeof tauriCsp === "string" ? { "Content-Security-Policy": tauriCsp } : {}),
+    },
     ...(isE2E
       ? {
-          // E2E runs in a real browser, so we emulate the Tauri CSP via HTTP headers
-          // to catch regressions (e.g. WASM compilation or Worker bootstrapping being blocked).
-          headers: { "Content-Security-Policy": tauriCsp as string },
           // Avoid Vite HMR WebSocket noise in CSP checks.
-          hmr: false
+          hmr: false,
         }
-      : {})
+      : {}),
+  },
+  preview: {
+    headers: crossOriginIsolationHeaders,
   },
   test: {
     environment: "node",

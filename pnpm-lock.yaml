@@ -48,6 +48,9 @@ importers:
       '@formula/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@formula/python-runtime':
+        specifier: workspace:*
+        version: link:../../packages/python-runtime
       '@formula/scripting':
         specifier: workspace:*
         version: link:../../packages/scripting
