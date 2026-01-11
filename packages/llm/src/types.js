@@ -11,7 +11,13 @@
  * }} ToolDefinition
  *
  * @typedef {{
- *   role: "system"|"user"|"assistant",
+ *   role: "system",
+ *   content: string
+ * } | {
+ *   role: "user",
+ *   content: string
+ * } | {
+ *   role: "assistant",
  *   content: string,
  *   toolCalls?: ToolCall[]
  * } | {

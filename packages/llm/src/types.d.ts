@@ -13,17 +13,29 @@ export interface ToolDefinition {
   requiresApproval?: boolean;
 }
 
-export type LLMMessage =
-  | {
-      role: "system" | "user" | "assistant";
-      content: string;
-      toolCalls?: ToolCall[];
-    }
-  | {
-      role: "tool";
-      toolCallId: string;
-      content: string;
-    };
+export interface SystemMessage {
+  role: "system";
+  content: string;
+}
+
+export interface UserMessage {
+  role: "user";
+  content: string;
+}
+
+export interface AssistantMessage {
+  role: "assistant";
+  content: string;
+  toolCalls?: ToolCall[];
+}
+
+export interface ToolMessage {
+  role: "tool";
+  toolCallId: string;
+  content: string;
+}
+
+export type LLMMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage;
 
 export interface ChatRequest {
   messages: LLMMessage[];
@@ -42,7 +54,7 @@ export interface ChatUsage {
 }
 
 export interface ChatResponse {
-  message: Extract<LLMMessage, { role: "assistant" }>;
+  message: AssistantMessage;
   usage?: ChatUsage;
   raw?: any;
 }
@@ -63,4 +75,3 @@ export interface ToolExecutor {
   tools: ToolDefinition[];
   execute: (call: ToolCall) => Promise<any>;
 }
-
