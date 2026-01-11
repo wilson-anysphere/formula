@@ -13,8 +13,12 @@ export async function contentHash(text) {
   const bytes = encoder.encode(String(text));
   const subtle = globalThis.crypto?.subtle;
   if (subtle) {
-    const digest = await subtle.digest("SHA-256", bytes);
-    return bytesToHex(new Uint8Array(digest));
+    try {
+      const digest = await subtle.digest("SHA-256", bytes);
+      return bytesToHex(new Uint8Array(digest));
+    } catch {
+      // fall through to non-WebCrypto fallback
+    }
   }
 
   // Extremely small fallback for environments without WebCrypto.

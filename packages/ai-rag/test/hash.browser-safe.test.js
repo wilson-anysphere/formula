@@ -81,3 +81,31 @@ test("contentHash falls back when WebCrypto is unavailable", async () => {
     else delete globalThis.crypto;
   }
 });
+
+test("contentHash falls back when WebCrypto digest throws", async () => {
+  const mod = await import("../src/utils/hash.js");
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  if (descriptor && descriptor.configurable !== true) {
+    // Can't override in this runtime; skip.
+    return;
+  }
+
+  try {
+    Object.defineProperty(globalThis, "crypto", {
+      value: {
+        subtle: {
+          async digest() {
+            throw new Error("boom");
+          },
+        },
+      },
+      configurable: true,
+    });
+
+    const digest = await mod.contentHash("hello");
+    assert.match(digest, /^[0-9a-f]{16}$/);
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "crypto", descriptor);
+    else delete globalThis.crypto;
+  }
+});
