@@ -51,3 +51,38 @@ test("Yjs doc adapter restore rehydrates comments array even if target doc hasn'
   assert.equal(restoredComment.get("content"), "Original comment");
 });
 
+test("Yjs doc adapter restore rehydrates additional map roots present only in the snapshot", () => {
+  const source = new Y.Doc();
+  const settings = source.getMap("settings");
+  settings.set("theme", "dark");
+  settings.set("gridlines", true);
+  const snapshot = Y.encodeStateAsUpdate(source);
+
+  const target = new Y.Doc();
+  assert.equal(target.share.has("settings"), false);
+
+  const adapter = createYjsSpreadsheetDocAdapter(target);
+  adapter.applyState(snapshot);
+
+  const restored = target.getMap("settings");
+  assert.equal(restored.get("theme"), "dark");
+  assert.equal(restored.get("gridlines"), true);
+});
+
+test("Yjs doc adapter restore preserves Y.Text formatting when restoring text roots", () => {
+  const source = new Y.Doc();
+  const note = source.getText("note");
+  note.insert(0, "hello");
+  note.format(0, 5, { bold: true });
+  const snapshot = Y.encodeStateAsUpdate(source);
+
+  const target = new Y.Doc();
+  assert.equal(target.share.has("note"), false);
+
+  const adapter = createYjsSpreadsheetDocAdapter(target);
+  adapter.applyState(snapshot);
+
+  const restored = target.getText("note");
+  assert.equal(restored.toString(), "hello");
+  assert.deepEqual(restored.toDelta(), [{ insert: "hello", attributes: { bold: true } }]);
+});

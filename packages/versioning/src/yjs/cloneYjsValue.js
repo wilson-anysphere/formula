@@ -29,7 +29,10 @@ export function cloneYjsValue(value) {
 
   if (value instanceof Y.Text) {
     const out = new Y.Text();
-    out.insert(0, value.toString());
+    // Preserve formatting by cloning the Y.Text delta instead of just its plain string.
+    // Note: it's safe to call `applyDelta` on an un-integrated Y.Text, but you
+    // must integrate it into a Y.Doc before reading it (toString/toDelta).
+    out.applyDelta(structuredClone(value.toDelta()));
     return out;
   }
 
@@ -41,4 +44,3 @@ export function cloneYjsValue(value) {
 
   return value;
 }
-

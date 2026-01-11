@@ -24,24 +24,34 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
    *
    * Note: after `Y.applyUpdate` into a fresh doc, root types can exist as a
    * generic `AbstractType` until a constructor is chosen via `getMap/getArray`.
-   * For roots with content we can infer Map vs Array by inspecting the internal
-   * state.
+   * For roots with content we can infer Map vs Array vs Text by inspecting the
+   * internal state.
    *
    * @param {Y.Doc} snapshotDoc
    * @param {string} name
-   * @returns {"map" | "array" | null}
+   * @returns {"map" | "array" | "text" | null}
    */
   function detectSnapshotRootKind(snapshotDoc, name) {
     const placeholder = snapshotDoc.share.get(name);
     if (!placeholder) return null;
     if (placeholder instanceof Y.Map) return "map";
     if (placeholder instanceof Y.Array) return "array";
+    if (placeholder instanceof Y.Text) return "text";
 
     const hasStart = placeholder?._start != null;
     const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
 
     if (mapSize > 0) return "map";
-    if (hasStart) return "array";
+    if (hasStart) {
+      // Distinguish Y.Text from Y.Array: Text content is represented using
+      // ContentString/ContentFormat nodes (e.g. `{ str }` or `{ key, value }`).
+      const content = placeholder?._start?.content;
+      if (content && typeof content === "object") {
+        if ("str" in content) return "text";
+        if ("key" in content && "value" in content) return "text";
+      }
+      return "array";
+    }
     return null;
   }
 
@@ -86,14 +96,17 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
 
       const roots = resolveRoots();
 
-      // Best-effort: if the snapshot contains collaboration roots (like
-      // comments) that haven't been instantiated in the current doc yet, add
-      // them so restoration doesn't silently drop data.
+      // Best-effort: if the snapshot contains additional root types that haven't
+      // been instantiated in the current doc yet, add them so restoration
+      // doesn't silently drop data (e.g. comments, rich-text notes, etc).
       if (!configuredRoots) {
         const names = new Set(roots.map((root) => root.name));
-        if (!names.has("comments") && restored.share.has("comments")) {
-          const kind = detectSnapshotRootKind(restored, "comments");
-          if (kind) roots.push({ name: "comments", kind });
+        for (const name of restored.share.keys()) {
+          if (names.has(name)) continue;
+          const kind = detectSnapshotRootKind(restored, name);
+          if (!kind) continue;
+          roots.push({ name, kind });
+          names.add(name);
         }
       }
 
@@ -131,8 +144,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
             const target = doc.getText(root.name);
             const source = restored.getText(root.name);
             if (target.length > 0) target.delete(0, target.length);
-            const text = source.toString();
-            if (text) target.insert(0, text);
+            target.applyDelta(structuredClone(source.toDelta()));
             continue;
           }
         }
