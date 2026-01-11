@@ -382,9 +382,7 @@ function groupBy(table, groupColumns, aggregations) {
     const keyValues = groupIdx.map((idx) => {
       return vectors[idx].get(rowIndex);
     });
-    const key = JSON.stringify(
-      keyValues.map((v) => (isDate(v) ? `__date__:${v.toISOString()}` : v ?? null)),
-    );
+    const key = JSON.stringify(keyValues.map((v) => valueKey(normalizeMissing(v))));
 
     let entry = groups.get(key);
     if (!entry) {
@@ -775,9 +773,7 @@ function pivot(table, op) {
 
   for (const row of table.rows) {
     const keyValues = keyIndices.map((idx) => row[idx]);
-    const key = JSON.stringify(
-      keyValues.map((v) => (isDate(v) ? `__date__:${v.toISOString()}` : v ?? null)),
-    );
+    const key = JSON.stringify(keyValues.map((v) => valueKey(normalizeMissing(v))));
 
     let entry = groups.get(key);
     if (!entry) {
