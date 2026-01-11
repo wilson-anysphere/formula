@@ -181,8 +181,22 @@ export function AIChatPanel(props: AIChatPanelProps) {
         ]);
       };
 
+      // When a streaming call triggers tool execution, providers may still emit
+      // additional text blocks after the tool call (e.g. Anthropic multi-block
+      // messages). We only want to stream the *final* assistant answer to the UI,
+      // so once a tool call begins we suppress further text deltas until the
+      // current model stream ends (`done`), then resume streaming for the next
+      // iteration.
+      let suppressTextDeltasForCurrentStream = false;
+
       const onStreamEvent = (event: ChatStreamEvent) => {
+        if (event.type === "done") {
+          suppressTextDeltasForCurrentStream = false;
+          return;
+        }
+
         if (event.type === "tool_call_start" || event.type === "tool_call_delta") {
+          suppressTextDeltasForCurrentStream = true;
           // We only display the final assistant answer. Clear any pre-tool chatter so the
           // pending assistant message doesn't briefly show "planning" text that will be
           // replaced after tool execution.
@@ -197,6 +211,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
 
         if (event.type !== "text") return;
         if (!event.delta) return;
+        if (suppressTextDeltasForCurrentStream) return;
         setMessages((prev) => {
           const next = prev.slice();
           const msg = [...next].reverse().find((m) => m.role === "assistant" && m.pending);
