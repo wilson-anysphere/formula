@@ -87,6 +87,8 @@ Set `CARGO_HOME` before sourcing `scripts/agent-init.sh` or running cargo, e.g.:
 
 ```bash
 export CARGO_HOME="$HOME/.cargo"   # or a CI cache directory
+# If running locally, allow agent-init to keep the global cargo home:
+export FORMULA_ALLOW_GLOBAL_CARGO_HOME=1
 source scripts/agent-init.sh
 ```
 
@@ -379,9 +381,10 @@ export RUSTFLAGS="-C codegen-units=4"
 # Repo-local Cargo home (avoids cross-agent ~/.cargo lock contention)
 # Some runners pre-set `CARGO_HOME=$HOME/.cargo`; treat that as "unset" so we
 # still get per-repo isolation by default. In CI we respect `CARGO_HOME` even if
-# it points at `$HOME/.cargo` so CI can use shared caching.
+# it points at `$HOME/.cargo` so CI can use shared caching. To explicitly keep
+# `CARGO_HOME=$HOME/.cargo` in local runs, set `FORMULA_ALLOW_GLOBAL_CARGO_HOME=1`.
 DEFAULT_GLOBAL_CARGO_HOME="${HOME:-/root}/.cargo"
-if [ -z "${CARGO_HOME:-}" ] || { [ -z "${CI:-}" ] && [ "${CARGO_HOME}" = "${DEFAULT_GLOBAL_CARGO_HOME}" ]; }; then
+if [ -z "${CARGO_HOME:-}" ] || { [ -z "${CI:-}" ] && [ -z "${FORMULA_ALLOW_GLOBAL_CARGO_HOME:-}" ] && [ "${CARGO_HOME}" = "${DEFAULT_GLOBAL_CARGO_HOME}" ]; }; then
   export CARGO_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/target/cargo-home"
 fi
 mkdir -p "$CARGO_HOME"
