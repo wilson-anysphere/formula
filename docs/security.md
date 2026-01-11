@@ -49,6 +49,16 @@ Implementation:
 
 The included `LocalKmsProvider` is meant for tests and single-node dev. Production deployments should supply AWS/GCP/Azure implementations.
 
+`services/api` also uses the same canonical envelope encryption primitives to encrypt
+`document_versions.data` in Postgres (see `services/api/src/db/documentVersions.ts`). Historical
+deployments may have legacy rows in an older envelope schema; the API can still decrypt those, and
+provides a migration script (`npm -C services/api run versions:migrate-legacy`) to re-wrap DEKs into
+the canonical schema without re-encrypting ciphertext. `LOCAL_KMS_MASTER_KEY` is only needed for
+decrypting/migrating those legacy rows.
+
+AWS KMS support is optional and loaded lazily. If you configure `kms_provider='aws'`, ensure
+`@aws-sdk/client-kms` is installed in the service/runtime image that uses it (e.g. `services/api`).
+
 ### Sync server (Yjs persistence)
 
 `services/sync-server` supports **encryption at rest** for persisted Yjs state in both supported persistence backends:
