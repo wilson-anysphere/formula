@@ -119,7 +119,7 @@ export function mountPythonPanel({
   degradedBanner.style.borderBottom = "1px solid var(--panel-border)";
   degradedBanner.style.fontSize = "12px";
   degradedBanner.style.color = "var(--text-secondary)";
-  degradedBanner.style.background = "var(--surface-secondary, rgba(0, 0, 0, 0.03))";
+  degradedBanner.style.background = "var(--bg-tertiary)";
   degradedBanner.dataset.testid = "python-panel-degraded-banner";
   degradedBanner.textContent =
     "SharedArrayBuffer unavailable; running Pyodide on main thread (UI may freeze during execution).";
