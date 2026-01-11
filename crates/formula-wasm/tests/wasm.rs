@@ -76,7 +76,7 @@ fn recalculate_returns_empty_when_no_cells_changed() {
 }
 
 #[wasm_bindgen_test]
-fn recalculate_reports_lambda_values_as_placeholder_text() {
+fn recalculate_reports_lambda_values_as_calc_error() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_str("=LAMBDA(x,x)"), None)
         .unwrap();
@@ -86,11 +86,11 @@ fn recalculate_reports_lambda_values_as_placeholder_text() {
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].sheet, DEFAULT_SHEET);
     assert_eq!(changes[0].address, "A1");
-    assert_eq!(changes[0].value, JsonValue::String("<LAMBDA>".to_string()));
+    assert_eq!(changes[0].value, JsonValue::String("#CALC!".to_string()));
 
     let cell_js = wb.get_cell("A1".to_string(), None).unwrap();
     let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
-    assert_eq!(cell.value, JsonValue::String("<LAMBDA>".to_string()));
+    assert_eq!(cell.value, JsonValue::String("#CALC!".to_string()));
 }
 
 #[wasm_bindgen_test]

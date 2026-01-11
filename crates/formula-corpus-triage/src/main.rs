@@ -611,8 +611,8 @@ fn normalize_engine_value(value: &EngineValue) -> NormalizedValue {
         EngineValue::Reference(_)
         | EngineValue::ReferenceUnion(_)
         | EngineValue::Array(_)
-        | EngineValue::Lambda(_)
         | EngineValue::Spill { .. } => NormalizedValue::Blank,
+        EngineValue::Lambda(_) => NormalizedValue::Error(ErrorKind::Calc.as_code().to_string()),
     }
 }
 

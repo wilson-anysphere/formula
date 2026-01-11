@@ -4,16 +4,21 @@ use crate::eval::address::CellAddr;
 use crate::eval::ast::{BinaryOp, CompareOp, CompiledExpr, Expr, PostfixOp, SheetReference, UnaryOp};
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference, SheetId as FnSheetId};
 use crate::locale::ValueLocaleConfig;
-use crate::value::{Array, ErrorKind, NumberLocale, Value};
+use crate::value::{Array, ErrorKind, Lambda, NumberLocale, Value};
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// Synthetic call name used for anonymous `LAMBDA(...)(...)` invocations.
 ///
 /// The leading NUL byte ensures this key cannot be referenced by user formulas.
 const ANON_LAMBDA_CALL_NAME: &str = "\u{0}ANON_LAMBDA_CALL";
+
+// Excel has various nesting limits (e.g. 64 nested function calls). Keep lambda recursion bounded
+// well below the Rust stack limit to avoid process aborts for accidental infinite recursion.
+const LAMBDA_RECURSION_LIMIT: u32 = 64;
 
 #[derive(Debug, Clone, Copy)]
 pub struct EvalContext {
@@ -585,10 +590,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         lambda: crate::value::Lambda,
         args: &[CompiledExpr],
     ) -> Value {
-        const MAX_RECURSION_DEPTH: u32 = 256;
-
         let depth = self.lambda_depth.get();
-        if depth >= MAX_RECURSION_DEPTH {
+        if depth >= LAMBDA_RECURSION_LIMIT {
             return Value::Error(ErrorKind::Calc);
         }
         self.lambda_depth.set(depth + 1);
@@ -614,7 +617,37 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
         let mut evaluated_args = Vec::with_capacity(args.len());
         for arg in args {
-            let v = self.eval_formula(arg);
+            let v = match self.eval_value(arg) {
+                EvalValue::Scalar(v) => v,
+                EvalValue::Reference(mut ranges) => {
+                    ranges.sort_by(|a, b| {
+                        a.sheet_id
+                            .cmp(&b.sheet_id)
+                            .then_with(|| a.start.row.cmp(&b.start.row))
+                            .then_with(|| a.start.col.cmp(&b.start.col))
+                            .then_with(|| a.end.row.cmp(&b.end.row))
+                            .then_with(|| a.end.col.cmp(&b.end.col))
+                    });
+
+                    match ranges.as_slice() {
+                        [only] => Value::Reference(FnReference {
+                            sheet_id: only.sheet_id.clone(),
+                            start: only.start,
+                            end: only.end,
+                        }),
+                        _ => Value::ReferenceUnion(
+                            ranges
+                                .into_iter()
+                                .map(|r| FnReference {
+                                    sheet_id: r.sheet_id,
+                                    start: r.start,
+                                    end: r.end,
+                                })
+                                .collect(),
+                        ),
+                    }
+                }
+            };
             if let Value::Error(e) = v {
                 return Value::Error(e);
             }
@@ -646,7 +679,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         scopes.push(call_scope);
 
         let evaluator = self.with_lexical_scopes(scopes);
-        evaluator.eval_formula(lambda.body.as_ref())
+        evaluator.deref_eval_value_dynamic(evaluator.eval_value(lambda.body.as_ref()))
     }
 
     fn deref_eval_value_dynamic(&self, value: EvalValue) -> Value {
@@ -669,7 +702,28 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
         if matches!(nref.sheet, SheetReference::Current) {
             if let Some(value) = self.lookup_lexical_value(&nref.name) {
-                return EvalValue::Scalar(value);
+                match value {
+                    Value::Reference(r) => {
+                        return EvalValue::Reference(vec![ResolvedRange {
+                            sheet_id: r.sheet_id,
+                            start: r.start,
+                            end: r.end,
+                        }]);
+                    }
+                    Value::ReferenceUnion(ranges) => {
+                        return EvalValue::Reference(
+                            ranges
+                                .into_iter()
+                                .map(|r| ResolvedRange {
+                                    sheet_id: r.sheet_id,
+                                    start: r.start,
+                                    end: r.end,
+                                })
+                                .collect(),
+                        );
+                    }
+                    other => return EvalValue::Scalar(other),
+                }
             }
         }
 
@@ -1130,6 +1184,106 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
         self.recalc_ctx.now_utc
+    }
+
+    fn push_local_scope(&self) {
+        self.lexical_scopes.borrow_mut().push(HashMap::new());
+    }
+
+    fn pop_local_scope(&self) {
+        self.lexical_scopes.borrow_mut().pop();
+    }
+
+    fn set_local(&self, name: &str, value: FnArgValue) {
+        let key = name.trim().to_ascii_uppercase();
+        let mut scopes = self.lexical_scopes.borrow_mut();
+        if scopes.is_empty() {
+            scopes.push(HashMap::new());
+        }
+        if let Some(scope) = scopes.last_mut() {
+            let value = match value {
+                FnArgValue::Scalar(v) => v,
+                FnArgValue::Reference(r) => Value::Reference(r),
+                FnArgValue::ReferenceUnion(ranges) => Value::ReferenceUnion(ranges),
+            };
+            scope.insert(key, value);
+        }
+    }
+
+    fn make_lambda(&self, params: Vec<String>, body: CompiledExpr) -> Value {
+        let params: Vec<String> = params
+            .into_iter()
+            .map(|p| p.trim().to_ascii_uppercase())
+            .collect();
+
+        let mut env = self.capture_lexical_env_map();
+        env.retain(|k, _| !k.starts_with(crate::eval::LAMBDA_OMITTED_PREFIX));
+
+        Value::Lambda(Lambda {
+            params: params.into(),
+            body: Arc::new(body),
+            env: Arc::new(env),
+        })
+    }
+
+    fn eval_lambda(&self, lambda: &Lambda, args: Vec<FnArgValue>) -> Value {
+        if args.len() > lambda.params.len() {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let depth = self.lambda_depth.get();
+        if depth >= LAMBDA_RECURSION_LIMIT {
+            return Value::Error(ErrorKind::Calc);
+        }
+        self.lambda_depth.set(depth + 1);
+
+        struct DepthGuard {
+            counter: Rc<Cell<u32>>,
+        }
+
+        impl Drop for DepthGuard {
+            fn drop(&mut self) {
+                let depth = self.counter.get();
+                self.counter.set(depth.saturating_sub(1));
+            }
+        }
+
+        let _depth_guard = DepthGuard {
+            counter: Rc::clone(&self.lambda_depth),
+        };
+
+        let mut call_scope =
+            HashMap::with_capacity(lambda.params.len().saturating_mul(2).saturating_add(1));
+        call_scope.insert(
+            ANON_LAMBDA_CALL_NAME.to_string(),
+            Value::Lambda(lambda.clone()),
+        );
+
+        for (idx, param) in lambda.params.iter().enumerate() {
+            let value = args.get(idx).cloned().unwrap_or(FnArgValue::Scalar(Value::Blank));
+            let value = match value {
+                FnArgValue::Scalar(v) => v,
+                FnArgValue::Reference(r) => Value::Reference(r),
+                FnArgValue::ReferenceUnion(ranges) => Value::ReferenceUnion(ranges),
+            };
+            call_scope.insert(param.to_ascii_uppercase(), value);
+
+            if idx >= args.len() {
+                call_scope.insert(
+                    format!("{}{}", crate::eval::LAMBDA_OMITTED_PREFIX, param),
+                    Value::Bool(true),
+                );
+            }
+        }
+
+        let mut scopes = Vec::new();
+        if !lambda.env.is_empty() {
+            scopes.push((*lambda.env).clone());
+        }
+        scopes.push(call_scope);
+
+        let evaluator = self.with_lexical_scopes(scopes);
+        evaluator.deref_eval_value_dynamic(evaluator.eval_value(lambda.body.as_ref()))
     }
 
     fn volatile_rand_u64(&self) -> u64 {

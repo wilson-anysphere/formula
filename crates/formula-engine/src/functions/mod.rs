@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use crate::date::ExcelDateSystem;
 use crate::eval::{CellAddr, CompiledExpr};
 use crate::locale::ValueLocaleConfig;
-use crate::value::{ErrorKind, Value};
+use crate::value::{ErrorKind, Lambda, Value};
 
 pub mod date_time;
 pub mod financial;
@@ -125,7 +125,7 @@ impl Reference {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ArgValue {
     Scalar(Value),
     Reference(Reference),
@@ -170,6 +170,13 @@ pub trait FunctionContext {
     fn value_locale(&self) -> ValueLocaleConfig {
         ValueLocaleConfig::default()
     }
+
+    fn push_local_scope(&self);
+    fn pop_local_scope(&self);
+    fn set_local(&self, name: &str, value: ArgValue);
+
+    fn make_lambda(&self, params: Vec<String>, body: CompiledExpr) -> Value;
+    fn eval_lambda(&self, lambda: &Lambda, args: Vec<ArgValue>) -> Value;
 
     /// Deterministic per-recalc random bits, scoped to the current cell evaluation.
     ///

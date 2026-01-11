@@ -150,9 +150,10 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
         // Spill markers should not leak because `Engine::get_cell_value` resolves spill cells to
         // their concrete values. Keep a defensive fallback anyway.
         EngineValue::Spill { .. } => JsonValue::String(ErrorKind::Spill.as_code().to_string()),
-        // `LAMBDA` results are valid Excel scalars but cannot be represented in the current
-        // worker JSON protocol. Use a stable display string so the UI won't crash.
-        EngineValue::Lambda(_) => JsonValue::String("<LAMBDA>".to_string()),
+        // Excel treats bare lambda values (not invoked) as a #CALC! cell result.
+        // Degrade any lambda that leaks to the JS worker boundary to the same error code so
+        // callers never have to handle function-valued JSON payloads.
+        EngineValue::Lambda(_) => JsonValue::String(ErrorKind::Calc.as_code().to_string()),
     }
 }
 

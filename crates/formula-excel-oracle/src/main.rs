@@ -110,6 +110,10 @@ impl From<Value> for EncodedValue {
                 v: kind.as_code().to_string(),
                 detail: None,
             },
+            Value::Lambda(_) => EncodedValue::Error {
+                v: "#CALC!".to_string(),
+                detail: None,
+            },
             Value::Array(arr) => {
                 let mut rows = Vec::with_capacity(arr.rows);
                 for r in 0..arr.rows {
@@ -124,7 +128,6 @@ impl From<Value> for EncodedValue {
             Value::Reference(_) | Value::ReferenceUnion(_) => {
                 EncodedValue::engine_error("unexpected reference value")
             }
-            Value::Lambda(_) => EncodedValue::engine_error("lambda value result is not serializable"),
             Value::Spill { .. } => EncodedValue::Error {
                 v: "#SPILL!".to_string(),
                 detail: None,
@@ -351,9 +354,9 @@ fn main() -> Result<()> {
                 }
             }
             Value::Error(e) => e.as_code().to_string(),
+            Value::Lambda(_) => "#CALC!".to_string(),
             Value::Array(arr) => arr.top_left().to_string(),
             Value::Reference(_) | Value::ReferenceUnion(_) => "#VALUE!".to_string(),
-            Value::Lambda(_) => "<LAMBDA>".to_string(),
             Value::Spill { .. } => "#SPILL!".to_string(),
         };
 

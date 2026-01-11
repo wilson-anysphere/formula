@@ -1895,6 +1895,11 @@ impl Engine {
         // evaluation result.
         self.clear_blocked_spill_for_origin(key);
 
+        let value = match value {
+            Value::Lambda(_) => Value::Error(ErrorKind::Calc),
+            other => other,
+        };
+
         match value {
             Value::Array(array) => {
                 if array.rows == 0 || array.cols == 0 {

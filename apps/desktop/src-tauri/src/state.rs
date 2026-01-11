@@ -2886,7 +2886,7 @@ fn engine_value_to_scalar(value: EngineValue) -> CellScalar {
             CellScalar::Error("#VALUE!".to_string())
         }
         EngineValue::Array(arr) => engine_value_to_scalar(arr.top_left()),
-        EngineValue::Lambda(_) => CellScalar::Text("<LAMBDA>".to_string()),
+        EngineValue::Lambda(_) => CellScalar::Error("#CALC!".to_string()),
         EngineValue::Spill { .. } => CellScalar::Error("#SPILL!".to_string()),
     }
 }

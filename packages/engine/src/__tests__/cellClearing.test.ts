@@ -280,7 +280,7 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
-  it("surfaces LAMBDA values as placeholder text", async () => {
+  it("surfaces bare LAMBDA values as #CALC!", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
 
@@ -295,10 +295,10 @@ describe("EngineWorker null clear semantics", () => {
       await engine.setCell("A1", "=LAMBDA(x,x)");
 
       const changes = await engine.recalculate();
-      expect(changes).toEqual([{ sheet: "Sheet1", address: "A1", value: "<LAMBDA>" }]);
+      expect(changes).toEqual([{ sheet: "Sheet1", address: "A1", value: "#CALC!" }]);
 
       const a1 = await engine.getCell("A1");
-      expect(a1.value).toBe("<LAMBDA>");
+      expect(a1.value).toBe("#CALC!");
     } finally {
       engine.terminate();
     }

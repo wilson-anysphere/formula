@@ -123,7 +123,7 @@ pub enum Expr<S> {
     },
     /// Call a runtime lambda value produced by another expression.
     ///
-    /// This models Excel's LAMBDA invocation syntax, e.g. `LAMBDA(x,x+1)(3)`.
+    /// This models Excel's LAMBDA invocation syntax, e.g. `LAMBDA(x, x + 1)(3)`.
     Call {
         callee: Box<Expr<S>>,
         args: Vec<Expr<S>>,

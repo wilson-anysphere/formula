@@ -348,7 +348,7 @@ impl fmt::Display for Value {
                 f.write_str(ErrorKind::Value.as_code())
             }
             Value::Array(arr) => write!(f, "{}", arr.top_left()),
-            Value::Lambda(_) => f.write_str("<LAMBDA>"),
+            Value::Lambda(_) => f.write_str(ErrorKind::Calc.as_code()),
             Value::Spill { .. } => f.write_str(ErrorKind::Spill.as_code()),
         }
     }

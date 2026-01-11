@@ -1,9 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::eval::{CompiledExpr, Expr, SheetReference, LAMBDA_OMITTED_PREFIX};
 use crate::functions::{
-    ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility,
+    ArgValue, ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility,
 };
 use crate::value::{ErrorKind, Lambda, Value};
 
@@ -28,8 +28,16 @@ fn let_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let mut bindings: HashMap<String, Value> = HashMap::new();
     let last = args.len() - 1;
+
+    ctx.push_local_scope();
+    struct ScopeGuard<'a>(&'a dyn FunctionContext);
+    impl Drop for ScopeGuard<'_> {
+        fn drop(&mut self) {
+            self.0.pop_local_scope();
+        }
+    }
+    let _guard = ScopeGuard(ctx);
 
     for pair in args[..last].chunks_exact(2) {
         let Some(name) = bare_identifier(&pair[0]) else {
@@ -37,15 +45,15 @@ fn let_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         };
         let name_key = name.trim().to_ascii_uppercase();
 
-        let value = ctx.eval_formula_with_bindings(&pair[1], &bindings);
-        if let Value::Error(e) = value {
-            return Value::Error(e);
+        let value = ctx.eval_arg(&pair[1]);
+        if let ArgValue::Scalar(Value::Error(e)) = &value {
+            return Value::Error(*e);
         }
 
-        bindings.insert(name_key, value);
+        ctx.set_local(&name_key, value);
     }
 
-    ctx.eval_formula_with_bindings(&args[last], &bindings)
+    ctx.eval_formula(&args[last])
 }
 
 inventory::submit! {
