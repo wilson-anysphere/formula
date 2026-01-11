@@ -24,6 +24,41 @@ Services (default ports shown; see “Port overrides” below):
 
 The API automatically runs SQL migrations on startup.
 
+## Security-related configuration
+
+### Local docker-compose vs production
+
+`docker-compose.yml` is intended for **local development** and runs the API with:
+
+- `NODE_ENV=development`
+- `COOKIE_SECURE=false`
+- development secrets for `SYNC_TOKEN_SECRET` / `SECRET_STORE_KEY` unless overridden
+
+The production API Docker image sets `NODE_ENV=production`, and the API will **fail fast**
+on insecure defaults (for example `COOKIE_SECURE!=true` or known dev secrets).
+
+### CORS
+
+The API uses an **allowlist** for CORS:
+
+- `CORS_ALLOWED_ORIGINS` — comma-separated list of allowed origins (e.g. `https://app.example.com`)
+  - In production: defaults to **no allowed origins** unless explicitly set.
+  - In dev/test: defaults to common localhost origins (`http://localhost:5173`, `http://localhost:3000`, etc).
+
+### Client IP (rate limiting + IP allowlists)
+
+Several protections depend on the derived client IP (`request.ip`):
+
+- auth rate limiting (brute-force protection)
+- org `ip_allowlist` enforcement (enterprise)
+
+If the API is deployed behind a trusted reverse proxy / load balancer, set:
+
+- `TRUST_PROXY=true`
+
+so Fastify will honor forwarding headers (e.g. `X-Forwarded-For`). Do **not** enable this
+unless the proxy strips spoofed headers.
+
 ### Port overrides
 
 If you already have something running on these ports, you can override the published ports:
