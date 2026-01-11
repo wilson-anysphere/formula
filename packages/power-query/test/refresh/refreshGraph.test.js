@@ -309,6 +309,25 @@ test("RefreshOrchestrator: cycle detection emits a clear error", async () => {
   assert.match(String(errEvt.error?.message ?? ""), /A -> B -> A/);
 });
 
+test("RefreshOrchestrator: cycle detection includes merge dependencies", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(
+    makeQuery("A", { type: "range", range: { values: [["Key"], [1]], hasHeaders: true } }, [
+      { id: "merge", name: "Merge", operation: { type: "merge", rightQuery: "B", joinType: "left", leftKey: "Key", rightKey: "Key" } },
+    ]),
+  );
+  orchestrator.registerQuery(
+    makeQuery("B", { type: "range", range: { values: [["Key"], [1]], hasHeaders: true } }, [
+      { id: "merge", name: "Merge", operation: { type: "merge", rightQuery: "A", joinType: "left", leftKey: "Key", rightKey: "Key" } },
+    ]),
+  );
+
+  const handle = orchestrator.refreshAll(["A"]);
+  await assert.rejects(handle.promise, /cycle/i);
+  assert.equal(engine.calls.length, 0);
+});
+
 test("RefreshOrchestrator: unknown target query emits error event and rejects", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
