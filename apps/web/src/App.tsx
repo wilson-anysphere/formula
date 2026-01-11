@@ -397,12 +397,17 @@ function EngineDemoApp() {
     internalClipboardRef.current = { tsv, html };
 
     event.clipboardData?.setData("text/plain", tsv);
+    // Some consumers look for explicit TSV MIME types.
+    event.clipboardData?.setData("text/tab-separated-values", tsv);
+    event.clipboardData?.setData("text/tsv", tsv);
     event.clipboardData?.setData("text/html", html);
     if (!event.clipboardData) {
       const clipboard = navigator.clipboard;
       if (clipboard && typeof clipboard.write === "function" && typeof ClipboardItem !== "undefined") {
         const item = new ClipboardItem({
           "text/plain": new Blob([tsv], { type: "text/plain" }),
+          "text/tab-separated-values": new Blob([tsv], { type: "text/tab-separated-values" }),
+          "text/tsv": new Blob([tsv], { type: "text/tsv" }),
           "text/html": new Blob([html], { type: "text/html" })
         });
         void clipboard.write([item]).catch(() => {
@@ -415,7 +420,11 @@ function EngineDemoApp() {
 
   const handleGridPaste = (event: ClipboardEvent<HTMLDivElement>) => {
     if (editingCell) return;
-    const clipboardPlain = event.clipboardData?.getData("text/plain") ?? "";
+    const clipboardPlain =
+      event.clipboardData?.getData("text/plain") ??
+      event.clipboardData?.getData("text/tab-separated-values") ??
+      event.clipboardData?.getData("text/tsv") ??
+      "";
     const clipboardHtml = event.clipboardData?.getData("text/html") ?? "";
     const internal = internalClipboardRef.current;
 
