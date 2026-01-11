@@ -1,13 +1,7 @@
-const fs = require("node:fs/promises");
-const path = require("node:path");
-const crypto = require("node:crypto");
-const { Worker } = require("node:worker_threads");
-const { pathToFileURL } = require("node:url");
+import manifestPkg from "../manifest.js";
+import { PermissionManager } from "./permission-manager.mjs";
 
-const { validateExtensionManifest } = require("./manifest");
-const { PermissionManager } = require("./permission-manager");
-const { InMemorySpreadsheet } = require("./spreadsheet-mock");
-const { installExtensionFromDirectory, uninstallExtension, listInstalledExtensions } = require("./installer");
+const { validateExtensionManifest } = manifestPkg;
 
 const API_PERMISSIONS = {
   "workbook.getActiveWorkbook": [],
@@ -49,39 +43,60 @@ function serializeError(error) {
   return { message: String(error) };
 }
 
-class ExtensionHost {
+function createRequestId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+class InMemoryExtensionStorage {
+  constructor() {
+    this._data = {};
+  }
+
+  /**
+   * @param {string} extensionId
+   */
+  getExtensionStore(extensionId) {
+    if (!this._data[extensionId]) this._data[extensionId] = {};
+    return this._data[extensionId];
+  }
+}
+
+class BrowserExtensionHost {
   constructor({
     engineVersion = "1.0.0",
     permissionPrompt,
-    permissionsStoragePath = path.join(process.cwd(), ".formula", "permissions.json"),
-    extensionStoragePath = path.join(process.cwd(), ".formula", "storage.json"),
-    auditDbPath = null,
-    spreadsheet = new InMemorySpreadsheet()
+    spreadsheetApi,
+    clipboardApi,
+    storageApi
   } = {}) {
+    if (!spreadsheetApi) {
+      throw new Error("BrowserExtensionHost requires a spreadsheetApi implementation");
+    }
+
     this._engineVersion = engineVersion;
     this._extensions = new Map();
-    this._commands = new Map(); // commandId -> extensionId
-    this._panels = new Map(); // panelId -> { id, title, html }
-    this._customFunctions = new Map(); // functionName -> extensionId
+    this._commands = new Map();
+    this._panels = new Map();
+    this._customFunctions = new Map();
     this._messages = [];
-    this._clipboardText = "";
     this._pendingWorkerRequests = new Map();
-    this._extensionStoragePath = extensionStoragePath;
-    this._spreadsheet = spreadsheet;
 
-    // Security baseline: host-level permissions and audit logging for extension runtime.
-    // The security package is ESM; extension-host is CJS, so we load it lazily.
-    this._securityModulePromise = null;
-    this._securityModule = null;
-    this._securityPermissionManager = null;
-    this._securityAuditLogger = null;
-    this._securityAuditDbPath =
-      auditDbPath ?? path.join(path.dirname(path.resolve(permissionsStoragePath)), "audit.sqlite");
+    this._spreadsheet = spreadsheetApi;
 
-    this._permissionManager = new PermissionManager({
-      storagePath: permissionsStoragePath,
-      prompt: permissionPrompt
-    });
+    this._clipboardText = "";
+    this._clipboardApi = clipboardApi ?? {
+      readText: async () => this._clipboardText,
+      writeText: async (text) => {
+        this._clipboardText = String(text ?? "");
+      }
+    };
+
+    this._storageApi = storageApi ?? new InMemoryExtensionStorage();
+
+    this._permissionManager = new PermissionManager({ prompt: permissionPrompt });
 
     this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e));
     this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e));
@@ -91,46 +106,74 @@ class ExtensionHost {
     return this._spreadsheet;
   }
 
-  async loadExtension(extensionPath) {
-    const manifestPath = path.join(extensionPath, "package.json");
-    const raw = await fs.readFile(manifestPath, "utf8");
-    const parsed = JSON.parse(raw);
-    const manifest = validateExtensionManifest(parsed, { engineVersion: this._engineVersion });
+  async loadExtensionFromUrl(manifestUrl) {
+    if (!manifestUrl) throw new Error("manifestUrl is required");
+    const resolvedUrl = new URL(
+      String(manifestUrl),
+      globalThis.location?.href ?? "http://localhost/"
+    ).toString();
 
+    const response = await fetch(resolvedUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch extension manifest: ${resolvedUrl} (${response.status})`);
+    }
+
+    const parsed = await response.json();
+    const manifest = validateExtensionManifest(parsed, { engineVersion: this._engineVersion });
     const extensionId = `${manifest.publisher}.${manifest.name}`;
 
-    const mainPath = path.resolve(extensionPath, manifest.main);
-    const workerScript = path.resolve(__dirname, "../worker/extension-worker.js");
-    const apiModulePath = path.resolve(__dirname, "../../extension-api/index.js");
+    const baseUrl = new URL("./", resolvedUrl).toString();
+    const entry = manifest.browser ?? manifest.module ?? manifest.main;
+    if (!entry) {
+      throw new Error(`Extension manifest missing entrypoint (main/module/browser): ${extensionId}`);
+    }
 
-    const worker = new Worker(workerScript, {
-      workerData: {
-        extensionId,
-        extensionPath,
-        mainPath,
-        apiModulePath
-      }
+    const mainUrl = new URL(entry, baseUrl).toString();
+
+    await this.loadExtension({
+      extensionId,
+      extensionPath: baseUrl,
+      manifest,
+      mainUrl
     });
+
+    return extensionId;
+  }
+
+  async loadExtension({ extensionId, extensionPath, manifest, mainUrl }) {
+    if (!extensionId) throw new Error("extensionId is required");
+    if (!manifest || typeof manifest !== "object") throw new Error("manifest is required");
+    if (!mainUrl) throw new Error("mainUrl is required");
+
+    if (this._extensions.has(extensionId)) {
+      throw new Error(`Extension already loaded: ${extensionId}`);
+    }
+
+    const workerUrl = new URL("./extension-worker.mjs", import.meta.url);
+    const worker = new Worker(workerUrl, { type: "module" });
 
     const extension = {
       id: extensionId,
       path: extensionPath,
-      mainPath,
       manifest,
+      mainUrl,
       worker,
       active: false,
       registeredCommands: new Set()
     };
 
-    worker.on("message", (msg) => this._handleWorkerMessage(extension, msg));
-    worker.on("error", (err) => this._handleWorkerCrash(extension, err));
-    worker.on("exit", (code) => {
-      if (code !== 0) {
-        this._handleWorkerCrash(extension, new Error(`Worker exited with code ${code}`));
-      }
+    worker.addEventListener("message", (event) => this._handleWorkerMessage(extension, event.data));
+    worker.addEventListener("error", (event) =>
+      this._handleWorkerCrash(extension, new Error(String(event?.message ?? "Worker error")))
+    );
+
+    worker.postMessage({
+      type: "init",
+      extensionId,
+      extensionPath,
+      mainUrl
     });
 
-    // Register contributed commands so the app can route executions before activation.
     for (const cmd of manifest.contributes.commands ?? []) {
       this._commands.set(cmd.command, extensionId);
     }
@@ -143,7 +186,6 @@ class ExtensionHost {
     }
 
     this._extensions.set(extensionId, extension);
-
     return extensionId;
   }
 
@@ -201,7 +243,7 @@ class ExtensionHost {
       await this._activateExtension(extension, activationEvent);
     }
 
-    const id = crypto.randomUUID();
+    const id = createRequestId();
     const promise = new Promise((resolve, reject) => {
       this._pendingWorkerRequests.set(id, { resolve, reject });
     });
@@ -214,6 +256,41 @@ class ExtensionHost {
     });
 
     return promise;
+  }
+
+  async invokeCustomFunction(functionName, ...args) {
+    const name = String(functionName);
+    const extensionId = this._customFunctions.get(name);
+    if (!extensionId) throw new Error(`Unknown custom function: ${name}`);
+
+    const extension = this._extensions.get(extensionId);
+    if (!extension) throw new Error(`Extension not loaded: ${extensionId}`);
+
+    if (!extension.active) {
+      const activationEvent = `onCustomFunction:${name}`;
+      if (!(extension.manifest.activationEvents ?? []).includes(activationEvent)) {
+        throw new Error(`Extension ${extensionId} is not activated for ${activationEvent}`);
+      }
+      await this._activateExtension(extension, activationEvent);
+    }
+
+    const id = createRequestId();
+    const promise = new Promise((resolve, reject) => {
+      this._pendingWorkerRequests.set(id, { resolve, reject });
+    });
+
+    extension.worker.postMessage({
+      type: "invoke_custom_function",
+      id,
+      functionName: name,
+      args
+    });
+
+    return promise;
+  }
+
+  getMessages() {
+    return [...this._messages];
   }
 
   getPanel(panelId) {
@@ -234,150 +311,6 @@ class ExtensionHost {
     extension.worker.postMessage({ type: "panel_message", panelId, message });
   }
 
-  async invokeCustomFunction(functionName, ...args) {
-    const name = String(functionName);
-    const extensionId = this._customFunctions.get(name);
-    if (!extensionId) throw new Error(`Unknown custom function: ${name}`);
-
-    const extension = this._extensions.get(extensionId);
-    if (!extension) throw new Error(`Extension not loaded: ${extensionId}`);
-
-    if (!extension.active) {
-      const activationEvent = `onCustomFunction:${name}`;
-      if (!(extension.manifest.activationEvents ?? []).includes(activationEvent)) {
-        throw new Error(`Extension ${extensionId} is not activated for ${activationEvent}`);
-      }
-      await this._activateExtension(extension, activationEvent);
-    }
-
-    const id = crypto.randomUUID();
-    const promise = new Promise((resolve, reject) => {
-      this._pendingWorkerRequests.set(id, { resolve, reject });
-    });
-
-    extension.worker.postMessage({
-      type: "invoke_custom_function",
-      id,
-      functionName: name,
-      args
-    });
-
-    return promise;
-  }
-
-  getMessages() {
-    return [...this._messages];
-  }
-
-  getClipboardText() {
-    return this._clipboardText;
-  }
-
-  listExtensions() {
-    return [...this._extensions.values()].map((ext) => ({
-      id: ext.id,
-      path: ext.path,
-      active: ext.active,
-      manifest: ext.manifest
-    }));
-  }
-
-  getContributedCommands() {
-    const out = [];
-    for (const extension of this._extensions.values()) {
-      for (const cmd of extension.manifest.contributes.commands ?? []) {
-        out.push({
-          extensionId: extension.id,
-          command: cmd.command,
-          title: cmd.title,
-          category: cmd.category ?? null,
-          icon: cmd.icon ?? null
-        });
-      }
-    }
-    return out;
-  }
-
-  getContributedPanels() {
-    const out = [];
-    for (const extension of this._extensions.values()) {
-      for (const panel of extension.manifest.contributes.panels ?? []) {
-        out.push({
-          extensionId: extension.id,
-          id: panel.id,
-          title: panel.title,
-          icon: panel.icon ?? null
-        });
-      }
-    }
-    return out;
-  }
-
-  getContributedKeybindings() {
-    const out = [];
-    for (const extension of this._extensions.values()) {
-      for (const kb of extension.manifest.contributes.keybindings ?? []) {
-        out.push({
-          extensionId: extension.id,
-          command: kb.command,
-          key: kb.key,
-          mac: kb.mac ?? null
-        });
-      }
-    }
-    return out;
-  }
-
-  /**
-   * @param {string} menuId
-   */
-  getContributedMenu(menuId) {
-    const id = String(menuId);
-    const out = [];
-    for (const extension of this._extensions.values()) {
-      const menus = extension.manifest.contributes.menus ?? {};
-      const items = menus[id] ?? [];
-      for (const item of items) {
-        out.push({
-          extensionId: extension.id,
-          command: item.command,
-          when: item.when ?? null,
-          group: item.group ?? null
-        });
-      }
-    }
-    return out;
-  }
-
-  getContributedCustomFunctions() {
-    const out = [];
-    for (const extension of this._extensions.values()) {
-      for (const fn of extension.manifest.contributes.customFunctions ?? []) {
-        out.push({
-          extensionId: extension.id,
-          name: fn.name,
-          description: fn.description ?? null
-        });
-      }
-    }
-    return out;
-  }
-
-  getContributedDataConnectors() {
-    const out = [];
-    for (const extension of this._extensions.values()) {
-      for (const connector of extension.manifest.contributes.dataConnectors ?? []) {
-        out.push({
-          extensionId: extension.id,
-          id: connector.id,
-          name: connector.name,
-          icon: connector.icon ?? null
-        });
-      }
-    }
-    return out;
-  }
-
   async dispose() {
     const extensions = [...this._extensions.values()];
     this._extensions.clear();
@@ -386,38 +319,13 @@ class ExtensionHost {
     this._customFunctions.clear();
     this._messages = [];
 
-    await Promise.allSettled(
-      extensions.map(async (ext) => {
-        try {
-          await ext.worker.terminate();
-        } catch {
-          // ignore
-        }
-      })
-    );
-  }
-
-  async _ensureSecurity() {
-    if (this._securityPermissionManager) return;
-
-    if (!this._securityModulePromise) {
-      const fallbackPath = pathToFileURL(path.resolve(__dirname, "../../security/src/index.js")).href;
-      this._securityModulePromise = import("@formula/security")
-        .catch(() => import(fallbackPath))
-        .then((security) => {
-        const { AuditLogger, PermissionManager, SqliteAuditLogStore } = security;
-        const store = new SqliteAuditLogStore({ path: this._securityAuditDbPath });
-        const auditLogger = new AuditLogger({ store });
-        const permissionManager = new PermissionManager({ auditLogger });
-
-        this._securityModule = security;
-        this._securityAuditLogger = auditLogger;
-        this._securityPermissionManager = permissionManager;
-        return security;
-      });
+    for (const ext of extensions) {
+      try {
+        ext.worker.terminate();
+      } catch {
+        // ignore
+      }
     }
-
-    await this._securityModulePromise;
   }
 
   async _handleApiCall(extension, message) {
@@ -425,14 +333,8 @@ class ExtensionHost {
     const apiKey = `${namespace}.${method}`;
 
     const permissions = API_PERMISSIONS[apiKey] ?? [];
-    const securityPrincipal = { type: "extension", id: extension.id };
-    const isNetworkFetch = apiKey === "network.fetch";
 
     try {
-      if (isNetworkFetch) {
-        await this._ensureSecurity();
-      }
-
       await this._permissionManager.ensurePermissions(
         {
           extensionId: extension.id,
@@ -442,16 +344,6 @@ class ExtensionHost {
         permissions
       );
 
-      if (isNetworkFetch) {
-        // Mirror the extension-host permission grant into the unified security manager so
-        // audit logging and future allowlist enforcement happen in one place.
-        this._securityPermissionManager.grant(
-          securityPrincipal,
-          { network: { mode: "full" } },
-          { source: "extension-host.permission-manager", apiKey }
-        );
-      }
-
       const result = await this._executeApi(namespace, method, args, extension);
 
       extension.worker.postMessage({
@@ -460,20 +352,6 @@ class ExtensionHost {
         result
       });
     } catch (error) {
-      if (isNetworkFetch) {
-        try {
-          await this._ensureSecurity();
-          this._securityAuditLogger?.log({
-            eventType: "security.permission.denied",
-            actor: securityPrincipal,
-            success: false,
-            metadata: { apiKey, permissions, message: String(error?.message ?? error) }
-          });
-        } catch {
-          // ignore
-        }
-      }
-
       extension.worker.postMessage({
         type: "api_error",
         id,
@@ -485,8 +363,14 @@ class ExtensionHost {
   async _executeApi(namespace, method, args, extension) {
     switch (`${namespace}.${method}`) {
       case "workbook.getActiveWorkbook":
-        return { name: "MockWorkbook", path: null };
+        if (typeof this._spreadsheet.getActiveWorkbook === "function") {
+          return this._spreadsheet.getActiveWorkbook();
+        }
+        return { name: "Workbook", path: null };
       case "sheets.getActiveSheet":
+        if (typeof this._spreadsheet.getActiveSheet === "function") {
+          return this._spreadsheet.getActiveSheet();
+        }
         return { id: "sheet1", name: "Sheet1" };
 
       case "cells.getSelection":
@@ -494,7 +378,7 @@ class ExtensionHost {
       case "cells.getCell":
         return this._spreadsheet.getCell(args[0], args[1]);
       case "cells.setCell":
-        this._spreadsheet.setCell(args[0], args[1], args[2]);
+        await this._spreadsheet.setCell(args[0], args[1], args[2]);
         return null;
 
       case "commands.registerCommand":
@@ -577,23 +461,11 @@ class ExtensionHost {
           throw new Error("Network fetch is not available in this runtime");
         }
 
-        await this._ensureSecurity();
-        const principal = { type: "extension", id: extension.id };
-        const secureFetch = this._securityModule.createSecureFetch({
-          principal,
-          permissionManager: this._securityPermissionManager,
-          auditLogger: this._securityAuditLogger,
-          promptIfDenied: false
-        });
-
         const url = String(args[0]);
         const init = args[1];
-        const response = await secureFetch(url, init);
+        const response = await fetch(url, init);
         const bodyText = await response.text();
-        const headers = [];
-        response.headers.forEach((value, key) => {
-          headers.push([key, value]);
-        });
+        const headers = Array.from(response.headers.entries());
 
         return {
           ok: response.ok,
@@ -606,36 +478,33 @@ class ExtensionHost {
       }
 
       case "clipboard.readText":
-        return this._clipboardText;
+        return this._clipboardApi.readText();
       case "clipboard.writeText":
-        this._clipboardText = String(args[0] ?? "");
+        await this._clipboardApi.writeText(String(args[0] ?? ""));
         return null;
 
       case "storage.get": {
-        const store = await this._loadExtensionStorage();
-        return store[extension.id]?.[String(args[0])];
+        const store = this._storageApi.getExtensionStore(extension.id);
+        return store[String(args[0])];
       }
       case "storage.set": {
         const key = String(args[0]);
         const value = args[1];
-        const store = await this._loadExtensionStorage();
-        store[extension.id] = store[extension.id] ?? {};
-        store[extension.id][key] = value;
-        await this._saveExtensionStorage(store);
+        const store = this._storageApi.getExtensionStore(extension.id);
+        store[key] = value;
         return null;
       }
       case "storage.delete": {
         const key = String(args[0]);
-        const store = await this._loadExtensionStorage();
-        if (store[extension.id]) delete store[extension.id][key];
-        await this._saveExtensionStorage(store);
+        const store = this._storageApi.getExtensionStore(extension.id);
+        delete store[key];
         return null;
       }
 
       case "config.get": {
         const key = String(args[0]);
-        const store = await this._loadExtensionStorage();
-        const stored = store[extension.id]?.[`__config__:${key}`];
+        const store = this._storageApi.getExtensionStore(extension.id);
+        const stored = store[`__config__:${key}`];
         if (stored !== undefined) return stored;
 
         const schema = extension.manifest.contributes.configuration;
@@ -652,31 +521,14 @@ class ExtensionHost {
 
         const key = `__config__:${configKey}`;
         const value = args[1];
-        const store = await this._loadExtensionStorage();
-        store[extension.id] = store[extension.id] ?? {};
-        store[extension.id][key] = value;
-        await this._saveExtensionStorage(store);
+        const store = this._storageApi.getExtensionStore(extension.id);
+        store[key] = value;
         return null;
       }
 
       default:
         throw new Error(`Unknown API method: ${namespace}.${method}`);
     }
-  }
-
-  async _loadExtensionStorage() {
-    try {
-      const raw = await fs.readFile(this._extensionStoragePath, "utf8");
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
-  async _saveExtensionStorage(store) {
-    await fs.mkdir(path.dirname(this._extensionStoragePath), { recursive: true });
-    await fs.writeFile(this._extensionStoragePath, JSON.stringify(store, null, 2), "utf8");
   }
 
   _handleWorkerMessage(extension, message) {
@@ -728,18 +580,8 @@ class ExtensionHost {
         pending.reject(new Error(String(message.error?.message ?? message.error)));
         return;
       }
-      case "log": {
-        // We keep this as a hook for future UI integration.
+      case "log":
         return;
-      }
-      case "audit": {
-        try {
-          this._securityAuditLogger?.log(message.event);
-        } catch {
-          // Audit logging should not break extension execution.
-        }
-        return;
-      }
       default:
         return;
     }
@@ -753,13 +595,12 @@ class ExtensionHost {
   }
 
   async _activateExtension(extension, reason) {
-    const id = crypto.randomUUID();
+    const id = createRequestId();
     const promise = new Promise((resolve, reject) => {
       this._pendingWorkerRequests.set(id, { resolve, reject });
     });
 
     extension.worker.postMessage({ type: "activate", id, reason });
-
     await promise;
     extension.active = true;
   }
@@ -787,11 +628,4 @@ class ExtensionHost {
   }
 }
 
-module.exports = {
-  ExtensionHost,
-  API_PERMISSIONS,
-
-  installExtensionFromDirectory,
-  uninstallExtension,
-  listInstalledExtensions
-};
+export { BrowserExtensionHost, API_PERMISSIONS };

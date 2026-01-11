@@ -3,6 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "main": "./src/index.js",
+  "exports": {
+    ".": {
+      "require": "./src/index.js",
+      "import": "./src/index.js"
+    },
+    "./browser": {
+      "import": "./src/browser/index.mjs"
+    }
+  },
   "dependencies": {
     "@formula/security": "workspace:*"
   }

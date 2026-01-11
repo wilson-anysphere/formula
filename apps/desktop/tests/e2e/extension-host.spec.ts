@@ -1,0 +1,94 @@
+import { expect, test } from "@playwright/test";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, "../../../..");
+
+function viteFsUrl(absPath: string) {
+  return `/@fs${absPath}`;
+}
+
+test.describe("BrowserExtensionHost", () => {
+  test("loads sample extension in a Worker and can run sumSelection", async ({ page }) => {
+    await page.goto("/");
+
+    const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
+    const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
+
+    const result = await page.evaluate(
+      async ({ manifestUrl, hostModuleUrl }) => {
+        const { BrowserExtensionHost } = await import(hostModuleUrl);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const app: any = (window as any).__formulaApp;
+        if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+        const doc = app.getDocument();
+        const sheetId = app.getCurrentSheetId();
+
+        doc.setCellValue(sheetId, { row: 0, col: 0 }, 1);
+        doc.setCellValue(sheetId, { row: 0, col: 1 }, 2);
+        doc.setCellValue(sheetId, { row: 1, col: 0 }, 3);
+        doc.setCellValue(sheetId, { row: 1, col: 1 }, 4);
+
+        app.selectRange({
+          sheetId,
+          range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 }
+        });
+
+        function normalizeCellValue(value: unknown) {
+          if (typeof value === "string") return value;
+          if (typeof value === "number") return value;
+          if (typeof value === "boolean") return value;
+          return null;
+        }
+
+        const spreadsheetApi = {
+          async getActiveSheet() {
+            return { id: sheetId, name: sheetId };
+          },
+          async getSelection() {
+            const range = app.getSelectionRanges()[0];
+            const values = [];
+            for (let r = range.startRow; r <= range.endRow; r++) {
+              const cols = [];
+              for (let c = range.startCol; c <= range.endCol; c++) {
+                const cell = doc.getCell(sheetId, { row: r, col: c });
+                cols.push(normalizeCellValue(cell.value));
+              }
+              values.push(cols);
+            }
+            return { ...range, values };
+          },
+          async getCell(row: number, col: number) {
+            const cell = doc.getCell(sheetId, { row, col });
+            return normalizeCellValue(cell.value);
+          },
+          async setCell(row: number, col: number, value: unknown) {
+            doc.setCellValue(sheetId, { row, col }, value);
+          }
+        };
+
+        const host = new BrowserExtensionHost({
+          engineVersion: "1.0.0",
+          spreadsheetApi,
+          permissionPrompt: async () => true
+        });
+
+        await host.loadExtensionFromUrl(manifestUrl);
+
+        const sum = await host.executeCommand("sampleHello.sumSelection");
+        const a3 = app.getCellValueA1("A3");
+        await host.dispose();
+
+        return { sum, a3 };
+      },
+      { manifestUrl, hostModuleUrl }
+    );
+
+    expect(result.sum).toBe(10);
+    expect(result.a3).toBe("10");
+  });
+});
+
