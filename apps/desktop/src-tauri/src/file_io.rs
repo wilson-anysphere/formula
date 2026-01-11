@@ -1292,8 +1292,17 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
 
         if edits.len() == 1 {
             let (sheet_index, edits) = &edits[0];
-            xlsb.save_with_cell_edits_streaming(&final_out_path, *sheet_index, edits)
-                .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
+            let has_text_edits = edits.iter().any(|edit| {
+                matches!(edit.new_value, XlsbCellValue::Text(_)) && edit.new_formula.is_none()
+            });
+            let has_shared_strings = xlsb.preserved_parts().contains_key("xl/sharedStrings.bin");
+            if has_text_edits && has_shared_strings {
+                xlsb.save_with_cell_edits_shared_strings(&final_out_path, *sheet_index, edits)
+                    .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
+            } else {
+                xlsb.save_with_cell_edits_streaming(&final_out_path, *sheet_index, edits)
+                    .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
+            }
             return Ok(());
         }
 
@@ -1327,8 +1336,17 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
 
             let wb = XlsbWorkbook::open(&source_path)
                 .with_context(|| format!("open xlsb {:?}", source_path))?;
-            wb.save_with_cell_edits_streaming(&out_path, *sheet_index, sheet_edits)
-                .with_context(|| format!("save edited xlsb {:?}", out_path))?;
+            let has_text_edits = sheet_edits.iter().any(|edit| {
+                matches!(edit.new_value, XlsbCellValue::Text(_)) && edit.new_formula.is_none()
+            });
+            let has_shared_strings = wb.preserved_parts().contains_key("xl/sharedStrings.bin");
+            if has_text_edits && has_shared_strings {
+                wb.save_with_cell_edits_shared_strings(&out_path, *sheet_index, sheet_edits)
+                    .with_context(|| format!("save edited xlsb {:?}", out_path))?;
+            } else {
+                wb.save_with_cell_edits_streaming(&out_path, *sheet_index, sheet_edits)
+                    .with_context(|| format!("save edited xlsb {:?}", out_path))?;
+            }
 
             source_path = out_path;
         }
@@ -1433,8 +1451,10 @@ mod tests {
     use super::*;
     use crate::state::AppState;
     use formula_format::{format_value, FormatOptions, Value as FormatValue};
+    use formula_xlsb::biff12_varint;
     use rust_xlsxwriter::{Chart, ChartType};
     use std::collections::BTreeSet;
+    use std::io::Read;
     use xlsx_diff::{diff_workbooks, Severity, WorkbookArchive};
 
     fn assert_no_critical_diffs(expected: &Path, actual: &Path) {
@@ -1485,6 +1505,55 @@ mod tests {
                 "expected part {name} to be preserved byte-for-byte"
             );
         }
+    }
+
+    fn find_xlsb_cell_record(
+        sheet_bin: &[u8],
+        target_row: u32,
+        target_col: u32,
+    ) -> Option<(u32, Vec<u8>)> {
+        const SHEETDATA: u32 = 0x0191;
+        const SHEETDATA_END: u32 = 0x0192;
+        const ROW: u32 = 0x0000;
+
+        let mut cursor = Cursor::new(sheet_bin);
+        let mut in_sheet_data = false;
+        let mut current_row = 0u32;
+
+        loop {
+            let id = match biff12_varint::read_record_id(&mut cursor).ok().flatten() {
+                Some(id) => id,
+                None => break,
+            };
+            let len = match biff12_varint::read_record_len(&mut cursor).ok().flatten() {
+                Some(len) => len as usize,
+                None => return None,
+            };
+            let mut payload = vec![0u8; len];
+            cursor.read_exact(&mut payload).ok()?;
+
+            match id {
+                SHEETDATA => in_sheet_data = true,
+                SHEETDATA_END => in_sheet_data = false,
+                ROW if in_sheet_data => {
+                    if payload.len() >= 4 {
+                        current_row = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                    }
+                }
+                _ if in_sheet_data => {
+                    if payload.len() < 8 {
+                        continue;
+                    }
+                    let col = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                    if current_row == target_row && col == target_col {
+                        return Some((id, payload));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        None
     }
 
     #[test]
@@ -1645,6 +1714,139 @@ mod tests {
             .find(|c| c.row == 0 && c.col == 1)
             .expect("B1 exists");
         assert_eq!(b1.value, XlsbCellValue::Number(123.0));
+    }
+
+    #[test]
+    fn xlsb_text_edit_preserves_shared_string_record() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+        let fixture_archive = WorkbookArchive::open(fixture_path).expect("open fixture archive");
+        let fixture_has_calc_chain = fixture_archive.get("xl/calcChain.bin").is_some();
+
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read xlsb workbook");
+        let sheet_id = workbook.sheets[0].id.clone();
+        let new_text = "formula-desktop-tauri-shared-string-edit";
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Text(new_text.to_string()))),
+        );
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("edited-text.xlsb");
+        write_xlsx_blocking(&out_path, &workbook).expect("write xlsb workbook");
+
+        let report = diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
+        let report_text = report
+            .differences
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let extra_parts: Vec<_> = report
+            .differences
+            .iter()
+            .filter(|d| d.kind == "extra_part")
+            .map(|d| d.part.clone())
+            .collect();
+        assert!(
+            extra_parts.is_empty(),
+            "unexpected extra parts: {extra_parts:?}\n{report_text}"
+        );
+
+        for expected_part in ["xl/worksheets/sheet1.bin", "xl/sharedStrings.bin"] {
+            assert!(
+                report.differences.iter().any(|d| d.part == expected_part),
+                "expected {expected_part} to change, got:\n{report_text}",
+            );
+        }
+
+        let mut allowed_parts: BTreeSet<String> = BTreeSet::from([
+            "xl/worksheets/sheet1.bin".to_string(),
+            "xl/sharedStrings.bin".to_string(),
+        ]);
+        if fixture_has_calc_chain {
+            allowed_parts.extend([
+                "xl/calcChain.bin".to_string(),
+                "[Content_Types].xml".to_string(),
+                "xl/_rels/workbook.bin.rels".to_string(),
+            ]);
+        } else {
+            assert!(
+                report
+                    .differences
+                    .iter()
+                    .all(|d| !d.part.starts_with("xl/calcChain.")),
+                "did not expect calcChain changes for fixture without calcChain.bin; got:\n{report_text}",
+            );
+            let out_archive = WorkbookArchive::open(&out_path).expect("open written archive");
+            assert!(
+                out_archive.get("xl/calcChain.bin").is_none(),
+                "written workbook should not gain xl/calcChain.bin"
+            );
+        }
+
+        let missing_parts: Vec<_> = report
+            .differences
+            .iter()
+            .filter(|d| d.kind == "missing_part")
+            .map(|d| d.part.clone())
+            .collect();
+        if fixture_has_calc_chain {
+            assert!(
+                missing_parts == vec!["xl/calcChain.bin".to_string()],
+                "expected only calcChain.bin to be missing; got {missing_parts:?}\n{report_text}"
+            );
+        } else {
+            assert!(
+                missing_parts.is_empty(),
+                "unexpected missing parts: {missing_parts:?}\n{report_text}"
+            );
+        }
+
+        let diff_parts: BTreeSet<String> =
+            report.differences.iter().map(|d| d.part.clone()).collect();
+        let unexpected_parts: Vec<_> = diff_parts.difference(&allowed_parts).cloned().collect();
+        assert!(
+            unexpected_parts.is_empty(),
+            "unexpected diff parts: {unexpected_parts:?}\n{report_text}"
+        );
+
+        let patched = XlsbWorkbook::open(&out_path).expect("re-open patched xlsb");
+        let sheet = patched.read_sheet(0).expect("read patched sheet");
+        let a1 = sheet
+            .cells
+            .iter()
+            .find(|c| c.row == 0 && c.col == 0)
+            .expect("A1 exists");
+        assert_eq!(a1.value, XlsbCellValue::Text(new_text.to_string()));
+
+        let archive = WorkbookArchive::open(&out_path).expect("open written archive");
+        let sheet_bin = archive
+            .get("xl/worksheets/sheet1.bin")
+            .expect("sheet1.bin exists");
+        let (record_id, payload) =
+            find_xlsb_cell_record(sheet_bin, 0, 0).expect("find A1 cell record");
+        assert_eq!(
+            record_id, 0x0007,
+            "expected BrtCellIsst/STRING record id for A1"
+        );
+        assert!(
+            payload.len() >= 12,
+            "expected A1 payload to contain shared string index, got {} bytes",
+            payload.len()
+        );
+        let isst = u32::from_le_bytes(payload[8..12].try_into().unwrap()) as usize;
+        let shared_strings = patched.shared_strings();
+        assert!(
+            isst < shared_strings.len(),
+            "A1 shared string index {isst} out of bounds ({} strings)",
+            shared_strings.len()
+        );
+        assert_eq!(shared_strings[isst], new_text);
     }
 
     #[test]
