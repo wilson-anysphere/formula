@@ -72,3 +72,38 @@ test("permission gating: rejects permission not declared in manifest", async () 
   );
 });
 
+test("permission storage: migrates legacy string-array grants to v2 permission records", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-perms-migrate-"));
+  const storePath = path.join(dir, "permissions.json");
+
+  await fs.writeFile(
+    storePath,
+    JSON.stringify(
+      {
+        "pub.ext": ["cells.write", "network"]
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  const pm = new PermissionManager({
+    storagePath: storePath,
+    prompt: async () => true
+  });
+
+  const granted = await pm.getGrantedPermissions("pub.ext");
+  assert.deepEqual(granted, {
+    "cells.write": true,
+    network: { mode: "full" }
+  });
+
+  const raw = JSON.parse(await fs.readFile(storePath, "utf8"));
+  assert.deepEqual(raw, {
+    "pub.ext": {
+      "cells.write": true,
+      network: { mode: "full" }
+    }
+  });
+});

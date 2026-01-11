@@ -730,65 +730,72 @@ Limitations:
 
 ### Permission System
 
-```typescript
-type Permission = 
-  | "cells.read"
-  | "cells.write"
-  | "sheets.manage"
-  | "workbook.manage"
-  | "network"
-  | "clipboard"
-  | "storage"
-  | "ui.panels"
-  | "ui.commands"
-  | "ui.menus";
+Permissions are **declared** in an extension manifest and **granted** at runtime by the host. Grants are
+persisted per-extension and can be inspected/revoked by the application.
 
-const API_PERMISSIONS: Record<string, Permission[]> = {
-  "cells.getCell": ["cells.read"],
-  "cells.getRange": ["cells.read"],
-  "cells.setCell": ["cells.write"],
-  "cells.setRange": ["cells.write"],
-  "sheets.createSheet": ["sheets.manage"],
-  "sheets.deleteSheet": ["sheets.manage"],
-  "ui.createPanel": ["ui.panels"],
-  "commands.registerCommand": ["ui.commands"],
-  // ... more mappings
-};
+#### Declaring permissions
 
-class PermissionManager {
-  private grantedPermissions: Map<string, Set<Permission>> = new Map();
-  
-  async requestPermissions(
-    extensionId: string,
-    permissions: Permission[]
-  ): Promise<boolean> {
-    // Check if already granted
-    const existing = this.grantedPermissions.get(extensionId) || new Set();
-    const needed = permissions.filter(p => !existing.has(p));
-    
-    if (needed.length === 0) return true;
-    
-    // Prompt user
-    const granted = await this.promptUser(extensionId, needed);
-    
-    if (granted) {
-      const all = new Set([...existing, ...needed]);
-      this.grantedPermissions.set(extensionId, all);
-    }
-    
-    return granted;
-  }
-  
-  hasPermission(extensionId: string, apiCall: string): boolean {
-    const required = API_PERMISSIONS[apiCall] || [];
-    const granted = this.grantedPermissions.get(extensionId) || new Set();
-    
-    return required.every(p => granted.has(p));
+Legacy (string) declarations are still supported:
+
+```json
+{
+  "permissions": ["ui.commands", "network", "clipboard"]
+}
+```
+
+The manifest validator also accepts a future object form (currently treated as declaring the same
+top-level permission key):
+
+```json
+{
+  "permissions": [
+    "ui.commands",
+    { "network": { "mode": "allowlist", "hosts": ["api.example.com"] } }
+  ]
+}
+```
+
+#### Stored grant format (v2)
+
+On disk (Node) or in `localStorage` (browser), the host stores grants per extension as:
+
+```json
+{
+  "publisher.name": {
+    "cells.read": true,
+    "ui.commands": true,
+    "network": { "mode": "allowlist", "hosts": ["api.example.com", "*.example.org"] }
   }
 }
 ```
 
----
+Network modes:
+
+- `full`: allow all outbound network access
+- `allowlist`: allow only `hosts` that match the request (exact host, `*.wildcard`, or full origin like
+  `https://api.example.com`)
+- `deny`: deny all outbound network access
+
+Both `formula.network.fetch(url)` and permission-gated `WebSocket(url)` connections are checked against
+the effective network policy.
+
+#### Host introspection + revocation APIs
+
+Both the Node and browser hosts expose permission management helpers:
+
+```ts
+await host.getGrantedPermissions("publisher.name");
+await host.revokePermissions("publisher.name", ["network"]); // omit list to revoke all
+await host.resetAllPermissions(); // clears all extensions
+```
+
+#### Backwards compatibility / migration
+
+Existing persisted permission data stored as string arrays is automatically migrated on load. Legacy
+`"network"` grants are upgraded to `{ "mode": "full" }` to preserve behavior for already-trusted
+extensions.
+
+---  
 
 ## Extension Marketplace
 

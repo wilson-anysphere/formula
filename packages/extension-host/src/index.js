@@ -430,6 +430,18 @@ class ExtensionHost {
     }));
   }
 
+  async getGrantedPermissions(extensionId) {
+    return this._permissionManager.getGrantedPermissions(String(extensionId));
+  }
+
+  async revokePermissions(extensionId, permissions) {
+    return this._permissionManager.revokePermissions(String(extensionId), permissions);
+  }
+
+  async resetAllPermissions() {
+    return this._permissionManager.resetAllPermissions();
+  }
+
   getContributedCommands() {
     const out = [];
     for (const extension of this._extensions.values()) {
@@ -781,7 +793,7 @@ class ExtensionHost {
   }
 
   async _ensureSecurity() {
-    if (this._securityPermissionManager) return;
+    if (this._securityModule) return;
 
     if (!this._securityModulePromise) {
       const fallbackPath = pathToFileURL(path.resolve(__dirname, "../../security/src/index.js")).href;
@@ -797,19 +809,48 @@ class ExtensionHost {
           return import(fallbackPath);
         })
         .then((security) => {
-          const { AuditLogger, PermissionManager, SqliteAuditLogStore } = security;
+          const { AuditLogger, SqliteAuditLogStore } = security;
           const store = new SqliteAuditLogStore({ path: this._securityAuditDbPath });
           const auditLogger = new AuditLogger({ store });
-          const permissionManager = new PermissionManager({ auditLogger });
 
           this._securityModule = security;
           this._securityAuditLogger = auditLogger;
-          this._securityPermissionManager = permissionManager;
           return security;
         });
     }
 
     await this._securityModulePromise;
+  }
+
+  async _createSecurityPermissionManager(extension, apiKey) {
+    await this._ensureSecurity();
+    const principal = { type: "extension", id: extension.id };
+    const security = this._securityModule;
+    if (!security?.PermissionManager) {
+      throw new Error("Security module is not available");
+    }
+
+    const permissionManager = new security.PermissionManager({ auditLogger: this._securityAuditLogger });
+    const grants = await this._permissionManager.getGrantedPermissions(extension.id);
+    const network = grants?.network;
+
+    if (network?.mode === "full") {
+      permissionManager.grant(principal, { network: { mode: "full" } }, {
+        source: "extension-host.permission-manager",
+        apiKey
+      });
+    } else if (network?.mode === "allowlist") {
+      permissionManager.grant(
+        principal,
+        { network: { mode: "allowlist", allowlist: Array.isArray(network.hosts) ? network.hosts : [] } },
+        {
+          source: "extension-host.permission-manager",
+          apiKey
+        }
+      );
+    }
+
+    return { principal, permissionManager };
   }
 
   async _handleApiCall(extension, message) {
@@ -819,10 +860,11 @@ class ExtensionHost {
 
     const permissions = API_PERMISSIONS[apiKey] ?? [];
     const securityPrincipal = { type: "extension", id: extension.id };
-    const isNetworkFetch = apiKey === "network.fetch";
+    const isNetworkApi = apiKey === "network.fetch" || apiKey === "network.openWebSocket";
+    const networkUrl = isNetworkApi ? String(args?.[0] ?? "") : null;
 
     try {
-      if (isNetworkFetch) {
+      if (isNetworkApi) {
         await this._ensureSecurity();
       }
 
@@ -832,18 +874,12 @@ class ExtensionHost {
           displayName: extension.manifest.displayName ?? extension.manifest.name,
           declaredPermissions: extension.manifest.permissions ?? []
         },
-        permissions
+        permissions,
+        {
+          apiKey,
+          ...(isNetworkApi ? { network: { url: networkUrl } } : {})
+        }
       );
-
-      if (isNetworkFetch) {
-        // Mirror the extension-host permission grant into the unified security manager so
-        // audit logging and future allowlist enforcement happen in one place.
-        this._securityPermissionManager.grant(
-          securityPrincipal,
-          { network: { mode: "full" } },
-          { source: "extension-host.permission-manager", apiKey }
-        );
-      }
 
       const result = await this._executeApi(namespace, method, args, extension);
 
@@ -857,14 +893,19 @@ class ExtensionHost {
         // ignore
       }
     } catch (error) {
-      if (isNetworkFetch) {
+      if (isNetworkApi) {
         try {
           await this._ensureSecurity();
           this._securityAuditLogger?.log({
             eventType: "security.permission.denied",
             actor: securityPrincipal,
             success: false,
-            metadata: { apiKey, permissions, message: String(error?.message ?? error) }
+            metadata: {
+              apiKey,
+              permissions,
+              url: networkUrl ?? undefined,
+              message: String(error?.message ?? error)
+            }
           });
         } catch {
           // ignore
@@ -1059,11 +1100,11 @@ class ExtensionHost {
           throw new Error("Network fetch is not available in this runtime");
         }
 
-        await this._ensureSecurity();
-        const principal = { type: "extension", id: extension.id };
+        const apiKey = "network.fetch";
+        const { principal, permissionManager } = await this._createSecurityPermissionManager(extension, apiKey);
         const secureFetch = this._securityModule.createSecureFetch({
           principal,
-          permissionManager: this._securityPermissionManager,
+          permissionManager,
           auditLogger: this._securityAuditLogger,
           promptIfDenied: false
         });
@@ -1087,10 +1128,21 @@ class ExtensionHost {
         };
       }
 
-      case "network.openWebSocket":
+      case "network.openWebSocket": {
         // Used by worker runtimes to permission-gate WebSocket connections before they
         // call the platform WebSocket implementation directly.
+        const apiKey = "network.openWebSocket";
+        const url = String(args[0]);
+        const { principal, permissionManager } = await this._createSecurityPermissionManager(extension, apiKey);
+        await permissionManager.ensure(principal, { kind: "network", url }, { promptIfDenied: false });
+        this._securityAuditLogger?.log({
+          eventType: "security.network.websocket.open",
+          actor: principal,
+          success: true,
+          metadata: { url }
+        });
         return null;
+      }
 
       case "clipboard.readText":
         return this._clipboardText;

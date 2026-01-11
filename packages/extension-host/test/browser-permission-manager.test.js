@@ -75,3 +75,35 @@ test("browser PermissionManager: persists grants via injected storage backend", 
   );
 });
 
+test("browser PermissionManager: migrates legacy string-array grants to v2 permission records", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const storage = createMemoryStorage();
+  const storageKey = "formula.test.permissions.migrate";
+  storage.setItem(
+    storageKey,
+    JSON.stringify({
+      "pub.ext": ["network", "clipboard"]
+    })
+  );
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true
+  });
+
+  const granted = await pm.getGrantedPermissions("pub.ext");
+  assert.deepEqual(granted, {
+    network: { mode: "full" },
+    clipboard: true
+  });
+
+  const storedRaw = JSON.parse(storage.getItem(storageKey));
+  assert.deepEqual(storedRaw, {
+    "pub.ext": {
+      network: { mode: "full" },
+      clipboard: true
+    }
+  });
+});

@@ -1,4 +1,4 @@
-import { PermissionManager } from "./permission-manager.mjs";
+import { PermissionError, PermissionManager } from "./permission-manager.mjs";
 import { validateExtensionManifest } from "./manifest.mjs";
 
 const API_PERMISSIONS = {
@@ -51,6 +51,59 @@ const API_PERMISSIONS = {
   "config.get": ["storage"],
   "config.update": ["storage"]
 };
+
+function normalizeStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry) => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function safeParseUrl(url) {
+  const raw = String(url ?? "");
+  try {
+    if (typeof globalThis?.location?.href === "string") {
+      return new URL(raw, globalThis.location.href);
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    return new URL(raw, "http://localhost/");
+  } catch {
+    return null;
+  }
+}
+
+function isUrlAllowedByHosts(urlString, hosts) {
+  const parsed = safeParseUrl(urlString);
+  if (!parsed) return false;
+  const origin = parsed.origin;
+  const host = parsed.hostname;
+
+  for (const rawEntry of normalizeStringArray(hosts)) {
+    const entry = rawEntry.trim();
+    if (!entry) continue;
+
+    if (entry.includes("://")) {
+      if (origin === entry) return true;
+      continue;
+    }
+
+    if (entry.startsWith("*.")) {
+      const suffix = entry.slice(2);
+      if (host === suffix) return true;
+      if (host.endsWith(`.${suffix}`)) return true;
+      continue;
+    }
+
+    if (host === entry) return true;
+  }
+
+  return false;
+}
 
 function serializeError(error) {
   if (error instanceof Error) {
@@ -576,6 +629,18 @@ class BrowserExtensionHost {
     }));
   }
 
+  async getGrantedPermissions(extensionId) {
+    return this._permissionManager.getGrantedPermissions(String(extensionId));
+  }
+
+  async revokePermissions(extensionId, permissions) {
+    return this._permissionManager.revokePermissions(String(extensionId), permissions);
+  }
+
+  async resetAllPermissions() {
+    return this._permissionManager.resetAllPermissions();
+  }
+
   getContributedCommands() {
     const out = [];
     for (const extension of this._extensions.values()) {
@@ -822,6 +887,8 @@ class BrowserExtensionHost {
     const worker = extension.worker;
 
     const permissions = API_PERMISSIONS[apiKey] ?? [];
+    const isNetworkApi = apiKey === "network.fetch" || apiKey === "network.openWebSocket";
+    const networkUrl = isNetworkApi ? String(args?.[0] ?? "") : null;
 
     try {
       await this._permissionManager.ensurePermissions(
@@ -830,8 +897,29 @@ class BrowserExtensionHost {
           displayName: extension.manifest.displayName ?? extension.manifest.name,
           declaredPermissions: extension.manifest.permissions ?? []
         },
-        permissions
+        permissions,
+        {
+          apiKey,
+          ...(isNetworkApi ? { network: { url: networkUrl } } : {})
+        }
       );
+
+      if (isNetworkApi) {
+        const grants = await this._permissionManager.getGrantedPermissions(extension.id);
+        const policy = grants?.network;
+        if (!policy) {
+          throw new PermissionError("Permission denied: network");
+        }
+        if (policy.mode === "deny") {
+          throw new PermissionError("Permission denied: network");
+        }
+        if (policy.mode === "allowlist" && !isUrlAllowedByHosts(networkUrl, policy.hosts ?? [])) {
+          const host = safeParseUrl(networkUrl)?.hostname ?? null;
+          throw new PermissionError(
+            host ? `Permission denied: network (${host})` : `Permission denied: network (${networkUrl})`
+          );
+        }
+      }
 
       const result = await this._executeApi(namespace, method, args, extension);
 

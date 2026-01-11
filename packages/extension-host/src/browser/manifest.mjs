@@ -230,13 +230,35 @@ function validateConfiguration(configuration) {
 
 function validatePermissions(permissions) {
   const list = assertArray(permissions, "permissions");
+  const normalized = [];
   for (const [idx, perm] of list.entries()) {
-    const val = assertString(perm, `permissions[${idx}]`);
-    if (!VALID_PERMISSIONS.has(val)) {
-      throw new ManifestError(`Invalid permission: ${val}`);
+    if (typeof perm === "string") {
+      const val = assertString(perm, `permissions[${idx}]`);
+      if (!VALID_PERMISSIONS.has(val)) {
+        throw new ManifestError(`Invalid permission: ${val}`);
+      }
+      normalized.push(val);
+      continue;
     }
+
+    if (perm && typeof perm === "object" && !Array.isArray(perm)) {
+      const keys = Object.keys(perm);
+      if (keys.length !== 1) {
+        throw new ManifestError(
+          `permissions[${idx}] must be a permission string or an object with a single permission key`
+        );
+      }
+      const key = String(keys[0]);
+      if (!VALID_PERMISSIONS.has(key)) {
+        throw new ManifestError(`Invalid permission: ${key}`);
+      }
+      normalized.push(key);
+      continue;
+    }
+
+    throw new ManifestError(`permissions[${idx}] must be a permission string or object`);
   }
-  return list;
+  return normalized;
 }
 
 function validateActivationEvents(activationEvents, contributes) {
