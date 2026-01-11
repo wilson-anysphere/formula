@@ -59,7 +59,9 @@ async function verifyEd25519Signature(payloadBytes, signatureBase64, publicKeyPe
   const subtle = globalThis.crypto?.subtle;
   try {
     if (!subtle || typeof subtle.importKey !== "function" || typeof subtle.verify !== "function") {
-      throw new Error("WebCrypto subtle.importKey()/verify() is required to verify extension packages in the browser");
+      throw new Error(
+        "WebCrypto (crypto.subtle.importKey()/verify()) is required to verify extension packages in the browser"
+      );
     }
 
     const key = await subtle.importKey(
@@ -73,7 +75,15 @@ async function verifyEd25519Signature(payloadBytes, signatureBase64, publicKeyPe
     const ok = await subtle.verify({ name: "Ed25519" }, key, signature, payloadBytes);
     return Boolean(ok);
   } catch (error) {
-    throw new Error(`Failed to verify extension signature via WebCrypto: ${String(error?.message ?? error)}`);
+    const name = typeof error?.name === "string" ? error.name : "";
+    const message = String(error?.message ?? error);
+    if (name === "NotSupportedError") {
+      throw new Error(
+        "This environment's WebCrypto implementation does not support Ed25519, so extension packages cannot be verified. " +
+          `Upgrade to a runtime that supports Ed25519 in WebCrypto. Original error: ${message}`
+      );
+    }
+    throw new Error(`Failed to verify extension signature via WebCrypto: ${message}`);
   }
 }
 
