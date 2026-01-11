@@ -3,12 +3,9 @@ import path from "node:path";
 
 import semverPkg from "../../../../shared/semver.js";
 import extensionPackagePkg from "../../../../shared/extension-package/index.js";
-import signingPkg from "../../../../shared/crypto/signing.js";
 
 const { compareSemver } = semverPkg;
-const { detectExtensionPackageFormatVersion, extractExtensionPackage, readExtensionPackage, verifyExtensionPackageV2 } =
-  extensionPackagePkg;
-const { verifyBytesSignature } = signingPkg;
+const { detectExtensionPackageFormatVersion, verifyAndExtractExtensionPackage } = extensionPackagePkg;
 
 async function readJsonIfExists(filePath, fallback) {
   try {
@@ -82,47 +79,18 @@ export class ExtensionManager {
         ? download.formatVersion
         : detectExtensionPackageFormatVersion(download.bytes);
 
-    let manifest;
-
+    const installDir = path.join(this.extensionsDir, id);
     if (formatVersion === 1) {
       ensureSignaturePresent(download.signatureBase64);
-
-      const signatureOk = verifyBytesSignature(download.bytes, download.signatureBase64, publicKeyPem);
-      if (!signatureOk) throw new Error("Extension signature verification failed (mandatory)");
-
-      // Basic cross-check: the manifest inside the package must match the requested extension id.
-      const bundle = readExtensionPackage(download.bytes);
-      manifest = bundle.manifest;
-    } else if (formatVersion === 2) {
-      let verified;
-      try {
-        verified = verifyExtensionPackageV2(download.bytes, publicKeyPem);
-      } catch (error) {
-        throw new Error(`Extension signature verification failed (mandatory): ${error?.message ?? String(error)}`);
-      }
-
-      manifest = verified.manifest;
-
-      // Optional transport cross-check: if the server included an X-Package-Signature header,
-      // ensure it matches the signed payload inside the package.
-      if (download.signatureBase64 && download.signatureBase64 !== verified.signatureBase64) {
-        throw new Error("Marketplace signature header does not match package signature");
-      }
-    } else {
-      throw new Error(`Unsupported extension package formatVersion: ${formatVersion}`);
     }
 
-    const bundleId = `${manifest.publisher}.${manifest.name}`;
-    if (bundleId !== id) {
-      throw new Error(`Package id mismatch: expected ${id} but got ${bundleId}`);
-    }
-    if (manifest.version !== resolvedVersion) {
-      throw new Error(`Package version mismatch: expected ${resolvedVersion} but got ${manifest.version}`);
-    }
-
-    const installDir = path.join(this.extensionsDir, id);
-    await fs.rm(installDir, { recursive: true, force: true });
-    await extractExtensionPackage(download.bytes, installDir);
+    await verifyAndExtractExtensionPackage(download.bytes, installDir, {
+      publicKeyPem,
+      signatureBase64: download.signatureBase64,
+      formatVersion,
+      expectedId: id,
+      expectedVersion: resolvedVersion,
+    });
 
     const state = await this._loadState();
     state.installed[id] = {

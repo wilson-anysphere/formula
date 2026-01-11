@@ -439,9 +439,7 @@ function readExtensionPackageV2(packageBytes) {
   };
 }
 
-function verifyExtensionPackageV2(packageBytes, publicKeyPem) {
-  const parsed = readExtensionPackageV2(packageBytes);
-
+function verifyExtensionPackageV2Parsed(parsed, publicKeyPem) {
   const { manifest, checksums, signature, files } = parsed;
   if (!isPlainObject(manifest)) throw new Error("Invalid manifest.json (expected object)");
   if (!isPlainObject(checksums) || checksums.algorithm !== "sha256" || !isPlainObject(checksums.files)) {
@@ -554,8 +552,12 @@ function verifyExtensionPackageV2(packageBytes, publicKeyPem) {
   };
 }
 
-async function extractExtensionPackageV2(packageBytes, destDir) {
+function verifyExtensionPackageV2(packageBytes, publicKeyPem) {
   const parsed = readExtensionPackageV2(packageBytes);
+  return verifyExtensionPackageV2Parsed(parsed, publicKeyPem);
+}
+
+async function extractExtensionPackageV2FromParsed(parsed, destDir) {
   await fs.mkdir(destDir, { recursive: true });
 
   for (const [relPath, data] of parsed.files.entries()) {
@@ -563,7 +565,11 @@ async function extractExtensionPackageV2(packageBytes, destDir) {
     await fs.mkdir(path.dirname(outPath), { recursive: true });
     await fs.writeFile(outPath, data);
   }
+}
 
+async function extractExtensionPackageV2(packageBytes, destDir) {
+  const parsed = readExtensionPackageV2(packageBytes);
+  await extractExtensionPackageV2FromParsed(parsed, destDir);
   return parsed.manifest;
 }
 
@@ -572,8 +578,10 @@ module.exports = {
   canonicalJsonBytes,
   createSignaturePayloadBytes,
   createExtensionPackageV2,
+  extractExtensionPackageV2FromParsed,
   extractExtensionPackageV2,
   loadExtensionManifest,
   readExtensionPackageV2,
   verifyExtensionPackageV2,
+  verifyExtensionPackageV2Parsed,
 };

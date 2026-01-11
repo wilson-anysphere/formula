@@ -184,7 +184,22 @@ function safeJoin(baseDir, relPath) {
 
 async function extractExtensionPackageV1(packageBytes, destDir) {
   const bundle = readExtensionPackageV1(packageBytes);
+  await extractExtensionPackageV1FromBundle(bundle, destDir);
+  return bundle.manifest;
+}
 
+module.exports = {
+  PACKAGE_FORMAT,
+  PACKAGE_FORMAT_VERSION,
+
+  createExtensionPackageV1,
+  extractExtensionPackageV1FromBundle,
+  extractExtensionPackageV1,
+  loadExtensionManifest,
+  readExtensionPackageV1,
+};
+
+async function extractExtensionPackageV1FromBundle(bundle, destDir) {
   await fs.mkdir(destDir, { recursive: true });
 
   for (const file of bundle.files) {
@@ -195,16 +210,4 @@ async function extractExtensionPackageV1(packageBytes, destDir) {
     await fs.mkdir(path.dirname(outPath), { recursive: true });
     await fs.writeFile(outPath, Buffer.from(file.dataBase64, "base64"));
   }
-
-  return bundle.manifest;
 }
-
-module.exports = {
-  PACKAGE_FORMAT,
-  PACKAGE_FORMAT_VERSION,
-
-  createExtensionPackageV1,
-  extractExtensionPackageV1,
-  loadExtensionManifest,
-  readExtensionPackageV1,
-};

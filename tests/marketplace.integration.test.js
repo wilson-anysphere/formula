@@ -312,6 +312,100 @@ test("marketplace publish → discover → install → verify signature → run 
   }
 });
 
+test("tampered marketplace download does not clobber an existing install", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-tamper-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+  const extensionsDir = path.join(tmpRoot, "installed-extensions");
+  const statePath = path.join(tmpRoot, "extensions-state.json");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSourceV1 = path.join(tmpRoot, "ext-v1");
+    await copyDir(sampleExtensionSrc, extSourceV1);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSourceV1, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({
+      extensionDir: extSourceV1,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    const marketplaceClient = new MarketplaceClient({ baseUrl });
+    const manager = new ExtensionManager({ marketplaceClient, extensionsDir, statePath });
+    await manager.install(extensionId, "1.0.0");
+
+    const installedBefore = await manager.getInstalled(extensionId);
+    assert.ok(installedBefore);
+    assert.equal(installedBefore.version, "1.0.0");
+
+    // Publish an update, then tamper with the stored package bytes on disk to simulate a
+    // malicious/bitflipped marketplace download.
+    const extSourceV11 = path.join(tmpRoot, "ext-v1.1.0");
+    await copyDir(sampleExtensionSrc, extSourceV11);
+    await writeManifestVersion(extSourceV11, "1.1.0");
+    await publishExtension({
+      extensionDir: extSourceV11,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    const packagePath = path.join(dataDir, "packages", extensionId, "1.1.0.fextpkg");
+    const pkgBytes = await fs.readFile(packagePath);
+    const tampered = Buffer.from(pkgBytes);
+    tampered[Math.floor(tampered.length / 2)] ^= 0x01;
+    await fs.writeFile(packagePath, tampered);
+
+    await assert.rejects(() => manager.update(extensionId), /signature|checksum|tar checksum/i);
+
+    // The failed update should not have removed or partially overwritten the existing install.
+    const installedAfter = await manager.getInstalled(extensionId);
+    assert.ok(installedAfter);
+    assert.equal(installedAfter.version, "1.0.0");
+
+    const installedPackageJson = JSON.parse(
+      await fs.readFile(path.join(extensionsDir, extensionId, "package.json"), "utf8"),
+    );
+    assert.equal(installedPackageJson.version, "1.0.0");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("publish accepts v2 extension packages without signatureBase64", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-v2-nosig-"));
   const dataDir = path.join(tmpRoot, "marketplace-data");
