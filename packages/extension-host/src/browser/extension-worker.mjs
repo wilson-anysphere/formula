@@ -162,7 +162,7 @@ function applySandboxGuardrails(sandbox) {
         // to create new functions from strings.
         const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
         if (typeof AsyncFunction === "function") {
-          lockDownProperty(AsyncFunction.prototype, "constructor", DisabledFunction);
+          lockDownProperty(AsyncFunction.prototype, "constructor", blocked("AsyncFunction"));
         }
       } catch {
         // ignore
@@ -171,7 +171,20 @@ function applySandboxGuardrails(sandbox) {
       try {
         const GeneratorFunction = Object.getPrototypeOf(function* () {}).constructor;
         if (typeof GeneratorFunction === "function") {
-          lockDownProperty(GeneratorFunction.prototype, "constructor", DisabledFunction);
+          lockDownProperty(GeneratorFunction.prototype, "constructor", blocked("GeneratorFunction"));
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        const AsyncGeneratorFunction = Object.getPrototypeOf(async function* () {}).constructor;
+        if (typeof AsyncGeneratorFunction === "function") {
+          lockDownProperty(
+            AsyncGeneratorFunction.prototype,
+            "constructor",
+            blocked("AsyncGeneratorFunction")
+          );
         }
       } catch {
         // ignore

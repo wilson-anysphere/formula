@@ -259,6 +259,60 @@ test("extension-worker: eval() throws when disableEval is enabled", async () => 
   }
 });
 
+test("extension-worker: Function() throws when disableEval is enabled", async () => {
+  const dir = await createTempDir("formula-ext-worker-function-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  Function("return 1");\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /Function is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: AsyncFunction constructor throws when disableEval is enabled", async () => {
+  const dir = await createTempDir("formula-ext-worker-async-function-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;\n  AsyncFunction("return 1");\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /AsyncFunction is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("extension-worker: setTimeout(string) throws when disableEval is enabled", async () => {
+  const dir = await createTempDir("formula-ext-worker-timeout-string-");
+  try {
+    await writeFiles(dir, {
+      "main.mjs": `export async function activate() {\n  setTimeout("1 + 1", 0);\n}\n`
+    });
+    const mainUrl = pathToFileURL(path.join(dir, "main.mjs")).href;
+    const extensionPath = pathToFileURL(`${dir}${path.sep}`).href;
+
+    await assert.rejects(
+      () => activateExtensionWorker({ mainUrl, extensionPath }),
+      /setTimeout with a string callback is not allowed in extensions/i
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("extension-worker: rejects entrypoints outside extensionPath base URL", async () => {
   const rootDir = await createTempDir("formula-ext-worker-root-");
   const outsideDir = await createTempDir("formula-ext-worker-outside-");
