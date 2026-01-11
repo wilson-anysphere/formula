@@ -184,6 +184,14 @@ The desktop app wires marketplace installs into the Node extension host runtime:
 //
 // The current API is intentionally small and async-first: calls go through the host
 // (worker_threads in Node, WebWorker in the desktop/webview runtime).
+//
+// `@formula/extension-api` ships both a CommonJS and an ESM entrypoint:
+// - Node / CJS: `const formula = require("@formula/extension-api")`
+// - Browser / ESM: `import * as formula from "@formula/extension-api"`
+//
+// They are **behaviorally identical** and both match the `index.d.ts` contract
+// (including `Workbook.save/saveAs/close`, `Sheet.getRange/setRange/activate/rename`,
+// and `Range.address/formulas`).
 
 type CellValue = string | number | boolean | null;
 
@@ -194,11 +202,20 @@ interface Disposable {
 interface Workbook {
   readonly name: string;
   readonly path?: string | null;
+  readonly sheets: Sheet[];
+  readonly activeSheet: Sheet;
+  save(): Promise<void>;
+  saveAs(path: string): Promise<void>;
+  close(): Promise<void>;
 }
 
 interface Sheet {
   readonly id: string;
   readonly name: string;
+  getRange(ref: string): Promise<Range>;
+  setRange(ref: string, values: CellValue[][]): Promise<void>;
+  activate(): Promise<Sheet>;
+  rename(name: string): Promise<Sheet>;
 }
 
 interface Range {
@@ -206,7 +223,9 @@ interface Range {
   readonly startCol: number;
   readonly endRow: number;
   readonly endCol: number;
+  readonly address: string;
   readonly values: CellValue[][];
+  readonly formulas: (string | null)[][];
 }
 
 interface PanelWebview {
