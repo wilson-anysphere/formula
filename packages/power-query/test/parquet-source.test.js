@@ -4,6 +4,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { arrowTableFromColumns, arrowTableToParquet } from "../../data-io/src/index.js";
+
 import { QueryEngine } from "../src/engine.js";
 import { ArrowTableAdapter } from "../src/arrowTable.js";
 
@@ -11,8 +13,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let parquetAvailable = true;
 try {
-  await import("apache-arrow");
-  await import("parquet-wasm/esm");
+  // Validate Parquet support is actually usable via the data-io helpers (pnpm workspaces
+  // don't necessarily hoist `apache-arrow`/`parquet-wasm` to the repo root).
+  await arrowTableToParquet(arrowTableFromColumns({ __probe: new Int32Array([1]) }));
 } catch {
   parquetAvailable = false;
 }
