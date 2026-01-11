@@ -83,6 +83,65 @@ test('agent-init prepends CARGO_HOME/bin to PATH', { skip: !hasBash }, () => {
   assert.ok(pathValue.split(':')[0] === resolve(repoRoot, 'target', 'cargo-home', 'bin'));
 });
 
+test(
+  'agent-init treats CARGO_HOME=$HOME/.cargo as unset in local runs (defaults to repo-local cargo-home)',
+  { skip: !hasBash },
+  () => {
+    const fakeHome = mkdtempSync(resolve(tmpdir(), 'formula-home-'));
+    const cargoHome = runBash(
+      [
+        `export HOME="${fakeHome}"`,
+        'export CARGO_HOME="$HOME/.cargo"',
+        'unset CI',
+        'unset FORMULA_ALLOW_GLOBAL_CARGO_HOME',
+        'export DISPLAY=:99',
+        'source scripts/agent-init.sh >/dev/null',
+        'printf "%s" "$CARGO_HOME"',
+      ].join(' && '),
+    );
+
+    assert.equal(cargoHome, resolve(repoRoot, 'target', 'cargo-home'));
+  },
+);
+
+test(
+  'agent-init preserves CARGO_HOME=$HOME/.cargo when FORMULA_ALLOW_GLOBAL_CARGO_HOME=1',
+  { skip: !hasBash },
+  () => {
+    const fakeHome = mkdtempSync(resolve(tmpdir(), 'formula-home-'));
+    const cargoHome = runBash(
+      [
+        `export HOME="${fakeHome}"`,
+        'export CARGO_HOME="$HOME/.cargo"',
+        'unset CI',
+        'export FORMULA_ALLOW_GLOBAL_CARGO_HOME=1',
+        'export DISPLAY=:99',
+        'source scripts/agent-init.sh >/dev/null',
+        'printf "%s" "$CARGO_HOME"',
+      ].join(' && '),
+    );
+
+    assert.equal(cargoHome, resolve(fakeHome, '.cargo'));
+  },
+);
+
+test('agent-init preserves CARGO_HOME=$HOME/.cargo when CI is set', { skip: !hasBash }, () => {
+  const fakeHome = mkdtempSync(resolve(tmpdir(), 'formula-home-'));
+  const cargoHome = runBash(
+    [
+      `export HOME="${fakeHome}"`,
+      'export CARGO_HOME="$HOME/.cargo"',
+      'export CI=1',
+      'unset FORMULA_ALLOW_GLOBAL_CARGO_HOME',
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'printf "%s" "$CARGO_HOME"',
+    ].join(' && '),
+  );
+
+  assert.equal(cargoHome, resolve(fakeHome, '.cargo'));
+});
+
 test('agent-init can be sourced under /bin/sh (no bash-only syntax)', { skip: !hasSh }, () => {
   const { stdout, stderr } = runSh(
     [
