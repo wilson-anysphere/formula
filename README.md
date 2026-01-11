@@ -133,6 +133,28 @@ When encryption is enabled, existing legacy plaintext `.yjs` files in `SYNC_SERV
 
 Key rotation is operator-managed by replacing the KeyRing JSON (bumping `currentVersion` and adding a new key while keeping old key versions available for decryption).
 
+#### Internal admin API (purge persisted docs)
+
+The sync server exposes a small internal HTTP API intended for retention and
+operational workflows (purging documents, etc). These endpoints are **disabled
+by default**.
+
+Enable by setting:
+
+- `SYNC_SERVER_INTERNAL_ADMIN_TOKEN` (preferred), or
+- `INTERNAL_ADMIN_TOKEN` (fallback for multi-service deployments)
+
+All internal endpoints require:
+
+- header: `x-internal-admin-token: <token>`
+
+Purge a persisted Yjs document (disconnects active clients for that document):
+
+- `DELETE /internal/docs/<docName>` → `{ ok: true }`
+
+`<docName>` is the same document id used in the WebSocket URL and may contain
+slashes (URL-encode as needed).
+
 #### Auth (dev default)
 
 If no auth env vars are provided, the server starts with a **development token**:

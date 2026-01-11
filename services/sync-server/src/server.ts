@@ -105,8 +105,75 @@ export function createSyncServer(
     config.limits.maxConnAttemptsPerWindow,
     config.limits.connAttemptWindowMs
   );
+
+  const activeSocketsByDoc = new Map<string, Set<WebSocket>>();
+
+  // When a document is purged while clients are connected, y-websocket can
+  // re-persist it via in-flight updates and `writeState()` on last disconnect.
+  // Tombstoning prevents persistence until all connections are closed.
+  const tombstonedDocs = new Set<string>();
+  const tombstoneForceTimers = new Map<string, NodeJS.Timeout>();
+  const tombstoneGraceTimers = new Map<string, NodeJS.Timeout>();
+  const tombstoneGraceMs = 500;
+  const tombstoneMaxMs = 30_000;
+
+  const shouldPersist = (docName: string) => !tombstonedDocs.has(docName);
+
+  const tombstoneDoc = (docName: string) => {
+    tombstonedDocs.add(docName);
+
+    const grace = tombstoneGraceTimers.get(docName);
+    if (grace) {
+      clearTimeout(grace);
+      tombstoneGraceTimers.delete(docName);
+    }
+
+    if (!tombstoneForceTimers.has(docName)) {
+      const forceTimer = setTimeout(() => {
+        tombstonedDocs.delete(docName);
+        tombstoneForceTimers.delete(docName);
+        const pendingGrace = tombstoneGraceTimers.get(docName);
+        if (pendingGrace) {
+          clearTimeout(pendingGrace);
+          tombstoneGraceTimers.delete(docName);
+        }
+        logger.warn({ docName }, "internal_doc_tombstone_force_cleared");
+      }, tombstoneMaxMs);
+      forceTimer.unref();
+      tombstoneForceTimers.set(docName, forceTimer);
+    }
+  };
+
+  const maybeClearTombstone = (docName: string) => {
+    if (!tombstonedDocs.has(docName)) return;
+    const active = activeSocketsByDoc.get(docName);
+    if (active && active.size > 0) return;
+    if (tombstoneGraceTimers.has(docName)) return;
+
+    const graceTimer = setTimeout(() => {
+      const stillActive = activeSocketsByDoc.get(docName);
+      if (stillActive && stillActive.size > 0) {
+        tombstoneGraceTimers.delete(docName);
+        return;
+      }
+
+      tombstonedDocs.delete(docName);
+      const force = tombstoneForceTimers.get(docName);
+      if (force) {
+        clearTimeout(force);
+        tombstoneForceTimers.delete(docName);
+      }
+      tombstoneGraceTimers.delete(docName);
+    }, tombstoneGraceMs);
+    graceTimer.unref();
+    tombstoneGraceTimers.set(docName, graceTimer);
+  };
+
   let persistenceInitialized = false;
   let persistenceCleanup: (() => Promise<void>) | null = null;
+  let persistenceBackend: "file" | "leveldb" | null = null;
+  let clearPersistedDocument: ((docName: string) => Promise<void>) | null = null;
+
   let retentionManager: LeveldbRetentionManager | null = null;
   let retentionSweepTimer: NodeJS.Timeout | null = null;
 
@@ -135,7 +202,7 @@ export function createSyncServer(
         })
         .catch((err) => logger.error({ err }, "retention_sweep_failed"));
     }, config.retention.sweepIntervalMs);
-    retentionSweepTimer.unref();
+      retentionSweepTimer.unref();
   };
 
   const initPersistence = async () => {
@@ -153,14 +220,17 @@ export function createSyncServer(
       persistenceInitialized = true;
       persistenceCleanup = null;
       retentionManager = null;
-      setPersistence(
-        new FilePersistence(
-          config.dataDir,
-          logger,
-          config.persistence.compactAfterUpdates,
-          config.persistence.encryption
-        )
+      persistenceBackend = "file";
+      const persistence = new FilePersistence(
+        config.dataDir,
+        logger,
+        config.persistence.compactAfterUpdates,
+        config.persistence.encryption,
+        shouldPersist
       );
+      setPersistence(persistence);
+      clearPersistedDocument = (docName: string) =>
+        persistence.clearDocument(docName);
       logger.info(
         {
           dir: config.dataDir,
@@ -173,6 +243,7 @@ export function createSyncServer(
 
     if (createLeveldbPersistence) {
       const ldb = createLeveldbPersistence(config.dataDir);
+      persistenceBackend = "leveldb";
       retentionManager = new LeveldbRetentionManager(
         ldb,
         docConnectionTracker,
@@ -180,10 +251,28 @@ export function createSyncServer(
         config.retention.ttlMs
       );
 
+      const queues = new Map<string, Promise<void>>();
+      const enqueue = (docName: string, task: () => Promise<void>) => {
+        const prev = queues.get(docName) ?? Promise.resolve();
+        const next = prev
+          .catch(() => {
+            // Keep the queue alive even if a previous write failed.
+          })
+          .then(task);
+        queues.set(docName, next);
+        void next.finally(() => {
+          if (queues.get(docName) === next) queues.delete(docName);
+        });
+        return next;
+      };
+
       persistenceInitialized = true;
       persistenceCleanup = async () => {
+        await Promise.allSettled([...queues.values()]);
         await ldb.destroy();
       };
+      clearPersistedDocument = (docName: string) =>
+        enqueue(docName, () => ldb.clearDocument(docName));
 
       setPersistence({
         provider: ldb,
@@ -192,21 +281,25 @@ export function createSyncServer(
 
           ydoc.on("update", (update: Uint8Array, origin: unknown) => {
             if (origin === persistenceOrigin) return;
-            void ldb.storeUpdate(docName, update);
+            if (!shouldPersist(docName)) return;
+            void enqueue(docName, () => ldb.storeUpdate(docName, update));
             void retentionManager?.markSeen(docName);
           });
 
-          void retentionManager?.markSeen(docName, { force: true });
+          if (shouldPersist(docName)) {
+            void retentionManager?.markSeen(docName, { force: true });
 
-          const persistedYdoc = await ldb.getYDoc(docName);
-          Y.applyUpdate(
-            ydoc,
-            Y.encodeStateAsUpdate(persistedYdoc),
-            persistenceOrigin
-          );
+            const persistedYdoc = await ldb.getYDoc(docName);
+            Y.applyUpdate(
+              ydoc,
+              Y.encodeStateAsUpdate(persistedYdoc),
+              persistenceOrigin
+            );
+          }
         },
         writeState: async (docName: string) => {
-          await ldb.flushDocument(docName);
+          if (!shouldPersist(docName)) return;
+          await enqueue(docName, () => ldb.flushDocument(docName));
           void retentionManager?.markFlushed(docName);
         },
       });
@@ -248,14 +341,17 @@ export function createSyncServer(
         persistenceInitialized = true;
         persistenceCleanup = null;
         retentionManager = null;
-        setPersistence(
-          new FilePersistence(
-            config.dataDir,
-            logger,
-            config.persistence.compactAfterUpdates,
-            config.persistence.encryption
-          )
+        persistenceBackend = "file";
+        const persistence = new FilePersistence(
+          config.dataDir,
+          logger,
+          config.persistence.compactAfterUpdates,
+          config.persistence.encryption,
+          shouldPersist
         );
+        setPersistence(persistence);
+        clearPersistedDocument = (docName: string) =>
+          persistence.clearDocument(docName);
         return;
       }
 
@@ -280,6 +376,7 @@ export function createSyncServer(
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
         const ldb = new LeveldbPersistenceCtor(config.dataDir);
+        persistenceBackend = "leveldb";
         retentionManager = new LeveldbRetentionManager(
           ldb,
           docConnectionTracker,
@@ -287,10 +384,28 @@ export function createSyncServer(
           config.retention.ttlMs
         );
 
+        const queues = new Map<string, Promise<void>>();
+        const enqueue = (docName: string, task: () => Promise<void>) => {
+          const prev = queues.get(docName) ?? Promise.resolve();
+          const next = prev
+            .catch(() => {
+              // Keep the queue alive even if a previous write failed.
+            })
+            .then(task);
+          queues.set(docName, next);
+          void next.finally(() => {
+            if (queues.get(docName) === next) queues.delete(docName);
+          });
+          return next;
+        };
+
         persistenceInitialized = true;
         persistenceCleanup = async () => {
+          await Promise.allSettled([...queues.values()]);
           await ldb.destroy();
         };
+        clearPersistedDocument = (docName: string) =>
+          enqueue(docName, () => ldb.clearDocument(docName));
 
         setPersistence({
           provider: ldb,
@@ -301,22 +416,25 @@ export function createSyncServer(
 
             ydoc.on("update", (update: Uint8Array, origin: unknown) => {
               if (origin === persistenceOrigin) return;
-              void ldb.storeUpdate(docName, update);
+              if (!shouldPersist(docName)) return;
+              void enqueue(docName, () => ldb.storeUpdate(docName, update));
               void retentionManager?.markSeen(docName);
             });
 
-            void retentionManager?.markSeen(docName, { force: true });
-
-            const persistedYdoc = await ldb.getYDoc(docName);
-            Y.applyUpdate(
-              ydoc,
-              Y.encodeStateAsUpdate(persistedYdoc),
-              persistenceOrigin
-            );
+            if (shouldPersist(docName)) {
+              void retentionManager?.markSeen(docName, { force: true });
+              const persistedYdoc = await ldb.getYDoc(docName);
+              Y.applyUpdate(
+                ydoc,
+                Y.encodeStateAsUpdate(persistedYdoc),
+                persistenceOrigin
+              );
+            }
           },
           writeState: async (docName: string) => {
             // Compact updates on last client disconnect to keep DB size bounded.
-            await ldb.flushDocument(docName);
+            if (!shouldPersist(docName)) return;
+            await enqueue(docName, () => ldb.flushDocument(docName));
             void retentionManager?.markFlushed(docName);
           },
         });
@@ -339,6 +457,15 @@ export function createSyncServer(
     }
   };
 
+  const sendJson = (
+    res: http.ServerResponse,
+    statusCode: number,
+    body: any
+  ) => {
+    res.writeHead(statusCode, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
+
   const server = http.createServer((req, res) => {
     void (async () => {
       if (!req.url) {
@@ -349,14 +476,11 @@ export function createSyncServer(
       const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
       if (req.method === "GET" && url.pathname === "/healthz") {
         const snapshot = connectionTracker.snapshot();
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(
-          JSON.stringify({
-            status: "ok",
-            uptimeSec: Math.round(process.uptime()),
-            connections: snapshot,
-          })
-        );
+        sendJson(res, 200, {
+          status: "ok",
+          uptimeSec: Math.round(process.uptime()),
+          connections: snapshot,
+        });
         return;
       }
 
@@ -364,55 +488,128 @@ export function createSyncServer(
         req.resume();
 
         if (!config.internalAdminToken) {
-          res.writeHead(404, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: "not_found" }));
+          sendJson(res, 404, { error: "not_found" });
           return;
         }
 
-        const token = req.headers["x-internal-admin-token"];
-        if (token !== config.internalAdminToken) {
-          res.writeHead(403, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: "forbidden" }));
+        const header = req.headers["x-internal-admin-token"];
+        const provided = Array.isArray(header) ? header[0] : header;
+        if (provided !== config.internalAdminToken) {
+          sendJson(res, 403, { error: "forbidden" });
           return;
         }
 
         if (config.retention.ttlMs <= 0) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(
-            JSON.stringify({
-              error: "retention_disabled",
-              message:
-                "Retention is disabled. Set SYNC_SERVER_RETENTION_TTL_MS to a positive integer (milliseconds).",
-            })
-          );
+          sendJson(res, 400, {
+            error: "retention_disabled",
+            message:
+              "Retention is disabled. Set SYNC_SERVER_RETENTION_TTL_MS to a positive integer (milliseconds).",
+          });
           return;
         }
 
         if (!retentionManager) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(
-            JSON.stringify({
-              error: "retention_not_supported",
-              message:
-                "Retention is only supported when SYNC_SERVER_PERSISTENCE_BACKEND=leveldb and y-leveldb is installed.",
-            })
-          );
+          sendJson(res, 400, {
+            error: "retention_not_supported",
+            message:
+              "Retention is only supported when SYNC_SERVER_PERSISTENCE_BACKEND=leveldb and y-leveldb is installed.",
+          });
           return;
         }
 
         const result = await retentionManager.sweep();
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true, ...result }));
+        sendJson(res, 200, { ok: true, ...result });
         return;
       }
 
-      res.writeHead(404, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "not_found" }));
+      const internalPrefix = "/internal/docs";
+      if (
+        url.pathname === internalPrefix ||
+        url.pathname.startsWith(`${internalPrefix}/`)
+      ) {
+        const ip = pickIp(req, config.trustProxy);
+        if (!config.internalAdminToken) {
+          logger.warn(
+            { ip, path: url.pathname, reason: "disabled" },
+            "internal_doc_purge_rejected"
+          );
+          sendJson(res, 404, { error: "not_found" });
+          return;
+        }
+
+        const header = req.headers["x-internal-admin-token"];
+        const provided = Array.isArray(header) ? header[0] : header;
+        if (provided !== config.internalAdminToken) {
+          logger.warn(
+            { ip, path: url.pathname, reason: "forbidden" },
+            "internal_doc_purge_rejected"
+          );
+          sendJson(res, 403, { error: "forbidden" });
+          return;
+        }
+
+        if (req.method === "DELETE") {
+          let docName = "";
+          if (url.pathname.startsWith(`${internalPrefix}/`)) {
+            try {
+              docName = decodeURIComponent(
+                url.pathname.slice(`${internalPrefix}/`.length)
+              );
+            } catch {
+              logger.warn(
+                { ip, reason: "invalid_doc_name" },
+                "internal_doc_purge_rejected"
+              );
+              sendJson(res, 400, { error: "bad_request" });
+              return;
+            }
+          }
+          if (!docName) {
+            logger.warn(
+              { ip, reason: "missing_doc_name" },
+              "internal_doc_purge_rejected"
+            );
+            sendJson(res, 400, { error: "bad_request" });
+            return;
+          }
+
+          logger.info({ ip, docName }, "internal_doc_purge_requested");
+
+          tombstoneDoc(docName);
+
+          const sockets = activeSocketsByDoc.get(docName);
+          const socketCount = sockets?.size ?? 0;
+          if (sockets) {
+            for (const ws of Array.from(sockets)) ws.terminate();
+          }
+
+          if (!clearPersistedDocument || !persistenceBackend) {
+            throw new Error("Persistence is not initialized");
+          }
+
+          await clearPersistedDocument(docName);
+          maybeClearTombstone(docName);
+
+          logger.info(
+            { docName, backend: persistenceBackend, terminated: socketCount },
+            "internal_doc_purge_completed"
+          );
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+
+        sendJson(res, 404, { error: "not_found" });
+        return;
+      }
+
+      sendJson(res, 404, { error: "not_found" });
     })().catch((err) => {
       logger.error({ err }, "http_request_failed");
-      if (res.headersSent) return;
-      res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "internal_server_error" }));
+      if (res.headersSent) {
+        res.end();
+        return;
+      }
+      sendJson(res, 500, { error: "internal_error" });
     });
   });
 
@@ -422,6 +619,9 @@ export function createSyncServer(
     const ip = pickIp(req, config.trustProxy);
     const url = new URL(req.url ?? "/", "http://localhost");
     const docName = url.pathname.replace(/^\//, "");
+    const active = activeSocketsByDoc.get(docName) ?? new Set<WebSocket>();
+    active.add(ws);
+    activeSocketsByDoc.set(docName, active);
     const authCtx = (req as IncomingMessage & { auth?: unknown }).auth as
       | AuthContext
       | undefined;
@@ -447,6 +647,12 @@ export function createSyncServer(
       clearInterval(messageWindow);
       connectionTracker.unregister(ip);
       docConnectionTracker.unregister(docName);
+      const sockets = activeSocketsByDoc.get(docName);
+      if (sockets) {
+        sockets.delete(ws);
+        if (sockets.size === 0) activeSocketsByDoc.delete(docName);
+      }
+      maybeClearTombstone(docName);
       logger.info(
         { ip, docName, userId: authCtx?.userId },
         "ws_connection_closed"
@@ -498,6 +704,11 @@ export function createSyncServer(
       const docName = url.pathname.replace(/^\//, "");
       if (!docName) {
         sendUpgradeRejection(socket, 400, "Missing document id");
+        return;
+      }
+      if (tombstonedDocs.has(docName)) {
+        sendUpgradeRejection(socket, 503, "Document is being purged");
+        logger.warn({ ip, docName }, "ws_connection_rejected_doc_tombstoned");
         return;
       }
 

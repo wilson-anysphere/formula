@@ -204,6 +204,186 @@ test("syncs between two clients and persists encrypted state across restart", as
   assert.equal(doc3.getText("t").toString(), secretText);
 });
 
+test("purges persisted documents via internal admin API", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const port = await getAvailablePort();
+  const wsUrl = `ws://127.0.0.1:${port}`;
+
+  let server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      // Ensure any externally-provided internal token doesn't leak into tests.
+      INTERNAL_ADMIN_TOKEN: "",
+      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "test-admin",
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const docName = "purge-doc";
+
+  const doc1 = new Y.Doc();
+  const doc2 = new Y.Doc();
+
+  const provider1 = new WebsocketProvider(wsUrl, docName, doc1, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: "test-token" },
+  });
+  const provider2 = new WebsocketProvider(wsUrl, docName, doc2, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: "test-token" },
+  });
+
+  t.after(() => {
+    provider1.destroy();
+    provider2.destroy();
+    doc1.destroy();
+    doc2.destroy();
+  });
+
+  await waitForProviderSync(provider1);
+  await waitForProviderSync(provider2);
+
+  doc1.getText("t").insert(0, "hello");
+
+  await waitForCondition(() => doc2.getText("t").toString() === "hello", 10_000);
+  assert.equal(doc2.getText("t").toString(), "hello");
+
+  provider1.destroy();
+  provider2.destroy();
+  doc1.destroy();
+  doc2.destroy();
+
+  // Give the server a moment to persist state after the last client disconnects.
+  await new Promise((r) => setTimeout(r, 250));
+
+  await server.stop();
+  server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      INTERNAL_ADMIN_TOKEN: "",
+      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "test-admin",
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+    },
+  });
+
+  const doc3 = new Y.Doc();
+  const provider3 = new WebsocketProvider(wsUrl, docName, doc3, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: "test-token" },
+  });
+
+  t.after(() => {
+    provider3.destroy();
+    doc3.destroy();
+  });
+
+  await waitForProviderSync(provider3);
+  await waitForCondition(() => doc3.getText("t").toString() === "hello", 10_000);
+  assert.equal(doc3.getText("t").toString(), "hello");
+
+  const purgePath = `${server.httpUrl}/internal/docs/${encodeURIComponent(docName)}`;
+
+  const forbidden = await fetch(purgePath, {
+    method: "DELETE",
+    headers: {
+      "x-internal-admin-token": "wrong-token",
+    },
+  });
+  assert.equal(forbidden.status, 403);
+  assert.deepEqual(await forbidden.json(), { error: "forbidden" });
+
+  // Keep the doc active on the server while purging, but avoid reconnection logic
+  // from the Yjs provider by holding a raw websocket open.
+  const rawWs = new WebSocket(`${wsUrl}/${docName}?token=test-token`);
+  await new Promise<void>((resolve, reject) => {
+    rawWs.once("open", () => resolve());
+    rawWs.once("error", (err) => reject(err));
+  });
+  provider3.destroy();
+
+  const purged = await fetch(purgePath, {
+    method: "DELETE",
+    headers: {
+      "x-internal-admin-token": "test-admin",
+    },
+  });
+  assert.equal(purged.status, 200);
+  assert.deepEqual(await purged.json(), { ok: true });
+
+  await new Promise<void>((resolve) => {
+    if (rawWs.readyState === WebSocket.CLOSED) return resolve();
+    rawWs.once("close", () => resolve());
+  });
+
+  await server.stop();
+  server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      INTERNAL_ADMIN_TOKEN: "",
+      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "test-admin",
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+    },
+  });
+
+  const doc4 = new Y.Doc();
+  const provider4 = new WebsocketProvider(wsUrl, docName, doc4, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: "test-token" },
+  });
+
+  t.after(() => {
+    provider4.destroy();
+    doc4.destroy();
+  });
+
+  await waitForProviderSync(provider4);
+  assert.equal(doc4.getText("t").toString(), "");
+
+  provider4.destroy();
+  doc4.destroy();
+
+  await server.stop();
+  server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      INTERNAL_ADMIN_TOKEN: "",
+      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "",
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+    },
+  });
+
+  const disabled = await fetch(
+    `${server.httpUrl}/internal/docs/${encodeURIComponent(docName)}`,
+    {
+      method: "DELETE",
+      headers: {
+        "x-internal-admin-token": "test-admin",
+      },
+    }
+  );
+  assert.equal(disabled.status, 404);
+  assert.deepEqual(await disabled.json(), { error: "not_found" });
+});
+
 test("migrates legacy plaintext persistence files to encrypted format", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
   t.after(async () => {

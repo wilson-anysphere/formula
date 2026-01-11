@@ -37,6 +37,14 @@ export type SyncServerConfig = {
 
   auth: AuthMode;
 
+  /**
+   * Optional shared secret for internal admin endpoints (purge, retention ops, etc).
+   *
+   * Disabled by default. To enable, set `SYNC_SERVER_INTERNAL_ADMIN_TOKEN`.
+   * For convenience in multi-service deployments, `INTERNAL_ADMIN_TOKEN` is also
+   * accepted as a fallback unless `SYNC_SERVER_INTERNAL_ADMIN_TOKEN` is set
+   * (even to an empty string).
+   */
   internalAdminToken: string | null;
   retention: {
     ttlMs: number;
@@ -126,11 +134,11 @@ export function loadConfigFromEnv(): SyncServerConfig {
           keyRing: loadKeyRingFromEnv(),
         }
       : { mode: "off" as const };
+
   const internalAdminToken =
-    process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN &&
-    process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN.length > 0
-      ? process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN
-      : null;
+    process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN !== undefined
+      ? process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN || null
+      : process.env.INTERNAL_ADMIN_TOKEN || null;
 
   const retentionTtlMs = envInt(process.env.SYNC_SERVER_RETENTION_TTL_MS, 0);
   const retentionSweepIntervalMs = envInt(

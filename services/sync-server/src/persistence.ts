@@ -212,13 +212,17 @@ export class FilePersistence {
   private queues = new Map<string, PendingQueue>();
   private updateCounts = new Map<string, number>();
   private compactTimers = new Map<string, NodeJS.Timeout>();
+  private readonly shouldPersist: (docName: string) => boolean;
 
   constructor(
     private readonly dir: string,
     private readonly logger: Logger,
     private readonly compactAfterUpdates: number,
-    private readonly encryption: EncryptionConfig = { mode: "off" }
-  ) {}
+    private readonly encryption: EncryptionConfig = { mode: "off" },
+    shouldPersist?: (docName: string) => boolean
+  ) {
+    this.shouldPersist = shouldPersist ?? (() => true);
+  }
 
   private docHashForDoc(docName: string): string {
     return createHash("sha256").update(docName).digest("hex");
@@ -244,6 +248,7 @@ export class FilePersistence {
 
     const timer = setTimeout(() => {
       this.compactTimers.delete(docName);
+      if (!this.shouldPersist(docName)) return;
       void this.compactNow(docName, doc);
     }, 250);
 
@@ -251,6 +256,7 @@ export class FilePersistence {
   }
 
   private async compactNow(docName: string, doc: YTypes.Doc): Promise<void> {
+    if (!this.shouldPersist(docName)) return;
     await this.enqueue(docName, async () => {
       await fs.mkdir(this.dir, { recursive: true });
 
@@ -282,7 +288,7 @@ export class FilePersistence {
 
     const updateHandler = (update: Uint8Array, origin: unknown) => {
       if (origin === persistenceOrigin) return;
-
+      if (!this.shouldPersist(docName)) return;
       void this.enqueue(docName, async () => {
         await fs.mkdir(this.dir, { recursive: true });
 
@@ -316,6 +322,7 @@ export class FilePersistence {
     });
 
     await this.enqueue(docName, async () => {
+      if (!this.shouldPersist(docName)) return;
       await fs.mkdir(this.dir, { recursive: true });
 
       let data: Buffer | null = null;
@@ -381,6 +388,27 @@ export class FilePersistence {
   }
 
   async writeState(docName: string, doc: YTypes.Doc): Promise<void> {
+    if (!this.shouldPersist(docName)) return;
     await this.compactNow(docName, doc);
+  }
+
+  async clearDocument(docName: string): Promise<void> {
+    const timer = this.compactTimers.get(docName);
+    if (timer) clearTimeout(timer);
+    this.compactTimers.delete(docName);
+
+    const docHash = this.docHashForDoc(docName);
+    const filePath = this.filePathForDocHash(docHash);
+    await this.enqueue(docName, async () => {
+      await fs.rm(filePath, { force: true });
+    });
+
+    // Reset per-document bookkeeping so future docs start from a clean slate.
+    this.queues.delete(docName);
+    this.updateCounts.delete(docName);
+
+    const timerAfter = this.compactTimers.get(docName);
+    if (timerAfter) clearTimeout(timerAfter);
+    this.compactTimers.delete(docName);
   }
 }
