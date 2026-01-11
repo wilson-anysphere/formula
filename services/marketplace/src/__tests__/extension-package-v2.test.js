@@ -248,6 +248,68 @@ test("v2 rejects duplicate manifest.json entries", () => {
   assert.throws(() => readExtensionPackageV2(archive), /duplicate manifest\.json/i);
 });
 
+test("v2 rejects invalid sha256 values in checksums.json", () => {
+  const key = generateEd25519KeyPair();
+  const manifest = {
+    name: "temp-ext",
+    publisher: "temp-pub",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+  };
+
+  const packageJsonBytes = canonicalJsonBytes(manifest);
+  const checksums = {
+    algorithm: "sha256",
+    files: {
+      "package.json": { sha256: "not-a-hash", size: packageJsonBytes.length },
+    },
+  };
+
+  const signaturePayload = createSignaturePayloadBytes(manifest, checksums);
+  const signatureBase64 = signBytes(signaturePayload, key.privateKeyPem);
+
+  const archive = createTarArchive([
+    { name: "manifest.json", data: canonicalJsonBytes(manifest) },
+    { name: "checksums.json", data: canonicalJsonBytes(checksums) },
+    { name: "signature.json", data: canonicalJsonBytes({ algorithm: "ed25519", formatVersion: 2, signatureBase64 }) },
+    { name: "files/package.json", data: packageJsonBytes },
+  ]);
+
+  assert.throws(() => verifyExtensionPackageV2(archive, key.publicKeyPem), /invalid sha256/i);
+});
+
+test("v2 rejects non-integer sizes in checksums.json", () => {
+  const key = generateEd25519KeyPair();
+  const manifest = {
+    name: "temp-ext",
+    publisher: "temp-pub",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+  };
+
+  const packageJsonBytes = canonicalJsonBytes(manifest);
+  const checksums = {
+    algorithm: "sha256",
+    files: {
+      "package.json": { sha256: sha256(packageJsonBytes), size: 1.5 },
+    },
+  };
+
+  const signaturePayload = createSignaturePayloadBytes(manifest, checksums);
+  const signatureBase64 = signBytes(signaturePayload, key.privateKeyPem);
+
+  const archive = createTarArchive([
+    { name: "manifest.json", data: canonicalJsonBytes(manifest) },
+    { name: "checksums.json", data: canonicalJsonBytes(checksums) },
+    { name: "signature.json", data: canonicalJsonBytes({ algorithm: "ed25519", formatVersion: 2, signatureBase64 }) },
+    { name: "files/package.json", data: packageJsonBytes },
+  ]);
+
+  assert.throws(() => verifyExtensionPackageV2(archive, key.publicKeyPem), /invalid size/i);
+});
+
 test("marketplace store accepts v1 packages during transition", async (t) => {
   try {
     requireFromHere.resolve("sql.js");

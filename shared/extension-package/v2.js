@@ -376,6 +376,32 @@ function verifyExtensionPackageV2(packageBytes, publicKeyPem) {
     throw new Error("Invalid signature.json");
   }
 
+  const checksumEntries = new Map();
+  for (const [rawPath, entry] of Object.entries(checksums.files)) {
+    const normalized = normalizePath(rawPath);
+    if (normalized !== rawPath) {
+      throw new Error(`checksums.json contains non-normalized path: ${rawPath}`);
+    }
+    if (!isPlainObject(entry)) {
+      throw new Error(`checksums.json entry for ${rawPath} must be an object`);
+    }
+    const sha = typeof entry.sha256 === "string" ? entry.sha256.toLowerCase() : null;
+    if (!sha || !/^[0-9a-f]{64}$/.test(sha)) {
+      throw new Error(`checksums.json entry for ${rawPath} has invalid sha256`);
+    }
+    const size = entry.size;
+    if (
+      typeof size !== "number" ||
+      !Number.isFinite(size) ||
+      size < 0 ||
+      !Number.isInteger(size) ||
+      size > Number.MAX_SAFE_INTEGER
+    ) {
+      throw new Error(`checksums.json entry for ${rawPath} has invalid size`);
+    }
+    checksumEntries.set(rawPath, { sha256: sha, size });
+  }
+
   const payloadBytes = createSignaturePayloadBytes(manifest, checksums);
   const ok = verifyBytesSignature(payloadBytes, signature.signatureBase64, publicKeyPem, { algorithm: SIGNATURE_ALGORITHM });
   if (!ok) throw new Error("Package signature verification failed");
@@ -401,11 +427,11 @@ function verifyExtensionPackageV2(packageBytes, publicKeyPem) {
     throw new Error("files/package.json does not match manifest.json");
   }
 
-  const expectedPaths = new Set(Object.keys(checksums.files));
+  const expectedPaths = new Set(checksumEntries.keys());
 
   for (const [relPath, data] of files.entries()) {
-    const expected = checksums.files[relPath];
-    if (!expected || typeof expected.sha256 !== "string" || typeof expected.size !== "number") {
+    const expected = checksumEntries.get(relPath);
+    if (!expected) {
       throw new Error(`checksums.json missing entry for ${relPath}`);
     }
 
