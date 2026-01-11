@@ -5,6 +5,8 @@ use roxmltree::Document;
 
 mod cell_styles;
 pub use cell_styles::{StylesPart, StylesPartError};
+mod style_editor;
+pub use style_editor::XlsxStylesEditor;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StylesError {

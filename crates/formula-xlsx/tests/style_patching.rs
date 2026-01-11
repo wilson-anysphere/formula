@@ -1,0 +1,107 @@
+use std::fs;
+use std::io::{Cursor, Read};
+
+use formula_model::{CellRef, CellValue};
+use formula_xlsx::{load_from_bytes, patch_xlsx_streaming, WorksheetCellPatch};
+use zip::ZipArchive;
+
+fn load_fixture() -> Vec<u8> {
+    fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/styles/varied_styles.xlsx"
+    ))
+    .expect("fixture exists")
+}
+
+fn sheet1_xml(bytes: &[u8]) -> String {
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("valid zip");
+    let mut xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .expect("sheet1.xml exists")
+        .read_to_string(&mut xml)
+        .expect("read sheet xml");
+    xml
+}
+
+fn cell_s_attr(sheet_xml: &str, a1: &str) -> Option<String> {
+    let doc = roxmltree::Document::parse(sheet_xml).expect("valid xml");
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    doc.descendants()
+        .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some(a1))
+        .and_then(|n| n.attribute("s"))
+        .map(str::to_string)
+}
+
+#[test]
+fn patch_preserves_existing_style_when_xf_index_none() -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = load_fixture();
+    let orig = load_from_bytes(&bytes)?;
+    let sheet_id = orig.workbook.sheets[0].id;
+    let sheet = orig.workbook.sheet(sheet_id).expect("sheet1 exists");
+
+    let a1 = CellRef::from_a1("A1")?;
+    let orig_style = sheet
+        .cell(a1)
+        .map(|c| c.style_id)
+        .expect("A1 should exist in fixture");
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        a1,
+        CellValue::String("Updated".to_string()),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let patched = load_from_bytes(out.get_ref())?;
+    let sheet_id = patched.workbook.sheets[0].id;
+    let sheet = patched
+        .workbook
+        .sheet(sheet_id)
+        .expect("sheet1 exists in patched workbook");
+    let cell = sheet.cell(a1).expect("A1 should exist after patch");
+
+    assert_eq!(cell.value, CellValue::String("Updated".to_string()));
+    assert_eq!(cell.style_id, orig_style, "style should be preserved by default");
+    Ok(())
+}
+
+#[test]
+fn patch_can_override_style_xf_index() -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = load_fixture();
+    let a1 = CellRef::from_a1("A1")?;
+
+    // Remove the style by setting `xf_index = Some(0)`.
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        a1,
+        CellValue::String("NoStyle".to_string()),
+        None,
+    )
+    .with_xf_index(Some(0));
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes.clone()), &mut out, &[patch])?;
+    let sheet_xml = sheet1_xml(out.get_ref());
+    assert_eq!(cell_s_attr(&sheet_xml, "A1"), None);
+
+    // Overwrite the style to an existing non-zero `xf` index.
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        a1,
+        CellValue::String("StyledAgain".to_string()),
+        None,
+    )
+    .with_xf_index(Some(2));
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+    let sheet_xml = sheet1_xml(out.get_ref());
+    assert_eq!(cell_s_attr(&sheet_xml, "A1"), Some("2".to_string()));
+
+    Ok(())
+}
+

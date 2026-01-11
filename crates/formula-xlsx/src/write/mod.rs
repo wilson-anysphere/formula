@@ -16,7 +16,7 @@ use zip::ZipWriter;
 
 use crate::path::{rels_for_part, resolve_target};
 use crate::sheet_metadata::{parse_sheet_tab_color, write_sheet_tab_color};
-use crate::styles::StylesPart;
+use crate::styles::XlsxStylesEditor;
 use crate::{CellValueKind, DateSystem, SheetMeta, XlsxDocument, XlsxError};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
@@ -271,7 +271,7 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
 
     // Parse/update styles.xml (cellXfs) so cell `s` attributes refer to real xf indices.
     let mut style_table = doc.workbook.styles.clone();
-    let mut styles_part = StylesPart::parse_or_default(
+    let mut styles_editor = XlsxStylesEditor::parse_or_default(
         parts.get(&styles_part_name).map(|b| b.as_slice()),
         &mut style_table,
     )?;
@@ -281,8 +281,8 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         .iter()
         .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id))
         .filter(|style_id| *style_id != 0);
-    let style_to_xf = styles_part.xf_indices_for_style_ids(style_ids, &style_table)?;
-    parts.insert(styles_part_name.clone(), styles_part.to_xml_bytes());
+    let style_to_xf = styles_editor.ensure_styles_for_style_ids(style_ids, &style_table)?;
+    parts.insert(styles_part_name.clone(), styles_editor.to_styles_xml_bytes());
 
     // Ensure core relationship/content types metadata exists when we synthesize new
     // parts for existing packages. For existing relationships we preserve IDs by

@@ -47,6 +47,13 @@ pub struct WorksheetCellPatch {
     pub value: CellValue,
     /// Optional formula to write into the `<f>` element. Leading `=` is permitted.
     pub formula: Option<String>,
+    /// Optional `xf` index to write into the cell `s` attribute.
+    ///
+    /// - `None`: preserve the existing `s` attribute when patching an existing cell (and omit `s`
+    ///   entirely when inserting a new cell).
+    /// - `Some(0)`: remove the `s` attribute.
+    /// - `Some(xf)` where `xf != 0`: set/overwrite `s="xf"`.
+    pub xf_index: Option<u32>,
 }
 
 impl WorksheetCellPatch {
@@ -61,7 +68,13 @@ impl WorksheetCellPatch {
             cell,
             value,
             formula,
+            xf_index: None,
         }
+    }
+
+    pub fn with_xf_index(mut self, xf_index: Option<u32>) -> Self {
+        self.xf_index = xf_index;
+        self
     }
 }
 
@@ -141,6 +154,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
                 CellPatch::Clear { .. } => (CellValue::Empty, None),
                 CellPatch::Set { value, formula, .. } => (value.clone(), formula.clone()),
             };
+            let xf_index = patch.style_index();
             patches_by_part
                 .entry(worksheet_part.clone())
                 .or_default()
@@ -149,7 +163,8 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
                     cell_ref,
                     value,
                     formula,
-                ));
+                )
+                .with_xf_index(xf_index));
         }
     }
 
@@ -227,6 +242,7 @@ struct CellPatchInternal {
     col_0: u32,
     value: CellValue,
     formula: Option<String>,
+    xf_index: Option<u32>,
 }
 
 struct RowState {
@@ -235,7 +251,7 @@ struct RowState {
     next_idx: usize,
 }
 
-fn patch_worksheet_xml_streaming<R: Read, W: Write>(
+pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     input: R,
     output: W,
     worksheet_part: &str,
@@ -255,6 +271,7 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 col_0,
                 value: patch.value.clone(),
                 formula: patch.formula.clone(),
+                xf_index: patch.xf_index,
             });
     }
     for row_patches in patches_by_row.values_mut() {
@@ -578,6 +595,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
 ) -> Result<(), StreamingPatchError> {
     let patch_formula = patch.formula.as_deref();
     let mut existing_t: Option<String> = None;
+    let style_override = patch.xf_index;
 
     let mut c = BytesStart::new("c");
     let mut has_r = false;
@@ -585,6 +603,9 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         let attr = attr?;
         if attr.key.as_ref() == b"t" {
             existing_t = Some(attr.unescape_value()?.into_owned());
+            continue;
+        }
+        if attr.key.as_ref() == b"s" && style_override.is_some() {
             continue;
         }
         if attr.key.as_ref() == b"r" {
@@ -603,6 +624,13 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         if should_preserve_unknown_t(existing_t) {
             cell_t_owned = Some(existing_t.to_string());
             body_kind = CellBodyKind::V(s.clone());
+        }
+    }
+
+    if let Some(xf_index) = style_override {
+        if xf_index != 0 {
+            let xf = xf_index.to_string();
+            c.push_attribute(("s", xf.as_str()));
         }
     }
 
@@ -850,12 +878,16 @@ fn write_patched_cell<W: Write>(
 
     let mut c = BytesStart::new("c");
     let inserted_a1 = original.is_none().then(|| cell_ref.to_a1());
+    let style_override = patch.xf_index;
 
     if let Some(orig) = original {
         for attr in orig.attributes() {
             let attr = attr?;
             if attr.key.as_ref() == b"t" {
                 existing_t = Some(attr.unescape_value()?.into_owned());
+                continue;
+            }
+            if attr.key.as_ref() == b"s" && style_override.is_some() {
                 continue;
             }
             c.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
@@ -869,6 +901,13 @@ fn write_patched_cell<W: Write>(
         if should_preserve_unknown_t(existing_t) {
             cell_t_owned = Some(existing_t.to_string());
             body_kind = CellBodyKind::V(s.clone());
+        }
+    }
+
+    if let Some(xf_index) = style_override {
+        if xf_index != 0 {
+            let xf = xf_index.to_string();
+            c.push_attribute(("s", xf.as_str()));
         }
     }
 
