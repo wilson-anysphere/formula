@@ -226,6 +226,14 @@ describe("API e2e: DLP policy + classification endpoints", () => {
     const ownerCookie = extractCookie(ownerRegister.headers["set-cookie"]);
     const orgId = (ownerRegister.json() as any).organization.id as string;
 
+    const putOrgPolicy = await app.inject({
+      method: "PUT",
+      url: `/orgs/${orgId}/dlp-policy`,
+      headers: { cookie: ownerCookie },
+      payload: { policy: DEFAULT_DLP_POLICY }
+    });
+    expect(putOrgPolicy.statusCode).toBe(200);
+
     const createDoc = await app.inject({
       method: "POST",
       url: "/docs",
@@ -294,6 +302,28 @@ describe("API e2e: DLP policy + classification endpoints", () => {
     expect(resolveInRange.json()).toMatchObject({
       classification: { level: "Restricted", labels: ["PII"] },
       source: { scope: "range", selectorKey: `range:${docId}:Sheet1:0,0:2,2` }
+    });
+
+    const evaluateCopy = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/dlp/evaluate`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        action: "clipboard.copy",
+        selector: {
+          scope: "cell",
+          documentId: docId,
+          sheetId: "Sheet1",
+          row: 0,
+          col: 1
+        }
+      }
+    });
+    expect(evaluateCopy.statusCode).toBe(200);
+    expect(evaluateCopy.json()).toMatchObject({
+      decision: "block",
+      classification: { level: "Restricted", labels: ["PII"] },
+      maxAllowed: "Confidential"
     });
   });
 });

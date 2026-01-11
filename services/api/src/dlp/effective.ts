@@ -1,5 +1,3 @@
-import type { Pool } from "pg";
-
 import {
   CLASSIFICATION_LEVEL,
   DLP_DECISION,
@@ -13,7 +11,12 @@ import {
   type PolicyEvaluationResult,
 } from "./dlp";
 
-type DbClient = Pick<Pool, "query">;
+import {
+  getAggregateClassificationForRange,
+  getEffectiveClassificationForSelector,
+  normalizeSelectorColumns,
+  type DbClient,
+} from "./classificationResolver";
 
 const DEFAULT_CLASSIFICATION: Classification = {
   level: CLASSIFICATION_LEVEL.PUBLIC,
@@ -42,6 +45,24 @@ export async function getClassificationForSelectorKey(
 
   if (res.rowCount !== 1) return DEFAULT_CLASSIFICATION;
   return normalizeClassification(res.rows[0]!.classification);
+}
+
+async function getEffectiveClassificationForSelectorOrRange(db: DbClient, docId: string, selector: unknown): Promise<Classification> {
+  const normalized = normalizeSelectorColumns(selector);
+  if (normalized.scope === "range") {
+    return getAggregateClassificationForRange(
+      db,
+      docId,
+      normalized.sheetId!,
+      normalized.startRow!,
+      normalized.startCol!,
+      normalized.endRow!,
+      normalized.endCol!
+    );
+  }
+
+  const resolved = await getEffectiveClassificationForSelector(db, docId, selector);
+  return resolved.classification;
 }
 
 export async function getEffectiveDocumentClassification(db: DbClient, docId: string): Promise<Classification> {
@@ -103,12 +124,13 @@ export async function evaluateDocumentDlpPolicy(
     docId: string;
     action: string;
     options?: { includeRestrictedContent?: boolean };
-    selectorKey?: string;
+    selector?: unknown;
   }
 ): Promise<PolicyEvaluationResult> {
-  const classification = params.selectorKey
-    ? await getClassificationForSelectorKey(db, params.docId, params.selectorKey)
-    : await getEffectiveDocumentClassification(db, params.docId);
+  const classification =
+    params.selector !== undefined
+      ? await getEffectiveClassificationForSelectorOrRange(db, params.docId, params.selector)
+      : await getEffectiveDocumentClassification(db, params.docId);
 
   const policyRes = await resolveEffectivePolicy(db, params.orgId, params.docId);
 
@@ -138,4 +160,3 @@ export async function evaluateDocumentDlpPolicy(
     options: params.options,
   });
 }
-

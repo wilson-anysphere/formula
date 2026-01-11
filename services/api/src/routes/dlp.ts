@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { enforceOrgIpAllowlistForSessionWithAllowlist } from "../auth/orgIpAllowlist";
-import { DLP_ACTION, selectorKey } from "../dlp/dlp";
+import { DLP_ACTION } from "../dlp/dlp";
 import { evaluateDocumentDlpPolicy } from "../dlp/effective";
 import { canDocument, type DocumentRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
@@ -62,26 +62,32 @@ export function registerDlpRoutes(app: FastifyInstance): void {
     const parsed = EvaluateDlpBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
 
-    let selectorKeyValue: string | undefined;
+    let selectorValue: unknown | undefined;
     if (parsed.data.selector !== undefined) {
       try {
         const selector = parsed.data.selector;
         if (typeof selector !== "object" || selector === null) throw new Error("Selector must be an object");
         if ((selector as any).documentId !== docId) throw new Error("Selector documentId must match route docId");
-        selectorKeyValue = selectorKey(selector);
+        selectorValue = selector;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Invalid selector";
         return reply.code(400).send({ error: "invalid_request", message });
       }
     }
 
-    const evaluation = await evaluateDocumentDlpPolicy(app.db, {
-      orgId: membership.orgId,
-      docId,
-      action: parsed.data.action,
-      options: parsed.data.options,
-      selectorKey: selectorKeyValue,
-    });
+    let evaluation;
+    try {
+      evaluation = await evaluateDocumentDlpPolicy(app.db, {
+        orgId: membership.orgId,
+        docId,
+        action: parsed.data.action,
+        options: parsed.data.options,
+        selector: selectorValue,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid selector";
+      return reply.code(400).send({ error: "invalid_request", message });
+    }
 
     return reply.send({
       decision: evaluation.decision,

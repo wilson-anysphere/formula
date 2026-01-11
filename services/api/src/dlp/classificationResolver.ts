@@ -3,6 +3,8 @@ import { selectorKey as coreSelectorKey } from "../../../../shared/dlp-core";
 import type { Classification } from "../../../../shared/dlp-core";
 import type { Pool } from "pg";
 
+export type DbClient = Pick<Pool, "query">;
+
 export type ClassificationResolutionSource = {
   scope: string;
   selectorKey: string;
@@ -246,7 +248,7 @@ function resolveFromContainingRanges(rows: RangeRow[]): ClassificationResolution
   return { classification: best, source: { scope: "range", selectorKey: bestKey } };
 }
 
-async function queryDocument(db: Pool, docId: string): Promise<ClassificationResolutionResult | null> {
+async function queryDocument(db: DbClient, docId: string): Promise<ClassificationResolutionResult | null> {
   const res = await db.query(
     `
       SELECT selector_key, classification
@@ -259,7 +261,7 @@ async function queryDocument(db: Pool, docId: string): Promise<ClassificationRes
   return resolveFromExactRows(rows);
 }
 
-async function querySheet(db: Pool, docId: string, sheetId: string): Promise<ClassificationResolutionResult | null> {
+async function querySheet(db: DbClient, docId: string, sheetId: string): Promise<ClassificationResolutionResult | null> {
   const res = await db.query(
     `
       SELECT selector_key, classification
@@ -273,7 +275,7 @@ async function querySheet(db: Pool, docId: string, sheetId: string): Promise<Cla
 }
 
 async function queryColumn(params: {
-  db: Pool;
+  db: DbClient;
   docId: string;
   sheetId: string;
   columnIndex?: number;
@@ -321,7 +323,13 @@ async function queryColumn(params: {
   return null;
 }
 
-async function queryCell(db: Pool, docId: string, sheetId: string, row: number, col: number): Promise<ClassificationResolutionResult | null> {
+async function queryCell(
+  db: DbClient,
+  docId: string,
+  sheetId: string,
+  row: number,
+  col: number
+): Promise<ClassificationResolutionResult | null> {
   const res = await db.query(
     `
       SELECT selector_key, classification
@@ -335,7 +343,7 @@ async function queryCell(db: Pool, docId: string, sheetId: string, row: number, 
 }
 
 async function queryContainingRangesForCell(
-  db: Pool,
+  db: DbClient,
   docId: string,
   sheetId: string,
   row: number,
@@ -368,7 +376,7 @@ async function queryContainingRangesForCell(
 }
 
 async function queryContainingRangesForRange(
-  db: Pool,
+  db: DbClient,
   docId: string,
   sheetId: string,
   startRow: number,
@@ -414,7 +422,7 @@ async function queryContainingRangesForRange(
  * 6) default = Public
  */
 export async function getEffectiveClassificationForSelector(
-  db: Pool,
+  db: DbClient,
   docId: string,
   selector: unknown
 ): Promise<ClassificationResolutionResult> {
@@ -505,7 +513,7 @@ export async function getEffectiveClassificationForSelector(
 }
 
 export async function getAggregateClassificationForRange(
-  db: Pool,
+  db: DbClient,
   docId: string,
   sheetId: string,
   startRow: number,
