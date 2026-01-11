@@ -368,7 +368,9 @@ Cell functions are implemented as an async cell-evaluator + cache:
   - Preserves provenance for direct cell/range references passed to AI functions:
     - Cell ref: `{ __cellRef: "Sheet1!A1", value: ... }`
     - Range ref: array of provenance cell values, tagged with `__rangeRef` + `__totalCells`
-  - Direct range references are sampled (default 200 cells) to avoid materializing unbounded arrays.
+  - Direct range references are sampled (default 200 cells) to avoid materializing unbounded arrays:
+    - include a small deterministic prefix (top-left cells)
+    - plus a deterministic seeded random sample from across the remainder of the range
 - Engine: `apps/desktop/src/spreadsheet/AiCellFunctionEngine.ts`
   - Returns `#GETTING_DATA` while an LLM request is pending, and reuses cached results.
   - **DLP enforcement**: evaluates `ai.cloudProcessing` policy using per-cell/range classification metadata.
