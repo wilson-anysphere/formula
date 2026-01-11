@@ -88,7 +88,9 @@ export async function waitForServerReady(
 export function waitForProviderSync(provider: {
   on: (event: string, cb: (...args: any[]) => void) => void;
   off: (event: string, cb: (...args: any[]) => void) => void;
+  synced?: boolean;
 }): Promise<void> {
+  if (provider.synced === true) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       provider.off("sync", handler);
@@ -103,6 +105,14 @@ export function waitForProviderSync(provider: {
       resolve();
     };
     provider.on("sync", handler);
+
+    // The provider may have already synced before we attached our listener,
+    // particularly when multiple providers are created before awaiting sync.
+    if (provider.synced === true) {
+      clearTimeout(timeout);
+      provider.off("sync", handler);
+      resolve();
+    }
   });
 }
 

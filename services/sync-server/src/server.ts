@@ -200,6 +200,21 @@ export function createSyncServer(
 
   const metrics = createSyncServerMetrics();
 
+  const closeCodeLabel = (code: number): string => {
+    switch (code) {
+      case 1000:
+      case 1003:
+      case 1006:
+      case 1008:
+      case 1009:
+      case 1011:
+      case 1013:
+        return String(code);
+      default:
+        return "other";
+    }
+  };
+
   const recordUpgradeRejection = (
     reason: "rate_limit" | "auth_failure" | "tombstone" | "retention_purging"
   ) => {
@@ -1181,7 +1196,8 @@ export function createSyncServer(
       void retentionManager?.markSeen(persistedName);
     });
 
-    ws.on("close", () => {
+    ws.on("close", (code) => {
+      metrics.wsClosesTotal.inc({ code: closeCodeLabel(code) });
       clearInterval(messageWindow);
       connectionTracker.unregister(ip);
       docConnectionTracker.unregister(persistedName);

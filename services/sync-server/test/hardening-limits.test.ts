@@ -62,9 +62,6 @@ function buildAwarenessMessage(entries: {
 
 test("closes websocket on oversized binary message", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-limits-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const server = await startSyncServer({
     dataDir,
@@ -75,6 +72,9 @@ test("closes websocket on oversized binary message", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const ws = new WebSocket(`${server.wsUrl}/limits-doc?token=test-token`);
@@ -96,9 +96,6 @@ test("closes websocket on oversized binary message", async (t) => {
 
 test("drops oversized awareness JSON without closing connection", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-awareness-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const server = await startSyncServer({
     dataDir,
@@ -111,6 +108,9 @@ test("drops oversized awareness JSON without closing connection", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = "awareness-size-doc";
@@ -166,9 +166,6 @@ test("drops oversized awareness JSON without closing connection", async (t) => {
 
 test("rate limits messages per document", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-doc-rate-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const server = await startSyncServer({
     dataDir,
@@ -180,6 +177,9 @@ test("rate limits messages per document", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const ws = new WebSocket(`${server.wsUrl}/doc-rate?token=test-token`);

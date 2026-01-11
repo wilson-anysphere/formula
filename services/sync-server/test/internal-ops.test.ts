@@ -9,7 +9,6 @@ import WebSocket from "ws";
 import { WebsocketProvider, Y } from "./yjs-interop.ts";
 
 import {
-  getAvailablePort,
   startSyncServer,
   waitForCondition,
   waitForProviderSync,
@@ -65,13 +64,8 @@ async function expectWsUpgradeStatus(
 
 test("internal endpoints are disabled without admin token", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
     env: {
@@ -81,6 +75,9 @@ test("internal endpoints are disabled without admin token", async (t) => {
   t.after(async () => {
     await server.stop();
   });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
 
   const res = await fetch(`${server.httpUrl}/internal/stats`);
   assert.equal(res.status, 404);
@@ -88,13 +85,8 @@ test("internal endpoints are disabled without admin token", async (t) => {
 
 test("internal endpoints require x-internal-admin-token", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
     env: {
@@ -103,6 +95,9 @@ test("internal endpoints require x-internal-admin-token", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const missingHeader = await fetch(`${server.httpUrl}/internal/stats`);
@@ -123,13 +118,8 @@ test("internal endpoints require x-internal-admin-token", async (t) => {
 
 test("purge creates tombstone and prevents doc resurrection", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
     env: {
@@ -138,6 +128,9 @@ test("purge creates tombstone and prevents doc resurrection", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = "purge-doc";
@@ -189,13 +182,8 @@ test("purge creates tombstone and prevents doc resurrection", async (t) => {
 
 test("purge decodes url-encoded doc ids", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
-  const port = await getAvailablePort();
   const server = await startSyncServer({
-    port,
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
     env: {
@@ -204,6 +192,9 @@ test("purge decodes url-encoded doc ids", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   // y-websocket uses the room name as the URL path verbatim; slashes are valid

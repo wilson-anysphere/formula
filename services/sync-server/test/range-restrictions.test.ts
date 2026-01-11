@@ -146,9 +146,6 @@ async function loadPersistedDoc(dataDir: string, docName: string): Promise<Y.Doc
 
 test("forbidden cell write is rejected and connection closed", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
   const server = await startSyncServer({
@@ -159,6 +156,9 @@ test("forbidden cell write is rejected and connection closed", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = `doc-${Math.random().toString(16).slice(2)}`;
@@ -248,9 +248,6 @@ test("forbidden cell write is rejected and connection closed", async (t) => {
 
 test("allowed cell write is accepted and syncs", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
   const server = await startSyncServer({
@@ -261,6 +258,9 @@ test("allowed cell write is accepted and syncs", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = `doc-${Math.random().toString(16).slice(2)}`;
@@ -329,9 +329,6 @@ test("allowed cell write is accepted and syncs", async (t) => {
 
 test("allowed offline edit syncs on reconnect (shadow state seeded from server doc)", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
   const server = await startSyncServer({
@@ -342,6 +339,9 @@ test("allowed offline edit syncs on reconnect (shadow state seeded from server d
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = `doc-${Math.random().toString(16).slice(2)}`;
@@ -386,8 +386,11 @@ test("allowed offline edit syncs on reconnect (shadow state seeded from server d
     docWriter.getMap("cells").set(cellKey, cell);
   });
 
+  assert.ok(providerWriter.ws, "Expected writer provider to have an underlying ws");
+  const writerClose = waitForWsClose(providerWriter.ws);
+
   providerWriter.destroy();
-  await new Promise((r) => setTimeout(r, 250));
+  await writerClose;
 
   // Offline edit: modify an existing cell *before* reconnecting.
   docWriter.transact(() => {
@@ -432,9 +435,6 @@ test("allowed offline edit syncs on reconnect (shadow state seeded from server d
 
 test("strict mode rejects updates when cell keys cannot be parsed", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
   const server = await startSyncServer({
@@ -445,6 +445,9 @@ test("strict mode rejects updates when cell keys cannot be parsed", async (t) =>
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = `doc-${Math.random().toString(16).slice(2)}`;
@@ -613,9 +616,6 @@ test("rangeRestrictions: rejects invalid numeric cell keys (Infinity) without cr
 
 test("rangeRestrictions: allows edits outside protected ranges", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   let server = await startSyncServer({
     dataDir,
@@ -624,6 +624,9 @@ test("rangeRestrictions: allows edits outside protected ranges", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = `doc-${Math.random().toString(16).slice(2)}`;
@@ -696,9 +699,6 @@ test("rangeRestrictions: allows edits outside protected ranges", async (t) => {
 
 test("rangeRestrictions: blocks edits to protected cells and does not persist them", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   let server = await startSyncServer({
     dataDir,
@@ -707,6 +707,9 @@ test("rangeRestrictions: blocks edits to protected cells and does not persist th
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = `doc-${Math.random().toString(16).slice(2)}`;
@@ -784,9 +787,6 @@ test("rangeRestrictions: blocks edits to protected cells and does not persist th
 
 test("rangeRestrictions: legacy cell key formats cannot bypass protected ranges", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   let server = await startSyncServer({
     dataDir,
@@ -795,6 +795,9 @@ test("rangeRestrictions: legacy cell key formats cannot bypass protected ranges"
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = `doc-${Math.random().toString(16).slice(2)}`;

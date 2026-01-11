@@ -24,15 +24,25 @@ async function waitForProcessExit(
 ): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
   return await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // ignore
+      }
       reject(new Error("Timed out waiting for process exit"));
     }, timeoutMs);
     timeout.unref();
 
-    child.once("exit", (code, signal) => {
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
       clearTimeout(timeout);
       resolve({ code, signal });
-    });
+    };
+
+    child.once("exit", onExit);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      child.off("exit", onExit);
+      onExit(child.exitCode, child.signalCode);
+    }
   });
 }
 
@@ -68,6 +78,19 @@ function signJwtToken(params: {
 function yjsFilePathForDoc(dataDir: string, docName: string): string {
   const id = createHash("sha256").update(docName).digest("hex");
   return path.join(dataDir, `${id}.yjs`);
+}
+
+async function waitForFile(filePath: string): Promise<void> {
+  await waitForCondition(async () => {
+    try {
+      const bytes = await readFile(filePath);
+      return bytes.byteLength > 0;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return false;
+      throw err;
+    }
+  }, 10_000);
 }
 
 async function expectWsUpgradeStatus(
@@ -175,9 +198,6 @@ function buildAwarenessMessage(entries: {
 
 test("syncs between two clients and persists encrypted state across restart", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
   const wsUrl = `ws://127.0.0.1:${port}`;
@@ -193,6 +213,9 @@ test("syncs between two clients and persists encrypted state across restart", as
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = "test-doc";
@@ -235,10 +258,8 @@ test("syncs between two clients and persists encrypted state across restart", as
   doc1.destroy();
   doc2.destroy();
 
-  // Give the server a moment to persist state after the last client disconnects.
-  await new Promise((r) => setTimeout(r, 250));
-
   const persistedPath = yjsFilePathForDoc(dataDir, docName);
+  await waitForFile(persistedPath);
   const persistedBytes = await readFile(persistedPath);
   assert.equal(persistedBytes.subarray(0, 8).toString("ascii"), "FMLYJS01");
   assert.equal(persistedBytes.readUInt8(8) & 0b1, 0b1);
@@ -283,9 +304,6 @@ test(
   "syncs and persists encrypted state across restart with SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64",
   async (t) => {
     const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-    t.after(async () => {
-      await rm(dataDir, { recursive: true, force: true });
-    });
 
     const port = await getAvailablePort();
     const wsUrl = `ws://127.0.0.1:${port}`;
@@ -307,6 +325,9 @@ test(
     });
     t.after(async () => {
       await server.stop();
+    });
+    t.after(async () => {
+      await rm(dataDir, { recursive: true, force: true });
     });
 
     const docName = "test-doc-key-b64";
@@ -349,10 +370,8 @@ test(
     doc1.destroy();
     doc2.destroy();
 
-    // Give the server a moment to persist state after the last client disconnects.
-    await new Promise((r) => setTimeout(r, 250));
-
     const persistedPath = yjsFilePathForDoc(dataDir, docName);
+    await waitForFile(persistedPath);
     const persistedBytes = await readFile(persistedPath);
     assert.equal(persistedBytes.subarray(0, 8).toString("ascii"), "FMLYJS01");
     assert.equal(persistedBytes.readUInt8(8) & 0b1, 0b1);
@@ -398,9 +417,6 @@ test(
 
 test("purges persisted documents via internal admin API", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
   const wsUrl = `ws://127.0.0.1:${port}`;
@@ -418,6 +434,9 @@ test("purges persisted documents via internal admin API", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = "purge-doc";
@@ -565,9 +584,6 @@ test("purges persisted documents via internal admin API", async (t) => {
 
 test("migrates legacy plaintext persistence files to encrypted format", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
   const wsUrl = `ws://127.0.0.1:${port}`;
@@ -580,6 +596,9 @@ test("migrates legacy plaintext persistence files to encrypted format", async (t
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = "migration-doc";
@@ -601,11 +620,10 @@ test("migrates legacy plaintext persistence files to encrypted format", async (t
 
   provider1.destroy();
   doc1.destroy();
-  await new Promise((r) => setTimeout(r, 250));
-
   await server.stop();
 
   const persistedPath = yjsFilePathForDoc(dataDir, docName);
+  await waitForFile(persistedPath);
   const plaintextBytes = await readFile(persistedPath);
   assert.notEqual(
     plaintextBytes.subarray(0, 8).toString("ascii"),
@@ -653,9 +671,6 @@ test("migrates legacy plaintext persistence files to encrypted format", async (t
 
 test("supports KeyRing rotation for encrypted file persistence", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
   const wsUrl = `ws://127.0.0.1:${port}`;
@@ -687,6 +702,9 @@ test("supports KeyRing rotation for encrypted file persistence", async (t) => {
   t.after(async () => {
     await server.stop();
   });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
 
   {
     const doc = new Y.Doc();
@@ -706,9 +724,9 @@ test("supports KeyRing rotation for encrypted file persistence", async (t) => {
 
     provider.destroy();
     doc.destroy();
-    await new Promise((r) => setTimeout(r, 250));
 
     const persistedPath = yjsFilePathForDoc(dataDir, docName);
+    await waitForFile(persistedPath);
     const bytesV1 = await readFile(persistedPath);
     assert.equal(bytesV1.subarray(0, 8).toString("ascii"), "FMLYJS01");
     assert.equal(bytesV1.readUInt8(8) & 0b1, 0b1);
@@ -758,9 +776,18 @@ test("supports KeyRing rotation for encrypted file persistence", async (t) => {
 
     provider.destroy();
     doc.destroy();
-    await new Promise((r) => setTimeout(r, 250));
 
     const persistedPath = yjsFilePathForDoc(dataDir, docName);
+    await waitForCondition(async () => {
+      try {
+        const bytes = await readFile(persistedPath);
+        return parseEncryptedYjsKeyVersions(bytes).includes(2);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") return false;
+        throw err;
+      }
+    }, 10_000);
     const bytesV2 = await readFile(persistedPath);
     assert.equal(bytesV2.subarray(0, 8).toString("ascii"), "FMLYJS01");
     assert.equal(bytesV2.readUInt8(8) & 0b1, 0b1);
@@ -776,9 +803,6 @@ test("supports KeyRing rotation for encrypted file persistence", async (t) => {
 
 test("loads KeyRing from SYNC_SERVER_ENCRYPTION_KEYRING_PATH", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const keyRingPath = path.join(dataDir, "keyring.json");
   await writeFile(keyRingPath, TEST_KEYRING_JSON);
@@ -798,6 +822,9 @@ test("loads KeyRing from SYNC_SERVER_ENCRYPTION_KEYRING_PATH", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = "keyring-path-doc";
@@ -819,9 +846,9 @@ test("loads KeyRing from SYNC_SERVER_ENCRYPTION_KEYRING_PATH", async (t) => {
 
   provider.destroy();
   doc.destroy();
-  await new Promise((r) => setTimeout(r, 250));
 
   const persistedPath = yjsFilePathForDoc(dataDir, docName);
+  await waitForFile(persistedPath);
   const persistedBytes = await readFile(persistedPath);
   assert.equal(persistedBytes.subarray(0, 8).toString("ascii"), "FMLYJS01");
   assert.equal(persistedBytes.readUInt8(8) & 0b1, 0b1);
@@ -894,9 +921,6 @@ test(
 
 test("enforces read-only roles (viewer/commenter) for Yjs updates", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
 
@@ -910,6 +934,9 @@ test("enforces read-only roles (viewer/commenter) for Yjs updates", async (t) =>
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const wsUrl = server.wsUrl;
@@ -982,9 +1009,6 @@ test("enforces read-only roles (viewer/commenter) for Yjs updates", async (t) =>
 
 test("sanitizes awareness identity and blocks clientID spoofing", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
 
@@ -998,6 +1022,9 @@ test("sanitizes awareness identity and blocks clientID spoofing", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const wsUrl = server.wsUrl;
@@ -1276,9 +1303,6 @@ test("sanitizes awareness identity and blocks clientID spoofing", async (t) => {
 
 test("refuses to start a second server using the same data directory", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-lock-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port1 = await getAvailablePort();
   const port2 = await getAvailablePort();
@@ -1300,6 +1324,9 @@ test("refuses to start a second server using the same data directory", async (t)
   });
   t.after(async () => {
     await server1.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   let stdout2 = "";
@@ -1417,9 +1444,6 @@ test("does not treat lock from another host as stale", async (t) => {
 
 test("removes stale lock from the same host and continues startup", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-lock-stale-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const stalePid = process.pid + 10_000_000;
   const lockPath = path.join(dataDir, ".sync-server.lock");
@@ -1442,6 +1466,9 @@ test("removes stale lock from the same host and continues startup", async (t) =>
   t.after(async () => {
     await server.stop();
   });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
 
   const activeLock = JSON.parse(await readFile(lockPath, "utf8")) as {
     pid?: unknown;
@@ -1452,9 +1479,6 @@ test("removes stale lock from the same host and continues startup", async (t) =>
 
 test("/readyz returns 503 when data dir locking is disabled", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-readyz-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const server = await startSyncServer({
     dataDir,
@@ -1467,6 +1491,9 @@ test("/readyz returns 503 when data dir locking is disabled", async (t) => {
   t.after(async () => {
     await server.stop();
   });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
 
   const res = await fetch(`${server.httpUrl}/readyz`);
   assert.equal(res.status, 503);
@@ -1477,16 +1504,18 @@ test("/readyz returns 503 when data dir locking is disabled", async (t) => {
 
 test("removes data directory lock file on graceful shutdown", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-lock-cleanup-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
-
   const server = await startSyncServer({
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
     env: {
       SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
     },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const lockPath = path.join(dataDir, ".sync-server.lock");

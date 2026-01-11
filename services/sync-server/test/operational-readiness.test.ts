@@ -43,9 +43,6 @@ async function httpsRequestText(url: string, opts?: { headers?: Record<string, s
 
 test("exposes Prometheus metrics in text format", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-metrics-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const server = await startSyncServer({
     dataDir,
@@ -57,6 +54,9 @@ test("exposes Prometheus metrics in text format", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const ws = new WebSocket(`${server.wsUrl}/metrics-doc?token=test-token`);
@@ -92,9 +92,6 @@ test("exposes Prometheus metrics in text format", async (t) => {
 
 test("supports HTTPS/WSS when SYNC_SERVER_TLS_CERT_PATH and SYNC_SERVER_TLS_KEY_PATH are set", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-tls-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
   const certPath = path.join(fixturesDir, "localhost-cert.pem");
@@ -112,6 +109,9 @@ test("supports HTTPS/WSS when SYNC_SERVER_TLS_CERT_PATH and SYNC_SERVER_TLS_KEY_
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   assert.match(server.httpUrl, /^https:\/\//);

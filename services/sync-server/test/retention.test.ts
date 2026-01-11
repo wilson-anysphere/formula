@@ -178,9 +178,6 @@ function expectWebSocketUpgradeStatus(
 
 test("retention sweep purges inactive docs (leveldb)", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const ldb = new InMemoryLeveldbPersistence();
   const logger = createLogger("silent");
@@ -191,6 +188,9 @@ test("retention sweep purges inactive docs (leveldb)", async (t) => {
   await server.start();
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const now = Date.now();
@@ -227,9 +227,6 @@ test("retention sweep purges inactive docs (leveldb)", async (t) => {
 
 test("retention sweep skips docs with active websocket connections", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const ldb = new InMemoryLeveldbPersistence();
   await ldb.storeUpdate("active-doc", seedUpdate("hi"));
@@ -242,6 +239,9 @@ test("retention sweep skips docs with active websocket connections", async (t) =
   await server.start();
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const doc = new Y.Doc();
@@ -285,9 +285,6 @@ test(
   "rejects websocket upgrades while retention is purging a legacy (raw docName) document (leveldb hashing)",
   async (t) => {
     const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
-    t.after(async () => {
-      await rm(dataDir, { recursive: true, force: true });
-    });
 
     const docName = "legacy-doc";
 
@@ -329,6 +326,9 @@ test(
     t.after(async () => {
       await server.stop();
     });
+    t.after(async () => {
+      await rm(dataDir, { recursive: true, force: true });
+    });
 
     const sweepPromise = fetch(`${server.getHttpUrl()}/internal/retention/sweep`, {
       method: "POST",
@@ -352,9 +352,6 @@ test(
 
 test("pong-based lastSeen refresh uses persisted docName when docName hashing is enabled", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const ldb = new InMemoryLeveldbPersistence();
   const logger = createLogger("silent");
@@ -374,6 +371,9 @@ test("pong-based lastSeen refresh uses persisted docName when docName hashing is
   await server.start();
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = "active-doc";
@@ -399,9 +399,6 @@ test("pong-based lastSeen refresh uses persisted docName when docName hashing is
 
 test("retention sweep endpoint returns 404 when internal admin token is disabled", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const ldb = new InMemoryLeveldbPersistence();
   const logger = createLogger("silent");
@@ -419,6 +416,9 @@ test("retention sweep endpoint returns 404 when internal admin token is disabled
   t.after(async () => {
     await server.stop();
   });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
 
   const res = await fetch(`${server.getHttpUrl()}/internal/retention/sweep`, {
     method: "POST",
@@ -433,9 +433,6 @@ test("retention sweep endpoint returns 404 when internal admin token is disabled
 
 test("retention sweep endpoint returns 400 when retention TTL is disabled", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const ldb = new InMemoryLeveldbPersistence();
   const logger = createLogger("silent");
@@ -446,6 +443,9 @@ test("retention sweep endpoint returns 400 when retention TTL is disabled", asyn
   await server.start();
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const res = await fetch(`${server.getHttpUrl()}/internal/retention/sweep`, {
@@ -465,9 +465,6 @@ test("retention sweep purges docs using y-leveldb + level-mem (no native LevelDB
   const { LeveldbPersistence } = await loadYLeveldbFromTarball(t);
 
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-leveldb-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   let ldb: any;
   const logger = createLogger("silent");
@@ -481,6 +478,9 @@ test("retention sweep purges docs using y-leveldb + level-mem (no native LevelDB
   await server.start();
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const now = Date.now();

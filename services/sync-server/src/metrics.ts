@@ -71,6 +71,7 @@ function createNoopMetrics(): SyncServerMetrics {
     wsConnectionsTotal: noopCounter,
     wsConnectionsCurrent: noopGauge,
     wsConnectionsRejectedTotal: noopCounter as Counter<"reason">,
+    wsClosesTotal: noopCounter as Counter<"code">,
     wsMessagesRateLimitedTotal: noopCounter,
     wsMessagesTooLargeTotal: noopCounter,
     retentionSweepsTotal: noopCounter as Counter<"sweep">,
@@ -98,6 +99,8 @@ export type SyncServerMetrics = {
   wsConnectionsTotal: Counter<string>;
   wsConnectionsCurrent: Gauge<string>;
   wsConnectionsRejectedTotal: Counter<"reason">;
+
+  wsClosesTotal: Counter<"code">;
 
   wsMessagesRateLimitedTotal: Counter<string>;
   wsMessagesTooLargeTotal: Counter<string>;
@@ -147,6 +150,17 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   wsConnectionsRejectedTotal.inc({ reason: "auth_failure" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "tombstone" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "retention_purging" }, 0);
+
+  const wsClosesTotal = new promClient.Counter({
+    name: "sync_server_ws_closes_total",
+    help: "Total WebSocket close events by close code.",
+    labelNames: ["code"],
+    registers: [registry],
+  });
+  // Pre-initialize common codes used by the server.
+  for (const code of ["1000", "1003", "1006", "1008", "1009", "1011", "1013", "other"]) {
+    wsClosesTotal.inc({ code }, 0);
+  }
 
   const wsMessagesRateLimitedTotal = new promClient.Counter({
     name: "sync_server_ws_messages_rate_limited_total",
@@ -214,6 +228,7 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     wsConnectionsTotal,
     wsConnectionsCurrent,
     wsConnectionsRejectedTotal,
+    wsClosesTotal,
     wsMessagesRateLimitedTotal,
     wsMessagesTooLargeTotal,
     retentionSweepsTotal,

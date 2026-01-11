@@ -80,9 +80,6 @@ function encodeWebsocketAwarenessMessage(awarenessUpdate: Uint8Array): Uint8Arra
 
 test("rejects JWT when docId mismatches path", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
   const server = await startSyncServer({
@@ -92,6 +89,9 @@ test("rejects JWT when docId mismatches path", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const token = signJwt({ sub: "u1", docId: "doc-a", orgId: "o1", role: "editor" });
@@ -136,9 +136,6 @@ test("rejects JWT when docId mismatches path", async (t) => {
 
 test("viewer can sync but cannot write", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
   const server = await startSyncServer({
@@ -148,6 +145,9 @@ test("viewer can sync but cannot write", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = `doc-${Math.random().toString(16).slice(2)}`;
@@ -221,9 +221,6 @@ test("viewer can sync but cannot write", async (t) => {
 
 test("awareness sanitizes presence.id and blocks clientID spoof", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const port = await getAvailablePort();
   const server = await startSyncServer({
@@ -233,6 +230,9 @@ test("awareness sanitizes presence.id and blocks clientID spoof", async (t) => {
   });
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = `doc-${Math.random().toString(16).slice(2)}`;
