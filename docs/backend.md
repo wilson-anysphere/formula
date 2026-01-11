@@ -16,7 +16,7 @@ Start the local stack:
 docker-compose up --build
 ```
 
-Services:
+Services (default ports shown; see “Port overrides” below):
 - API: http://localhost:3000
 - Sync WS: ws://localhost:1234/<docId>?token=... (y-websocket protocol)
 - Sync health: http://localhost:1234/healthz
@@ -178,6 +178,8 @@ setTimeout(() => {
 }, 2_000);
 NODE
 ```
+
+Note: the Yjs example uses `pnpm ... exec` so the required JS dependencies (`yjs`, `y-websocket`, `ws`) are available. If you haven’t installed dependencies yet, run `pnpm install` first (or skip to the minimal WebSocket auth check below).
 
 If you just want to verify the token authorizes the WebSocket upgrade (without speaking the `y-websocket` protocol), you can also do a minimal connect/disconnect:
 
