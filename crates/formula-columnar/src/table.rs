@@ -358,7 +358,8 @@ impl ColumnarTable {
 /// This type supports:
 /// - fast appends via page-sized chunk flushing (no rewriting of existing pages)
 /// - sparse point/range updates via an in-memory overlay map
-/// - `compact()` / `freeze()` to materialize overlays into a compact immutable [`ColumnarTable`]
+/// - `compact_in_place()` / `freeze()` to materialize overlays into the base pages
+/// - `compact()` to produce a compact immutable [`ColumnarTable`] snapshot
 ///
 /// The common Power Query refresh pattern is:
 /// 1. Start with a mutable table (empty or derived from a previous snapshot)
