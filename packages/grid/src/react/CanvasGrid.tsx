@@ -502,8 +502,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         renderer.resetColWidth(col);
         syncScrollbars();
       },
-      getRowHeight: (row) => rendererRef.current?.getRowHeight(row) ?? (props.defaultRowHeight ?? 21),
-      getColWidth: (col) => rendererRef.current?.getColWidth(col) ?? (props.defaultColWidth ?? 100),
+      getRowHeight: (row) => rendererRef.current?.getRowHeight(row) ?? (props.defaultRowHeight ?? 21) * zoomRef.current,
+      getColWidth: (col) => rendererRef.current?.getColWidth(col) ?? (props.defaultColWidth ?? 100) * zoomRef.current,
       setSelection: (row, col) => {
         const renderer = rendererRef.current;
         if (!renderer) return;
