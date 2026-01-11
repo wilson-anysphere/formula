@@ -121,3 +121,20 @@ fn recalculates_when_intermediate_sheet_changes() {
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(9.0));
 }
+
+#[test]
+fn evaluates_sum_over_reversed_sheet_range_ref() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+
+    // Excel resolves 3D spans by workbook sheet order regardless of whether the
+    // user writes them forward or reversed.
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet3:Sheet1!A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Summary", "A1"), Value::Number(6.0));
+}
