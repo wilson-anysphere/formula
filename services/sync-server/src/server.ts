@@ -758,6 +758,13 @@ export function createSyncServer(
       }
     });
 
+    // Treat an active websocket session as document activity. y-websocket sends
+    // periodic pings (30s) and receives pongs, which lets us refresh `lastSeenMs`
+    // even for read-only sessions with no Yjs updates.
+    ws.on("pong", () => {
+      void retentionManager?.markSeen(docName);
+    });
+
     ws.on("close", () => {
       clearInterval(messageWindow);
       connectionTracker.unregister(ip);
