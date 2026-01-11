@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
 
-import { LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
+import { LocalStorageAIAuditStore } from "../../../../../../packages/ai-audit/src/local-storage-store.js";
 import { ContextManager } from "../../../../../../packages/ai-context/src/contextManager.js";
-import { HashEmbedder, InMemoryVectorStore } from "../../../../../../packages/ai-rag/src/index.js";
+import { HashEmbedder } from "../../../../../../packages/ai-rag/src/embedding/hashEmbedder.js";
+import { InMemoryVectorStore } from "../../../../../../packages/ai-rag/src/store/inMemoryVectorStore.js";
 
 import { createAiChatOrchestrator } from "../orchestrator.js";
 import { ChartStore } from "../../../charts/chartStore";
