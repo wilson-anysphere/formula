@@ -30,3 +30,16 @@ For an end-to-end smoke test, open:
 - `/python-runtime-test.html` (PyodideRuntime + formula bridge)
 - `/scripting-test.html` (TypeScript scripting runtime)
 - `/` and click the "Python" button in the status bar (Python panel demo)
+
+## Extensions / Marketplace (current status)
+
+The repo contains a complete **extension runtime + marketplace installer** implementation, but it currently lives in
+**Node-only modules**:
+
+- Installer: `apps/desktop/src/marketplace/extensionManager.js`
+- Runtime: `apps/desktop/src/extensions/ExtensionHostManager.js` (wraps `packages/extension-host`)
+
+These modules use `node:fs` and `worker_threads` and are **not wired into the Vite/WebView runtime yet**. They are
+used by Node integration tests and are intended to be bridged into the real desktop app via IPC/Tauri plumbing.
+
+See `docs/10-extensibility.md` for the end-to-end flow and hot-reload behavior.
