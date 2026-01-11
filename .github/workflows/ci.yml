@@ -36,7 +36,7 @@ jobs:
           fi
 
   web:
-    name: Web build
+    name: Web + desktop builds
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -66,6 +66,9 @@ jobs:
 
       - name: Build web
         run: pnpm build:web
+
+      - name: Build desktop (Vite)
+        run: pnpm build:desktop
 
   node-tests:
     name: Node tests
