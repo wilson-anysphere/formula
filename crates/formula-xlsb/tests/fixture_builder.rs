@@ -20,6 +20,9 @@ pub struct XlsbFixtureBuilder {
 
 #[derive(Debug, Clone)]
 enum CellSpec {
+    Blank,
+    Bool(bool),
+    Error(u8),
     Number(f64),
     Rk(u32),
     Sst(u32),
@@ -67,6 +70,24 @@ impl XlsbFixtureBuilder {
             .entry(row)
             .or_default()
             .insert(col, CellSpec::Number(v));
+    }
+
+    pub fn set_cell_blank(&mut self, row: u32, col: u32) {
+        self.cells.entry(row).or_default().insert(col, CellSpec::Blank);
+    }
+
+    pub fn set_cell_bool(&mut self, row: u32, col: u32, v: bool) {
+        self.cells
+            .entry(row)
+            .or_default()
+            .insert(col, CellSpec::Bool(v));
+    }
+
+    pub fn set_cell_error(&mut self, row: u32, col: u32, code: u8) {
+        self.cells
+            .entry(row)
+            .or_default()
+            .insert(col, CellSpec::Error(code));
     }
 
     pub fn set_cell_number_rk(&mut self, row: u32, col: u32, v: f64) {
@@ -262,7 +283,10 @@ mod biff12 {
     pub const DIMENSION: u32 = 0x0194;
 
     pub const ROW: u32 = 0x0000;
+    pub const BLANK: u32 = 0x0001;
     pub const NUM: u32 = 0x0002;
+    pub const BOOLERR: u32 = 0x0003;
+    pub const BOOL: u32 = 0x0004;
     pub const FLOAT: u32 = 0x0005;
     pub const STRING: u32 = 0x0007;
     pub const CELL_ST: u32 = 0x0006;
@@ -317,6 +341,26 @@ fn build_sheet_bin(cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>) -> Vec<u8> {
         write_record(&mut out, biff12::ROW, &row.to_le_bytes());
         for (col, cell) in cols {
             match cell {
+                CellSpec::Blank => {
+                    let mut data = Vec::<u8>::new();
+                    data.extend_from_slice(&col.to_le_bytes());
+                    data.extend_from_slice(&0u32.to_le_bytes()); // style
+                    write_record(&mut out, biff12::BLANK, &data);
+                }
+                CellSpec::Bool(v) => {
+                    let mut data = Vec::<u8>::new();
+                    data.extend_from_slice(&col.to_le_bytes());
+                    data.extend_from_slice(&0u32.to_le_bytes()); // style
+                    data.push(u8::from(*v));
+                    write_record(&mut out, biff12::BOOL, &data);
+                }
+                CellSpec::Error(code) => {
+                    let mut data = Vec::<u8>::new();
+                    data.extend_from_slice(&col.to_le_bytes());
+                    data.extend_from_slice(&0u32.to_le_bytes()); // style
+                    data.push(*code);
+                    write_record(&mut out, biff12::BOOLERR, &data);
+                }
                 CellSpec::Number(v) => {
                     let mut data = Vec::<u8>::new();
                     data.extend_from_slice(&col.to_le_bytes());

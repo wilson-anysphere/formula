@@ -328,3 +328,108 @@ fn save_with_edits_can_patch_rk_number_cells() {
         .expect("B1 exists");
     assert_eq!(b1.value, CellValue::Number(100.0));
 }
+
+#[test]
+fn patch_sheet_bin_is_byte_identical_for_noop_bool_error_blank_edits() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("Types");
+    builder.set_cell_bool(0, 0, true);
+    builder.set_cell_error(0, 1, 0x07);
+    builder.set_cell_blank(0, 2);
+
+    let xlsb_bytes = builder.build_bytes();
+    let mut zip = zip::ZipArchive::new(Cursor::new(xlsb_bytes)).expect("open in-memory xlsb zip");
+    let mut entry = zip
+        .by_name("xl/worksheets/sheet1.bin")
+        .expect("find sheet1.bin");
+    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
+
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[
+            CellEdit {
+                row: 0,
+                col: 0,
+                new_value: CellValue::Bool(true),
+                new_formula: None,
+            },
+            CellEdit {
+                row: 0,
+                col: 1,
+                new_value: CellValue::Error(0x07),
+                new_formula: None,
+            },
+            CellEdit {
+                row: 0,
+                col: 2,
+                new_value: CellValue::Blank,
+                new_formula: None,
+            },
+        ],
+    )
+    .expect("patch sheet bin");
+
+    assert_eq!(patched, sheet_bin);
+}
+
+#[test]
+fn save_with_cell_edits_can_patch_bool_error_blank_cells() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("Types");
+    builder.set_cell_bool(0, 0, true);
+    builder.set_cell_error(0, 1, 0x07);
+    builder.set_cell_blank(0, 2);
+
+    let bytes = builder.build_bytes();
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("types_input.xlsb");
+    let output_path = tmpdir.path().join("types_output.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open generated xlsb");
+    wb.save_with_cell_edits(
+        &output_path,
+        0,
+        &[
+            CellEdit {
+                row: 0,
+                col: 0,
+                new_value: CellValue::Bool(false),
+                new_formula: None,
+            },
+            CellEdit {
+                row: 0,
+                col: 1,
+                new_value: CellValue::Error(0x2A),
+                new_formula: None,
+            },
+            // Patch the blank cell into a numeric value.
+            CellEdit {
+                row: 0,
+                col: 2,
+                new_value: CellValue::Number(123.0),
+                new_formula: None,
+            },
+        ],
+    )
+    .expect("save_with_cell_edits");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open patched workbook");
+    let sheet = wb2.read_sheet(0).expect("read sheet");
+    let mut cells = sheet
+        .cells
+        .iter()
+        .map(|c| ((c.row, c.col), c.value.clone()))
+        .collect::<HashMap<_, _>>();
+
+    assert_eq!(cells.remove(&(0, 0)).expect("A1 exists"), CellValue::Bool(false));
+    assert_eq!(
+        cells.remove(&(0, 1)).expect("B1 exists"),
+        CellValue::Error(0x2A)
+    );
+    assert_eq!(
+        cells.remove(&(0, 2)).expect("C1 exists"),
+        CellValue::Number(123.0)
+    );
+}
