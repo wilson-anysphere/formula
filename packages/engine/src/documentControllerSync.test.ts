@@ -38,7 +38,7 @@ describe("DocumentController → engine workbook JSON exporter", () => {
 
     const calls: string[] = [];
     const engine = {
-      loadWorkbookFromJson: vi.fn(async () => {
+      loadWorkbookFromJson: vi.fn(async (_serialized: string) => {
         calls.push("loadWorkbookFromJson");
       }),
       setCell: vi.fn(async () => {}),
