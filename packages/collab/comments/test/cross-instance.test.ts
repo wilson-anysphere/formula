@@ -4,6 +4,7 @@ import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
 
 import { CommentManager } from "../src/manager";
+import { getCommentsRoot, migrateCommentsArrayToMap } from "../src/yjs";
 
 describe("collab comments cross-instance Yjs roots (ESM doc + CJS applyUpdate)", () => {
   it("reads and mutates a comments map root created by a different Yjs instance", () => {
@@ -134,6 +135,46 @@ describe("collab comments cross-instance Yjs roots (ESM doc + CJS applyUpdate)",
     expect(listed).toHaveLength(1);
     expect(listed[0]?.id).toBe("c1");
     expect(listed[0]?.resolved).toBe(true);
+    expect(listed[0]?.replies).toHaveLength(1);
+    expect(listed[0]?.replies[0]?.content).toBe("Reply");
+  });
+
+  it("can write + migrate a legacy comments array root on a CJS Doc", () => {
+    const require = createRequire(import.meta.url);
+    // eslint-disable-next-line import/no-named-as-default-member
+    const Ycjs = require("yjs");
+
+    const doc = new Ycjs.Doc();
+    doc.getArray("comments"); // force legacy schema
+
+    const mgr = new CommentManager(doc);
+
+    mgr.addComment({
+      cellRef: "A1",
+      kind: "threaded",
+      content: "Hello",
+      author: { id: "u1", name: "Alice" },
+      id: "c1",
+      now: 1,
+    });
+    mgr.addReply({
+      commentId: "c1",
+      content: "Reply",
+      author: { id: "u1", name: "Alice" },
+      id: "r1",
+      now: 2,
+    });
+
+    expect(getCommentsRoot(doc).kind).toBe("array");
+    expect(mgr.listAll()[0]?.replies).toHaveLength(1);
+
+    expect(migrateCommentsArrayToMap(doc)).toBe(true);
+    expect(getCommentsRoot(doc).kind).toBe("map");
+
+    // No data loss after migration.
+    const listed = mgr.listAll();
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.id).toBe("c1");
     expect(listed[0]?.replies).toHaveLength(1);
     expect(listed[0]?.replies[0]?.content).toBe("Reply");
   });

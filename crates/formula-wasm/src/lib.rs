@@ -71,6 +71,9 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
             .map(JsonValue::Number)
             .unwrap_or_else(|| JsonValue::String(ErrorKind::Num.as_code().to_string())),
         EngineValue::Error(kind) => JsonValue::String(kind.as_code().to_string()),
+        // Lambda values cannot be represented in the current JS worker protocol.
+        // Match the engine's display semantics (`Value::Lambda` shows as `#CALC!`).
+        EngineValue::Lambda(_) => JsonValue::String(ErrorKind::Calc.as_code().to_string()),
         // The JS protocol only supports scalar-ish values. Spill markers should not leak because
         // `Engine::get_cell_value` resolves spill cells to their concrete values. Keep a defensive
         // fallback anyway.
