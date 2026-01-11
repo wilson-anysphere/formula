@@ -134,6 +134,9 @@ fn rewrite_expr_for_copy_delta(expr: &Expr, delta_row: i32, delta_col: i32) -> (
             if range_has_external_workbook(&b.left) || range_has_external_workbook(&b.right) {
                 return (expr.clone(), false);
             }
+            if let Some(result) = rewrite_range_for_copy_delta(expr, b, delta_row, delta_col) {
+                return result;
+            }
             rewrite_expr_children(expr, |child| rewrite_expr_for_copy_delta(child, delta_row, delta_col))
         }
         _ => rewrite_expr_children(expr, |child| rewrite_expr_for_copy_delta(child, delta_row, delta_col)),
@@ -699,6 +702,204 @@ fn rewrite_col_range_for_structural_edit(
     (out.clone(), out != *original)
 }
 
+fn rewrite_range_for_copy_delta(
+    original: &Expr,
+    b: &BinaryExpr,
+    delta_row: i32,
+    delta_col: i32,
+) -> Option<(Expr, bool)> {
+    match (&*b.left, &*b.right) {
+        (Expr::CellRef(start), Expr::CellRef(end)) => Some(rewrite_cell_range_for_copy_delta(
+            original, start, end, delta_row, delta_col,
+        )),
+        (Expr::RowRef(start), Expr::RowRef(end)) => {
+            Some(rewrite_row_range_for_copy_delta(original, start, end, delta_row))
+        }
+        (Expr::ColRef(start), Expr::ColRef(end)) => {
+            Some(rewrite_col_range_for_copy_delta(original, start, end, delta_col))
+        }
+        _ => None,
+    }
+}
+
+fn rewrite_cell_range_for_copy_delta(
+    original: &Expr,
+    start: &AstCellRef,
+    end: &AstCellRef,
+    delta_row: i32,
+    delta_col: i32,
+) -> (Expr, bool) {
+    let Some((start_col, start_col_abs)) = coord_a1(&start.col) else {
+        return (original.clone(), false);
+    };
+    let Some((start_row, start_row_abs)) = coord_a1(&start.row) else {
+        return (original.clone(), false);
+    };
+    let Some((end_col, end_col_abs)) = coord_a1(&end.col) else {
+        return (original.clone(), false);
+    };
+    let Some((end_row, end_row_abs)) = coord_a1(&end.row) else {
+        return (original.clone(), false);
+    };
+
+    let new_start_row = if start_row_abs {
+        start_row as i64
+    } else {
+        start_row as i64 + delta_row as i64
+    };
+    let new_start_col = if start_col_abs {
+        start_col as i64
+    } else {
+        start_col as i64 + delta_col as i64
+    };
+    let new_end_row = if end_row_abs {
+        end_row as i64
+    } else {
+        end_row as i64 + delta_row as i64
+    };
+    let new_end_col = if end_col_abs {
+        end_col as i64
+    } else {
+        end_col as i64 + delta_col as i64
+    };
+
+    if new_start_row < 0 || new_start_col < 0 || new_end_row < 0 || new_end_col < 0 {
+        return (Expr::Error(REF_ERROR.to_string()), true);
+    }
+
+    let out = Expr::Binary(BinaryExpr {
+        op: BinaryOp::Range,
+        left: Box::new(expr_ref(AstCellRef {
+            workbook: start.workbook.clone(),
+            sheet: start.sheet.clone(),
+            col: Coord::A1 {
+                index: new_start_col as u32,
+                abs: start_col_abs,
+            },
+            row: Coord::A1 {
+                index: new_start_row as u32,
+                abs: start_row_abs,
+            },
+        })),
+        right: Box::new(expr_ref(AstCellRef {
+            workbook: end.workbook.clone(),
+            sheet: end.sheet.clone(),
+            col: Coord::A1 {
+                index: new_end_col as u32,
+                abs: end_col_abs,
+            },
+            row: Coord::A1 {
+                index: new_end_row as u32,
+                abs: end_row_abs,
+            },
+        })),
+    });
+
+    (out.clone(), out != *original)
+}
+
+fn rewrite_row_range_for_copy_delta(
+    original: &Expr,
+    start: &AstRowRef,
+    end: &AstRowRef,
+    delta_row: i32,
+) -> (Expr, bool) {
+    let Some((start_row, start_abs)) = coord_a1(&start.row) else {
+        return (original.clone(), false);
+    };
+    let Some((end_row, end_abs)) = coord_a1(&end.row) else {
+        return (original.clone(), false);
+    };
+
+    let new_start_row = if start_abs {
+        start_row as i64
+    } else {
+        start_row as i64 + delta_row as i64
+    };
+    let new_end_row = if end_abs {
+        end_row as i64
+    } else {
+        end_row as i64 + delta_row as i64
+    };
+
+    if new_start_row < 0 || new_end_row < 0 {
+        return (Expr::Error(REF_ERROR.to_string()), true);
+    }
+
+    let out = Expr::Binary(BinaryExpr {
+        op: BinaryOp::Range,
+        left: Box::new(Expr::RowRef(AstRowRef {
+            workbook: start.workbook.clone(),
+            sheet: start.sheet.clone(),
+            row: Coord::A1 {
+                index: new_start_row as u32,
+                abs: start_abs,
+            },
+        })),
+        right: Box::new(Expr::RowRef(AstRowRef {
+            workbook: end.workbook.clone(),
+            sheet: end.sheet.clone(),
+            row: Coord::A1 {
+                index: new_end_row as u32,
+                abs: end_abs,
+            },
+        })),
+    });
+
+    (out.clone(), out != *original)
+}
+
+fn rewrite_col_range_for_copy_delta(
+    original: &Expr,
+    start: &AstColRef,
+    end: &AstColRef,
+    delta_col: i32,
+) -> (Expr, bool) {
+    let Some((start_col, start_abs)) = coord_a1(&start.col) else {
+        return (original.clone(), false);
+    };
+    let Some((end_col, end_abs)) = coord_a1(&end.col) else {
+        return (original.clone(), false);
+    };
+
+    let new_start_col = if start_abs {
+        start_col as i64
+    } else {
+        start_col as i64 + delta_col as i64
+    };
+    let new_end_col = if end_abs {
+        end_col as i64
+    } else {
+        end_col as i64 + delta_col as i64
+    };
+
+    if new_start_col < 0 || new_end_col < 0 {
+        return (Expr::Error(REF_ERROR.to_string()), true);
+    }
+
+    let out = Expr::Binary(BinaryExpr {
+        op: BinaryOp::Range,
+        left: Box::new(Expr::ColRef(AstColRef {
+            workbook: start.workbook.clone(),
+            sheet: start.sheet.clone(),
+            col: Coord::A1 {
+                index: new_start_col as u32,
+                abs: start_abs,
+            },
+        })),
+        right: Box::new(Expr::ColRef(AstColRef {
+            workbook: end.workbook.clone(),
+            sheet: end.sheet.clone(),
+            col: Coord::A1 {
+                index: new_end_col as u32,
+                abs: end_abs,
+            },
+        })),
+    });
+
+    (out.clone(), out != *original)
+}
+
 fn rewrite_cell_ref_for_copy_delta(r: &AstCellRef, delta_row: i32, delta_col: i32) -> (Expr, bool) {
     if r.workbook.is_some() {
         return (expr_ref(r.clone()), false);
@@ -1220,6 +1421,21 @@ mod tests {
         let (out, changed) = rewrite_formula_for_copy_delta("=1:1", "Sheet1", 1, 0);
         assert!(changed);
         assert_eq!(out, "=2:2");
+    }
+
+    #[test]
+    fn copy_delta_turns_entire_range_into_ref_error_if_any_endpoint_underflows() {
+        let (out, changed) = rewrite_formula_for_copy_delta("=A1:B2", "Sheet1", -1, 0);
+        assert!(changed);
+        assert_eq!(out, "=#REF!");
+
+        let (out, changed) = rewrite_formula_for_copy_delta("=1:2", "Sheet1", -1, 0);
+        assert!(changed);
+        assert_eq!(out, "=#REF!");
+
+        let (out, changed) = rewrite_formula_for_copy_delta("=A:B", "Sheet1", 0, -1);
+        assert!(changed);
+        assert_eq!(out, "=#REF!");
     }
 
     #[test]
