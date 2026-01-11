@@ -443,10 +443,10 @@ impl XlsbWorkbook {
         };
 
         let targets: HashSet<(u32, u32)> = edits.iter().map(|e| (e.row, e.col)).collect();
-        let cell_record_ids = if targets.is_empty() {
+        let cell_records = if targets.is_empty() {
             HashMap::new()
         } else {
-            sheet_cell_record_ids(&sheet_bytes, &targets)?
+            sheet_cell_records(&sheet_bytes, &targets)?
         };
 
         let mut sst = SharedStringsWriter::new(shared_strings_bytes)?;
@@ -458,9 +458,24 @@ impl XlsbWorkbook {
             };
 
             let coord = (edit.row, edit.col);
-            match cell_record_ids.get(&coord) {
-                Some(&biff12::STRING) => {
-                    // Preserve existing shared-string cells as shared-string references.
+            match cell_records.get(&coord) {
+                Some(record) if record.id == biff12::STRING => {
+                    // Preserve existing `BrtCellIsst` cells as shared-string references. When the
+                    // edit is a no-op (text matches the existing shared string) keep the original
+                    // `isst` so rich-text / phonetic shared strings stay byte-identical.
+                    if record.payload.len() >= 12 {
+                        let isst = u32::from_le_bytes(record.payload[8..12].try_into().unwrap());
+                        if self
+                            .shared_strings
+                            .get(isst as usize)
+                            .is_some_and(|s| s == text)
+                            && edit.new_formula.is_none()
+                            && edit.new_rgcb.is_none()
+                        {
+                            edit.shared_string_index = Some(isst);
+                            continue;
+                        }
+                    }
                     edit.shared_string_index = Some(sst.intern_plain(text)?);
                 }
                 None => {
@@ -476,7 +491,8 @@ impl XlsbWorkbook {
             .iter()
             .map(|edit| {
                 let coord = (edit.row, edit.col);
-                let old_uses_sst = matches!(cell_record_ids.get(&coord), Some(&biff12::STRING));
+                let old_uses_sst =
+                    matches!(cell_records.get(&coord).map(|r| r.id), Some(biff12::STRING));
                 let new_uses_sst = matches!(edit.new_value, CellValue::Text(_))
                     && edit.shared_string_index.is_some();
                 match (old_uses_sst, new_uses_sst) {
@@ -596,6 +612,26 @@ impl XlsbWorkbook {
                         // The workbook-level shared-string counts should also remain unchanged in
                         // this case, since the cell still uses `BrtCellSt` storage.
                         continue;
+                    }
+                }
+            }
+
+            if record_id == Some(biff12::STRING) {
+                if let Some(record) = record {
+                    // No-op shared-string edit: keep the existing `isst` to avoid inserting a new
+                    // (plain) `BrtSI` record when the original string has rich-text/phonetic data.
+                    if record.payload.len() >= 12 {
+                        let isst = u32::from_le_bytes(record.payload[8..12].try_into().unwrap());
+                        if self
+                            .shared_strings
+                            .get(isst as usize)
+                            .is_some_and(|s| s == text)
+                            && edit.new_formula.is_none()
+                            && edit.new_rgcb.is_none()
+                        {
+                            edit.shared_string_index = Some(isst);
+                            continue;
+                        }
                     }
                 }
             }
@@ -1070,59 +1106,6 @@ fn preserve_part<R: Read + Seek>(
 struct CellRecordInfo {
     id: u32,
     payload: Vec<u8>,
-}
-
-fn sheet_cell_record_ids(
-    sheet_bin: &[u8],
-    targets: &HashSet<(u32, u32)>,
-) -> Result<HashMap<(u32, u32), u32>, ParseError> {
-    let mut cursor = Cursor::new(sheet_bin);
-    let mut in_sheet_data = false;
-    let mut current_row = 0u32;
-    let mut found: HashMap<(u32, u32), u32> = HashMap::new();
-
-    loop {
-        let Some(id) = biff12_varint::read_record_id(&mut cursor)? else {
-            break;
-        };
-        let Some(len) = biff12_varint::read_record_len(&mut cursor)? else {
-            return Err(ParseError::UnexpectedEof);
-        };
-        let len = len as usize;
-
-        let payload_start = cursor.position() as usize;
-        let payload_end = payload_start
-            .checked_add(len)
-            .filter(|&end| end <= sheet_bin.len())
-            .ok_or(ParseError::UnexpectedEof)?;
-        let payload = &sheet_bin[payload_start..payload_end];
-        cursor.set_position(payload_end as u64);
-
-        match id {
-            biff12::SHEETDATA => in_sheet_data = true,
-            biff12::SHEETDATA_END => in_sheet_data = false,
-            biff12::ROW if in_sheet_data => {
-                if payload.len() >= 4 {
-                    current_row = u32::from_le_bytes(payload[0..4].try_into().unwrap());
-                }
-            }
-            _ if in_sheet_data => {
-                if payload.len() >= 4 {
-                    let col = u32::from_le_bytes(payload[0..4].try_into().unwrap());
-                    let coord = (current_row, col);
-                    if targets.contains(&coord) {
-                        found.insert(coord, id);
-                        if found.len() == targets.len() {
-                            break;
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    Ok(found)
 }
 
 fn sheet_cell_records(
