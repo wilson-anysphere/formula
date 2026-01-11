@@ -10,11 +10,24 @@ mod updater;
 use formula_desktop_tauri::commands;
 use formula_desktop_tauri::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
 use formula_desktop_tauri::macros::MacroExecutionOptions;
-use formula_desktop_tauri::state::{AppState, SharedAppState};
+use formula_desktop_tauri::state::{AppState, CellUpdateData, SharedAppState};
+use serde::Serialize;
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Listener, Manager};
+use tokio::sync::oneshot;
+use tokio::time::{timeout, Duration};
+use uuid::Uuid;
 
 const WORKBOOK_ID: &str = "local-workbook";
+
+#[derive(Clone, Debug, Serialize)]
+struct CloseRequestedPayload {
+    /// Optional cell updates produced by `Workbook_BeforeClose`.
+    ///
+    /// Note: if the user cancels the close in the frontend (e.g. via an unsaved-changes prompt),
+    /// applying these updates keeps the frontend `DocumentController` consistent with the backend.
+    updates: Vec<commands::CellUpdate>,
+}
 
 fn signature_status(vba_project_bin: &[u8]) -> commands::MacroSignatureStatus {
     let parsed = formula_vba::verify_vba_digital_signature(vba_project_bin)
@@ -69,6 +82,17 @@ fn macros_trusted_for_before_close(
     let trust = trust_store.trust_state(&fingerprint);
     let sig_status = signature_status(vba_bin);
     Ok(commands::evaluate_macro_trust(trust, sig_status).is_ok())
+}
+
+fn cell_update_from_state(update: CellUpdateData) -> commands::CellUpdate {
+    commands::CellUpdate {
+        sheet_id: update.sheet_id,
+        row: update.row,
+        col: update.col,
+        value: update.value.as_json(),
+        formula: update.formula,
+        display_value: update.value.display(),
+    }
 }
 
 fn main() {
@@ -175,6 +199,35 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     // Best-effort Workbook_BeforeClose. We do this in a background task so we
                     // don't block the window event loop. Cancellation isn't supported yet.
+                    //
+                    // We ask the frontend to drain any pending workbook-sync operations and to
+                    // sync the macro UI context before we run the event macro. This avoids
+                    // running the macro against stale backend state.
+                    let token = Uuid::new_v4().to_string();
+                    let (tx, rx) = oneshot::channel::<()>();
+                    let tx = Arc::new(Mutex::new(Some(tx)));
+                    let token_for_listener = token.clone();
+                    let tx_for_listener = tx.clone();
+
+                    let handler = window.listen("close-prep-done", move |event| {
+                        let Some(payload) = event.payload() else {
+                            return;
+                        };
+                        let received = payload.trim().trim_matches('"');
+                        if received != token_for_listener {
+                            return;
+                        }
+                        if let Ok(mut guard) = tx_for_listener.lock() {
+                            if let Some(sender) = guard.take() {
+                                let _ = sender.send(());
+                            }
+                        }
+                    });
+
+                    let _ = window.emit("close-prep", token);
+                    let _ = timeout(Duration::from_millis(750), rx).await;
+                    window.unlisten(handler);
+
                     let state_for_macro = shared_state.clone();
                     let trust_for_macro = shared_trust.clone();
                     let macro_outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -185,7 +238,7 @@ fn main() {
                         drop(trust_store);
 
                         if !should_run {
-                            return Ok::<_, String>(());
+                            return Ok::<_, String>(CloseRequestedPayload { updates: Vec::new() });
                         }
 
                         let options = MacroExecutionOptions {
@@ -206,29 +259,37 @@ fn main() {
                                         .unwrap_or_else(|| "unknown macro error".to_string());
                                     eprintln!("[macro] Workbook_BeforeClose failed: {msg}");
                                 }
+                                let updates = outcome
+                                    .updates
+                                    .into_iter()
+                                    .map(cell_update_from_state)
+                                    .collect();
+                                return Ok(CloseRequestedPayload { updates });
                             }
                             Err(err) => {
                                 eprintln!("[macro] Workbook_BeforeClose failed: {err}");
                             }
                         }
 
-                        Ok(())
+                        Ok(CloseRequestedPayload { updates: Vec::new() })
                     })
                     .await;
 
-                    match macro_outcome {
-                        Ok(Ok(())) => {}
+                    let payload = match macro_outcome {
+                        Ok(Ok(payload)) => payload,
                         Ok(Err(err)) => {
                             eprintln!("[macro] Workbook_BeforeClose task failed: {err}");
+                            CloseRequestedPayload { updates: Vec::new() }
                         }
                         Err(err) => {
                             eprintln!("[macro] Workbook_BeforeClose task panicked: {err}");
+                            CloseRequestedPayload { updates: Vec::new() }
                         }
-                    }
+                    };
 
                     // Delegate the rest of close-handling to the frontend (unsaved changes prompt
                     // + deciding whether to hide the window or keep it open).
-                    let _ = window.emit("close-requested", ());
+                    let _ = window.emit("close-requested", payload);
                 });
             }
             tauri::WindowEvent::DragDrop(drag_drop) => {

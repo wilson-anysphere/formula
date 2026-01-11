@@ -1103,6 +1103,16 @@ function getTauriListen(): TauriListen {
   return listen;
 }
 
+type TauriEmit = (event: string, payload?: any) => Promise<void> | void;
+
+function getTauriEmit(): TauriEmit {
+  const emit = (globalThis as any).__TAURI__?.event?.emit as TauriEmit | undefined;
+  if (!emit) {
+    throw new Error("Tauri event API not available");
+  }
+  return emit;
+}
+
 type TauriDialogOpen = (options?: Record<string, unknown>) => Promise<string | string[] | null>;
 type TauriDialogSave = (options?: Record<string, unknown>) => Promise<string | null>;
 
@@ -1622,6 +1632,47 @@ try {
   });
 
   const listen = getTauriListen();
+  const emit = getTauriEmit();
+
+  // When the Rust host receives a close request, it asks the frontend to flush any pending
+  // workbook-sync operations and to sync macro UI context before it runs `Workbook_BeforeClose`.
+  void listen("close-prep", async (event) => {
+    const token = (event as any)?.payload;
+    if (typeof token !== "string" || token.trim() === "") return;
+
+    try {
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      await drainBackendSync();
+
+      const invokeForContext = queuedInvoke ?? invoke;
+      if (invokeForContext) {
+        const selection = currentSelectionRect();
+        const active_row = selection.activeRow;
+        const active_col = selection.activeCol;
+        await invokeForContext("set_macro_ui_context", {
+          workbook_id: workbookId,
+          sheet_id: selection.sheetId,
+          active_row,
+          active_col,
+          selection: {
+            start_row: selection.startRow,
+            start_col: selection.startCol,
+            end_row: selection.endRow,
+            end_col: selection.endCol,
+          },
+        });
+      }
+    } catch (err) {
+      console.error("Failed to prepare close request:", err);
+    } finally {
+      try {
+        await emit("close-prep-done", token);
+      } catch (err) {
+        console.error("Failed to acknowledge close request:", err);
+      }
+    }
+  });
+
   void listen("file-dropped", async (event) => {
     const paths = (event as any)?.payload;
     const first = Array.isArray(paths) ? paths[0] : null;
@@ -1662,7 +1713,58 @@ try {
   });
 
   let closeInFlight = false;
-  async function handleCloseRequest({ quit }: { quit: boolean }): Promise<void> {
+  type RawCellUpdate = {
+    sheet_id: string;
+    row: number;
+    col: number;
+    value: unknown | null;
+    formula: string | null;
+    display_value?: string;
+  };
+
+  function normalizeCloseMacroUpdates(raw: unknown): Array<{
+    sheetId: string;
+    row: number;
+    col: number;
+    value: unknown | null;
+    formula: string | null;
+    displayValue: string;
+  }> {
+    if (!Array.isArray(raw) || raw.length === 0) return [];
+    const out: Array<{
+      sheetId: string;
+      row: number;
+      col: number;
+      value: unknown | null;
+      formula: string | null;
+      displayValue: string;
+    }> = [];
+    for (const u of raw as RawCellUpdate[]) {
+      const sheetId = typeof u?.sheet_id === "string" ? u.sheet_id.trim() : "";
+      const row = Number((u as any)?.row);
+      const col = Number((u as any)?.col);
+      if (!sheetId) continue;
+      if (!Number.isInteger(row) || row < 0) continue;
+      if (!Number.isInteger(col) || col < 0) continue;
+      out.push({
+        sheetId,
+        row,
+        col,
+        value: (u as any).value ?? null,
+        formula: typeof (u as any).formula === "string" ? (u as any).formula : null,
+        displayValue: String((u as any).display_value ?? ""),
+      });
+    }
+    return out;
+  }
+
+  async function handleCloseRequest({
+    quit,
+    beforeCloseUpdates,
+  }: {
+    quit: boolean;
+    beforeCloseUpdates?: unknown;
+  }): Promise<void> {
     if (closeInFlight) return;
     closeInFlight = true;
     try {
@@ -1673,6 +1775,13 @@ try {
           await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
         } catch (err) {
           console.warn("Workbook_BeforeClose event macro failed:", err);
+        }
+      }
+
+      if (!quit && beforeCloseUpdates && vbaEventMacros) {
+        const normalized = normalizeCloseMacroUpdates(beforeCloseUpdates);
+        if (normalized.length > 0) {
+          await vbaEventMacros.applyMacroUpdates(normalized, { label: "Workbook_BeforeClose" });
         }
       }
 
@@ -1704,8 +1813,9 @@ try {
     }
   }
 
-  void listen("close-requested", async () => {
-    await handleCloseRequest({ quit: false });
+  void listen("close-requested", async (event) => {
+    const payload = (event as any)?.payload;
+    await handleCloseRequest({ quit: false, beforeCloseUpdates: payload?.updates });
   });
 
   window.addEventListener("keydown", (e) => {
