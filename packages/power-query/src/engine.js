@@ -335,18 +335,34 @@ export class QueryEngine {
 
     /** @type {import("./folding/sql.js").CompiledQueryPlan | null} */
     let foldedPlan = null;
+    /** @type {import("./folding/dialect.js").SqlDialectName | import("./folding/dialect.js").SqlDialect | null} */
+    let foldedDialect = null;
     if (this.sqlFoldingEnabled && query.source.type === "database") {
       const dialect = query.source.dialect ?? this.sqlFoldingDialect;
       if (dialect) {
         foldedPlan = this.foldingEngine.compile({ ...query, steps }, { dialect, queries: context.queries ?? undefined });
+        foldedDialect = dialect;
       }
     }
 
     /** @type {DataTable} */
     let table;
 
-    if (foldedPlan && (foldedPlan.type === "sql" || foldedPlan.type === "hybrid") && query.source.type === "database") {
-      const sourceResult = await this.loadDatabaseQueryWithMeta(query.source, foldedPlan.sql, foldedPlan.params, callStack, options, state);
+    if (
+      foldedPlan &&
+      (foldedPlan.type === "sql" || foldedPlan.type === "hybrid") &&
+      query.source.type === "database" &&
+      foldedDialect
+    ) {
+      const sourceResult = await this.loadDatabaseQueryWithMeta(
+        query.source,
+        foldedPlan.sql,
+        foldedPlan.params,
+        foldedDialect,
+        callStack,
+        options,
+        state,
+      );
       sources.push(...sourceResult.sources);
       table = sourceResult.table;
 
@@ -770,19 +786,26 @@ export class QueryEngine {
    * @param {import("./model.js").DatabaseQuerySource} source
    * @param {string} sql
    * @param {unknown[]} params
+   * @param {import("./folding/dialect.js").SqlDialectName | import("./folding/dialect.js").SqlDialect} dialect
    * @param {Set<string>} callStack
    * @param {ExecuteOptions} options
    * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
    * @returns {Promise<{ table: DataTable, meta: ConnectorMeta, sources: ConnectorMeta[] }>}
    */
-  async loadDatabaseQueryWithMeta(source, sql, params, callStack, options, state) {
+  async loadDatabaseQueryWithMeta(source, sql, params, dialect, callStack, options, state) {
     throwIfAborted(options.signal);
     options.onProgress?.({ type: "source:start", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: "database" });
 
     const connector = this.connectors.get("sql");
     if (!connector) throw new Error("Database source requires a SqlConnector");
 
-    const request = { connection: source.connection, sql, params };
+    const dialectName = typeof dialect === "string" ? dialect : dialect.name;
+    let normalizedSql = sql;
+    if (dialectName === "postgres") {
+      let idx = 0;
+      normalizedSql = sql.replaceAll("?", () => `$${++idx}`);
+    }
+    const request = { connection: source.connection, sql: normalizedSql, params };
     await this.assertPermission(connector.permissionKind, { source, request }, state);
     const credentials = await this.getCredentials("sql", request, state);
     const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
