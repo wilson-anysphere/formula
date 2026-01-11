@@ -100,11 +100,24 @@ export class ExtensionHostManager {
       this.bindToExtensionManager(extensionManager);
     }
 
+    // Serialize all operations that touch the underlying ExtensionHost. Many host APIs mutate
+    // shared runtime state (commands, panels, registrations) and are not safe to call concurrently
+    // with unload/reload/sync.
+    this._hostQueue = Promise.resolve();
+
     // `syncInstalledExtensions()` can be triggered from multiple sources (e.g. installer events,
     // explicit UI refresh calls). Serialize sync runs and coalesce concurrent requests so we don't
     // unload/reload the same extension simultaneously.
     this._syncRunner = null;
     this._syncRequested = false;
+  }
+
+  _runHostOperation(fn) {
+    const run = () => Promise.resolve().then(fn);
+    const task = this._hostQueue.then(run, run);
+    // Keep the queue alive even if a task fails.
+    this._hostQueue = task.catch(() => {});
+    return task;
   }
 
   get spreadsheet() {
@@ -168,32 +181,34 @@ export class ExtensionHostManager {
    * Safe to call multiple times (already-loaded extensions are skipped).
    */
   async startup() {
-    const state = await this._loadInstalledState();
-    const installedIds = Object.keys(state.installed ?? {}).sort();
-    const loaded = new Set(this._host.listExtensions().map((ext) => ext.id));
+    return this._runHostOperation(async () => {
+      const state = await this._loadInstalledState();
+      const installedIds = Object.keys(state.installed ?? {}).sort();
+      const loaded = new Set(this._host.listExtensions().map((ext) => ext.id));
 
-    for (const extensionId of installedIds) {
-      if (loaded.has(extensionId)) continue;
+      for (const extensionId of installedIds) {
+        if (loaded.has(extensionId)) continue;
 
-      const verification = await this._verifyInstalledExtension(state, extensionId);
-      if (!verification.ok) {
-        // Do not prevent the rest of the runtime from starting if one install is corrupted.
-        // The extension is marked as corrupted in state and can be repaired by reinstalling.
-        // eslint-disable-next-line no-console
-        console.warn(
-          `Skipping extension ${extensionId}: integrity check failed: ${verification.reason || "unknown reason"}`
-        );
-        continue;
+        const verification = await this._verifyInstalledExtension(state, extensionId);
+        if (!verification.ok) {
+          // Do not prevent the rest of the runtime from starting if one install is corrupted.
+          // The extension is marked as corrupted in state and can be repaired by reinstalling.
+          // eslint-disable-next-line no-console
+          console.warn(
+            `Skipping extension ${extensionId}: integrity check failed: ${verification.reason || "unknown reason"}`
+          );
+          continue;
+        }
+
+        const extensionPath = path.join(this.extensionsDir, extensionId);
+        await this._host.loadExtension(extensionPath);
       }
 
-      const extensionPath = path.join(this.extensionsDir, extensionId);
-      await this._host.loadExtension(extensionPath);
-    }
-
-    if (!this._started) {
-      await this._host.startup();
-      this._started = true;
-    }
+      if (!this._started) {
+        await this._host.startup();
+        this._started = true;
+      }
+    });
   }
 
   async dispose() {
@@ -205,8 +220,10 @@ export class ExtensionHostManager {
       }
       this._extensionManagerSubscription = null;
     }
-    await this._host.dispose();
-    this._started = false;
+    await this._runHostOperation(async () => {
+      await this._host.dispose();
+      this._started = false;
+    });
   }
 
   bindToExtensionManager(extensionManager) {
@@ -295,7 +312,7 @@ export class ExtensionHostManager {
     for (const id of toReload) {
       if (installed[id]?.corrupted) continue;
       try {
-        await this.reloadExtension(id);
+        await this._reloadExtensionUnsafe(id);
       } catch (error) {
         // eslint-disable-next-line no-console
         console.warn(`Failed to reload extension ${id}: ${String(error?.message ?? error)}`);
@@ -303,11 +320,11 @@ export class ExtensionHostManager {
     }
 
     for (const id of toLoad) {
-      // Reuse reloadExtension() so we always run integrity checks before loading
+      // Reuse reload semantics so we always run integrity checks before loading
       // new installed extensions into the runtime.
       if (installed[id]?.corrupted) continue;
       try {
-        await this.reloadExtension(id);
+        await this._reloadExtensionUnsafe(id);
       } catch (error) {
         // eslint-disable-next-line no-console
         console.warn(`Failed to load extension ${id}: ${String(error?.message ?? error)}`);
@@ -322,7 +339,7 @@ export class ExtensionHostManager {
       return this._syncRunner;
     }
 
-    this._syncRunner = (async () => {
+    this._syncRunner = this._runHostOperation(async () => {
       try {
         while (this._syncRequested) {
           this._syncRequested = false;
@@ -332,25 +349,27 @@ export class ExtensionHostManager {
         this._syncRequested = false;
         this._syncRunner = null;
       }
-    })();
+    });
 
     return this._syncRunner;
   }
 
   async executeCommand(commandId, ...args) {
-    return this._host.executeCommand(String(commandId), ...args);
+    return this._runHostOperation(() => this._host.executeCommand(String(commandId), ...args));
   }
 
   async invokeCustomFunction(name, ...args) {
-    return this._host.invokeCustomFunction(String(name), ...args);
+    return this._runHostOperation(() => this._host.invokeCustomFunction(String(name), ...args));
   }
 
   async invokeDataConnector(connectorId, method, ...args) {
-    return this._host.invokeDataConnector(String(connectorId), String(method), ...args);
+    return this._runHostOperation(() =>
+      this._host.invokeDataConnector(String(connectorId), String(method), ...args)
+    );
   }
 
   async activateView(viewId) {
-    return this._host.activateView(String(viewId));
+    return this._runHostOperation(() => this._host.activateView(String(viewId)));
   }
 
   getPanel(panelId) {
@@ -381,7 +400,7 @@ export class ExtensionHostManager {
    * - If already loaded: unload (removes contributions + terminates worker)
    * - Load fresh from disk (re-reads manifest, registers new contributions, spawns new worker)
    */
-  async reloadExtension(extensionId) {
+  async _reloadExtensionUnsafe(extensionId) {
     const id = String(extensionId);
     const loaded = this._host.listExtensions().some((ext) => ext.id === id);
     if (loaded) {
@@ -404,13 +423,21 @@ export class ExtensionHostManager {
     }
   }
 
+  async reloadExtension(extensionId) {
+    return this._runHostOperation(() => this._reloadExtensionUnsafe(extensionId));
+  }
+
   /**
    * Unload an extension from the runtime (does not delete files on disk).
    */
-  async unloadExtension(extensionId) {
+  async _unloadExtensionUnsafe(extensionId) {
     const id = String(extensionId);
     const loaded = this._host.listExtensions().some((ext) => ext.id === id);
     if (!loaded) return;
     await this._host.unloadExtension(id);
+  }
+
+  async unloadExtension(extensionId) {
+    return this._runHostOperation(() => this._unloadExtensionUnsafe(extensionId));
   }
 }

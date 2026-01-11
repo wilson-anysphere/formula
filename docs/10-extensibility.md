@@ -51,8 +51,10 @@ The desktop app wires marketplace installs into the Node extension host runtime:
       loads new installs, reloads updated versions, and unloads removed extensions.
     - The runtime can **bind to installer change events** (`ExtensionManager.onDidChange`) so installs outside
       the marketplace panel still hot-reload automatically.
-    - `syncInstalledExtensions()` is serialized/coalesced so multiple rapid install/update events won't race
-      unload/reload operations.
+    - `ExtensionHostManager` serializes host operations so `syncInstalledExtensions()`, reload/unload, and command
+      execution do not race each other.
+    - `syncInstalledExtensions()` is serialized/coalesced so multiple rapid install/update events coalesce into a
+      single sync run.
     - Uninstall removes contributions and terminates the worker (via `ExtensionHost.unloadExtension`).
 
 ---
