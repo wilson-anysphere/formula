@@ -325,6 +325,29 @@ test("v2 rejects path segments with trailing dot/space", () => {
   assert.throws(() => readExtensionPackageV2(archive), /invalid path/i);
 });
 
+test("v2 rejects checksums.json with too many entries", () => {
+  const manifest = {
+    name: "temp-ext",
+    publisher: "temp-pub",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+  };
+
+  const files = {};
+  for (let i = 0; i < 5001; i++) {
+    files[`x/${i}.txt`] = { sha256: "0".repeat(64), size: 0 };
+  }
+
+  const archive = createTarArchive([
+    { name: "manifest.json", data: canonicalJsonBytes(manifest) },
+    { name: "checksums.json", data: canonicalJsonBytes({ algorithm: "sha256", files }) },
+    { name: "signature.json", data: canonicalJsonBytes({ algorithm: "ed25519", formatVersion: 2, signatureBase64: "" }) },
+  ]);
+
+  assert.throws(() => verifyExtensionPackageV2(archive, generateEd25519KeyPair().publicKeyPem), /too many entries/i);
+});
+
 test("marketplace store accepts v1 packages during transition", async (t) => {
   try {
     requireFromHere.resolve("sql.js");

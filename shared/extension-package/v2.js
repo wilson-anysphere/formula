@@ -7,6 +7,11 @@ const { SIGNATURE_ALGORITHM, signBytes, verifyBytesSignature } = require("../cry
 const PACKAGE_FORMAT_VERSION = 2;
 
 const TAR_BLOCK_SIZE = 512;
+const MAX_TAR_ENTRIES = 10_000;
+const MAX_PACKAGE_FILES = 5_000;
+const MAX_MANIFEST_JSON_BYTES = 1 * 1024 * 1024;
+const MAX_CHECKSUMS_JSON_BYTES = 4 * 1024 * 1024;
+const MAX_SIGNATURE_JSON_BYTES = 64 * 1024;
 
 function sha256Hex(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
@@ -319,7 +324,13 @@ function readExtensionPackageV2(packageBytes) {
 
   const payloadFiles = new Map();
 
+  let entriesSeen = 0;
   for (const entry of iterateTarEntries(packageBytes)) {
+    entriesSeen += 1;
+    if (entriesSeen > MAX_TAR_ENTRIES) {
+      throw new Error(`Invalid extension package: too many tar entries (>${MAX_TAR_ENTRIES})`);
+    }
+
     if (entry.typeflag !== "0" && entry.typeflag !== "\0") {
       if (entry.typeflag === "5") continue; // directory entry
       throw new Error(`Unsupported tar entry type: ${entry.typeflag} (${entry.name})`);
@@ -332,12 +343,18 @@ function readExtensionPackageV2(packageBytes) {
       if (required.manifest) {
         throw new Error("Invalid extension package: duplicate manifest.json");
       }
+      if (entry.data.length > MAX_MANIFEST_JSON_BYTES) {
+        throw new Error("Invalid extension package: manifest.json is too large");
+      }
       required.manifest = JSON.parse(entry.data.toString("utf8"));
       continue;
     }
     if (name === "checksums.json") {
       if (required.checksums) {
         throw new Error("Invalid extension package: duplicate checksums.json");
+      }
+      if (entry.data.length > MAX_CHECKSUMS_JSON_BYTES) {
+        throw new Error("Invalid extension package: checksums.json is too large");
       }
       required.checksums = JSON.parse(entry.data.toString("utf8"));
       continue;
@@ -346,11 +363,17 @@ function readExtensionPackageV2(packageBytes) {
       if (required.signature) {
         throw new Error("Invalid extension package: duplicate signature.json");
       }
+      if (entry.data.length > MAX_SIGNATURE_JSON_BYTES) {
+        throw new Error("Invalid extension package: signature.json is too large");
+      }
       required.signature = JSON.parse(entry.data.toString("utf8"));
       continue;
     }
 
     if (name.startsWith("files/")) {
+      if (payloadFiles.size >= MAX_PACKAGE_FILES) {
+        throw new Error(`Invalid extension package: too many files (>${MAX_PACKAGE_FILES})`);
+      }
       const relPath = normalizePath(name.slice("files/".length));
       if (payloadFiles.has(relPath)) throw new Error(`Duplicate file in package: ${relPath}`);
       payloadFiles.set(relPath, entry.data);
@@ -390,8 +413,14 @@ function verifyExtensionPackageV2(packageBytes, publicKeyPem) {
     throw new Error("Invalid signature.json");
   }
 
+  const MAX_CHECKSUM_ENTRIES = 5_000;
   const checksumEntries = new Map();
+  let checksumCount = 0;
   for (const [rawPath, entry] of Object.entries(checksums.files)) {
+    checksumCount += 1;
+    if (checksumCount > MAX_CHECKSUM_ENTRIES) {
+      throw new Error(`checksums.json contains too many entries (>${MAX_CHECKSUM_ENTRIES})`);
+    }
     const normalized = normalizePath(rawPath);
     if (normalized !== rawPath) {
       throw new Error(`checksums.json contains non-normalized path: ${rawPath}`);
