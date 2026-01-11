@@ -105,3 +105,67 @@ test("timeouts: command timeout terminates a hanging command handler", async (t)
   assert.equal(extInfo.active, false);
 });
 
+test("timeouts: terminating a hung worker rejects other in-flight requests and allows restart", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-timeout-cleanup-"));
+  const extDir = path.join(dir, "ext");
+
+  await writeExtension(
+    extDir,
+    {
+      name: "hang-cleanup",
+      version: "1.0.0",
+      publisher: "test",
+      main: "extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: ["onCommand:test.quick", "onCommand:test.hangLoop"],
+      contributes: {
+        commands: [
+          { command: "test.quick", title: "Quick Command" },
+          { command: "test.hangLoop", title: "Hang Loop" }
+        ]
+      },
+      permissions: ["ui.commands"]
+    },
+    `
+      const formula = require("formula");
+
+      module.exports.activate = async () => {
+        await formula.commands.registerCommand("test.quick", async () => "ok");
+        await formula.commands.registerCommand("test.hangLoop", async () => {
+          // Block the worker thread event loop so subsequent requests cannot be processed.
+          // This simulates a truly misbehaving extension.
+          // eslint-disable-next-line no-constant-condition
+          while (true) {}
+        });
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true,
+    activationTimeoutMs: 1000,
+    commandTimeoutMs: 100
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  // Ensure the extension is activated before starting concurrent command execution.
+  assert.equal(await host.executeCommand("test.quick"), "ok");
+
+  const hangPromise = host.executeCommand("test.hangLoop");
+  await new Promise((r) => setTimeout(r, 10));
+  const pendingPromise = host.executeCommand("test.quick");
+
+  await assert.rejects(() => hangPromise, /timed out/i);
+  await assert.rejects(() => pendingPromise, /worker terminated/i);
+
+  // The next command should automatically spin up a fresh worker and re-activate the extension.
+  assert.equal(await host.executeCommand("test.quick"), "ok");
+});
