@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+mod schema;
 pub mod slicers;
+
+pub use schema::{CalculatedField, CalculatedItem};
 
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;
