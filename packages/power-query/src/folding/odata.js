@@ -485,7 +485,11 @@ function applyODataStep(current, operation) {
       }
       const orderby = sortToOrderBy(operation.sortBy);
       if (!orderby) return null;
-      return { ...current, orderby };
+      const prev = typeof current.orderby === "string" && current.orderby.trim() !== "" ? current.orderby.trim() : null;
+      // Local `sortRows` is stable, so previous ordering becomes a tie-breaker
+      // for equal values in the new sort key.
+      const combined = prev ? `${orderby}, ${prev}` : orderby;
+      return { ...current, orderby: combined };
     }
     case "skip": {
       const count = operation.count;

@@ -61,6 +61,23 @@ test("OData folding: falls back to local when an operation is unsupported", () =
   assert.equal(explained.steps[2].reason, "folding_stopped");
 });
 
+test("OData folding: composes consecutive sorts as an $orderby list", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_multi_sort",
+    name: "OData multi sort",
+    source: { type: "odata", url: "https://example.com/odata/Products" },
+    steps: [
+      { id: "s1", name: "Sort1", operation: { type: "sortRows", sortBy: [{ column: "Price", direction: "descending" }] } },
+      { id: "s2", name: "Sort2", operation: { type: "sortRows", sortBy: [{ column: "Name", direction: "ascending" }] } },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "odata");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$orderby=Name%20asc,%20Price%20desc");
+});
+
 test("OData folding: folds removeColumns when a projection is known", () => {
   const folding = new ODataFoldingEngine();
   const query = {
