@@ -21,6 +21,17 @@ use std::path::{Path, PathBuf};
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+const DEFAULT_SHARED_STRINGS_PART: &str = "xl/sharedStrings.bin";
+const DEFAULT_STYLES_PART: &str = "xl/styles.bin";
+
+const SHARED_STRINGS_REL_TYPE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
+const STYLES_REL_TYPE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
+
+const SHARED_STRINGS_CONTENT_TYPE: &str = "application/vnd.ms-excel.sharedStrings";
+const STYLES_CONTENT_TYPE: &str = "application/vnd.ms-excel.styles";
+
 /// Controls how much of the original package we keep around for round-trip preservation.
 #[derive(Debug, Clone)]
 pub struct OpenOptions {
@@ -60,10 +71,12 @@ pub struct XlsbWorkbook {
     sheets: Vec<SheetMeta>,
     shared_strings: Vec<String>,
     shared_strings_table: Vec<SharedString>,
+    shared_strings_part: Option<String>,
     workbook_context: WorkbookContext,
     workbook_properties: WorkbookProperties,
     defined_names: Vec<DefinedName>,
     styles: Styles,
+    styles_part: Option<String>,
     preserved_parts: HashMap<String, Vec<u8>>,
     preserve_parsed_parts: bool,
 }
@@ -95,15 +108,45 @@ impl XlsbWorkbook {
         );
         let workbook_rels = parse_relationships(&workbook_rels_bytes)?;
 
+        let content_types_xml = preserved_parts
+            .get("[Content_Types].xml")
+            .map(|bytes| bytes.as_slice());
+
+        let shared_strings_part = resolve_workbook_part_name(
+            &zip,
+            &workbook_rels_bytes,
+            content_types_xml,
+            SHARED_STRINGS_REL_TYPE,
+            Some(SHARED_STRINGS_CONTENT_TYPE),
+            DEFAULT_SHARED_STRINGS_PART,
+        )?;
+
+        let styles_part = resolve_workbook_part_name(
+            &zip,
+            &workbook_rels_bytes,
+            content_types_xml,
+            STYLES_REL_TYPE,
+            Some(STYLES_CONTENT_TYPE),
+            DEFAULT_STYLES_PART,
+        )?;
+
         // Styles are required for round-trip. We also parse `cellXfs` so callers can
         // resolve per-cell `style` indices to number formats (e.g. dates).
-        let styles_bin = read_zip_entry(&mut zip, "xl/styles.bin")?;
+        let styles_bin = match styles_part.as_deref() {
+            Some(part) => read_zip_entry(&mut zip, part)?,
+            None => None,
+        };
         let styles = match styles_bin.as_deref() {
             Some(bytes) => Styles::parse(bytes).unwrap_or_default(),
             None => Styles::default(),
         };
         if let Some(bytes) = styles_bin {
-            preserved_parts.insert("xl/styles.bin".to_string(), bytes);
+            preserved_parts.insert(
+                styles_part
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_STYLES_PART.to_string()),
+                bytes,
+            );
         }
 
         let workbook_bin = {
@@ -119,39 +162,48 @@ impl XlsbWorkbook {
             preserved_parts.insert("xl/workbook.bin".to_string(), workbook_bin);
         }
 
-        let shared_strings = match zip.by_name("xl/sharedStrings.bin") {
-            Ok(mut sst) => {
-                let mut bytes = Vec::with_capacity(sst.size() as usize);
-                sst.read_to_end(&mut bytes)?;
-                let table = parse_shared_strings(&mut Cursor::new(&bytes))?;
-                let strings = table.iter().map(|s| s.plain_text().to_string()).collect();
-                if options.preserve_parsed_parts {
-                    preserved_parts.insert("xl/sharedStrings.bin".to_string(), bytes);
+        let shared_strings = match shared_strings_part.as_deref() {
+            Some(part) => match zip.by_name(part) {
+                Ok(mut sst) => {
+                    let mut bytes = Vec::with_capacity(sst.size() as usize);
+                    sst.read_to_end(&mut bytes)?;
+                    let table = parse_shared_strings(&mut Cursor::new(&bytes))?;
+                    let strings = table.iter().map(|s| s.plain_text().to_string()).collect();
+                    if options.preserve_parsed_parts {
+                        preserved_parts.insert(part.to_string(), bytes);
+                    }
+                    (strings, table)
                 }
-                (strings, table)
-            }
-            Err(zip::result::ZipError::FileNotFound) => (Vec::new(), Vec::new()),
-            Err(e) => return Err(e.into()),
+                Err(zip::result::ZipError::FileNotFound) => (Vec::new(), Vec::new()),
+                Err(e) => return Err(e.into()),
+            },
+            None => (Vec::new(), Vec::new()),
         };
 
         let (shared_strings, shared_strings_table) = shared_strings;
 
-        let known_parts: HashSet<&str> = [
+        let mut known_parts: HashSet<String> = [
             "[Content_Types].xml",
             "_rels/.rels",
             "xl/workbook.bin",
             "xl/_rels/workbook.bin.rels",
-            "xl/sharedStrings.bin",
-            "xl/styles.bin",
+            DEFAULT_SHARED_STRINGS_PART,
+            DEFAULT_STYLES_PART,
         ]
         .into_iter()
+        .map(str::to_string)
         .collect();
+        if let Some(part) = &shared_strings_part {
+            known_parts.insert(part.clone());
+        }
+        if let Some(part) = &styles_part {
+            known_parts.insert(part.clone());
+        }
 
         let worksheet_paths: HashSet<String> = sheets.iter().map(|s| s.part_path.clone()).collect();
         if options.preserve_unknown_parts {
             for name in zip.file_names().map(str::to_string).collect::<Vec<_>>() {
-                let is_known =
-                    known_parts.contains(name.as_str()) || worksheet_paths.contains(&name);
+                let is_known = known_parts.contains(&name) || worksheet_paths.contains(&name);
                 if is_known {
                     continue;
                 }
@@ -178,10 +230,12 @@ impl XlsbWorkbook {
             sheets,
             shared_strings,
             shared_strings_table,
+            shared_strings_part,
             workbook_context,
             workbook_properties,
             defined_names,
             styles,
+            styles_part,
             preserved_parts,
             preserve_parsed_parts: options.preserve_parsed_parts,
         })
@@ -241,9 +295,8 @@ impl XlsbWorkbook {
 
     /// Raw `xl/styles.bin`, preserved for round-trip.
     pub fn styles_bin(&self) -> Option<&[u8]> {
-        self.preserved_parts
-            .get("xl/styles.bin")
-            .map(|v| v.as_slice())
+        let part = self.styles_part.as_deref()?;
+        self.preserved_parts.get(part).map(|v| v.as_slice())
     }
 
     /// Read a worksheet by index and return all discovered cells.
@@ -426,16 +479,21 @@ impl XlsbWorkbook {
             bytes
         };
 
-        let shared_strings_bytes = match self.preserved_parts.get("xl/sharedStrings.bin") {
+        let Some(shared_strings_part) = self.shared_strings_part.as_deref() else {
+            // Workbook has no shared string table. Fall back to the generic patcher which may
+            // convert shared-string cells to inline strings.
+            return self.save_with_cell_edits(dest, sheet_index, edits);
+        };
+
+        let shared_strings_bytes = match self.preserved_parts.get(shared_strings_part) {
             Some(bytes) => bytes.clone(),
             None => {
                 let file = File::open(&self.path)?;
                 let mut zip = ZipArchive::new(file)?;
-                match read_zip_entry(&mut zip, "xl/sharedStrings.bin")? {
+                match read_zip_entry(&mut zip, shared_strings_part)? {
                     Some(bytes) => bytes,
                     None => {
-                        // Workbook has no shared string table. Fall back to the generic patcher
-                        // which may convert shared-string cells to inline strings.
+                        // Shared strings part went missing; fall back to the generic patcher.
                         return self.save_with_cell_edits(dest, sheet_index, edits);
                     }
                 }
@@ -512,7 +570,7 @@ impl XlsbWorkbook {
             &HashMap::from([
                 (sheet_part, patched_sheet),
                 (
-                    "xl/sharedStrings.bin".to_string(),
+                    shared_strings_part.to_string(),
                     updated_shared_strings_bytes,
                 ),
             ]),
@@ -546,7 +604,7 @@ impl XlsbWorkbook {
     }
 
     /// Save the workbook with a set of edits for a single worksheet, patching the worksheet part
-    /// as a stream while updating `xl/sharedStrings.bin`.
+    /// as a stream while updating the shared string table (if present).
     ///
     /// This avoids buffering `xl/worksheets/sheetN.bin` in memory (important for large sheets)
     /// while still preserving shared-string (`BrtCellIsst`) storage for edited text cells.
@@ -562,15 +620,21 @@ impl XlsbWorkbook {
             .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
         let sheet_part = meta.part_path.clone();
 
-        let shared_strings_bytes = match self.preserved_parts.get("xl/sharedStrings.bin") {
+        let Some(shared_strings_part) = self.shared_strings_part.as_deref() else {
+            // Workbook has no shared string table. Fall back to the generic streaming patcher,
+            // which may emit inline strings.
+            return self.save_with_cell_edits_streaming(dest, sheet_index, edits);
+        };
+
+        let shared_strings_bytes = match self.preserved_parts.get(shared_strings_part) {
             Some(bytes) => bytes.clone(),
             None => {
                 let file = File::open(&self.path)?;
                 let mut zip = ZipArchive::new(file)?;
-                match read_zip_entry(&mut zip, "xl/sharedStrings.bin")? {
+                match read_zip_entry(&mut zip, shared_strings_part)? {
                     Some(bytes) => bytes,
                     None => {
-                        // Workbook has no shared string table. Fall back to the generic streaming
+                        // Shared strings part went missing; fall back to the generic streaming
                         // patcher, which may emit inline strings.
                         return self.save_with_cell_edits_streaming(dest, sheet_index, edits);
                     }
@@ -660,10 +724,7 @@ impl XlsbWorkbook {
 
         self.save_with_part_overrides_streaming(
             dest,
-            &HashMap::from([(
-                "xl/sharedStrings.bin".to_string(),
-                updated_shared_strings_bytes,
-            )]),
+            &HashMap::from([(shared_strings_part.to_string(), updated_shared_strings_bytes)]),
             &sheet_part,
             |input, output| patch_sheet_bin_streaming(input, output, &updated_edits),
         )
@@ -1074,6 +1135,136 @@ fn parse_relationships(xml_bytes: &[u8]) -> Result<HashMap<String, String>, Pars
         buf.clear();
     }
     Ok(out)
+}
+
+fn resolve_workbook_part_name<R: Read + Seek>(
+    zip: &ZipArchive<R>,
+    workbook_rels_xml: &[u8],
+    content_types_xml: Option<&[u8]>,
+    relationship_type: &str,
+    content_type: Option<&str>,
+    default_part: &str,
+) -> Result<Option<String>, ParseError> {
+    if let Some(target) = relationship_target_by_type(workbook_rels_xml, relationship_type)? {
+        for candidate in workbook_target_candidates(&target) {
+            if let Some(actual) = find_zip_entry_case_insensitive(zip, &candidate) {
+                return Ok(Some(actual));
+            }
+        }
+    }
+
+    if let (Some(content_type), Some(content_types_xml)) = (content_type, content_types_xml) {
+        for part_name in content_type_override_part_names(content_types_xml, content_type)? {
+            let normalized = normalize_zip_part_name(&part_name);
+            if let Some(actual) = find_zip_entry_case_insensitive(zip, &normalized) {
+                return Ok(Some(actual));
+            }
+        }
+    }
+
+    Ok(find_zip_entry_case_insensitive(zip, default_part))
+}
+
+fn relationship_target_by_type(
+    xml_bytes: &[u8],
+    relationship_type: &str,
+) -> Result<Option<String>, ParseError> {
+    let mut reader = XmlReader::from_reader(std::io::BufReader::new(Cursor::new(xml_bytes)));
+    reader.trim_text(true);
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if e.name().as_ref().ends_with(b"Relationship") =>
+            {
+                if let Some(ty) = xml_attr_value(&e, &reader, b"Type")? {
+                    if ty.eq_ignore_ascii_case(relationship_type) {
+                        return Ok(xml_attr_value(&e, &reader, b"Target")?);
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(ParseError::Xml(e)),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(None)
+}
+
+fn content_type_override_part_names(
+    xml_bytes: &[u8],
+    content_type: &str,
+) -> Result<Vec<String>, ParseError> {
+    let mut reader = XmlReader::from_reader(std::io::BufReader::new(Cursor::new(xml_bytes)));
+    reader.trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if e.name().as_ref().ends_with(b"Override") =>
+            {
+                let Some(ty) = xml_attr_value(&e, &reader, b"ContentType")? else {
+                    continue;
+                };
+                if !ty.eq_ignore_ascii_case(content_type) {
+                    continue;
+                }
+                if let Some(part) = xml_attr_value(&e, &reader, b"PartName")? {
+                    out.push(part);
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(ParseError::Xml(e)),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+fn workbook_target_candidates(target: &str) -> Vec<String> {
+    // workbook.bin is stored under `xl/`, so relationship targets are typically relative to `xl/`.
+    // Some writers use absolute targets with a leading `/`.
+    let target = target.replace('\\', "/");
+    let target = target.trim_start_matches('/');
+
+    let mut candidates = Vec::new();
+    candidates.push(normalize_zip_part_name(&format!("xl/{target}")));
+    candidates.push(normalize_zip_part_name(target));
+    candidates
+}
+
+fn normalize_zip_part_name(part_name: &str) -> String {
+    let part_name = part_name.replace('\\', "/");
+    let part_name = part_name.trim_start_matches('/');
+    let mut out: Vec<&str> = Vec::new();
+    for seg in part_name.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            _ => out.push(seg),
+        }
+    }
+    out.join("/")
+}
+
+fn find_zip_entry_case_insensitive<R: Read + Seek>(
+    zip: &ZipArchive<R>,
+    name: &str,
+) -> Option<String> {
+    let target = name.trim_start_matches('/').replace('\\', "/");
+    let target_lc = target.to_ascii_lowercase();
+    zip.file_names()
+        .find(|n| n.to_ascii_lowercase() == target_lc)
+        .map(str::to_string)
 }
 
 fn read_zip_entry<R: Read + Seek>(
