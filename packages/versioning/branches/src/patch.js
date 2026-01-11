@@ -39,13 +39,39 @@ function isRecord(value) {
 }
 
 /**
+ * @param {any} value
+ * @returns {value is Record<string, SheetMeta | null>}
+ */
+function looksLikeSheetMetaByIdPatch(value) {
+  if (!isRecord(value)) return false;
+  const entries = Object.entries(value);
+  if (entries.length === 0) return false;
+  for (const [_sheetId, meta] of entries) {
+    if (meta === null) continue;
+    if (!isRecord(meta)) return false;
+    if (!("id" in meta) && !("name" in meta)) return false;
+  }
+  return true;
+}
+
+/**
  * @param {Patch} patch
  */
 function isLegacyCellPatch(patch) {
   if (!isRecord(patch)) return false;
   if (patch.schemaVersion === 1) return false;
   if (!isRecord(patch.sheets)) return false;
-  if ("cells" in patch || "metadata" in patch || "namedRanges" in patch || "comments" in patch) return false;
+  if ("cells" in patch) return false;
+
+  // BranchService v2 uses `patch.sheets.order` / `patch.sheets.metaById` for sheet
+  // metadata. Legacy patches store cell updates under `patch.sheets[sheetId]`.
+  //
+  // Detect legacy patches by checking whether the `sheets` object looks like the
+  // newer metadata shape. This intentionally allows legacy cell patches to be
+  // combined with newer top-level sections like `metadata` (future-proofing).
+  const sheets = /** @type {any} */ (patch.sheets);
+  if (Array.isArray(sheets.order)) return false;
+  if (looksLikeSheetMetaByIdPatch(sheets.metaById)) return false;
   return true;
 }
 

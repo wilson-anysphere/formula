@@ -27,3 +27,24 @@ test("patch: diff/apply includes workbook metadata changes", () => {
   assert.deepEqual(applied.metadata, next.metadata);
 });
 
+test("patch: legacy cell patches can still apply when combined with metadata section", () => {
+  const base = normalizeDocumentState({
+    schemaVersion: 1,
+    sheets: { order: ["Sheet1"], metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } } },
+    cells: { Sheet1: { A1: { value: 1 } } },
+    metadata: { scenario: "base" },
+    namedRanges: {},
+    comments: {},
+  });
+
+  // Legacy patch shape: cells stored under `patch.sheets`.
+  const legacyPatch = {
+    sheets: { Sheet1: { A1: { value: 2 } } },
+    metadata: { scenario: "next" },
+  };
+
+  // @ts-expect-error - intentionally mixing legacy+new patch shape for compat.
+  const applied = applyPatch(base, legacyPatch);
+  assert.equal(applied.cells.Sheet1.A1.value, 2);
+  assert.equal(applied.metadata.scenario, "next");
+});
