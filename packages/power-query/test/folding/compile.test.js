@@ -556,6 +556,46 @@ test("compile: folds merge with multi-key join conditions", () => {
   });
 });
 
+test("compile: merge with a non-default comparer breaks folding into a hybrid plan", () => {
+  const folding = new QueryFoldingEngine();
+  const connection = {};
+
+  const right = {
+    id: "q_right_comparer",
+    name: "Scores",
+    source: { type: "database", connection, query: "SELECT * FROM scores" },
+    steps: [{ id: "r1", name: "Select", operation: { type: "selectColumns", columns: ["Name", "Score"] } }],
+  };
+
+  const left = {
+    id: "q_left_comparer",
+    name: "People",
+    source: { type: "database", connection, query: "SELECT * FROM people" },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Name"] } },
+      {
+        id: "l2",
+        name: "Merge (ignore case)",
+        operation: {
+          type: "merge",
+          rightQuery: "q_right_comparer",
+          joinType: "inner",
+          leftKeys: ["Name"],
+          rightKeys: ["Name"],
+          joinMode: "flat",
+          comparer: { comparer: "ordinalIgnoreCase", caseSensitive: false },
+        },
+      },
+    ],
+  };
+
+  const plan = folding.compile(left, { queries: { q_right_comparer: right } });
+  assert.equal(plan.type, "hybrid");
+  assert.equal(plan.sql, 'SELECT t."Id", t."Name" FROM (SELECT * FROM people) AS t');
+  assert.deepEqual(plan.params, []);
+  assert.deepEqual(plan.localSteps.map((s) => s.operation.type), ["merge"]);
+});
+
 test("compile: folds nested join + expand into a flattened join", () => {
   const folding = new QueryFoldingEngine();
   const connection = {};
