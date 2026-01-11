@@ -52,6 +52,46 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
+  it("suggests named ranges when typing a range argument", async () => {
+    const doc = new DocumentController();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      schemaProvider: {
+        getNamedRanges: () => [{ name: "SalesData", range: "Sheet1!A1:A10" }],
+        getTables: () => [],
+        getSheetNames: () => ["Sheet1"],
+        getCacheKey: () => "namedRanges:SalesData",
+      },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=SUM(Sal";
+    view.textarea.setSelectionRange(8, 8);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe("=SUM(SalesData)");
+    expect(view.model.aiGhostText()).toBe("esData)");
+    expect(view.model.aiSuggestionPreview()).toBe("(preview unavailable)");
+
+    const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    expect(highlight?.textContent).toContain("=SUM(SalesData)");
+    expect(highlight?.querySelector(".formula-bar-preview")?.textContent).toContain("(preview unavailable)");
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("treats formulas that evaluate to blank as non-empty when suggesting ranges", async () => {
     const doc = new DocumentController();
     for (let row = 0; row < 10; row += 1) {

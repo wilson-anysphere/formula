@@ -2,6 +2,7 @@ import {
   LocalModelManager,
   OllamaClient,
   TabCompletionEngine,
+  type CompletionContext,
   type SchemaProvider,
   type Suggestion
 } from "@formula/ai-completion";
@@ -227,7 +228,7 @@ function createPreviewEvaluator(params: {
   document: DocumentController;
   sheetId: string;
   cellAddress: string;
-}): (args: { suggestion: Suggestion }) => unknown {
+}): (args: { suggestion: Suggestion; context: CompletionContext }) => unknown {
   const { document, sheetId, cellAddress } = params;
 
   // Hard cap on the number of cell reads we allow for preview. This keeps
@@ -235,7 +236,7 @@ function createPreviewEvaluator(params: {
   // range.
   const MAX_CELL_READS = 5_000;
 
-  return ({ suggestion }: { suggestion: Suggestion }): unknown => {
+  return ({ suggestion }: { suggestion: Suggestion; context: CompletionContext }): unknown => {
     const text = suggestion?.text ?? "";
     if (typeof text !== "string" || text.trim() === "") return undefined;
 
