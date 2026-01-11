@@ -133,6 +133,7 @@ export const storage: StorageApi;
 export namespace config {
   function get<T = unknown>(key: string): Promise<T | undefined>;
   function update(key: string, value: any): Promise<void>;
+  function onDidChange(callback: (e: { key: string; value: any }) => void): Disposable;
 }
 
 export namespace events {

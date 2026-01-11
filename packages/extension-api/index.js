@@ -391,6 +391,9 @@ const config = {
   },
   async update(key, value) {
     await rpcCall("config", "update", [String(key), value]);
+  },
+  onDidChange(callback) {
+    return addEventHandler("configChanged", callback);
   }
 };
 

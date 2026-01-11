@@ -540,3 +540,72 @@ test("events: workbook.save emits beforeSave with stable payload", async (t) => 
   const evt = await host.executeCommand(commandId);
   assert.deepEqual(evt, { workbook: { name: "Book2.xlsx", path: workbookPath } });
 });
+
+test("api surface: config.onDidChange fires after config.update and value persists", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-config-change-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "configExt.update";
+  const configKey = "configExt.greeting";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "config-change-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: {
+        commands: [{ command: commandId, title: "Config Change" }],
+        configuration: {
+          title: "Config Change",
+          properties: {
+            [configKey]: { type: "string", default: "Hello" }
+          }
+        }
+      },
+      permissions: ["ui.commands", "storage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          const eventPromise = new Promise((resolve) => {
+            const disp = formula.config.onDidChange((e) => {
+              disp.dispose();
+              resolve(e);
+            });
+          });
+
+          await formula.config.update(${JSON.stringify(configKey)}, "Hi");
+          const evt = await eventPromise;
+          const value = await formula.config.get(${JSON.stringify(configKey)});
+          return { evt, value };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const result = await host.executeCommand(commandId);
+  assert.deepEqual(result, {
+    evt: { key: configKey, value: "Hi" },
+    value: "Hi"
+  });
+});

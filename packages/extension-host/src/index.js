@@ -939,6 +939,7 @@ class ExtensionHost {
         store[extension.id] = store[extension.id] ?? {};
         store[extension.id][key] = value;
         await this._saveExtensionStorage(store);
+        this._sendEventToExtension(extension, "configChanged", { key: configKey, value });
         return null;
       }
 
