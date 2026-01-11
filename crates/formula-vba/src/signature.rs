@@ -94,16 +94,46 @@ pub fn parse_vba_digital_signature(
 /// is well-formed and that the signature matches the signed attributes / embedded content. We do
 /// **not** currently validate that the signature is bound to the rest of the VBA project streams
 /// as Excel does per MS-OVBA.
+///
+/// If multiple signature streams are present, we return the first one (by Excel's preferred stream
+/// name ordering) that verifies successfully, falling back to the first candidate if none verify.
 pub fn verify_vba_digital_signature(
     vba_project_bin: &[u8],
 ) -> Result<Option<VbaDigitalSignature>, SignatureError> {
-    let mut sig = match parse_vba_digital_signature(vba_project_bin)? {
-        Some(sig) => sig,
-        None => return Ok(None),
-    };
+    let mut ole = OleFile::open(vba_project_bin)?;
+    let streams = ole.list_streams()?;
 
-    sig.verification = verify_signature_blob(&sig.signature);
-    Ok(Some(sig))
+    let mut candidates = streams
+        .into_iter()
+        .filter(|path| path.split('/').any(is_signature_component))
+        .collect::<Vec<_>>();
+
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+
+    candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
+
+    let mut first: Option<VbaDigitalSignature> = None;
+    for path in candidates {
+        let signature = ole.read_stream_opt(&path)?.unwrap_or_default();
+        let signer_subject = extract_first_certificate_subject(&signature);
+        let verification = verify_signature_blob(&signature);
+        let sig = VbaDigitalSignature {
+            stream_path: path,
+            signer_subject,
+            signature,
+            verification,
+        };
+        if sig.verification == VbaSignatureVerification::SignedVerified {
+            return Ok(Some(sig));
+        }
+        if first.is_none() {
+            first = Some(sig);
+        }
+    }
+
+    Ok(first)
 }
 
 fn is_signature_component(component: &str) -> bool {

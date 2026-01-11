@@ -93,18 +93,23 @@ fn make_pkcs7_detached_signature(data: &[u8]) -> Vec<u8> {
     pkcs7.to_der().expect("pkcs7 DER")
 }
 
-fn build_vba_project_bin_with_signature(signature_blob: Option<&[u8]>) -> Vec<u8> {
+fn build_vba_project_bin_with_signature_streams(streams: &[(&str, &[u8])]) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
 
-    if let Some(sig) = signature_blob {
-        let mut stream = ole
-            .create_stream("\u{0005}DigitalSignature")
-            .expect("create signature stream");
-        stream.write_all(sig).expect("write signature bytes");
+    for (path, bytes) in streams {
+        let mut stream = ole.create_stream(path).expect("create signature stream");
+        stream.write_all(bytes).expect("write signature bytes");
     }
 
     ole.into_inner().into_inner()
+}
+
+fn build_vba_project_bin_with_signature(signature_blob: Option<&[u8]>) -> Vec<u8> {
+    match signature_blob {
+        Some(sig) => build_vba_project_bin_with_signature_streams(&[("\u{0005}DigitalSignature", sig)]),
+        None => build_vba_project_bin_with_signature_streams(&[]),
+    }
 }
 
 #[test]
@@ -174,4 +179,29 @@ fn detached_pkcs7_signature_with_prefixed_content_is_verified() {
         .expect("signature should be present");
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+}
+
+#[test]
+fn prefers_verified_signature_stream_over_invalid_candidate() {
+    let mut invalid = make_pkcs7_signed_message(b"formula-vba-test");
+    let last = invalid.len().saturating_sub(1);
+    invalid[last] ^= 0xFF;
+
+    let valid = make_pkcs7_signed_message(b"formula-vba-test");
+
+    let vba = build_vba_project_bin_with_signature_streams(&[
+        ("\u{0005}DigitalSignature", &invalid),
+        ("\u{0005}DigitalSignatureEx", &valid),
+    ]);
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert!(
+        sig.stream_path.contains("DigitalSignatureEx"),
+        "expected to pick verified signature stream, got {}",
+        sig.stream_path
+    );
 }
