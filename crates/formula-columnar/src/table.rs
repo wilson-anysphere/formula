@@ -902,10 +902,11 @@ impl MutableColumnarTable {
             for (chunk_idx, updates) in by_chunk {
                 if chunk_idx < chunk_count {
                     self.columns[col].apply_overlays_to_chunk(chunk_idx, &updates);
+                    let key = CacheKey { col, chunk: chunk_idx };
                     self.cache
                         .lock()
                         .expect("columnar page cache poisoned")
-                        .remove_if(|key| key.col == col && key.chunk == chunk_idx);
+                        .remove(&key);
                 } else if chunk_idx == chunk_count {
                     self.columns[col].apply_overlays_to_current(&updates);
                 }

@@ -65,6 +65,10 @@ where
         self.order.clear();
     }
 
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        self.map.remove(key).map(|(value, _)| value)
+    }
+
     pub fn remove_if<F>(&mut self, mut predicate: F)
     where
         F: FnMut(&K) -> bool,
