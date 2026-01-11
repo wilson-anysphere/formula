@@ -52,3 +52,24 @@ test("utils/hash.js is browser-safe (no Node builtin crypto import)", async () =
     );
   }
 });
+
+test("contentHash falls back when WebCrypto is unavailable", async () => {
+  const mod = await import("../src/utils/hash.js");
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  if (descriptor && descriptor.configurable !== true) {
+    // Can't override in this runtime; just ensure it works.
+    const digest = await mod.contentHash("hello");
+    assert.match(digest, /^[0-9a-f]+$/);
+    assert.ok(digest.length === 64 || digest.length === 16);
+    return;
+  }
+
+  try {
+    Object.defineProperty(globalThis, "crypto", { value: undefined, configurable: true });
+    const digest = await mod.contentHash("hello");
+    assert.match(digest, /^[0-9a-f]{16}$/);
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "crypto", descriptor);
+    else delete globalThis.crypto;
+  }
+});
