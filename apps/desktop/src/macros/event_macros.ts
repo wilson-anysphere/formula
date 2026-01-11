@@ -307,6 +307,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   let eventsAllowed = true;
   let promptedForTrust = false;
   let workbookOpenFired = false;
+  let macroStatusResolved = false;
 
   let pendingChangesBySheet = new Map<string, Rect>();
   let changeFlushScheduled = false;
@@ -335,6 +336,8 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       console.warn("Failed to read macro security status for event macros:", err);
       macroStatus = null;
       eventsAllowed = true;
+    } finally {
+      macroStatusResolved = true;
     }
   })();
 
@@ -343,7 +346,12 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     cmd: string,
     cmdArgs: Record<string, unknown>,
   ): Promise<void> {
-    await statusPromise;
+    // `await statusPromise` always yields a microtask (even if already resolved),
+    // which can introduce races between Workbook_Open and events queued while the
+    // status request was pending. Once the status is resolved, avoid the extra
+    // yield so `runningEventMacro` is set synchronously and queued events can
+    // reliably defer without dropping their pending state.
+    if (!macroStatusResolved) await statusPromise;
     if (disposed) return;
     if (eventsDisabled) return;
 
