@@ -538,6 +538,11 @@ def PYSUM(range_values: List[List[float]]) -> float:
 
 #### Option 1: Pyodide (In-Browser)
 
+Pyodide can run in two modes:
+
+- **Worker-backed (preferred)**: keeps the UI responsive, but requires a cross-origin isolated context (COOP/COEP) so `SharedArrayBuffer` is available.
+- **Main-thread fallback**: works without COOP/COEP, but Python execution will block the UI thread (acceptable as a degraded mode for embedded/webview deployments).
+
 ```typescript
 class PyodideRuntime {
   private pyodide: any;
