@@ -21,6 +21,7 @@ pub(crate) mod biff12 {
     pub const BOOLERR: u32 = 0x0003;
     pub const BOOL: u32 = 0x0004;
     pub const FLOAT: u32 = 0x0005;
+    pub const CELL_ST: u32 = 0x0006;
     pub const STRING: u32 = 0x0007;
     pub const FORMULA_STRING: u32 = 0x0008;
     pub const FORMULA_FLOAT: u32 = 0x0009;
@@ -366,7 +367,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
             | biff12::BOOLERR
             | biff12::BOOL
             | biff12::FLOAT
-            | 0x0006 // BrtCellSt
+            | biff12::CELL_ST
             | biff12::STRING
             | biff12::FORMULA_STRING
             | biff12::FORMULA_FLOAT
@@ -385,7 +386,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                     biff12::BOOLERR => (CellValue::Error(rr.read_u8()?), None),
                     biff12::BOOL => (CellValue::Bool(rr.read_u8()? != 0), None),
                     biff12::FLOAT => (CellValue::Number(rr.read_f64()?), None),
-                    0x0006 => (CellValue::Text(rr.read_utf16_string()?), None),
+                    biff12::CELL_ST => (CellValue::Text(rr.read_utf16_string()?), None),
                     biff12::STRING => {
                         let idx = rr.read_u32()? as usize;
                         let s = shared_strings.get(idx).cloned().unwrap_or_default();

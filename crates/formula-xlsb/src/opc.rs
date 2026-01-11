@@ -7,7 +7,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::{Cursor, Read, Seek, Write};
+use std::io::{self, Cursor, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -232,7 +232,23 @@ impl XlsbWorkbook {
     ///   so they can be re-emitted without re-reading those ZIP entries.
     /// - `preserve_worksheets`: stores raw bytes for worksheet `.bin` parts (can be large). When
     ///   `false`, worksheets are streamed from the source ZIP during `save_as`.
-    pub fn save_as(&self, dest: impl AsRef<Path>) -> Result<(), crate::Error> {
+    ///
+    /// If you need to override specific parts (e.g. a patched worksheet stream), use
+    /// [`XlsbWorkbook::save_with_part_overrides`].
+    pub fn save_as(&self, dest: impl AsRef<Path>) -> Result<(), ParseError> {
+        self.save_with_part_overrides(dest, &HashMap::new())
+    }
+
+    /// Save the workbook while overriding specific part payloads.
+    ///
+    /// `overrides` maps ZIP entry paths (e.g. `xl/worksheets/sheet1.bin`) to replacement bytes.
+    /// All other parts are copied from the source workbook, except for any entry already present
+    /// in [`XlsbWorkbook::preserved_parts`], which is emitted from that buffer.
+    pub fn save_with_part_overrides(
+        &self,
+        dest: impl AsRef<Path>,
+        overrides: &HashMap<String, Vec<u8>>,
+    ) -> Result<(), ParseError> {
         let dest = dest.as_ref();
 
         let file = File::open(&self.path)?;
@@ -244,6 +260,8 @@ impl XlsbWorkbook {
         // Use a consistent compression method for output. This does *not* affect payload
         // preservation: we always copy/write the uncompressed part bytes.
         let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+
+        let mut used_overrides: HashSet<String> = HashSet::new();
 
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i)?;
@@ -257,11 +275,28 @@ impl XlsbWorkbook {
             }
 
             writer.start_file(name.as_str(), options)?;
-            if let Some(bytes) = self.preserved_parts.get(&name) {
+            if let Some(bytes) = overrides.get(&name) {
+                used_overrides.insert(name.clone());
+                writer.write_all(bytes)?;
+            } else if let Some(bytes) = self.preserved_parts.get(&name) {
                 writer.write_all(bytes)?;
             } else {
-                std::io::copy(&mut entry, &mut writer)?;
+                io::copy(&mut entry, &mut writer)?;
             }
+        }
+
+        if used_overrides.len() != overrides.len() {
+            let mut missing = Vec::new();
+            for key in overrides.keys() {
+                if !used_overrides.contains(key) {
+                    missing.push(key.clone());
+                }
+            }
+            missing.sort();
+            return Err(ParseError::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("override parts not found in source package: {}", missing.join(", ")),
+            )));
         }
 
         writer.finish()?;
