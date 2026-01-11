@@ -147,3 +147,54 @@ test("Yjs↔DocumentController binder encrypts protected cell contents and masks
   await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value == null, 10_000);
   assert.equal(controllerB.getCell("Sheet1", "A1").value, null);
 });
+
+test("Yjs↔DocumentController binder uses maskCellValue hook when encrypted cell cannot be decrypted", async (t) => {
+  const docId = "collab-binder-encryption-test-doc-mask-hook";
+  const docA = new Y.Doc({ guid: docId });
+  const docB = new Y.Doc({ guid: docId });
+  const disconnect = connectDocs(docA, docB);
+
+  const keyBytes = new Uint8Array(32).fill(5);
+  const keyForA1 = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-1", keyBytes };
+    }
+    return null;
+  };
+
+  const controllerA = new DocumentController();
+  const controllerB = new DocumentController();
+
+  const maskCellValue = () => "MASKED";
+
+  const binderA = bindYjsToDocumentController({
+    ydoc: docA,
+    documentController: controllerA,
+    defaultSheetId: "Sheet1",
+    userId: "u-a",
+    encryption: { keyForCell: keyForA1 },
+    maskCellValue,
+  });
+
+  const binderB = bindYjsToDocumentController({
+    ydoc: docB,
+    documentController: controllerB,
+    defaultSheetId: "Sheet1",
+    userId: "u-b",
+    // No key on B, so it should fall back to maskCellValue.
+    maskCellValue,
+  });
+
+  t.after(() => {
+    binderA.destroy();
+    binderB.destroy();
+    disconnect();
+    docA.destroy();
+    docB.destroy();
+  });
+
+  controllerA.setCellValue("Sheet1", "A1", "top-secret");
+
+  await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value === "MASKED", 10_000);
+  assert.equal(controllerB.getCell("Sheet1", "A1").formula, null);
+});
