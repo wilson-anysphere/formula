@@ -52,6 +52,7 @@ Collaboration must be seamless, conflict-free, and work offline. We use **CRDTs 
 
 ```typescript
 import * as Y from "yjs";
+import { ensureWorkbookSchema } from "@formula/collab-workbook";
 
 interface SpreadsheetDoc {
   // Root Y.Doc
@@ -80,6 +81,10 @@ class CollaborativeDocument {
   }
   
   private initializeStructure(): void {
+    // Production code should call `ensureWorkbookSchema` so all required roots
+    // exist and at least one default sheet is present.
+    ensureWorkbookSchema(this.doc, { defaultSheetId: "Sheet1", defaultSheetName: "Sheet1" });
+
     // Get or create top-level structures
     const sheets = this.doc.getArray("sheets");
     const cells = this.doc.getMap("cells");
