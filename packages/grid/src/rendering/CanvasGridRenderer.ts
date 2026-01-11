@@ -94,19 +94,44 @@ function padRect(rect: Rect, padding: number): Rect {
   return { x: rect.x - padding, y: rect.y - padding, width: rect.width + padding * 2, height: rect.height + padding * 2 };
 }
 
-function parseHexColor(color: string): { r: number; g: number; b: number } | null {
-  const match = /^#?([0-9a-f]{6})$/i.exec(color);
-  if (!match) return null;
-  const value = Number.parseInt(match[1], 16);
-  return {
-    r: (value >> 16) & 255,
-    g: (value >> 8) & 255,
-    b: value & 255
-  };
+function parseCssColor(color: string): { r: number; g: number; b: number } | null {
+  const trimmed = color.trim();
+
+  const hex6 = /^#?([0-9a-f]{6})$/i.exec(trimmed);
+  if (hex6) {
+    const value = Number.parseInt(hex6[1], 16);
+    return {
+      r: (value >> 16) & 255,
+      g: (value >> 8) & 255,
+      b: value & 255
+    };
+  }
+
+  const hex3 = /^#?([0-9a-f]{3})$/i.exec(trimmed);
+  if (hex3) {
+    const [r, g, b] = hex3[1].split("");
+    const value = Number.parseInt(`${r}${r}${g}${g}${b}${b}`, 16);
+    return {
+      r: (value >> 16) & 255,
+      g: (value >> 8) & 255,
+      b: value & 255
+    };
+  }
+
+  const rgb = /^rgba?\(\s*(\d{1,3})(?:\s*,\s*|\s+)(\d{1,3})(?:\s*,\s*|\s+)(\d{1,3})/i.exec(trimmed);
+  if (rgb) {
+    return {
+      r: clamp(Number.parseInt(rgb[1], 10), 0, 255),
+      g: clamp(Number.parseInt(rgb[2], 10), 0, 255),
+      b: clamp(Number.parseInt(rgb[3], 10), 0, 255)
+    };
+  }
+
+  return null;
 }
 
 function pickTextColor(backgroundColor: string): string {
-  const rgb = parseHexColor(backgroundColor);
+  const rgb = parseCssColor(backgroundColor);
   if (!rgb) return "#ffffff";
   const luma = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
   return luma > 0.6 ? "#000000" : "#ffffff";
