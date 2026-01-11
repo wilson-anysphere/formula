@@ -38,8 +38,16 @@ impl Ref {
 
     #[inline]
     pub fn resolve(self, base: CellCoord) -> CellCoord {
-        let row = if self.row_abs { self.row } else { base.row + self.row };
-        let col = if self.col_abs { self.col } else { base.col + self.col };
+        let row = if self.row_abs {
+            self.row
+        } else {
+            base.row + self.row
+        };
+        let col = if self.col_abs {
+            self.col
+        } else {
+            base.col + self.col
+        };
         CellCoord { row, col }
     }
 }
@@ -101,12 +109,14 @@ impl ResolvedRange {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErrorKind {
+    Null,
     Div0,
     Ref,
     Value,
     Name,
     Num,
     NA,
+    Spill,
     Calc,
 }
 
@@ -169,13 +179,15 @@ impl PartialEq for Value {
             (Empty, Empty) => true,
             (Error(a), Error(b)) => a == b,
             (Range(a), Range(b)) => a == b,
-            (Array(a), Array(b)) => a.rows == b.rows
-                && a.cols == b.cols
-                && a.values.len() == b.values.len()
-                && a.values
-                    .iter()
-                    .zip(&b.values)
-                    .all(|(x, y)| x.to_bits() == y.to_bits()),
+            (Array(a), Array(b)) => {
+                a.rows == b.rows
+                    && a.cols == b.cols
+                    && a.values.len() == b.values.len()
+                    && a.values
+                        .iter()
+                        .zip(&b.values)
+                        .all(|(x, y)| x.to_bits() == y.to_bits())
+            }
             _ => false,
         }
     }
@@ -186,15 +198,16 @@ impl Eq for Value {}
 impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
+            ErrorKind::Null => "#NULL!",
             ErrorKind::Div0 => "#DIV/0!",
             ErrorKind::Ref => "#REF!",
             ErrorKind::Value => "#VALUE!",
             ErrorKind::Name => "#NAME?",
             ErrorKind::Num => "#NUM!",
             ErrorKind::NA => "#N/A",
+            ErrorKind::Spill => "#SPILL!",
             ErrorKind::Calc => "#CALC!",
         };
         f.write_str(s)
     }
 }
-

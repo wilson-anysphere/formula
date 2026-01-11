@@ -1,7 +1,7 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
-use crate::simd::{self, CmpOp, NumericCriteria};
 use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, ResolvedRange, Value};
+use crate::simd::{self, CmpOp, NumericCriteria};
 use smallvec::SmallVec;
 
 pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
@@ -21,7 +21,26 @@ pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
         Expr::FuncCall { func, args } => {
             // Evaluate arguments first (AST evaluation).
             let mut evaluated: SmallVec<[Value; 8]> = SmallVec::with_capacity(args.len());
-            for arg in args {
+            for (arg_idx, arg) in args.iter().enumerate() {
+                let treat_cell_as_range = match func {
+                    // See `Compiler::compile_func_arg` for the rationale.
+                    Function::Sum
+                    | Function::Average
+                    | Function::Min
+                    | Function::Max
+                    | Function::Count => true,
+                    Function::CountIf => arg_idx == 0,
+                    Function::SumProduct => true,
+                    Function::Unknown(_) => false,
+                };
+
+                if treat_cell_as_range {
+                    if let Expr::CellRef(r) = arg {
+                        evaluated.push(Value::Range(RangeRef::new(*r, *r)));
+                        continue;
+                    }
+                }
+
                 evaluated.push(eval_ast(arg, grid, base));
             }
             call_function(func, &evaluated, grid, base)
@@ -29,45 +48,118 @@ pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
     }
 }
 
+fn parse_number_from_text(s: &str) -> Option<f64> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed.parse::<f64>().ok()
+}
+
+fn coerce_to_number(v: Value) -> Result<f64, ErrorKind> {
+    match v {
+        Value::Number(n) => Ok(n),
+        Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
+        Value::Empty => Ok(0.0),
+        Value::Text(s) => parse_number_from_text(&s).ok_or(ErrorKind::Value),
+        Value::Error(e) => Err(e),
+        // Dynamic arrays / range-as-scalar: treat as a spill attempt (engine semantics).
+        Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
+    }
+}
+
+fn matches_numeric_criteria(v: f64, criteria: NumericCriteria) -> bool {
+    match criteria.op {
+        CmpOp::Eq => v == criteria.rhs,
+        CmpOp::Ne => v != criteria.rhs,
+        CmpOp::Lt => v < criteria.rhs,
+        CmpOp::Le => v <= criteria.rhs,
+        CmpOp::Gt => v > criteria.rhs,
+        CmpOp::Ge => v >= criteria.rhs,
+    }
+}
+
 pub fn apply_unary(op: UnaryOp, v: Value) -> Value {
+    let n = match coerce_to_number(v) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
     match op {
-        UnaryOp::Plus => v,
-        UnaryOp::Neg => match v {
-            Value::Number(x) => Value::Number(-x),
-            Value::Bool(b) => Value::Number(if b { -1.0 } else { 0.0 }),
-            Value::Error(e) => Value::Error(e),
-            _ => Value::Error(ErrorKind::Value),
-        },
+        UnaryOp::Plus => Value::Number(n),
+        UnaryOp::Neg => Value::Number(-n),
     }
 }
 
 pub fn apply_binary(op: BinaryOp, left: Value, right: Value) -> Value {
     use Value::*;
 
-    if let Error(e) = left {
-        return Error(e);
-    }
-    if let Error(e) = right {
-        return Error(e);
-    }
-
     match op {
         BinaryOp::Add => numeric_binop(left, right, |a, b| a + b, simd::add_f64),
         BinaryOp::Sub => numeric_binop(left, right, |a, b| a - b, simd::sub_f64),
         BinaryOp::Mul => numeric_binop(left, right, |a, b| a * b, simd::mul_f64),
-        BinaryOp::Div => {
-            if let Some(0.0) = right.as_f64() {
-                return Error(ErrorKind::Div0);
+        BinaryOp::Div => match (left, right) {
+            (Error(e), _) | (_, Error(e)) => Error(e),
+            (Array(a), Array(b)) => {
+                if a.rows != b.rows || a.cols != b.cols {
+                    return Error(ErrorKind::Value);
+                }
+                let mut out = vec![0.0; a.values.len()];
+                simd::div_f64(&mut out, &a.values, &b.values);
+                Value::Array(ArrayValue::new(a.rows, a.cols, out))
             }
-            numeric_binop(left, right, |a, b| a / b, simd::div_f64)
-        }
-        BinaryOp::Pow => match (left.as_f64(), right.as_f64()) {
-            (Some(a), Some(b)) => Number(a.powf(b)),
-            _ => Error(ErrorKind::Value),
+            (Array(a), other) => {
+                let denom = match coerce_to_number(other) {
+                    Ok(n) => n,
+                    Err(e) => return Error(e),
+                };
+                if denom == 0.0 {
+                    return Error(ErrorKind::Div0);
+                }
+                let mut out = a.values.clone();
+                for v in &mut out {
+                    *v /= denom;
+                }
+                Value::Array(ArrayValue::new(a.rows, a.cols, out))
+            }
+            (other, Array(b)) => {
+                let numer = match coerce_to_number(other) {
+                    Ok(n) => n,
+                    Err(e) => return Error(e),
+                };
+                let mut out = b.values.clone();
+                for v in &mut out {
+                    *v = numer / *v;
+                }
+                Value::Array(ArrayValue::new(b.rows, b.cols, out))
+            }
+            (l, r) => {
+                let ln = match coerce_to_number(l) {
+                    Ok(n) => n,
+                    Err(e) => return Error(e),
+                };
+                let rn = match coerce_to_number(r) {
+                    Ok(n) => n,
+                    Err(e) => return Error(e),
+                };
+                if rn == 0.0 {
+                    Error(ErrorKind::Div0)
+                } else {
+                    Number(ln / rn)
+                }
+            }
+        },
+        BinaryOp::Pow => match (coerce_to_number(left), coerce_to_number(right)) {
+            (Ok(a), Ok(b)) => Number(a.powf(b)),
+            (Err(e), _) | (_, Err(e)) => Error(e),
         },
         BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-            let (Some(a), Some(b)) = (left.as_f64(), right.as_f64()) else {
-                return Error(ErrorKind::Value);
+            let a = match coerce_to_number(left) {
+                Ok(n) => n,
+                Err(e) => return Error(e),
+            };
+            let b = match coerce_to_number(right) {
+                Ok(n) => n,
+                Err(e) => return Error(e),
             };
             let res = match op {
                 BinaryOp::Eq => a == b,
@@ -91,9 +183,7 @@ fn numeric_binop(
 ) -> Value {
     use Value::*;
     match (left, right) {
-        (Number(a), Number(b)) => Number(scalar(a, b)),
-        (Bool(a), Number(b)) => Number(scalar(if a { 1.0 } else { 0.0 }, b)),
-        (Number(a), Bool(b)) => Number(scalar(a, if b { 1.0 } else { 0.0 })),
+        (Error(e), _) | (_, Error(e)) => Error(e),
         (Array(a), Array(b)) => {
             if a.rows != b.rows || a.cols != b.cols {
                 return Error(ErrorKind::Value);
@@ -102,21 +192,32 @@ fn numeric_binop(
             simd_binop(&mut out, &a.values, &b.values);
             Value::Array(ArrayValue::new(a.rows, a.cols, out))
         }
-        (Array(a), Number(b)) => {
+        (Array(a), other) => {
+            let b = match coerce_to_number(other) {
+                Ok(n) => n,
+                Err(e) => return Error(e),
+            };
             let mut out = a.values.clone();
             for v in &mut out {
                 *v = scalar(*v, b);
             }
             Value::Array(ArrayValue::new(a.rows, a.cols, out))
         }
-        (Number(a), Array(b)) => {
+        (other, Array(b)) => {
+            let a = match coerce_to_number(other) {
+                Ok(n) => n,
+                Err(e) => return Error(e),
+            };
             let mut out = b.values.clone();
             for v in &mut out {
                 *v = scalar(a, *v);
             }
             Value::Array(ArrayValue::new(b.rows, b.cols, out))
         }
-        _ => Error(ErrorKind::Value),
+        (l, r) => match (coerce_to_number(l), coerce_to_number(r)) {
+            (Ok(a), Ok(b)) => Number(scalar(a, b)),
+            (Err(e), _) | (_, Err(e)) => Error(e),
+        },
     }
 }
 
@@ -140,16 +241,25 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Value::Number(v) => sum += v,
             Value::Bool(v) => sum += if *v { 1.0 } else { 0.0 },
             Value::Array(a) => sum += simd::sum_ignore_nan_f64(&a.values),
-            Value::Range(r) => sum += sum_range(grid, r.resolve(base)),
+            Value::Range(r) => match sum_range(grid, r.resolve(base)) {
+                Ok(v) => sum += v,
+                Err(e) => return Value::Error(e),
+            },
             Value::Empty => {}
             Value::Error(e) => return Value::Error(*e),
-            Value::Text(_) => {}
+            Value::Text(s) => match parse_number_from_text(s) {
+                Some(v) => sum += v,
+                None => return Value::Error(ErrorKind::Value),
+            },
         }
     }
     Value::Number(sum)
 }
 
 fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
     let mut sum = 0.0;
     let mut count = 0usize;
     for arg in args {
@@ -167,14 +277,22 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 sum += s;
                 count += c;
             }
-            Value::Range(r) => {
-                let (s, c) = sum_count_range(grid, r.resolve(base));
-                sum += s;
-                count += c;
-            }
+            Value::Range(r) => match sum_count_range(grid, r.resolve(base)) {
+                Ok((s, c)) => {
+                    sum += s;
+                    count += c;
+                }
+                Err(e) => return Value::Error(e),
+            },
             Value::Empty => {}
             Value::Error(e) => return Value::Error(*e),
-            Value::Text(_) => {}
+            Value::Text(s) => match parse_number_from_text(s) {
+                Some(v) => {
+                    sum += v;
+                    count += 1;
+                }
+                None => return Value::Error(ErrorKind::Value),
+            },
         }
     }
     if count == 0 {
@@ -184,69 +302,81 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 }
 
 fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
     let mut out: Option<f64> = None;
     for arg in args {
         match arg {
             Value::Number(v) => out = Some(out.map_or(*v, |prev| prev.min(*v))),
             Value::Bool(v) => {
-                let n = if *v { 1.0 } else { 0.0 };
-                out = Some(out.map_or(n, |prev| prev.min(n)));
+                out = Some(out.map_or(if *v { 1.0 } else { 0.0 }, |prev| {
+                    prev.min(if *v { 1.0 } else { 0.0 })
+                }))
             }
             Value::Array(a) => {
                 if let Some(m) = simd::min_ignore_nan_f64(&a.values) {
                     out = Some(out.map_or(m, |prev| prev.min(m)));
                 }
             }
-            Value::Range(r) => {
-                if let Some(m) = min_range(grid, r.resolve(base)) {
-                    out = Some(out.map_or(m, |prev| prev.min(m)));
-                }
-            }
-            Value::Empty => {}
+            Value::Range(r) => match min_range(grid, r.resolve(base)) {
+                Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.min(m))),
+                Ok(None) => {}
+                Err(e) => return Value::Error(e),
+            },
+            Value::Empty => out = Some(out.map_or(0.0, |prev| prev.min(0.0))),
             Value::Error(e) => return Value::Error(*e),
-            Value::Text(_) => {}
+            Value::Text(s) => match parse_number_from_text(s) {
+                Some(v) => out = Some(out.map_or(v, |prev| prev.min(v))),
+                None => return Value::Error(ErrorKind::Value),
+            },
         }
     }
-    out.map(Value::Number).unwrap_or(Value::Error(ErrorKind::Value))
+    Value::Number(out.unwrap_or(0.0))
 }
 
 fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
     let mut out: Option<f64> = None;
     for arg in args {
         match arg {
             Value::Number(v) => out = Some(out.map_or(*v, |prev| prev.max(*v))),
             Value::Bool(v) => {
-                let n = if *v { 1.0 } else { 0.0 };
-                out = Some(out.map_or(n, |prev| prev.max(n)));
+                out = Some(out.map_or(if *v { 1.0 } else { 0.0 }, |prev| {
+                    prev.max(if *v { 1.0 } else { 0.0 })
+                }))
             }
             Value::Array(a) => {
                 if let Some(m) = simd::max_ignore_nan_f64(&a.values) {
                     out = Some(out.map_or(m, |prev| prev.max(m)));
                 }
             }
-            Value::Range(r) => {
-                if let Some(m) = max_range(grid, r.resolve(base)) {
-                    out = Some(out.map_or(m, |prev| prev.max(m)));
-                }
-            }
-            Value::Empty => {}
+            Value::Range(r) => match max_range(grid, r.resolve(base)) {
+                Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.max(m))),
+                Ok(None) => {}
+                Err(e) => return Value::Error(e),
+            },
+            Value::Empty => out = Some(out.map_or(0.0, |prev| prev.max(0.0))),
             Value::Error(e) => return Value::Error(*e),
-            Value::Text(_) => {}
+            Value::Text(s) => match parse_number_from_text(s) {
+                Some(v) => out = Some(out.map_or(v, |prev| prev.max(v))),
+                None => return Value::Error(ErrorKind::Value),
+            },
         }
     }
-    out.map(Value::Number).unwrap_or(Value::Error(ErrorKind::Value))
+    Value::Number(out.unwrap_or(0.0))
 }
 
 fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     let mut count = 0usize;
     for arg in args {
         match arg {
-            Value::Number(_) | Value::Bool(_) => count += 1,
+            Value::Number(_) => count += 1,
             Value::Array(a) => count += simd::count_ignore_nan_f64(&a.values),
             Value::Range(r) => count += count_range(grid, r.resolve(base)),
-            Value::Empty => {}
-            Value::Error(e) => return Value::Error(*e),
-            Value::Text(_) => {}
+            Value::Bool(_) | Value::Empty | Value::Error(_) | Value::Text(_) => {}
         }
     }
     Value::Number(count as f64)
@@ -286,8 +416,8 @@ fn fn_sumproduct(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             let ra = a.resolve(base);
             let rb = b.resolve(base);
             match sumproduct_range(grid, ra, rb) {
-                Some(v) => Value::Number(v),
-                None => Value::Error(ErrorKind::Value),
+                Ok(v) => Value::Number(v),
+                Err(e) => Value::Error(e),
             }
         }
         _ => Value::Error(ErrorKind::Value),
@@ -329,23 +459,30 @@ fn parse_criteria_str(s: &str) -> Option<NumericCriteria> {
     Some(NumericCriteria::new(op, rhs))
 }
 
-fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> f64 {
+fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
     let mut sum = 0.0;
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
             sum += simd::sum_ignore_nan_f64(slice);
         } else {
             for row in range.row_start..=range.row_end {
-                if let Some(v) = grid.get_number(CellCoord { row, col }) {
-                    sum += v;
+                match grid.get_value(CellCoord { row, col }) {
+                    Value::Number(v) => sum += v,
+                    Value::Error(e) => return Err(e),
+                    // SUM ignores text/logicals/blanks in references.
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_) => {}
                 }
             }
         }
     }
-    sum
+    Ok(sum)
 }
 
-fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> (f64, usize) {
+fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize), ErrorKind> {
     let mut sum = 0.0;
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
@@ -355,14 +492,23 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> (f64, usize) {
             count += c;
         } else {
             for row in range.row_start..=range.row_end {
-                if let Some(v) = grid.get_number(CellCoord { row, col }) {
-                    sum += v;
-                    count += 1;
+                match grid.get_value(CellCoord { row, col }) {
+                    Value::Number(v) => {
+                        sum += v;
+                        count += 1;
+                    }
+                    Value::Error(e) => return Err(e),
+                    // Ignore non-numeric values in references.
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_) => {}
                 }
             }
         }
     }
-    (sum, count)
+    Ok((sum, count))
 }
 
 fn count_range(grid: &dyn Grid, range: ResolvedRange) -> usize {
@@ -372,8 +518,8 @@ fn count_range(grid: &dyn Grid, range: ResolvedRange) -> usize {
             count += simd::count_ignore_nan_f64(slice);
         } else {
             for row in range.row_start..=range.row_end {
-                if grid.get_number(CellCoord { row, col }).is_some() {
-                    count += 1;
+                if matches!(grid.get_value(CellCoord { row, col }), Value::Number(_)) {
+                    count += 1
                 }
             }
         }
@@ -381,7 +527,7 @@ fn count_range(grid: &dyn Grid, range: ResolvedRange) -> usize {
     count
 }
 
-fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Option<f64> {
+fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, ErrorKind> {
     let mut out: Option<f64> = None;
     for col in range.col_start..=range.col_end {
         let col_min = if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
@@ -389,8 +535,14 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Option<f64> {
         } else {
             let mut m: Option<f64> = None;
             for row in range.row_start..=range.row_end {
-                if let Some(v) = grid.get_number(CellCoord { row, col }) {
-                    m = Some(m.map_or(v, |prev| prev.min(v)));
+                match grid.get_value(CellCoord { row, col }) {
+                    Value::Number(v) => m = Some(m.map_or(v, |prev| prev.min(v))),
+                    Value::Error(e) => return Err(e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_) => {}
                 }
             }
             m
@@ -399,10 +551,10 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Option<f64> {
             out = Some(out.map_or(m, |prev| prev.min(m)));
         }
     }
-    out
+    Ok(out)
 }
 
-fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Option<f64> {
+fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, ErrorKind> {
     let mut out: Option<f64> = None;
     for col in range.col_start..=range.col_end {
         let col_max = if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
@@ -410,8 +562,14 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Option<f64> {
         } else {
             let mut m: Option<f64> = None;
             for row in range.row_start..=range.row_end {
-                if let Some(v) = grid.get_number(CellCoord { row, col }) {
-                    m = Some(m.map_or(v, |prev| prev.max(v)));
+                match grid.get_value(CellCoord { row, col }) {
+                    Value::Number(v) => m = Some(m.map_or(v, |prev| prev.max(v))),
+                    Value::Error(e) => return Err(e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_) => {}
                 }
             }
             m
@@ -420,7 +578,7 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Option<f64> {
             out = Some(out.map_or(m, |prev| prev.max(m)));
         }
     }
-    out
+    Ok(out)
 }
 
 fn count_if_range(grid: &dyn Grid, range: ResolvedRange, criteria: NumericCriteria) -> usize {
@@ -430,16 +588,8 @@ fn count_if_range(grid: &dyn Grid, range: ResolvedRange, criteria: NumericCriter
             count += simd::count_if_f64(slice, criteria);
         } else {
             for row in range.row_start..=range.row_end {
-                if let Some(v) = grid.get_number(CellCoord { row, col }) {
-                    let ok = match criteria.op {
-                        CmpOp::Eq => v == criteria.rhs,
-                        CmpOp::Ne => v != criteria.rhs,
-                        CmpOp::Lt => v < criteria.rhs,
-                        CmpOp::Le => v <= criteria.rhs,
-                        CmpOp::Gt => v > criteria.rhs,
-                        CmpOp::Ge => v >= criteria.rhs,
-                    };
-                    if ok {
+                if let Value::Number(v) = grid.get_value(CellCoord { row, col }) {
+                    if matches_numeric_criteria(v, criteria) {
                         count += 1;
                     }
                 }
@@ -449,9 +599,20 @@ fn count_if_range(grid: &dyn Grid, range: ResolvedRange, criteria: NumericCriter
     count
 }
 
-fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Option<f64> {
+fn coerce_sumproduct_number(v: Value) -> Result<f64, ErrorKind> {
+    match v {
+        Value::Number(n) => Ok(n),
+        Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
+        Value::Text(s) => Ok(parse_number_from_text(&s).unwrap_or(0.0)),
+        Value::Empty => Ok(0.0),
+        Value::Error(e) => Err(e),
+        Value::Array(_) | Value::Range(_) => Err(ErrorKind::Value),
+    }
+}
+
+fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Result<f64, ErrorKind> {
     if a.rows() != b.rows() || a.cols() != b.cols() {
-        return None;
+        return Err(ErrorKind::Value);
     }
     let rows = a.rows();
     let cols = a.cols();
@@ -475,11 +636,10 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Opti
                 row: b.row_start + row_offset,
                 col: col_b,
             };
-            let (Some(x), Some(y)) = (grid.get_number(ra), grid.get_number(rb)) else {
-                continue;
-            };
+            let x = coerce_sumproduct_number(grid.get_value(ra))?;
+            let y = coerce_sumproduct_number(grid.get_value(rb))?;
             sum += x * y;
         }
     }
-    Some(sum)
+    Ok(sum)
 }

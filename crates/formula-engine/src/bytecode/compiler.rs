@@ -1,6 +1,6 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::program::{ConstValue, Instruction, OpCode, Program};
-use super::value::Value;
+use super::value::{RangeRef, Value};
 use std::sync::Arc;
 
 #[derive(Default)]
@@ -18,12 +18,16 @@ impl Compiler {
             Expr::Literal(v) => {
                 let idx = program.consts.len() as u32;
                 program.consts.push(ConstValue::Value(v.clone()));
-                program.instrs.push(Instruction::new(OpCode::PushConst, idx, 0));
+                program
+                    .instrs
+                    .push(Instruction::new(OpCode::PushConst, idx, 0));
             }
             Expr::CellRef(r) => {
                 let idx = program.cell_refs.len() as u32;
                 program.cell_refs.push(*r);
-                program.instrs.push(Instruction::new(OpCode::LoadCell, idx, 0));
+                program
+                    .instrs
+                    .push(Instruction::new(OpCode::LoadCell, idx, 0));
             }
             Expr::RangeRef(r) => {
                 let idx = program.range_refs.len() as u32;
@@ -35,8 +39,12 @@ impl Compiler {
             Expr::Unary { op, expr } => {
                 Self::compile_expr(expr, program);
                 match op {
-                    UnaryOp::Plus => program.instrs.push(Instruction::new(OpCode::UnaryPlus, 0, 0)),
-                    UnaryOp::Neg => program.instrs.push(Instruction::new(OpCode::UnaryNeg, 0, 0)),
+                    UnaryOp::Plus => program
+                        .instrs
+                        .push(Instruction::new(OpCode::UnaryPlus, 0, 0)),
+                    UnaryOp::Neg => program
+                        .instrs
+                        .push(Instruction::new(OpCode::UnaryNeg, 0, 0)),
                 }
             }
             Expr::Binary { op, left, right } => {
@@ -58,8 +66,8 @@ impl Compiler {
                 program.instrs.push(Instruction::new(opcode, 0, 0));
             }
             Expr::FuncCall { func, args } => {
-                for arg in args {
-                    Self::compile_expr(arg, program);
+                for (arg_idx, arg) in args.iter().enumerate() {
+                    Self::compile_func_arg(func, arg_idx, arg, program);
                 }
                 let func_idx = intern_func(program, func.clone());
                 let argc = args.len() as u32;
@@ -68,6 +76,35 @@ impl Compiler {
                     .push(Instruction::new(OpCode::CallFunc, func_idx, argc));
             }
         }
+    }
+
+    fn compile_func_arg(func: &Function, arg_idx: usize, arg: &Expr, program: &mut Program) {
+        // Excel-style aggregate functions have a quirk: a cell reference passed directly as an
+        // argument (e.g. `SUM(A1)`) is treated as a *reference* argument, not a scalar, which means
+        // logical/text values in the referenced cell are ignored (unlike `SUM(TRUE)` / `SUM("5")`).
+        //
+        // Lower single-cell references to a range so the runtime can apply reference semantics.
+        let treat_cell_as_range = match func {
+            Function::Sum | Function::Average | Function::Min | Function::Max | Function::Count => {
+                true
+            }
+            Function::CountIf => arg_idx == 0,
+            Function::SumProduct => true,
+            Function::Unknown(_) => false,
+        };
+
+        if treat_cell_as_range {
+            if let Expr::CellRef(r) = arg {
+                let idx = program.range_refs.len() as u32;
+                program.range_refs.push(RangeRef::new(*r, *r));
+                program
+                    .instrs
+                    .push(Instruction::new(OpCode::LoadRange, idx, 0));
+                return;
+            }
+        }
+
+        Self::compile_expr(arg, program);
     }
 }
 

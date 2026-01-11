@@ -1,3 +1,4 @@
+use crate::bytecode;
 use crate::eval::{
     compile_canonical_expr, parse_a1, CellAddr, CompiledExpr, Expr, FormulaParseError, Parser,
     RangeRef, SheetReference,
@@ -72,10 +73,31 @@ pub(crate) struct CellKey {
 }
 
 #[derive(Debug, Clone)]
+enum CompiledFormula {
+    Ast(CompiledExpr),
+    Bytecode(BytecodeFormula),
+}
+
+impl CompiledFormula {
+    fn ast(&self) -> &CompiledExpr {
+        match self {
+            CompiledFormula::Ast(expr) => expr,
+            CompiledFormula::Bytecode(bc) => &bc.ast,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BytecodeFormula {
+    ast: CompiledExpr,
+    program: Arc<bytecode::Program>,
+}
+
+#[derive(Debug, Clone)]
 struct Cell {
     value: Value,
     formula: Option<String>,
-    ast: Option<CompiledExpr>,
+    compiled: Option<CompiledFormula>,
     volatile: bool,
     thread_safe: bool,
 }
@@ -85,7 +107,7 @@ impl Default for Cell {
         Self {
             value: Value::Blank,
             formula: None,
-            ast: None,
+            compiled: None,
             volatile: false,
             thread_safe: true,
         }
@@ -219,6 +241,7 @@ struct SpillState {
 
 pub struct Engine {
     workbook: Workbook,
+    bytecode_cache: bytecode::BytecodeCache,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
     name_dependents: HashMap<String, HashSet<CellKey>>,
     cell_name_refs: HashMap<CellKey, HashSet<String>>,
@@ -243,6 +266,7 @@ impl Engine {
     pub fn new() -> Self {
         Self {
             workbook: Workbook::default(),
+            bytecode_cache: bytecode::BytecodeCache::new(),
             external_value_provider: None,
             name_dependents: HashMap::new(),
             cell_name_refs: HashMap::new(),
@@ -282,6 +306,10 @@ impl Engine {
         self.external_value_provider = provider;
     }
 
+    pub fn bytecode_program_count(&self) -> usize {
+        self.bytecode_cache.program_count()
+    }
+
     pub fn has_dirty_cells(&self) -> bool {
         !self.dirty.is_empty()
     }
@@ -314,7 +342,7 @@ impl Engine {
         let cell = self.workbook.get_or_create_cell_mut(key);
         cell.value = value.into();
         cell.formula = None;
-        cell.ast = None;
+        cell.compiled = None;
         cell.volatile = false;
         cell.thread_safe = true;
 
@@ -344,8 +372,14 @@ impl Engine {
         let mut formulas: Vec<(CellKey, CompiledExpr)> = Vec::new();
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
             for (addr, cell) in &sheet.cells {
-                if let Some(ast) = cell.ast.clone() {
-                    formulas.push((CellKey { sheet: sheet_id, addr: *addr }, ast));
+                if let Some(compiled) = cell.compiled.as_ref() {
+                    formulas.push((
+                        CellKey {
+                            sheet: sheet_id,
+                            addr: *addr,
+                        },
+                        compiled.ast().clone(),
+                    ));
                 }
             }
         }
@@ -505,9 +539,17 @@ impl Engine {
         let deps = CellDeps::new(calc_vec).volatile(volatile);
         self.calc_graph.update_cell_dependencies(cell_id, deps);
 
+        let compiled_formula = match self.try_compile_bytecode(formula, key, volatile, thread_safe) {
+            Some(program) => CompiledFormula::Bytecode(BytecodeFormula {
+                ast: compiled.clone(),
+                program,
+            }),
+            None => CompiledFormula::Ast(compiled),
+        };
+
         let cell = self.workbook.get_or_create_cell_mut(key);
         cell.formula = Some(formula.to_string());
-        cell.ast = Some(compiled);
+        cell.compiled = Some(compiled_formula);
         cell.volatile = volatile;
         cell.thread_safe = thread_safe;
 
@@ -996,41 +1038,91 @@ impl Engine {
                         .unwrap_or(false)
                 });
 
-                let tasks: Vec<(CellKey, CompiledExpr)> = keys
+                let tasks: Vec<(CellKey, CompiledFormula)> = keys
                     .iter()
                     .filter_map(|&k| {
                         self.workbook
                             .get_cell(k)
-                            .and_then(|c| c.ast.clone().map(|a| (k, a)))
+                            .and_then(|c| c.compiled.clone().map(|a| (k, a)))
                     })
                     .collect();
 
-                let mut results: Vec<(CellKey, Value)> =
-                    if mode == RecalcMode::MultiThreaded && !has_barrier {
-                        tasks
-                            .par_iter()
-                            .map(|(k, expr)| {
+                let sheet_count = self.workbook.sheets.len();
+                let column_cache = BytecodeColumnCache::build(sheet_count, &snapshot, &tasks);
+                let empty_cols: HashMap<i32, BytecodeColumn> = HashMap::new();
+
+                let mut results: Vec<(CellKey, Value)> = if mode == RecalcMode::MultiThreaded && !has_barrier
+                {
+                    tasks
+                        .par_iter()
+                        .map_init(
+                            || bytecode::Vm::with_capacity(32),
+                            |vm, (k, compiled)| {
                                 let ctx = crate::eval::EvalContext {
                                     current_sheet: k.sheet,
                                     current_cell: k.addr,
                                 };
-                                let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
-                                (*k, evaluator.eval_formula(expr))
-                            })
-                            .collect()
-                    } else {
-                        tasks
-                            .iter()
-                            .map(|(k, expr)| {
-                                let ctx = crate::eval::EvalContext {
-                                    current_sheet: k.sheet,
-                                    current_cell: k.addr,
-                                };
-                                let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
-                                (*k, evaluator.eval_formula(expr))
-                            })
-                            .collect()
-                    };
+                                match compiled {
+                                    CompiledFormula::Ast(expr) => {
+                                        let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
+                                        (*k, evaluator.eval_formula(expr))
+                                    }
+                                    CompiledFormula::Bytecode(bc) => {
+                                        let cols = column_cache
+                                            .by_sheet
+                                            .get(k.sheet)
+                                            .unwrap_or(&empty_cols);
+                                        let grid = EngineBytecodeGrid {
+                                            snapshot: &snapshot,
+                                            sheet: k.sheet,
+                                            cols,
+                                        };
+                                        let base = bytecode::CellCoord {
+                                            row: k.addr.row as i32,
+                                            col: k.addr.col as i32,
+                                        };
+                                        let v = vm.eval(&bc.program, &grid, base);
+                                        (*k, bytecode_value_to_engine(v))
+                                    }
+                                }
+                            },
+                        )
+                        .collect()
+                } else {
+                    let mut vm = bytecode::Vm::with_capacity(32);
+                    tasks
+                        .iter()
+                        .map(|(k, compiled)| {
+                            let ctx = crate::eval::EvalContext {
+                                current_sheet: k.sheet,
+                                current_cell: k.addr,
+                            };
+                            match compiled {
+                                CompiledFormula::Ast(expr) => {
+                                    let evaluator = crate::eval::Evaluator::new(&snapshot, ctx);
+                                    (*k, evaluator.eval_formula(expr))
+                                }
+                                CompiledFormula::Bytecode(bc) => {
+                                    let cols = column_cache
+                                        .by_sheet
+                                        .get(k.sheet)
+                                        .unwrap_or(&empty_cols);
+                                    let grid = EngineBytecodeGrid {
+                                        snapshot: &snapshot,
+                                        sheet: k.sheet,
+                                        cols,
+                                    };
+                                    let base = bytecode::CellCoord {
+                                        row: k.addr.row as i32,
+                                        col: k.addr.col as i32,
+                                    };
+                                    let v = vm.eval(&bc.program, &grid, base);
+                                    (*k, bytecode_value_to_engine(v))
+                                }
+                            }
+                        })
+                        .collect()
+                };
 
                 results.sort_by_key(|(k, _)| (k.sheet, k.addr.row, k.addr.col));
 
@@ -1115,11 +1207,11 @@ impl Engine {
 
             if !is_cycle {
                 let k = scc[0];
-                let Some(expr) = self
-                    .workbook
-                    .get_cell(k)
-                    .and_then(|c| c.ast.clone())
-                else {
+                let Some(expr) = self.workbook.get_cell(k).and_then(|c| {
+                    c.compiled
+                        .as_ref()
+                        .map(|compiled| compiled.ast().clone())
+                }) else {
                     continue;
                 };
                 let ctx = crate::eval::EvalContext {
@@ -1150,11 +1242,11 @@ impl Engine {
             for _ in 0..max_iters {
                 let mut max_delta: f64 = 0.0;
                 for &k in &scc {
-                    let Some(expr) = self
-                        .workbook
-                        .get_cell(k)
-                        .and_then(|c| c.ast.clone())
-                    else {
+                    let Some(expr) = self.workbook.get_cell(k).and_then(|c| {
+                        c.compiled
+                            .as_ref()
+                            .map(|compiled| compiled.ast().clone())
+                    }) else {
                         continue;
                     };
                     let old = snapshot.values.get(&k).cloned().unwrap_or(Value::Blank);
@@ -1497,6 +1589,28 @@ impl Engine {
         }
     }
 
+    fn try_compile_bytecode(
+        &self,
+        formula: &str,
+        key: CellKey,
+        volatile: bool,
+        thread_safe: bool,
+    ) -> Option<Arc<bytecode::Program>> {
+        if volatile || !thread_safe {
+            return None;
+        }
+
+        let origin = bytecode::CellCoord {
+            row: key.addr.row as i32,
+            col: key.addr.col as i32,
+        };
+        let expr = bytecode::parse_formula(formula, origin).ok()?;
+        if !bytecode_expr_is_eligible(&expr) {
+            return None;
+        }
+        Some(self.bytecode_cache.get_or_compile(&expr))
+    }
+
     fn compile_name_expr(&mut self, expr: &Expr<String>) -> CompiledExpr {
         let mut map = |sref: &SheetReference<String>| match sref {
             SheetReference::Current => SheetReference::Current,
@@ -1549,11 +1663,11 @@ impl Engine {
             self.workbook.sheets.iter().map(|s| s.tables.clone()).collect();
 
         for key in cells {
-            let Some(ast) = self
-                .workbook
-                .get_cell(key)
-                .and_then(|c| c.ast.clone())
-            else {
+            let Some(ast) = self.workbook.get_cell(key).and_then(|c| {
+                c.compiled
+                    .as_ref()
+                    .map(|compiled| compiled.ast().clone())
+            }) else {
                 continue;
             };
 
@@ -2420,6 +2534,257 @@ fn resolve_defined_name<'a>(
 
 pub trait ExternalValueProvider: Send + Sync {
     fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value>;
+}
+
+const EXCEL_MAX_ROWS_I32: i32 = 1_048_576;
+const EXCEL_MAX_COLS_I32: i32 = 16_384;
+
+fn engine_error_to_bytecode(err: ErrorKind) -> bytecode::ErrorKind {
+    match err {
+        ErrorKind::Null => bytecode::ErrorKind::Null,
+        ErrorKind::Div0 => bytecode::ErrorKind::Div0,
+        ErrorKind::Value => bytecode::ErrorKind::Value,
+        ErrorKind::Ref => bytecode::ErrorKind::Ref,
+        ErrorKind::Name => bytecode::ErrorKind::Name,
+        ErrorKind::Num => bytecode::ErrorKind::Num,
+        ErrorKind::NA => bytecode::ErrorKind::NA,
+        ErrorKind::Spill => bytecode::ErrorKind::Spill,
+        ErrorKind::Calc => bytecode::ErrorKind::Calc,
+    }
+}
+
+fn bytecode_error_to_engine(err: bytecode::ErrorKind) -> ErrorKind {
+    match err {
+        bytecode::ErrorKind::Null => ErrorKind::Null,
+        bytecode::ErrorKind::Div0 => ErrorKind::Div0,
+        bytecode::ErrorKind::Value => ErrorKind::Value,
+        bytecode::ErrorKind::Ref => ErrorKind::Ref,
+        bytecode::ErrorKind::Name => ErrorKind::Name,
+        bytecode::ErrorKind::Num => ErrorKind::Num,
+        bytecode::ErrorKind::NA => ErrorKind::NA,
+        bytecode::ErrorKind::Spill => ErrorKind::Spill,
+        bytecode::ErrorKind::Calc => ErrorKind::Calc,
+    }
+}
+
+fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
+    match value {
+        Value::Number(n) => bytecode::Value::Number(*n),
+        Value::Bool(b) => bytecode::Value::Bool(*b),
+        Value::Text(s) => bytecode::Value::Text(Arc::from(s.as_str())),
+        Value::Blank => bytecode::Value::Empty,
+        Value::Error(e) => bytecode::Value::Error(engine_error_to_bytecode(*e)),
+        Value::Array(_) | Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
+    }
+}
+
+fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
+    match value {
+        bytecode::Value::Number(n) => Value::Number(n),
+        bytecode::Value::Bool(b) => Value::Bool(b),
+        bytecode::Value::Text(s) => Value::Text(s.to_string()),
+        bytecode::Value::Empty => Value::Blank,
+        bytecode::Value::Error(e) => Value::Error(bytecode_error_to_engine(e)),
+        bytecode::Value::Array(_) | bytecode::Value::Range(_) => Value::Error(ErrorKind::Spill),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BytecodeColumn {
+    values: Vec<f64>,
+    blocked_rows: Vec<i32>,
+}
+
+#[derive(Debug)]
+struct BytecodeColumnCache {
+    by_sheet: Vec<HashMap<i32, BytecodeColumn>>,
+}
+
+impl BytecodeColumnCache {
+    fn build(
+        sheet_count: usize,
+        snapshot: &Snapshot,
+        tasks: &[(CellKey, CompiledFormula)],
+    ) -> Self {
+        let mut max_row_by_col: Vec<HashMap<i32, i32>> = vec![HashMap::new(); sheet_count];
+
+        for (key, compiled) in tasks {
+            let CompiledFormula::Bytecode(bc) = compiled else {
+                continue;
+            };
+
+            if bc.program.range_refs.is_empty() {
+                continue;
+            }
+
+            let base = bytecode::CellCoord {
+                row: key.addr.row as i32,
+                col: key.addr.col as i32,
+            };
+            for range in &bc.program.range_refs {
+                let resolved = range.resolve(base);
+                for col in resolved.col_start..=resolved.col_end {
+                    let entry = max_row_by_col[key.sheet].entry(col).or_insert(resolved.row_end);
+                    *entry = (*entry).max(resolved.row_end);
+                }
+            }
+        }
+
+        let mut by_sheet: Vec<HashMap<i32, BytecodeColumn>> = Vec::with_capacity(sheet_count);
+        for sheet_id in 0..sheet_count {
+            let mut cols: HashMap<i32, BytecodeColumn> = HashMap::new();
+            for (col, max_row) in max_row_by_col[sheet_id].iter() {
+                if *max_row < 0 {
+                    continue;
+                }
+                let len = (*max_row as usize).saturating_add(1);
+                let mut values: Vec<f64> = vec![f64::NAN; len];
+                let mut blocked_rows: Vec<i32> = Vec::new();
+
+                for row in 0..=*max_row {
+                    let addr = CellAddr {
+                        row: row as u32,
+                        col: (*col) as u32,
+                    };
+                    let v = snapshot
+                        .values
+                        .get(&CellKey { sheet: sheet_id, addr })
+                        .unwrap_or(&Value::Blank);
+                    match v {
+                        Value::Number(n) => values[row as usize] = *n,
+                        Value::Blank => {}
+                        // Conservative: only expose SIMD slices for dense numeric columns
+                        // (numbers + blanks). Errors/text/bools require per-cell semantics.
+                        _ => blocked_rows.push(row),
+                    }
+                }
+
+                blocked_rows.sort_unstable();
+                blocked_rows.dedup();
+
+                cols.insert(
+                    *col,
+                    BytecodeColumn {
+                        values,
+                        blocked_rows,
+                    },
+                );
+            }
+            by_sheet.push(cols);
+        }
+
+        Self { by_sheet }
+    }
+}
+
+fn has_blocked_row(blocked_rows: &[i32], row_start: i32, row_end: i32) -> bool {
+    if blocked_rows.is_empty() {
+        return false;
+    }
+    let idx = blocked_rows.partition_point(|r| *r < row_start);
+    blocked_rows.get(idx).is_some_and(|r| *r <= row_end)
+}
+
+struct EngineBytecodeGrid<'a> {
+    snapshot: &'a Snapshot,
+    sheet: SheetId,
+    cols: &'a HashMap<i32, BytecodeColumn>,
+}
+
+impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
+    fn get_value(&self, coord: bytecode::CellCoord) -> bytecode::Value {
+        if coord.row < 0 || coord.col < 0 {
+            return bytecode::Value::Error(bytecode::ErrorKind::Ref);
+        }
+        let addr = CellAddr {
+            row: coord.row as u32,
+            col: coord.col as u32,
+        };
+        self.snapshot
+            .values
+            .get(&CellKey {
+                sheet: self.sheet,
+                addr,
+            })
+            .map(engine_value_to_bytecode)
+            .unwrap_or(bytecode::Value::Empty)
+    }
+
+    fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
+        let data = self.cols.get(&col)?;
+        if row_start < 0 || row_end < 0 || row_start > row_end {
+            return None;
+        }
+        if has_blocked_row(&data.blocked_rows, row_start, row_end) {
+            return None;
+        }
+        let start = row_start as usize;
+        let end = row_end as usize;
+        if end >= data.values.len() {
+            return None;
+        }
+        Some(&data.values[start..=end])
+    }
+
+    fn bounds(&self) -> (i32, i32) {
+        (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32)
+    }
+}
+
+fn bytecode_expr_is_eligible(expr: &bytecode::Expr) -> bool {
+    bytecode_expr_is_eligible_inner(expr, false, false)
+}
+
+fn bytecode_expr_is_eligible_inner(
+    expr: &bytecode::Expr,
+    allow_range: bool,
+    allow_text: bool,
+) -> bool {
+    match expr {
+        bytecode::Expr::Literal(v) => match v {
+            bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
+            bytecode::Value::Text(_) => allow_text,
+            bytecode::Value::Empty => true,
+            bytecode::Value::Error(_) | bytecode::Value::Array(_) | bytecode::Value::Range(_) => false,
+        },
+        bytecode::Expr::CellRef(_) => true,
+        bytecode::Expr::RangeRef(_) => allow_range,
+        bytecode::Expr::Unary { expr, .. } => bytecode_expr_is_eligible_inner(expr, false, false),
+        bytecode::Expr::Binary { op, left, right } => {
+            matches!(
+                op,
+                bytecode::ast::BinaryOp::Add
+                    | bytecode::ast::BinaryOp::Sub
+                    | bytecode::ast::BinaryOp::Mul
+                    | bytecode::ast::BinaryOp::Div
+            ) && bytecode_expr_is_eligible_inner(left, false, false)
+                && bytecode_expr_is_eligible_inner(right, false, false)
+        }
+        bytecode::Expr::FuncCall { func, args } => match func {
+            bytecode::ast::Function::Sum
+            | bytecode::ast::Function::Average
+            | bytecode::ast::Function::Min
+            | bytecode::ast::Function::Max
+            | bytecode::ast::Function::Count => args
+                .iter()
+                .all(|arg| bytecode_expr_is_eligible_inner(arg, true, false)),
+            bytecode::ast::Function::CountIf => {
+                if args.len() != 2 {
+                    return false;
+                }
+                matches!(args[0], bytecode::Expr::RangeRef(_))
+                    && bytecode_expr_is_eligible_inner(&args[1], false, true)
+            }
+            bytecode::ast::Function::SumProduct => {
+                if args.len() != 2 {
+                    return false;
+                }
+                matches!(args[0], bytecode::Expr::RangeRef(_))
+                    && matches!(args[1], bytecode::Expr::RangeRef(_))
+            }
+            bytecode::ast::Function::Unknown(_) => false,
+        },
+    }
 }
 
 fn analyze_expr(

@@ -1,6 +1,8 @@
 use std::time::Instant;
 
-use crate::eval::{CellAddr, CompiledExpr, EvalContext, Evaluator, Parser, SheetReference, ValueResolver};
+use crate::eval::{
+    CellAddr, CompiledExpr, EvalContext, Evaluator, Parser, SheetReference, ValueResolver,
+};
 use crate::{Engine, Value};
 
 #[derive(Debug, Clone)]
@@ -146,6 +148,35 @@ fn setup_chain_engine(size: usize) -> (Engine, String) {
     (engine, format!("A{size}"))
 }
 
+fn setup_range_aggregate_engine(size: usize) -> (Engine, String, String) {
+    let mut engine = Engine::new();
+
+    for row in 1..=size {
+        let addr = format!("A{row}");
+        engine
+            .set_cell_value("Sheet1", &addr, (row % 1000) as f64)
+            .expect("seed value");
+    }
+
+    let sum_cell = "B1".to_string();
+    let countif_cell = "B2".to_string();
+
+    engine
+        .set_cell_formula("Sheet1", &sum_cell, &format!("=SUM(A1:A{size})"))
+        .expect("set SUM formula");
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            &countif_cell,
+            &format!("=COUNTIF(A1:A{size}, \">500\")"),
+        )
+        .expect("set COUNTIF formula");
+
+    engine.recalculate_single_threaded();
+
+    (engine, sum_cell, countif_cell)
+}
+
 pub fn run_benchmarks() -> Vec<BenchmarkResult> {
     let parse_inputs: Vec<String> = (0..1000)
         .map(|i| format!("=SUM(A{}:A{})", i + 1, i + 100))
@@ -230,6 +261,27 @@ pub fn run_benchmarks() -> Vec<BenchmarkResult> {
             engine_100k.recalculate_single_threaded();
             let v = engine_100k.get_cell_value("Sheet1", &last_100k);
             std::hint::black_box(v);
+        },
+    ));
+
+    // Large range aggregations. This is a common workload in real spreadsheets with
+    // data columns and summary formulas (SUM/COUNTIF/etc).
+    let (mut engine_range, sum_cell, countif_cell) = setup_range_aggregate_engine(200_000);
+    let mut counter3 = 0_i64;
+    results.push(run_benchmark(
+        "calc.recalc_sum_countif_range_200k_cells.p95",
+        10,
+        2,
+        500.0,
+        || {
+            counter3 += 1;
+            engine_range
+                .set_cell_value("Sheet1", "A1", (counter3 % 1000) as f64)
+                .expect("update");
+            engine_range.recalculate_single_threaded();
+            let a = engine_range.get_cell_value("Sheet1", &sum_cell);
+            let b = engine_range.get_cell_value("Sheet1", &countif_cell);
+            std::hint::black_box((a, b));
         },
     ));
 

@@ -2,6 +2,7 @@ use crate::eval::CompiledExpr;
 use crate::error::ExcelError;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
+use crate::simd::{CmpOp, NumericCriteria};
 use crate::value::{ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
@@ -330,6 +331,144 @@ fn count_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "COUNTIF",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: countif_fn,
+    }
+}
+
+fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let ranges = match ctx.eval_arg(&args[0]) {
+        ArgValue::Reference(r) => vec![r],
+        ArgValue::ReferenceUnion(ranges) => ranges,
+        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
+        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+    };
+
+    let criteria_value = eval_scalar_arg(ctx, &args[1]);
+    if let Value::Error(e) = criteria_value {
+        return Value::Error(e);
+    }
+    let Some(criteria) = parse_numeric_criteria(&criteria_value) else {
+        return Value::Error(ErrorKind::Value);
+    };
+
+    let mut count = 0u64;
+    for range in ranges {
+        for addr in range.iter_cells() {
+            let v = ctx.get_cell_value(range.sheet_id, addr);
+            if let Value::Number(n) = v {
+                if matches_numeric_criteria(n, criteria) {
+                    count += 1;
+                }
+            }
+        }
+    }
+    Value::Number(count as f64)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "SUMPRODUCT",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: sumproduct_fn,
+    }
+}
+
+fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let a = match ctx.eval_arg(&args[0]) {
+        ArgValue::Reference(r) => r.normalized(),
+        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
+        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
+        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+    };
+    let b = match ctx.eval_arg(&args[1]) {
+        ArgValue::Reference(r) => r.normalized(),
+        ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
+        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
+        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
+    };
+
+    let rows_a = a.end.row - a.start.row + 1;
+    let cols_a = a.end.col - a.start.col + 1;
+    let rows_b = b.end.row - b.start.row + 1;
+    let cols_b = b.end.col - b.start.col + 1;
+    if rows_a != rows_b || cols_a != cols_b {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let len = (rows_a as usize).saturating_mul(cols_a as usize);
+    let mut va = Vec::with_capacity(len);
+    let mut vb = Vec::with_capacity(len);
+    for addr in a.iter_cells() {
+        va.push(ctx.get_cell_value(a.sheet_id, addr));
+    }
+    for addr in b.iter_cells() {
+        vb.push(ctx.get_cell_value(b.sheet_id, addr));
+    }
+
+    match crate::functions::math::sumproduct(&[&va, &vb]) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+fn parse_numeric_criteria(value: &Value) -> Option<NumericCriteria> {
+    match value {
+        Value::Number(n) => Some(NumericCriteria::new(CmpOp::Eq, *n)),
+        Value::Bool(b) => Some(NumericCriteria::new(CmpOp::Eq, if *b { 1.0 } else { 0.0 })),
+        Value::Text(s) => parse_numeric_criteria_str(s),
+        _ => None,
+    }
+}
+
+fn parse_numeric_criteria_str(raw: &str) -> Option<NumericCriteria> {
+    let s = raw.trim();
+    let (op, rest) = if let Some(r) = s.strip_prefix(">=") {
+        (CmpOp::Ge, r)
+    } else if let Some(r) = s.strip_prefix("<=") {
+        (CmpOp::Le, r)
+    } else if let Some(r) = s.strip_prefix("<>") {
+        (CmpOp::Ne, r)
+    } else if let Some(r) = s.strip_prefix('>') {
+        (CmpOp::Gt, r)
+    } else if let Some(r) = s.strip_prefix('<') {
+        (CmpOp::Lt, r)
+    } else if let Some(r) = s.strip_prefix('=') {
+        (CmpOp::Eq, r)
+    } else {
+        (CmpOp::Eq, s)
+    };
+
+    let rhs: f64 = rest.trim().parse().ok()?;
+    Some(NumericCriteria::new(op, rhs))
+}
+
+fn matches_numeric_criteria(value: f64, criteria: NumericCriteria) -> bool {
+    match criteria.op {
+        CmpOp::Eq => value == criteria.rhs,
+        CmpOp::Ne => value != criteria.rhs,
+        CmpOp::Lt => value < criteria.rhs,
+        CmpOp::Le => value <= criteria.rhs,
+        CmpOp::Gt => value > criteria.rhs,
+        CmpOp::Ge => value >= criteria.rhs,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "COUNTA",
         min_args: 0,
         max_args: VAR_ARGS,
@@ -400,8 +539,7 @@ fn countblank_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             ArgValue::Reference(r) => {
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(r.sheet_id, addr);
-                    if matches!(v, Value::Blank)
-                        || matches!(v, Value::Text(ref s) if s.is_empty())
+                    if matches!(v, Value::Blank) || matches!(v, Value::Text(ref s) if s.is_empty())
                     {
                         total += 1;
                     }
@@ -604,7 +742,6 @@ fn round_with_mode(n: f64, digits: i32, mode: RoundMode) -> f64 {
         rounded * factor
     }
 }
-
 inventory::submit! {
     FunctionSpec {
         name: "SIGN",
