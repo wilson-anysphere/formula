@@ -519,7 +519,7 @@ export class QueryFoldingEngine {
         }
         if (dialect.name === "sqlserver") {
           return {
-            fragment: { sql: `SELECT * FROM ${from}`, params },
+            fragment: { sql: state.fragment.sql, params },
             columns: state.columns,
             sortBy: operation.sortBy.slice(),
             sortInFragment: false,
@@ -1161,7 +1161,7 @@ function finalizeSqlForDialect(state, dialect) {
   const sortBy = state.sortBy;
   if (!sortBy || sortBy.length === 0) return state.fragment.sql;
   if (state.sortInFragment) return state.fragment.sql;
-  return `${state.fragment.sql} ORDER BY ${sortSpecsToSql(dialect, sortBy)}`;
+  return `SELECT * FROM (${state.fragment.sql}) AS t ORDER BY ${sortSpecsToSql(dialect, sortBy)}`;
 }
 
 /**

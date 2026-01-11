@@ -60,8 +60,36 @@ test("sqlserver: sort followed by take folds to TOP with ORDER BY (no nested ORD
   const plan = folding.compile(query, { dialect: "sqlserver" });
   assert.deepEqual(plan, {
     type: "sql",
-    sql: "SELECT TOP (?) * FROM (SELECT * FROM (SELECT * FROM sales) AS t) AS t ORDER BY (CASE WHEN t.[Sales] IS NULL THEN 1 ELSE 0 END) DESC, t.[Sales] DESC",
+    sql: "SELECT TOP (?) * FROM (SELECT * FROM sales) AS t ORDER BY (CASE WHEN t.[Sales] IS NULL THEN 1 ELSE 0 END) DESC, t.[Sales] DESC",
     params: [5],
+  });
+});
+
+test("sqlserver: sort followed by renameColumn keeps valid ORDER BY", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_sqlserver_sort_rename",
+    name: "SQL Server Sort + Rename",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales", columns: ["Sales"] },
+    steps: [
+      {
+        id: "s1",
+        name: "Sort",
+        operation: { type: "sortRows", sortBy: [{ column: "Sales", direction: "descending", nulls: "first" }] },
+      },
+      {
+        id: "s2",
+        name: "Rename",
+        operation: { type: "renameColumn", oldName: "Sales", newName: "Amount" },
+      },
+    ],
+  };
+
+  const plan = folding.compile(query, { dialect: "sqlserver" });
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: "SELECT * FROM (SELECT t.[Sales] AS [Amount] FROM (SELECT * FROM sales) AS t) AS t ORDER BY (CASE WHEN t.[Amount] IS NULL THEN 1 ELSE 0 END) DESC, t.[Amount] DESC",
+    params: [],
   });
 });
 
