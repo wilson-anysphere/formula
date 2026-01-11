@@ -693,13 +693,15 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         const recoveryCode = parsed.data.recoveryCode?.trim();
         if (totpCode) {
           const secret = await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, request.user!.id);
-          if (!secret || !verifyTotpCode(secret, totpCode)) return { ok: false, usedRecoveryCodeId: null };
+          if (!secret || !verifyTotpCode(secret, totpCode)) {
+            return { ok: false, error: "invalid_code" as const, usedRecoveryCodeId: null };
+          }
         } else if (recoveryCode) {
           const consumedId = await consumeRecoveryCode(client, request.user!.id, recoveryCode);
-          if (!consumedId) return { ok: false, usedRecoveryCodeId: null };
+          if (!consumedId) return { ok: false, error: "invalid_code" as const, usedRecoveryCodeId: null };
           usedRecoveryCodeId = consumedId;
         } else {
-          return { ok: false, usedRecoveryCodeId: null };
+          return { ok: false, error: "mfa_required" as const, usedRecoveryCodeId: null };
         }
       }
 
@@ -708,9 +710,12 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       ]);
       await deleteSecret(client, totpSecretName(request.user!.id));
       await deleteUnusedRecoveryCodes(client, request.user!.id);
-      return { ok: true, usedRecoveryCodeId };
+      return { ok: true, error: null, usedRecoveryCodeId };
     });
-    if (!txResult.ok) return reply.code(400).send({ error: "invalid_code" });
+    if (!txResult.ok) {
+      if (txResult.error === "mfa_required") return reply.code(403).send({ error: "mfa_required" });
+      return reply.code(400).send({ error: "invalid_code" });
+    }
 
     await writeAuditEvent(
       app.db,
