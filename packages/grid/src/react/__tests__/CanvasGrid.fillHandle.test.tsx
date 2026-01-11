@@ -306,4 +306,61 @@ describe("CanvasGrid fill handle", () => {
     });
     host.remove();
   });
+
+  it("only updates the active selection range when using multi-range selection", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onFillHandleCommit = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
+          rowCount={20}
+          colCount={10}
+          apiRef={apiRef}
+          onFillHandleCommit={onFillHandleCommit}
+        />
+      );
+    });
+
+    const rangeA = { startRow: 0, endRow: 1, startCol: 0, endCol: 1 };
+    const rangeB = { startRow: 2, endRow: 3, startCol: 2, endCol: 3 };
+
+    await act(async () => {
+      apiRef.current?.setSelectionRanges([rangeA, rangeB], { activeIndex: 1 });
+    });
+
+    const handle = apiRef.current?.getFillHandleRect();
+    expect(handle).not.toBeNull();
+
+    const targetCell = apiRef.current?.getCellRect(4, 2);
+    expect(targetCell).not.toBeNull();
+
+    const selectionCanvas = host.querySelectorAll("canvas")[2] as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
+    const end = { clientX: start.clientX, clientY: targetCell!.y + targetCell!.height / 2 };
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointermove", { ...end, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerup", { ...end, pointerId: 1 }));
+    });
+
+    const expectedTarget = { startRow: 2, endRow: 5, startCol: 2, endCol: 3 };
+    expect(onFillHandleCommit).toHaveBeenCalledWith({ source: rangeB, target: expectedTarget });
+
+    expect(apiRef.current?.getSelectionRanges()).toEqual([rangeA, expectedTarget]);
+    expect(apiRef.current?.getActiveSelectionRangeIndex()).toBe(1);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
 });
