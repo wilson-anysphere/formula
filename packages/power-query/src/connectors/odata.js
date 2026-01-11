@@ -231,6 +231,12 @@ export class ODataConnector {
 
     if (!this.fetchFn) return {};
 
+    const knownEtag = typeof options.knownEtag === "string" && options.knownEtag !== "" ? options.knownEtag : undefined;
+    const knownSourceTimestamp =
+      options.knownSourceTimestamp instanceof Date && !Number.isNaN(options.knownSourceTimestamp.getTime())
+        ? options.knownSourceTimestamp
+        : undefined;
+
     /** @type {Record<string, string>} */
     const headers = { ...(request.headers ?? {}) };
 
@@ -284,6 +290,13 @@ export class ODataConnector {
       }
     }
 
+    const hasHeader = (name) => Object.keys(headers).some((key) => key.toLowerCase() === name);
+    if (knownEtag && !hasHeader("if-none-match")) {
+      headers["If-None-Match"] = knownEtag;
+    } else if (!knownEtag && knownSourceTimestamp && !hasHeader("if-modified-since")) {
+      headers["If-Modified-Since"] = knownSourceTimestamp.toUTCString();
+    }
+
     if (!Object.keys(headers).some((k) => k.toLowerCase() === "accept")) {
       headers.Accept = "application/json";
     }
@@ -323,6 +336,10 @@ export class ODataConnector {
       return {};
     }
 
+    if (response.status === 304) {
+      return { etag: knownEtag, sourceTimestamp: knownSourceTimestamp };
+    }
+
     if (!response.ok && oauth2Auth && this.oauth2RetryStatusCodes.includes(response.status)) {
       await applyOAuthHeader(true);
       try {
@@ -330,6 +347,10 @@ export class ODataConnector {
       } catch {
         return {};
       }
+    }
+
+    if (response.status === 304) {
+      return { etag: knownEtag, sourceTimestamp: knownSourceTimestamp };
     }
 
     if (!response.ok) return {};

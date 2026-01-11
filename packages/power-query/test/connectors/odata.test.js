@@ -218,6 +218,34 @@ test("ODataConnector: supports legacy d.results payload shape", async () => {
   assert.deepEqual(result.table.toGrid(), [["Id"], [1], [2]]);
 });
 
+test("ODataConnector: getSourceState returns known source state on 304", async () => {
+  const knownEtag = '"v1"';
+  const knownSourceTimestamp = new Date("2024-01-01T00:00:00.000Z");
+  let headerChecked = false;
+
+  /** @type {typeof fetch} */
+  const fetchMock = async (_url, init) => {
+    const method = String(init?.method ?? "GET").toUpperCase();
+    if (method !== "HEAD") throw new Error("expected HEAD");
+    const ifNoneMatch = Object.entries(/** @type {any} */ (init?.headers ?? {})).find(([name]) => name.toLowerCase() === "if-none-match")?.[1];
+    assert.equal(ifNoneMatch, knownEtag);
+    headerChecked = true;
+    return {
+      ok: false,
+      status: 304,
+      headers: { get: () => null },
+      async json() {
+        return {};
+      },
+    };
+  };
+
+  const connector = new ODataConnector({ fetch: fetchMock });
+  const state = await connector.getSourceState({ url: "https://example.com/odata/Products" }, { knownEtag, knownSourceTimestamp });
+  assert.equal(headerChecked, true);
+  assert.deepEqual(state, { etag: knownEtag, sourceTimestamp: knownSourceTimestamp });
+});
+
 test("privacy ids: OData sources map to stable http source ids", () => {
   const source = { type: "odata", url: "https://example.com/odata/Products" };
   const sourceId = getSourceIdForQuerySource(/** @type {any} */ (source));
