@@ -27,17 +27,57 @@ export function createDesktopDlpContext(params: {
   const orgId = params.orgId ?? "local-org";
   const documentId = params.documentId;
 
-  const storage: StorageLike = params.storage ?? getLocalStorageOrNull() ?? createMemoryStorage();
+  const storage: StorageLike = safeStorage(params.storage ?? getLocalStorageOrNull() ?? createMemoryStorage());
 
   const policyStore = new LocalPolicyStore({ storage });
-  const orgPolicy = policyStore.getOrgPolicy(orgId) ?? createDefaultOrgPolicy();
+  let orgPolicy: any = createDefaultOrgPolicy();
+  const storedOrg = policyStore.getOrgPolicy(orgId);
+  if (storedOrg) orgPolicy = storedOrg;
   const documentPolicy = policyStore.getDocumentPolicy(documentId) ?? undefined;
-  const { policy } = mergePolicies({ orgPolicy, documentPolicy });
+
+  // Corrupt localStorage / invalid policies should never take down desktop surfaces.
+  // Prefer falling back to a safe baseline policy rather than throwing.
+  let policy: any;
+  try {
+    policy = mergePolicies({ orgPolicy, documentPolicy }).policy;
+  } catch {
+    try {
+      policy = mergePolicies({ orgPolicy, documentPolicy: undefined }).policy;
+    } catch {
+      policy = createDefaultOrgPolicy();
+    }
+  }
 
   const classificationStore = params.classificationStore ?? new LocalClassificationStore({ storage });
   const auditLogger = params.auditLogger ?? new InMemoryAuditLogger();
 
   return { orgId, documentId, policy, classificationStore, auditLogger };
+}
+
+function safeStorage(storage: StorageLike): StorageLike {
+  return {
+    getItem(key) {
+      try {
+        return storage.getItem(key);
+      } catch {
+        return null;
+      }
+    },
+    setItem(key, value) {
+      try {
+        storage.setItem(key, value);
+      } catch {
+        // ignore
+      }
+    },
+    removeItem(key) {
+      try {
+        storage.removeItem(key);
+      } catch {
+        // ignore
+      }
+    },
+  };
 }
 
 function getLocalStorageOrNull(): StorageLike | null {
@@ -46,7 +86,7 @@ function getLocalStorageOrNull(): StorageLike | null {
       const storage = window.localStorage as unknown as StorageLike | undefined;
       if (!storage) return null;
       if (typeof storage.getItem !== "function" || typeof storage.setItem !== "function") return null;
-      return storage;
+      return safeStorage(storage);
     } catch {
       // ignore
     }
@@ -58,7 +98,7 @@ function getLocalStorageOrNull(): StorageLike | null {
     const storage = (globalThis as any).localStorage as StorageLike | undefined;
     if (!storage) return null;
     if (typeof storage.getItem !== "function" || typeof storage.setItem !== "function") return null;
-    return storage;
+    return safeStorage(storage);
   } catch {
     return null;
   }

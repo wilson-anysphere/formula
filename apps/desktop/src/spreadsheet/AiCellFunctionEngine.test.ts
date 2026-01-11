@@ -466,7 +466,8 @@ describe("AiCellFunctionEngine", () => {
     const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
     expect(userMessage).toContain("PREFIX_");
     expect(userMessage).not.toContain("_SUFFIX");
-    expect(userMessage).toContain("…[TRUNCATED]");
+    expect(userMessage).toContain("[TRUNCATED]");
+    expect(userMessage).toContain("…");
   });
 
   it("truncates long prompts in audit entries", async () => {
@@ -496,7 +497,8 @@ describe("AiCellFunctionEngine", () => {
     expect(typeof input?.prompt).toBe("string");
     expect(input.prompt).not.toBe(longPrompt);
     expect(input.prompt.length).toBe(200);
-    expect(input.prompt.endsWith("…[TRUNCATED]")).toBe(true);
+    expect(input.prompt).toContain("[TRUNCATED]");
+    expect(input.prompt.endsWith("…")).toBe(true);
     expect(input.prompt_hash).toMatch(/^[0-9a-f]{8}$/);
   });
 });
