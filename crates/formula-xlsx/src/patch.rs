@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use formula_model::rich_text::RichText;
 use formula_model::{CellRef, CellValue, StyleTable};
-use quick_xml::events::{BytesEnd, BytesStart, Event};
+use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 
 use crate::openxml::{parse_relationships, rels_part_name, resolve_relationship_target};
@@ -515,17 +515,10 @@ fn patch_worksheet_xml(
     mut shared_strings: Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
 ) -> Result<(Vec<u8>, bool), XlsxError> {
-    // Adding a formula where none existed is always a "formula change" for the workbook.
-    // (Removing formulas is detected while patching existing cells.)
-    let mut formula_changed = patches.iter().any(|(_, patch)| {
-        matches!(
-            patch,
-            CellPatch::Set {
-                formula: Some(_),
-                ..
-            }
-        )
-    });
+    // Track whether any formulas actually changed (added/removed/updated) so we can apply the
+    // workbook recalculation policy. This is computed while patching so no-op patches don't churn
+    // calc state.
+    let mut formula_changed = false;
 
     // Track the bounds of "non-empty" patches (cells that will contain a formula or value) so we
     // can expand the worksheet `<dimension ref="..."/>` if needed.
@@ -584,6 +577,7 @@ fn patch_worksheet_xml(
                     writer.write_event(Event::Start(e.into_owned()))?;
                     for row in remaining_patch_rows.iter().skip(patch_row_idx).copied() {
                         let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
+                        formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
                         write_new_row(
                             &mut writer,
                             row,
@@ -602,6 +596,7 @@ fn patch_worksheet_xml(
                     writer.write_event(Event::Start(BytesStart::new("sheetData")))?;
                     for row in remaining_patch_rows.iter().skip(patch_row_idx).copied() {
                         let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
+                        formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
                         write_new_row(
                             &mut writer,
                             row,
@@ -650,6 +645,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                 {
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
+                    formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
                     write_new_row(writer, row, cells, shared_strings, style_id_to_xf)?;
                     *patch_row_idx += 1;
                 }
@@ -689,6 +685,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                 {
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
+                    formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
                     write_new_row(writer, row, cells, shared_strings, style_id_to_xf)?;
                     *patch_row_idx += 1;
                 }
@@ -703,6 +700,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                     // Convert `<row/>` into `<row>...</row>`.
                     writer.write_event(Event::Start(row_empty.clone()))?;
                     for (col, patch) in cells {
+                        formula_changed |= patch_has_formula(patch);
                         write_cell_patch(
                             writer,
                             row_num,
@@ -725,6 +723,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                 while *patch_row_idx < remaining_patch_rows.len() {
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
+                    formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
                     write_new_row(writer, row, cells, shared_strings, style_id_to_xf)?;
                     *patch_row_idx += 1;
                 }
@@ -776,6 +775,7 @@ fn patch_row<R: std::io::BufRead>(
                 let col = cell_ref.col;
                 while patch_idx < patches.len() && patches[patch_idx].0 < col {
                     let (patch_col, patch) = patches[patch_idx];
+                    formula_changed |= patch_has_formula(patch);
                     write_cell_patch(
                         writer,
                         row_num,
@@ -794,79 +794,48 @@ fn patch_row<R: std::io::BufRead>(
                     let patch = patches[patch_idx].1;
                     patch_idx += 1;
 
-                    let mut existing_formula = false;
-                    let mut existing_shared_idx: Option<u32> = None;
-                    let mut in_v = false;
+                    let mut inner_events = Vec::new();
                     let mut depth = 1usize;
-                    loop {
+                    let cell_end = loop {
                         match reader.read_event_into(&mut buf)? {
                             Event::Start(inner) => {
-                                if depth == 1 {
-                                    match local_name(inner.name().as_ref()) {
-                                        b"f" => existing_formula = true,
-                                        b"v" => {
-                                            if existing_t.as_deref() == Some("s") {
-                                                in_v = true;
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
                                 depth += 1;
+                                inner_events.push(Event::Start(inner.into_owned()));
                             }
                             Event::Empty(inner) => {
-                                if depth == 1 && local_name(inner.name().as_ref()) == b"f" {
-                                    existing_formula = true;
-                                }
-                            }
-                            Event::Text(e) if in_v => {
-                                existing_shared_idx =
-                                    e.unescape()?.trim().parse::<u32>().ok();
+                                inner_events.push(Event::Empty(inner.into_owned()));
                             }
                             Event::End(inner) => {
-                                if in_v && local_name(inner.name().as_ref()) == b"v" {
-                                    in_v = false;
-                                }
                                 depth = depth.saturating_sub(1);
                                 if depth == 0 && local_name(inner.name().as_ref()) == b"c" {
-                                    break;
+                                    break inner.into_owned();
                                 }
+                                inner_events.push(Event::End(inner.into_owned()));
                             }
                             Event::Eof => {
                                 return Err(XlsxError::Invalid(
                                     "unexpected EOF while skipping patched cell".to_string(),
                                 ))
                             }
-                            _ => {}
+                            ev => inner_events.push(ev.into_owned()),
                         }
                         buf.clear();
-                    }
+                    };
 
-                    let _changed = write_cell_patch(
+                    let cell_formula_changed = patch_cell_element(
                         writer,
-                        row_num,
-                        col,
+                        CellRef::new(row_num - 1, col),
                         patch,
-                        existing_t.as_deref(),
-                        existing_s.as_deref(),
-                        existing_shared_idx,
+                        cell_start,
+                        Some(cell_end),
+                        inner_events,
+                        existing_t,
+                        existing_s,
                         shared_strings,
                         style_id_to_xf,
+                        false,
                     )?;
-
-                    // Any formula removal counts as a formula change.
-                    let patch_formula = matches!(
-                        patch,
-                        CellPatch::Set {
-                            formula: Some(_),
-                            ..
-                        }
-                    );
-                    if patch_formula || (existing_formula && !patch_formula) {
-                        formula_changed = true;
-                    }
-
-                    // `_changed` indicates we wrote a cell patch (always true when called).
+                    formula_changed |= cell_formula_changed;
                 } else {
                     writer.write_event(Event::Start(cell_start))?;
                 }
@@ -888,6 +857,7 @@ fn patch_row<R: std::io::BufRead>(
                 let col = cell_ref.col;
                 while patch_idx < patches.len() && patches[patch_idx].0 < col {
                     let (patch_col, patch) = patches[patch_idx];
+                    formula_changed |= patch_has_formula(patch);
                     write_cell_patch(
                         writer,
                         row_num,
@@ -905,27 +875,20 @@ fn patch_row<R: std::io::BufRead>(
                 if patch_idx < patches.len() && patches[patch_idx].0 == col {
                     let patch = patches[patch_idx].1;
                     patch_idx += 1;
-                    let patch_formula = matches!(
-                        patch,
-                        CellPatch::Set {
-                            formula: Some(_),
-                            ..
-                        }
-                    );
-                    if patch_formula {
-                        formula_changed = true;
-                    }
-                    write_cell_patch(
+                    let cell_formula_changed = patch_cell_element(
                         writer,
-                        row_num,
-                        col,
+                        CellRef::new(row_num - 1, col),
                         patch,
-                        existing_t.as_deref(),
-                        existing_s.as_deref(),
+                        cell_empty,
                         None,
+                        Vec::new(),
+                        existing_t,
+                        existing_s,
                         shared_strings,
                         style_id_to_xf,
+                        true,
                     )?;
+                    formula_changed |= cell_formula_changed;
                 } else {
                     writer.write_event(Event::Empty(cell_empty))?;
                 }
@@ -933,6 +896,7 @@ fn patch_row<R: std::io::BufRead>(
             Event::End(e) if local_name(e.name().as_ref()) == b"row" => {
                 while patch_idx < patches.len() {
                     let (col, patch) = patches[patch_idx];
+                    formula_changed |= patch_has_formula(patch);
                     write_cell_patch(
                         writer,
                         row_num,
@@ -1216,6 +1180,765 @@ fn write_cell_patch(
 
     writer.get_mut().extend_from_slice(cell.as_bytes());
     Ok(true)
+}
+
+fn patch_has_formula(patch: &CellPatch) -> bool {
+    matches!(
+        patch,
+        CellPatch::Set {
+            formula: Some(_),
+            ..
+        }
+    )
+}
+
+#[derive(Debug, Clone)]
+struct ExistingCellSemantics {
+    formula: Option<String>,
+    value: ExistingCellValue,
+}
+
+#[derive(Debug, Clone)]
+enum ExistingCellValue {
+    None,
+    Number(f64),
+    Boolean(bool),
+    Error(String),
+    String(String),
+    SharedString(RichText),
+}
+
+#[derive(Debug, Clone)]
+enum CellBodyKind {
+    None,
+    V(String),
+    InlineStr(String),
+}
+
+fn patch_cell_element(
+    writer: &mut Writer<Vec<u8>>,
+    cell_ref: CellRef,
+    patch: &CellPatch,
+    original_start: BytesStart<'static>,
+    original_end: Option<BytesEnd<'static>>,
+    inner_events: Vec<Event<'static>>,
+    existing_t: Option<String>,
+    existing_s: Option<String>,
+    shared_strings: &mut Option<&mut SharedStringsState>,
+    style_id_to_xf: Option<&HashMap<u32, u32>>,
+    original_was_empty: bool,
+) -> Result<bool, XlsxError> {
+    let (patch_value, patch_formula) = match patch {
+        CellPatch::Clear { .. } => (None, None),
+        CellPatch::Set { value, formula, .. } => (Some(value), formula.as_deref()),
+    };
+
+    let cell_prefix = element_prefix(original_start.name().as_ref()).map(|p| p.to_vec());
+    let existing = parse_existing_cell_semantics(
+        existing_t.as_deref(),
+        &inner_events,
+        shared_strings.as_deref(),
+        cell_prefix.as_deref(),
+    )?;
+
+    let patch_file_formula = patch_formula.map(formula_to_file_text);
+    let formula_eq = match (existing.formula.as_deref(), patch_file_formula.as_deref()) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a.trim() == b,
+        _ => false,
+    };
+    let value_eq = value_semantics_eq(&existing.value, patch_value);
+
+    let style_override = patch.style_index_override(style_id_to_xf)?;
+    let style_change = match style_override {
+        None => false,
+        Some(0) => existing_s.is_some(),
+        Some(xf) => existing_s
+            .as_deref()
+            .and_then(|s| s.parse::<u32>().ok())
+            != Some(xf),
+    };
+
+    let update_formula = !formula_eq;
+    let update_value = !value_eq;
+    let any_change = style_change || update_formula || update_value;
+
+    if !any_change {
+        if original_was_empty {
+            writer.write_event(Event::Empty(original_start))?;
+        } else {
+            writer.write_event(Event::Start(original_start))?;
+            for ev in inner_events {
+                writer.write_event(ev)?;
+            }
+            writer.write_event(Event::End(
+                original_end.expect("non-empty cell must have end tag"),
+            ))?;
+        }
+        return Ok(false);
+    }
+
+    let cell_tag = std::str::from_utf8(original_start.name().as_ref())
+        .unwrap_or("c")
+        .to_string();
+    let prefix_str = cell_tag.rsplit_once(':').map(|(p, _)| p);
+    let formula_tag = prefixed_tag(prefix_str, "f");
+    let v_tag = prefixed_tag(prefix_str, "v");
+    let is_tag = prefixed_tag(prefix_str, "is");
+    let t_tag = prefixed_tag(prefix_str, "t");
+
+    let (new_t, body_kind) = if update_value {
+        cell_representation_for_patch(
+            patch_value,
+            patch_formula,
+            existing_t.as_deref(),
+            shared_strings,
+        )?
+    } else {
+        (None, CellBodyKind::None)
+    };
+
+    if update_value {
+        if let Some(shared_strings) = shared_strings.as_deref_mut() {
+            let old_uses_shared = existing_t.as_deref() == Some("s");
+            let new_uses_shared = new_t.as_deref() == Some("s");
+            shared_strings.note_shared_string_ref_delta(old_uses_shared, new_uses_shared);
+        }
+    }
+
+    let mut c = BytesStart::new(cell_tag.as_str());
+    let mut has_r = false;
+    for attr in original_start.attributes() {
+        let attr = attr?;
+        match attr.key.as_ref() {
+            b"s" if style_override.is_some() => continue,
+            b"t" if update_value => continue,
+            b"r" => has_r = true,
+            _ => {}
+        }
+        c.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+    }
+    if !has_r {
+        let a1 = cell_ref.to_a1();
+        c.push_attribute(("r", a1.as_str()));
+    }
+
+    if let Some(xf) = style_override {
+        if xf != 0 {
+            let xf_str = xf.to_string();
+            c.push_attribute(("s", xf_str.as_str()));
+        }
+    }
+
+    if update_value {
+        if let Some(t) = new_t.as_deref() {
+            c.push_attribute(("t", t));
+        }
+    }
+
+    writer.write_event(Event::Start(c.into_owned()))?;
+    write_patched_cell_children(
+        writer,
+        &inner_events,
+        cell_prefix.as_deref(),
+        update_formula,
+        patch_formula,
+        &formula_tag,
+        update_value,
+        &body_kind,
+        &v_tag,
+        &is_tag,
+        &t_tag,
+    )?;
+    writer.write_event(Event::End(BytesEnd::new(cell_tag.as_str())))?;
+
+    Ok(update_formula)
+}
+
+fn parse_existing_cell_semantics(
+    cell_t: Option<&str>,
+    inner_events: &[Event<'static>],
+    shared_strings: Option<&SharedStringsState>,
+    cell_prefix: Option<&[u8]>,
+) -> Result<ExistingCellSemantics, XlsxError> {
+    let mut formula: Option<String> = None;
+    let mut v_text: Option<String> = None;
+    let mut is_text: Option<String> = None;
+
+    let mut depth = 0usize;
+    let mut idx = 0usize;
+    while idx < inner_events.len() {
+        match &inner_events[idx] {
+            Event::Start(e) => {
+                if depth == 0 {
+                    if formula.is_none()
+                        && is_element_named(e.name().as_ref(), cell_prefix, b"f")
+                    {
+                        let (text, next_idx) = extract_element_text(inner_events, idx)?;
+                        formula = Some(text);
+                        idx = next_idx;
+                        continue;
+                    }
+                    if v_text.is_none() && is_element_named(e.name().as_ref(), cell_prefix, b"v") {
+                        let (text, next_idx) = extract_element_text(inner_events, idx)?;
+                        v_text = Some(text);
+                        idx = next_idx;
+                        continue;
+                    }
+                    if is_text.is_none()
+                        && is_element_named(e.name().as_ref(), cell_prefix, b"is")
+                    {
+                        let (text, next_idx) =
+                            extract_inline_string_text(inner_events, idx, cell_prefix)?;
+                        is_text = Some(text);
+                        idx = next_idx;
+                        continue;
+                    }
+                }
+                depth += 1;
+            }
+            Event::Empty(e) => {
+                if depth == 0 {
+                    if formula.is_none()
+                        && is_element_named(e.name().as_ref(), cell_prefix, b"f")
+                    {
+                        formula = Some(String::new());
+                    } else if v_text.is_none()
+                        && is_element_named(e.name().as_ref(), cell_prefix, b"v")
+                    {
+                        v_text = Some(String::new());
+                    } else if is_text.is_none()
+                        && is_element_named(e.name().as_ref(), cell_prefix, b"is")
+                    {
+                        is_text = Some(String::new());
+                    }
+                }
+            }
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+
+    let value = if let Some(text) = is_text {
+        ExistingCellValue::String(text)
+    } else if let Some(v) = v_text {
+        match cell_t.unwrap_or("n") {
+            "b" => ExistingCellValue::Boolean(v.trim() == "1"),
+            "e" => ExistingCellValue::Error(v),
+            "s" => {
+                if let (Some(ss), Ok(idx)) = (shared_strings, v.trim().parse::<u32>()) {
+                    if let Some(item) = ss.rich_at(idx) {
+                        ExistingCellValue::SharedString(item.clone())
+                    } else {
+                        ExistingCellValue::String(v)
+                    }
+                } else {
+                    ExistingCellValue::String(v)
+                }
+            }
+            "str" | "inlineStr" => ExistingCellValue::String(v),
+            other if should_preserve_unknown_t(other) => ExistingCellValue::String(v),
+            _ => v
+                .trim()
+                .parse::<f64>()
+                .map(ExistingCellValue::Number)
+                .unwrap_or_else(|_| ExistingCellValue::String(v)),
+        }
+    } else {
+        ExistingCellValue::None
+    };
+
+    Ok(ExistingCellSemantics { formula, value })
+}
+
+fn extract_element_text(
+    events: &[Event<'static>],
+    start_idx: usize,
+) -> Result<(String, usize), XlsxError> {
+    let mut out = String::new();
+    let mut idx = start_idx + 1;
+    let mut depth = 1usize;
+    while idx < events.len() {
+        match &events[idx] {
+            Event::Start(_) => depth += 1,
+            Event::Empty(_) => {}
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Ok((out, idx + 1));
+                }
+            }
+            Event::Text(t) => out.push_str(&t.unescape()?.into_owned()),
+            Event::CData(t) => out.push_str(&String::from_utf8_lossy(t.as_ref())),
+            _ => {}
+        }
+        idx += 1;
+    }
+    Ok((out, events.len()))
+}
+
+fn extract_inline_string_text(
+    events: &[Event<'static>],
+    start_idx: usize,
+    cell_prefix: Option<&[u8]>,
+) -> Result<(String, usize), XlsxError> {
+    let mut out = String::new();
+    let mut idx = start_idx + 1;
+    let mut depth = 1usize;
+    let mut t_depth: Option<usize> = None;
+    while idx < events.len() {
+        match &events[idx] {
+            Event::Start(e) => {
+                depth += 1;
+                if is_element_named(e.name().as_ref(), cell_prefix, b"t") {
+                    t_depth = Some(depth);
+                }
+            }
+            Event::Empty(_) => {}
+            Event::End(e) => {
+                if t_depth.is_some()
+                    && is_element_named(e.name().as_ref(), cell_prefix, b"t")
+                    && t_depth == Some(depth)
+                {
+                    t_depth = None;
+                }
+                depth = depth.saturating_sub(1);
+                if depth == 0 && is_element_named(e.name().as_ref(), cell_prefix, b"is") {
+                    return Ok((out, idx + 1));
+                }
+            }
+            Event::Text(t) => {
+                if t_depth.is_some() {
+                    out.push_str(&t.unescape()?.into_owned());
+                }
+            }
+            Event::CData(t) => {
+                if t_depth.is_some() {
+                    out.push_str(&String::from_utf8_lossy(t.as_ref()));
+                }
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+    Ok((out, events.len()))
+}
+
+fn formula_to_file_text(formula: &str) -> String {
+    let display = crate::formula_text::normalize_display_formula(formula);
+    crate::formula_text::add_xlfn_prefixes(&display)
+}
+
+fn value_semantics_eq(existing: &ExistingCellValue, patch_value: Option<&CellValue>) -> bool {
+    let Some(patch_value) = patch_value else {
+        return matches!(existing, ExistingCellValue::None);
+    };
+
+    match patch_value {
+        CellValue::Empty => matches!(existing, ExistingCellValue::None),
+        CellValue::Number(n) => matches!(existing, ExistingCellValue::Number(m) if m == n),
+        CellValue::Boolean(b) => matches!(existing, ExistingCellValue::Boolean(m) if m == b),
+        CellValue::Error(err) => {
+            matches!(existing, ExistingCellValue::Error(e) if e == err.as_str())
+        }
+        CellValue::String(s) => match existing {
+            ExistingCellValue::String(v) => v == s,
+            ExistingCellValue::SharedString(rich) => &rich.text == s,
+            _ => false,
+        },
+        CellValue::RichText(rich) => match existing {
+            ExistingCellValue::SharedString(existing_rich) => existing_rich == rich,
+            ExistingCellValue::String(v) => rich.runs.is_empty() && &rich.text == v,
+            _ => false,
+        },
+        CellValue::Array(_) | CellValue::Spill(_) => false,
+    }
+}
+
+fn cell_representation_for_patch(
+    value: Option<&CellValue>,
+    formula: Option<&str>,
+    existing_t: Option<&str>,
+    shared_strings: &mut Option<&mut SharedStringsState>,
+) -> Result<(Option<String>, CellBodyKind), XlsxError> {
+    let Some(value) = value else {
+        return Ok((None, CellBodyKind::None));
+    };
+
+    match value {
+        CellValue::Empty => Ok((None, CellBodyKind::None)),
+        CellValue::Number(n) => Ok((None, CellBodyKind::V(n.to_string()))),
+        CellValue::Boolean(b) => Ok((
+            Some("b".to_string()),
+            CellBodyKind::V(if *b { "1" } else { "0" }.to_string()),
+        )),
+        CellValue::Error(e) => Ok((Some("e".to_string()), CellBodyKind::V(e.as_str().to_string()))),
+        CellValue::String(s) => {
+            if let Some(existing_t) = existing_t {
+                if should_preserve_unknown_t(existing_t) {
+                    return Ok((Some(existing_t.to_string()), CellBodyKind::V(s.clone())));
+                }
+
+                let prefer_shared = shared_strings.is_some() && existing_t != "inlineStr";
+                match (existing_t, prefer_shared) {
+                    ("inlineStr", _) => Ok((Some("inlineStr".to_string()), CellBodyKind::InlineStr(s.clone()))),
+                    ("str", _) => Ok((Some("str".to_string()), CellBodyKind::V(s.clone()))),
+                    (_, true) => {
+                        let idx = shared_strings
+                            .as_deref_mut()
+                            .map(|ss| ss.get_or_insert_plain(s))
+                            .unwrap_or(0);
+                        Ok((Some("s".to_string()), CellBodyKind::V(idx.to_string())))
+                    }
+                    _ => Ok((Some("inlineStr".to_string()), CellBodyKind::InlineStr(s.clone()))),
+                }
+            } else if shared_strings.is_some() {
+                let idx = shared_strings
+                    .as_deref_mut()
+                    .map(|ss| ss.get_or_insert_plain(s))
+                    .unwrap_or(0);
+                Ok((Some("s".to_string()), CellBodyKind::V(idx.to_string())))
+            } else {
+                let _ = formula;
+                Ok((Some("inlineStr".to_string()), CellBodyKind::InlineStr(s.clone())))
+            }
+        }
+        CellValue::RichText(rich) => {
+            let prefer_shared = shared_strings.is_some() && existing_t != Some("inlineStr");
+            if prefer_shared {
+                let idx = shared_strings
+                    .as_deref_mut()
+                    .map(|ss| ss.get_or_insert_rich(rich))
+                    .unwrap_or(0);
+                Ok((Some("s".to_string()), CellBodyKind::V(idx.to_string())))
+            } else {
+                Ok((
+                    Some("inlineStr".to_string()),
+                    CellBodyKind::InlineStr(rich.text.clone()),
+                ))
+            }
+        }
+        CellValue::Array(_) | CellValue::Spill(_) => Err(XlsxError::Invalid(format!(
+            "unsupported cell value type for patch: {value:?}"
+        ))),
+    }
+}
+
+fn write_patched_cell_children(
+    writer: &mut Writer<Vec<u8>>,
+    inner_events: &[Event<'static>],
+    cell_prefix: Option<&[u8]>,
+    update_formula: bool,
+    patch_formula: Option<&str>,
+    formula_tag: &str,
+    update_value: bool,
+    body_kind: &CellBodyKind,
+    v_tag: &str,
+    is_tag: &str,
+    t_tag: &str,
+) -> Result<(), XlsxError> {
+    let mut formula_written = !update_formula || patch_formula.is_none();
+    let mut value_written = !update_value || matches!(body_kind, CellBodyKind::None);
+    let mut saw_formula = false;
+    let mut saw_value = false;
+
+    let mut idx = 0usize;
+    while idx < inner_events.len() {
+        match &inner_events[idx] {
+            Event::Start(e) if is_element_named(e.name().as_ref(), cell_prefix, b"f") => {
+                saw_formula = true;
+                if update_formula {
+                    if !formula_written {
+                        if let Some(formula) = patch_formula {
+                            let detach_shared = should_detach_shared_formula(e, formula);
+                            write_formula_element(
+                                writer,
+                                Some(e),
+                                formula,
+                                detach_shared,
+                                formula_tag,
+                            )?;
+                            formula_written = true;
+                        }
+                    }
+                    idx = skip_owned_subtree(inner_events, idx);
+                    continue;
+                }
+
+                idx = write_owned_subtree(writer, inner_events, idx)?;
+                continue;
+            }
+            Event::Empty(e) if is_element_named(e.name().as_ref(), cell_prefix, b"f") => {
+                saw_formula = true;
+                if update_formula {
+                    if !formula_written {
+                        if let Some(formula) = patch_formula {
+                            let detach_shared = should_detach_shared_formula(e, formula);
+                            write_formula_element(
+                                writer,
+                                Some(e),
+                                formula,
+                                detach_shared,
+                                formula_tag,
+                            )?;
+                            formula_written = true;
+                        }
+                    }
+                } else {
+                    writer.write_event(Event::Empty(e.clone()))?;
+                }
+                idx += 1;
+                continue;
+            }
+            Event::Start(e)
+                if is_element_named(e.name().as_ref(), cell_prefix, b"v")
+                    || is_element_named(e.name().as_ref(), cell_prefix, b"is") =>
+            {
+                saw_value = true;
+
+                if update_formula && !formula_written {
+                    if let Some(formula) = patch_formula {
+                        write_formula_element(writer, None, formula, false, formula_tag)?;
+                        formula_written = true;
+                    }
+                }
+                if update_value && !value_written {
+                    write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
+                    value_written = true;
+                }
+
+                if update_value {
+                    idx = skip_owned_subtree(inner_events, idx);
+                } else {
+                    idx = write_owned_subtree(writer, inner_events, idx)?;
+                }
+                continue;
+            }
+            Event::Empty(e)
+                if is_element_named(e.name().as_ref(), cell_prefix, b"v")
+                    || is_element_named(e.name().as_ref(), cell_prefix, b"is") =>
+            {
+                saw_value = true;
+
+                if update_formula && !formula_written {
+                    if let Some(formula) = patch_formula {
+                        write_formula_element(writer, None, formula, false, formula_tag)?;
+                        formula_written = true;
+                    }
+                }
+                if update_value && !value_written {
+                    write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
+                    value_written = true;
+                }
+
+                if !update_value {
+                    writer.write_event(Event::Empty(e.clone()))?;
+                }
+
+                idx += 1;
+                continue;
+            }
+            ev => {
+                if update_formula && !formula_written && !saw_formula {
+                    if let Some(formula) = patch_formula {
+                        write_formula_element(writer, None, formula, false, formula_tag)?;
+                        formula_written = true;
+                    }
+                }
+                if update_value && !value_written && !saw_value {
+                    write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
+                    value_written = true;
+                }
+
+                writer.write_event(ev.clone())?;
+            }
+        }
+        idx += 1;
+    }
+
+    if update_formula && !formula_written {
+        if let Some(formula) = patch_formula {
+            write_formula_element(writer, None, formula, false, formula_tag)?;
+        }
+    }
+    if update_value && !value_written {
+        write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
+    }
+
+    Ok(())
+}
+
+fn write_owned_subtree(
+    writer: &mut Writer<Vec<u8>>,
+    events: &[Event<'static>],
+    mut idx: usize,
+) -> Result<usize, XlsxError> {
+    match &events[idx] {
+        Event::Start(_) => {
+            let mut depth = 0usize;
+            while idx < events.len() {
+                let ev = events[idx].clone();
+                match &ev {
+                    Event::Start(_) => depth += 1,
+                    Event::End(_) => {
+                        depth = depth.saturating_sub(1);
+                    }
+                    _ => {}
+                }
+                writer.write_event(ev)?;
+                idx += 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            Ok(idx)
+        }
+        _ => {
+            writer.write_event(events[idx].clone())?;
+            Ok(idx + 1)
+        }
+    }
+}
+
+fn skip_owned_subtree(events: &[Event<'static>], mut idx: usize) -> usize {
+    match &events[idx] {
+        Event::Start(_) => {
+            let mut depth = 1usize;
+            idx += 1;
+            while idx < events.len() {
+                match &events[idx] {
+                    Event::Start(_) => depth += 1,
+                    Event::End(_) => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            idx += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                idx += 1;
+            }
+            idx
+        }
+        _ => idx + 1,
+    }
+}
+
+fn write_formula_element(
+    writer: &mut Writer<Vec<u8>>,
+    original: Option<&BytesStart<'_>>,
+    formula: &str,
+    detach_shared: bool,
+    tag_name: &str,
+) -> Result<(), XlsxError> {
+    let file_formula = formula_to_file_text(formula);
+
+    let mut f = BytesStart::new(tag_name);
+    if let Some(orig) = original {
+        for attr in orig.attributes() {
+            let attr = attr?;
+            if detach_shared && matches!(attr.key.as_ref(), b"t" | b"ref" | b"si") {
+                continue;
+            }
+            f.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+        }
+    }
+
+    if file_formula.is_empty() {
+        writer.write_event(Event::Empty(f))?;
+    } else {
+        writer.write_event(Event::Start(f))?;
+        writer.write_event(Event::Text(BytesText::new(&file_formula)))?;
+        writer.write_event(Event::End(BytesEnd::new(tag_name)))?;
+    }
+
+    Ok(())
+}
+
+fn write_value_element(
+    writer: &mut Writer<Vec<u8>>,
+    body_kind: &CellBodyKind,
+    v_tag: &str,
+    is_tag: &str,
+    t_tag: &str,
+) -> Result<(), XlsxError> {
+    match body_kind {
+        CellBodyKind::V(text) => {
+            writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+            writer.write_event(Event::Text(BytesText::new(text)))?;
+            writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+        }
+        CellBodyKind::InlineStr(text) => {
+            writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
+            let mut t = BytesStart::new(t_tag);
+            if needs_space_preserve(text) {
+                t.push_attribute(("xml:space", "preserve"));
+            }
+            writer.write_event(Event::Start(t))?;
+            writer.write_event(Event::Text(BytesText::new(text)))?;
+            writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+            writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
+        }
+        CellBodyKind::None => {}
+    }
+
+    Ok(())
+}
+
+fn should_detach_shared_formula(f: &BytesStart<'_>, patch_formula: &str) -> bool {
+    let trimmed = patch_formula.trim();
+    let stripped = trimmed.strip_prefix('=').unwrap_or(trimmed).trim();
+    if stripped.is_empty() {
+        return false;
+    }
+
+    let mut is_shared = false;
+    let mut has_ref = false;
+    for attr in f.attributes().flatten() {
+        match attr.key.as_ref() {
+            b"t" if attr.value.as_ref() == b"shared" => is_shared = true,
+            b"ref" => has_ref = true,
+            _ => {}
+        }
+    }
+
+    is_shared && !has_ref
+}
+
+fn should_preserve_unknown_t(t: &str) -> bool {
+    !matches!(t, "s" | "b" | "e" | "n" | "str" | "inlineStr")
+}
+
+fn prefixed_tag(prefix: Option<&str>, local: &str) -> String {
+    match prefix {
+        Some(prefix) => format!("{prefix}:{local}"),
+        None => local.to_string(),
+    }
+}
+
+fn element_prefix(name: &[u8]) -> Option<&[u8]> {
+    name.iter().rposition(|b| *b == b':').map(|idx| &name[..idx])
+}
+
+fn is_element_named(name: &[u8], expected_prefix: Option<&[u8]>, local: &[u8]) -> bool {
+    let (prefix, local_name) = match name.iter().rposition(|b| *b == b':') {
+        Some(idx) => (Some(&name[..idx]), &name[idx + 1..]),
+        None => (None, name),
+    };
+
+    if local_name != local {
+        return false;
+    }
+
+    match (prefix, expected_prefix) {
+        (None, None) => true,
+        (Some(p), Some(e)) => p == e,
+        _ => false,
+    }
 }
 
 fn parse_row_r(row: &BytesStart<'_>) -> Result<Option<u32>, XlsxError> {
