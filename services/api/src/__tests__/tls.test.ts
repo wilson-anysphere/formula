@@ -183,4 +183,31 @@ describe("fetchWithOrgTls", () => {
       });
     }
   });
+
+  it("enforces TLSv1.3 minimum by rejecting TLSv1.2-only servers", async () => {
+    const dir = fixturesDir();
+    const keyPem = fs.readFileSync(path.join(dir, "localhost.key"));
+
+    const server = https.createServer({ key: keyPem, cert: certPem, maxVersion: "TLSv1.2" }, (_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("ok");
+    });
+
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("expected https server to listen on tcp");
+
+    const url = `https://127.0.0.1:${address.port}/`;
+    try {
+      await expect(
+        fetchWithOrgTls(url, { method: "GET" }, { tls: { certificatePinningEnabled: false, certificatePins: [], ca: certPem } })
+      ).rejects.toThrow();
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
+      });
+    }
+  });
 });
