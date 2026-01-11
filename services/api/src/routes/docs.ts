@@ -235,19 +235,24 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const createdAt = (inserted.rows[0] as any).created_at as Date;
     const sizeBytes = data.length;
 
-    await writeAuditEvent(app.db, {
-      orgId: membership.orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "document.version_created",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { versionId, description: parsed.data.description ?? null, sizeBytes },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "document.version_created",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId: membership.orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: { versionId, description: parsed.data.description ?? null, sizeBytes }
+      })
+    );
 
     return reply.send({
       version: {
@@ -330,19 +335,24 @@ export function registerDocRoutes(app: FastifyInstance): void {
     );
     if (deleted.rowCount !== 1) return reply.code(404).send({ error: "version_not_found" });
 
-    await writeAuditEvent(app.db, {
-      orgId: membership.orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "document.version_deleted",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { versionId },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "document.version_deleted",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId: membership.orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: { versionId }
+      })
+    );
 
     return reply.send({ ok: true });
   });
@@ -890,19 +900,24 @@ export function registerDocRoutes(app: FastifyInstance): void {
     );
     if (res.rowCount !== 1) return reply.code(404).send({ error: "not_found" });
 
-    await writeAuditEvent(app.db, {
-      orgId: membership.orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "sharing.modified",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { type: "range-permission", action: "deleted", id: permissionId },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "sharing.modified",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId: membership.orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: { type: "range-permission", action: "deleted", id: permissionId }
+      })
+    );
 
     return reply.send({ ok: true });
   });
