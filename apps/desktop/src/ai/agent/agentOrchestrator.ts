@@ -350,6 +350,23 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
             emit({ type: "planning", iteration });
             await refreshSystemMessage(request.messages);
 
+            const toolTokens = estimateToolDefinitionTokens(request?.tools as any, estimator);
+            const maxMessageTokens = Math.max(0, contextWindowTokens - toolTokens);
+            const trimmed = await trimMessagesToBudget({
+              messages: request.messages as any,
+              maxTokens: maxMessageTokens,
+              reserveForOutputTokens,
+              estimator,
+              keepLastMessages
+            });
+            if (Array.isArray(request.messages)) {
+              const next = trimmed === request.messages ? trimmed.slice() : trimmed;
+              request.messages.length = 0;
+              request.messages.push(...next);
+            } else {
+              request.messages = trimmed;
+            }
+
             let content = "";
             for await (const event of params.llmClient.streamChat!({ ...request, model: request.model ?? params.model })) {
               if (event?.type === "text" && typeof event.delta === "string" && event.delta.length > 0) {

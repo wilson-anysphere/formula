@@ -139,12 +139,24 @@ export class OllamaChatClient {
         arguments: tryParseJson(c.function?.arguments ?? "{}"),
       }));
 
+      const promptTokens =
+        typeof json.prompt_eval_count === "number" && Number.isFinite(json.prompt_eval_count) ? json.prompt_eval_count : null;
+      const completionTokens =
+        typeof json.eval_count === "number" && Number.isFinite(json.eval_count) ? json.eval_count : null;
+
       return {
         message: {
           role: "assistant",
           content: message?.content ?? "",
           toolCalls: toolCalls.length ? toolCalls : undefined,
         },
+        usage:
+          promptTokens != null || completionTokens != null
+            ? {
+                promptTokens: promptTokens ?? undefined,
+                completionTokens: completionTokens ?? undefined,
+              }
+            : undefined,
         raw: json,
       };
     } finally {
