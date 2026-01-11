@@ -282,6 +282,12 @@ export class RefreshOrchestrator {
      * @returns {RefreshAllHandle}
      */
     const errorHandle = (error, queryId) => {
+      // Ensure consumers that don't immediately attach a handler don't trigger an
+      // unhandled rejection warning, while still exposing the rejection to callers
+      // that await/catch `handle.promise`.
+      const promise = Promise.reject(error);
+      promise.catch(() => {});
+
       const job = {
         id: `${sessionId}:graph`,
         queryId,
@@ -302,7 +308,7 @@ export class RefreshOrchestrator {
       return {
         sessionId,
         queryIds: targetIds,
-        promise: Promise.reject(error),
+        promise,
         cancel: () => {},
       };
     };
