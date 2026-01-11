@@ -1,13 +1,12 @@
 use std::cmp::{max, min};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct SheetPrefix {
-    /// Exact prefix text as it appears in the formula, including the trailing `!`.
-    raw: String,
-    /// Normalized (unescaped) sheet name without workbook qualifier.
-    sheet_name: String,
-    external_workbook: bool,
-}
+use crate::{
+    parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellRef as AstCellRef,
+    ColRef as AstColRef, Coord, Expr, FunctionCall, ParseOptions, PostfixExpr,
+    RowRef as AstRowRef, SerializeOptions, UnaryExpr,
+};
+
+const REF_ERROR: &str = "#REF!";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GridRange {
@@ -36,101 +35,6 @@ impl GridRange {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct A1CellRef {
-    pub row: u32,
-    pub col: u32,
-    pub row_abs: bool,
-    pub col_abs: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct A1ColRef {
-    pub col: u32,
-    pub abs: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct A1RowRef {
-    pub row: u32,
-    pub abs: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum RefKind {
-    Cell(A1CellRef),
-    CellRange { start: A1CellRef, end: A1CellRef },
-    ColRange { start: A1ColRef, end: A1ColRef },
-    RowRange { start: A1RowRef, end: A1RowRef },
-    RefError,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ParsedRef {
-    prefix: Option<SheetPrefix>,
-    kind: RefKind,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct RefTarget<'a> {
-    sheet: &'a str,
-    external_workbook: bool,
-}
-
-impl ParsedRef {
-    fn target_sheet<'a>(&'a self, ctx_sheet: &'a str) -> RefTarget<'a> {
-        match &self.prefix {
-            Some(prefix) => RefTarget {
-                sheet: &prefix.sheet_name,
-                external_workbook: prefix.external_workbook,
-            },
-            None => RefTarget {
-                sheet: ctx_sheet,
-                external_workbook: false,
-            },
-        }
-    }
-
-    fn to_formula_string(&self) -> String {
-        let mut out = String::new();
-        if let Some(prefix) = &self.prefix {
-            out.push_str(&prefix.raw);
-        }
-        match &self.kind {
-            RefKind::Cell(cell) => out.push_str(&fmt_cell(*cell)),
-            RefKind::CellRange { start, end } => {
-                out.push_str(&fmt_cell(*start));
-                out.push(':');
-                out.push_str(&fmt_cell(*end));
-            }
-            RefKind::ColRange { start, end } => {
-                out.push_str(&fmt_col(*start));
-                out.push(':');
-                out.push_str(&fmt_col(*end));
-            }
-            RefKind::RowRange { start, end } => {
-                out.push_str(&fmt_row(*start));
-                out.push(':');
-                out.push_str(&fmt_row(*end));
-            }
-            RefKind::RefError => out.push_str("#REF!"),
-        }
-        out
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum FormulaPart {
-    Raw(String),
-    Ref(ParsedRef),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum RefRewrite {
-    Kind(RefKind),
-    Text(String),
-}
-
 pub(crate) enum StructuralEdit {
     InsertRows { sheet: String, row: u32, count: u32 },
     DeleteRows { sheet: String, row: u32, count: u32 },
@@ -151,54 +55,16 @@ pub(crate) fn rewrite_formula_for_structural_edit(
     ctx_sheet: &str,
     edit: &StructuralEdit,
 ) -> (String, bool) {
-    rewrite_formula(formula, ctx_sheet, |parsed, target| {
-        if target.external_workbook {
-            return None;
-        }
-        let matches = match edit {
-            StructuralEdit::InsertRows { sheet, .. }
-            | StructuralEdit::DeleteRows { sheet, .. }
-            | StructuralEdit::InsertCols { sheet, .. }
-            | StructuralEdit::DeleteCols { sheet, .. } => target.sheet.eq_ignore_ascii_case(sheet),
-        };
-        if !matches {
-            return None;
-        }
-
-        let new_kind = match edit {
-            StructuralEdit::InsertRows { row, count, .. } => {
-                adjust_ref_kind_insert_rows(&parsed.kind, *row, *count)
-            }
-            StructuralEdit::DeleteRows { row, count, .. } => {
-                adjust_ref_kind_delete_rows(&parsed.kind, *row, *count)
-            }
-            StructuralEdit::InsertCols { col, count, .. } => {
-                adjust_ref_kind_insert_cols(&parsed.kind, *col, *count)
-            }
-            StructuralEdit::DeleteCols { col, count, .. } => {
-                adjust_ref_kind_delete_cols(&parsed.kind, *col, *count)
-            }
-        };
-        Some(RefRewrite::Kind(new_kind))
-    })
+    rewrite_formula_via_ast(formula, |expr| rewrite_expr_for_structural_edit(expr, ctx_sheet, edit))
 }
 
 pub(crate) fn rewrite_formula_for_copy_delta(
     formula: &str,
-    ctx_sheet: &str,
+    _ctx_sheet: &str,
     delta_row: i32,
     delta_col: i32,
 ) -> (String, bool) {
-    rewrite_formula(formula, ctx_sheet, |parsed, target| {
-        if target.external_workbook {
-            return None;
-        }
-        Some(RefRewrite::Kind(adjust_ref_kind_copy_delta(
-            &parsed.kind,
-            delta_row,
-            delta_col,
-        )))
-    })
+    rewrite_formula_via_ast(formula, |expr| rewrite_expr_for_copy_delta(expr, delta_row, delta_col))
 }
 
 pub(crate) fn rewrite_formula_for_range_map(
@@ -206,728 +72,925 @@ pub(crate) fn rewrite_formula_for_range_map(
     ctx_sheet: &str,
     edit: &RangeMapEdit,
 ) -> (String, bool) {
-    rewrite_formula(formula, ctx_sheet, |parsed, target| {
-        if target.external_workbook || !target.sheet.eq_ignore_ascii_case(&edit.sheet) {
-            return None;
-        }
-        Some(map_reference_via_range_map(parsed, edit))
-    })
+    rewrite_formula_via_ast(formula, |expr| rewrite_expr_for_range_map(expr, ctx_sheet, edit))
 }
 
-fn rewrite_formula<F>(formula: &str, ctx_sheet: &str, mut f: F) -> (String, bool)
+fn rewrite_formula_via_ast<F>(formula: &str, f: F) -> (String, bool)
 where
-    F: FnMut(&ParsedRef, RefTarget<'_>) -> Option<RefRewrite>,
+    F: FnOnce(&Expr) -> (Expr, bool),
 {
-    let parts = tokenize_formula(formula);
-    let mut changed = false;
-    let mut out = String::new();
-    for part in parts {
-        match part {
-            FormulaPart::Raw(text) => out.push_str(&text),
-            FormulaPart::Ref(mut parsed) => {
-                let original = parsed.to_formula_string();
-                let target = parsed.target_sheet(ctx_sheet);
-                if let Some(rewrite) = f(&parsed, target) {
-                    match rewrite {
-                        RefRewrite::Kind(new_kind) => {
-                            if parsed.kind != new_kind {
-                                changed = true;
-                                parsed.kind = new_kind;
-                            }
-                            out.push_str(&parsed.to_formula_string());
-                        }
-                        RefRewrite::Text(text) => {
-                            if text != original {
-                                changed = true;
-                            }
-                            out.push_str(&text);
-                        }
-                    }
-                } else {
-                    out.push_str(&original);
-                }
-            }
-        }
-    }
-    (out, changed)
-}
-
-fn tokenize_formula(formula: &str) -> Vec<FormulaPart> {
-    let mut parts = Vec::new();
-    let mut raw_buf = String::new();
-    let mut i = 0usize;
-    while i < formula.len() {
-        let ch = formula[i..].chars().next().unwrap();
-        if ch == '"' {
-            // String literal - preserve exactly and skip reference parsing inside.
-            let start = i;
-            i += 1;
-            while i < formula.len() {
-                let c = formula[i..].chars().next().unwrap();
-                i += c.len_utf8();
-                if c == '"' {
-                    // Escaped quote is doubled.
-                    if i < formula.len() && formula[i..].starts_with('"') {
-                        i += 1;
-                        continue;
-                    }
-                    break;
-                }
-            }
-            raw_buf.push_str(&formula[start..i]);
-            continue;
-        }
-
-        if ch == '[' {
-            if let Some((parsed, consumed)) = parse_reference_at(formula, i) {
-                if !raw_buf.is_empty() {
-                    parts.push(FormulaPart::Raw(std::mem::take(&mut raw_buf)));
-                }
-                parts.push(FormulaPart::Ref(parsed));
-                i += consumed;
-                continue;
-            }
-            // Assume structured reference like Table1[Column] or [@Column].
-            if let Some(end) = formula[i..].find(']') {
-                raw_buf.push_str(&formula[i..i + end + 1]);
-                i += end + 1;
-                continue;
-            }
-        }
-
-        if let Some((parsed, consumed)) = parse_reference_at(formula, i) {
-            if !raw_buf.is_empty() {
-                parts.push(FormulaPart::Raw(std::mem::take(&mut raw_buf)));
-            }
-            parts.push(FormulaPart::Ref(parsed));
-            i += consumed;
-            continue;
-        }
-
-        raw_buf.push(ch);
-        i += ch.len_utf8();
-    }
-
-    if !raw_buf.is_empty() {
-        parts.push(FormulaPart::Raw(raw_buf));
-    }
-
-    parts
-}
-
-fn parse_reference_at(formula: &str, start: usize) -> Option<(ParsedRef, usize)> {
-    if !is_boundary_before(formula, start) {
-        return None;
-    }
-
-    let (prefix, idx) = if let Some((prefix, next)) = parse_sheet_prefix(formula, start) {
-        (Some(prefix), next)
-    } else {
-        (None, start)
+    let ast = match parse_formula(formula, ParseOptions::default()) {
+        Ok(ast) => ast,
+        Err(_) => return (formula.to_string(), false),
     };
 
-    let (kind, end_idx) = parse_ref_body(formula, idx)?;
-
-    if !is_boundary_after(formula, end_idx) {
-        return None;
+    let (expr, changed) = f(&ast.expr);
+    if !changed {
+        return (formula.to_string(), false);
     }
 
-    // Avoid mis-parsing functions like LOG10( ... ) as a cell reference.
-    if matches!(kind, RefKind::Cell(_) | RefKind::CellRange { .. })
-        && formula[end_idx..].starts_with('(')
-    {
-        return None;
-    }
-
-    Some((ParsedRef { prefix, kind }, end_idx - start))
-}
-
-fn is_ident_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'
-}
-
-fn is_boundary_before(formula: &str, idx: usize) -> bool {
-    if idx == 0 {
-        return true;
-    }
-    let prev = formula[..idx].chars().next_back().unwrap_or('\0');
-    !is_ident_char(prev)
-}
-
-fn is_boundary_after(formula: &str, idx: usize) -> bool {
-    if idx >= formula.len() {
-        return true;
-    }
-    let next = formula[idx..].chars().next().unwrap_or('\0');
-    !is_ident_char(next)
-}
-
-fn parse_sheet_prefix(formula: &str, start: usize) -> Option<(SheetPrefix, usize)> {
-    let bytes = formula.as_bytes();
-    if start >= bytes.len() {
-        return None;
-    }
-
-    match bytes[start] as char {
-        '\'' => parse_quoted_sheet_prefix(formula, start),
-        '[' => parse_bracketed_workbook_prefix(formula, start),
-        _ => parse_unquoted_sheet_prefix(formula, start),
-    }
-}
-
-fn parse_quoted_sheet_prefix(formula: &str, start: usize) -> Option<(SheetPrefix, usize)> {
-    let mut i = start + 1;
-    while i < formula.len() {
-        let ch = formula[i..].chars().next().unwrap();
-        if ch == '\'' {
-            // Escaped quote inside quoted sheet name.
-            if formula[i + 1..].starts_with('\'') {
-                i += 2;
-                continue;
-            }
-            // Closing quote.
-            let after_quote = i + 1;
-            if after_quote < formula.len() && formula[after_quote..].starts_with('!') {
-                let raw = formula[start..after_quote + 1].to_string();
-                let inner = formula[start + 1..i].replace("''", "'");
-                let (sheet_name, external_workbook) = if inner.starts_with('[') {
-                    if let Some(end) = inner.find(']') {
-                        let sheet = inner[end + 1..].to_string();
-                        (sheet, true)
-                    } else {
-                        (inner.clone(), false)
-                    }
-                } else {
-                    (inner.clone(), false)
-                };
-                return Some((
-                    SheetPrefix {
-                        raw,
-                        sheet_name,
-                        external_workbook,
-                    },
-                    after_quote + 1,
-                ));
-            }
-            return None;
-        }
-        i += ch.len_utf8();
-    }
-    None
-}
-
-fn parse_bracketed_workbook_prefix(formula: &str, start: usize) -> Option<(SheetPrefix, usize)> {
-    let rest = &formula[start..];
-    let end_bracket = rest.find(']')?;
-    let after_bracket = start + end_bracket + 1;
-    let bang = formula[after_bracket..].find('!')?;
-    if bang == 0 {
-        return None;
-    }
-    let bang_idx = after_bracket + bang;
-    let raw = formula[start..bang_idx + 1].to_string();
-    let sheet_name = formula[after_bracket..bang_idx].to_string();
-    Some((
-        SheetPrefix {
-            raw,
-            sheet_name,
-            external_workbook: true,
-        },
-        bang_idx + 1,
-    ))
-}
-
-fn parse_unquoted_sheet_prefix(formula: &str, start: usize) -> Option<(SheetPrefix, usize)> {
-    let rest = &formula[start..];
-    let bang = rest.find('!')?;
-    if bang == 0 {
-        return None;
-    }
-    let name = &rest[..bang];
-    if name.chars().any(|ch| !is_ident_char(ch)) {
-        return None;
-    }
-    Some((
-        SheetPrefix {
-            raw: rest[..bang + 1].to_string(),
-            sheet_name: name.to_string(),
-            external_workbook: false,
-        },
-        start + bang + 1,
-    ))
-}
-
-fn parse_ref_body(formula: &str, start: usize) -> Option<(RefKind, usize)> {
-    let rest = &formula[start..];
-    if rest.len() >= 5 && rest[..5].eq_ignore_ascii_case("#REF!") {
-        return Some((RefKind::RefError, start + 5));
-    }
-
-    let mut i = start;
-    let ch = formula[i..].chars().next()?;
-
-    if ch == '$' || ch.is_ascii_alphabetic() {
-        let (col1, col1_abs, after_col1) = parse_col(formula, i)?;
-        i = after_col1;
-
-        let next = formula[i..].chars().next();
-        match next {
-            Some('$') => {
-                let (row1, row1_abs, after_row1) = parse_row(formula, i)?;
-                i = after_row1;
-                let cell1 = A1CellRef {
-                    col: col1,
-                    row: row1,
-                    col_abs: col1_abs,
-                    row_abs: row1_abs,
-                };
-                if formula[i..].starts_with(':') {
-                    let (cell2, after_cell2) = parse_cell(formula, i + 1)?;
-                    return Some((
-                        RefKind::CellRange {
-                            start: cell1,
-                            end: cell2,
-                        },
-                        after_cell2,
-                    ));
-                }
-                return Some((RefKind::Cell(cell1), i));
-            }
-            Some(d) if d.is_ascii_digit() => {
-                let (row1, row1_abs, after_row1) = parse_row(formula, i)?;
-                i = after_row1;
-                let cell1 = A1CellRef {
-                    col: col1,
-                    row: row1,
-                    col_abs: col1_abs,
-                    row_abs: row1_abs,
-                };
-                if formula[i..].starts_with(':') {
-                    let (cell2, after_cell2) = parse_cell(formula, i + 1)?;
-                    return Some((
-                        RefKind::CellRange {
-                            start: cell1,
-                            end: cell2,
-                        },
-                        after_cell2,
-                    ));
-                }
-                return Some((RefKind::Cell(cell1), i));
-            }
-            Some(':') => {
-                let (col2, col2_abs, after_col2) = parse_col(formula, i + 1)?;
-                if let Some(next) = formula[after_col2..].chars().next() {
-                    if next == '$' || next.is_ascii_digit() {
-                        return None;
-                    }
-                }
-                return Some((
-                    RefKind::ColRange {
-                        start: A1ColRef {
-                            col: col1,
-                            abs: col1_abs,
-                        },
-                        end: A1ColRef {
-                            col: col2,
-                            abs: col2_abs,
-                        },
-                    },
-                    after_col2,
-                ));
-            }
-            _ => return None,
-        }
-    }
-
-    if ch == '$' || ch.is_ascii_digit() {
-        if let Some((row1, row1_abs, after_row1)) = parse_row(formula, start) {
-            if formula[after_row1..].starts_with(':') {
-                let (row2, row2_abs, after_row2) = parse_row(formula, after_row1 + 1)?;
-                return Some((
-                    RefKind::RowRange {
-                        start: A1RowRef { row: row1, abs: row1_abs },
-                        end: A1RowRef { row: row2, abs: row2_abs },
-                    },
-                    after_row2,
-                ));
-            }
-        }
-    }
-
-    None
-}
-
-fn parse_col(formula: &str, start: usize) -> Option<(u32, bool, usize)> {
-    let mut i = start;
-    let mut abs = false;
-    if formula[i..].starts_with('$') {
-        abs = true;
-        i += 1;
-    }
-    let mut end = i;
-    while end < formula.len() {
-        let ch = formula[end..].chars().next().unwrap();
-        if !ch.is_ascii_alphabetic() {
-            break;
-        }
-        end += ch.len_utf8();
-        if end - i > 3 {
-            return None;
-        }
-    }
-    if end == i {
-        return None;
-    }
-    let col = col_from_name(&formula[i..end])?;
-    Some((col, abs, end))
-}
-
-fn parse_row(formula: &str, start: usize) -> Option<(u32, bool, usize)> {
-    let mut i = start;
-    let mut abs = false;
-    if formula[i..].starts_with('$') {
-        abs = true;
-        i += 1;
-    }
-    let mut end = i;
-    while end < formula.len() {
-        let ch = formula[end..].chars().next().unwrap();
-        if !ch.is_ascii_digit() {
-            break;
-        }
-        end += ch.len_utf8();
-    }
-    if end == i {
-        return None;
-    }
-    let row_1_based: u32 = formula[i..end].parse().ok()?;
-    if row_1_based == 0 {
-        return None;
-    }
-    Some((row_1_based - 1, abs, end))
-}
-
-fn parse_cell(formula: &str, start: usize) -> Option<(A1CellRef, usize)> {
-    let (col, col_abs, after_col) = parse_col(formula, start)?;
-    let (row, row_abs, after_row) = parse_row(formula, after_col)?;
-    Some((
-        A1CellRef {
-            col,
-            row,
-            col_abs,
-            row_abs,
-        },
-        after_row,
-    ))
-}
-
-fn fmt_cell(cell: A1CellRef) -> String {
-    let mut out = String::new();
-    if cell.col_abs {
-        out.push('$');
-    }
-    out.push_str(&col_to_name(cell.col));
-    if cell.row_abs {
-        out.push('$');
-    }
-    out.push_str(&(cell.row + 1).to_string());
-    out
-}
-
-fn fmt_col(col: A1ColRef) -> String {
-    let mut out = String::new();
-    if col.abs {
-        out.push('$');
-    }
-    out.push_str(&col_to_name(col.col));
-    out
-}
-
-fn fmt_row(row: A1RowRef) -> String {
-    let mut out = String::new();
-    if row.abs {
-        out.push('$');
-    }
-    out.push_str(&(row.row + 1).to_string());
-    out
-}
-
-fn col_to_name(col: u32) -> String {
-    // 0-indexed -> A1 letters.
-    let mut n = col + 1;
-    let mut out = Vec::<u8>::new();
-    while n > 0 {
-        let rem = (n - 1) % 26;
-        out.push(b'A' + rem as u8);
-        n = (n - 1) / 26;
-    }
-    out.reverse();
-    String::from_utf8(out).expect("column letters are ASCII")
-}
-
-fn col_from_name(name: &str) -> Option<u32> {
-    let mut col: u32 = 0;
-    let mut len = 0usize;
-    for ch in name.chars() {
-        if !ch.is_ascii_alphabetic() {
-            return None;
-        }
-        let v = ch.to_ascii_uppercase() as u32 - 'A' as u32 + 1;
-        col = col.checked_mul(26)?.checked_add(v)?;
-        len += 1;
-        if len > 3 {
-            return None;
-        }
-    }
-    if len == 0 {
-        None
-    } else {
-        Some(col - 1)
-    }
-}
-
-fn adjust_ref_kind_insert_rows(kind: &RefKind, at: u32, count: u32) -> RefKind {
-    match kind {
-        RefKind::Cell(cell) => RefKind::Cell(A1CellRef {
-            row: adjust_row_insert(cell.row, at, count),
-            ..*cell
-        }),
-        RefKind::CellRange { start, end } => RefKind::CellRange {
-            start: A1CellRef {
-                row: adjust_row_insert(start.row, at, count),
-                ..*start
-            },
-            end: A1CellRef {
-                row: adjust_row_insert_range_end(end.row, start.row, at, count),
-                ..*end
-            },
-        },
-        RefKind::RowRange { start, end } => RefKind::RowRange {
-            start: A1RowRef {
-                row: adjust_row_insert(start.row, at, count),
-                ..*start
-            },
-            end: A1RowRef {
-                row: adjust_row_insert_range_end(end.row, start.row, at, count),
-                ..*end
-            },
-        },
-        _ => kind.clone(),
-    }
-}
-
-fn adjust_ref_kind_insert_cols(kind: &RefKind, at: u32, count: u32) -> RefKind {
-    match kind {
-        RefKind::Cell(cell) => RefKind::Cell(A1CellRef {
-            col: adjust_col_insert(cell.col, at, count),
-            ..*cell
-        }),
-        RefKind::CellRange { start, end } => RefKind::CellRange {
-            start: A1CellRef {
-                col: adjust_col_insert(start.col, at, count),
-                ..*start
-            },
-            end: A1CellRef {
-                col: adjust_col_insert_range_end(end.col, start.col, at, count),
-                ..*end
-            },
-        },
-        RefKind::ColRange { start, end } => RefKind::ColRange {
-            start: A1ColRef {
-                col: adjust_col_insert(start.col, at, count),
-                ..*start
-            },
-            end: A1ColRef {
-                col: adjust_col_insert_range_end(end.col, start.col, at, count),
-                ..*end
-            },
-        },
-        _ => kind.clone(),
-    }
-}
-
-fn adjust_ref_kind_delete_rows(kind: &RefKind, at: u32, count: u32) -> RefKind {
-    let del_end = at.saturating_add(count.saturating_sub(1));
-    match kind {
-        RefKind::Cell(cell) => match adjust_row_delete(cell.row, at, del_end, count) {
-            Some(new_row) => RefKind::Cell(A1CellRef { row: new_row, ..*cell }),
-            None => RefKind::RefError,
-        },
-        RefKind::CellRange { start, end } => {
-            let Some((new_start, new_end)) =
-                adjust_row_range_delete(start.row, end.row, at, del_end, count)
-            else {
-                return RefKind::RefError;
-            };
-            RefKind::CellRange {
-                start: A1CellRef { row: new_start, ..*start },
-                end: A1CellRef { row: new_end, ..*end },
-            }
-        }
-        RefKind::RowRange { start, end } => {
-            let Some((new_start, new_end)) =
-                adjust_row_range_delete(start.row, end.row, at, del_end, count)
-            else {
-                return RefKind::RefError;
-            };
-            RefKind::RowRange {
-                start: A1RowRef { row: new_start, ..*start },
-                end: A1RowRef { row: new_end, ..*end },
-            }
-        }
-        _ => kind.clone(),
-    }
-}
-
-fn adjust_ref_kind_delete_cols(kind: &RefKind, at: u32, count: u32) -> RefKind {
-    let del_end = at.saturating_add(count.saturating_sub(1));
-    match kind {
-        RefKind::Cell(cell) => match adjust_col_delete(cell.col, at, del_end, count) {
-            Some(new_col) => RefKind::Cell(A1CellRef { col: new_col, ..*cell }),
-            None => RefKind::RefError,
-        },
-        RefKind::CellRange { start, end } => {
-            let Some((new_start, new_end)) =
-                adjust_col_range_delete(start.col, end.col, at, del_end, count)
-            else {
-                return RefKind::RefError;
-            };
-            RefKind::CellRange {
-                start: A1CellRef { col: new_start, ..*start },
-                end: A1CellRef { col: new_end, ..*end },
-            }
-        }
-        RefKind::ColRange { start, end } => {
-            let Some((new_start, new_end)) =
-                adjust_col_range_delete(start.col, end.col, at, del_end, count)
-            else {
-                return RefKind::RefError;
-            };
-            RefKind::ColRange {
-                start: A1ColRef { col: new_start, ..*start },
-                end: A1ColRef { col: new_end, ..*end },
-            }
-        }
-        _ => kind.clone(),
-    }
-}
-
-fn adjust_ref_kind_copy_delta(kind: &RefKind, delta_row: i32, delta_col: i32) -> RefKind {
-    match kind {
-        RefKind::Cell(cell) => apply_delta_cell(*cell, delta_row, delta_col)
-            .map(RefKind::Cell)
-            .unwrap_or(RefKind::RefError),
-        RefKind::CellRange { start, end } => {
-            let Some(start) = apply_delta_cell(*start, delta_row, delta_col) else {
-                return RefKind::RefError;
-            };
-            let Some(end) = apply_delta_cell(*end, delta_row, delta_col) else {
-                return RefKind::RefError;
-            };
-            RefKind::CellRange { start, end }
-        }
-        RefKind::ColRange { start, end } => {
-            let start_col = apply_delta_col(*start, delta_col);
-            let end_col = apply_delta_col(*end, delta_col);
-            match (start_col, end_col) {
-                (Some(sc), Some(ec)) => RefKind::ColRange {
-                    start: A1ColRef { col: sc, ..*start },
-                    end: A1ColRef { col: ec, ..*end },
-                },
-                _ => RefKind::RefError,
-            }
-        }
-        RefKind::RowRange { start, end } => {
-            let start_row = apply_delta_row(*start, delta_row);
-            let end_row = apply_delta_row(*end, delta_row);
-            match (start_row, end_row) {
-                (Some(sr), Some(er)) => RefKind::RowRange {
-                    start: A1RowRef { row: sr, ..*start },
-                    end: A1RowRef { row: er, ..*end },
-                },
-                _ => RefKind::RefError,
-            }
-        }
-        RefKind::RefError => RefKind::RefError,
-    }
-}
-
-fn apply_delta_cell(cell: A1CellRef, delta_row: i32, delta_col: i32) -> Option<A1CellRef> {
-    let new_row = if cell.row_abs {
-        cell.row as i32
-    } else {
-        cell.row as i32 + delta_row
+    let new_ast = Ast {
+        has_equals: ast.has_equals,
+        expr,
     };
-    let new_col = if cell.col_abs {
-        cell.col as i32
-    } else {
-        cell.col as i32 + delta_col
+
+    let mut opts = SerializeOptions::default();
+    // Preserve `_xlfn.` prefixes for newer Excel functions.
+    opts.include_xlfn_prefix = true;
+
+    match new_ast.to_string(opts) {
+        Ok(out) => (out, true),
+        Err(_) => (formula.to_string(), false),
+    }
+}
+
+fn rewrite_expr_for_structural_edit(expr: &Expr, ctx_sheet: &str, edit: &StructuralEdit) -> (Expr, bool) {
+    match expr {
+        Expr::CellRef(r) => rewrite_cell_ref_for_structural_edit(r, ctx_sheet, edit),
+        Expr::RowRef(r) => rewrite_row_ref_for_structural_edit(r, ctx_sheet, edit),
+        Expr::ColRef(r) => rewrite_col_ref_for_structural_edit(r, ctx_sheet, edit),
+        Expr::Binary(b) if b.op == BinaryOp::Range => {
+            if let Some(result) = rewrite_range_for_structural_edit(expr, b, ctx_sheet, edit) {
+                return result;
+            }
+            rewrite_expr_children(expr, |child| rewrite_expr_for_structural_edit(child, ctx_sheet, edit))
+        }
+        _ => rewrite_expr_children(expr, |child| rewrite_expr_for_structural_edit(child, ctx_sheet, edit)),
+    }
+}
+
+fn rewrite_expr_for_copy_delta(expr: &Expr, delta_row: i32, delta_col: i32) -> (Expr, bool) {
+    match expr {
+        Expr::CellRef(r) => rewrite_cell_ref_for_copy_delta(r, delta_row, delta_col),
+        Expr::RowRef(r) => rewrite_row_ref_for_copy_delta(r, delta_row),
+        Expr::ColRef(r) => rewrite_col_ref_for_copy_delta(r, delta_col),
+        Expr::Binary(b) if b.op == BinaryOp::Range => {
+            if range_has_external_workbook(&b.left) || range_has_external_workbook(&b.right) {
+                return (expr.clone(), false);
+            }
+            rewrite_expr_children(expr, |child| rewrite_expr_for_copy_delta(child, delta_row, delta_col))
+        }
+        _ => rewrite_expr_children(expr, |child| rewrite_expr_for_copy_delta(child, delta_row, delta_col)),
+    }
+}
+
+fn rewrite_expr_for_range_map(expr: &Expr, ctx_sheet: &str, edit: &RangeMapEdit) -> (Expr, bool) {
+    match expr {
+        Expr::CellRef(r) => rewrite_cell_ref_for_range_map(r, ctx_sheet, edit),
+        Expr::Binary(b) if b.op == BinaryOp::Range => {
+            if let Some(result) = rewrite_cell_range_for_range_map(expr, b, ctx_sheet, edit) {
+                return result;
+            }
+            rewrite_expr_children(expr, |child| rewrite_expr_for_range_map(child, ctx_sheet, edit))
+        }
+        _ => rewrite_expr_children(expr, |child| rewrite_expr_for_range_map(child, ctx_sheet, edit)),
+    }
+}
+
+fn rewrite_expr_children<F>(expr: &Expr, mut f: F) -> (Expr, bool)
+where
+    F: FnMut(&Expr) -> (Expr, bool),
+{
+    match expr {
+        Expr::FunctionCall(FunctionCall { name, args }) => {
+            let mut changed = false;
+            let args: Vec<Expr> = args
+                .iter()
+                .map(|arg| {
+                    let (expr, c) = f(arg);
+                    changed |= c;
+                    expr
+                })
+                .collect();
+
+            if !changed {
+                return (expr.clone(), false);
+            }
+
+            (
+                Expr::FunctionCall(FunctionCall {
+                    name: name.clone(),
+                    args,
+                }),
+                true,
+            )
+        }
+        Expr::Unary(UnaryExpr { op, expr: inner }) => {
+            let (inner, changed) = f(inner);
+            if !changed {
+                return (expr.clone(), false);
+            }
+            (
+                Expr::Unary(UnaryExpr {
+                    op: *op,
+                    expr: Box::new(inner),
+                }),
+                true,
+            )
+        }
+        Expr::Postfix(PostfixExpr { op, expr: inner }) => {
+            let (inner, changed) = f(inner);
+            if !changed {
+                return (expr.clone(), false);
+            }
+            (
+                Expr::Postfix(PostfixExpr {
+                    op: *op,
+                    expr: Box::new(inner),
+                }),
+                true,
+            )
+        }
+        Expr::Binary(BinaryExpr { op, left, right }) => {
+            let (left, left_changed) = f(left);
+            let (right, right_changed) = f(right);
+            if !left_changed && !right_changed {
+                return (expr.clone(), false);
+            }
+            (
+                Expr::Binary(BinaryExpr {
+                    op: *op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }),
+                true,
+            )
+        }
+        Expr::Array(ArrayLiteral { rows }) => {
+            let mut changed = false;
+            let rows: Vec<Vec<Expr>> = rows
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|el| {
+                            let (expr, c) = f(el);
+                            changed |= c;
+                            expr
+                        })
+                        .collect()
+                })
+                .collect();
+
+            if !changed {
+                return (expr.clone(), false);
+            }
+
+            (Expr::Array(ArrayLiteral { rows }), true)
+        }
+        _ => (expr.clone(), false),
+    }
+}
+
+fn range_has_external_workbook(expr: &Expr) -> bool {
+    match expr {
+        Expr::CellRef(r) => r.workbook.is_some(),
+        Expr::RowRef(r) => r.workbook.is_some(),
+        Expr::ColRef(r) => r.workbook.is_some(),
+        _ => false,
+    }
+}
+
+fn rewrite_cell_ref_for_structural_edit(
+    r: &AstCellRef,
+    ctx_sheet: &str,
+    edit: &StructuralEdit,
+) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (expr_ref(r.clone()), false);
+    }
+
+    let target_sheet = r.sheet.as_deref().unwrap_or(ctx_sheet);
+    let applies = match edit {
+        StructuralEdit::InsertRows { sheet, .. }
+        | StructuralEdit::DeleteRows { sheet, .. }
+        | StructuralEdit::InsertCols { sheet, .. }
+        | StructuralEdit::DeleteCols { sheet, .. } => target_sheet.eq_ignore_ascii_case(sheet),
     };
+    if !applies {
+        return (expr_ref(r.clone()), false);
+    }
+
+    let Some((col, col_abs)) = coord_a1(&r.col) else {
+        return (expr_ref(r.clone()), false);
+    };
+    let Some((row, row_abs)) = coord_a1(&r.row) else {
+        return (expr_ref(r.clone()), false);
+    };
+
+    let mut new_row = row;
+    let mut new_col = col;
+
+    match edit {
+        StructuralEdit::InsertRows { row: at, count, .. } => {
+            new_row = adjust_row_insert(row, *at, *count).unwrap_or(row);
+        }
+        StructuralEdit::DeleteRows { row: at, count, .. } => {
+            let del_end = at.saturating_add(count.saturating_sub(1));
+            new_row = match adjust_row_delete(row, *at, del_end, *count) {
+                Some(v) => v,
+                None => return (Expr::Error(REF_ERROR.to_string()), true),
+            };
+        }
+        StructuralEdit::InsertCols { col: at, count, .. } => {
+            new_col = adjust_col_insert(col, *at, *count).unwrap_or(col);
+        }
+        StructuralEdit::DeleteCols { col: at, count, .. } => {
+            let del_end = at.saturating_add(count.saturating_sub(1));
+            new_col = match adjust_col_delete(col, *at, del_end, *count) {
+                Some(v) => v,
+                None => return (Expr::Error(REF_ERROR.to_string()), true),
+            };
+        }
+    }
+
+    let new_ref = AstCellRef {
+        workbook: r.workbook.clone(),
+        sheet: r.sheet.clone(),
+        col: Coord::A1 {
+            index: new_col,
+            abs: col_abs,
+        },
+        row: Coord::A1 {
+            index: new_row,
+            abs: row_abs,
+        },
+    };
+
+    let changed = &new_ref != r;
+    (expr_ref(new_ref), changed)
+}
+
+fn rewrite_row_ref_for_structural_edit(r: &AstRowRef, ctx_sheet: &str, edit: &StructuralEdit) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::RowRef(r.clone()), false);
+    }
+
+    let target_sheet = r.sheet.as_deref().unwrap_or(ctx_sheet);
+    let applies = match edit {
+        StructuralEdit::InsertRows { sheet, .. } | StructuralEdit::DeleteRows { sheet, .. } => {
+            target_sheet.eq_ignore_ascii_case(sheet)
+        }
+        _ => false,
+    };
+    if !applies {
+        return (Expr::RowRef(r.clone()), false);
+    }
+
+    let Some((row, abs)) = coord_a1(&r.row) else {
+        return (Expr::RowRef(r.clone()), false);
+    };
+
+    let new_row = match edit {
+        StructuralEdit::InsertRows { row: at, count, .. } => adjust_row_insert(row, *at, *count).unwrap_or(row),
+        StructuralEdit::DeleteRows { row: at, count, .. } => {
+            let del_end = at.saturating_add(count.saturating_sub(1));
+            match adjust_row_delete(row, *at, del_end, *count) {
+                Some(v) => v,
+                None => return (Expr::Error(REF_ERROR.to_string()), true),
+            }
+        }
+        _ => row,
+    };
+
+    let new_ref = AstRowRef {
+        workbook: r.workbook.clone(),
+        sheet: r.sheet.clone(),
+        row: Coord::A1 {
+            index: new_row,
+            abs,
+        },
+    };
+
+    let changed = &new_ref != r;
+    (Expr::RowRef(new_ref), changed)
+}
+
+fn rewrite_col_ref_for_structural_edit(r: &AstColRef, ctx_sheet: &str, edit: &StructuralEdit) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::ColRef(r.clone()), false);
+    }
+
+    let target_sheet = r.sheet.as_deref().unwrap_or(ctx_sheet);
+    let applies = match edit {
+        StructuralEdit::InsertCols { sheet, .. } | StructuralEdit::DeleteCols { sheet, .. } => {
+            target_sheet.eq_ignore_ascii_case(sheet)
+        }
+        _ => false,
+    };
+    if !applies {
+        return (Expr::ColRef(r.clone()), false);
+    }
+
+    let Some((col, abs)) = coord_a1(&r.col) else {
+        return (Expr::ColRef(r.clone()), false);
+    };
+
+    let new_col = match edit {
+        StructuralEdit::InsertCols { col: at, count, .. } => adjust_col_insert(col, *at, *count).unwrap_or(col),
+        StructuralEdit::DeleteCols { col: at, count, .. } => {
+            let del_end = at.saturating_add(count.saturating_sub(1));
+            match adjust_col_delete(col, *at, del_end, *count) {
+                Some(v) => v,
+                None => return (Expr::Error(REF_ERROR.to_string()), true),
+            }
+        }
+        _ => col,
+    };
+
+    let new_ref = AstColRef {
+        workbook: r.workbook.clone(),
+        sheet: r.sheet.clone(),
+        col: Coord::A1 {
+            index: new_col,
+            abs,
+        },
+    };
+
+    let changed = &new_ref != r;
+    (Expr::ColRef(new_ref), changed)
+}
+
+fn rewrite_range_for_structural_edit(
+    original: &Expr,
+    b: &BinaryExpr,
+    ctx_sheet: &str,
+    edit: &StructuralEdit,
+) -> Option<(Expr, bool)> {
+    match (&*b.left, &*b.right) {
+        (Expr::CellRef(start), Expr::CellRef(end)) => {
+            Some(rewrite_cell_range_for_structural_edit(original, start, end, ctx_sheet, edit))
+        }
+        (Expr::RowRef(start), Expr::RowRef(end)) => {
+            Some(rewrite_row_range_for_structural_edit(original, start, end, ctx_sheet, edit))
+        }
+        (Expr::ColRef(start), Expr::ColRef(end)) => {
+            Some(rewrite_col_range_for_structural_edit(original, start, end, ctx_sheet, edit))
+        }
+        _ => None,
+    }
+}
+
+fn rewrite_cell_range_for_structural_edit(
+    original: &Expr,
+    start: &AstCellRef,
+    end: &AstCellRef,
+    ctx_sheet: &str,
+    edit: &StructuralEdit,
+) -> (Expr, bool) {
+    if start.workbook.is_some() || end.workbook.is_some() {
+        return (original.clone(), false);
+    }
+
+    let target_sheet = start
+        .sheet
+        .as_deref()
+        .or(end.sheet.as_deref())
+        .unwrap_or(ctx_sheet);
+    let applies = match edit {
+        StructuralEdit::InsertRows { sheet, .. }
+        | StructuralEdit::DeleteRows { sheet, .. }
+        | StructuralEdit::InsertCols { sheet, .. }
+        | StructuralEdit::DeleteCols { sheet, .. } => target_sheet.eq_ignore_ascii_case(sheet),
+    };
+    if !applies {
+        return (original.clone(), false);
+    }
+
+    let Some((start_col, start_col_abs)) = coord_a1(&start.col) else {
+        return (original.clone(), false);
+    };
+    let Some((start_row, start_row_abs)) = coord_a1(&start.row) else {
+        return (original.clone(), false);
+    };
+    let Some((end_col, end_col_abs)) = coord_a1(&end.col) else {
+        return (original.clone(), false);
+    };
+    let Some((end_row, end_row_abs)) = coord_a1(&end.row) else {
+        return (original.clone(), false);
+    };
+
+    let mut sr = min(start_row, end_row);
+    let mut er = max(start_row, end_row);
+    let mut sc = min(start_col, end_col);
+    let mut ec = max(start_col, end_col);
+
+    match edit {
+        StructuralEdit::InsertRows { row: at, count, .. } => {
+            sr = adjust_row_insert(sr, *at, *count).unwrap_or(sr);
+            er = adjust_row_insert(er, *at, *count).unwrap_or(er);
+        }
+        StructuralEdit::DeleteRows { row: at, count, .. } => {
+            let del_end = at.saturating_add(count.saturating_sub(1));
+            let Some((new_sr, new_er)) = adjust_row_range_delete(sr, er, *at, del_end, *count) else {
+                return (Expr::Error(REF_ERROR.to_string()), true);
+            };
+            sr = new_sr;
+            er = new_er;
+        }
+        StructuralEdit::InsertCols { col: at, count, .. } => {
+            sc = adjust_col_insert(sc, *at, *count).unwrap_or(sc);
+            ec = adjust_col_insert(ec, *at, *count).unwrap_or(ec);
+        }
+        StructuralEdit::DeleteCols { col: at, count, .. } => {
+            let del_end = at.saturating_add(count.saturating_sub(1));
+            let Some((new_sc, new_ec)) = adjust_col_range_delete(sc, ec, *at, del_end, *count) else {
+                return (Expr::Error(REF_ERROR.to_string()), true);
+            };
+            sc = new_sc;
+            ec = new_ec;
+        }
+    }
+
+    let start_ref = AstCellRef {
+        workbook: start.workbook.clone(),
+        sheet: start.sheet.clone(),
+        col: Coord::A1 {
+            index: sc,
+            abs: start_col_abs,
+        },
+        row: Coord::A1 {
+            index: sr,
+            abs: start_row_abs,
+        },
+    };
+
+    if sr == er && sc == ec {
+        let out = expr_ref(start_ref);
+        return (out.clone(), out != *original);
+    }
+
+    let end_ref = AstCellRef {
+        workbook: end.workbook.clone(),
+        sheet: end.sheet.clone(),
+        col: Coord::A1 {
+            index: ec,
+            abs: end_col_abs,
+        },
+        row: Coord::A1 {
+            index: er,
+            abs: end_row_abs,
+        },
+    };
+
+    let out = Expr::Binary(BinaryExpr {
+        op: BinaryOp::Range,
+        left: Box::new(expr_ref(start_ref)),
+        right: Box::new(expr_ref(end_ref)),
+    });
+
+    (out.clone(), out != *original)
+}
+
+fn rewrite_row_range_for_structural_edit(
+    original: &Expr,
+    start: &AstRowRef,
+    end: &AstRowRef,
+    ctx_sheet: &str,
+    edit: &StructuralEdit,
+) -> (Expr, bool) {
+    if start.workbook.is_some() || end.workbook.is_some() {
+        return (original.clone(), false);
+    }
+
+    let target_sheet = start
+        .sheet
+        .as_deref()
+        .or(end.sheet.as_deref())
+        .unwrap_or(ctx_sheet);
+
+    let applies = match edit {
+        StructuralEdit::InsertRows { sheet, .. } | StructuralEdit::DeleteRows { sheet, .. } => {
+            target_sheet.eq_ignore_ascii_case(sheet)
+        }
+        _ => false,
+    };
+    if !applies {
+        return (original.clone(), false);
+    }
+
+    let Some((start_row, start_abs)) = coord_a1(&start.row) else {
+        return (original.clone(), false);
+    };
+    let Some((end_row, end_abs)) = coord_a1(&end.row) else {
+        return (original.clone(), false);
+    };
+
+    let mut sr = min(start_row, end_row);
+    let mut er = max(start_row, end_row);
+
+    match edit {
+        StructuralEdit::InsertRows { row: at, count, .. } => {
+            sr = adjust_row_insert(sr, *at, *count).unwrap_or(sr);
+            er = adjust_row_insert(er, *at, *count).unwrap_or(er);
+        }
+        StructuralEdit::DeleteRows { row: at, count, .. } => {
+            let del_end = at.saturating_add(count.saturating_sub(1));
+            let Some((new_sr, new_er)) = adjust_row_range_delete(sr, er, *at, del_end, *count) else {
+                return (Expr::Error(REF_ERROR.to_string()), true);
+            };
+            sr = new_sr;
+            er = new_er;
+        }
+        _ => {}
+    }
+
+    let out = Expr::Binary(BinaryExpr {
+        op: BinaryOp::Range,
+        left: Box::new(Expr::RowRef(AstRowRef {
+            workbook: start.workbook.clone(),
+            sheet: start.sheet.clone(),
+            row: Coord::A1 {
+                index: sr,
+                abs: start_abs,
+            },
+        })),
+        right: Box::new(Expr::RowRef(AstRowRef {
+            workbook: end.workbook.clone(),
+            sheet: end.sheet.clone(),
+            row: Coord::A1 {
+                index: er,
+                abs: end_abs,
+            },
+        })),
+    });
+
+    (out.clone(), out != *original)
+}
+
+fn rewrite_col_range_for_structural_edit(
+    original: &Expr,
+    start: &AstColRef,
+    end: &AstColRef,
+    ctx_sheet: &str,
+    edit: &StructuralEdit,
+) -> (Expr, bool) {
+    if start.workbook.is_some() || end.workbook.is_some() {
+        return (original.clone(), false);
+    }
+
+    let target_sheet = start
+        .sheet
+        .as_deref()
+        .or(end.sheet.as_deref())
+        .unwrap_or(ctx_sheet);
+
+    let applies = match edit {
+        StructuralEdit::InsertCols { sheet, .. } | StructuralEdit::DeleteCols { sheet, .. } => {
+            target_sheet.eq_ignore_ascii_case(sheet)
+        }
+        _ => false,
+    };
+    if !applies {
+        return (original.clone(), false);
+    }
+
+    let Some((start_col, start_abs)) = coord_a1(&start.col) else {
+        return (original.clone(), false);
+    };
+    let Some((end_col, end_abs)) = coord_a1(&end.col) else {
+        return (original.clone(), false);
+    };
+
+    let mut sc = min(start_col, end_col);
+    let mut ec = max(start_col, end_col);
+
+    match edit {
+        StructuralEdit::InsertCols { col: at, count, .. } => {
+            sc = adjust_col_insert(sc, *at, *count).unwrap_or(sc);
+            ec = adjust_col_insert(ec, *at, *count).unwrap_or(ec);
+        }
+        StructuralEdit::DeleteCols { col: at, count, .. } => {
+            let del_end = at.saturating_add(count.saturating_sub(1));
+            let Some((new_sc, new_ec)) = adjust_col_range_delete(sc, ec, *at, del_end, *count) else {
+                return (Expr::Error(REF_ERROR.to_string()), true);
+            };
+            sc = new_sc;
+            ec = new_ec;
+        }
+        _ => {}
+    }
+
+    let out = Expr::Binary(BinaryExpr {
+        op: BinaryOp::Range,
+        left: Box::new(Expr::ColRef(AstColRef {
+            workbook: start.workbook.clone(),
+            sheet: start.sheet.clone(),
+            col: Coord::A1 {
+                index: sc,
+                abs: start_abs,
+            },
+        })),
+        right: Box::new(Expr::ColRef(AstColRef {
+            workbook: end.workbook.clone(),
+            sheet: end.sheet.clone(),
+            col: Coord::A1 {
+                index: ec,
+                abs: end_abs,
+            },
+        })),
+    });
+
+    (out.clone(), out != *original)
+}
+
+fn rewrite_cell_ref_for_copy_delta(r: &AstCellRef, delta_row: i32, delta_col: i32) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (expr_ref(r.clone()), false);
+    }
+
+    let Some((col, col_abs)) = coord_a1(&r.col) else {
+        return (expr_ref(r.clone()), false);
+    };
+    let Some((row, row_abs)) = coord_a1(&r.row) else {
+        return (expr_ref(r.clone()), false);
+    };
+
+    let new_row = if row_abs {
+        row as i64
+    } else {
+        row as i64 + delta_row as i64
+    };
+    let new_col = if col_abs {
+        col as i64
+    } else {
+        col as i64 + delta_col as i64
+    };
+
     if new_row < 0 || new_col < 0 {
+        return (Expr::Error(REF_ERROR.to_string()), true);
+    }
+
+    let new_ref = AstCellRef {
+        workbook: r.workbook.clone(),
+        sheet: r.sheet.clone(),
+        col: Coord::A1 {
+            index: new_col as u32,
+            abs: col_abs,
+        },
+        row: Coord::A1 {
+            index: new_row as u32,
+            abs: row_abs,
+        },
+    };
+
+    let changed = &new_ref != r;
+    (expr_ref(new_ref), changed)
+}
+
+fn rewrite_row_ref_for_copy_delta(r: &AstRowRef, delta_row: i32) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::RowRef(r.clone()), false);
+    }
+
+    let Some((row, abs)) = coord_a1(&r.row) else {
+        return (Expr::RowRef(r.clone()), false);
+    };
+
+    let new_row = if abs { row as i64 } else { row as i64 + delta_row as i64 };
+    if new_row < 0 {
+        return (Expr::Error(REF_ERROR.to_string()), true);
+    }
+
+    let new_ref = AstRowRef {
+        workbook: r.workbook.clone(),
+        sheet: r.sheet.clone(),
+        row: Coord::A1 {
+            index: new_row as u32,
+            abs,
+        },
+    };
+
+    let changed = &new_ref != r;
+    (Expr::RowRef(new_ref), changed)
+}
+
+fn rewrite_col_ref_for_copy_delta(r: &AstColRef, delta_col: i32) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (Expr::ColRef(r.clone()), false);
+    }
+
+    let Some((col, abs)) = coord_a1(&r.col) else {
+        return (Expr::ColRef(r.clone()), false);
+    };
+
+    let new_col = if abs { col as i64 } else { col as i64 + delta_col as i64 };
+    if new_col < 0 {
+        return (Expr::Error(REF_ERROR.to_string()), true);
+    }
+
+    let new_ref = AstColRef {
+        workbook: r.workbook.clone(),
+        sheet: r.sheet.clone(),
+        col: Coord::A1 {
+            index: new_col as u32,
+            abs,
+        },
+    };
+
+    let changed = &new_ref != r;
+    (Expr::ColRef(new_ref), changed)
+}
+
+fn rewrite_cell_ref_for_range_map(r: &AstCellRef, ctx_sheet: &str, edit: &RangeMapEdit) -> (Expr, bool) {
+    if r.workbook.is_some() {
+        return (expr_ref(r.clone()), false);
+    }
+
+    let target_sheet = r.sheet.as_deref().unwrap_or(ctx_sheet);
+    if !target_sheet.eq_ignore_ascii_case(&edit.sheet) {
+        return (expr_ref(r.clone()), false);
+    }
+
+    let Some((col, col_abs)) = coord_a1(&r.col) else {
+        return (expr_ref(r.clone()), false);
+    };
+    let Some((row, row_abs)) = coord_a1(&r.row) else {
+        return (expr_ref(r.clone()), false);
+    };
+
+    if let Some(deleted) = edit.deleted_region {
+        if deleted.contains(row, col) {
+            return (Expr::Error(REF_ERROR.to_string()), true);
+        }
+    }
+
+    if !edit.moved_region.contains(row, col) {
+        return (expr_ref(r.clone()), false);
+    }
+
+    let new_row = row as i64 + edit.delta_row as i64;
+    let new_col = col as i64 + edit.delta_col as i64;
+    if new_row < 0 || new_col < 0 {
+        return (Expr::Error(REF_ERROR.to_string()), true);
+    }
+
+    let new_ref = AstCellRef {
+        workbook: r.workbook.clone(),
+        sheet: r.sheet.clone(),
+        col: Coord::A1 {
+            index: new_col as u32,
+            abs: col_abs,
+        },
+        row: Coord::A1 {
+            index: new_row as u32,
+            abs: row_abs,
+        },
+    };
+
+    let changed = &new_ref != r;
+    (expr_ref(new_ref), changed)
+}
+
+fn rewrite_cell_range_for_range_map(
+    original: &Expr,
+    b: &BinaryExpr,
+    ctx_sheet: &str,
+    edit: &RangeMapEdit,
+) -> Option<(Expr, bool)> {
+    let Expr::CellRef(start) = b.left.as_ref() else {
         return None;
+    };
+    let Expr::CellRef(end) = b.right.as_ref() else {
+        return None;
+    };
+
+    if start.workbook.is_some() || end.workbook.is_some() {
+        return Some((original.clone(), false));
     }
-    Some(A1CellRef {
-        row: new_row as u32,
-        col: new_col as u32,
-        ..cell
-    })
+
+    let target_sheet = start
+        .sheet
+        .as_deref()
+        .or(end.sheet.as_deref())
+        .unwrap_or(ctx_sheet);
+    if !target_sheet.eq_ignore_ascii_case(&edit.sheet) {
+        return Some((original.clone(), false));
+    }
+
+    let Some((start_col, start_col_abs)) = coord_a1(&start.col) else {
+        return Some((original.clone(), false));
+    };
+    let Some((start_row, start_row_abs)) = coord_a1(&start.row) else {
+        return Some((original.clone(), false));
+    };
+    let Some((end_col, end_col_abs)) = coord_a1(&end.col) else {
+        return Some((original.clone(), false));
+    };
+    let Some((end_row, end_row_abs)) = coord_a1(&end.row) else {
+        return Some((original.clone(), false));
+    };
+
+    let original_range = GridRange::new(start_row, start_col, end_row, end_col);
+    let mut areas = vec![original_range];
+
+    if let Some(deleted) = edit.deleted_region {
+        areas = subtract_region(&areas, deleted);
+        if areas.is_empty() {
+            return Some((Expr::Error(REF_ERROR.to_string()), true));
+        }
+    }
+
+    areas = apply_move_region(&areas, edit.moved_region, edit.delta_row, edit.delta_col);
+    if areas.is_empty() {
+        return Some((Expr::Error(REF_ERROR.to_string()), true));
+    }
+
+    let exprs: Vec<Expr> = areas
+        .into_iter()
+        .map(|area| {
+            if area.start_row == area.end_row && area.start_col == area.end_col {
+                expr_ref(AstCellRef {
+                    workbook: start.workbook.clone(),
+                    sheet: start.sheet.clone(),
+                    col: Coord::A1 {
+                        index: area.start_col,
+                        abs: start_col_abs,
+                    },
+                    row: Coord::A1 {
+                        index: area.start_row,
+                        abs: start_row_abs,
+                    },
+                })
+            } else {
+                Expr::Binary(BinaryExpr {
+                    op: BinaryOp::Range,
+                    left: Box::new(expr_ref(AstCellRef {
+                        workbook: start.workbook.clone(),
+                        sheet: start.sheet.clone(),
+                        col: Coord::A1 {
+                            index: area.start_col,
+                            abs: start_col_abs,
+                        },
+                        row: Coord::A1 {
+                            index: area.start_row,
+                            abs: start_row_abs,
+                        },
+                    })),
+                    right: Box::new(expr_ref(AstCellRef {
+                        workbook: end.workbook.clone(),
+                        sheet: end.sheet.clone(),
+                        col: Coord::A1 {
+                            index: area.end_col,
+                            abs: end_col_abs,
+                        },
+                        row: Coord::A1 {
+                            index: area.end_row,
+                            abs: end_row_abs,
+                        },
+                    })),
+                })
+            }
+        })
+        .collect();
+
+    let out = union_expr(exprs);
+    let changed = out != *original;
+    Some((out, changed))
 }
 
-fn apply_delta_col(col: A1ColRef, delta_col: i32) -> Option<u32> {
-    if col.abs {
-        Some(col.col)
-    } else {
-        let new = col.col as i32 + delta_col;
-        if new < 0 {
-            None
-        } else {
-            Some(new as u32)
+fn union_expr(mut exprs: Vec<Expr>) -> Expr {
+    match exprs.len() {
+        0 => Expr::Error(REF_ERROR.to_string()),
+        1 => exprs.pop().expect("len == 1"),
+        _ => {
+            let mut iter = exprs.into_iter();
+            let mut out = iter.next().expect("len > 1");
+            for next in iter {
+                out = Expr::Binary(BinaryExpr {
+                    op: BinaryOp::Union,
+                    left: Box::new(out),
+                    right: Box::new(next),
+                });
+            }
+            out
         }
     }
 }
 
-fn apply_delta_row(row: A1RowRef, delta_row: i32) -> Option<u32> {
-    if row.abs {
-        Some(row.row)
-    } else {
-        let new = row.row as i32 + delta_row;
-        if new < 0 {
-            None
-        } else {
-            Some(new as u32)
-        }
+fn expr_ref(r: AstCellRef) -> Expr {
+    Expr::CellRef(r)
+}
+
+fn coord_a1(coord: &Coord) -> Option<(u32, bool)> {
+    match coord {
+        Coord::A1 { index, abs } => Some((*index, *abs)),
+        Coord::Offset(_) => None,
     }
 }
 
-fn adjust_row_insert(row: u32, at: u32, count: u32) -> u32 {
+fn adjust_row_insert(row: u32, at: u32, count: u32) -> Option<u32> {
     if row >= at {
-        row + count
+        row.checked_add(count)
     } else {
-        row
+        Some(row)
     }
 }
 
-fn adjust_row_insert_range_end(end_row: u32, start_row: u32, at: u32, count: u32) -> u32 {
-    if start_row < at && end_row >= at {
-        end_row + count
-    } else {
-        adjust_row_insert(end_row, at, count)
-    }
-}
-
-fn adjust_col_insert(col: u32, at: u32, count: u32) -> u32 {
+fn adjust_col_insert(col: u32, at: u32, count: u32) -> Option<u32> {
     if col >= at {
-        col + count
+        col.checked_add(count)
     } else {
-        col
-    }
-}
-
-fn adjust_col_insert_range_end(end_col: u32, start_col: u32, at: u32, count: u32) -> u32 {
-    if start_col < at && end_col >= at {
-        end_col + count
-    } else {
-        adjust_col_insert(end_col, at, count)
+        Some(col)
     }
 }
 
@@ -1031,86 +1094,6 @@ fn adjust_col_range_delete(
     }
 }
 
-fn map_reference_via_range_map(parsed: &ParsedRef, edit: &RangeMapEdit) -> RefRewrite {
-    match &parsed.kind {
-        RefKind::Cell(cell) => {
-            if let Some(deleted) = edit.deleted_region {
-                if deleted.contains(cell.row, cell.col) {
-                    return RefRewrite::Kind(RefKind::RefError);
-                }
-            }
-            if !edit.moved_region.contains(cell.row, cell.col) {
-                return RefRewrite::Kind(parsed.kind.clone());
-            }
-            let new_row = cell.row as i32 + edit.delta_row;
-            let new_col = cell.col as i32 + edit.delta_col;
-            if new_row < 0 || new_col < 0 {
-                return RefRewrite::Kind(RefKind::RefError);
-            }
-            RefRewrite::Kind(RefKind::Cell(A1CellRef {
-                row: new_row as u32,
-                col: new_col as u32,
-                ..*cell
-            }))
-        }
-        RefKind::CellRange { start, end } => {
-            let original = GridRange::new(start.row, start.col, end.row, end.col);
-            let mut areas = vec![original];
-
-            if let Some(deleted) = edit.deleted_region {
-                areas = subtract_region(&areas, deleted);
-                if areas.is_empty() {
-                    return RefRewrite::Kind(RefKind::RefError);
-                }
-            }
-
-            areas = apply_move_region(&areas, edit.moved_region, edit.delta_row, edit.delta_col);
-            if areas.is_empty() {
-                return RefRewrite::Kind(RefKind::RefError);
-            }
-
-            let mut area_strings = Vec::new();
-            for area in areas {
-                let kind = if area.start_row == area.end_row && area.start_col == area.end_col {
-                    RefKind::Cell(A1CellRef {
-                        row: area.start_row,
-                        col: area.start_col,
-                        row_abs: start.row_abs,
-                        col_abs: start.col_abs,
-                    })
-                } else {
-                    RefKind::CellRange {
-                        start: A1CellRef {
-                            row: area.start_row,
-                            col: area.start_col,
-                            row_abs: start.row_abs,
-                            col_abs: start.col_abs,
-                        },
-                        end: A1CellRef {
-                            row: area.end_row,
-                            col: area.end_col,
-                            row_abs: end.row_abs,
-                            col_abs: end.col_abs,
-                        },
-                    }
-                };
-                let r = ParsedRef {
-                    prefix: parsed.prefix.clone(),
-                    kind,
-                };
-                area_strings.push(r.to_formula_string());
-            }
-
-            if area_strings.len() == 1 {
-                RefRewrite::Text(area_strings[0].clone())
-            } else {
-                RefRewrite::Text(format!("({})", area_strings.join(",")))
-            }
-        }
-        _ => RefRewrite::Kind(parsed.kind.clone()),
-    }
-}
-
 fn subtract_region(areas: &[GridRange], deleted: GridRange) -> Vec<GridRange> {
     let mut out = Vec::new();
     for area in areas {
@@ -1203,10 +1186,10 @@ fn rect_difference(range: GridRange, overlap: GridRange) -> Vec<GridRange> {
 }
 
 fn shift_range(area: GridRange, delta_row: i32, delta_col: i32) -> Option<GridRange> {
-    let start_row = area.start_row as i32 + delta_row;
-    let start_col = area.start_col as i32 + delta_col;
-    let end_row = area.end_row as i32 + delta_row;
-    let end_col = area.end_col as i32 + delta_col;
+    let start_row = area.start_row as i64 + delta_row as i64;
+    let start_col = area.start_col as i64 + delta_col as i64;
+    let end_row = area.end_row as i64 + delta_row as i64;
+    let end_col = area.end_col as i64 + delta_col as i64;
     if start_row < 0 || start_col < 0 || end_row < 0 || end_col < 0 {
         return None;
     }
@@ -1216,4 +1199,32 @@ fn shift_range(area: GridRange, delta_row: i32, delta_col: i32) -> Option<GridRa
         end_row as u32,
         end_col as u32,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_delta_updates_row_and_column_ranges() {
+        let (out, changed) = rewrite_formula_for_copy_delta("=A:A", "Sheet1", 0, 1);
+        assert!(changed);
+        assert_eq!(out, "=B:B");
+
+        let (out, changed) = rewrite_formula_for_copy_delta("=1:1", "Sheet1", 1, 0);
+        assert!(changed);
+        assert_eq!(out, "=2:2");
+    }
+
+    #[test]
+    fn structural_edit_rewrites_sheet_qualified_ranges() {
+        let edit = StructuralEdit::InsertRows {
+            sheet: "Sheet1".to_string(),
+            row: 0,
+            count: 1,
+        };
+        let (out, changed) = rewrite_formula_for_structural_edit("=SUM(Sheet1!A1:B2)", "Other", &edit);
+        assert!(changed);
+        assert_eq!(out, "=SUM(Sheet1!A2:B3)");
+    }
 }
