@@ -41,6 +41,14 @@ test("macro recorder generates runnable TypeScript that replays edits against Do
   assert.deepEqual(freshSheet.getRange("B1").getFormat(), { bold: true });
   assert.deepEqual(freshWorkbook.getSelection(), { sheetName: "Sheet1", address: "A2" });
 
+  const a1 = freshController.getCell("Sheet1", "A1");
+  const b1 = freshController.getCell("Sheet1", "B1");
+  const a1Style = freshController.styleTable.get(a1.styleId);
+  const b1Style = freshController.styleTable.get(b1.styleId);
+  assert.equal(a1Style.font?.bold, true);
+  assert.equal(b1Style.font?.bold, true);
+  assert.equal(a1Style.bold, undefined); // adapter should map to DocumentController schema
+
   workbook.dispose();
   freshWorkbook.dispose();
 });

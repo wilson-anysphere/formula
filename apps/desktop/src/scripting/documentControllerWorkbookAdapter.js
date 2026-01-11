@@ -31,6 +31,10 @@ function stableStringify(value) {
   return `{${entries.join(",")}}`;
 }
 
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 function cellInputFromState(state) {
   if (state.formula != null) return state.formula;
   return state.value ?? null;
@@ -69,6 +73,95 @@ function denseRectForDeltas(deltas) {
   return { minRow, maxRow, minCol, maxCol, rows, cols, byCell };
 }
 
+/**
+ * Convert a DocumentController style object into the (currently minimal) scripting `CellFormat`
+ * shape defined in `packages/scripting/formula.d.ts`.
+ *
+ * @param {any} style
+ */
+function scriptFormatFromDocStyle(style) {
+  const out = {};
+  if (!isPlainObject(style)) return out;
+
+  // DocumentController native schema: { font: { bold, italic }, numberFormat, fill: { fgColor } }
+  const font = style.font;
+  if (isPlainObject(font)) {
+    if (hasOwn(font, "bold") && typeof font.bold === "boolean") out.bold = font.bold;
+    if (hasOwn(font, "italic") && typeof font.italic === "boolean") out.italic = font.italic;
+  }
+
+  // Back-compat: earlier scripting adapters stored these at the top-level.
+  if (!hasOwn(out, "bold") && hasOwn(style, "bold") && typeof style.bold === "boolean") out.bold = style.bold;
+  if (!hasOwn(out, "italic") && hasOwn(style, "italic") && typeof style.italic === "boolean") out.italic = style.italic;
+
+  if (hasOwn(style, "numberFormat") && typeof style.numberFormat === "string") {
+    out.numberFormat = style.numberFormat;
+  }
+
+  const fill = style.fill;
+  if (isPlainObject(fill)) {
+    const fgColor = fill.fgColor ?? fill.background;
+    if (typeof fgColor === "string") out.backgroundColor = fgColor;
+  }
+
+  if (!hasOwn(out, "backgroundColor") && hasOwn(style, "backgroundColor") && typeof style.backgroundColor === "string") {
+    out.backgroundColor = style.backgroundColor;
+  }
+
+  return out;
+}
+
+/**
+ * Map a scripting `CellFormat` patch (flat keys like `{ bold: true }`) into the DocumentController
+ * style patch schema.
+ *
+ * This function also preserves any DocumentController-style keys already present on the patch
+ * (e.g. `{ border: ... }`), so callers can use advanced formatting without losing expressiveness.
+ *
+ * @param {any} format
+ * @returns {any}
+ */
+function docStylePatchFromScriptFormat(format) {
+  if (format == null) return null;
+  if (!isPlainObject(format)) return format;
+
+  /** @type {Record<string, any>} */
+  const out = {};
+
+  for (const [key, value] of Object.entries(format)) {
+    if (key === "bold" || key === "italic") {
+      // Handled below.
+      continue;
+    }
+    if (key === "backgroundColor") {
+      // Handled below.
+      continue;
+    }
+    out[key] = value;
+  }
+
+  if (hasOwn(format, "bold") || hasOwn(format, "italic")) {
+    const fontPatch = isPlainObject(out.font) ? { ...out.font } : {};
+    if (hasOwn(format, "bold")) fontPatch.bold = format.bold;
+    if (hasOwn(format, "italic")) fontPatch.italic = format.italic;
+    out.font = fontPatch;
+  }
+
+  if (hasOwn(format, "backgroundColor")) {
+    const color = format.backgroundColor;
+    if (color == null) {
+      out.fill = null;
+    } else {
+      const fillPatch = isPlainObject(out.fill) ? { ...out.fill } : {};
+      fillPatch.pattern = "solid";
+      fillPatch.fgColor = color;
+      out.fill = fillPatch;
+    }
+  }
+
+  return out;
+}
+
 function diffStylePatch(beforeStyle, afterStyle) {
   const before = isPlainObject(beforeStyle) ? beforeStyle : {};
   const after = isPlainObject(afterStyle) ? afterStyle : {};
@@ -105,6 +198,63 @@ function diffStylePatch(beforeStyle, afterStyle) {
   }
 
   return patch;
+}
+
+/**
+ * Convert a DocumentController style patch into a scripting format patch where possible.
+ *
+ * - Promotes `font.bold`/`font.italic` into top-level `bold`/`italic`.
+ * - Promotes `fill.fgColor` into top-level `backgroundColor`.
+ *
+ * Any non-representable keys are kept (so macro recording doesn't lose information).
+ *
+ * @param {any} patch
+ */
+function scriptFormatPatchFromDocStylePatch(patch) {
+  if (patch == null) return null;
+  if (!isPlainObject(patch)) return patch;
+
+  /** @type {Record<string, any>} */
+  const out = {};
+
+  // Copy non-formatting keys directly.
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === "font" || key === "fill") continue;
+    out[key] = value;
+  }
+
+  if (isPlainObject(patch.font)) {
+    const font = { ...patch.font };
+    if (hasOwn(font, "bold")) {
+      out.bold = font.bold;
+      delete font.bold;
+    }
+    if (hasOwn(font, "italic")) {
+      out.italic = font.italic;
+      delete font.italic;
+    }
+    if (Object.keys(font).length > 0) {
+      out.font = font;
+    }
+  }
+
+  if (patch.fill === null) {
+    out.backgroundColor = null;
+  } else if (isPlainObject(patch.fill)) {
+    const fill = { ...patch.fill };
+    const color = fill.fgColor ?? fill.background;
+    if (color !== undefined) {
+      out.backgroundColor = color;
+      delete fill.fgColor;
+      delete fill.background;
+      delete fill.pattern;
+    }
+    if (Object.keys(fill).length > 0) {
+      out.fill = fill;
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -278,7 +428,10 @@ export class DocumentControllerWorkbookAdapter {
         for (const delta of bucket.format) {
           const beforeStyle = this.documentController.styleTable.get(delta.before?.styleId ?? 0);
           const afterStyle = this.documentController.styleTable.get(delta.after?.styleId ?? 0);
-          const patch = diffStylePatch(beforeStyle, afterStyle);
+          const docPatch = diffStylePatch(beforeStyle, afterStyle);
+          const patch = scriptFormatPatchFromDocStylePatch(docPatch);
+          if (patch !== null && isPlainObject(patch) && Object.keys(patch).length === 0) continue;
+
           const key = patch === null ? "null" : stableStringify(patch);
           const entry = groups.get(key) ?? { patch, deltas: [] };
           entry.deltas.push(delta);
@@ -431,10 +584,12 @@ class DocumentControllerRangeAdapter {
       row: this.coords.startRow,
       col: this.coords.startCol,
     });
-    return { ...this.sheet.workbook.documentController.styleTable.get(cell.styleId) };
+    const style = this.sheet.workbook.documentController.styleTable.get(cell.styleId);
+    return scriptFormatFromDocStyle(style);
   }
 
   setFormat(format) {
-    this.sheet.workbook.documentController.setRangeFormat(this.sheet.name, this.address, format);
+    const patch = docStylePatchFromScriptFormat(format);
+    this.sheet.workbook.documentController.setRangeFormat(this.sheet.name, this.address, patch);
   }
 }
