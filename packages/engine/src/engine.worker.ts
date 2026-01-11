@@ -231,7 +231,26 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
         break;
       case "loadFromXlsxBytes":
         {
-          const next = mod.WasmWorkbook.fromXlsxBytes(params.bytes as Uint8Array);
+          const rawBytes = params.bytes as unknown;
+          let bytes: Uint8Array;
+          if (rawBytes instanceof Uint8Array) {
+            bytes = rawBytes;
+          } else if (rawBytes instanceof ArrayBuffer) {
+            bytes = new Uint8Array(rawBytes);
+          } else if (ArrayBuffer.isView(rawBytes) && rawBytes.buffer instanceof ArrayBuffer) {
+            bytes = new Uint8Array(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
+          } else {
+            throw new Error("loadFromXlsxBytes: expected params.bytes to be a Uint8Array");
+          }
+
+          const fromXlsxBytes = (mod.WasmWorkbook as any).fromXlsxBytes as
+            | ((bytes: Uint8Array) => WasmWorkbookInstance)
+            | undefined;
+          if (typeof fromXlsxBytes !== "function") {
+            throw new Error("loadFromXlsxBytes: WasmWorkbook.fromXlsxBytes is not available in this WASM build");
+          }
+
+          const next = fromXlsxBytes(bytes);
           freeWorkbook(workbook);
           workbook = next;
         }
