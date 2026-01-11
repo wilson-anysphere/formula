@@ -196,6 +196,15 @@ fn patch_fmla_num<W: io::Write>(
     let extra = payload.get(rgce_end..).unwrap_or(&[]);
 
     let new_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
+    if edit.new_formula.is_some() && !extra.is_empty() && new_rgce != rgce {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot replace formula rgce for BrtFmlaNum at ({}, {}) with trailing rgcb bytes",
+                edit.row, edit.col
+            ),
+        )));
+    }
     let cached = match &edit.new_value {
         CellValue::Number(v) => *v,
         _ => {

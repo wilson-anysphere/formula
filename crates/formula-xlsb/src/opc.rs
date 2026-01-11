@@ -256,6 +256,25 @@ impl XlsbWorkbook {
         col: u32,
         value: f64,
     ) -> Result<(), ParseError> {
+        self.save_with_cell_edits(
+            dest,
+            sheet_index,
+            &[CellEdit {
+                row,
+                col,
+                new_value: CellValue::Number(value),
+                new_formula: None,
+            }],
+        )
+    }
+
+    /// Save the workbook with a set of edits for a single worksheet.
+    pub fn save_with_cell_edits(
+        &self,
+        dest: impl AsRef<Path>,
+        sheet_index: usize,
+        edits: &[CellEdit],
+    ) -> Result<(), ParseError> {
         let meta = self
             .sheets
             .get(sheet_index)
@@ -273,16 +292,7 @@ impl XlsbWorkbook {
             bytes
         };
 
-        let patched = patch_sheet_bin(
-            &sheet_bytes,
-            &[CellEdit {
-                row,
-                col,
-                new_value: CellValue::Number(value),
-                new_formula: None,
-            }],
-        )?;
-
+        let patched = patch_sheet_bin(&sheet_bytes, edits)?;
         self.save_with_part_overrides(dest, &HashMap::from([(sheet_part, patched)]))
     }
 

@@ -257,3 +257,30 @@ fn patch_sheet_bin_preserves_formula_trailing_bytes() {
 
     assert_eq!(patched, sheet_bin);
 }
+
+#[test]
+fn save_with_edits_can_patch_rk_number_cells() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("Sheet1");
+    builder.set_cell_number_rk(0, 1, 42.0);
+
+    let bytes = builder.build_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("rk_input.xlsb");
+    let output_path = tmpdir.path().join("rk_output.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open generated xlsb");
+    wb.save_with_edits(&output_path, 0, 0, 1, 100.0)
+        .expect("save_with_edits");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open patched workbook");
+    let sheet = wb2.read_sheet(0).expect("read sheet");
+    let b1 = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 1)
+        .expect("B1 exists");
+    assert_eq!(b1.value, CellValue::Number(100.0));
+}

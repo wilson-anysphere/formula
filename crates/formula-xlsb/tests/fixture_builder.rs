@@ -21,6 +21,7 @@ pub struct XlsbFixtureBuilder {
 #[derive(Debug, Clone)]
 enum CellSpec {
     Number(f64),
+    Rk(u32),
     Sst(u32),
     InlineString(String),
     FormulaNum { cached: f64, rgce: Vec<u8>, extra: Vec<u8> },
@@ -53,6 +54,11 @@ impl XlsbFixtureBuilder {
             .entry(row)
             .or_default()
             .insert(col, CellSpec::Number(v));
+    }
+
+    pub fn set_cell_number_rk(&mut self, row: u32, col: u32, v: f64) {
+        let rk = encode_rk_number(v).unwrap_or_else(|| panic!("value {v} not representable as RK"));
+        self.cells.entry(row).or_default().insert(col, CellSpec::Rk(rk));
     }
 
     pub fn set_cell_sst(&mut self, row: u32, col: u32, sst_idx: u32) {
@@ -224,6 +230,7 @@ mod biff12 {
     pub const DIMENSION: u32 = 0x0194;
 
     pub const ROW: u32 = 0x0000;
+    pub const NUM: u32 = 0x0002;
     pub const FLOAT: u32 = 0x0005;
     pub const STRING: u32 = 0x0007;
     pub const CELL_ST: u32 = 0x0006;
@@ -284,6 +291,13 @@ fn build_sheet_bin(cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>) -> Vec<u8> {
                     data.extend_from_slice(&0u32.to_le_bytes()); // style
                     data.extend_from_slice(&v.to_le_bytes());
                     write_record(&mut out, biff12::FLOAT, &data);
+                }
+                CellSpec::Rk(rk) => {
+                    let mut data = Vec::<u8>::new();
+                    data.extend_from_slice(&col.to_le_bytes());
+                    data.extend_from_slice(&0u32.to_le_bytes()); // style
+                    data.extend_from_slice(&rk.to_le_bytes());
+                    write_record(&mut out, biff12::NUM, &data);
                 }
                 CellSpec::Sst(idx) => {
                     let mut data = Vec::<u8>::new();
@@ -410,4 +424,27 @@ fn write_utf16_string(out: &mut Vec<u8>, s: &str) {
     for u in units {
         out.extend_from_slice(&u.to_le_bytes());
     }
+}
+
+fn encode_rk_number(value: f64) -> Option<u32> {
+    if !value.is_finite() {
+        return None;
+    }
+
+    let int = value.round();
+    if (value - int).abs() <= f64::EPSILON && int >= i32::MIN as f64 && int <= i32::MAX as f64 {
+        let i = int as i32;
+        return Some(((i as u32) << 2) | 0x02);
+    }
+
+    let scaled = (value * 100.0).round();
+    if ((value * 100.0) - scaled).abs() <= 1e-6
+        && scaled >= i32::MIN as f64
+        && scaled <= i32::MAX as f64
+    {
+        let i = scaled as i32;
+        return Some(((i as u32) << 2) | 0x03);
+    }
+
+    None
 }
