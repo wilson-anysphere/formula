@@ -5,6 +5,9 @@ const API_PERMISSIONS = {
   "workbook.getActiveWorkbook": [],
   "workbook.openWorkbook": ["workbook.manage"],
   "workbook.createWorkbook": ["workbook.manage"],
+  "workbook.save": ["workbook.manage"],
+  "workbook.saveAs": ["workbook.manage"],
+  "workbook.close": ["workbook.manage"],
   "sheets.getActiveSheet": [],
 
   "cells.getSelection": ["cells.read"],
@@ -16,6 +19,7 @@ const API_PERMISSIONS = {
   "sheets.getSheet": ["sheets.manage"],
   "sheets.createSheet": ["sheets.manage"],
   "sheets.renameSheet": ["sheets.manage"],
+  "sheets.deleteSheet": ["sheets.manage"],
 
   "commands.registerCommand": ["ui.commands"],
   "commands.unregisterCommand": ["ui.commands"],
@@ -144,6 +148,29 @@ class BrowserExtensionHost {
     this._workbook = { name, path: workbookPathStr };
     this._broadcastEvent("workbookOpened", { workbook: this._workbook });
     return this._workbook;
+  }
+
+  saveWorkbook() {
+    // Browser host stub mirrors the Node host: emit a stable payload for beforeSave.
+    this._broadcastEvent("beforeSave", { workbook: this._workbook });
+    return true;
+  }
+
+  saveWorkbookAs(workbookPath) {
+    const workbookPathStr = workbookPath == null ? null : String(workbookPath);
+    if (workbookPathStr == null || workbookPathStr.trim().length === 0) {
+      throw new Error("Workbook path must be a non-empty string");
+    }
+
+    const name = workbookPathStr.split(/[/\\]/).pop() ?? workbookPathStr;
+    this._workbook = { name, path: workbookPathStr };
+    this._broadcastEvent("beforeSave", { workbook: this._workbook });
+    return true;
+  }
+
+  closeWorkbook() {
+    this.openWorkbook(null);
+    return true;
   }
 
   async loadExtensionFromUrl(manifestUrl) {
@@ -417,6 +444,15 @@ class BrowserExtensionHost {
         return this.openWorkbook(args[0]);
       case "workbook.createWorkbook":
         return this.openWorkbook(null);
+      case "workbook.save":
+        this.saveWorkbook();
+        return null;
+      case "workbook.saveAs":
+        this.saveWorkbookAs(args[0]);
+        return null;
+      case "workbook.close":
+        this.closeWorkbook();
+        return null;
       case "sheets.getActiveSheet":
         if (typeof this._spreadsheet.getActiveSheet === "function") {
           return this._spreadsheet.getActiveSheet();
@@ -459,6 +495,13 @@ class BrowserExtensionHost {
           return null;
         }
         this._defaultRenameSheet(args[0], args[1]);
+        return null;
+      case "sheets.deleteSheet":
+        if (typeof this._spreadsheet.deleteSheet === "function") {
+          await this._spreadsheet.deleteSheet(args[0]);
+          return null;
+        }
+        this._defaultDeleteSheet(args[0]);
         return null;
 
       case "commands.registerCommand":
@@ -608,6 +651,7 @@ class BrowserExtensionHost {
         const value = args[1];
         const store = this._storageApi.getExtensionStore(extension.id);
         store[key] = value;
+        this._sendEventToExtension(extension, "configChanged", { key: configKey, value });
         return null;
       }
 
@@ -720,6 +764,25 @@ class BrowserExtensionHost {
     const sheet = this._sheets.find((s) => s.name === from);
     if (!sheet) throw new Error(`Unknown sheet: ${from}`);
     sheet.name = to;
+  }
+
+  _defaultDeleteSheet(name) {
+    const sheetName = String(name);
+    const idx = this._sheets.findIndex((s) => s.name === sheetName);
+    if (idx === -1) throw new Error(`Unknown sheet: ${sheetName}`);
+    if (this._sheets.length === 1) {
+      throw new Error("Cannot delete the last remaining sheet");
+    }
+
+    const sheet = this._sheets[idx];
+    const wasActive = sheet.id === this._activeSheetId;
+    this._sheets.splice(idx, 1);
+
+    if (wasActive) {
+      this._activeSheetId = this._sheets[0].id;
+      const active = this._sheets.find((s) => s.id === this._activeSheetId) ?? this._sheets[0];
+      this._broadcastEvent("sheetActivated", { sheet: { id: active.id, name: active.name } });
+    }
   }
 
   _handleWorkerMessage(extension, message) {

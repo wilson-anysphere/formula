@@ -17,6 +17,30 @@ test("dual entrypoint: CJS and ESM exports stay in sync", async () => {
     cjsKeys,
     `ESM export surface drifted.\nCJS: ${cjsKeys.join(", ")}\nESM: ${esmKeys.join(", ")}`
   );
+
+  const namespaces = [
+    "workbook",
+    "sheets",
+    "cells",
+    "commands",
+    "functions",
+    "network",
+    "clipboard",
+    "ui",
+    "storage",
+    "config",
+    "events"
+  ];
+
+  for (const ns of namespaces) {
+    assert.equal(typeof cjsApi[ns], "object", `Expected CJS ${ns} to be an object`);
+    assert.equal(typeof esmApi[ns], "object", `Expected ESM ${ns} to be an object`);
+    assert.deepEqual(
+      Object.keys(esmApi[ns]).sort(),
+      Object.keys(cjsApi[ns]).sort(),
+      `Namespace ${ns} drifted between entrypoints`
+    );
+  }
 });
 
 test("dual entrypoint: transport/context state is shared between CJS and ESM", async () => {
@@ -52,4 +76,3 @@ test("dual entrypoint: transport/context state is shared between CJS and ESM", a
     args: [1, 2]
   });
 });
-

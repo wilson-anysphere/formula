@@ -274,6 +274,18 @@ const workbook = {
 
   async createWorkbook() {
     return rpcCall("workbook", "createWorkbook", []);
+  },
+
+  async save() {
+    await rpcCall("workbook", "save", []);
+  },
+
+  async saveAs(workbookPath) {
+    await rpcCall("workbook", "saveAs", [String(workbookPath)]);
+  },
+
+  async close() {
+    await rpcCall("workbook", "close", []);
   }
 };
 
@@ -292,6 +304,10 @@ const sheets = {
 
   async renameSheet(oldName, newName) {
     await rpcCall("sheets", "renameSheet", [String(oldName), String(newName)]);
+  },
+
+  async deleteSheet(name) {
+    await rpcCall("sheets", "deleteSheet", [String(name)]);
   }
 };
 
@@ -375,6 +391,9 @@ const config = {
   },
   async update(key, value) {
     await rpcCall("config", "update", [String(key), value]);
+  },
+  onDidChange(callback) {
+    return addEventHandler("configChanged", callback);
   }
 };
 
@@ -437,6 +456,9 @@ const events = {
   },
   onWorkbookOpened(callback) {
     return addEventHandler("workbookOpened", callback);
+  },
+  onBeforeSave(callback) {
+    return addEventHandler("beforeSave", callback);
   },
   onViewActivated(callback) {
     return addEventHandler("viewActivated", callback);
