@@ -108,7 +108,8 @@ export class CellStructuralConflictMonitor {
       if (conflict.type === "move") {
         const oursTo = conflict.local?.toCellKey ?? null;
         const theirsTo = conflict.remote?.toCellKey ?? null;
-        const baseCell = conflict.local?.cell ?? conflict.remote?.cell ?? null;
+        const oursCell = conflict.local?.cell ?? null;
+        const theirsCell = conflict.remote?.cell ?? null;
  
         let target = null;
         if (resolution.choice === "ours") target = oursTo;
@@ -117,14 +118,16 @@ export class CellStructuralConflictMonitor {
  
         if (!target) return false;
  
+        const chosenCell = resolution.choice === "theirs" ? theirsCell ?? oursCell : oursCell ?? theirsCell;
+ 
         this.doc.transact(() => {
           // Clear source + both destinations.
           this.cells.delete(conflict.cellKey);
           if (oursTo) this.cells.delete(oursTo);
           if (theirsTo) this.cells.delete(theirsTo);
  
-          if (baseCell) {
-            this._writeCell(target, baseCell);
+          if (chosenCell) {
+            this._writeCell(target, chosenCell);
           }
         }, this.origin);
       } else {
@@ -749,9 +752,11 @@ export class CellStructuralConflictMonitor {
      moves,
      deletes,
      edits,
-     touchedCells: Array.from(touched.keys())
+     // Only include cells whose structural footprint changed (ignore metadata-only
+     // edits like modified timestamps).
+     touchedCells: Array.from(new Set(diffs.map((d) => d.cellKey)))
    };
- }
+  }
  
  /**
   * @param {any} cellData
