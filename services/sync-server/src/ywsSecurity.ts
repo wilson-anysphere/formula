@@ -343,7 +343,19 @@ export function installYwsSecurity(
   };
 
   const guard: MessageGuard = (raw, isBinary) => {
-    const message = toUint8Array(raw);
+    if (typeof raw === "string") {
+      // y-websocket is a binary protocol; reject string messages early.
+      ws.close(1003, "binary messages only");
+      return { drop: true };
+    }
+
+    // ws can deliver text frames as a Buffer with `isBinary=false`. Treat the
+    // bytes equivalently regardless of the `isBinary` flag.
+    const normalizedRaw: WebSocket.RawData = Array.isArray(raw)
+      ? Buffer.concat(raw)
+      : raw;
+
+    const message = toUint8Array(normalizedRaw);
     if (!message) return { drop: true };
 
     let outerType: number;
@@ -366,10 +378,10 @@ export function installYwsSecurity(
         ws.close(1003, "malformed sync message");
         return { drop: true };
       }
-      return { data: raw, isBinary };
+      return { data: normalizedRaw, isBinary };
     }
 
-    if (outerType !== 1) return { data: raw, isBinary };
+    if (outerType !== 1) return { data: normalizedRaw, isBinary };
 
     // Awareness anti-spoofing: enforce one clientID per connection and sanitize
     // identity fields to match the authenticated user.
@@ -440,7 +452,7 @@ export function installYwsSecurity(
       encodeVarUint(sanitizedUpdate.length),
       sanitizedUpdate,
     ]);
-    return { data: Buffer.from(sanitizedMessage), isBinary: true };
+    return { data: Buffer.from(sanitizedMessage), isBinary };
   };
 
   patchWebSocketMessageHandlers(ws, guard);
