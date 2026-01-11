@@ -140,73 +140,86 @@ fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, Xlsx
 }
 
 fn handle_element(def: &mut PivotCacheDefinition, e: &BytesStart<'_>) -> Result<(), XlsxError> {
-    match e.local_name().as_ref() {
-        b"pivotCacheDefinition" => {
-            for attr in e.attributes().with_checks(false) {
-                let attr = attr.map_err(quick_xml::Error::from)?;
-                let value = attr.unescape_value()?;
-                match attr.key.local_name().as_ref() {
-                    b"recordCount" => def.record_count = value.parse::<u64>().ok(),
-                    b"refreshOnLoad" => def.refresh_on_load = parse_bool(&value),
-                    b"createdVersion" => def.created_version = value.parse::<u32>().ok(),
-                    b"refreshedVersion" => def.refreshed_version = value.parse::<u32>().ok(),
-                    _ => {}
-                }
+    let tag = e.local_name();
+    let tag = tag.as_ref();
+
+    if tag.eq_ignore_ascii_case(b"pivotCacheDefinition") {
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr.map_err(quick_xml::Error::from)?;
+            let key = attr.key.local_name();
+            let key = key.as_ref();
+            let value = attr.unescape_value()?;
+
+            if key.eq_ignore_ascii_case(b"recordCount") {
+                def.record_count = value.parse::<u64>().ok();
+            } else if key.eq_ignore_ascii_case(b"refreshOnLoad") {
+                def.refresh_on_load = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"createdVersion") {
+                def.created_version = value.parse::<u32>().ok();
+            } else if key.eq_ignore_ascii_case(b"refreshedVersion") {
+                def.refreshed_version = value.parse::<u32>().ok();
             }
         }
-        b"cacheSource" => {
-            for attr in e.attributes().with_checks(false) {
-                let attr = attr.map_err(quick_xml::Error::from)?;
-                if attr.key.local_name().as_ref() != b"type" {
-                    continue;
-                }
-                let raw_value = attr.unescape_value()?.to_string();
-                let value = raw_value.to_ascii_lowercase();
-                def.cache_source_type = match value.as_str() {
-                    "worksheet" => PivotCacheSourceType::Worksheet,
-                    "external" => PivotCacheSourceType::External,
-                    "consolidation" => PivotCacheSourceType::Consolidation,
-                    "scenario" => PivotCacheSourceType::Scenario,
-                    _ => PivotCacheSourceType::Unknown(raw_value),
-                };
-                break;
+    } else if tag.eq_ignore_ascii_case(b"cacheSource") {
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr.map_err(quick_xml::Error::from)?;
+            let key = attr.key.local_name();
+            let key = key.as_ref();
+            if !key.eq_ignore_ascii_case(b"type") {
+                continue;
+            }
+            let raw_value = attr.unescape_value()?.to_string();
+            let value = raw_value.to_ascii_lowercase();
+            def.cache_source_type = match value.as_str() {
+                "worksheet" => PivotCacheSourceType::Worksheet,
+                "external" => PivotCacheSourceType::External,
+                "consolidation" => PivotCacheSourceType::Consolidation,
+                "scenario" => PivotCacheSourceType::Scenario,
+                _ => PivotCacheSourceType::Unknown(raw_value),
+            };
+            break;
+        }
+    } else if tag.eq_ignore_ascii_case(b"worksheetSource") {
+        let mut sheet: Option<String> = None;
+        let mut reference: Option<String> = None;
+        let mut name: Option<String> = None;
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr.map_err(quick_xml::Error::from)?;
+            let key = attr.key.local_name();
+            let key = key.as_ref();
+            let value = attr.unescape_value()?.to_string();
+            if key.eq_ignore_ascii_case(b"sheet") {
+                sheet = Some(value);
+            } else if key.eq_ignore_ascii_case(b"ref") {
+                reference = Some(value);
+            } else if key.eq_ignore_ascii_case(b"name") {
+                name = Some(value);
             }
         }
-        b"worksheetSource" => {
-            let mut sheet: Option<String> = None;
-            let mut reference: Option<String> = None;
-            let mut name: Option<String> = None;
-            for attr in e.attributes().with_checks(false) {
-                let attr = attr.map_err(quick_xml::Error::from)?;
-                let value = attr.unescape_value()?.to_string();
-                match attr.key.local_name().as_ref() {
-                    b"sheet" => sheet = Some(value),
-                    b"ref" => reference = Some(value),
-                    b"name" => name = Some(value),
-                    _ => {}
-                }
+        def.worksheet_source_sheet = sheet;
+        def.worksheet_source_ref = reference.or(name);
+    } else if tag.eq_ignore_ascii_case(b"cacheField") {
+        let mut field = PivotCacheField::default();
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr.map_err(quick_xml::Error::from)?;
+            let key = attr.key.local_name();
+            let key = key.as_ref();
+            let value = attr.unescape_value()?;
+            if key.eq_ignore_ascii_case(b"name") {
+                field.name = value.to_string();
+            } else if key.eq_ignore_ascii_case(b"numFmtId") {
+                field.num_fmt_id = value.parse::<u32>().ok();
+            } else if key.eq_ignore_ascii_case(b"databaseField") {
+                field.database_field = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"formula") {
+                field.formula = Some(value.to_string());
+            } else if key.eq_ignore_ascii_case(b"sqlType") {
+                field.sql_type = value.parse::<i32>().ok();
+            } else if key.eq_ignore_ascii_case(b"hierarchy") {
+                field.hierarchy = value.parse::<u32>().ok();
             }
-            def.worksheet_source_sheet = sheet;
-            def.worksheet_source_ref = reference.or(name);
         }
-        b"cacheField" => {
-            let mut field = PivotCacheField::default();
-            for attr in e.attributes().with_checks(false) {
-                let attr = attr.map_err(quick_xml::Error::from)?;
-                let value = attr.unescape_value()?;
-                match attr.key.local_name().as_ref() {
-                    b"name" => field.name = value.to_string(),
-                    b"numFmtId" => field.num_fmt_id = value.parse::<u32>().ok(),
-                    b"databaseField" => field.database_field = parse_bool(&value),
-                    b"formula" => field.formula = Some(value.to_string()),
-                    b"sqlType" => field.sql_type = value.parse::<i32>().ok(),
-                    b"hierarchy" => field.hierarchy = value.parse::<u32>().ok(),
-                    _ => {}
-                }
-            }
-            def.cache_fields.push(field);
-        }
-        _ => {}
+        def.cache_fields.push(field);
     }
     Ok(())
 }
