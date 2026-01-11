@@ -1251,7 +1251,30 @@ impl MutableIntColumn {
 
         let (distinct_base, distinct) = match distinct {
             Some(counter) => (0, counter),
-            None => (stats.distinct_count, DistinctCounter::new()),
+            None => {
+                // We do not have the base distinct sketch (e.g. the table came from
+                // `ColumnarTable::from_encoded`). Reconstruct it from the encoded pages so
+                // subsequent appends/updates can maintain a consistent estimate.
+                let mut counter = DistinctCounter::new();
+                for chunk in &chunks {
+                    let EncodedChunk::Int(c) = chunk else {
+                        continue;
+                    };
+                    let values = c.decode_i64();
+                    if let Some(validity) = &c.validity {
+                        for (idx, v) in values.iter().enumerate() {
+                            if validity.get(idx) {
+                                counter.insert_i64(*v);
+                            }
+                        }
+                    } else {
+                        for v in values {
+                            counter.insert_i64(v);
+                        }
+                    }
+                }
+                (0, counter)
+            }
         };
 
         let min = stats.min.as_ref().and_then(i64_from_value);
@@ -1597,7 +1620,26 @@ impl MutableFloatColumn {
 
         let (distinct_base, distinct) = match distinct {
             Some(counter) => (0, counter),
-            None => (stats.distinct_count, DistinctCounter::new()),
+            None => {
+                let mut counter = DistinctCounter::new();
+                for chunk in &chunks {
+                    let EncodedChunk::Float(c) = chunk else {
+                        continue;
+                    };
+                    if let Some(validity) = &c.validity {
+                        for (idx, v) in c.values.iter().enumerate() {
+                            if validity.get(idx) {
+                                counter.insert_i64(v.to_bits() as i64);
+                            }
+                        }
+                    } else {
+                        for v in &c.values {
+                            counter.insert_i64(v.to_bits() as i64);
+                        }
+                    }
+                }
+                (0, counter)
+            }
         };
 
         let min = match &stats.min {

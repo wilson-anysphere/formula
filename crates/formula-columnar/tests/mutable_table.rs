@@ -1,6 +1,6 @@
 use formula_columnar::{
-    ColumnSchema, ColumnType, ColumnarTableBuilder, MutableColumnarTable, PageCacheConfig,
-    TableOptions, Value,
+    ColumnSchema, ColumnType, ColumnarTable, ColumnarTableBuilder, EncodedColumn,
+    MutableColumnarTable, PageCacheConfig, TableOptions, Value,
 };
 use std::sync::Arc;
 
@@ -247,6 +247,38 @@ fn distinct_count_survives_snapshot_and_append() {
 
     let stats = mutable.column_stats(0).unwrap();
     assert_eq!(stats.distinct_count, 4);
+}
+
+#[test]
+fn distinct_count_after_from_encoded_and_append() {
+    let schema = vec![ColumnSchema {
+        name: "x".to_owned(),
+        column_type: ColumnType::Number,
+    }];
+    let options = TableOptions {
+        page_size_rows: 4,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+
+    let mut builder = ColumnarTableBuilder::new(schema.clone(), options);
+    for v in [1.0, 2.0, 3.0] {
+        builder.append_row(&[Value::Number(v)]);
+    }
+    let table = builder.finalize();
+
+    let encoded = vec![EncodedColumn {
+        schema: schema[0].clone(),
+        chunks: table.encoded_chunks(0).unwrap().to_vec(),
+        stats: table.stats(0).unwrap().clone(),
+        dictionary: table.dictionary(0),
+    }];
+
+    let restored = ColumnarTable::from_encoded(schema, encoded, table.row_count(), options);
+    let mut mutable = restored.into_mutable();
+    mutable.append_row(&[Value::Number(3.0)]);
+    mutable.append_row(&[Value::Number(4.0)]);
+
+    assert_eq!(mutable.column_stats(0).unwrap().distinct_count, 4);
 }
 
 #[test]
