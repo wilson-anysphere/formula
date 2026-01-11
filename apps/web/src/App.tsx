@@ -2,8 +2,8 @@ import { createEngineClient } from "@formula/engine";
 import type { CellRange } from "@formula/grid";
 import { CanvasGrid, GridPlaceholder } from "@formula/grid";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { range0ToA1 } from "@formula/spreadsheet-frontend";
 
-import { rangeToA1 } from "./a1";
 import { EngineCellProvider } from "./EngineCellProvider";
 import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
 
@@ -46,16 +46,19 @@ export function App() {
   };
 
   const cellRangeToA1 = (range: CellRange): string | null => {
-    const startRow = range.startRow - headerRowOffset;
-    const startCol = range.startCol - headerColOffset;
-    const endRow = range.endRow - 1 - headerRowOffset;
-    const endCol = range.endCol - 1 - headerColOffset;
+    const startRow0 = range.startRow - headerRowOffset;
+    const startCol0 = range.startCol - headerColOffset;
+    const endRow0Exclusive = range.endRow - headerRowOffset;
+    const endCol0Exclusive = range.endCol - headerColOffset;
 
-    if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) return null;
+    if (startRow0 < 0 || startCol0 < 0) return null;
+    if (endRow0Exclusive <= startRow0 || endCol0Exclusive <= startCol0) return null;
 
-    return rangeToA1({
-      start: { row: startRow, col: startCol },
-      end: { row: endRow, col: endCol }
+    return range0ToA1({
+      startRow0,
+      startCol0,
+      endRow0Exclusive,
+      endCol0Exclusive
     });
   };
 
