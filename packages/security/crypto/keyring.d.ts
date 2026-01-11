@@ -7,7 +7,7 @@ export type KeyRingJSON = {
 
 export type KeyRingEncrypted = {
   keyVersion: number;
-  algorithm: string;
+  algorithm?: string;
   iv: string;
   ciphertext: string;
   tag: string;
@@ -15,7 +15,11 @@ export type KeyRingEncrypted = {
 
 export type KeyRingEncryptedBytes = {
   keyVersion: number;
-  algorithm: string;
+  /**
+   * Included by `KeyRing.encryptBytes()`, but optional so callers can persist a
+   * compact record format that omits redundant algorithm metadata.
+   */
+  algorithm?: string;
   iv: Buffer;
   ciphertext: Buffer;
   tag: Buffer;
