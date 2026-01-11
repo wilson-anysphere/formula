@@ -16,7 +16,7 @@ use quick_xml::{Reader, Writer};
 use crate::openxml::{parse_relationships, rels_part_name, resolve_relationship_target};
 use crate::path::resolve_target;
 use crate::recalc_policy::apply_recalc_policy_to_parts;
-use crate::shared_strings::{parse_shared_strings_xml, write_shared_strings_xml, SharedStrings};
+use crate::shared_strings::preserve::SharedStringsEditor;
 use crate::styles::XlsxStylesEditor;
 use crate::{RecalcPolicy, WorkbookSheetInfo, XlsxError, XlsxPackage};
 
@@ -268,66 +268,53 @@ impl CellPatch {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct SharedStringsState {
-    items: Vec<RichText>,
-    plain_index: HashMap<String, u32>,
-    dirty: bool,
+    editor: SharedStringsEditor,
+    // Best-effort shared-string reference count delta from cell patches.
+    count_delta: i32,
 }
 
 impl SharedStringsState {
     fn from_part(bytes: &[u8]) -> Result<Self, XlsxError> {
-        let xml = String::from_utf8(bytes.to_vec())?;
-        let parsed = parse_shared_strings_xml(&xml)
+        let editor = SharedStringsEditor::parse(bytes)
             .map_err(|e| XlsxError::Invalid(format!("sharedStrings.xml parse error: {e}")))?;
-        let mut plain_index = HashMap::new();
-        for (idx, item) in parsed.items.iter().enumerate() {
-            if item.runs.is_empty() {
-                plain_index.insert(item.text.clone(), idx as u32);
-            }
-        }
         Ok(Self {
-            items: parsed.items,
-            plain_index,
-            dirty: false,
+            editor,
+            count_delta: 0,
         })
     }
 
     fn get_or_insert_plain(&mut self, text: &str) -> u32 {
-        if let Some(idx) = self.plain_index.get(text).copied() {
-            return idx;
-        }
-        let idx = self.items.len() as u32;
-        self.items.push(RichText::new(text.to_string()));
-        self.plain_index.insert(text.to_string(), idx);
-        self.dirty = true;
-        idx
+        self.editor.get_or_insert_plain(text)
     }
 
     fn get_or_insert_rich(&mut self, rich: &RichText) -> u32 {
-        if let Some((idx, _)) = self
-            .items
-            .iter()
-            .enumerate()
-            .find(|(_, item)| *item == rich)
-        {
-            return idx as u32;
+        self.editor.get_or_insert_rich(rich)
+    }
+
+    fn note_shared_string_ref_delta(&mut self, old_uses_shared: bool, new_uses_shared: bool) {
+        match (old_uses_shared, new_uses_shared) {
+            (true, false) => self.count_delta -= 1,
+            (false, true) => self.count_delta += 1,
+            _ => {}
         }
-        let idx = self.items.len() as u32;
-        self.items.push(rich.clone());
-        self.dirty = true;
-        idx
     }
 
     fn write_if_dirty(&self) -> Result<Option<Vec<u8>>, XlsxError> {
-        if !self.dirty {
+        if !self.editor.is_dirty() {
             return Ok(None);
         }
-        let xml = write_shared_strings_xml(&SharedStrings {
-            items: self.items.clone(),
-        })
-        .map_err(|e| XlsxError::Invalid(format!("sharedStrings.xml write error: {e}")))?;
-        Ok(Some(xml.into_bytes()))
+
+        let count_hint = self
+            .editor
+            .original_count()
+            .map(|base| base.saturating_add_signed(self.count_delta));
+        let updated = self
+            .editor
+            .to_xml_bytes(count_hint)
+            .map_err(|e| XlsxError::Invalid(format!("sharedStrings.xml write error: {e}")))?;
+        Ok(Some(updated))
     }
 }
 
@@ -1151,6 +1138,12 @@ fn write_cell_patch(
 
     if let Some(t) = ty {
         cell.push_str(&format!(r#" t="{t}""#));
+    }
+
+    if let Some(shared_strings) = shared_strings.as_deref_mut() {
+        let old_uses_shared = existing_t == Some("s");
+        let new_uses_shared = ty == Some("s");
+        shared_strings.note_shared_string_ref_delta(old_uses_shared, new_uses_shared);
     }
 
     if value_xml.is_empty() {

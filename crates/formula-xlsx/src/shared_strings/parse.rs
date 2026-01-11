@@ -53,28 +53,25 @@ pub fn parse_shared_strings_xml(xml: &str) -> Result<SharedStrings, SharedString
 fn parse_si(reader: &mut Reader<&[u8]>) -> Result<RichText, SharedStringsError> {
     let mut buf = Vec::new();
     let mut segments: Vec<(String, RichTextRunStyle)> = Vec::new();
-    let mut plain_text: Option<String> = None;
 
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) if e.local_name().as_ref() == b"t" => {
                 let t = read_text(reader, QName(b"t"))?;
-                if segments.is_empty() {
-                    plain_text.get_or_insert_with(String::new).push_str(&t);
-                } else {
-                    // Mixed `<t>` and `<r>` is not expected in `si`.
-                    return Err(SharedStringsError::Malformed(
-                        "shared string item mixes <t> and <r>",
-                    ));
-                }
+                segments.push((t, RichTextRunStyle::default()));
             }
             Event::Start(e) if e.local_name().as_ref() == b"r" => {
-                if plain_text.is_some() {
-                    return Err(SharedStringsError::Malformed(
-                        "shared string item mixes <t> and <r>",
-                    ));
-                }
                 segments.push(parse_r(reader)?);
+            }
+            Event::Start(e) => {
+                // Only treat `<t>` as visible text when it is a direct child of `<si>` or
+                // inside `<si><r>...</r></si>`. Other subtrees (phonetic/ruby runs, extensions)
+                // may contain `<t>` elements that should not be concatenated into the display
+                // string.
+                //
+                // Best-effort: skip unknown elements instead of erroring so we can still
+                // extract the visible string content.
+                reader.read_to_end_into(e.name(), &mut Vec::new())?;
             }
             Event::End(e) if e.local_name().as_ref() == b"si" => break,
             Event::Eof => return Err(SharedStringsError::Malformed("unexpected eof in <si>")),
@@ -83,10 +80,12 @@ fn parse_si(reader: &mut Reader<&[u8]>) -> Result<RichText, SharedStringsError> 
         buf.clear();
     }
 
-    if !segments.is_empty() {
-        Ok(RichText::from_segments(segments))
+    if segments.iter().all(|(_, style)| style.is_empty()) {
+        Ok(RichText::new(
+            segments.into_iter().map(|(text, _)| text).collect::<String>(),
+        ))
     } else {
-        Ok(RichText::new(plain_text.unwrap_or_default()))
+        Ok(RichText::from_segments(segments))
     }
 }
 
@@ -102,6 +101,11 @@ fn parse_r(reader: &mut Reader<&[u8]>) -> Result<(String, RichTextRunStyle), Sha
             }
             Event::Start(e) if e.local_name().as_ref() == b"t" => {
                 text.push_str(&read_text(reader, QName(b"t"))?);
+            }
+            Event::Start(e) => {
+                // Skip any unexpected subtrees to avoid accidentally capturing `<t>` elements
+                // from phonetic/ruby annotations (best-effort).
+                reader.read_to_end_into(e.name(), &mut Vec::new())?;
             }
             Event::End(e) if e.local_name().as_ref() == b"r" => break,
             Event::Eof => return Err(SharedStringsError::Malformed("unexpected eof in <r>")),
@@ -132,6 +136,27 @@ fn parse_rpr(reader: &mut Reader<&[u8]>) -> Result<RichTextRunStyle, SharedStrin
     }
 
     Ok(style)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ignores_phonetic_ruby_text_in_si() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1">
+  <si>
+    <t>Base</t>
+    <phoneticPr fontId="0" type="noConversion"/>
+    <rPh sb="0" eb="4"><t>PHO</t></rPh>
+  </si>
+</sst>"#;
+
+        let shared = parse_shared_strings_xml(xml).expect("parse sharedStrings.xml");
+        assert_eq!(shared.items.len(), 1);
+        assert_eq!(shared.items[0].text, "Base");
+    }
 }
 
 fn parse_rpr_tag(

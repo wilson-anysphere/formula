@@ -18,6 +18,7 @@ use zip::ZipWriter;
 use crate::path::{rels_for_part, resolve_target};
 use crate::recalc_policy::{apply_recalc_policy_to_parts, RecalcPolicyError};
 use crate::sheet_metadata::{parse_sheet_tab_color, write_sheet_tab_color};
+use crate::shared_strings::preserve::SharedStringsEditor;
 use crate::styles::XlsxStylesEditor;
 use crate::autofilter::AutoFilterParseError;
 use crate::{CellValueKind, DateSystem, RecalcPolicy, SheetMeta, XlsxDocument, XlsxError};
@@ -434,10 +435,14 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
         }
     }
 
+    let original_shared_strings = parts
+        .get(&shared_strings_part_name)
+        .map(|bytes| bytes.as_slice());
     let (shared_strings_xml, shared_string_lookup) = build_shared_strings_xml(
         doc,
         &sheet_plan.sheets,
         &sheet_plan.cell_meta_sheet_ids,
+        original_shared_strings,
     )?;
     if is_new || !shared_string_lookup.is_empty() || parts.contains_key(&shared_strings_part_name) {
         parts.insert(shared_strings_part_name.clone(), shared_strings_xml);
@@ -1181,6 +1186,7 @@ fn build_shared_strings_xml(
     doc: &XlsxDocument,
     sheets: &[SheetMeta],
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    original_xml: Option<&[u8]>,
 ) -> Result<(Vec<u8>, HashMap<SharedStringKey, u32>), WriteError> {
     let mut table: Vec<RichText> = doc.shared_strings.clone();
     let mut lookup: HashMap<SharedStringKey, u32> = HashMap::new();
@@ -1259,6 +1265,40 @@ fn build_shared_strings_xml(
                 }
             }
         }
+    }
+
+    // If we started from an existing `sharedStrings.xml` and we didn't add any new entries,
+    // preserve the original bytes byte-for-byte to avoid dropping unsupported substructures
+    // (phonetic runs, extensions, mc:AlternateContent, etc.).
+    if let Some(original_xml) = original_xml {
+        if table.len() == doc.shared_strings.len() {
+            return Ok((original_xml.to_vec(), lookup));
+        }
+
+        let mut editor = SharedStringsEditor::parse(original_xml).map_err(|e| {
+            WriteError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("sharedStrings.xml parse error: {e}"),
+            ))
+        })?;
+
+        // Append only the newly created entries (do not rewrite existing `<si>` blocks).
+        for rich in &table[doc.shared_strings.len()..] {
+            if rich.runs.is_empty() {
+                editor.get_or_insert_plain(&rich.text);
+            } else {
+                editor.get_or_insert_rich(rich);
+            }
+        }
+
+        let patched = editor.to_xml_bytes(Some(ref_count)).map_err(|e| {
+            WriteError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("sharedStrings.xml write error: {e}"),
+            ))
+        })?;
+
+        return Ok((patched, lookup));
     }
 
     let mut xml = String::new();

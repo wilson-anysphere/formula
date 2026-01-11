@@ -1,4 +1,5 @@
 mod parse;
+pub(crate) mod preserve;
 mod write;
 mod xlsx;
 
