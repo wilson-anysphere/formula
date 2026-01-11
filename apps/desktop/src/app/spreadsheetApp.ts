@@ -131,6 +131,8 @@ export class SpreadsheetApp {
   private newCommentInput!: HTMLInputElement;
   private commentTooltip!: HTMLDivElement;
 
+  private renderScheduled = false;
+
   constructor(
     private root: HTMLElement,
     private status: SpreadsheetAppStatusElements,
@@ -319,6 +321,32 @@ export class SpreadsheetApp {
     this.stopCommentPersistence?.();
     this.resizeObserver.disconnect();
     this.root.replaceChildren();
+  }
+
+  /**
+   * Request a full redraw of the grid + overlays.
+   *
+   * This is intentionally public so external callers (e.g. AI tool execution)
+   * can update the UI after mutating the DocumentController.
+   */
+  refresh(): void {
+    if (this.renderScheduled) return;
+    this.renderScheduled = true;
+
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) =>
+            globalThis.setTimeout(() => cb(typeof performance !== "undefined" ? performance.now() : Date.now()), 0);
+
+    schedule(() => {
+      this.renderScheduled = false;
+      this.renderGrid();
+      this.renderCharts();
+      this.renderReferencePreview();
+      this.renderSelection();
+      this.updateStatus();
+    });
   }
 
   focus(): void {

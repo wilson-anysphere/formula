@@ -38,6 +38,9 @@ const app = new SpreadsheetApp(gridRoot, { activeCell, selectionRange, activeVal
 app.focus();
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
 
+// Keep the canvas renderer in sync with programmatic document mutations (e.g. AI tools).
+app.getDocument().on("change", () => app.refresh());
+
 // --- Dock layout + persistence (minimal shell wiring for e2e + demos) ----------
 
 const dockLeft = document.getElementById("dock-left");
