@@ -101,3 +101,35 @@ test("DocumentController + BranchService: format-only conflicts round-trip throu
   assert.equal(a1.value, 1);
   assert.deepEqual(doc.styleTable.get(a1.styleId), { numberFormat: "percent" });
 });
+
+test("DocumentController + BranchService: delete-vs-edit conflicts clear cells when resolved as delete", async () => {
+  const actor = { userId: "u1", role: "owner" };
+
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+
+  const store = new InMemoryBranchStore();
+  const branchService = new BranchService({ docId: "doc-delete", store });
+  await branchService.init(actor, { sheets: { Sheet1: {} } });
+
+  const workflow = new DocumentBranchingWorkflow({ doc, branchService });
+  await workflow.commitCurrentState(actor, "base");
+
+  await branchService.createBranch(actor, { name: "del" });
+
+  await workflow.checkoutIntoDoc(actor, "del");
+  doc.setCellValue("Sheet1", "A1", null);
+  await workflow.commitCurrentState(actor, "delete A1");
+
+  await workflow.checkoutIntoDoc(actor, "main");
+  doc.setCellValue("Sheet1", "A1", 2);
+  await workflow.commitCurrentState(actor, "edit A1");
+
+  const preview = await branchService.previewMerge(actor, { sourceBranch: "del" });
+  assert.equal(preview.conflicts.length, 1);
+  assert.equal(preview.conflicts[0]?.reason, "delete-vs-edit");
+
+  await workflow.mergeIntoDoc(actor, "del", [{ conflictIndex: 0, choice: "theirs" }]);
+  assert.equal(doc.getCell("Sheet1", "A1").value, null);
+  assert.equal(doc.getCell("Sheet1", "A1").formula, null);
+});
