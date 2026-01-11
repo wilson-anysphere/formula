@@ -1400,7 +1400,35 @@ impl DaxEngine {
                         .table(&base.table)
                         .ok_or_else(|| DaxError::UnknownTable(base.table.clone()))?;
 
-                    let mut group_idxs = Vec::with_capacity(group_exprs.len());
+                    let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
+                    for &idx in &filter.active_relationship_overrides {
+                        if let Some(rel) = model.relationships().get(idx) {
+                            override_pairs
+                                .insert((rel.rel.from_table.as_str(), rel.rel.to_table.as_str()));
+                        }
+                    }
+
+                    let is_relationship_active =
+                        |idx: usize, rel: &RelationshipInfo, overrides: &HashSet<(&str, &str)>| {
+                            let pair = (rel.rel.from_table.as_str(), rel.rel.to_table.as_str());
+                            if overrides.contains(&pair) {
+                                filter.active_relationship_overrides.contains(&idx)
+                            } else {
+                                rel.rel.is_active
+                            }
+                        };
+
+                    enum GroupAccessor {
+                        BaseColumn(usize),
+                        RelatedColumn {
+                            relationship_idx: usize,
+                            from_idx: usize,
+                            to_table: String,
+                            to_col_idx: usize,
+                        },
+                    }
+
+                    let mut accessors = Vec::with_capacity(group_exprs.len());
                     for expr in group_exprs {
                         let Expr::ColumnRef { table, column } = expr else {
                             return Err(DaxError::Type(
@@ -1408,10 +1436,50 @@ impl DaxEngine {
                             ));
                         };
                         if table != &base.table {
-                            return Err(DaxError::Eval(format!(
-                                "SUMMARIZE grouping column must belong to {}, got {table}[{column}]",
-                                base.table
-                            )));
+                            let relationship_idx = model
+                                .relationships()
+                                .iter()
+                                .enumerate()
+                                .find_map(|(idx, rel)| {
+                                    (rel.rel.from_table == base.table
+                                        && rel.rel.to_table == *table
+                                        && is_relationship_active(idx, rel, &override_pairs))
+                                    .then_some(idx)
+                                })
+                                .ok_or_else(|| {
+                                    DaxError::Eval(format!(
+                                        "SUMMARIZE grouping column {table}[{column}] is not reachable from {}",
+                                        base.table
+                                    ))
+                                })?;
+                            let rel_info = model
+                                .relationships()
+                                .get(relationship_idx)
+                                .expect("found above");
+                            let from_idx = table_ref
+                                .column_idx(&rel_info.rel.from_column)
+                                .ok_or_else(|| DaxError::UnknownColumn {
+                                    table: base.table.clone(),
+                                    column: rel_info.rel.from_column.clone(),
+                                })?;
+
+                            let to_table_ref = model
+                                .table(table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                            let to_col_idx = to_table_ref.column_idx(column).ok_or_else(|| {
+                                DaxError::UnknownColumn {
+                                    table: table.clone(),
+                                    column: column.clone(),
+                                }
+                            })?;
+
+                            accessors.push(GroupAccessor::RelatedColumn {
+                                relationship_idx,
+                                from_idx,
+                                to_table: table.clone(),
+                                to_col_idx,
+                            });
+                            continue;
                         }
                         let idx = table_ref.column_idx(column).ok_or_else(|| {
                             DaxError::UnknownColumn {
@@ -1419,16 +1487,52 @@ impl DaxEngine {
                                 column: column.clone(),
                             }
                         })?;
-                        group_idxs.push(idx);
+                        accessors.push(GroupAccessor::BaseColumn(idx));
                     }
 
                     let mut seen: HashSet<Vec<Value>> = HashSet::new();
                     let mut rows = Vec::new();
                     for row in base.rows {
-                        let key: Vec<Value> = group_idxs
-                            .iter()
-                            .map(|idx| table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank))
-                            .collect();
+                        let mut key = Vec::with_capacity(accessors.len());
+                        for accessor in &accessors {
+                            match accessor {
+                                GroupAccessor::BaseColumn(idx) => key.push(
+                                    table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank),
+                                ),
+                                GroupAccessor::RelatedColumn {
+                                    relationship_idx,
+                                    from_idx,
+                                    to_table,
+                                    to_col_idx,
+                                } => {
+                                    let fk = table_ref
+                                        .value_by_idx(row, *from_idx)
+                                        .unwrap_or(Value::Blank);
+                                    if fk.is_blank() {
+                                        key.push(Value::Blank);
+                                        continue;
+                                    }
+
+                                    let rel_info = model
+                                        .relationships()
+                                        .get(*relationship_idx)
+                                        .expect("valid relationship index");
+                                    let Some(to_row) = rel_info.to_index.get(&fk).copied() else {
+                                        key.push(Value::Blank);
+                                        continue;
+                                    };
+
+                                    let to_table_ref = model
+                                        .table(to_table)
+                                        .ok_or_else(|| DaxError::UnknownTable(to_table.clone()))?;
+                                    key.push(
+                                        to_table_ref
+                                            .value_by_idx(to_row, *to_col_idx)
+                                            .unwrap_or(Value::Blank),
+                                    );
+                                }
+                            }
+                        }
                         if seen.insert(key) {
                             rows.push(row);
                         }

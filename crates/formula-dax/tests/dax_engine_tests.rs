@@ -523,6 +523,16 @@ fn values_and_summarize_support_basic_grouping() {
         )
         .unwrap();
     assert_eq!(customers, 3.into());
+
+    let regions = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZE(Orders, Customers[Region]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(regions, 2.into());
 }
 
 #[test]
