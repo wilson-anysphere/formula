@@ -28,6 +28,7 @@ export interface Range {
   readonly startCol: number;
   readonly endRow: number;
   readonly endCol: number;
+  /** 2D array indexed by [row][col] relative to startRow/startCol. */
   readonly values: CellValue[][];
 }
 
