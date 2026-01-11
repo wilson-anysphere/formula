@@ -192,8 +192,8 @@ pub struct Workbook {
     pub preserved_drawing_parts: Option<PreservedDrawingParts>,
     /// Preserved pivot tables/caches/slicers/timelines for regeneration-based XLSX round-trips.
     ///
-    /// Pivot attachments are currently re-applied by sheet name. If a sheet is renamed in-app,
-    /// we may fail to reconnect its pivot table relationships.
+    /// Pivot attachments are re-applied by sheet name, falling back to the original
+    /// sheet ordinal position in the workbook when a sheet is renamed in-app.
     pub preserved_pivot_parts: Option<PreservedPivotParts>,
     pub theme_palette: Option<formula_xlsx::theme::ThemePalette>,
     pub sheets: Vec<Sheet>,
