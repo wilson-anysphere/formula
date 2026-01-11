@@ -576,8 +576,9 @@ impl MutableColumnarTable {
             "row length must match schema"
         );
 
-        for (column, value) in self.columns.iter_mut().zip(row.iter()) {
-            column.push(value);
+        for col_idx in 0..self.columns.len() {
+            self.maybe_clear_cache_for_dict_growth(col_idx, &row[col_idx]);
+            self.columns[col_idx].push(&row[col_idx]);
         }
 
         self.rows += 1;
@@ -598,11 +599,12 @@ impl MutableColumnarTable {
         if row >= self.rows {
             return false;
         }
-        let Some(column) = self.columns.get(col) else {
-            return false;
+        let column_type = match self.columns.get(col) {
+            Some(column) => column.column_type(),
+            None => return false,
         };
 
-        let coerced = coerce_value_for_type(column.column_type(), value);
+        let coerced = coerce_value_for_type(column_type, value);
         let base = self.get_cell_base(row, col);
         let old = self.get_cell(row, col);
 
@@ -618,6 +620,7 @@ impl MutableColumnarTable {
             map.insert(row, coerced.clone());
         }
 
+        self.maybe_clear_cache_for_dict_growth(col, &coerced);
         let recompute = self.columns[col].apply_update(&old, &coerced);
         if recompute {
             self.recompute_min_max(col);
@@ -664,6 +667,33 @@ impl MutableColumnarTable {
     fn flush_all(&mut self) {
         for column in &mut self.columns {
             column.flush();
+        }
+    }
+
+    fn maybe_clear_cache_for_dict_growth(&mut self, col: usize, value: &Value) {
+        let Value::String(s) = value else {
+            return;
+        };
+
+        let (dict_ref_count, contains) = match self.columns.get(col) {
+            Some(MutableColumn::Dict(c)) => {
+                (Arc::strong_count(&c.dictionary), c.dict_map.contains_key(s.as_ref()))
+            }
+            _ => return,
+        };
+
+        if contains {
+            return;
+        }
+
+        // If the dictionary is currently shared (e.g. referenced by cached decoded pages), growing
+        // it would trigger an `Arc::make_mut` clone of the entire dictionary Vec. To keep string
+        // appends cheap, clear the page cache first so the dictionary is likely uniquely owned.
+        if dict_ref_count > 1 {
+            self.cache
+                .lock()
+                .expect("columnar page cache poisoned")
+                .clear();
         }
     }
 
