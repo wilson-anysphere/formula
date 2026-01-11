@@ -107,6 +107,13 @@ async function main() {
   );
 
   await benchKernel(
+    "groupByCount",
+    async () => engineCpu.groupByCount(keys),
+    async () => engineExcel.groupByCount(keys),
+    async () => engineFast.groupByCount(keys)
+  );
+
+  await benchKernel(
     "hashJoin",
     async () => engineCpu.hashJoin(joinLeftKeys, joinRightKeys),
     async () => engineExcel.hashJoin(joinLeftKeys, joinRightKeys),
