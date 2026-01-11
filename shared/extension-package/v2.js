@@ -53,6 +53,16 @@ function normalizePath(relPath) {
   if (parts.some((p) => p.includes(":"))) {
     throw new Error(`Invalid path in extension package: ${relPath}`);
   }
+  // Cross-platform safety: Windows strips trailing dots/spaces, and also reserves certain device names.
+  const windowsReservedRe = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+  for (const part of parts) {
+    if (part.endsWith(" ") || part.endsWith(".")) {
+      throw new Error(`Invalid path in extension package: ${relPath}`);
+    }
+    if (windowsReservedRe.test(part)) {
+      throw new Error(`Invalid path in extension package: ${relPath}`);
+    }
+  }
   return parts.join("/");
 }
 

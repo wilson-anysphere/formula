@@ -310,6 +310,21 @@ test("v2 rejects non-integer sizes in checksums.json", () => {
   assert.throws(() => verifyExtensionPackageV2(archive, key.publicKeyPem), /invalid size/i);
 });
 
+test("v2 rejects ':' in tar entry paths", () => {
+  const archive = createTarArchive([{ name: "files/a:b.txt", data: Buffer.from("x") }]);
+  assert.throws(() => readExtensionPackageV2(archive), /invalid path/i);
+});
+
+test("v2 rejects Windows reserved device names in paths", () => {
+  const archive = createTarArchive([{ name: "files/CON.txt", data: Buffer.from("x") }]);
+  assert.throws(() => readExtensionPackageV2(archive), /invalid path/i);
+});
+
+test("v2 rejects path segments with trailing dot/space", () => {
+  const archive = createTarArchive([{ name: "files/bad./x.txt", data: Buffer.from("x") }]);
+  assert.throws(() => readExtensionPackageV2(archive), /invalid path/i);
+});
+
 test("marketplace store accepts v1 packages during transition", async (t) => {
   try {
     requireFromHere.resolve("sql.js");

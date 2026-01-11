@@ -239,6 +239,11 @@ function isAllowedFilePath(filePath) {
   const parts = normalized.split("/");
   if (parts.some((p) => p === "" || p === "." || p === "..")) return false;
   if (parts.some((p) => p.includes(":"))) return false;
+  const windowsReservedRe = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+  for (const part of parts) {
+    if (part.endsWith(" ") || part.endsWith(".")) return false;
+    if (windowsReservedRe.test(part)) return false;
+  }
 
   const lower = normalized.toLowerCase();
   const ext = path.extname(lower);

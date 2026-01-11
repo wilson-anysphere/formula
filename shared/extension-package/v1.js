@@ -90,6 +90,15 @@ function safeJoin(baseDir, relPath) {
   if (parts.some((p) => p.includes(":"))) {
     throw new Error(`Invalid path in extension package: ${relPath}`);
   }
+  const windowsReservedRe = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+  for (const part of parts) {
+    if (part.endsWith(" ") || part.endsWith(".")) {
+      throw new Error(`Invalid path in extension package: ${relPath}`);
+    }
+    if (windowsReservedRe.test(part)) {
+      throw new Error(`Invalid path in extension package: ${relPath}`);
+    }
+  }
   const full = path.join(baseDir, normalized);
   const relative = path.relative(baseDir, full);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
