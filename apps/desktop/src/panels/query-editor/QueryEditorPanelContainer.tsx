@@ -7,6 +7,7 @@ import { parseCronExpression } from "../../../../../packages/power-query/src/cro
 import { parseA1 } from "../../document/coords.js";
 
 import { applyQueryToDocument, type QuerySheetDestination } from "../../power-query/applyToDocument.js";
+import { enqueueApplyForDocument } from "../../power-query/applyQueue.js";
 import { maybeGetPowerQueryDlpContext } from "../../power-query/dlpContext.js";
 import { createDesktopQueryEngine, getContextForDocument } from "../../power-query/engine.js";
 import { DesktopPowerQueryRefreshManager } from "../../power-query/refresh.js";
@@ -449,17 +450,19 @@ export function QueryEditorPanelContainer(props: Props) {
 
     try {
       setRefreshEvent({ type: "apply:started", jobId, queryId: current.id, destination });
-      const result = await applyQueryToDocument(doc, current, destination, {
-        engine,
-        context: queryContext,
-        batchSize: 1024,
-        signal: controller.signal,
-        onProgress: (evt) => {
-          if (evt.type === "batch") {
-            setRefreshEvent({ type: "apply:progress", jobId, queryId: current.id, rowsWritten: evt.totalRowsWritten });
-          }
-        },
-      });
+      const result = await enqueueApplyForDocument(doc, () =>
+        applyQueryToDocument(doc, current, destination, {
+          engine,
+          context: queryContext,
+          batchSize: 1024,
+          signal: controller.signal,
+          onProgress: (evt) => {
+            if (evt.type === "batch") {
+              setRefreshEvent({ type: "apply:progress", jobId, queryId: current.id, rowsWritten: evt.totalRowsWritten });
+            }
+          },
+        }),
+      );
       setRefreshEvent({ type: "apply:completed", jobId, queryId: current.id, result });
       setQuery({ ...current, destination });
     } catch (err: any) {

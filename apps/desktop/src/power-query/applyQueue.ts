@@ -4,12 +4,18 @@ import type { DocumentController } from "../document/documentController.js";
 // apply operations can corrupt undo grouping and prevent cancellation from reverting
 // partial writes. Serialize apply work per-document across all orchestrator instances.
 
-const APPLY_QUEUE_BY_DOC: WeakMap<DocumentController, Promise<void>> = new WeakMap();
+const APPLY_QUEUE_BY_DOC: WeakMap<DocumentController, Promise<unknown>> = new WeakMap();
 
-export function enqueueApplyForDocument(doc: DocumentController, work: () => Promise<void>): Promise<void> {
+export function enqueueApplyForDocument<T>(doc: DocumentController, work: () => Promise<T>): Promise<T> {
   const prior = APPLY_QUEUE_BY_DOC.get(doc) ?? Promise.resolve();
-  const next = prior.then(work).catch(() => {});
-  APPLY_QUEUE_BY_DOC.set(doc, next);
-  return next;
+  const resultPromise = prior.then(work);
+  // Keep the internal queue in a resolved state so subsequent work always runs.
+  APPLY_QUEUE_BY_DOC.set(
+    doc,
+    resultPromise.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return resultPromise;
 }
-
