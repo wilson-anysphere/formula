@@ -872,19 +872,18 @@ export class CollabSession {
         // (old clients could otherwise overwrite encrypted content).
         let cellData = this.cells.get(cellKey);
         let cell = getYMapCell(cellData);
-        if (cell?.get("enc") !== undefined) {
+        if (!cell) {
+          cell = new Y.Map();
+          this.cells.set(cellKey, cell);
+        }
+
+        if (cell.get("enc") !== undefined) {
           throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
         }
 
         monitor.setLocalFormula(cellKey, formula ?? "");
         // We don't sync calculated values. Clearing `value` marks the cell dirty
         // for the local formula engine to recompute.
-        cellData = this.cells.get(cellKey);
-        cell = getYMapCell(cellData);
-        if (!cell) {
-          cell = new Y.Map();
-          this.cells.set(cellKey, cell);
-        }
         cell.set("value", null);
       });
       return;

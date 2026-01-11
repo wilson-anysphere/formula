@@ -165,15 +165,13 @@ export class CellStructuralConflictMonitor {
  
     const tx = extractTransactionChanges(events, this.cells);
     if (!tx) return;
- 
+
     const beforeState = encodeStateVector(transaction.beforeState);
-    const afterState = encodeStateVector(transaction.afterState);
     const txId = crypto.randomUUID();
     const createdAt = Date.now();
- 
     /** @type {Array<any>} */
     const records = [];
- 
+
     for (const move of tx.moves) {
       records.push({
         id: crypto.randomUUID(),
@@ -182,7 +180,6 @@ export class CellStructuralConflictMonitor {
         userId: this.localUserId,
         createdAt,
         beforeState,
-        afterState,
         touchedCells: tx.touchedCells,
         fromCellKey: move.fromCellKey,
         toCellKey: move.toCellKey,
@@ -199,7 +196,6 @@ export class CellStructuralConflictMonitor {
         userId: this.localUserId,
         createdAt,
         beforeState,
-        afterState,
         touchedCells: tx.touchedCells,
         cellKey: del.cellKey,
         before: del.before,
@@ -216,7 +212,6 @@ export class CellStructuralConflictMonitor {
         userId: this.localUserId,
         createdAt,
         beforeState,
-        afterState,
         touchedCells: tx.touchedCells,
         cellKey: edit.cellKey,
         before: edit.before,
@@ -227,9 +222,25 @@ export class CellStructuralConflictMonitor {
         formatChanged: edit.formatChanged
       });
     }
- 
+
     if (records.length === 0) return;
- 
+
+    // `transaction.afterState` only advances when a transaction inserts new
+    // structs. Pure deletions (DeleteSet-only transactions) leave the state
+    // vector unchanged, which would make delete-vs-edit conflicts look
+    // causally ordered when they were actually concurrent.
+    //
+    // We always write these records into `_ops` in a follow-up transaction that
+    // *does* insert new structs (one per record). Predict that follow-up state
+    // vector by bumping the local client's clock by the number of records.
+    const afterStateVector = new Map(transaction.afterState);
+    const clientId = this.doc.clientID;
+    afterStateVector.set(clientId, (afterStateVector.get(clientId) ?? 0) + records.length);
+    const afterState = encodeStateVector(afterStateVector);
+    for (const record of records) {
+      record.afterState = afterState;
+    }
+
     // Store operation records in a shared log so other clients can compare
     // state vectors and detect true concurrency.
     this.doc.transact(() => {
@@ -780,12 +791,45 @@ export class CellStructuralConflictMonitor {
    };
   }
  
- /**
-  * @param {any} cellData
-  * @returns {NormalizedCell | null}
-  */
- function normalizeCell(cellData) {
-   if (cellData == null) return null;
+  /**
+   * @param {any} cellData
+   * @returns {NormalizedCell | null}
+   */
+  function readDeletedYMapValue(map, key) {
+    // When a nested Y.Map is removed from its parent (e.g. `cells.delete(cellKey)`),
+    // Yjs marks the nested map's items as deleted before deep observers run.
+    // As a result, `map.get(key)` can return `undefined` even though the previous
+    // value is still present on the deleted `Item` content.
+    //
+    // We only attempt to recover values when the map itself is deleted (its
+    // integration item is deleted). For normal in-place edits, deleted entries
+    // should remain `undefined`.
+    if (!map || typeof map !== "object") return undefined;
+    const item = map._item;
+    if (!item || item.deleted !== true) return undefined;
+
+    const entries = map._map;
+    if (!(entries instanceof Map)) return undefined;
+    const entry = entries.get(key);
+    const content = entry?.content;
+    if (content && Array.isArray(content.arr) && content.arr.length > 0) {
+      return content.arr[0];
+    }
+    if (content && content.type !== undefined) {
+      return content.type;
+    }
+    return undefined;
+  }
+
+  function readYMapValue(map, key) {
+    if (!map || typeof map.get !== "function") return undefined;
+    const direct = map.get(key);
+    if (direct !== undefined) return direct;
+    return readDeletedYMapValue(map, key);
+  }
+
+  function normalizeCell(cellData) {
+    if (cellData == null) return null;
  
    /** @type {any} */
    let value = null;
@@ -795,16 +839,16 @@ export class CellStructuralConflictMonitor {
    let enc = null;
    /** @type {Record<string, unknown> | null} */
    let format = null;
- 
-   if (isYMap(cellData)) {
-     value = cellData.get("value") ?? null;
-     formula = cellData.get("formula") ?? null;
-     enc = cellData.get("enc") ?? null;
-     format = cellData.get("format") ?? cellData.get("style") ?? null;
-   } else if (typeof cellData === "object") {
-     value = cellData.value ?? null;
-     formula = cellData.formula ?? null;
-     enc = cellData.enc ?? null;
+
+    if (isYMap(cellData)) {
+      value = readYMapValue(cellData, "value") ?? null;
+      formula = readYMapValue(cellData, "formula") ?? null;
+      enc = readYMapValue(cellData, "enc") ?? null;
+      format = (readYMapValue(cellData, "format") ?? readYMapValue(cellData, "style")) ?? null;
+    } else if (typeof cellData === "object") {
+      value = cellData.value ?? null;
+      formula = cellData.formula ?? null;
+      enc = cellData.enc ?? null;
      format = cellData.format ?? cellData.style ?? null;
    } else {
      value = cellData;
