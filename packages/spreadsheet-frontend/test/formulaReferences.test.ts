@@ -60,6 +60,14 @@ describe("assignFormulaReferenceColors", () => {
     expect(colored.map((r) => r.color)).toEqual([FORMULA_REFERENCE_PALETTE[0], FORMULA_REFERENCE_PALETTE[1]]);
   });
 
+  it("reuses the same color for repeated references within a formula", () => {
+    const { references } = extractFormulaReferences("=A1+A1", 0, 0);
+    const { colored } = assignFormulaReferenceColors(references, null);
+    expect(colored).toHaveLength(2);
+    expect(colored[0]?.color).toBe(FORMULA_REFERENCE_PALETTE[0]);
+    expect(colored[1]?.color).toBe(FORMULA_REFERENCE_PALETTE[0]);
+  });
+
   it("reuses colors for the same reference text across edits", () => {
     const first = extractFormulaReferences("=A1+B1", 0, 0).references;
     const { colored: coloredFirst, nextByText } = assignFormulaReferenceColors(first, null);
@@ -74,6 +82,20 @@ describe("assignFormulaReferenceColors", () => {
     expect(coloredSecond.map((r) => [r.text, r.color])).toEqual([
       ["B1", FORMULA_REFERENCE_PALETTE[1]],
       ["A1", FORMULA_REFERENCE_PALETTE[0]]
+    ]);
+  });
+
+  it("preserves existing reference colors when a new reference is inserted earlier", () => {
+    const initialRefs = extractFormulaReferences("=A1+B1", 0, 0).references;
+    const { nextByText } = assignFormulaReferenceColors(initialRefs, null);
+
+    const editedRefs = extractFormulaReferences("=C1+A1+B1", 0, 0).references;
+    const { colored } = assignFormulaReferenceColors(editedRefs, nextByText);
+
+    expect(colored.map((r) => [r.text, r.color])).toEqual([
+      ["C1", FORMULA_REFERENCE_PALETTE[2]],
+      ["A1", FORMULA_REFERENCE_PALETTE[0]],
+      ["B1", FORMULA_REFERENCE_PALETTE[1]]
     ]);
   });
 });

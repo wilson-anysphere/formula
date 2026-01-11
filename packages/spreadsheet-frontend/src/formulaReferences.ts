@@ -81,21 +81,40 @@ export function assignFormulaReferenceColors(
   const usedColors = new Set<string>();
   const nextByText = new Map<string, string>();
 
-  const colored = references.map((reference) => {
-    let color = prev.get(reference.text);
-    if (color && usedColors.has(color)) color = undefined;
+  // Build a stable list of unique references (by text), preserving first-appearance order.
+  const uniqueByText: Array<{ text: string; firstIndex: number }> = [];
+  for (const reference of references) {
+    if (nextByText.has(reference.text)) continue;
+    nextByText.set(reference.text, "");
+    uniqueByText.push({ text: reference.text, firstIndex: reference.index });
+  }
+  // Reset placeholders; we'll fill them in deterministically below.
+  nextByText.clear();
 
-    if (!color) {
-      color =
-        FORMULA_REFERENCE_PALETTE.find((candidate) => !usedColors.has(candidate)) ??
-        FORMULA_REFERENCE_PALETTE[reference.index % FORMULA_REFERENCE_PALETTE.length]!;
-    }
-
+  // First pass: reuse previous colors for any references that still exist, so inserting a new
+  // reference earlier in the formula doesn't "steal" colors from existing refs.
+  for (const entry of uniqueByText) {
+    const color = prev.get(entry.text);
+    if (!color) continue;
+    if (usedColors.has(color)) continue;
+    nextByText.set(entry.text, color);
     usedColors.add(color);
-    if (!nextByText.has(reference.text)) nextByText.set(reference.text, color);
-    return { ...reference, color };
-  });
+  }
 
+  // Second pass: assign fresh colors to new references (or ones whose previous color
+  // collided), walking the Excel-ish palette in order.
+  for (const entry of uniqueByText) {
+    if (nextByText.has(entry.text)) continue;
+
+    const color =
+      FORMULA_REFERENCE_PALETTE.find((candidate) => !usedColors.has(candidate)) ??
+      FORMULA_REFERENCE_PALETTE[entry.firstIndex % FORMULA_REFERENCE_PALETTE.length]!;
+
+    nextByText.set(entry.text, color);
+    usedColors.add(color);
+  }
+
+  const colored = references.map((reference) => ({ ...reference, color: nextByText.get(reference.text)! }));
   return { colored, nextByText };
 }
 
