@@ -366,20 +366,30 @@ export class CpuBackend {
       );
     }
 
-    /** @type {Map<number, number[]>} */
+    /** @type {Map<number, number | number[]>} */
     const rightMap = new Map();
     for (let j = 0; j < rightKeys.length; j++) {
       const k = rightKeys[j];
-      const arr = rightMap.get(k);
-      if (arr) arr.push(j);
-      else rightMap.set(k, [j]);
+      const existing = rightMap.get(k);
+      if (existing === undefined) {
+        rightMap.set(k, j);
+      } else if (typeof existing === "number") {
+        rightMap.set(k, [existing, j]);
+      } else {
+        existing.push(j);
+      }
     }
 
     let total = 0;
     for (let i = 0; i < leftKeys.length; i++) {
-      const arr = rightMap.get(leftKeys[i]);
-      if (arr) total += arr.length;
-      else if (joinType === "left") total += 1;
+      const entry = rightMap.get(leftKeys[i]);
+      if (entry === undefined) {
+        if (joinType === "left") total += 1;
+      } else if (typeof entry === "number") {
+        total += 1;
+      } else {
+        total += entry.length;
+      }
     }
 
     const leftIndex = new Uint32Array(total);
@@ -387,12 +397,18 @@ export class CpuBackend {
 
     let p = 0;
     for (let i = 0; i < leftKeys.length; i++) {
-      const arr = rightMap.get(leftKeys[i]);
-      if (arr) {
-        for (let k = 0; k < arr.length; k++) {
+      const entry = rightMap.get(leftKeys[i]);
+      if (entry !== undefined) {
+        if (typeof entry === "number") {
           leftIndex[p] = i;
-          rightIndex[p] = arr[k];
+          rightIndex[p] = entry;
           p += 1;
+        } else {
+          for (let k = 0; k < entry.length; k++) {
+            leftIndex[p] = i;
+            rightIndex[p] = entry[k];
+            p += 1;
+          }
         }
       } else if (joinType === "left") {
         leftIndex[p] = i;
