@@ -454,6 +454,40 @@ class SyncManager {
 
 ### Offline Support
 
+In production, Formula treats collaboration as **offline-first** by persisting the local Yjs
+CRDT state across app restarts. When a client reconnects, Yjs automatically merges any offline
+changes with remote updates.
+
+`@formula/collab-session` supports this via a pluggable persistence layer (see
+`@formula/collab-persistence`):
+
+```ts
+import { createCollabSession } from "@formula/collab-session";
+import { IndexedDbCollabPersistence } from "@formula/collab-persistence/indexeddb";
+
+const session = createCollabSession({
+  docId,
+  // Browser: persist CRDT updates to IndexedDB.
+  persistence: new IndexedDbCollabPersistence(),
+  connection: { wsUrl, docId, token },
+});
+
+// Ensures local persisted state is applied into the Y.Doc before the sync provider connects.
+await session.whenLocalPersistenceLoaded();
+```
+
+Node/desktop environments can use `FileCollabPersistence` instead:
+
+```ts
+import { FileCollabPersistence } from "@formula/collab-persistence/file";
+
+const session = createCollabSession({
+  docId,
+  persistence: new FileCollabPersistence("/path/to/app-data-dir"),
+  connection: { wsUrl, docId, token },
+});
+```
+
 ```typescript
 import { IndexeddbPersistence } from "y-indexeddb";
 
