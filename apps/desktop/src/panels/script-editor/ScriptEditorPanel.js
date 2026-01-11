@@ -104,11 +104,13 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
 }
 
 function defaultScript() {
-  return `// Example: read a range, compute sum, write result
-const values = await ctx.activeSheet.getRange("A1:A3").getValues();
-const sum = values.flat().reduce((acc, v) => acc + (typeof v === "number" ? v : 0), 0);
+  return `export default async function main(ctx: ScriptContext) {
+  // Example: read a range, compute sum, write result
+  const values = await ctx.activeSheet.getRange("A1:A3").getValues();
+  const sum = values.flat().reduce((acc, v) => acc + (typeof v === "number" ? v : 0), 0);
 
-await ctx.activeSheet.getRange("B1").setValue(sum);
-ctx.ui.log("sum =", sum);
+  await ctx.activeSheet.getRange("B1").setValue(sum);
+  ctx.ui.log("sum =", sum);
+}
 `;
 }

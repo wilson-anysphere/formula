@@ -18,11 +18,13 @@ test("scripting: runs TypeScript in a WebWorker with RPC + network sandbox", asy
     const runtime = new ScriptRuntime(workbook);
 
     const mainRun = await runtime.run(`
-await ctx.workbook.setSelection("Sheet1", "A1:B1");
-const values = await ctx.activeSheet.getRange("A1:B1").getValues();
-await ctx.activeSheet.getRange("C1").setValue(values[0][0] + values[0][1]);
-await ctx.activeSheet.getRange("A1:B1").setFormat({ bold: true });
-ctx.ui.log("sum", values[0][0] + values[0][1]);
+export default async function main(ctx) {
+  await ctx.workbook.setSelection("Sheet1", "A1:B1");
+  const values = await ctx.activeSheet.getRange("A1:B1").getValues();
+  await ctx.activeSheet.getRange("C1").setValue(values[0][0] + values[0][1]);
+  await ctx.activeSheet.getRange("A1:B1").setFormat({ bold: true });
+  ctx.ui.log("sum", values[0][0] + values[0][1]);
+}
 `);
 
     const computed = sheet.getRange("C1").getValue();
@@ -30,13 +32,17 @@ ctx.ui.log("sum", values[0][0] + values[0][1]);
     const selection = workbook.getSelection();
 
     const blockedNetwork = await runtime.run(`
-await ctx.fetch("https://example.com");
+export default async function main(ctx) {
+  await ctx.fetch("https://example.com");
+}
 `);
 
     const allowlistedNetwork = await runtime.run(
       `
-const res = await ctx.fetch("/scripting-test.html");
-ctx.ui.log("status", res.status);
+export default async function main(ctx) {
+  const res = await ctx.fetch("/scripting-test.html");
+  ctx.ui.log("status", res.status);
+}
 `,
       {
         permissions: { network: "allowlist", networkAllowlist: ["localhost"] },
@@ -45,7 +51,9 @@ ctx.ui.log("status", res.status);
 
     const allowlistDenied = await runtime.run(
       `
-await ctx.fetch("https://example.com");
+export default async function main(ctx) {
+  await ctx.fetch("https://example.com");
+}
 `,
       {
         permissions: { network: "allowlist", networkAllowlist: ["localhost"] },
@@ -54,7 +62,9 @@ await ctx.fetch("https://example.com");
 
     const allowlistWebSocketDenied = await runtime.run(
       `
-new WebSocket("wss://example.com");
+export default async function main(ctx) {
+  new WebSocket("wss://example.com");
+}
 `,
       {
         permissions: { network: "allowlist", networkAllowlist: ["localhost"] },

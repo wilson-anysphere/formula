@@ -175,10 +175,37 @@ function compileTypeScript(tsSource) {
   return result.outputText;
 }
 
+function compileTypeScriptModule(tsSource) {
+  const result = ts.transpileModule(tsSource, {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.CommonJS,
+    },
+    reportDiagnostics: true,
+    fileName: "user-script.ts",
+  });
+
+  const diagnostics = (result.diagnostics || []).filter((d) => d.category === ts.DiagnosticCategory.Error);
+  if (diagnostics.length > 0) {
+    const formatHost = {
+      getCanonicalFileName: (f) => f,
+      getCurrentDirectory: () => "",
+      getNewLine: () => "\n",
+    };
+    const message = ts.formatDiagnostics(diagnostics, formatHost);
+    throw new Error(message);
+  }
+
+  return result.outputText;
+}
+
 async function runUserScript({ code, activeSheetName, selection, permissions }) {
   applyNetworkSandbox(permissions ?? {});
 
-  const jsSource = `${compileTypeScript(code)}\n//# sourceURL=user-script.js\nreturn __formulaUserMain(ctx);`;
+  const isModule = /\bexport\s+default\b/.test(code);
+  const jsSource = isModule
+    ? `${compileTypeScriptModule(code)}\n//# sourceURL=user-script.js`
+    : `${compileTypeScript(code)}\n//# sourceURL=user-script.js\nreturn __formulaUserMain(ctx);`;
 
   const ctx = {
     workbook: createWorkbookProxy(),
@@ -191,15 +218,25 @@ async function runUserScript({ code, activeSheetName, selection, permissions }) 
     console: safeConsole,
   };
 
-  const runner = new Function(
-    "ctx",
-    "console",
-    "setTimeout",
-    "clearTimeout",
-    "setInterval",
-    "clearInterval",
-    `"use strict";\n${jsSource}`,
-  );
+  const runner = isModule
+    ? new Function(
+        "ctx",
+        "console",
+        "setTimeout",
+        "clearTimeout",
+        "setInterval",
+        "clearInterval",
+        `"use strict";\nconst exports = {};\nconst module = { exports };\n${jsSource}\nconst __formulaMain = module.exports?.default ?? exports.default;\nif (typeof __formulaMain !== \"function\") { throw new Error(\"Script must export a default function\"); }\nreturn __formulaMain(ctx);`,
+      )
+    : new Function(
+        "ctx",
+        "console",
+        "setTimeout",
+        "clearTimeout",
+        "setInterval",
+        "clearInterval",
+        `"use strict";\n${jsSource}`,
+      );
 
   const result = runner(ctx, safeConsole, setTimeout, clearTimeout, setInterval, clearInterval);
   await result;

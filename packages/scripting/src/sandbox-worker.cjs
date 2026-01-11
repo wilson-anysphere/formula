@@ -163,8 +163,37 @@ function compileTypeScript(tsSource) {
   return result.outputText;
 }
 
+function compileTypeScriptModule(tsSource) {
+  if (!ts) {
+    throw new Error("TypeScript compiler is required to run module-style scripts");
+  }
+
+  const result = ts.transpileModule(tsSource, {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.CommonJS,
+    },
+    reportDiagnostics: true,
+    fileName: "user-script.ts",
+  });
+
+  const diagnostics = (result.diagnostics || []).filter((d) => d.category === ts.DiagnosticCategory.Error);
+  if (diagnostics.length > 0) {
+    const formatHost = {
+      getCanonicalFileName: (f) => f,
+      getCurrentDirectory: () => "",
+      getNewLine: () => "\n",
+    };
+    const message = ts.formatDiagnostics(diagnostics, formatHost);
+    throw new Error(message);
+  }
+
+  return result.outputText;
+}
+
 async function runUserScript(tsSource) {
-  const jsSource = compileTypeScript(tsSource);
+  const isModule = /\bexport\s+default\b/.test(tsSource);
+  const jsSource = isModule ? compileTypeScriptModule(tsSource) : compileTypeScript(tsSource);
 
   const networkSandbox = applyNetworkSandbox(workerData.permissions ?? {});
 
@@ -180,6 +209,7 @@ async function runUserScript(tsSource) {
   };
 
   const sandbox = {
+    exports: {},
     ctx,
     console: safeConsole,
     setTimeout,
@@ -189,6 +219,7 @@ async function runUserScript(tsSource) {
     fetch: networkSandbox.fetch,
     WebSocket: networkSandbox.WebSocket,
   };
+  sandbox.module = { exports: sandbox.exports };
   sandbox.globalThis = sandbox;
 
   const context = vm.createContext(sandbox, {
@@ -197,7 +228,19 @@ async function runUserScript(tsSource) {
 
   const script = new vm.Script(jsSource, { filename: "user-script.js" });
   const result = script.runInContext(context);
-  await result;
+
+  if (!isModule) {
+    await result;
+    return;
+  }
+
+  // Module-style script: `export default async function main(ctx) { ... }`.
+  const exported = sandbox.module?.exports?.default ?? sandbox.exports?.default;
+  if (typeof exported !== "function") {
+    throw new Error("Script must export a default function");
+  }
+
+  await exported(ctx);
 }
 
 parentPort.on("message", async (message) => {

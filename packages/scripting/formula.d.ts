@@ -3,16 +3,16 @@
 // This file is intended for editor tooling (Monaco) and does not need to be
 // imported by application code.
 
-export type CellValue = string | number | boolean | null;
+type CellValue = string | number | boolean | null;
 
-export interface CellFormat {
+interface CellFormat {
   bold?: boolean;
   italic?: boolean;
   numberFormat?: string;
   backgroundColor?: string;
 }
 
-export interface Range {
+interface Range {
   readonly address: string;
   getValues(): Promise<CellValue[][]>;
   setValues(values: CellValue[][]): Promise<void>;
@@ -22,23 +22,23 @@ export interface Range {
   setFormat(format: Partial<CellFormat>): Promise<void>;
 }
 
-export interface Sheet {
+interface Sheet {
   readonly name: string;
   getRange(address: string): Range;
 }
 
-export interface Workbook {
+interface Workbook {
   getSheet(name: string): Sheet;
   setSelection(sheetName: string, address: string): Promise<void>;
   getSelection(): Promise<{ sheetName: string; address: string }>;
   getActiveSheetName(): Promise<string>;
 }
 
-export interface UIHelpers {
+interface UIHelpers {
   log(...args: unknown[]): void;
 }
 
-export interface ScriptContext {
+interface ScriptContext {
   workbook: Workbook;
   activeSheet: Sheet;
   selection: Range;
