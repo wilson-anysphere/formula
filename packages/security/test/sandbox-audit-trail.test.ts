@@ -36,7 +36,7 @@ describe("Sandbox audit trail", () => {
       code: `await fs.readFile(${JSON.stringify(filePath)}, "utf8");\nreturn null;`
     });
 
-    const types = events.map((e) => [e.eventType, e.metadata?.phase ?? null]);
+    const types = events.map((e) => [e.eventType, e.details?.phase ?? null]);
 
     // Ensure ordering within the run.
     expect(types[0]).toEqual(["security.extension.run", "start"]);
@@ -50,4 +50,3 @@ describe("Sandbox audit trail", () => {
     expect(opIdx).toBeGreaterThan(permIdx);
   });
 });
-
