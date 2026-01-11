@@ -1,7 +1,10 @@
 use crate::tables::{write_table_xml, TABLE_REL_TYPE};
 use crate::styles::StylesPart;
-use formula_model::{normalize_formula_text, Cell, CellRef, CellValue, Workbook, Worksheet};
-use std::collections::{BTreeMap, HashMap};
+use formula_model::{
+    normalize_formula_text, Cell, CellRef, CellValue, Hyperlink, HyperlinkTarget, Range,
+    SheetVisibility, Workbook, Worksheet,
+};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{Seek, Write};
 use std::path::Path;
@@ -96,20 +99,14 @@ pub fn write_workbook_to_writer<W: Write + Seek>(workbook: &Workbook, writer: W)
     for (idx, sheet) in workbook.sheets.iter().enumerate() {
         let sheet_number = idx + 1;
         let sheet_path = format!("xl/worksheets/sheet{sheet_number}.xml");
+        let (sheet_xml, sheet_rels) =
+            sheet_xml(sheet, &shared_strings, &table_parts_by_sheet[idx], &style_to_xf)?;
         zip.start_file(&sheet_path, options)?;
-        zip.write_all(
-            sheet_xml(
-                sheet,
-                &shared_strings,
-                &table_parts_by_sheet[idx],
-                &style_to_xf,
-            )
-            .as_bytes(),
-        )?;
+        zip.write_all(sheet_xml.as_bytes())?;
 
         let rels_path = format!("xl/worksheets/_rels/sheet{sheet_number}.xml.rels");
         zip.start_file(&rels_path, options)?;
-        zip.write_all(sheet_rels_xml(&table_parts_by_sheet[idx]).as_bytes())?;
+        zip.write_all(sheet_rels.as_bytes())?;
     }
 
     let _writer = zip.finish()?;
@@ -129,11 +126,17 @@ fn workbook_xml(workbook: &Workbook) -> String {
     let mut sheets_xml = String::new();
     for (idx, sheet) in workbook.sheets.iter().enumerate() {
         let sheet_id = idx + 1;
+        let state = match sheet.visibility {
+            SheetVisibility::Visible => "",
+            SheetVisibility::Hidden => r#" state="hidden""#,
+            SheetVisibility::VeryHidden => r#" state="veryHidden""#,
+        };
         sheets_xml.push_str(&format!(
-            r#"<sheet name="{}" sheetId="{}" r:id="rId{}"/>"#,
+            r#"<sheet name="{}" sheetId="{}" r:id="rId{}"{} />"#,
             escape_xml(&sheet.name),
             sheet_id,
-            sheet_id
+            sheet_id,
+            state
         ));
     }
 
@@ -204,7 +207,7 @@ fn sheet_xml(
     shared_strings: &SharedStrings,
     table_parts: &[(String, String)],
     style_to_xf: &HashMap<u32, u32>,
-) -> String {
+) -> Result<(String, String), XlsxWriteError> {
     // Excel expects rows in ascending order.
     let mut rows: BTreeMap<u32, Vec<(u32, CellRef, &Cell)>> = BTreeMap::new();
     for (cell_ref, cell) in sheet.iter_cells() {
@@ -240,7 +243,7 @@ fn sheet_xml(
         )
     };
 
-    format!(
+    let mut xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheetData>
@@ -249,7 +252,96 @@ fn sheet_xml(
   {}
 </worksheet>"#,
         sheet_data, table_parts_xml
-    )
+    );
+
+    if sheet.tab_color.is_some() {
+        xml = crate::sheet_metadata::write_sheet_tab_color(&xml, sheet.tab_color.as_ref())
+            .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+    }
+
+    let mut merges: Vec<Range> = sheet
+        .merged_regions
+        .iter()
+        .map(|region| region.range)
+        .filter(|range| !range.is_single_cell())
+        .collect();
+    merges.sort_by_key(|range| (range.start.row, range.start.col, range.end.row, range.end.col));
+    if !merges.is_empty() {
+        xml = crate::merge_cells::update_worksheet_xml(&xml, &merges)
+            .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+    }
+
+    // Generate a safe set of hyperlink relationship IDs for this sheet.
+    let mut used_rel_ids: HashSet<String> =
+        table_parts.iter().map(|(id, _)| id.clone()).collect();
+    let mut next_rel_id = used_rel_ids
+        .iter()
+        .filter_map(|id| id.strip_prefix("rId")?.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0)
+        + 1;
+
+    let mut links: Vec<Hyperlink> = sheet.hyperlinks.clone();
+    let mut target_by_rel_id: HashMap<String, String> = HashMap::new();
+    for link in &mut links {
+        let target = match &link.target {
+            HyperlinkTarget::ExternalUrl { uri } => Some(uri.as_str()),
+            HyperlinkTarget::Email { uri } => Some(uri.as_str()),
+            HyperlinkTarget::Internal { .. } => None,
+        };
+        let Some(target) = target else {
+            continue;
+        };
+
+        let mut rel_id = link.rel_id.clone();
+        let needs_new = match rel_id.as_deref() {
+            None => true,
+            Some(id) if used_rel_ids.contains(id) && !target_by_rel_id.contains_key(id) => true,
+            Some(id) => target_by_rel_id
+                .get(id)
+                .is_some_and(|existing| existing != target),
+        };
+        if needs_new {
+            loop {
+                let candidate = format!("rId{next_rel_id}");
+                next_rel_id += 1;
+                if used_rel_ids.insert(candidate.clone()) {
+                    rel_id = Some(candidate);
+                    break;
+                }
+            }
+        } else if let Some(id) = rel_id.as_ref() {
+            used_rel_ids.insert(id.clone());
+        }
+
+        let id = rel_id.expect("rel id ensured for external hyperlinks");
+        link.rel_id = Some(id.clone());
+        target_by_rel_id.entry(id).or_insert_with(|| target.to_string());
+    }
+
+    if !links.is_empty() {
+        xml = crate::update_worksheet_xml(&xml, &links)
+            .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+    }
+
+    let rels_xml = {
+        let base = sheet_rels_xml(table_parts);
+        // Only external hyperlinks need relationships; internal hyperlinks are stored as `location=`.
+        if links.iter().any(|link| {
+            matches!(
+                link.target,
+                HyperlinkTarget::ExternalUrl { .. } | HyperlinkTarget::Email { .. }
+            )
+        }) {
+            crate::update_worksheet_relationships(Some(&base), &links)
+                .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?
+                .unwrap_or_else(|| sheet_rels_xml(&[]))
+        } else {
+            base
+        }
+    };
+
+    Ok((xml, rels_xml))
 }
 
 fn cell_xml(
