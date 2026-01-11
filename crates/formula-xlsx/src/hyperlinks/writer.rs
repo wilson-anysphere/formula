@@ -67,7 +67,9 @@ fn parse_relationships(rels_xml: &str) -> Result<Vec<Relationship>, XlsxError> {
 /// Update the worksheet XML with a `<hyperlinks>` element representing `hyperlinks`.
 ///
 /// If the worksheet already contains `<hyperlinks>`, it is replaced. If it does not
-/// and `hyperlinks` is non-empty, the element is inserted before the closing `</worksheet>`.
+/// and `hyperlinks` is non-empty, the element is inserted before the end of the worksheet
+/// (preferably before late elements like `<tableParts>` / `<extLst>` to match Excel's
+/// expected element ordering).
 pub fn update_worksheet_xml(sheet_xml: &str, hyperlinks: &[Hyperlink]) -> Result<String, XlsxError> {
     let mut reader = Reader::from_str(sheet_xml);
     reader.config_mut().trim_text(false);
@@ -102,6 +104,15 @@ pub fn update_worksheet_xml(sheet_xml: &str, hyperlinks: &[Hyperlink]) -> Result
                 if !hyperlinks.is_empty() {
                     write_hyperlinks_block(&mut writer, hyperlinks)?;
                 }
+            }
+            Event::Start(ref e) | Event::Empty(ref e)
+                if !replaced
+                    && !hyperlinks.is_empty()
+                    && matches!(e.local_name().as_ref(), b"tableParts" | b"extLst") =>
+            {
+                write_hyperlinks_block(&mut writer, hyperlinks)?;
+                replaced = true;
+                writer.write_event(event.to_owned())?;
             }
             Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
                 if !replaced && !hyperlinks.is_empty() {
@@ -263,3 +274,32 @@ fn quote_sheet_name(name: &str) -> String {
     format!("'{escaped}'")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use formula_model::{CellRef, Range};
+
+    #[test]
+    fn update_inserts_before_table_parts_when_missing() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData/><tableParts count="1"><tablePart r:id="rId1"/></tableParts></worksheet>"#;
+        let links = vec![Hyperlink {
+            range: Range::from_a1("A1").unwrap(),
+            target: HyperlinkTarget::Internal {
+                sheet: "Sheet1".to_string(),
+                cell: CellRef::new(0, 0),
+            },
+            display: None,
+            tooltip: None,
+            rel_id: None,
+        }];
+
+        let updated = update_worksheet_xml(xml, &links).unwrap();
+
+        let links_pos = updated.find("<hyperlinks").expect("hyperlinks inserted");
+        let table_pos = updated.find("<tableParts").expect("tableParts exists");
+        assert!(
+            links_pos < table_pos,
+            "expected hyperlinks before tableParts, got:\n{updated}"
+        );
+    }
+}

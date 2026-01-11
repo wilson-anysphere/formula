@@ -55,7 +55,9 @@ pub fn write_worksheet_xml(merges: &[Range]) -> String {
 /// Update (or remove) a worksheet `<mergeCells>` section to match `merges`.
 ///
 /// If the worksheet already contains `<mergeCells>`, it is replaced. If it does not
-/// and `merges` is non-empty, the block is inserted before the closing `</worksheet>`.
+/// and `merges` is non-empty, the block is inserted before the end of the worksheet
+/// (preferably before late elements like `<tableParts>` / `<extLst>` to match Excel's
+/// expected element ordering).
 pub fn update_worksheet_xml(sheet_xml: &str, merges: &[Range]) -> Result<String, XlsxError> {
     let mut reader = Reader::from_str(sheet_xml);
     reader.config_mut().trim_text(false);
@@ -88,6 +90,15 @@ pub fn update_worksheet_xml(sheet_xml: &str, merges: &[Range]) -> Result<String,
                 if !merges.is_empty() {
                     write_merge_cells_block(&mut writer, merges)?;
                 }
+            }
+            Event::Start(ref e) | Event::Empty(ref e)
+                if !replaced
+                    && !merges.is_empty()
+                    && matches!(e.local_name().as_ref(), b"tableParts" | b"extLst") =>
+            {
+                write_merge_cells_block(&mut writer, merges)?;
+                replaced = true;
+                writer.write_event(event.to_owned())?;
             }
             Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
                 if !replaced && !merges.is_empty() {
@@ -124,4 +135,23 @@ fn write_merge_cells_block<W: std::io::Write>(
 
     writer.write_event(Event::End(BytesEnd::new("mergeCells")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_inserts_before_table_parts_when_missing() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData/><tableParts count="1"><tablePart r:id="rId1"/></tableParts></worksheet>"#;
+        let merges = vec![Range::from_a1("A1:B2").unwrap()];
+        let updated = update_worksheet_xml(xml, &merges).unwrap();
+
+        let merge_pos = updated.find("<mergeCells").expect("mergeCells inserted");
+        let table_pos = updated.find("<tableParts").expect("tableParts exists");
+        assert!(
+            merge_pos < table_pos,
+            "expected mergeCells before tableParts, got:\n{updated}"
+        );
+    }
 }
