@@ -3946,6 +3946,7 @@ fn analyze_expr_flags(
     let mut volatile = false;
     let mut thread_safe = true;
     let mut visiting_names = HashSet::new();
+    let mut lexical_scopes: Vec<HashSet<String>> = Vec::new();
     walk_expr_flags(
         expr,
         current_cell,
@@ -3954,6 +3955,7 @@ fn analyze_expr_flags(
         &mut volatile,
         &mut thread_safe,
         &mut visiting_names,
+        &mut lexical_scopes,
     );
     (names, volatile, thread_safe)
 }
@@ -3966,7 +3968,21 @@ fn walk_expr_flags(
     volatile: &mut bool,
     thread_safe: &mut bool,
     visiting_names: &mut HashSet<(SheetId, String)>,
+    lexical_scopes: &mut Vec<HashSet<String>>,
 ) {
+    fn name_is_local(scopes: &[HashSet<String>], name_key: &str) -> bool {
+        scopes.iter().rev().any(|scope| scope.contains(name_key))
+    }
+
+    fn bare_identifier(expr: &CompiledExpr) -> Option<String> {
+        match expr {
+            Expr::NameRef(nref) if matches!(nref.sheet, SheetReference::Current) => {
+                Some(normalize_defined_name(&nref.name))
+            }
+            _ => None,
+        }
+    }
+
     match expr {
         Expr::NameRef(nref) => {
             let Some(sheet) = resolve_sheet(&nref.sheet, current_cell.sheet) else {
@@ -3974,6 +3990,10 @@ fn walk_expr_flags(
             };
             let name_key = normalize_defined_name(&nref.name);
             if name_key.is_empty() {
+                return;
+            }
+
+            if name_is_local(lexical_scopes, &name_key) {
                 return;
             }
 
@@ -3999,6 +4019,7 @@ fn walk_expr_flags(
                         volatile,
                         thread_safe,
                         visiting_names,
+                        lexical_scopes,
                     );
                 }
             }
@@ -4006,11 +4027,38 @@ fn walk_expr_flags(
             visiting_names.remove(&visit_key);
         }
         Expr::Unary { expr, .. } | Expr::Postfix { expr, .. } => {
-            walk_expr_flags(expr, current_cell, workbook, names, volatile, thread_safe, visiting_names)
+            walk_expr_flags(
+                expr,
+                current_cell,
+                workbook,
+                names,
+                volatile,
+                thread_safe,
+                visiting_names,
+                lexical_scopes,
+            )
         }
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
-            walk_expr_flags(left, current_cell, workbook, names, volatile, thread_safe, visiting_names);
-            walk_expr_flags(right, current_cell, workbook, names, volatile, thread_safe, visiting_names);
+            walk_expr_flags(
+                left,
+                current_cell,
+                workbook,
+                names,
+                volatile,
+                thread_safe,
+                visiting_names,
+                lexical_scopes,
+            );
+            walk_expr_flags(
+                right,
+                current_cell,
+                workbook,
+                names,
+                volatile,
+                thread_safe,
+                visiting_names,
+                lexical_scopes,
+            );
         }
         Expr::FunctionCall { name, args, .. } => {
             if let Some(spec) = crate::functions::lookup_function(name) {
@@ -4020,21 +4068,151 @@ fn walk_expr_flags(
                 if spec.thread_safety == crate::functions::ThreadSafety::NotThreadSafe {
                     *thread_safe = false;
                 }
+
+                match spec.name {
+                    "LET" => {
+                        if args.len() < 3 || args.len() % 2 == 0 {
+                            return;
+                        }
+
+                        lexical_scopes.push(HashSet::new());
+                        for pair in args[..args.len() - 1].chunks_exact(2) {
+                            let Some(name_key) = bare_identifier(&pair[0]) else {
+                                lexical_scopes.pop();
+                                return;
+                            };
+
+                            walk_expr_flags(
+                                &pair[1],
+                                current_cell,
+                                workbook,
+                                names,
+                                volatile,
+                                thread_safe,
+                                visiting_names,
+                                lexical_scopes,
+                            );
+                            lexical_scopes.last_mut().expect("pushed scope").insert(name_key);
+                        }
+
+                        walk_expr_flags(
+                            &args[args.len() - 1],
+                            current_cell,
+                            workbook,
+                            names,
+                            volatile,
+                            thread_safe,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        lexical_scopes.pop();
+                        return;
+                    }
+                    "LAMBDA" => {
+                        if args.is_empty() {
+                            return;
+                        }
+
+                        let mut scope = HashSet::new();
+                        for param in &args[..args.len() - 1] {
+                            let Some(name_key) = bare_identifier(param) else {
+                                return;
+                            };
+                            if !scope.insert(name_key) {
+                                return;
+                            }
+                        }
+
+                        lexical_scopes.push(scope);
+                        walk_expr_flags(
+                            &args[args.len() - 1],
+                            current_cell,
+                            workbook,
+                            names,
+                            volatile,
+                            thread_safe,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        lexical_scopes.pop();
+                        return;
+                    }
+                    _ => {}
+                }
             } else {
-                // Placeholder: treat unknown/UDFs as non-thread-safe.
-                *thread_safe = false;
+                let name_key = normalize_defined_name(name);
+                let mut resolved_defined_name = None;
+                if !name_key.is_empty() && !name_is_local(lexical_scopes, &name_key) {
+                    names.insert(name_key.clone());
+
+                    let sheet = current_cell.sheet;
+                    let visit_key = (sheet, name_key.clone());
+                    if visiting_names.insert(visit_key.clone()) {
+                        resolved_defined_name = resolve_defined_name(workbook, sheet, &name_key);
+                        if let Some(def) = resolved_defined_name.as_ref() {
+                            if let Some(expr) = def.compiled.as_ref() {
+                                walk_expr_flags(
+                                    expr,
+                                    CellKey {
+                                        sheet,
+                                        addr: current_cell.addr,
+                                    },
+                                    workbook,
+                                    names,
+                                    volatile,
+                                    thread_safe,
+                                    visiting_names,
+                                    lexical_scopes,
+                                );
+                            }
+                        }
+                        visiting_names.remove(&visit_key);
+                    }
+                }
+
+                // Placeholder: treat unresolved UDFs as non-thread-safe.
+                if resolved_defined_name.is_none() {
+                    *thread_safe = false;
+                }
             }
             for a in args {
-                walk_expr_flags(a, current_cell, workbook, names, volatile, thread_safe, visiting_names);
+                walk_expr_flags(
+                    a,
+                    current_cell,
+                    workbook,
+                    names,
+                    volatile,
+                    thread_safe,
+                    visiting_names,
+                    lexical_scopes,
+                );
             }
         }
         Expr::ArrayLiteral { values, .. } => {
             for el in values.iter() {
-                walk_expr_flags(el, current_cell, workbook, names, volatile, thread_safe, visiting_names);
+                walk_expr_flags(
+                    el,
+                    current_cell,
+                    workbook,
+                    names,
+                    volatile,
+                    thread_safe,
+                    visiting_names,
+                    lexical_scopes,
+                );
             }
         }
         Expr::ImplicitIntersection(inner) | Expr::SpillRange(inner) => {
-            walk_expr_flags(inner, current_cell, workbook, names, volatile, thread_safe, visiting_names)
+            walk_expr_flags(
+                inner,
+                current_cell,
+                workbook,
+                names,
+                volatile,
+                thread_safe,
+                visiting_names,
+                lexical_scopes,
+            )
         }
         Expr::CellRef(_)
         | Expr::RangeRef(_)
@@ -4056,6 +4234,7 @@ fn analyze_calc_precedents(
 ) -> HashSet<Precedent> {
     let mut out = HashSet::new();
     let mut visiting_names = HashSet::new();
+    let mut lexical_scopes: Vec<HashSet<String>> = Vec::new();
     walk_calc_expr(
         expr,
         current_cell,
@@ -4064,6 +4243,7 @@ fn analyze_calc_precedents(
         spills,
         &mut out,
         &mut visiting_names,
+        &mut lexical_scopes,
     );
     out
 }
@@ -4103,7 +4283,21 @@ fn walk_calc_expr(
     spills: &SpillState,
     precedents: &mut HashSet<Precedent>,
     visiting_names: &mut HashSet<(SheetId, String)>,
+    lexical_scopes: &mut Vec<HashSet<String>>,
 ) {
+    fn name_is_local(scopes: &[HashSet<String>], name_key: &str) -> bool {
+        scopes.iter().rev().any(|scope| scope.contains(name_key))
+    }
+
+    fn bare_identifier(expr: &CompiledExpr) -> Option<String> {
+        match expr {
+            Expr::NameRef(nref) if matches!(nref.sheet, SheetReference::Current) => {
+                Some(normalize_defined_name(&nref.name))
+            }
+            _ => None,
+        }
+    }
+
     match expr {
         Expr::CellRef(r) => {
             if let Some(sheet) = resolve_sheet(&r.sheet, current_cell.sheet) {
@@ -4153,6 +4347,9 @@ fn walk_calc_expr(
             if name_key.is_empty() {
                 return;
             }
+            if name_is_local(lexical_scopes, &name_key) {
+                return;
+            }
             let visit_key = (sheet, name_key.clone());
             if !visiting_names.insert(visit_key.clone()) {
                 return;
@@ -4170,6 +4367,7 @@ fn walk_calc_expr(
                         spills,
                         precedents,
                         visiting_names,
+                        lexical_scopes,
                     );
                 }
             }
@@ -4195,27 +4393,188 @@ fn walk_calc_expr(
                     )));
                 }
             }
-            walk_calc_expr(inner, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names)
+            walk_calc_expr(
+                inner,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            )
         }
         Expr::Unary { expr, .. } | Expr::Postfix { expr, .. } => {
-            walk_calc_expr(expr, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names)
+            walk_calc_expr(
+                expr,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            )
         }
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
-            walk_calc_expr(left, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names);
-            walk_calc_expr(right, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names);
+            walk_calc_expr(
+                left,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            );
+            walk_calc_expr(
+                right,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            );
         }
-        Expr::FunctionCall { args, .. } => {
+        Expr::FunctionCall { name, args, .. } => {
+            if let Some(spec) = crate::functions::lookup_function(name) {
+                match spec.name {
+                    "LET" => {
+                        if args.len() < 3 || args.len() % 2 == 0 {
+                            return;
+                        }
+
+                        lexical_scopes.push(HashSet::new());
+                        for pair in args[..args.len() - 1].chunks_exact(2) {
+                            let Some(name_key) = bare_identifier(&pair[0]) else {
+                                lexical_scopes.pop();
+                                return;
+                            };
+                            walk_calc_expr(
+                                &pair[1],
+                                current_cell,
+                                tables_by_sheet,
+                                workbook,
+                                spills,
+                                precedents,
+                                visiting_names,
+                                lexical_scopes,
+                            );
+                            lexical_scopes.last_mut().expect("pushed scope").insert(name_key);
+                        }
+
+                        walk_calc_expr(
+                            &args[args.len() - 1],
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        lexical_scopes.pop();
+                        return;
+                    }
+                    "LAMBDA" => {
+                        if args.is_empty() {
+                            return;
+                        }
+
+                        let mut scope = HashSet::new();
+                        for param in &args[..args.len() - 1] {
+                            let Some(name_key) = bare_identifier(param) else {
+                                return;
+                            };
+                            if !scope.insert(name_key) {
+                                return;
+                            }
+                        }
+
+                        lexical_scopes.push(scope);
+                        walk_calc_expr(
+                            &args[args.len() - 1],
+                            current_cell,
+                            tables_by_sheet,
+                            workbook,
+                            spills,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        lexical_scopes.pop();
+                        return;
+                    }
+                    _ => {}
+                }
+            } else {
+                let name_key = normalize_defined_name(name);
+                if !name_key.is_empty() && !name_is_local(lexical_scopes, &name_key) {
+                    let sheet = current_cell.sheet;
+                    let visit_key = (sheet, name_key.clone());
+                    if visiting_names.insert(visit_key.clone()) {
+                        if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
+                            if let Some(expr) = def.compiled.as_ref() {
+                                walk_calc_expr(
+                                    expr,
+                                    CellKey {
+                                        sheet,
+                                        addr: current_cell.addr,
+                                    },
+                                    tables_by_sheet,
+                                    workbook,
+                                    spills,
+                                    precedents,
+                                    visiting_names,
+                                    lexical_scopes,
+                                );
+                            }
+                        }
+                        visiting_names.remove(&visit_key);
+                    }
+                }
+            }
+
             for a in args {
-                walk_calc_expr(a, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names);
+                walk_calc_expr(
+                    a,
+                    current_cell,
+                    tables_by_sheet,
+                    workbook,
+                    spills,
+                    precedents,
+                    visiting_names,
+                    lexical_scopes,
+                );
             }
         }
         Expr::ArrayLiteral { values, .. } => {
             for el in values.iter() {
-                walk_calc_expr(el, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names);
+                walk_calc_expr(
+                    el,
+                    current_cell,
+                    tables_by_sheet,
+                    workbook,
+                    spills,
+                    precedents,
+                    visiting_names,
+                    lexical_scopes,
+                );
             }
         }
         Expr::ImplicitIntersection(inner) => {
-            walk_calc_expr(inner, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names)
+            walk_calc_expr(
+                inner,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            )
         }
         Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
     }

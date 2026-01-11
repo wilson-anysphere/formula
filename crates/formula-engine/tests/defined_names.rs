@@ -156,3 +156,91 @@ fn name_defined_as_array_literal_spills_when_used_as_formula_result() {
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(3.0));
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(4.0));
 }
+
+#[test]
+fn defined_name_lambdas_called_like_functions_register_dependencies() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 99.0).unwrap();
+
+    engine
+        .define_name(
+            "AddX",
+            NameScope::Workbook,
+            NameDefinition::Formula("=LAMBDA(x,Sheet1!A1+x)".to_string()),
+        )
+        .unwrap();
+
+    engine.set_cell_formula("Sheet2", "B1", "=AddX(2)").unwrap();
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet2", "B1"), Value::Number(12.0));
+
+    // Updating a precedent referenced from the named lambda should dirty the dependent cell.
+    engine.set_cell_value("Sheet1", "A1", 20.0).unwrap();
+    assert!(engine.is_dirty("Sheet2", "B1"));
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet2", "B1"), Value::Number(22.0));
+
+    // Repoint the name at a different cell; the dependent should become dirty and follow the new precedent.
+    engine
+        .define_name(
+            "AddX",
+            NameScope::Workbook,
+            NameDefinition::Formula("=LAMBDA(x,Sheet1!A2+x)".to_string()),
+        )
+        .unwrap();
+    assert!(engine.is_dirty("Sheet2", "B1"));
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet2", "B1"), Value::Number(101.0));
+
+    engine.set_cell_value("Sheet1", "A1", 30.0).unwrap();
+    assert!(!engine.is_dirty("Sheet2", "B1"));
+
+    engine.set_cell_value("Sheet1", "A2", 100.0).unwrap();
+    assert!(engine.is_dirty("Sheet2", "B1"));
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet2", "B1"), Value::Number(102.0));
+}
+
+#[test]
+fn defining_name_after_function_call_recalculates_dependents() {
+    let mut engine = Engine::new();
+    engine.set_cell_formula("Sheet1", "A1", "=NewLambda(2)").unwrap();
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Name));
+
+    engine
+        .define_name(
+            "NewLambda",
+            NameScope::Workbook,
+            NameDefinition::Formula("=LAMBDA(x,x+1)".to_string()),
+        )
+        .unwrap();
+
+    assert!(engine.is_dirty("Sheet1", "A1"));
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+}
+
+#[test]
+fn let_bound_lambda_calls_do_not_depend_on_same_named_defined_names() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
+    engine
+        .define_name(
+            "F",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!A1".to_string()),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=LET(f,LAMBDA(x,x+1),f(2))")
+        .unwrap();
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+
+    // Changing the defined-name precedent should not dirty the LET-bound lambda call.
+    engine.set_cell_value("Sheet1", "A1", 20.0).unwrap();
+    assert!(!engine.is_dirty("Sheet1", "B1"));
+}
