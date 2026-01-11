@@ -367,6 +367,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
+    if (!isValidUuid(versionId)) return reply.code(404).send({ error: "version_not_found" });
 
     const res = await app.db.query(
       `
@@ -407,6 +408,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
+    if (!isValidUuid(versionId)) return reply.code(404).send({ error: "version_not_found" });
 
     const deleted = await app.db.query(
       "DELETE FROM document_versions WHERE document_id = $1 AND id = $2 RETURNING id",
@@ -710,6 +712,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const parsed = UpdateDocVersionBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
     if (parsed.data.checkpointLocked === undefined) return reply.send({ ok: true });
+    if (!isValidUuid(versionId)) return reply.code(404).send({ error: "version_not_found" });
 
     const existing = await app.db.query(
       `
@@ -1205,6 +1208,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.session))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
+    if (!isValidUuid(permissionId)) return reply.code(404).send({ error: "not_found" });
 
     const res = await app.db.query(
       "DELETE FROM document_range_permissions WHERE document_id = $1 AND id = $2 RETURNING id",

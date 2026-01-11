@@ -8,6 +8,10 @@ import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
 
+function isValidUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 async function requireOrgAdminForKeyManagement(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -148,6 +152,9 @@ export function registerApiKeyRoutes(app: FastifyInstance): void {
       if (!member) return;
       if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.session))) {
         return reply.code(403).send({ error: "mfa_required" });
+      }
+      if (!isValidUuid(apiKeyId)) {
+        return reply.code(404).send({ error: "api_key_not_found" });
       }
 
       const res = await app.db.query(

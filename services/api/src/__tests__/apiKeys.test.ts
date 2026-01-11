@@ -165,6 +165,14 @@ describe("API keys", () => {
     });
     expect(revoke.statusCode).toBe(200);
 
+    const invalidRevoke = await app.inject({
+      method: "DELETE",
+      url: `/orgs/${orgId}/api-keys/not-a-uuid`,
+      headers: { cookie }
+    });
+    expect(invalidRevoke.statusCode).toBe(404);
+    expect((invalidRevoke.json() as any).error).toBe("api_key_not_found");
+
     const me = await app.inject({
       method: "GET",
       url: "/me",

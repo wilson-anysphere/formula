@@ -119,6 +119,14 @@ describe("SCIM provisioning (Users)", () => {
     expect(listBody.tokens[0]).toMatchObject({ id: tokenId, orgId, name: "okta" });
     expect(listBody.tokens[0].token).toBeUndefined();
 
+    const invalidRevoke = await app.inject({
+      method: "DELETE",
+      url: `/orgs/${orgId}/scim/tokens/not-a-uuid`,
+      headers: { cookie }
+    });
+    expect(invalidRevoke.statusCode).toBe(404);
+    expect((invalidRevoke.json() as any).error).toBe("scim_token_not_found");
+
     const unauthorized = await app.inject({ method: "GET", url: "/scim/v2/Users" });
     expect(unauthorized.statusCode).toBe(401);
     expect((unauthorized.json() as any).schemas).toEqual([SCIM_SCHEMA_ERROR]);
@@ -134,6 +142,37 @@ describe("SCIM provisioning (Users)", () => {
     expect(usersBody.schemas).toEqual([SCIM_SCHEMA_LIST_RESPONSE]);
     expect(Array.isArray(usersBody.Resources)).toBe(true);
     expect(listUsers.headers["content-type"]).toContain("application/scim+json");
+
+    const invalidUserGet = await app.inject({
+      method: "GET",
+      url: "/scim/v2/Users/not-a-uuid",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(invalidUserGet.statusCode).toBe(404);
+    expect((invalidUserGet.json() as any).schemas).toEqual([SCIM_SCHEMA_ERROR]);
+    expect((invalidUserGet.json() as any).status).toBe("404");
+
+    const invalidUserPatch = await app.inject({
+      method: "PATCH",
+      url: "/scim/v2/Users/not-a-uuid",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        schemas: [SCIM_SCHEMA_PATCH_OP],
+        Operations: [{ op: "Replace", path: "active", value: false }]
+      }
+    });
+    expect(invalidUserPatch.statusCode).toBe(404);
+    expect((invalidUserPatch.json() as any).schemas).toEqual([SCIM_SCHEMA_ERROR]);
+    expect((invalidUserPatch.json() as any).status).toBe("404");
+
+    const invalidUserDelete = await app.inject({
+      method: "DELETE",
+      url: "/scim/v2/Users/not-a-uuid",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(invalidUserDelete.statusCode).toBe(404);
+    expect((invalidUserDelete.json() as any).schemas).toEqual([SCIM_SCHEMA_ERROR]);
+    expect((invalidUserDelete.json() as any).status).toBe("404");
 
     const used = await db.query("SELECT last_used_at FROM org_scim_tokens WHERE id = $1", [tokenId]);
     expect(used.rows[0]!.last_used_at).toBeTruthy();

@@ -386,6 +386,7 @@ describe("security hardening", () => {
     });
     expect(register.statusCode).toBe(200);
     const cookie = extractCookie(register.headers["set-cookie"]);
+    const orgId = (register.json() as any).organization.id as string;
 
     const res = await app.inject({
       method: "GET",
@@ -411,5 +412,30 @@ describe("security hardening", () => {
     });
     expect(dlpRes.statusCode).toBe(404);
     expect((dlpRes.json() as any).error).toBe("doc_not_found");
+
+    const createDoc = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { cookie },
+      payload: { orgId, title: "Param validation doc" }
+    });
+    expect(createDoc.statusCode).toBe(200);
+    const docId = (createDoc.json() as any).document.id as string;
+
+    const versionRes = await app.inject({
+      method: "GET",
+      url: `/docs/${docId}/versions/not-a-uuid`,
+      headers: { cookie }
+    });
+    expect(versionRes.statusCode).toBe(404);
+    expect((versionRes.json() as any).error).toBe("version_not_found");
+
+    const permissionRes = await app.inject({
+      method: "DELETE",
+      url: `/docs/${docId}/range-permissions/not-a-uuid`,
+      headers: { cookie }
+    });
+    expect(permissionRes.statusCode).toBe(404);
+    expect((permissionRes.json() as any).error).toBe("not_found");
   });
 });

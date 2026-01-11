@@ -13,6 +13,10 @@ const SCIM_SCHEMA_LIST_RESPONSE = "urn:ietf:params:scim:api:messages:2.0:ListRes
 const SCIM_SCHEMA_ERROR = "urn:ietf:params:scim:api:messages:2.0:Error";
 const SCIM_SCHEMA_SERVICE_PROVIDER_CONFIG = "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig";
 
+function isValidUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 function sendScimError(reply: FastifyReply, statusCode: number, detail: string): void {
   reply
     .code(statusCode)
@@ -335,6 +339,7 @@ export function registerScimRoutes(app: FastifyInstance): void {
       scimApp.get("/Users/:id", async (request, reply) => {
         const orgId = request.authOrgId!;
         const id = (request.params as { id: string }).id;
+        if (!isValidUuid(id)) return sendScimError(reply, 404, "User not found");
 
         const res = await scimApp.db.query(
           `
@@ -437,6 +442,7 @@ export function registerScimRoutes(app: FastifyInstance): void {
 
         const changes = parsePatchChanges(request.body);
         if (!changes) return sendScimError(reply, 400, "Invalid request");
+        if (!isValidUuid(id)) return sendScimError(reply, 404, "User not found");
 
         const resUser = await scimApp.db.query("SELECT id, email, name FROM users WHERE id = $1 LIMIT 1", [id]);
         if (resUser.rowCount !== 1) return sendScimError(reply, 404, "User not found");
@@ -547,6 +553,7 @@ export function registerScimRoutes(app: FastifyInstance): void {
       scimApp.delete("/Users/:id", async (request, reply) => {
         const orgId = request.authOrgId!;
         const id = (request.params as { id: string }).id;
+        if (!isValidUuid(id)) return sendScimError(reply, 404, "User not found");
 
         const res = await scimApp.db.query("DELETE FROM org_members WHERE org_id = $1 AND user_id = $2", [orgId, id]);
         if (res.rowCount !== 1) return sendScimError(reply, 404, "User not found");
@@ -573,4 +580,3 @@ export function registerScimRoutes(app: FastifyInstance): void {
     { prefix: "/scim/v2" }
   );
 }
-
