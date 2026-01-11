@@ -2603,11 +2603,7 @@ export class SpreadsheetApp {
       return;
     }
 
-    const fillHandle = this.selectionRenderer.getFillHandleRect(this.selection, {
-      getCellRect: (c) => this.getCellRect(c),
-      visibleRows: this.visibleRows,
-      visibleCols: this.visibleCols,
-    });
+    const fillHandle = this.getFillHandleRect();
     if (
       fillHandle &&
       x >= fillHandle.x &&

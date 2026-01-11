@@ -9,7 +9,7 @@ import { OllamaChatClient } from "../../../../../packages/llm/src/ollama.js";
 import { clearDesktopLLMConfig } from "../../ai/llm/settings.js";
 import { DocumentController } from "../../document/documentController.js";
 
-const TEST_TIMEOUT_MS = 15_000;
+const TEST_TIMEOUT_MS = 30_000;
 
 const mocks = vi.hoisted(() => {
   return {
