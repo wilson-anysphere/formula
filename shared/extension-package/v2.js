@@ -236,8 +236,16 @@ function* iterateTarEntries(archiveBytes) {
 
       // v2 packages should terminate with at least two 512-byte zero blocks. We already consumed
       // the first one as `header`, so require at least one more full block remaining.
-      if (archiveBytes.length - offset < TAR_BLOCK_SIZE) {
+      const remainingBytes = archiveBytes.length - offset;
+      if (remainingBytes < TAR_BLOCK_SIZE) {
         throw new Error("Invalid tar archive: missing end-of-archive marker");
+      }
+
+      // Many tar implementations pad archives to 10KB "record" boundaries. Allow some trailing
+      // zero padding, but cap it to prevent attackers from appending huge unused payloads.
+      const maxTrailerBytes = TAR_BLOCK_SIZE * 20; // 10240 bytes
+      if (remainingBytes > maxTrailerBytes) {
+        throw new Error("Invalid tar archive: excessive trailing padding");
       }
 
       // Ensure there is no trailing non-zero data after the end-of-archive marker; this prevents

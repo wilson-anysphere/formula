@@ -191,6 +191,19 @@ test("v2 rejects tar archives whose length is not a multiple of 512", async () =
   }
 });
 
+test("v2 rejects tar archives with excessive trailing padding", async () => {
+  const { dir } = await createTempExtensionDir();
+  const key = generateEd25519KeyPair();
+
+  try {
+    const pkg = await createExtensionPackageV2(dir, { privateKeyPem: key.privateKeyPem });
+    const tampered = Buffer.concat([pkg, Buffer.alloc(10240, 0)]);
+    assert.throws(() => verifyExtensionPackageV2(tampered, key.publicKeyPem), /excessive trailing padding/i);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("v2 rejects path traversal entries", async () => {
   const { dir } = await createTempExtensionDir();
   const key = generateEd25519KeyPair();
