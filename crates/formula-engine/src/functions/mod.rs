@@ -10,6 +10,7 @@ pub mod financial;
 pub mod information;
 pub mod lookup;
 pub mod math;
+pub mod statistical;
 pub mod text;
 pub(crate) mod array_lift;
 pub(crate) mod wildcard;
@@ -28,6 +29,7 @@ mod builtins_math;
 mod builtins_math_extended;
 mod builtins_select;
 mod builtins_reference;
+mod builtins_statistical;
 mod builtins_text;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
