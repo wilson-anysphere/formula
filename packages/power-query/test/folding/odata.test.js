@@ -10,13 +10,13 @@ test("OData folding: pushes select/filter/orderby/top into query options", () =>
     name: "OData fold",
     source: { type: "odata", url: "https://example.com/odata/Products" },
     steps: [
-      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Name"] } },
       {
-        id: "s2",
+        id: "s1",
         name: "Filter",
         operation: { type: "filterRows", predicate: { type: "comparison", column: "Price", operator: "greaterThan", value: 20 } },
       },
-      { id: "s3", name: "Sort", operation: { type: "sortRows", sortBy: [{ column: "Price", direction: "descending" }] } },
+      { id: "s2", name: "Sort", operation: { type: "sortRows", sortBy: [{ column: "Price", direction: "descending" }] } },
+      { id: "s3", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Name"] } },
       { id: "s4", name: "Take", operation: { type: "take", count: 10 } },
     ],
   };

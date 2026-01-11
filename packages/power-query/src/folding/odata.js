@@ -272,6 +272,39 @@ function predicateToFilter(predicate) {
 }
 
 /**
+ * @param {FilterPredicate} predicate
+ * @returns {Set<string>}
+ */
+function collectPredicateColumns(predicate) {
+  /** @type {Set<string>} */
+  const cols = new Set();
+  /**
+   * @param {FilterPredicate} node
+   */
+  const visit = (node) => {
+    switch (node.type) {
+      case "comparison":
+        cols.add(node.column);
+        return;
+      case "and":
+      case "or":
+        for (const child of node.predicates) visit(child);
+        return;
+      case "not":
+        visit(node.predicate);
+        return;
+      default: {
+        /** @type {never} */
+        const exhausted = node;
+        throw new Error(`Unsupported predicate '${exhausted.type}'`);
+      }
+    }
+  };
+  visit(predicate);
+  return cols;
+}
+
+/**
  * @param {SortSpec[]} sortBy
  * @returns {string | null}
  */
@@ -298,9 +331,21 @@ function applyODataStep(current, operation) {
     case "selectColumns": {
       if (!Array.isArray(operation.columns) || operation.columns.length === 0) return null;
       if (hasDuplicateStrings(operation.columns)) return null;
+      if (Array.isArray(current.select) && current.select.length > 0) {
+        const available = new Set(current.select);
+        for (const col of operation.columns) {
+          if (!available.has(col)) return null;
+        }
+      }
       return { ...current, select: operation.columns.slice() };
     }
     case "filterRows": {
+      if (Array.isArray(current.select) && current.select.length > 0) {
+        const available = new Set(current.select);
+        for (const col of collectPredicateColumns(operation.predicate)) {
+          if (!available.has(col)) return null;
+        }
+      }
       const compiled = predicateToFilter(operation.predicate);
       if (!compiled) return null;
       const prev = current.filter;
@@ -308,6 +353,14 @@ function applyODataStep(current, operation) {
       return { ...current, filter: nextFilter };
     }
     case "sortRows": {
+      if (!Array.isArray(operation.sortBy)) return null;
+      if (operation.sortBy.length === 0) return { ...current };
+      if (Array.isArray(current.select) && current.select.length > 0) {
+        const available = new Set(current.select);
+        for (const spec of operation.sortBy) {
+          if (!available.has(spec.column)) return null;
+        }
+      }
       const orderby = sortToOrderBy(operation.sortBy);
       if (!orderby) return null;
       return { ...current, orderby };
