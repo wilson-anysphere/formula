@@ -255,6 +255,10 @@ export class ODataConnector {
       }
     }
 
+    if (!Object.keys(headers).some((k) => k.toLowerCase() === "accept")) {
+      headers.Accept = "application/json";
+    }
+
     /** @type {{ type: "oauth2"; providerId: string; scopes?: string[] } | null} */
     let oauth2Auth = null;
     if (request.auth?.type === "oauth2") {
@@ -380,6 +384,10 @@ export class ODataConnector {
           credentialOAuth2 = { providerId, scopes };
         }
       }
+    }
+
+    if (!Object.keys(headers).some((k) => k.toLowerCase() === "accept")) {
+      headers.Accept = "application/json";
     }
 
     /** @type {{ type: "oauth2"; providerId: string; scopes?: string[] } | null} */

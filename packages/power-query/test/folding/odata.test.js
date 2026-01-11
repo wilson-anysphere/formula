@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ODataFoldingEngine } from "../../src/folding/odata.js";
+import { ODataFoldingEngine, buildODataUrl } from "../../src/folding/odata.js";
 
 test("OData folding: pushes select/filter/orderby/top into query options", () => {
   const folding = new ODataFoldingEngine();
@@ -143,5 +143,16 @@ test("OData folding: predicate columns must exist after selectColumns (preserves
   assert.deepEqual(
     explained.steps.map((s) => s.status),
     ["folded", "local"],
+  );
+});
+
+test("buildODataUrl: preserves existing query options when not overridden", () => {
+  assert.equal(
+    buildODataUrl("https://example.com/odata/Products?$top=5&foo=bar", {}),
+    "https://example.com/odata/Products?$top=5&foo=bar",
+  );
+  assert.equal(
+    buildODataUrl("https://example.com/odata/Products?$top=5&foo=bar", { top: 2 }),
+    "https://example.com/odata/Products?foo=bar&$top=2",
   );
 });

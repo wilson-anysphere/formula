@@ -97,8 +97,17 @@ export function buildODataUrl(baseUrl, query) {
   const existing = new Map();
   for (const [k, v] of existingEntries) existing.set(k, v);
 
-  const optionKeys = new Set(["$select", "$filter", "$orderby", "$top"]);
-  for (const key of optionKeys) existing.delete(key);
+  // Only remove existing option keys when the caller provides overrides. This
+  // keeps user-supplied query options (embedded in the base URL) intact for
+  // non-folded requests.
+  /** @type {Set<string>} */
+  const overrideKeys = new Set();
+  if (Array.isArray(normalized.select) && normalized.select.length > 0) overrideKeys.add("$select");
+  if (typeof normalized.filter === "string" && normalized.filter.length > 0) overrideKeys.add("$filter");
+  if (typeof normalized.orderby === "string" && normalized.orderby.length > 0) overrideKeys.add("$orderby");
+  if (typeof normalized.top === "number" && Number.isFinite(normalized.top)) overrideKeys.add("$top");
+
+  for (const key of overrideKeys) existing.delete(key);
 
   /** @type {Array<[string, string]>} */
   const entries = [];
