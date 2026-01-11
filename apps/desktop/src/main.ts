@@ -83,6 +83,19 @@ function currentSelectionRect(): SelectionRect {
   return { sheetId, startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
 }
 
+let suppressSelectionEventMacros = false;
+let sawInitialSelection = false;
+app.subscribeSelection(() => {
+  // `subscribeSelection` invokes the listener immediately with the current selection. Excel
+  // does not fire `Worksheet_SelectionChange` on workbook load, so we skip the initial call.
+  if (!sawInitialSelection) {
+    sawInitialSelection = true;
+    return;
+  }
+  if (suppressSelectionEventMacros) return;
+  macroEventBridge?.notifySelectionChanged(currentSelectionRect());
+});
+
 // --- Sheet tabs (minimal multi-sheet support) ---------------------------------
 
 const sheetTabsRoot = document.getElementById("sheet-tabs");
@@ -142,7 +155,6 @@ app.activateCell = (target: Parameters<SpreadsheetApp["activateCell"]>[0]): void
   const prevSheet = app.getCurrentSheetId();
   originalActivateCell(target);
   if (target.sheetId && target.sheetId !== prevSheet) syncSheetUi();
-  macroEventBridge?.notifySelectionChanged(currentSelectionRect());
 };
 
 const originalSelectRange = app.selectRange.bind(app);
@@ -150,7 +162,6 @@ app.selectRange = (target: Parameters<SpreadsheetApp["selectRange"]>[0]): void =
   const prevSheet = app.getCurrentSheetId();
   originalSelectRange(target);
   if (target.sheetId && target.sheetId !== prevSheet) syncSheetUi();
-  macroEventBridge?.notifySelectionChanged(currentSelectionRect());
 };
 
 // Keep the canvas renderer in sync with programmatic document mutations (e.g. AI tools)
@@ -1257,6 +1268,7 @@ async function openWorkbookFromPath(path: string): Promise<void> {
   workbookSync?.stop();
   workbookSync = null;
 
+  suppressSelectionEventMacros = true;
   try {
     // Allow any microtask-batched workbook edits to enqueue into the backend queue,
     // then drain the queue fully before swapping the workbook state.
@@ -1288,6 +1300,8 @@ async function openWorkbookFromPath(path: string): Promise<void> {
       });
     }
     throw err;
+  } finally {
+    suppressSelectionEventMacros = false;
   }
 }
 
@@ -1349,6 +1363,7 @@ async function handleNewWorkbook(): Promise<void> {
   workbookSync?.stop();
   workbookSync = null;
 
+  suppressSelectionEventMacros = true;
   try {
     // Allow any microtask-batched workbook edits to enqueue into the backend queue,
     // then drain the queue fully before replacing the backend workbook state.
@@ -1376,6 +1391,8 @@ async function handleNewWorkbook(): Promise<void> {
       });
     }
     throw err;
+  } finally {
+    suppressSelectionEventMacros = false;
   }
 }
 
