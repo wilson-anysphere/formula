@@ -13,11 +13,19 @@ import { cloneYjsValue } from "./cloneYjsValue.js";
  * stable so other systems (providers/awareness) can keep references to it.
  *
  * @param {Y.Doc} doc
- * @param {{ roots?: RootTypeSpec[] }} [opts]
+ * @param {{ roots?: RootTypeSpec[], excludeRoots?: string[] }} [opts]
  */
 export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
   /** @type {RootTypeSpec[] | null} */
   const configuredRoots = opts.roots ?? null;
+  const excludedRoots = Array.isArray(opts.excludeRoots) ? new Set(opts.excludeRoots) : null;
+
+  /**
+   * @param {string} name
+   */
+  function isExcludedRoot(name) {
+    return Boolean(excludedRoots?.has(name));
+  }
 
   /**
    * @param {unknown} value
@@ -58,7 +66,96 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
 
   return {
     encodeState() {
-      return Y.encodeStateAsUpdate(doc);
+      if (!excludedRoots || excludedRoots.size === 0) {
+        return Y.encodeStateAsUpdate(doc);
+      }
+
+      // Fast path: if none of the excluded roots exist, there is nothing to filter.
+      let hasExcluded = false;
+      for (const name of excludedRoots) {
+        if (doc.share.has(name)) {
+          hasExcluded = true;
+          break;
+        }
+      }
+      if (!hasExcluded) {
+        return Y.encodeStateAsUpdate(doc);
+      }
+
+      const snapshotDoc = new Y.Doc();
+
+      /** @type {Map<string, { kind: RootTypeSpec["kind"], source: string }>} */
+      const roots = new Map();
+
+      /**
+       * @param {string} name
+       * @param {RootTypeSpec["kind"]} kind
+       * @param {string} source
+       */
+      function addRoot(name, kind, source) {
+        if (isExcludedRoot(name)) return;
+        const existing = roots.get(name);
+        if (!existing) {
+          roots.set(name, { kind, source });
+          return;
+        }
+        if (existing.kind !== kind) {
+          throw new Error(
+            `Yjs root schema mismatch for "${name}": ${existing.source} is "${existing.kind}" but ${source} is "${kind}"`,
+          );
+        }
+      }
+
+      if (configuredRoots) {
+        for (const root of configuredRoots) {
+          addRoot(root.name, root.kind, "configured roots");
+        }
+      } else {
+        addRoot("sheets", "array", "default roots");
+        addRoot("cells", "map", "default roots");
+        addRoot("metadata", "map", "default roots");
+        addRoot("namedRanges", "map", "default roots");
+      }
+
+      for (const [name, value] of doc.share.entries()) {
+        if (isExcludedRoot(name)) continue;
+        const kind = rootKindFromValue(value);
+        if (!kind) {
+          throw new Error(
+            `Unsupported Yjs root type for "${name}" in current doc: ${value?.constructor?.name ?? typeof value}`,
+          );
+        }
+        addRoot(name, kind, "current doc");
+      }
+
+      for (const [name, { kind }] of roots.entries()) {
+        if (kind === "map") {
+          const source = doc.getMap(name);
+          const target = snapshotDoc.getMap(name);
+          source.forEach((value, key) => {
+            target.set(key, cloneYjsValue(value));
+          });
+          continue;
+        }
+
+        if (kind === "array") {
+          const source = doc.getArray(name);
+          const target = snapshotDoc.getArray(name);
+          for (const value of source.toArray()) {
+            target.push([cloneYjsValue(value)]);
+          }
+          continue;
+        }
+
+        if (kind === "text") {
+          const source = doc.getText(name);
+          const target = snapshotDoc.getText(name);
+          target.applyDelta(structuredClone(source.toDelta()));
+          continue;
+        }
+      }
+
+      return Y.encodeStateAsUpdate(snapshotDoc);
     },
     /**
      * @param {Uint8Array} snapshot
@@ -76,6 +173,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
        * @param {string} source
        */
       function addRoot(name, kind, source) {
+        if (isExcludedRoot(name)) return;
         const existing = roots.get(name);
         if (!existing) {
           roots.set(name, { kind, source });
@@ -104,6 +202,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
       // Include any other root types already instantiated in either the current
       // doc or the snapshot doc so restoring doesn't silently drop data.
       for (const [name, value] of doc.share.entries()) {
+        if (isExcludedRoot(name)) continue;
         const kind = rootKindFromValue(value);
         if (!kind) {
           throw new Error(
@@ -114,6 +213,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
       }
 
       for (const [name, value] of restored.share.entries()) {
+        if (isExcludedRoot(name)) continue;
         const kind = rootKindFromValue(value);
         if (!kind) {
           throw new Error(
@@ -172,7 +272,38 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
       if (event !== "update") {
         throw new Error(`Unsupported event: ${event}`);
       }
-      doc.on("update", () => listener());
+      if (!excludedRoots || excludedRoots.size === 0) {
+        doc.on("update", () => listener());
+        return;
+      }
+
+      doc.on("update", (_update, _origin, _doc, transaction) => {
+        // We only want to surface changes that touch non-excluded roots.
+        // When using YjsVersionStore the version-history itself lives inside the
+        // same Y.Doc. Without this filter, saving/pruning versions would mark the
+        // workbook as dirty and trigger redundant snapshots.
+        const changedParentTypes = /** @type {any} */ (transaction)?.changedParentTypes;
+        const changedTypes = /** @type {any} */ (transaction)?.changed;
+
+        if (!(changedParentTypes instanceof Map) && !(changedTypes instanceof Map)) {
+          // Defensive fallback: if we can't introspect the transaction, treat it
+          // as a meaningful update rather than risking missed changes.
+          listener();
+          return;
+        }
+
+        const hasTypeChange = (type) =>
+          (changedParentTypes instanceof Map && changedParentTypes.has(type)) ||
+          (changedTypes instanceof Map && changedTypes.has(type));
+
+        for (const [name, value] of doc.share.entries()) {
+          if (isExcludedRoot(name)) continue;
+          if (hasTypeChange(value)) {
+            listener();
+            return;
+          }
+        }
+      });
     },
   };
 }

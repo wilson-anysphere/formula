@@ -5,6 +5,7 @@ export { FileVersionStore } from "./store/fileVersionStore.js";
 export { ApiVersionStore } from "./store/apiVersionStore.js";
 export { IndexedDBVersionStore } from "./store/indexeddbVersionStore.js";
 export { SQLiteVersionStore } from "./store/sqliteVersionStore.js";
+export { YjsVersionStore } from "./store/yjsVersionStore.js";
 export { VersionManager } from "./versioning/versionManager.js";
 export { createYjsSpreadsheetDocAdapter } from "./yjs/yjsSpreadsheetDocAdapter.js";
 export { sheetStateFromYjsDoc, sheetStateFromYjsSnapshot } from "./yjs/sheetState.js";
