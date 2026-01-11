@@ -46,3 +46,14 @@ test("expr evaluate: value placeholder _", () => {
   assert.throws(() => evaluateExpr(expr, []), /Formula references '_' but no value was provided/);
 });
 
+test("expr evaluate: date() literal", () => {
+  const expr = parseFormula('date("2020-01-01")');
+  const value = evaluateExpr(expr, []);
+  assert.ok(value instanceof Date);
+  assert.equal(value.toISOString(), "2020-01-01T00:00:00.000Z");
+});
+
+test("expr evaluate: date() rejects invalid formats", () => {
+  const expr = parseFormula('date("2020-02-30")');
+  assert.throws(() => evaluateExpr(expr, []), /Invalid date literal/);
+});

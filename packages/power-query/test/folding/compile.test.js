@@ -236,6 +236,23 @@ test("compile: folds addColumn string literals with escapes", () => {
   assert.deepEqual(plan.params, [payload]);
 });
 
+test("compile: folds addColumn with date() literal", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_add_date",
+    name: "Add date",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [{ id: "s1", name: "Add", operation: { type: "addColumn", name: "Day", formula: 'date("2020-01-01")' } }],
+  };
+
+  const plan = folding.compile(query);
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT t.*, ? AS "Day" FROM (SELECT * FROM sales) AS t',
+    params: ["2020-01-01T00:00:00.000Z"],
+  });
+});
+
 test("compile: addColumn params come before nested query params (placeholder order)", () => {
   const folding = new QueryFoldingEngine();
   const query = {

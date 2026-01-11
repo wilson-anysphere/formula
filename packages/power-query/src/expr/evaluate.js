@@ -1,5 +1,7 @@
 import "./ast.js";
 
+import { parseDateLiteral } from "./date.js";
+
 /**
  * @typedef {import("./ast.js").ExprNode} ExprNode
  */
@@ -147,10 +149,21 @@ export function evaluateExpr(expr, values, columnIndex = null, value = undefined
         : evaluateExpr(expr.alternate, values, columnIndex, value);
     }
     case "call": {
-      // No functions are currently supported in the formula surface area.
-      // This node type exists so we can give a targeted error message and
-      // potentially add safe functions in the future.
-      throw new Error(`Unsupported function '${expr.callee}'`);
+      const callee = expr.callee.toLowerCase();
+      switch (callee) {
+        case "date": {
+          if (expr.args.length !== 1) {
+            throw new Error("date() expects exactly 1 argument");
+          }
+          const arg = evaluateExpr(expr.args[0], values, columnIndex, value);
+          if (typeof arg !== "string") {
+            throw new Error('date() expects a string like date("2020-01-01")');
+          }
+          return parseDateLiteral(arg);
+        }
+        default:
+          throw new Error(`Unsupported function '${expr.callee}'`);
+      }
     }
     default: {
       /** @type {never} */

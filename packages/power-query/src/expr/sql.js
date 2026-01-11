@@ -1,5 +1,7 @@
 import "./ast.js";
 
+import { parseDateLiteral } from "./date.js";
+
 /**
  * @typedef {import("./ast.js").ExprNode} ExprNode
  * @typedef {import("../folding/dialect.js").SqlDialect} SqlDialect
@@ -113,6 +115,16 @@ export function compileExprToSql(expr, ctx) {
         return `(CASE WHEN ${test} THEN ${cons} ELSE ${alt} END)`;
       }
       case "call":
+        if (node.callee.toLowerCase() === "date") {
+          if (node.args.length !== 1) {
+            throw new Error("date() expects exactly 1 argument");
+          }
+          const arg0 = node.args[0];
+          if (arg0.type !== "literal" || typeof arg0.value !== "string") {
+            throw new Error('date() expects a string literal like date("2020-01-01")');
+          }
+          return param(parseDateLiteral(arg0.value));
+        }
         throw new Error(`Unsupported function '${node.callee}'`);
       default: {
         /** @type {never} */
