@@ -6,7 +6,7 @@ import { compileExprToSql, parseFormula } from "../expr/index.js";
 import { collectSourcePrivacy, distinctPrivacyLevels } from "../privacy/firewall.js";
 import { getPrivacyLevel } from "../privacy/levels.js";
 import { getSqlSourceId } from "../privacy/sourceId.js";
-import { PqDateTimeZone } from "../values.js";
+import { PqDateTimeZone, PqDecimal, PqDuration, PqTime } from "../values.js";
 
 /**
  * @typedef {import("../model.js").Query} Query
@@ -682,6 +682,7 @@ export class QueryFoldingEngine {
         };
       }
       case "filterRows": {
+        if (!predicateHasOnlySqlScalarValues(operation.predicate)) return null;
         const where = predicateToSql(operation.predicate, {
           alias: "t",
           quoteIdentifier,
@@ -1638,6 +1639,51 @@ function isDate(value) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isSqlScalarValue(value) {
+  if (value == null) return true;
+  if (typeof value === "string") return true;
+  if (typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (isDate(value)) return true;
+  if (value instanceof PqDateTimeZone) return true;
+  if (value instanceof PqTime) return true;
+  if (value instanceof PqDuration) return true;
+  if (value instanceof PqDecimal) return true;
+  return false;
+}
+
+/**
+ * @param {import("../model.js").FilterPredicate} predicate
+ * @returns {boolean}
+ */
+function predicateHasOnlySqlScalarValues(predicate) {
+  if (!predicate || typeof predicate !== "object") return false;
+  switch (predicate.type) {
+    case "and":
+    case "or":
+      return predicate.predicates.every(predicateHasOnlySqlScalarValues);
+    case "not":
+      return predicateHasOnlySqlScalarValues(predicate.predicate);
+    case "comparison": {
+      // LIKE-based predicates stringify values before passing them through the
+      // SQL parameterizer, so they never require non-scalar params.
+      if (predicate.operator === "contains" || predicate.operator === "startsWith" || predicate.operator === "endsWith") {
+        return true;
+      }
+      return isSqlScalarValue(predicate.value);
+    }
+    default: {
+      /** @type {never} */
+      const exhausted = predicate;
+      throw new Error(`Unsupported predicate type '${exhausted.type}'`);
+    }
+  }
+}
+
+/**
  * @param {SqlDialect} dialect
  * @param {unknown[]} params
  * @returns {(value: unknown) => string}
@@ -1650,6 +1696,22 @@ function makeParam(dialect, params) {
     }
     if (value instanceof PqDateTimeZone) {
       params.push(dialect.formatDateParam(value.toDate()));
+      return "?";
+    }
+    if (value instanceof PqTime) {
+      params.push(value.toString());
+      return "?";
+    }
+    if (value instanceof PqDuration) {
+      params.push(value.toString());
+      return "?";
+    }
+    if (value instanceof PqDecimal) {
+      params.push(value.value);
+      return "?";
+    }
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      params.push(null);
       return "?";
     }
     params.push(value === undefined ? null : value);

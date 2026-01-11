@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { QueryFoldingEngine } from "../../src/folding/sql.js";
+import { PqTime } from "../../src/values.js";
 
 test("compile: folds selectColumns/filterRows/groupBy into a parameterized SQL plan", () => {
   const folding = new QueryFoldingEngine();
@@ -87,6 +88,55 @@ test("compile: LIKE predicates escape wildcard characters + use ESCAPE clause", 
     sql: 'SELECT * FROM (SELECT * FROM items) AS t WHERE (LOWER(COALESCE(CAST(t."Name" AS TEXT), \'\')) LIKE LOWER(?) ESCAPE \'!\')',
     params: ["%50!%!_!!\\test%"],
   });
+});
+
+test("compile: folds filterRows predicates with time parameters", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_time_filter",
+    name: "Time Filter",
+    source: { type: "database", connection: {}, query: "SELECT * FROM times" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: {
+          type: "filterRows",
+          predicate: { type: "comparison", column: "Start", operator: "equals", value: new PqTime(6 * 60 * 60 * 1000) },
+        },
+      },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.equal(plan.type, "sql");
+  assert.equal(plan.sql, 'SELECT * FROM (SELECT * FROM times) AS t WHERE (t."Start" = ?)');
+  assert.deepEqual(plan.params, ["06:00:00"]);
+});
+
+test("compile: filterRows with non-scalar predicate values breaks folding", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_binary_filter",
+    name: "Binary Filter",
+    source: { type: "database", connection: {}, query: "SELECT * FROM blobs" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: {
+          type: "filterRows",
+          predicate: { type: "comparison", column: "Payload", operator: "equals", value: new Uint8Array([1, 2, 3]) },
+        },
+      },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.equal(plan.type, "hybrid");
+  assert.equal(plan.sql, "SELECT * FROM blobs");
+  assert.deepEqual(plan.params, []);
+  assert.deepEqual(plan.localSteps.map((s) => s.operation.type), ["filterRows"]);
 });
 
 test("compile: folds renameColumn when output columns are known", () => {
