@@ -889,11 +889,41 @@ fn to_number(value: &JsonValue) -> Option<f64> {
             if trimmed.is_empty() {
                 return Some(0.0);
             }
-            let num = trimmed.parse::<f64>().ok()?;
-            if num.is_finite() { Some(num) } else { None }
+            parse_js_number(trimmed)
         }
         _ => None,
     }
+}
+
+fn parse_js_number(text: &str) -> Option<f64> {
+    // Mirror the JS evaluator's `Number(trimmed)` behavior for a small set of
+    // string forms that Rust's `f64::from_str` doesn't accept (notably
+    // hex/binary/octal prefixes).
+    //
+    // We only care about finite values; non-finite values should be treated as
+    // invalid (`null` in the JS evaluator).
+    if let Ok(num) = text.parse::<f64>() {
+        return num.is_finite().then_some(num);
+    }
+
+    // JS Number() accepts 0x/0b/0o prefixes, but *not* with a leading sign.
+    // (e.g. Number("0x10") === 16, Number("-0x10") === NaN)
+    let (radix, digits) = if let Some(rest) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        (16, rest)
+    } else if let Some(rest) = text.strip_prefix("0b").or_else(|| text.strip_prefix("0B")) {
+        (2, rest)
+    } else if let Some(rest) = text.strip_prefix("0o").or_else(|| text.strip_prefix("0O")) {
+        (8, rest)
+    } else {
+        return None;
+    };
+
+    if digits.is_empty() {
+        return None;
+    }
+
+    let value = u64::from_str_radix(digits, radix).ok()? as f64;
+    value.is_finite().then_some(value)
 }
 
 fn number_to_json(value: f64) -> JsonValue {
@@ -1186,5 +1216,20 @@ mod tests {
 
         wb.recalculate(None).unwrap();
         assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(ERROR_NAME));
+    }
+
+    #[test]
+    fn to_number_matches_js_number_parsing_for_hex_strings() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("=SUM(\"0x10\",1)"), None).unwrap();
+        wb.set_cell("A2", json!("=\"0x10\"+1"), None).unwrap();
+        wb.set_cell("A3", json!("=SUM(\"-0x10\",1)"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(17.0));
+        assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(17.0));
+        // JS Number("-0x10") is NaN -> ignored by SUM.
+        assert_eq!(wb.get_cell("A3", None).unwrap().value, json!(1.0));
     }
 }
