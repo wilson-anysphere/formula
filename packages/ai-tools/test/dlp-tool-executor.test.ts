@@ -433,4 +433,49 @@ describe("ToolExecutor DLP enforcement", () => {
     });
     expect(event.decision?.decision).toBe("redact");
   });
+
+  it("apply_formula_column is denied when policy blocks cloud processing", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Header" });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { value: 1 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: null,
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        audit_logger
+      }
+    });
+
+    const result = await executor.execute({
+      name: "apply_formula_column",
+      parameters: { column: "B", formula_template: "=A{row}*2", start_row: 2, end_row: -1 }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+    expect(result.error?.message).toMatch(/DLP policy blocks applying formulas to Sheet1!B2/);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "ai.tool.dlp",
+      tool: "apply_formula_column",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet1!B2",
+      redactedCellCount: 0
+    });
+    expect(event.decision?.decision).toBe("block");
+  });
 });

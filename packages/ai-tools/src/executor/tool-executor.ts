@@ -376,6 +376,16 @@ export class ToolExecutor {
       throw new Error(`apply_formula_column end_row (${endRow}) must be >= start_row (${startRow})`);
     }
 
+    const range = { sheet, startRow, endRow, startCol: colIndex, endCol: colIndex };
+    const dlp = this.evaluateDlpForRange("apply_formula_column", range);
+    if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
+      this.logToolDlpDecision({ tool: "apply_formula_column", range, dlp, redactedCellCount: 0 });
+      throw toolError(
+        "permission_denied",
+        `DLP policy blocks applying formulas to ${formatA1Range(range)} via apply_formula_column (ai.cloudProcessing).`
+      );
+    }
+
     const template = String(params.formula_template);
     let updated = 0;
     for (let row = startRow; row <= endRow; row++) {
@@ -392,6 +402,7 @@ export class ToolExecutor {
       endCol: colIndex
     });
 
+    if (dlp) this.logToolDlpDecision({ tool: "apply_formula_column", range, dlp, redactedCellCount: 0 });
     return { sheet, column, start_row: startRow, end_row: endRow, updated_cells: updated };
   }
 
