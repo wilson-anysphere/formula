@@ -4,6 +4,11 @@ Optional WebGPU compute acceleration for heavy spreadsheet/analytics kernels wit
 ## What’s implemented
 - **SUM / SUMPRODUCT** (parallel reduction)
 - **MIN / MAX / AVERAGE / COUNT** (reductions; AVERAGE derived from SUM)
+- **Group-by aggregations** on key columns:
+  - `COUNT`, `SUM`, `MIN`, `MAX`
+  - Keys: `Uint32Array` (dictionary ids) or `Int32Array` (signed 32-bit keys)
+  - Outputs are returned sorted by `uniqueKeys`
+- **Hash join** (inner join) on two key arrays producing matching `(leftIndex, rightIndex)` pairs
 - **MMULT** (matrix multiplication)
 - **Sort** (bitonic sort for numeric vectors)
 - **Histogram/binning** (atomic bin counts)
@@ -25,6 +30,19 @@ const engine = await createKernelEngine({
 const values = new Float64Array(1_000_000).fill(1);
 const sum = await engine.sum(values);
 console.log(sum);
+
+// Group-by SUM(+COUNT).
+const keys = new Uint32Array([1, 1, 2, 2, 2]);
+const valuesByKey = new Float64Array([10, 5, 1, 2, 3]);
+const grouped = await engine.groupBySum(keys, valuesByKey);
+console.log(grouped.uniqueKeys, grouped.sums, grouped.counts);
+
+// Hash join (inner join).
+const leftKeys = new Uint32Array([1, 2, 2, 3]);
+const rightKeys = new Uint32Array([2, 2, 3, 4]);
+const joined = await engine.hashJoin(leftKeys, rightKeys);
+console.log(joined.leftIndex, joined.rightIndex);
+
 console.log(engine.diagnostics());
 await engine.dispose();
 ```
@@ -35,11 +53,15 @@ await engine.dispose();
 - Precision modes:
   - `precision: "excel"` (default): uses **f64** GPU kernels when supported and otherwise falls back to CPU. This mode never silently downcasts `Float64Array` inputs to `f32`.
   - `precision: "fast"`: prefers **f32** GPU kernels and may downcast `Float64Array` inputs for performance.
+- Current WebGPU coverage:
+  - `groupBySum/groupByMin/groupByMax` are currently **f32-only** (implemented via atomic CAS loops), so `"excel"` mode will fall back to CPU for these.
 - Optional safety net: in `"excel"` mode the engine can validate some GPU results against CPU for smaller workloads (default `maxElements=32768`) and fall back to CPU if the difference exceeds a strict tolerance (`abs=1e-9`, `rel=1e-12`). Configure via the `validation` option.
 - In `"excel"` mode, if a WebGPU kernel throws at runtime (pipeline/dispatch/device issues), the engine records diagnostics and **falls back to CPU**.
 - Kernel edge cases:
   - **Sort** matches `TypedArray#sort` semantics for special values: `NaN` sorts to the end, and `±Infinity` sorts normally.
   - **Histogram** ignores `NaN` values and clamps `±Infinity` into the first/last bin.
+  - **Group-by SUM/MIN/MAX** follow JS numeric semantics (`NaN` propagates, `±Infinity` behaves per IEEE-754). `MIN/MAX` preserve signed zero like `Math.min/Math.max`.
+  - **Hash join** returns *all* matching pairs (duplicates produce multiple output rows). Outputs are sorted by `(leftIndex, rightIndex)` ascending.
 
 ## Benchmarks
 ```bash

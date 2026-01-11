@@ -5,7 +5,7 @@ import { KernelEngine } from "../src/index.js";
 
 class FakeGpuBackend {
   kind = "webgpu";
-  calls = { sum: 0, min: 0, sort: 0, histogram: 0 };
+  calls = { sum: 0, min: 0, sort: 0, histogram: 0, groupBySum: 0 };
   /** @type {any} */
   lastOpts = null;
 
@@ -27,6 +27,9 @@ class FakeGpuBackend {
 
   supportsKernelPrecision(kernel, precision) {
     if (precision === "f32") return true;
+    if (precision === "u32") return kernel === "hashJoin" || kernel === "groupByCount";
+    // Group-by currently has no f64 GPU path; treat as unsupported.
+    if (kernel === "groupBySum" || kernel === "groupByMin" || kernel === "groupByMax") return false;
     return kernel === "sum" || kernel === "min" || kernel === "sort" || kernel === "histogram" ? this._supportsF64 : false;
   }
 
@@ -69,6 +72,12 @@ class FakeGpuBackend {
       counts[bin] += 1;
     }
     return counts;
+  }
+
+  async groupBySum(_keys, _values, opts) {
+    this.calls.groupBySum += 1;
+    this.lastOpts = opts;
+    return { uniqueKeys: new Uint32Array([1]), sums: new Float64Array([123]), counts: new Uint32Array([3]) };
   }
 }
 
@@ -348,4 +357,41 @@ test("histogram: fast mode uses f32 precision for Float64Array inputs", async ()
   assert.deepEqual(fakeGpu.lastOpts, { precision: "f32", allowFp32FallbackForF64: true });
   assert.equal(engine.lastKernelBackend().histogram, "webgpu");
   assert.equal(engine.diagnostics().lastKernelPrecision.histogram, "f32");
+});
+
+test("groupBySum: excel mode falls back to CPU when GPU cannot do f64 group-by", async () => {
+  const fakeGpu = new FakeGpuBackend(true);
+  const engine = new KernelEngine({
+    precision: "excel",
+    gpuBackend: fakeGpu,
+    thresholds: { groupBySum: 0 },
+    validation: { enabled: false }
+  });
+
+  const keys = new Uint32Array([1, 1, 2]);
+  const values = new Float64Array([1, 2, 3]);
+  const out = await engine.groupBySum(keys, values);
+  assert.deepEqual(Array.from(out.uniqueKeys), [1, 2]);
+  assert.deepEqual(Array.from(out.counts), [2, 1]);
+  assert.deepEqual(Array.from(out.sums), [3, 3]);
+  assert.equal(fakeGpu.calls.groupBySum, 0);
+  assert.equal(engine.lastKernelBackend().groupBySum, "cpu");
+});
+
+test("groupBySum: fast mode uses f32 on GPU for Float64Array inputs", async () => {
+  const fakeGpu = new FakeGpuBackend(true);
+  const engine = new KernelEngine({
+    precision: "fast",
+    gpuBackend: fakeGpu,
+    thresholds: { groupBySum: 0 }
+  });
+
+  const keys = new Uint32Array([1, 2]);
+  const values = new Float64Array([1, 2]);
+  const out = await engine.groupBySum(keys, values);
+  assert.deepEqual(Array.from(out.uniqueKeys), [1]);
+  assert.deepEqual(fakeGpu.lastOpts, { precision: "f32", allowFp32FallbackForF64: true });
+  assert.equal(fakeGpu.calls.groupBySum, 1);
+  assert.equal(engine.lastKernelBackend().groupBySum, "webgpu");
+  assert.equal(engine.diagnostics().lastKernelPrecision.groupBySum, "f32");
 });

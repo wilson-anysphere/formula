@@ -6,6 +6,7 @@ import { loadTextResource } from "../util/load_text_resource.js";
 
 const WORKGROUP_SIZE = 256;
 const MMULT_TILE = 8;
+const EMPTY_U32 = 0xffff_ffff;
 
 function hasWebGpu() {
   return typeof navigator !== "undefined" && navigator && "gpu" in navigator && navigator.gpu;
@@ -35,6 +36,15 @@ function toFloat64(values) {
   const out = new Float64Array(values.length);
   for (let i = 0; i < values.length; i++) out[i] = values[i];
   return out;
+}
+
+/**
+ * @param {Uint32Array | Int32Array} keys
+ */
+function toUint32Keys(keys) {
+  if (keys instanceof Uint32Array) return keys;
+  if (keys instanceof Int32Array) return new Uint32Array(keys.buffer, keys.byteOffset, keys.length);
+  throw new Error(`Unsupported key array type: expected Uint32Array or Int32Array`);
 }
 
 /**
@@ -75,25 +85,34 @@ export class WebGpuBackend {
    * @param {GPUDevice} device
    * @param {GPUAdapter} adapter
    * @param {{
-   *  supportsF64: boolean,
-   *  pipelines: {
-   *    reduceSum_f32: GPUComputePipeline,
-   *    reduceMin_f32: GPUComputePipeline,
-   *    reduceMax_f32: GPUComputePipeline,
-   *    reduceSumproduct_f32: GPUComputePipeline,
-   *    mmult_f32: GPUComputePipeline,
-   *    histogram_f32: GPUComputePipeline,
-   *    bitonicSort_f32: GPUComputePipeline,
-   *    reduceSum_f64?: GPUComputePipeline,
-   *    reduceMin_f64?: GPUComputePipeline,
-   *    reduceMax_f64?: GPUComputePipeline,
-   *    reduceSumproduct_f64?: GPUComputePipeline,
-   *    mmult_f64?: GPUComputePipeline,
-   *    histogram_f64?: GPUComputePipeline,
-   *    bitonicSort_f64?: GPUComputePipeline
-   *  }
-   * }} resources
-   */
+ *  supportsF64: boolean,
+ *  pipelines: {
+ *    reduceSum_f32: GPUComputePipeline,
+ *    reduceMin_f32: GPUComputePipeline,
+ *    reduceMax_f32: GPUComputePipeline,
+ *    reduceSumproduct_f32: GPUComputePipeline,
+ *    groupByClear: GPUComputePipeline,
+ *    groupByCount: GPUComputePipeline,
+ *    groupBySum_f32: GPUComputePipeline,
+ *    groupByMin_f32: GPUComputePipeline,
+ *    groupByMax_f32: GPUComputePipeline,
+ *    hashJoinClear: GPUComputePipeline,
+ *    hashJoinBuild: GPUComputePipeline,
+ *    hashJoinCount: GPUComputePipeline,
+ *    hashJoinFill: GPUComputePipeline,
+ *    mmult_f32: GPUComputePipeline,
+ *    histogram_f32: GPUComputePipeline,
+ *    bitonicSort_f32: GPUComputePipeline,
+ *    reduceSum_f64?: GPUComputePipeline,
+ *    reduceMin_f64?: GPUComputePipeline,
+ *    reduceMax_f64?: GPUComputePipeline,
+ *    reduceSumproduct_f64?: GPUComputePipeline,
+ *    mmult_f64?: GPUComputePipeline,
+ *    histogram_f64?: GPUComputePipeline,
+ *    bitonicSort_f64?: GPUComputePipeline
+ *  }
+ * }} resources
+ */
   constructor(device, adapter, resources) {
     this.device = device;
     this.adapter = adapter;
@@ -127,14 +146,40 @@ export class WebGpuBackend {
       }
       supportsF64 = supportsF64 && (device.features?.has?.("shader-f64") ?? false);
 
-      const [reduceSumSrc, reduceMinSrc, reduceMaxSrc, reduceSumproductSrc, mmultSrc, histogramSrc, bitonicSortSrc] = await Promise.all([
+      const [
+        reduceSumSrc,
+        reduceMinSrc,
+        reduceMaxSrc,
+        reduceSumproductSrc,
+        mmultSrc,
+        histogramSrc,
+        bitonicSortSrc,
+        groupByClearSrc,
+        groupByCountSrc,
+        groupBySumSrc,
+        groupByMinSrc,
+        groupByMaxSrc,
+        hashJoinClearSrc,
+        hashJoinBuildSrc,
+        hashJoinCountSrc,
+        hashJoinFillSrc
+      ] = await Promise.all([
         loadTextResource(new URL("./wgsl/reduce_sum.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/reduce_min.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/reduce_max.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/reduce_sumproduct.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/mmult.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/histogram.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/bitonic_sort.wgsl", import.meta.url))
+        loadTextResource(new URL("./wgsl/bitonic_sort.wgsl", import.meta.url)),
+        loadTextResource(new URL("./wgsl/groupby_clear.wgsl", import.meta.url)),
+        loadTextResource(new URL("./wgsl/groupby_count.wgsl", import.meta.url)),
+        loadTextResource(new URL("./wgsl/groupby_sum_f32.wgsl", import.meta.url)),
+        loadTextResource(new URL("./wgsl/groupby_min_f32.wgsl", import.meta.url)),
+        loadTextResource(new URL("./wgsl/groupby_max_f32.wgsl", import.meta.url)),
+        loadTextResource(new URL("./wgsl/hash_join_clear.wgsl", import.meta.url)),
+        loadTextResource(new URL("./wgsl/hash_join_build.wgsl", import.meta.url)),
+        loadTextResource(new URL("./wgsl/hash_join_count.wgsl", import.meta.url)),
+        loadTextResource(new URL("./wgsl/hash_join_fill.wgsl", import.meta.url))
       ]);
 
       const reduceSum_f32 = device.createComputePipeline({
@@ -193,12 +238,93 @@ export class WebGpuBackend {
         }
       });
 
+      const groupByClear = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: device.createShaderModule({ code: groupByClearSrc }),
+          entryPoint: "main"
+        }
+      });
+
+      const groupByCount = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: device.createShaderModule({ code: groupByCountSrc }),
+          entryPoint: "main"
+        }
+      });
+
+      const groupBySum_f32 = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: device.createShaderModule({ code: groupBySumSrc }),
+          entryPoint: "main"
+        }
+      });
+
+      const groupByMin_f32 = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: device.createShaderModule({ code: groupByMinSrc }),
+          entryPoint: "main"
+        }
+      });
+
+      const groupByMax_f32 = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: device.createShaderModule({ code: groupByMaxSrc }),
+          entryPoint: "main"
+        }
+      });
+
+      const hashJoinClear = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: device.createShaderModule({ code: hashJoinClearSrc }),
+          entryPoint: "main"
+        }
+      });
+
+      const hashJoinBuild = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: device.createShaderModule({ code: hashJoinBuildSrc }),
+          entryPoint: "main"
+        }
+      });
+
+      const hashJoinCount = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: device.createShaderModule({ code: hashJoinCountSrc }),
+          entryPoint: "main"
+        }
+      });
+
+      const hashJoinFill = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: device.createShaderModule({ code: hashJoinFillSrc }),
+          entryPoint: "main"
+        }
+      });
+
       /** @type {WebGpuBackend["pipelines"]} */
       const pipelines = {
         reduceSum_f32,
         reduceMin_f32,
         reduceMax_f32,
         reduceSumproduct_f32,
+        groupByClear,
+        groupByCount,
+        groupBySum_f32,
+        groupByMin_f32,
+        groupByMax_f32,
+        hashJoinClear,
+        hashJoinBuild,
+        hashJoinCount,
+        hashJoinFill,
         mmult_f32,
         histogram_f32,
         bitonicSort_f32
@@ -326,6 +452,11 @@ export class WebGpuBackend {
         sumproduct: true,
         average: true,
         count: true,
+        groupByCount: true,
+        groupBySum: true,
+        groupByMin: true,
+        groupByMax: true,
+        hashJoin: true,
         mmult: true,
         sort: true,
         histogram: true
@@ -337,6 +468,11 @@ export class WebGpuBackend {
         sumproduct: Boolean(this.pipelines.reduceSumproduct_f64 && this.pipelines.reduceSum_f64),
         average: Boolean(this.pipelines.reduceSum_f64),
         count: Boolean(this.pipelines.reduceSum_f64),
+        groupByCount: true,
+        groupBySum: false,
+        groupByMin: false,
+        groupByMax: false,
+        hashJoin: true,
         mmult: Boolean(this.pipelines.mmult_f64),
         sort: Boolean(this.pipelines.bitonicSort_f64),
         histogram: Boolean(this.pipelines.histogram_f64)
@@ -355,11 +491,21 @@ export class WebGpuBackend {
   }
 
   /**
-   * @param {"sum" | "min" | "max" | "average" | "count" | "sumproduct" | "mmult" | "sort" | "histogram"} kernel
-   * @param {"f32" | "f64"} dtype
+   * @param {"sum" | "min" | "max" | "average" | "count" | "sumproduct" | "groupByCount" | "groupBySum" | "groupByMin" | "groupByMax" | "hashJoin" | "mmult" | "sort" | "histogram"} kernel
+   * @param {"f32" | "f64" | "u32"} dtype
    */
   supportsKernelPrecision(kernel, dtype) {
     if (dtype === "f32") return true;
+    if (dtype === "u32") {
+      switch (kernel) {
+        case "groupByCount":
+          return Boolean(this.pipelines.groupByCount && this.pipelines.groupByClear);
+        case "hashJoin":
+          return Boolean(this.pipelines.hashJoinClear && this.pipelines.hashJoinBuild && this.pipelines.hashJoinCount && this.pipelines.hashJoinFill);
+        default:
+          return false;
+      }
+    }
     if (!this.supportsF64) return false;
     switch (kernel) {
       case "sum":
@@ -372,6 +518,12 @@ export class WebGpuBackend {
         // SUMPRODUCT uses its own first-pass kernel then finishes via the
         // regular sum reduction.
         return Boolean(this.pipelines.reduceSumproduct_f64 && this.pipelines.reduceSum_f64);
+      case "groupBySum":
+      case "groupByMin":
+      case "groupByMax":
+      case "groupByCount":
+      case "hashJoin":
+        return false;
       case "average":
       case "count":
         // `average` and `count` are derived from sum + scalar operations.
@@ -862,6 +1014,860 @@ export class WebGpuBackend {
     paramBuf.destroy();
     this._precisionUsed.add(canRunF64 ? "f64" : "f32");
     return counts;
+  }
+
+  /**
+   * @param {Uint32Array | Int32Array} keys
+   * @returns {Promise<{ uniqueKeys: Uint32Array | Int32Array, counts: Uint32Array }>}
+   */
+  async groupByCount(keys) {
+    this._ensureNotDisposed();
+
+    const signedKeys = keys instanceof Int32Array;
+    const keysU32 = toUint32Keys(keys);
+    const n = keysU32.length;
+    if (n === 0) {
+      return { uniqueKeys: signedKeys ? new Int32Array() : new Uint32Array(), counts: new Uint32Array() };
+    }
+
+    // Load factor ~0.5 (2x) keeps probe lengths manageable.
+    const tableSize = nextPowerOfTwo(n * 2);
+    const tableLen = tableSize + 1; // +1 for the special key (0xFFFF_FFFF).
+
+    const inKeysBuf = this._createStorageBufferFromArray(keysU32, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const tableKeysBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+    const tableCountsBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+    // Unused, but the clear kernel expects an aggregate buffer.
+    const tableAggBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+
+    const clearParams = new Uint32Array([tableLen, 0, 0, 0]);
+    const clearParamBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(clearParamBuf, 0, clearParams);
+
+    const clearBindGroup = this.device.createBindGroup({
+      layout: this.pipelines.groupByClear.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: tableKeysBuf } },
+        { binding: 1, resource: { buffer: tableCountsBuf } },
+        { binding: 2, resource: { buffer: tableAggBuf } },
+        { binding: 3, resource: { buffer: clearParamBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(tableLen / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.groupByClear);
+      pass.setBindGroup(0, clearBindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    const params = new Uint32Array([n, tableSize, 0, 0]);
+    const paramBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(paramBuf, 0, params);
+
+    const bindGroup = this.device.createBindGroup({
+      layout: this.pipelines.groupByCount.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: inKeysBuf } },
+        { binding: 1, resource: { buffer: tableKeysBuf } },
+        { binding: 2, resource: { buffer: tableCountsBuf } },
+        { binding: 3, resource: { buffer: paramBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(n / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.groupByCount);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    const [tableKeys, tableCounts] = await Promise.all([
+      this._readbackTypedArray(tableKeysBuf, Uint32Array),
+      this._readbackTypedArray(tableCountsBuf, Uint32Array)
+    ]);
+
+    inKeysBuf.destroy();
+    tableKeysBuf.destroy();
+    tableCountsBuf.destroy();
+    tableAggBuf.destroy();
+    clearParamBuf.destroy();
+    paramBuf.destroy();
+
+    /** @type {number[]} */
+    const compactKeys = [];
+    /** @type {number[]} */
+    const compactCounts = [];
+    for (let i = 0; i < tableLen; i++) {
+      const c = tableCounts[i];
+      if (c === 0) continue;
+      compactKeys.push(tableKeys[i]);
+      compactCounts.push(c);
+    }
+
+    if (compactKeys.length === 0) {
+      return { uniqueKeys: signedKeys ? new Int32Array() : new Uint32Array(), counts: new Uint32Array() };
+    }
+
+    // Sort by key, then materialize typed arrays.
+    const packed = new BigUint64Array(compactKeys.length);
+    for (let i = 0; i < compactKeys.length; i++) {
+      const sortKey = (compactKeys[i] ^ (signedKeys ? 0x8000_0000 : 0)) >>> 0;
+      packed[i] = (BigInt(sortKey) << 32n) | BigInt(i);
+    }
+    packed.sort();
+
+    const uniqueKeys = signedKeys ? new Int32Array(compactKeys.length) : new Uint32Array(compactKeys.length);
+    const counts = new Uint32Array(compactKeys.length);
+    for (let out = 0; out < packed.length; out++) {
+      const idx = Number(packed[out] & 0xffff_ffffn);
+      const keyU32 = compactKeys[idx] >>> 0;
+      uniqueKeys[out] = signedKeys ? (keyU32 | 0) : keyU32;
+      counts[out] = compactCounts[idx];
+    }
+
+    return { uniqueKeys, counts };
+  }
+
+  /**
+   * @param {Uint32Array | Int32Array} keys
+   * @param {Float32Array | Float64Array} values
+   * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} opts
+   * @returns {Promise<{ uniqueKeys: Uint32Array | Int32Array, sums: Float64Array, counts: Uint32Array }>}
+   */
+  async groupBySum(keys, values, opts) {
+    this._ensureNotDisposed();
+    const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
+    const requested = opts.precision ?? "auto";
+    const dtype = requested === "auto" ? dtypeOf(values) : requested;
+
+    if (keys.length !== values.length) {
+      throw new Error(`groupBySum length mismatch: keys=${keys.length} values=${values.length}`);
+    }
+
+    const canRunF64 = dtype === "f64" && this.supportsKernelPrecision("groupBySum", "f64");
+    if (dtype === "f64" && !canRunF64 && !allowFp32FallbackForF64) {
+      throw new Error("WebGPU backend does not support f64 group-by kernels; disallowing f64->f32 fallback");
+    }
+
+    const signedKeys = keys instanceof Int32Array;
+    const keysU32 = toUint32Keys(keys);
+    const vals = canRunF64 ? toFloat64(values) : toFloat32(values);
+    const n = keysU32.length;
+    if (n === 0) {
+      return { uniqueKeys: signedKeys ? new Int32Array() : new Uint32Array(), sums: new Float64Array(), counts: new Uint32Array() };
+    }
+
+    const tableSize = nextPowerOfTwo(n * 2);
+    const tableLen = tableSize + 1;
+
+    const inKeysBuf = this._createStorageBufferFromArray(keysU32, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const inValsBuf = this._createStorageBufferFromArray(vals, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const tableKeysBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+    const tableCountsBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+    const tableAggBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+
+    const clearParams = new Uint32Array([tableLen, 0 /* aggInitBits */, 0, 0]);
+    const clearParamBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(clearParamBuf, 0, clearParams);
+
+    const clearBindGroup = this.device.createBindGroup({
+      layout: this.pipelines.groupByClear.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: tableKeysBuf } },
+        { binding: 1, resource: { buffer: tableCountsBuf } },
+        { binding: 2, resource: { buffer: tableAggBuf } },
+        { binding: 3, resource: { buffer: clearParamBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(tableLen / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.groupByClear);
+      pass.setBindGroup(0, clearBindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    const params = new Uint32Array([n, tableSize, 0, 0]);
+    const paramBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(paramBuf, 0, params);
+
+    const bindGroup = this.device.createBindGroup({
+      layout: this.pipelines.groupBySum_f32.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: inKeysBuf } },
+        { binding: 1, resource: { buffer: inValsBuf } },
+        { binding: 2, resource: { buffer: tableKeysBuf } },
+        { binding: 3, resource: { buffer: tableCountsBuf } },
+        { binding: 4, resource: { buffer: tableAggBuf } },
+        { binding: 5, resource: { buffer: paramBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(n / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.groupBySum_f32);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    const [tableKeys, tableCounts, tableAggBits] = await Promise.all([
+      this._readbackTypedArray(tableKeysBuf, Uint32Array),
+      this._readbackTypedArray(tableCountsBuf, Uint32Array),
+      this._readbackTypedArray(tableAggBuf, Uint32Array)
+    ]);
+
+    inKeysBuf.destroy();
+    inValsBuf.destroy();
+    tableKeysBuf.destroy();
+    tableCountsBuf.destroy();
+    tableAggBuf.destroy();
+    clearParamBuf.destroy();
+    paramBuf.destroy();
+
+    const tableAgg = new Float32Array(tableAggBits.buffer, tableAggBits.byteOffset, tableAggBits.length);
+
+    /** @type {number[]} */
+    const compactKeys = [];
+    /** @type {number[]} */
+    const compactCounts = [];
+    /** @type {number[]} */
+    const compactSums = [];
+    for (let i = 0; i < tableLen; i++) {
+      const c = tableCounts[i];
+      if (c === 0) continue;
+      compactKeys.push(tableKeys[i]);
+      compactCounts.push(c);
+      compactSums.push(tableAgg[i]);
+    }
+
+    if (compactKeys.length === 0) {
+      return { uniqueKeys: signedKeys ? new Int32Array() : new Uint32Array(), sums: new Float64Array(), counts: new Uint32Array() };
+    }
+
+    const packed = new BigUint64Array(compactKeys.length);
+    for (let i = 0; i < compactKeys.length; i++) {
+      const sortKey = (compactKeys[i] ^ (signedKeys ? 0x8000_0000 : 0)) >>> 0;
+      packed[i] = (BigInt(sortKey) << 32n) | BigInt(i);
+    }
+    packed.sort();
+
+    const uniqueKeys = signedKeys ? new Int32Array(compactKeys.length) : new Uint32Array(compactKeys.length);
+    const counts = new Uint32Array(compactKeys.length);
+    const sums = new Float64Array(compactKeys.length);
+    for (let out = 0; out < packed.length; out++) {
+      const idx = Number(packed[out] & 0xffff_ffffn);
+      const keyU32 = compactKeys[idx] >>> 0;
+      uniqueKeys[out] = signedKeys ? (keyU32 | 0) : keyU32;
+      counts[out] = compactCounts[idx];
+      sums[out] = compactSums[idx];
+    }
+
+    this._precisionUsed.add("f32");
+    return { uniqueKeys, sums, counts };
+  }
+
+  /**
+   * @param {Uint32Array | Int32Array} keys
+   * @param {Float32Array | Float64Array} values
+   * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} opts
+   * @returns {Promise<{ uniqueKeys: Uint32Array | Int32Array, mins: Float64Array, counts: Uint32Array }>}
+   */
+  async groupByMin(keys, values, opts) {
+    this._ensureNotDisposed();
+    const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
+    const requested = opts.precision ?? "auto";
+    const dtype = requested === "auto" ? dtypeOf(values) : requested;
+
+    if (keys.length !== values.length) {
+      throw new Error(`groupByMin length mismatch: keys=${keys.length} values=${values.length}`);
+    }
+
+    const canRunF64 = dtype === "f64" && this.supportsKernelPrecision("groupByMin", "f64");
+    if (dtype === "f64" && !canRunF64 && !allowFp32FallbackForF64) {
+      throw new Error("WebGPU backend does not support f64 group-by kernels; disallowing f64->f32 fallback");
+    }
+
+    const signedKeys = keys instanceof Int32Array;
+    const keysU32 = toUint32Keys(keys);
+    const vals = canRunF64 ? toFloat64(values) : toFloat32(values);
+    const n = keysU32.length;
+    if (n === 0) {
+      return { uniqueKeys: signedKeys ? new Int32Array() : new Uint32Array(), mins: new Float64Array(), counts: new Uint32Array() };
+    }
+
+    const tableSize = nextPowerOfTwo(n * 2);
+    const tableLen = tableSize + 1;
+
+    const inKeysBuf = this._createStorageBufferFromArray(keysU32, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const inValsBuf = this._createStorageBufferFromArray(vals, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const tableKeysBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+    const tableCountsBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+    const tableAggBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+
+    const posInfBits = new Uint32Array(new Float32Array([Number.POSITIVE_INFINITY]).buffer)[0];
+    const clearParams = new Uint32Array([tableLen, posInfBits, 0, 0]);
+    const clearParamBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(clearParamBuf, 0, clearParams);
+
+    const clearBindGroup = this.device.createBindGroup({
+      layout: this.pipelines.groupByClear.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: tableKeysBuf } },
+        { binding: 1, resource: { buffer: tableCountsBuf } },
+        { binding: 2, resource: { buffer: tableAggBuf } },
+        { binding: 3, resource: { buffer: clearParamBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(tableLen / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.groupByClear);
+      pass.setBindGroup(0, clearBindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    const params = new Uint32Array([n, tableSize, 0, 0]);
+    const paramBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(paramBuf, 0, params);
+
+    const bindGroup = this.device.createBindGroup({
+      layout: this.pipelines.groupByMin_f32.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: inKeysBuf } },
+        { binding: 1, resource: { buffer: inValsBuf } },
+        { binding: 2, resource: { buffer: tableKeysBuf } },
+        { binding: 3, resource: { buffer: tableCountsBuf } },
+        { binding: 4, resource: { buffer: tableAggBuf } },
+        { binding: 5, resource: { buffer: paramBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(n / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.groupByMin_f32);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    const [tableKeys, tableCounts, tableAggBits] = await Promise.all([
+      this._readbackTypedArray(tableKeysBuf, Uint32Array),
+      this._readbackTypedArray(tableCountsBuf, Uint32Array),
+      this._readbackTypedArray(tableAggBuf, Uint32Array)
+    ]);
+
+    inKeysBuf.destroy();
+    inValsBuf.destroy();
+    tableKeysBuf.destroy();
+    tableCountsBuf.destroy();
+    tableAggBuf.destroy();
+    clearParamBuf.destroy();
+    paramBuf.destroy();
+
+    const tableAgg = new Float32Array(tableAggBits.buffer, tableAggBits.byteOffset, tableAggBits.length);
+
+    /** @type {number[]} */
+    const compactKeys = [];
+    /** @type {number[]} */
+    const compactCounts = [];
+    /** @type {number[]} */
+    const compactMins = [];
+    for (let i = 0; i < tableLen; i++) {
+      const c = tableCounts[i];
+      if (c === 0) continue;
+      compactKeys.push(tableKeys[i]);
+      compactCounts.push(c);
+      compactMins.push(tableAgg[i]);
+    }
+
+    if (compactKeys.length === 0) {
+      return { uniqueKeys: signedKeys ? new Int32Array() : new Uint32Array(), mins: new Float64Array(), counts: new Uint32Array() };
+    }
+
+    const packed = new BigUint64Array(compactKeys.length);
+    for (let i = 0; i < compactKeys.length; i++) {
+      const sortKey = (compactKeys[i] ^ (signedKeys ? 0x8000_0000 : 0)) >>> 0;
+      packed[i] = (BigInt(sortKey) << 32n) | BigInt(i);
+    }
+    packed.sort();
+
+    const uniqueKeys = signedKeys ? new Int32Array(compactKeys.length) : new Uint32Array(compactKeys.length);
+    const counts = new Uint32Array(compactKeys.length);
+    const mins = new Float64Array(compactKeys.length);
+    for (let out = 0; out < packed.length; out++) {
+      const idx = Number(packed[out] & 0xffff_ffffn);
+      const keyU32 = compactKeys[idx] >>> 0;
+      uniqueKeys[out] = signedKeys ? (keyU32 | 0) : keyU32;
+      counts[out] = compactCounts[idx];
+      mins[out] = compactMins[idx];
+    }
+
+    this._precisionUsed.add("f32");
+    return { uniqueKeys, mins, counts };
+  }
+
+  /**
+   * @param {Uint32Array | Int32Array} keys
+   * @param {Float32Array | Float64Array} values
+   * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} opts
+   * @returns {Promise<{ uniqueKeys: Uint32Array | Int32Array, maxs: Float64Array, counts: Uint32Array }>}
+   */
+  async groupByMax(keys, values, opts) {
+    this._ensureNotDisposed();
+    const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
+    const requested = opts.precision ?? "auto";
+    const dtype = requested === "auto" ? dtypeOf(values) : requested;
+
+    if (keys.length !== values.length) {
+      throw new Error(`groupByMax length mismatch: keys=${keys.length} values=${values.length}`);
+    }
+
+    const canRunF64 = dtype === "f64" && this.supportsKernelPrecision("groupByMax", "f64");
+    if (dtype === "f64" && !canRunF64 && !allowFp32FallbackForF64) {
+      throw new Error("WebGPU backend does not support f64 group-by kernels; disallowing f64->f32 fallback");
+    }
+
+    const signedKeys = keys instanceof Int32Array;
+    const keysU32 = toUint32Keys(keys);
+    const vals = canRunF64 ? toFloat64(values) : toFloat32(values);
+    const n = keysU32.length;
+    if (n === 0) {
+      return { uniqueKeys: signedKeys ? new Int32Array() : new Uint32Array(), maxs: new Float64Array(), counts: new Uint32Array() };
+    }
+
+    const tableSize = nextPowerOfTwo(n * 2);
+    const tableLen = tableSize + 1;
+
+    const inKeysBuf = this._createStorageBufferFromArray(keysU32, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const inValsBuf = this._createStorageBufferFromArray(vals, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const tableKeysBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+    const tableCountsBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+    const tableAggBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+
+    const negInfBits = new Uint32Array(new Float32Array([Number.NEGATIVE_INFINITY]).buffer)[0];
+    const clearParams = new Uint32Array([tableLen, negInfBits, 0, 0]);
+    const clearParamBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(clearParamBuf, 0, clearParams);
+
+    const clearBindGroup = this.device.createBindGroup({
+      layout: this.pipelines.groupByClear.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: tableKeysBuf } },
+        { binding: 1, resource: { buffer: tableCountsBuf } },
+        { binding: 2, resource: { buffer: tableAggBuf } },
+        { binding: 3, resource: { buffer: clearParamBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(tableLen / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.groupByClear);
+      pass.setBindGroup(0, clearBindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    const params = new Uint32Array([n, tableSize, 0, 0]);
+    const paramBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(paramBuf, 0, params);
+
+    const bindGroup = this.device.createBindGroup({
+      layout: this.pipelines.groupByMax_f32.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: inKeysBuf } },
+        { binding: 1, resource: { buffer: inValsBuf } },
+        { binding: 2, resource: { buffer: tableKeysBuf } },
+        { binding: 3, resource: { buffer: tableCountsBuf } },
+        { binding: 4, resource: { buffer: tableAggBuf } },
+        { binding: 5, resource: { buffer: paramBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(n / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.groupByMax_f32);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    const [tableKeys, tableCounts, tableAggBits] = await Promise.all([
+      this._readbackTypedArray(tableKeysBuf, Uint32Array),
+      this._readbackTypedArray(tableCountsBuf, Uint32Array),
+      this._readbackTypedArray(tableAggBuf, Uint32Array)
+    ]);
+
+    inKeysBuf.destroy();
+    inValsBuf.destroy();
+    tableKeysBuf.destroy();
+    tableCountsBuf.destroy();
+    tableAggBuf.destroy();
+    clearParamBuf.destroy();
+    paramBuf.destroy();
+
+    const tableAgg = new Float32Array(tableAggBits.buffer, tableAggBits.byteOffset, tableAggBits.length);
+
+    /** @type {number[]} */
+    const compactKeys = [];
+    /** @type {number[]} */
+    const compactCounts = [];
+    /** @type {number[]} */
+    const compactMaxs = [];
+    for (let i = 0; i < tableLen; i++) {
+      const c = tableCounts[i];
+      if (c === 0) continue;
+      compactKeys.push(tableKeys[i]);
+      compactCounts.push(c);
+      compactMaxs.push(tableAgg[i]);
+    }
+
+    if (compactKeys.length === 0) {
+      return { uniqueKeys: signedKeys ? new Int32Array() : new Uint32Array(), maxs: new Float64Array(), counts: new Uint32Array() };
+    }
+
+    const packed = new BigUint64Array(compactKeys.length);
+    for (let i = 0; i < compactKeys.length; i++) {
+      const sortKey = (compactKeys[i] ^ (signedKeys ? 0x8000_0000 : 0)) >>> 0;
+      packed[i] = (BigInt(sortKey) << 32n) | BigInt(i);
+    }
+    packed.sort();
+
+    const uniqueKeys = signedKeys ? new Int32Array(compactKeys.length) : new Uint32Array(compactKeys.length);
+    const counts = new Uint32Array(compactKeys.length);
+    const maxs = new Float64Array(compactKeys.length);
+    for (let out = 0; out < packed.length; out++) {
+      const idx = Number(packed[out] & 0xffff_ffffn);
+      const keyU32 = compactKeys[idx] >>> 0;
+      uniqueKeys[out] = signedKeys ? (keyU32 | 0) : keyU32;
+      counts[out] = compactCounts[idx];
+      maxs[out] = compactMaxs[idx];
+    }
+
+    this._precisionUsed.add("f32");
+    return { uniqueKeys, maxs, counts };
+  }
+
+  /**
+   * @param {Uint32Array | Int32Array} leftKeys
+   * @param {Uint32Array | Int32Array} rightKeys
+   * @returns {Promise<{ leftIndex: Uint32Array, rightIndex: Uint32Array }>}
+   */
+  async hashJoin(leftKeys, rightKeys) {
+    this._ensureNotDisposed();
+
+    const leftU32 = toUint32Keys(leftKeys);
+    const rightU32 = toUint32Keys(rightKeys);
+    const leftLen = leftU32.length;
+    const rightLen = rightU32.length;
+    if (leftLen === 0 || rightLen === 0) {
+      return { leftIndex: new Uint32Array(), rightIndex: new Uint32Array() };
+    }
+
+    const tableSize = nextPowerOfTwo(rightLen * 2);
+    const tableLen = tableSize + 1;
+
+    const leftKeysBuf = this._createStorageBufferFromArray(leftU32, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const rightKeysBuf = this._createStorageBufferFromArray(rightU32, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+
+    const tableKeysBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+    const tableHeadsBuf = this.device.createBuffer({
+      size: tableLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+    const nextBuf = this.device.createBuffer({
+      size: rightLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+
+    // Clear hash table.
+    const clearParams = new Uint32Array([tableLen, 0, 0, 0]);
+    const clearParamBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(clearParamBuf, 0, clearParams);
+
+    const clearBindGroup = this.device.createBindGroup({
+      layout: this.pipelines.hashJoinClear.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: tableKeysBuf } },
+        { binding: 1, resource: { buffer: tableHeadsBuf } },
+        { binding: 2, resource: { buffer: clearParamBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(tableLen / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.hashJoinClear);
+      pass.setBindGroup(0, clearBindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    // Build hash table from right keys.
+    const buildParams = new Uint32Array([rightLen, tableSize, 0, 0]);
+    const buildParamBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(buildParamBuf, 0, buildParams);
+
+    const buildBindGroup = this.device.createBindGroup({
+      layout: this.pipelines.hashJoinBuild.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: rightKeysBuf } },
+        { binding: 1, resource: { buffer: tableKeysBuf } },
+        { binding: 2, resource: { buffer: tableHeadsBuf } },
+        { binding: 3, resource: { buffer: nextBuf } },
+        { binding: 4, resource: { buffer: buildParamBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(rightLen / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.hashJoinBuild);
+      pass.setBindGroup(0, buildBindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    // Count matches for each left key.
+    const countsBuf = this.device.createBuffer({
+      size: leftLen * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+    });
+
+    const countParams = new Uint32Array([leftLen, tableSize, 0, 0]);
+    const countParamBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(countParamBuf, 0, countParams);
+
+    const countBindGroup = this.device.createBindGroup({
+      layout: this.pipelines.hashJoinCount.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: leftKeysBuf } },
+        { binding: 1, resource: { buffer: tableKeysBuf } },
+        { binding: 2, resource: { buffer: tableHeadsBuf } },
+        { binding: 3, resource: { buffer: nextBuf } },
+        { binding: 4, resource: { buffer: countsBuf } },
+        { binding: 5, resource: { buffer: countParamBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(leftLen / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.hashJoinCount);
+      pass.setBindGroup(0, countBindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    const counts = await this._readbackTypedArray(countsBuf, Uint32Array);
+    const offsets = new Uint32Array(leftLen);
+    let total = 0;
+    for (let i = 0; i < leftLen; i++) {
+      offsets[i] = total;
+      total += counts[i];
+      // Guard against overflow; outputs are Uint32-indexed.
+      if (total > 0xffff_ffff) {
+        throw new Error(`hashJoin output too large: ${total} pairs (exceeds Uint32Array limits)`);
+      }
+    }
+
+    if (total === 0) {
+      leftKeysBuf.destroy();
+      rightKeysBuf.destroy();
+      tableKeysBuf.destroy();
+      tableHeadsBuf.destroy();
+      nextBuf.destroy();
+      clearParamBuf.destroy();
+      buildParamBuf.destroy();
+      countParamBuf.destroy();
+      countsBuf.destroy();
+      return { leftIndex: new Uint32Array(), rightIndex: new Uint32Array() };
+    }
+
+    const offsetsBuf = this._createStorageBufferFromArray(offsets, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const outLeftBuf = this.device.createBuffer({
+      size: total * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+    });
+    const outRightBuf = this.device.createBuffer({
+      size: total * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+    });
+
+    const fillParams = new Uint32Array([leftLen, tableSize, 0, 0]);
+    const fillParamBuf = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+    this.queue.writeBuffer(fillParamBuf, 0, fillParams);
+
+    const fillBindGroup = this.device.createBindGroup({
+      layout: this.pipelines.hashJoinFill.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: leftKeysBuf } },
+        { binding: 1, resource: { buffer: tableKeysBuf } },
+        { binding: 2, resource: { buffer: tableHeadsBuf } },
+        { binding: 3, resource: { buffer: nextBuf } },
+        { binding: 4, resource: { buffer: countsBuf } },
+        { binding: 5, resource: { buffer: offsetsBuf } },
+        { binding: 6, resource: { buffer: outLeftBuf } },
+        { binding: 7, resource: { buffer: outRightBuf } },
+        { binding: 8, resource: { buffer: fillParamBuf } }
+      ]
+    });
+
+    {
+      const dispatch = this._dispatch2D(Math.ceil(leftLen / WORKGROUP_SIZE));
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(this.pipelines.hashJoinFill);
+      pass.setBindGroup(0, fillBindGroup);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
+      pass.end();
+      this.queue.submit([encoder.finish()]);
+    }
+
+    const [leftIndex, rightIndex] = await Promise.all([
+      this._readbackTypedArray(outLeftBuf, Uint32Array),
+      this._readbackTypedArray(outRightBuf, Uint32Array)
+    ]);
+
+    leftKeysBuf.destroy();
+    rightKeysBuf.destroy();
+    tableKeysBuf.destroy();
+    tableHeadsBuf.destroy();
+    nextBuf.destroy();
+    clearParamBuf.destroy();
+    buildParamBuf.destroy();
+    countParamBuf.destroy();
+    fillParamBuf.destroy();
+    offsetsBuf.destroy();
+    countsBuf.destroy();
+    outLeftBuf.destroy();
+    outRightBuf.destroy();
+
+    // Canonicalize output order for stable semantics across backends.
+    if (total > 1) {
+      const packed = new BigUint64Array(total);
+      for (let i = 0; i < total; i++) {
+        packed[i] = (BigInt(leftIndex[i]) << 32n) | BigInt(rightIndex[i]);
+      }
+      packed.sort();
+      for (let i = 0; i < total; i++) {
+        const v = packed[i];
+        leftIndex[i] = Number(v >> 32n);
+        rightIndex[i] = Number(v & 0xffff_ffffn);
+      }
+    }
+
+    return { leftIndex, rightIndex };
   }
 
   /**

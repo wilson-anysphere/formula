@@ -15,6 +15,16 @@ function formatResult(result) {
   if (result && typeof result === "object" && "length" in result) {
     return `len=${result.length}`;
   }
+  if (result && typeof result === "object" && "uniqueKeys" in result) {
+    // Group-by kernels
+    // @ts-ignore
+    return `groups=${result.uniqueKeys?.length ?? 0}`;
+  }
+  if (result && typeof result === "object" && "leftIndex" in result) {
+    // Hash join
+    // @ts-ignore
+    return `pairs=${result.leftIndex?.length ?? 0}`;
+  }
   return String(result);
 }
 
@@ -31,6 +41,14 @@ async function main() {
   for (let i = 0; i < n; i++) values[i] = (i % 1024) * 0.25;
   const values2 = new Float64Array(n);
   for (let i = 0; i < n; i++) values2[i] = (i % 2048) * 0.5;
+  const keys = new Uint32Array(n);
+  for (let i = 0; i < n; i++) keys[i] = i % 65_536;
+  const joinLeftKeys = new Uint32Array(n);
+  const joinRightKeys = new Uint32Array(n);
+  for (let i = 0; i < n; i++) {
+    joinLeftKeys[i] = i;
+    joinRightKeys[i] = i;
+  }
 
   const engineExcel = await createKernelEngine({ precision: "excel", gpu: { enabled: true } });
   const engineFast = await createKernelEngine({ precision: "fast", gpu: { enabled: true } });
@@ -79,6 +97,20 @@ async function main() {
     async () => engineCpu.histogram(values, { min: 0, max: 256, bins: 64 }),
     async () => engineExcel.histogram(values, { min: 0, max: 256, bins: 64 }),
     async () => engineFast.histogram(values, { min: 0, max: 256, bins: 64 })
+  );
+
+  await benchKernel(
+    "groupBySum",
+    async () => engineCpu.groupBySum(keys, values),
+    async () => engineExcel.groupBySum(keys, values),
+    async () => engineFast.groupBySum(keys, values)
+  );
+
+  await benchKernel(
+    "hashJoin",
+    async () => engineCpu.hashJoin(joinLeftKeys, joinRightKeys),
+    async () => engineExcel.hashJoin(joinLeftKeys, joinRightKeys),
+    async () => engineFast.hashJoin(joinLeftKeys, joinRightKeys)
   );
 
   await engineExcel.dispose();

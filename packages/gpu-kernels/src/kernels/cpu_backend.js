@@ -24,6 +24,11 @@ export class CpuBackend {
         sumproduct: true,
         average: true,
         count: true,
+        groupByCount: true,
+        groupBySum: true,
+        groupByMin: true,
+        groupByMax: true,
+        hashJoin: true,
         mmult: true,
         sort: true,
         histogram: true
@@ -162,5 +167,219 @@ export class CpuBackend {
     }
 
     return counts;
+  }
+
+  /**
+   * Group-by COUNT.
+   * Keys may be `Uint32Array` (dictionary ids) or `Int32Array` (signed keys).
+   * Returned keys are sorted ascending by the key type's numeric ordering.
+   *
+   * @param {Uint32Array | Int32Array} keys
+   * @returns {Promise<{ uniqueKeys: Uint32Array | Int32Array, counts: Uint32Array }>}
+   */
+  async groupByCount(keys) {
+    /** @type {Map<number, number>} */
+    const countsMap = new Map();
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      countsMap.set(k, (countsMap.get(k) ?? 0) + 1);
+    }
+
+    const unique = Array.from(countsMap.keys());
+    unique.sort((a, b) => a - b);
+
+    const uniqueKeys = keys instanceof Int32Array ? new Int32Array(unique.length) : new Uint32Array(unique.length);
+    const counts = new Uint32Array(unique.length);
+    for (let i = 0; i < unique.length; i++) {
+      const k = unique[i];
+      uniqueKeys[i] = k;
+      counts[i] = countsMap.get(k) ?? 0;
+    }
+    return { uniqueKeys, counts };
+  }
+
+  /**
+   * Group-by SUM(+COUNT). SUM follows JS numeric semantics: `NaN` propagates and
+   * `±Infinity` behaves per IEEE-754.
+   *
+   * @param {Uint32Array | Int32Array} keys
+   * @param {Float32Array | Float64Array} values
+   * @returns {Promise<{ uniqueKeys: Uint32Array | Int32Array, sums: Float64Array, counts: Uint32Array }>}
+   */
+  async groupBySum(keys, values) {
+    if (keys.length !== values.length) {
+      throw new Error(`groupBySum length mismatch: keys=${keys.length} values=${values.length}`);
+    }
+
+    /** @type {Map<number, { sum: number, count: number }>} */
+    const map = new Map();
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      const v = values[i];
+      const entry = map.get(k);
+      if (entry) {
+        entry.sum += v;
+        entry.count += 1;
+      } else {
+        map.set(k, { sum: v, count: 1 });
+      }
+    }
+
+    const unique = Array.from(map.keys());
+    unique.sort((a, b) => a - b);
+
+    const uniqueKeys = keys instanceof Int32Array ? new Int32Array(unique.length) : new Uint32Array(unique.length);
+    const sums = new Float64Array(unique.length);
+    const counts = new Uint32Array(unique.length);
+    for (let i = 0; i < unique.length; i++) {
+      const k = unique[i];
+      const entry = map.get(k);
+      uniqueKeys[i] = k;
+      sums[i] = entry?.sum ?? 0;
+      counts[i] = entry?.count ?? 0;
+    }
+    return { uniqueKeys, sums, counts };
+  }
+
+  /**
+   * Group-by MIN(+COUNT). MIN follows JS `Math.min` semantics: `NaN` propagates
+   * and signed zero is preserved (`min(0, -0) === -0`).
+   *
+   * @param {Uint32Array | Int32Array} keys
+   * @param {Float32Array | Float64Array} values
+   * @returns {Promise<{ uniqueKeys: Uint32Array | Int32Array, mins: Float64Array, counts: Uint32Array }>}
+   */
+  async groupByMin(keys, values) {
+    if (keys.length !== values.length) {
+      throw new Error(`groupByMin length mismatch: keys=${keys.length} values=${values.length}`);
+    }
+
+    /** @type {Map<number, { min: number, count: number }>} */
+    const map = new Map();
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      const v = values[i];
+      const entry = map.get(k);
+      if (entry) {
+        entry.min = Math.min(entry.min, v);
+        entry.count += 1;
+      } else {
+        map.set(k, { min: v, count: 1 });
+      }
+    }
+
+    const unique = Array.from(map.keys());
+    unique.sort((a, b) => a - b);
+
+    const uniqueKeys = keys instanceof Int32Array ? new Int32Array(unique.length) : new Uint32Array(unique.length);
+    const mins = new Float64Array(unique.length);
+    const counts = new Uint32Array(unique.length);
+    for (let i = 0; i < unique.length; i++) {
+      const k = unique[i];
+      const entry = map.get(k);
+      uniqueKeys[i] = k;
+      mins[i] = entry?.min ?? Number.POSITIVE_INFINITY;
+      counts[i] = entry?.count ?? 0;
+    }
+    return { uniqueKeys, mins, counts };
+  }
+
+  /**
+   * Group-by MAX(+COUNT). MAX follows JS `Math.max` semantics: `NaN` propagates
+   * and signed zero is preserved (`max(0, -0) === 0`).
+   *
+   * @param {Uint32Array | Int32Array} keys
+   * @param {Float32Array | Float64Array} values
+   * @returns {Promise<{ uniqueKeys: Uint32Array | Int32Array, maxs: Float64Array, counts: Uint32Array }>}
+   */
+  async groupByMax(keys, values) {
+    if (keys.length !== values.length) {
+      throw new Error(`groupByMax length mismatch: keys=${keys.length} values=${values.length}`);
+    }
+
+    /** @type {Map<number, { max: number, count: number }>} */
+    const map = new Map();
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      const v = values[i];
+      const entry = map.get(k);
+      if (entry) {
+        entry.max = Math.max(entry.max, v);
+        entry.count += 1;
+      } else {
+        map.set(k, { max: v, count: 1 });
+      }
+    }
+
+    const unique = Array.from(map.keys());
+    unique.sort((a, b) => a - b);
+
+    const uniqueKeys = keys instanceof Int32Array ? new Int32Array(unique.length) : new Uint32Array(unique.length);
+    const maxs = new Float64Array(unique.length);
+    const counts = new Uint32Array(unique.length);
+    for (let i = 0; i < unique.length; i++) {
+      const k = unique[i];
+      const entry = map.get(k);
+      uniqueKeys[i] = k;
+      maxs[i] = entry?.max ?? Number.NEGATIVE_INFINITY;
+      counts[i] = entry?.count ?? 0;
+    }
+    return { uniqueKeys, maxs, counts };
+  }
+
+  /**
+   * Inner hash-join of two key arrays. Returns pairs of matching indices.
+   *
+   * Output pairs are sorted by `(leftIndex, rightIndex)` ascending.
+   *
+   * @param {Uint32Array | Int32Array} leftKeys
+   * @param {Uint32Array | Int32Array} rightKeys
+   * @returns {Promise<{ leftIndex: Uint32Array, rightIndex: Uint32Array }>}
+   */
+  async hashJoin(leftKeys, rightKeys) {
+    /** @type {Map<number, number[]>} */
+    const rightMap = new Map();
+    for (let j = 0; j < rightKeys.length; j++) {
+      const k = rightKeys[j];
+      const arr = rightMap.get(k);
+      if (arr) arr.push(j);
+      else rightMap.set(k, [j]);
+    }
+
+    let total = 0;
+    for (let i = 0; i < leftKeys.length; i++) {
+      const arr = rightMap.get(leftKeys[i]);
+      if (arr) total += arr.length;
+    }
+
+    const leftIndex = new Uint32Array(total);
+    const rightIndex = new Uint32Array(total);
+
+    let p = 0;
+    for (let i = 0; i < leftKeys.length; i++) {
+      const arr = rightMap.get(leftKeys[i]);
+      if (!arr) continue;
+      for (let k = 0; k < arr.length; k++) {
+        leftIndex[p] = i;
+        rightIndex[p] = arr[k];
+        p += 1;
+      }
+    }
+
+    // Canonicalize order for stable semantics across backends.
+    if (total > 1) {
+      const packed = new BigUint64Array(total);
+      for (let i = 0; i < total; i++) {
+        packed[i] = (BigInt(leftIndex[i]) << 32n) | BigInt(rightIndex[i]);
+      }
+      packed.sort();
+      for (let i = 0; i < total; i++) {
+        const v = packed[i];
+        leftIndex[i] = Number(v >> 32n);
+        rightIndex[i] = Number(v & 0xffff_ffffn);
+      }
+    }
+
+    return { leftIndex, rightIndex };
   }
 }

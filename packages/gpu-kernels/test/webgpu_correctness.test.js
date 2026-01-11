@@ -137,6 +137,38 @@ test("webgpu: f32 + f64 correctness for common kernels (if WebGPU available)", a
     assert.deepEqual(Array.from(gpuSorted), Array.from(cpuSorted));
   }
 
+  {
+    const rng = makeRng(4242);
+    const n = 50_000;
+    const keys = new Uint32Array(n);
+    const vals = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      keys[i] = (rng() * 1024) | 0;
+      vals[i] = 1;
+    }
+    const cpuOut = await cpu.groupBySum(keys, vals);
+    const gpuOut = await gpu.groupBySum(keys, vals, { precision: "f32" });
+    assert.deepEqual(Array.from(gpuOut.uniqueKeys), Array.from(cpuOut.uniqueKeys));
+    assert.deepEqual(Array.from(gpuOut.counts), Array.from(cpuOut.counts));
+    assert.deepEqual(Array.from(gpuOut.sums), Array.from(cpuOut.sums));
+  }
+
+  {
+    const rng = makeRng(9999);
+    const leftLen = 4096;
+    const rightLen = 4096;
+    const range = 512;
+    const leftKeys = new Uint32Array(leftLen);
+    const rightKeys = new Uint32Array(rightLen);
+    for (let i = 0; i < leftLen; i++) leftKeys[i] = (rng() * range) | 0;
+    for (let i = 0; i < rightLen; i++) rightKeys[i] = (rng() * range) | 0;
+
+    const cpuOut = await cpu.hashJoin(leftKeys, rightKeys);
+    const gpuOut = await gpu.hashJoin(leftKeys, rightKeys);
+    assert.deepEqual(Array.from(gpuOut.leftIndex), Array.from(cpuOut.leftIndex));
+    assert.deepEqual(Array.from(gpuOut.rightIndex), Array.from(cpuOut.rightIndex));
+  }
+
   // -------- f64 paths (when supported) --------
   if (diag.supportsF64) {
     {
