@@ -7,6 +7,7 @@
 //! round-trip common patterns while we build out full compatibility.
 
 use crate::format::push_column_label;
+use crate::formula_text::escape_excel_string_literal;
 use crate::workbook_context::{NameScope, WorkbookContext};
 use thiserror::Error;
 
@@ -219,7 +220,10 @@ fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String
                     units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
                 }
 
-                stack.push(format!("\"{}\"", String::from_utf16_lossy(&units)));
+                // Excel escapes embedded quotes by doubling them inside the literal.
+                let s = String::from_utf16_lossy(&units);
+                let escaped = escape_excel_string_literal(&s);
+                stack.push(format!("\"{escaped}\""));
             }
             0x19 => {
                 // PtgAttr: [grbit: u8][unused: u16]

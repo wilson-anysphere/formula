@@ -4,6 +4,7 @@
 
 pub mod biff12_varint;
 pub mod format;
+pub mod formula_text;
 pub mod rgce;
 pub mod workbook_context;
 mod opc;

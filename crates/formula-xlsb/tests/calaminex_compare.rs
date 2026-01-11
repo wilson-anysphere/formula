@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook_auto, Reader};
+use formula_engine::{parse_formula, ParseOptions};
 use formula_xlsb::format::{format_a1, format_hex};
 use formula_xlsb::rgce::decode_rgce;
 use formula_xlsb::{Formula, XlsbWorkbook};
@@ -156,9 +157,9 @@ fn formulas_match_calamine_for_generated_fixture() {
         4,
         0,
         "A\"B",
-        // `"A""B"` (string containing a quote)
+        // `"A""B"` (string containing a quote). PtgStr stores the raw value (`A"B`).
         vec![
-            0x17, 0x04, 0x00, 0x41, 0x00, 0x22, 0x00, 0x22, 0x00, 0x42, 0x00, // "A\"\"B"
+            0x17, 0x03, 0x00, 0x41, 0x00, 0x22, 0x00, 0x42, 0x00, // "A\"B"
         ],
     );
 
@@ -272,6 +273,21 @@ fn compare_fixture(path: &Path) {
 
             let cal_norm = normalize_formula_for_compare(&cal_formula);
             let decoded_norm = normalize_formula_for_compare(decoded_text);
+
+            // Calamine's XLSB formula reader does not escape embedded quotes inside string literals.
+            // We intentionally normalize decoded formulas into Excel-canonical text so the output is
+            // parseable by formula-engine.
+            if parse_formula(&cal_norm, ParseOptions::default()).is_err() {
+                parse_formula(&decoded_norm, ParseOptions::default()).unwrap_or_else(|e| {
+                    panic!(
+                        "fixture {} sheet {sheet_name} cell {}: calamine produced an invalid formula ({cal_formula:?}); expected formula-xlsb to produce a parseable formula but got error: {e:?}\nformula-xlsb: {decoded_text}",
+                        path.display(),
+                        format_a1(row, col),
+                    )
+                });
+                continue;
+            }
+
             assert_eq!(
                 decoded_norm,
                 cal_norm,

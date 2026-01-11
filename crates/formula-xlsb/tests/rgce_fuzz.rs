@@ -64,10 +64,8 @@ fn trailing_bytes_after_complete_expression_is_error() {
 #[test]
 fn ptgstr_escapes_quotes_excel_style() {
     // PtgStr payload stores raw characters. Excel formula text escapes inner quotes by doubling them.
-    // This token represents the literal text: A\"\"B.
-    let rgce = vec![
-        0x17, 0x04, 0x00, b'A', 0x00, b'"', 0x00, b'"', 0x00, b'B', 0x00,
-    ];
+    // This token stores the raw string value `A"B`.
+    let rgce = vec![0x17, 0x03, 0x00, b'A', 0x00, b'"', 0x00, b'B', 0x00];
     let decoded = decode_rgce(&rgce).expect("decode string literal");
     assert_eq!(decoded, "\"A\"\"B\"");
 }

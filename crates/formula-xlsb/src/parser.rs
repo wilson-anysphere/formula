@@ -60,6 +60,10 @@ pub enum Error {
     SheetIndexOutOfBounds(usize),
     #[error("missing relationship target for sheet rId {0}")]
     MissingSheetRelationship(String),
+    #[error("invalid Excel string literal: {0}")]
+    InvalidExcelStringLiteral(String),
+    #[error("unsupported formula text: {0}")]
+    UnsupportedFormulaText(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
