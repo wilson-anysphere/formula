@@ -9,47 +9,6 @@ import type {
   WorkerOutboundMessage,
 } from "./protocol";
 
-type EngineRequest = {
-  id: number;
-  method: "init" | "ping";
-  params?: unknown;
-};
-
-type EngineResponse =
-  | { id: number; ok: true; result: unknown }
-  | { id: number; ok: false; error: string };
-
-let initialized = false;
-
-async function handleEngine(method: EngineRequest["method"], _params?: unknown) {
-  switch (method) {
-    case "init": {
-      initialized = true;
-      return;
-    }
-    case "ping": {
-      return initialized ? "pong" : "not-initialized";
-    }
-  }
-}
-
-async function respondToEngineRequest(request: EngineRequest): Promise<void> {
-  const { id, method, params } = request;
-
-  try {
-    const result = await handleEngine(method, params);
-    const response: EngineResponse = { id, ok: true, result };
-    self.postMessage(response);
-  } catch (error) {
-    const response: EngineResponse = {
-      id,
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-    self.postMessage(response);
-  }
-}
-
 type WasmWorkbookInstance = {
   getCell(address: string, sheet?: string): unknown;
   setCell(address: string, value: CellScalar, sheet?: string): void;
@@ -221,24 +180,8 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
   }
 }
 
-function isEngineRequest(data: unknown): data is EngineRequest {
-  return (
-    !!data &&
-    typeof data === "object" &&
-    "id" in data &&
-    typeof (data as any).id === "number" &&
-    "method" in data &&
-    ((data as any).method === "init" || (data as any).method === "ping")
-  );
-}
-
 self.addEventListener("message", (event: MessageEvent<unknown>) => {
   const data = event.data;
-
-  if (isEngineRequest(data)) {
-    void respondToEngineRequest(data);
-    return;
-  }
 
   const msg = data as InitMessage;
   if (!msg || typeof msg !== "object" || (msg as any).type !== "init") {
