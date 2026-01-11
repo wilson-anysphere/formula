@@ -2,16 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { TextLayoutEngine } from "../src/index.js";
+import GraphemeSplitter from "grapheme-splitter";
 
 function makeMonospaceMeasurer(clusterWidth = 1) {
-  const segmenter = new Intl.Segmenter("und", { granularity: "grapheme" });
+  const splitter = new GraphemeSplitter();
 
   return {
     calls: 0,
     measure(text, font) {
       this.calls++;
-      let clusters = 0;
-      for (const _ of segmenter.segment(text)) clusters++;
+      const clusters = splitter.countGraphemes(text);
       return {
         width: clusters * clusterWidth,
         ascent: font.sizePx * 0.8,
@@ -148,6 +148,22 @@ test("word wrap uses Unicode line breaking to keep punctuation with the previous
   });
 
   assert.deepEqual(layout.lines.map((l) => l.text), ["Hello,", "world"]);
+});
+
+test("word wrap does not split emoji ZWJ grapheme clusters", () => {
+  const measurer = makeMonospaceMeasurer();
+  const engine = new TextLayoutEngine(measurer);
+
+  const layout = engine.layout({
+    text: "👨‍👩‍👧‍👦👨‍👩‍👧‍👦",
+    font: { family: "Inter", sizePx: 10, weight: 400 },
+    maxWidth: 1,
+    wrapMode: "word",
+    align: "left",
+    direction: "ltr",
+  });
+
+  assert.deepEqual(layout.lines.map((l) => l.text), ["👨‍👩‍👧‍👦", "👨‍👩‍👧‍👦"]);
 });
 
 test("maxLines truncates and applies ellipsis within maxWidth", () => {

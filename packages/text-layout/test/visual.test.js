@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 
 import { TextLayoutEngine } from "../src/index.js";
 import { drawTextLayout } from "../src/draw.js";
+import GraphemeSplitter from "grapheme-splitter";
 
 function makeMonospaceMeasurer(clusterWidth = 1) {
-  const segmenter = new Intl.Segmenter("und", { granularity: "grapheme" });
+  const splitter = new GraphemeSplitter();
   return {
     measure(text, font) {
-      let clusters = 0;
-      for (const _ of segmenter.segment(text)) clusters++;
+      const clusters = splitter.countGraphemes(text);
       return {
         width: clusters * clusterWidth,
         ascent: font.sizePx * 0.8,

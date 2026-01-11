@@ -66,6 +66,7 @@ export function wordBreakPositions(text, locale) {
   // after a run of breakable whitespace to the *start* of that whitespace run so lines exclude
   // trailing whitespace and the engine can skip it on the next line.
   const breaker = new LineBreaker(text);
+  let lastPos = -1;
   for (let brk = breaker.nextBreak(); brk; brk = breaker.nextBreak()) {
     let pos = brk.position;
     if (pos <= 0) continue;
@@ -78,17 +79,15 @@ export function wordBreakPositions(text, locale) {
       wordBreakSet.add(pos);
     }
 
-    breaks.push(pos);
+    if (pos !== lastPos) {
+      breaks.push(pos);
+      lastPos = pos;
+    }
   }
 
-  // Ensure final break and make monotonic.
-  breaks.push(text.length);
-  breaks.sort((a, b) => a - b);
-  const deduped = [];
-  for (let i = 0; i < breaks.length; i++) {
-    if (i === 0 || breaks[i] !== breaks[i - 1]) deduped.push(breaks[i]);
-  }
-  return { breaks: deduped, wordBreakSet };
+  // Ensure final break.
+  if (breaks.length === 0 || breaks[breaks.length - 1] !== text.length) breaks.push(text.length);
+  return { breaks, wordBreakSet };
 }
 
 /**
