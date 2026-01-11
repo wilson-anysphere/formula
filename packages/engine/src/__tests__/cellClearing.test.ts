@@ -249,6 +249,30 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("surfaces LAMBDA values as placeholder text", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setCell("A1", "=LAMBDA(x,x)");
+
+      const changes = await engine.recalculate();
+      expect(changes).toEqual([{ sheet: "Sheet1", address: "A1", value: "<LAMBDA>" }]);
+
+      const a1 = await engine.getCell("A1");
+      expect(a1.value).toBe("<LAMBDA>");
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("clears spill output cells when a spill cell is overwritten", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
