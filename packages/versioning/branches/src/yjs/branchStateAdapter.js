@@ -86,6 +86,34 @@ function yjsValueToJson(value) {
 }
 
 /**
+ * Iterate legacy list items stored on a Map root (i.e. CRDT list items with
+ * `parentSub === null`).
+ *
+ * This happens if a document originally used the legacy Array schema, but the
+ * root was later instantiated as a Map (e.g. by calling `doc.getMap("comments")`
+ * first while the root was still an `AbstractType` placeholder). In that case
+ * the comments still exist in the CRDT but are invisible via `map.keys()`.
+ *
+ * @param {any} mapType
+ * @returns {Y.Map<any>[]} legacy comment maps
+ */
+function legacyListCommentsFromMapRoot(mapType) {
+  /** @type {Y.Map<any>[]} */
+  const out = [];
+  let item = mapType?._start ?? null;
+  while (item) {
+    if (!item.deleted && item.parentSub === null) {
+      const content = item.content?.getContent?.() ?? [];
+      for (const value of content) {
+        if (value instanceof Y.Map) out.push(value);
+      }
+    }
+    item = item.right;
+  }
+  return out;
+}
+
+/**
  * Parse a spreadsheet cell key. Supports:
  * - `${sheetId}:${row}:${col}`
  * - `${sheetId}:${row},${col}`
@@ -236,27 +264,75 @@ export function branchStateFromYjsDoc(doc) {
   /** @type {Record<string, any>} */
   const comments = {};
   if (doc.share.has("comments")) {
-    const placeholder = doc.share.get("comments");
-    const hasStart = placeholder?._start != null;
-    const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
-    const kind = hasStart && mapSize === 0 ? "array" : "map";
+    // Yjs root types are schema-defined: you must know whether a key is a Map or
+    // Array. When applying updates into a fresh Doc, root types can temporarily
+    // appear as a generic `AbstractType` until a constructor is chosen.
+    //
+    // Importantly, calling `doc.getArray("comments")` on a Map-backed root (or
+    // vice versa) can throw and/or make legacy content inaccessible. To support
+    // both historical schemas (Map or Array) we inspect the root value first.
+    const existing = doc.share.get("comments");
 
-    if (kind === "map") {
-      const commentsMap = doc.getMap("comments");
-      for (const id of Array.from(commentsMap.keys()).sort()) {
-        comments[id] = yjsValueToJson(commentsMap.get(id));
+    if (existing instanceof Y.Map) {
+      /** @type {Map<string, any>} */
+      const byId = new Map();
+      for (const id of Array.from(existing.keys()).sort()) {
+        byId.set(id, yjsValueToJson(existing.get(id)));
       }
-    } else {
-      const commentsArray = doc.getArray("comments");
+      // Recovery: legacy list items stored on a Map root.
+      for (const item of legacyListCommentsFromMapRoot(existing)) {
+        const id = coerceString(readYMapOrObject(item, "id"));
+        if (!id) continue;
+        if (byId.has(id)) continue;
+        byId.set(id, yjsValueToJson(item));
+      }
+      for (const id of Array.from(byId.keys()).sort()) {
+        comments[id] = byId.get(id);
+      }
+    } else if (existing instanceof Y.Array) {
       /** @type {Array<{ id: string, value: any }>} */
       const entries = [];
-      for (const item of commentsArray.toArray()) {
+      for (const item of existing.toArray()) {
         const id = coerceString(readYMapOrObject(item, "id"));
         if (!id) continue;
         entries.push({ id, value: yjsValueToJson(item) });
       }
       entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       for (const entry of entries) comments[entry.id] = entry.value;
+    } else {
+      const placeholder = existing;
+      const hasStart = placeholder?._start != null;
+      const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
+      const kind = hasStart && mapSize === 0 ? "array" : "map";
+
+      if (kind === "map") {
+        const commentsMap = doc.getMap("comments");
+        /** @type {Map<string, any>} */
+        const byId = new Map();
+        for (const id of Array.from(commentsMap.keys()).sort()) {
+          byId.set(id, yjsValueToJson(commentsMap.get(id)));
+        }
+        for (const item of legacyListCommentsFromMapRoot(commentsMap)) {
+          const id = coerceString(readYMapOrObject(item, "id"));
+          if (!id) continue;
+          if (byId.has(id)) continue;
+          byId.set(id, yjsValueToJson(item));
+        }
+        for (const id of Array.from(byId.keys()).sort()) {
+          comments[id] = byId.get(id);
+        }
+      } else {
+        const commentsArray = doc.getArray("comments");
+        /** @type {Array<{ id: string, value: any }>} */
+        const entries = [];
+        for (const item of commentsArray.toArray()) {
+          const id = coerceString(readYMapOrObject(item, "id"));
+          if (!id) continue;
+          entries.push({ id, value: yjsValueToJson(item) });
+        }
+        entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        for (const entry of entries) comments[entry.id] = entry.value;
+      }
     }
   }
 
@@ -282,24 +358,53 @@ export function branchStateFromYjsDoc(doc) {
 export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
   const normalized = normalizeDocumentState(state);
 
+  /**
+   * @param {any} value
+   */
+  function yMapFromJsonObject(value) {
+    const map = new Y.Map();
+    if (!isRecord(value)) return map;
+    const keys = Object.keys(value).sort();
+    for (const key of keys) {
+      const v = value[key];
+      if (key === "replies") {
+        const replies = new Y.Array();
+        if (Array.isArray(v)) {
+          for (const reply of v) {
+            if (isRecord(reply)) replies.push([yMapFromJsonObject(reply)]);
+          }
+        }
+        map.set("replies", replies);
+        continue;
+      }
+      // Mentions are stored as plain arrays in the collab comment schema.
+      if (key === "mentions") {
+        map.set("mentions", Array.isArray(v) ? structuredClone(v) : []);
+        continue;
+      }
+      map.set(key, structuredClone(v));
+    }
+    return map;
+  }
+
   doc.transact(
     () => {
       // --- Sheets ---
       const sheetsArray = doc.getArray("sheets");
       if (sheetsArray.length > 0) sheetsArray.delete(0, sheetsArray.length);
       for (const sheetId of normalized.sheets.order) {
-      const meta = normalized.sheets.metaById[sheetId];
-      const entry = new Y.Map();
-      entry.set("id", sheetId);
-      entry.set("name", meta?.name ?? null);
-      sheetsArray.push([entry]);
-    }
+        const meta = normalized.sheets.metaById[sheetId];
+        const entry = new Y.Map();
+        entry.set("id", sheetId);
+        entry.set("name", meta?.name ?? null);
+        sheetsArray.push([entry]);
+      }
 
-    // --- Cells ---
-    const cellsMap = doc.getMap("cells");
-    for (const key of Array.from(cellsMap.keys())) {
-      cellsMap.delete(key);
-    }
+      // --- Cells ---
+      const cellsMap = doc.getMap("cells");
+      for (const key of Array.from(cellsMap.keys())) {
+        cellsMap.delete(key);
+      }
 
       for (const [sheetId, sheet] of Object.entries(normalized.cells)) {
         for (const [addr, cell] of Object.entries(sheet ?? {})) {
@@ -321,34 +426,45 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
         }
       }
 
-    // --- Named ranges ---
-    const namedRangesMap = doc.getMap("namedRanges");
-    for (const key of Array.from(namedRangesMap.keys())) namedRangesMap.delete(key);
-    for (const [key, value] of Object.entries(normalized.namedRanges ?? {})) {
-      namedRangesMap.set(key, structuredClone(value));
-    }
+      // --- Named ranges ---
+      const namedRangesMap = doc.getMap("namedRanges");
+      for (const key of Array.from(namedRangesMap.keys())) namedRangesMap.delete(key);
+      for (const [key, value] of Object.entries(normalized.namedRanges ?? {})) {
+        namedRangesMap.set(key, structuredClone(value));
+      }
 
-    // --- Comments ---
-    const placeholder = doc.share.get("comments");
-    const hasStart = placeholder?._start != null;
-    const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
-    const kind = placeholder && hasStart && mapSize === 0 ? "array" : "map";
+      // --- Comments ---
+      const existing = doc.share.get("comments");
+      const commentsKind =
+        existing instanceof Y.Array
+          ? "array"
+          : existing instanceof Y.Map
+            ? "map"
+            : (() => {
+                const placeholder = existing;
+                const hasStart = placeholder?._start != null;
+                const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
+                return placeholder && hasStart && mapSize === 0 ? "array" : "map";
+              })();
 
-      if (kind === "array") {
+      if (commentsKind === "array") {
         const commentsArray = doc.getArray("comments");
         if (commentsArray.length > 0) commentsArray.delete(0, commentsArray.length);
+
         const ids = Object.keys(normalized.comments ?? {}).sort();
-      for (const id of ids) {
-        const value = normalized.comments[id];
-        const obj = isRecord(value) ? structuredClone(value) : { value: structuredClone(value) };
-        if (isRecord(obj) && !("id" in obj)) obj.id = id;
-        commentsArray.push([obj]);
-      }
-    } else {
-      const commentsMap = doc.getMap("comments");
-      for (const key of Array.from(commentsMap.keys())) commentsMap.delete(key);
+        for (const id of ids) {
+          const value = normalized.comments[id];
+          const obj = isRecord(value) ? structuredClone(value) : { value: structuredClone(value) };
+          if (isRecord(obj) && !("id" in obj)) obj.id = id;
+          commentsArray.push([yMapFromJsonObject(obj)]);
+        }
+      } else {
+        const commentsMap = doc.getMap("comments");
+        for (const key of Array.from(commentsMap.keys())) commentsMap.delete(key);
         for (const [id, value] of Object.entries(normalized.comments ?? {})) {
-          commentsMap.set(id, structuredClone(value));
+          const obj = isRecord(value) ? structuredClone(value) : { value: structuredClone(value) };
+          if (isRecord(obj) && !("id" in obj)) obj.id = id;
+          commentsMap.set(id, yMapFromJsonObject(obj));
         }
       }
     },
