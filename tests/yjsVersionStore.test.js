@@ -56,3 +56,29 @@ test("YjsVersionStore: save/get/list/update/delete (gzip + chunks)", async () =>
   assert.deepEqual(afterDelete.map((v) => v.id), ["v1"]);
 });
 
+test("YjsVersionStore: base64 encoding round-trips", async () => {
+  const ydoc = new Y.Doc();
+  const store = new YjsVersionStore({ doc: ydoc, snapshotEncoding: "base64", compression: "none" });
+
+  const v1 = {
+    id: "v1",
+    kind: "snapshot",
+    timestampMs: 1,
+    userId: null,
+    userName: null,
+    description: "hello",
+    checkpointName: null,
+    checkpointLocked: null,
+    checkpointAnnotations: null,
+    snapshot: new Uint8Array([0, 255, 1, 2, 3]),
+  };
+
+  await store.saveVersion(v1);
+
+  const record = ydoc.getMap("versions").get("v1");
+  assert.equal(typeof record?.get?.("snapshotBase64"), "string", "expected snapshotBase64 to be stored");
+
+  const loaded = await store.getVersion("v1");
+  assert.ok(loaded);
+  assert.deepEqual(Array.from(loaded.snapshot), Array.from(v1.snapshot));
+});

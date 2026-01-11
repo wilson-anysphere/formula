@@ -41,7 +41,7 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
   const docId = `yjs-version-history-${randomUUID()}`;
   const wsUrl = server.wsUrl;
 
-  const createClient = ({ userId, userName, storeCompression }) => {
+  const createClient = ({ userId, userName, storeCompression, explicitStore = false }) => {
     const session = createCollabSession({
       connection: {
         wsUrl,
@@ -53,18 +53,28 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
       defaultSheetId: "Sheet1",
     });
 
-    const store = new YjsVersionStore({
-      doc: session.doc,
-      ...(storeCompression ? { compression: storeCompression } : {}),
-      chunkSize: 8 * 1024,
-    });
+    const store = explicitStore
+      ? new YjsVersionStore({
+          doc: session.doc,
+          ...(storeCompression ? { compression: storeCompression } : {}),
+          chunkSize: 8 * 1024,
+        })
+      : null;
 
-    const versioning = createCollabVersioning({
-      session,
-      store,
-      user: { userId, userName },
-      autoStart: false,
-    });
+    const versioning = createCollabVersioning(
+      store
+        ? {
+            session,
+            store,
+            user: { userId, userName },
+            autoStart: false,
+          }
+        : {
+            session,
+            user: { userId, userName },
+            autoStart: false,
+          }
+    );
 
     let destroyed = false;
     const destroy = () => {
@@ -78,7 +88,13 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
     return { session, store, versioning, destroy };
   };
 
-  const clientA = createClient({ userId: "u-a", userName: "User A", storeCompression: "gzip" });
+  const clientA = createClient({
+    userId: "u-a",
+    userName: "User A",
+    storeCompression: "gzip",
+    explicitStore: true,
+  });
+  // B uses the default store (YjsVersionStore) provided by CollabVersioning.
   const clientB = createClient({ userId: "u-b", userName: "User B" });
 
   t.after(() => {
@@ -122,6 +138,11 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
     const versions = await clientB.versioning.listVersions();
     return versions.some((v) => v.kind === "restore");
   }, 10_000);
+  {
+    const versions = await clientB.versioning.listVersions();
+    assert.ok(versions.some((v) => v.id === checkpoint.id), "expected checkpoint to survive restore");
+    assert.ok(versions.some((v) => v.id === snapshot.id), "expected snapshot to survive restore");
+  }
 
   // Tear down clients and restart the server (persisted doc + version history should survive).
   clientA.destroy();
@@ -137,6 +158,7 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
     auth: { mode: "opaque", token: "test-token" },
   });
 
+  // C also uses the default store (YjsVersionStore) via CollabVersioning.
   const clientC = createClient({ userId: "u-c", userName: "User C" });
   t.after(() => clientC.destroy());
 
