@@ -376,18 +376,29 @@ impl Storage {
         let conn = self.conn.lock().expect("storage mutex poisoned");
         let mut stmt = conn.prepare("SELECT id, name, metadata FROM workbooks ORDER BY created_at")?;
         let rows = stmt.query_map([], |r| {
-            let id: String = r.get(0)?;
+            let Some(id_raw) = r.get::<_, Option<String>>(0).ok().flatten() else {
+                return Ok(None);
+            };
+            let Ok(id) = Uuid::parse_str(&id_raw).map_err(|_| rusqlite::Error::InvalidQuery) else {
+                return Ok(None);
+            };
+            let Some(name) = r.get::<_, Option<String>>(1).ok().flatten() else {
+                return Ok(None);
+            };
             let metadata_raw: Option<String> = r.get::<_, Option<String>>(2).ok().flatten();
-            Ok(WorkbookMeta {
-                id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                name: r.get(1)?,
+            Ok(Some(WorkbookMeta {
+                id,
+                name,
                 metadata: parse_optional_json_value(metadata_raw),
-            })
+            }))
         })?;
 
         let mut out = Vec::new();
         for row in rows {
-            out.push(row?);
+            let Some(row) = row? else {
+                continue;
+            };
+            out.push(row);
         }
         Ok(out)
     }
