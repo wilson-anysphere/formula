@@ -740,34 +740,17 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
             continue;
         }
 
+        if try_read_sheet_reference_token(&mut chars, &mut tokens) {
+            continue;
+        }
+
         match ch {
-            // Sheet prefixes are not supported in this lightweight evaluator yet.
-            // Mirror the JS fallback behavior by treating them as invalid references.
-            '!' => return Err(ERROR_REF),
-            '\'' => {
-                // Only treat `'Sheet Name'!A1`-style prefixes as #REF!. Any other
-                // stray `'` should behave like an unknown token and map to
-                // #VALUE! (matching the current JS evaluator).
-                let mut lookahead = chars.clone();
-                lookahead.next();
-                let mut saw_closing = false;
-                while let Some(next) = lookahead.next() {
-                    if next == '\'' {
-                        saw_closing = true;
-                        break;
-                    }
-                }
-                if !saw_closing {
-                    return Err(ERROR_VALUE);
-                }
-                if lookahead.next() != Some('!') {
-                    return Err(ERROR_VALUE);
-                }
-                match lookahead.peek().copied() {
-                    Some('$') => return Err(ERROR_REF),
-                    Some(next) if next.is_ascii_alphabetic() => return Err(ERROR_REF),
-                    _ => return Err(ERROR_VALUE),
-                }
+            // `!` and `'` are not tokens the evaluator understands (they're only meaningful
+            // inside sheet-qualified references, which are tokenized above). Treat them as
+            // unknown characters.
+            '!' | '\'' => {
+                chars.next();
+                tokens.push(FormulaToken::OtherOp(ch.to_string()))
             }
             '"' => {
                 chars.next();
@@ -960,6 +943,67 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
     }
 
     Ok(tokens)
+}
+
+fn try_read_sheet_reference_token(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    out: &mut Vec<FormulaToken>,
+) -> bool {
+    let mut lookahead = chars.clone();
+    let start = match lookahead.peek().copied() {
+        Some(ch) => ch,
+        None => return false,
+    };
+
+    // Try a quoted sheet prefix: `'Sheet Name'!A1`
+    if start == '\'' {
+        lookahead.next();
+        let mut saw_closing = false;
+        while let Some(next) = lookahead.next() {
+            if next == '\'' {
+                saw_closing = true;
+                break;
+            }
+        }
+        if !saw_closing || lookahead.next() != Some('!') {
+            return false;
+        }
+    } else {
+        // Unquoted sheet prefix: `Sheet1!A1` (JS tokenizer also allows spaces).
+        if !(start.is_ascii_alphabetic() || start == '_') {
+            return false;
+        }
+
+        lookahead.next();
+        while let Some(next) = lookahead.peek().copied() {
+            if next.is_ascii_alphanumeric() || next == '_' || next == '.' || next == ' ' {
+                lookahead.next();
+            } else {
+                break;
+            }
+        }
+        if lookahead.next() != Some('!') {
+            return false;
+        }
+    }
+
+    // Cell reference after the `!`.
+    if try_read_cell_ref_token(&mut lookahead).is_none() {
+        return false;
+    }
+
+    // Optional range: `Sheet1!A1:B2` (only if second cell ref exists).
+    if lookahead.peek().copied() == Some(':') {
+        let mut range_look = lookahead.clone();
+        range_look.next();
+        if try_read_cell_ref_token(&mut range_look).is_some() {
+            lookahead = range_look;
+        }
+    }
+
+    *chars = lookahead;
+    out.push(FormulaToken::ErrorCode(ERROR_REF.to_string()));
+    true
 }
 
 fn try_read_cell_ref_token(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
