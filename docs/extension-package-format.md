@@ -36,6 +36,7 @@ Formula extensions are distributed as a single binary “package” blob downloa
 **Container:** gzipped JSON bundle containing base64-encoded files.
 
 - Signature is **detached** and verified over the raw package bytes.
+- The embedded `manifest` object must match the bundled `package.json` file contents.
 - Supported only for backward compatibility while v2 rolls out.
 
 ## Tooling
