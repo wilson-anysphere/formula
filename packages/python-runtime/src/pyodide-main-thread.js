@@ -210,58 +210,93 @@ export function applyNetworkSandbox(permissions) {
   const mode = permissions?.network ?? "none";
   const previousFetch = globalThis.fetch;
   const previousWebSocket = globalThis.WebSocket;
- 
-  if (mode === "none") {
-    globalThis.fetch = async () => {
-      throw new Error("Network access is not permitted");
-    };
- 
-    globalThis.WebSocket = class BlockedWebSocket {
-      constructor() {
-        throw new Error("Network access is not permitted");
+
+  let didOverrideFetch = false;
+  let didOverrideWebSocket = false;
+
+  // Network sandboxing is best-effort: embedded/webview hosts sometimes expose
+  // non-writable `fetch` / `WebSocket` globals. We prefer running scripts (with a
+  // degraded sandbox) over hard-failing at startup in those environments.
+  const trySet = (key, value) => {
+    try {
+      globalThis[key] = value;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const restore = () => {
+    if (didOverrideFetch) {
+      try {
+        globalThis.fetch = previousFetch;
+      } catch {
+        // ignore
       }
-    };
- 
-    return () => {
-      globalThis.fetch = previousFetch;
-      globalThis.WebSocket = previousWebSocket;
-    };
+    }
+    if (didOverrideWebSocket) {
+      try {
+        globalThis.WebSocket = previousWebSocket;
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  if (mode === "none") {
+    didOverrideFetch = trySet("fetch", async () => {
+      throw new Error("Network access is not permitted");
+    });
+
+    didOverrideWebSocket = trySet(
+      "WebSocket",
+      class BlockedWebSocket {
+        constructor() {
+          throw new Error("Network access is not permitted");
+        }
+      },
+    );
+
+    return restore;
   }
- 
+
   if (mode === "allowlist") {
     const allowlist = new Set(permissions?.networkAllowlist ?? []);
-    globalThis.fetch = async (input, init) => {
+    didOverrideFetch = trySet("fetch", async (input, init) => {
       const url = typeof input === "string" ? input : input?.url;
       const hostname = new URL(url, globalThis.location?.href ?? "https://localhost").hostname;
       if (!allowlist.has(hostname)) {
         throw new Error(`Network access to ${hostname} is not permitted`);
       }
-      return previousFetch(input, init);
-    };
- 
-    globalThis.WebSocket = class AllowlistWebSocket {
-      constructor(url, protocols) {
-        const hostname = new URL(url, globalThis.location?.href ?? "https://localhost").hostname;
-        if (!allowlist.has(hostname)) {
-          throw new Error(`Network access to ${hostname} is not permitted`);
-        }
-        return new previousWebSocket(url, protocols);
+      if (typeof previousFetch !== "function") {
+        throw new Error("Network access is not permitted (fetch is unavailable)");
       }
-    };
- 
-    return () => {
-      globalThis.fetch = previousFetch;
-      globalThis.WebSocket = previousWebSocket;
-    };
+      return previousFetch(input, init);
+    });
+
+    didOverrideWebSocket = trySet(
+      "WebSocket",
+      class AllowlistWebSocket {
+        constructor(url, protocols) {
+          const hostname = new URL(url, globalThis.location?.href ?? "https://localhost").hostname;
+          if (!allowlist.has(hostname)) {
+            throw new Error(`Network access to ${hostname} is not permitted`);
+          }
+          if (typeof previousWebSocket !== "function") {
+            throw new Error("Network access is not permitted (WebSocket is unavailable)");
+          }
+          return new previousWebSocket(url, protocols);
+        }
+      },
+    );
+
+    return restore;
   }
- 
+
   // full access
-  globalThis.fetch = previousFetch;
-  globalThis.WebSocket = previousWebSocket;
-  return () => {
-    globalThis.fetch = previousFetch;
-    globalThis.WebSocket = previousWebSocket;
-  };
+  didOverrideFetch = trySet("fetch", previousFetch);
+  didOverrideWebSocket = trySet("WebSocket", previousWebSocket);
+  return restore;
 }
  
 export async function applyPythonSandbox(runtime, permissions) {

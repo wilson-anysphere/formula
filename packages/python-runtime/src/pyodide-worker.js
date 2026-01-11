@@ -129,44 +129,74 @@ function applyNetworkSandbox(permissions) {
   const mode = permissions?.network ?? "none";
 
   if (mode === "none") {
-    self.fetch = async () => {
-      throw new Error("Network access is not permitted");
-    };
-
-    self.WebSocket = class BlockedWebSocket {
-      constructor() {
+    try {
+      self.fetch = async () => {
         throw new Error("Network access is not permitted");
-      }
-    };
+      };
+    } catch {
+      // Best-effort: some hosts may expose non-writable globals.
+    }
+
+    try {
+      self.WebSocket = class BlockedWebSocket {
+        constructor() {
+          throw new Error("Network access is not permitted");
+        }
+      };
+    } catch {
+      // ignore
+    }
     return;
   }
 
   if (mode === "allowlist") {
     const allowlist = new Set(permissions?.networkAllowlist ?? []);
-    self.fetch = async (input, init) => {
-      const url = typeof input === "string" ? input : input?.url;
-      const hostname = new URL(url, self.location?.href ?? "https://localhost").hostname;
-      if (!allowlist.has(hostname)) {
-        throw new Error(`Network access to ${hostname} is not permitted`);
-      }
-      return originalFetch(input, init);
-    };
-
-    self.WebSocket = class AllowlistWebSocket {
-      constructor(url, protocols) {
+    try {
+      self.fetch = async (input, init) => {
+        const url = typeof input === "string" ? input : input?.url;
         const hostname = new URL(url, self.location?.href ?? "https://localhost").hostname;
         if (!allowlist.has(hostname)) {
           throw new Error(`Network access to ${hostname} is not permitted`);
         }
-        return new originalWebSocket(url, protocols);
-      }
-    };
+        if (typeof originalFetch !== "function") {
+          throw new Error("Network access is not permitted (fetch is unavailable)");
+        }
+        return originalFetch(input, init);
+      };
+    } catch {
+      // ignore
+    }
+
+    try {
+      self.WebSocket = class AllowlistWebSocket {
+        constructor(url, protocols) {
+          const hostname = new URL(url, self.location?.href ?? "https://localhost").hostname;
+          if (!allowlist.has(hostname)) {
+            throw new Error(`Network access to ${hostname} is not permitted`);
+          }
+          if (typeof originalWebSocket !== "function") {
+            throw new Error("Network access is not permitted (WebSocket is unavailable)");
+          }
+          return new originalWebSocket(url, protocols);
+        }
+      };
+    } catch {
+      // ignore
+    }
     return;
   }
 
   // full access
-  self.fetch = originalFetch;
-  self.WebSocket = originalWebSocket;
+  try {
+    self.fetch = originalFetch;
+  } catch {
+    // ignore
+  }
+  try {
+    self.WebSocket = originalWebSocket;
+  } catch {
+    // ignore
+  }
 }
 
 function coercePyProxy(value) {
