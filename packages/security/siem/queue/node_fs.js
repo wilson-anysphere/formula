@@ -149,7 +149,10 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function acquireFlushLock(lockPath, { staleMs = 5 * 60_000, timeoutMs = 30_000 } = {}) {
+async function acquireLock(
+  lockPath,
+  { staleMs = 5 * 60_000, timeoutMs = 30_000, busyMessage = "offline audit queue is currently locked" } = {}
+) {
   const startedAt = Date.now();
   let delayMs = 25;
 
@@ -174,7 +177,7 @@ async function acquireFlushLock(lockPath, { staleMs = 5 * 60_000, timeoutMs = 30
       }
 
       if (Date.now() - startedAt > timeoutMs) {
-        const locked = new Error("offline audit queue is currently flushing");
+        const locked = new Error(busyMessage);
         locked.code = "EQUEUELOCKED";
         throw locked;
       }
@@ -183,6 +186,14 @@ async function acquireFlushLock(lockPath, { staleMs = 5 * 60_000, timeoutMs = 30
       delayMs = Math.min(1_000, Math.floor(delayMs * 1.5));
     }
   }
+}
+
+async function acquireFlushLock(lockPath, options) {
+  return acquireLock(lockPath, { busyMessage: "offline audit queue is currently flushing", ...options });
+}
+
+async function acquireEnqueueLock(lockPath, options) {
+  return acquireLock(lockPath, { busyMessage: "offline audit queue is currently busy", ...options });
 }
 
 export class NodeFsOfflineAuditQueue {
@@ -204,6 +215,7 @@ export class NodeFsOfflineAuditQueue {
     this.flushPromise = null;
 
     this.lockPath = path.join(this.dirPath, "queue.flush.lock");
+    this.enqueueLockPath = path.join(this.dirPath, "queue.enqueue.lock");
   }
 
   async ensureDir() {
@@ -290,27 +302,32 @@ export class NodeFsOfflineAuditQueue {
     return this._withMutex(async () => {
       await this.ensureDir();
 
-      const usage = await calculateDirBytes(this.segmentsDir);
-      if (usage + lineBytes > this.maxBytes) {
-        const error = new Error("offline audit queue is full");
-        error.code = "EQUEUEFULL";
-        throw error;
-      }
-
-      const segment = await this._getOrCreateOpenSegment();
-
-      const handle = await openFile(segment.openPath, "a");
+      await acquireEnqueueLock(this.enqueueLockPath, { staleMs: 60_000, timeoutMs: 5_000 });
       try {
-        await handle.writeFile(line, "utf8");
-        if (this.syncOnWrite) await handle.sync();
+        const usage = await calculateDirBytes(this.segmentsDir);
+        if (usage + lineBytes > this.maxBytes) {
+          const error = new Error("offline audit queue is full");
+          error.code = "EQUEUEFULL";
+          throw error;
+        }
+
+        const segment = await this._getOrCreateOpenSegment();
+
+        const handle = await openFile(segment.openPath, "a");
+        try {
+          await handle.writeFile(line, "utf8");
+          if (this.syncOnWrite) await handle.sync();
+        } finally {
+          await handle.close();
+        }
+
+        segment.bytes += lineBytes;
+
+        if (segment.bytes >= this.maxSegmentBytes) {
+          await this._sealCurrentSegment();
+        }
       } finally {
-        await handle.close();
-      }
-
-      segment.bytes += lineBytes;
-
-      if (segment.bytes >= this.maxSegmentBytes) {
-        await this._sealCurrentSegment();
+        await safeUnlink(this.enqueueLockPath);
       }
     });
   }
