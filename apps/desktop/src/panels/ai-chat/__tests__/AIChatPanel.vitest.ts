@@ -153,4 +153,57 @@ describe("AIChatPanel tool-calling history", () => {
       root.unmount();
     });
   });
+
+  it("clears the pending assistant placeholder when sendMessage throws", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const sendMessage = vi.fn(async () => {
+      throw new Error("Boom");
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+        }),
+      );
+    });
+
+    const input = container.querySelector("input");
+    const sendButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Send");
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(sendButton).toBeInstanceOf(HTMLButtonElement);
+
+    const inputEl = input as HTMLInputElement;
+    const buttonEl = sendButton as HTMLButtonElement;
+
+    await act(async () => {
+      setNativeInputValue(inputEl, "Hi");
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+      inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      buttonEl.click();
+      await waitFor(() => sendMessage.mock.calls.length === 1);
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("Error: Boom") ?? false);
+    });
+
+    // Regression: previously the panel would append an error message but leave the
+    // pending assistant placeholder stuck in a permanent "thinking…" state.
+    expect(container.textContent).not.toContain("thinking");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });
