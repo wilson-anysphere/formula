@@ -109,3 +109,47 @@ test("buildWorkbookContext: redacts sensitive workbook chunks when policy allows
   assert.equal(auditEvents[0].decision.decision, "redact");
   assert.equal(auditEvents[0].redactedChunkCount, 1);
 });
+
+test("buildWorkbookContext: structured Restricted classifications fully redact retrieved chunks", async () => {
+  const workbook = makeSensitiveWorkbook();
+  // Add a value that isn't handled by the regex redactor but should still be suppressed by
+  // explicit DLP classification.
+  workbook.sheets[0].cells[1][0].v = "TopSecret";
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 800,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const auditEvents = [];
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "TopSecret",
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ maxAllowed: "Confidential", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbook.id,
+            sheetId: "Contacts",
+            range: { start: { row: 0, col: 0 }, end: { row: 1, col: 2 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+      auditLogger: { log: (e) => auditEvents.push(e) },
+    },
+  });
+
+  assert.ok(out.retrieved.length > 0);
+  assert.match(out.retrieved[0].text, /\[REDACTED\]/);
+  assert.doesNotMatch(out.promptContext, /TopSecret/);
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditEvents[0].decision.decision, "redact");
+});

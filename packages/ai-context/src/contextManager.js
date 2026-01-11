@@ -309,6 +309,15 @@ export class ContextManager {
       const classification = maxClassification(recordClassification, heuristicClassification);
       overallClassification = maxClassification(overallClassification, classification);
 
+      const recordDecision = dlp
+        ? evaluatePolicy({
+            action: DLP_ACTION.AI_CLOUD_PROCESSING,
+            classification: recordClassification,
+            policy: dlp.policy,
+            options: { includeRestrictedContent },
+          })
+        : null;
+
       const decision = dlp
         ? evaluatePolicy({
             action: DLP_ACTION.AI_CLOUD_PROCESSING,
@@ -324,6 +333,8 @@ export class ContextManager {
         sheetName: meta.sheetName,
         title,
         rect: meta.rect,
+        recordClassification,
+        recordDecision,
         classification,
         decision,
         heuristic,
@@ -379,13 +390,19 @@ export class ContextManager {
 
       const audit = chunkAudits[idx];
       const decision = audit?.decision ?? null;
+      const recordDecision = audit?.recordDecision ?? null;
 
       let outText = this.redactor(raw);
       let redacted = false;
 
       if (dlp && decision?.decision === DLP_DECISION.REDACT) {
-        // Ensure deterministic redaction even when the regex redactor has no effect.
-        if (outText === raw) {
+        // If the chunk is disallowed due to explicit document/sheet/range classification,
+        // redact the entire content. Pattern-based redaction is only safe when the
+        // classification is derived solely from those patterns.
+        if (recordDecision && recordDecision.decision !== DLP_DECISION.ALLOW) {
+          outText = this.redactor(`${header}\n[REDACTED]`);
+        } else if (outText === raw) {
+          // Ensure deterministic redaction even when the regex redactor has no effect.
           outText = this.redactor(`${header}\n[REDACTED]`);
         }
         redacted = true;
