@@ -13,6 +13,15 @@ export interface PanelBodyRendererOptions {
   getDocumentController: () => unknown;
   getActiveSheetId?: () => string;
   workbookId?: string;
+  /**
+   * Optional dynamic workbook id accessor.
+   *
+   * Some desktop flows (open workbook / new workbook) swap the active document
+   * without recreating the panel renderer. Using a getter allows panels that
+   * persist per-workbook state (Power Query refresh schedules, chat context, etc)
+   * to re-render with the latest workbook id.
+   */
+  getWorkbookId?: () => string | undefined;
   renderMacrosPanel?: (body: HTMLDivElement) => void;
   createChart?: SpreadsheetApi["createChart"];
 }
@@ -76,6 +85,8 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
   }
 
   function renderPanelBody(panelId: string, body: HTMLDivElement) {
+    const workbookId = options.getWorkbookId?.() ?? options.workbookId;
+
     if (panelId === PanelIds.AI_CHAT) {
       // Ensure the chat UI can own the full panel height (dock panels are flex columns).
       makeBodyFillAvailableHeight(body);
@@ -85,7 +96,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         <AIChatPanelContainer
           getDocumentController={options.getDocumentController}
           getActiveSheetId={options.getActiveSheetId}
-          workbookId={options.workbookId}
+          workbookId={workbookId}
           createChart={options.createChart}
         />,
       );
@@ -100,7 +111,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         <QueryEditorPanelContainer
           getDocumentController={options.getDocumentController}
           getActiveSheetId={options.getActiveSheetId}
-          workbookId={options.workbookId}
+          workbookId={workbookId}
         />,
       );
       return;
@@ -126,7 +137,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       renderDomPanel(panelId, body, (container) => {
         const panel = createAIAuditPanel({
           container,
-          initialWorkbookId: options.workbookId,
+          initialWorkbookId: workbookId,
           autoRefreshMs: 1_000,
         });
         return { container, dispose: panel.dispose, refresh: panel.refresh };
@@ -147,7 +158,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
 
     if (panelId === PanelIds.VBA_MIGRATE) {
       makeBodyFillAvailableHeight(body);
-      renderReactPanel(panelId, body, <VbaMigratePanel workbookId={options.workbookId} />);
+      renderReactPanel(panelId, body, <VbaMigratePanel workbookId={workbookId} />);
       return;
     }
 

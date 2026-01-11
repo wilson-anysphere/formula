@@ -39,6 +39,7 @@ let activeWorkbook: WorkbookInfo | null = null;
 let pendingBackendSync: Promise<void> = Promise.resolve();
 let queuedInvoke: TauriInvoke | null = null;
 let workbookSync: ReturnType<typeof startWorkbookSync> | null = null;
+let rerenderLayout: (() => void) | null = null;
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -369,6 +370,7 @@ if (
     getDocumentController: () => app.getDocument(),
     getActiveSheetId: () => app.getCurrentSheetId(),
     workbookId,
+    getWorkbookId: () => activeWorkbook?.path ?? activeWorkbook?.origin_path ?? workbookId,
     createChart: (spec) => app.addChart(spec),
     renderMacrosPanel: (body) => {
       body.textContent = "Loading macros…";
@@ -981,6 +983,7 @@ if (
   });
 
   layoutController.on("change", () => renderLayout());
+  rerenderLayout = renderLayout;
   renderLayout();
 }
 
@@ -1343,6 +1346,7 @@ async function openWorkbookFromPath(path: string): Promise<void> {
 
     activeWorkbook = await tauriBackend.openWorkbook(path);
     await loadWorkbookIntoDocument(activeWorkbook);
+    rerenderLayout?.();
 
     workbookSync = startWorkbookSync({
       document: app.getDocument(),
@@ -1438,6 +1442,7 @@ async function handleNewWorkbook(): Promise<void> {
 
     activeWorkbook = await tauriBackend.newWorkbook();
     await loadWorkbookIntoDocument(activeWorkbook);
+    rerenderLayout?.();
 
     workbookSync = startWorkbookSync({
       document: app.getDocument(),
