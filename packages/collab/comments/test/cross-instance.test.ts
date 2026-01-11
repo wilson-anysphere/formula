@@ -99,5 +99,42 @@ describe("collab comments cross-instance Yjs roots (ESM doc + CJS applyUpdate)",
 
     expect(mgr.listAll().map((c) => c.id).sort()).toEqual(["c1", "c2"]);
   });
-});
 
+  it("can write to a doc created by a different Yjs module instance (CJS Doc)", () => {
+    const require = createRequire(import.meta.url);
+    // eslint-disable-next-line import/no-named-as-default-member
+    const Ycjs = require("yjs");
+
+    // Doc + root types are from the CJS build.
+    const doc = new Ycjs.Doc();
+
+    // CommentManager uses the ESM build.
+    const mgr = new CommentManager(doc);
+
+    mgr.addComment({
+      cellRef: "A1",
+      kind: "threaded",
+      content: "Hello",
+      author: { id: "u1", name: "Alice" },
+      id: "c1",
+      now: 1,
+    });
+
+    mgr.addReply({
+      commentId: "c1",
+      content: "Reply",
+      author: { id: "u1", name: "Alice" },
+      id: "r1",
+      now: 2,
+    });
+
+    mgr.setResolved({ commentId: "c1", resolved: true, now: 3 });
+
+    const listed = mgr.listAll();
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.id).toBe("c1");
+    expect(listed[0]?.resolved).toBe(true);
+    expect(listed[0]?.replies).toHaveLength(1);
+    expect(listed[0]?.replies[0]?.content).toBe("Reply");
+  });
+});

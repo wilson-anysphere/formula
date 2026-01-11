@@ -133,6 +133,34 @@ export class CommentManager {
     const now = input.now ?? Date.now();
 
     this.transact(() => {
+      const mapConstructor = (() => {
+        if (root.kind === "map") return (root.map as any).constructor as new () => any;
+
+        // Local Yjs instance.
+        if (root.array instanceof Y.Array) return Y.Map;
+
+        // Foreign Yjs instance: try to reuse an existing comment map constructor
+        // (if the array already has comments), otherwise derive it from the doc.
+        const existingComment = this.getAllYComments(root)[0]?.yComment;
+        if (existingComment) return (existingComment as any).constructor as new () => any;
+        return getDocMapConstructor(this.doc);
+      })();
+
+      const arrayConstructor = (() => {
+        // For local (ESM) Y.Maps, always use the local Y.Array constructor.
+        // Mixing module instances here causes `typeMapSet` to throw.
+        if (mapConstructor === Y.Map) return Y.Array;
+
+        // Foreign Yjs instance: prefer the replies array constructor from any
+        // existing comment, otherwise derive it from the doc.
+        const existingComment = this.getAllYComments(root)[0]?.yComment;
+        const existingReplies = existingComment ? getYArray(existingComment.get("replies")) : null;
+        if (existingReplies) return existingReplies.constructor as new () => any;
+
+        if (root.kind === "array") return (root.array as any).constructor as new () => any;
+        return getDocArrayConstructor(this.doc);
+      })();
+
       const yComment = createYComment({
         id,
         cellRef: input.cellRef,
@@ -140,6 +168,9 @@ export class CommentManager {
         author: input.author,
         now,
         content: input.content,
+      }, {
+        mapConstructor,
+        arrayConstructor,
       });
 
       if (root.kind === "map") {
@@ -168,8 +199,18 @@ export class CommentManager {
 
     const id = input.id ?? createId();
     const now = input.now ?? Date.now();
-    const mapConstructor =
-      replies instanceof Y.Array ? undefined : (yComment as any)?.constructor?.name === "YMap" ? ((yComment as any).constructor as any) : undefined;
+    const mapConstructor = (() => {
+      // Local replies array => create local Y.Maps.
+      if (replies instanceof Y.Array) return undefined;
+
+      // Prefer the constructor of any existing reply item.
+      const existingReply = replies.toArray().find((reply) => getYMap(reply));
+      if (existingReply) return (existingReply as any).constructor as any;
+
+      // Fallback: comment map is usually from the same Yjs module instance as
+      // its `replies` array.
+      return (yComment as any)?.constructor?.name === "YMap" ? ((yComment as any).constructor as any) : undefined;
+    })();
 
     this.transact(() => {
       replies.push([
@@ -419,8 +460,22 @@ export function createYComment(input: {
   author: CommentAuthor;
   now: number;
   content: string;
-}): Y.Map<unknown> {
-  const yComment = new Y.Map<unknown>();
+}): Y.Map<unknown>;
+
+export function createYComment(
+  input: {
+    id: string;
+    cellRef: string;
+    kind: CommentKind;
+    author: CommentAuthor;
+    now: number;
+    content: string;
+  },
+  opts: { mapConstructor?: new () => any; arrayConstructor?: new () => any } = {},
+): Y.Map<unknown> {
+  const MapCtor = opts.mapConstructor ?? Y.Map;
+  const ArrayCtor = opts.arrayConstructor ?? Y.Array;
+  const yComment = new MapCtor();
   yComment.set("id", input.id);
   yComment.set("cellRef", input.cellRef);
   yComment.set("kind", input.kind);
@@ -431,7 +486,7 @@ export function createYComment(input: {
   yComment.set("resolved", false);
   yComment.set("content", input.content);
   yComment.set("mentions", []);
-  yComment.set("replies", new Y.Array<Y.Map<unknown>>());
+  yComment.set("replies", new ArrayCtor());
   return yComment;
 }
 
@@ -543,7 +598,10 @@ export function migrateCommentsArrayToMap(doc: Y.Doc, opts: { origin?: unknown }
 }
 
 function findAvailableLegacyRootName(doc: Y.Doc): string {
-  const base = "comments_legacy";
+  return findAvailableRootName(doc, "comments_legacy");
+}
+
+function findAvailableRootName(doc: Y.Doc, base: string): string {
   if (!doc.share.has(base)) return base;
   for (let i = 1; i < 1000; i += 1) {
     const name = `${base}_${i}`;
@@ -552,10 +610,27 @@ function findAvailableLegacyRootName(doc: Y.Doc): string {
   return `${base}_${Date.now()}`;
 }
 
+function getDocArrayConstructor(doc: any): new () => any {
+  const name = findAvailableRootName(doc, "__comments_tmp_array");
+  const tmp = doc.getArray(name);
+  const ctor = tmp.constructor as new () => any;
+  doc.share.delete(name);
+  return ctor;
+}
+
+function getDocMapConstructor(doc: any): new () => any {
+  const name = findAvailableRootName(doc, "__comments_tmp_map");
+  const tmp = doc.getMap(name);
+  const ctor = tmp.constructor as new () => any;
+  doc.share.delete(name);
+  return ctor;
+}
+
 function cloneYjsValue(value: any): any {
   const map = getYMap(value);
   if (map) {
-    const out = new Y.Map();
+    const MapCtor = map.constructor as new () => any;
+    const out = new MapCtor();
     map.forEach((v: any, k: string) => {
       out.set(k, cloneYjsValue(v));
     });
@@ -564,7 +639,8 @@ function cloneYjsValue(value: any): any {
 
   const array = getYArray(value);
   if (array) {
-    const out = new Y.Array();
+    const ArrayCtor = array.constructor as new () => any;
+    const out = new ArrayCtor();
     for (const item of array.toArray()) {
       out.push([cloneYjsValue(item)]);
     }
@@ -572,7 +648,8 @@ function cloneYjsValue(value: any): any {
   }
 
   if (isYText(value)) {
-    const out = new Y.Text();
+    const TextCtor = (value as any).constructor as new () => any;
+    const out = new TextCtor();
     out.applyDelta(structuredClone(value.toDelta()));
     return out;
   }
