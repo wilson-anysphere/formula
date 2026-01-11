@@ -30,7 +30,7 @@ export function ApprovalModal(props: ApprovalModalProps): React.ReactElement {
         position: "absolute",
         inset: 0,
         zIndex: 50,
-        background: "rgba(0, 0, 0, 0.4)",
+        background: "var(--dialog-backdrop)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -48,7 +48,7 @@ export function ApprovalModal(props: ApprovalModalProps): React.ReactElement {
           background: "var(--dialog-bg)",
           border: "1px solid var(--border)",
           borderRadius: 8,
-          boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
+          boxShadow: "var(--dialog-shadow)",
         }}
       >
         <div style={{ padding: "12px 12px 8px 12px", borderBottom: "1px solid var(--border)" }}>
