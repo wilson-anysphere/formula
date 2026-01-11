@@ -139,6 +139,22 @@ test("RefreshOrchestrator: append dependency ordering (B append depends on A)", 
   await handle.promise;
 });
 
+test("RefreshOrchestrator: runs independent queries concurrently", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("q1", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(makeQuery("q2", { type: "range", range: { values: [["Value"], [2]], hasHeaders: true } }));
+
+  const handle = orchestrator.refreshAll(["q1", "q2"]);
+
+  assert.equal(engine.calls.length, 2, "both root queries should start immediately when concurrency allows");
+  const started = new Set(engine.calls.map((c) => c.queryId));
+  assert.deepEqual(started, new Set(["q1", "q2"]));
+
+  for (const call of engine.calls) call.deferred.resolve(makeResult(call.queryId));
+  await handle.promise;
+});
+
 test("RefreshOrchestrator: dedup shared dependency results (A only loads once)", async () => {
   let reads = 0;
   const engine = new QueryEngine({
