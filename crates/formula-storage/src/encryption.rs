@@ -1,3 +1,27 @@
+//! Encryption-at-rest primitives for `formula-storage`.
+//!
+//! # Container format
+//! The persisted workbook bytes are stored in a small versioned container so we can distinguish
+//! encrypted data from plaintext SQLite files.
+//!
+//! This crate writes **version 1** using the same header as the JS implementation
+//! (`packages/security/crypto/encryptedFile.js`):
+//!
+//! ```text
+//! 8B   magic:      "FMLENC01"
+//! 4B   keyVersion: uint32 big-endian
+//! 12B  iv:         AES-GCM nonce
+//! 16B  tag:        AES-GCM authentication tag
+//! ...  ciphertext
+//! ```
+//!
+//! We also support reading a legacy Rust-only format (magic `"FSTORAGE"`) for backwards
+//! compatibility with earlier iterations of this crate.
+//!
+//! # Key management
+//! Consumers provide key storage via [`KeyProvider`]. The crate includes an in-memory provider for
+//! tests; production consumers should back this with an OS keychain or other secure secret store.
+
 use aes_gcm::aead::{AeadInPlace, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce, Tag};
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};

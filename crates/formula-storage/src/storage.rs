@@ -173,6 +173,9 @@ impl Storage {
     ///
     /// This keeps the live SQLite database in-memory; callers must invoke [`Storage::persist`]
     /// to flush the encrypted container to disk.
+    ///
+    /// The on-disk format uses the same header as the JS encrypted file helper:
+    /// `FMLENC01` + `keyVersion` + `iv` + `tag` + ciphertext.
     pub fn open_encrypted_path(
         path: impl AsRef<Path>,
         key_provider: Arc<dyn KeyProvider>,
