@@ -918,6 +918,7 @@ export class SpreadsheetApp {
     this.selection = setActiveCell(this.selection, { row: target.row, col: target.col }, this.limits);
     this.ensureActiveCellVisible();
     const didScroll = this.scrollCellIntoView(this.selection.active);
+    if (didScroll) this.updateViewportMapping();
     this.renderSelection();
     this.updateStatus();
     if (sheetChanged) {
@@ -953,6 +954,7 @@ export class SpreadsheetApp {
     // become "lost" offscreen.
     const didScrollCell = this.scrollCellIntoView(this.selection.active);
     const didScroll = didScrollRange || didScrollCell;
+    if (didScroll) this.updateViewportMapping();
     this.renderSelection();
     this.updateStatus();
     if (sheetChanged) {
@@ -2990,6 +2992,7 @@ export class SpreadsheetApp {
 
       this.ensureActiveCellVisible();
       const didScroll = this.scrollCellIntoView(this.selection.active);
+      if (didScroll) this.updateViewportMapping();
       this.renderSelection();
       this.updateStatus();
       if (didScroll) this.refresh("scroll");
@@ -3012,6 +3015,7 @@ export class SpreadsheetApp {
         : setActiveCell(this.selection, { row, col }, this.limits);
       this.ensureActiveCellVisible();
       const didScroll = this.scrollCellIntoView(this.selection.active);
+      if (didScroll) this.updateViewportMapping();
       this.renderSelection();
       this.updateStatus();
       if (didScroll) this.refresh("scroll");
@@ -3041,6 +3045,7 @@ export class SpreadsheetApp {
     e.preventDefault();
     this.selection = next;
     const didScroll = this.scrollCellIntoView(this.selection.active);
+    if (didScroll) this.updateViewportMapping();
     this.renderSelection();
     this.updateStatus();
     if (didScroll) this.refresh("scroll");
@@ -3232,6 +3237,7 @@ export class SpreadsheetApp {
     this.referencePreview = null;
     this.ensureActiveCellVisible();
     const didScroll = this.scrollCellIntoView(this.selection.active);
+    if (didScroll) this.updateViewportMapping();
     this.renderReferencePreview();
     this.renderSelection();
     this.updateStatus();
