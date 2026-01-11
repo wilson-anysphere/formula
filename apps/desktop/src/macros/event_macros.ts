@@ -278,6 +278,9 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
 
     runningEventMacro = true;
     try {
+      // Allow microtask-batched edits (e.g. `startWorkbookSync`) to enqueue into the backend
+      // sync chain before we drain it, so event macros see the latest persisted workbook state.
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
       await args.drainBackendSync();
       await setMacroUiContext(args);
 
@@ -566,6 +569,7 @@ export async function fireWorkbookBeforeCloseBestEffort(args: InstallVbaEventMac
     return;
   }
 
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
   await args.drainBackendSync();
   await setMacroUiContext(args);
 
