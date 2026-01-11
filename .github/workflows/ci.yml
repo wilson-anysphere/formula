@@ -138,7 +138,7 @@ jobs:
             sleep 1
           done
 
-          curl -fsS http://127.0.0.1:12345/healthz
+          curl -fsS http://127.0.0.1:12345/healthz | node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync(0,'utf8'));console.log(JSON.stringify(j));if(j.backend!=='leveldb'){throw new Error('expected backend=leveldb');}if(j.encryptionEnabled!==false){throw new Error('expected encryptionEnabled=false');}"
 
       - name: Smoke test container (file + encryption)
         run: |
@@ -169,4 +169,4 @@ jobs:
             sleep 1
           done
 
-          curl -fsS http://127.0.0.1:12346/healthz
+          curl -fsS http://127.0.0.1:12346/healthz | node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync(0,'utf8'));console.log(JSON.stringify(j));if(j.backend!=='file'){throw new Error('expected backend=file');}if(j.encryptionEnabled!==true){throw new Error('expected encryptionEnabled=true');}"
