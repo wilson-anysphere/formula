@@ -78,17 +78,30 @@ function envInt(value: string | undefined, defaultValue: number): number {
 function loadKeyRingFromEnv(): KeyRing {
   const keyRingJsonEnv = process.env.SYNC_SERVER_ENCRYPTION_KEYRING_JSON;
   const keyRingPath = process.env.SYNC_SERVER_ENCRYPTION_KEYRING_PATH;
+  const keyBase64Env = process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64;
 
   let json: string | null = null;
   if (keyRingJsonEnv && keyRingJsonEnv.trim().length > 0) {
     json = keyRingJsonEnv;
   } else if (keyRingPath && keyRingPath.trim().length > 0) {
     json = readFileSync(keyRingPath, "utf8");
+  } else if (keyBase64Env && keyBase64Env.trim().length > 0) {
+    const keyBase64 = keyBase64Env.trim();
+    const decoded = Buffer.from(keyBase64, "base64");
+    if (decoded.byteLength !== 32) {
+      throw new Error(
+        "SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64 must be a base64-encoded 32-byte (256-bit) key."
+      );
+    }
+    return new KeyRing({
+      currentVersion: 1,
+      keysByVersion: new Map([[1, decoded]]),
+    });
   }
 
   if (!json) {
     throw new Error(
-      "SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring requires SYNC_SERVER_ENCRYPTION_KEYRING_JSON or SYNC_SERVER_ENCRYPTION_KEYRING_PATH."
+      "SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring requires SYNC_SERVER_ENCRYPTION_KEYRING_JSON, SYNC_SERVER_ENCRYPTION_KEYRING_PATH, or SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64."
     );
   }
 
@@ -131,8 +144,13 @@ export function loadConfigFromEnv(): SyncServerConfig {
   );
 
   const encryptionEnv = process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION ?? "off";
+  const encryptionKeyBase64 = process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64;
   const encryptionMode =
-    encryptionEnv === "keyring" || encryptionEnv === "off" ? encryptionEnv : "off";
+    encryptionEnv === "keyring" || encryptionKeyBase64
+      ? "keyring"
+      : encryptionEnv === "off"
+        ? "off"
+        : "off";
   const encryptionStrictDefault = nodeEnv === "production";
   const encryptionStrict = envBool(
     process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION_STRICT,

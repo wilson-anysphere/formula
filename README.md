@@ -162,6 +162,7 @@ Enable:
 - Provide key material via **one** of:
   - `SYNC_SERVER_ENCRYPTION_KEYRING_JSON` (KeyRing JSON string), or
   - `SYNC_SERVER_ENCRYPTION_KEYRING_PATH` (path to a JSON file containing KeyRing JSON)
+  - (Optional shorthand) `SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64` (base64 32-byte key; creates a single-version keyring)
 
 The server will refuse to start if encryption is enabled but key material is missing (always in production; also in dev/test when `SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring` is set).
 
@@ -201,6 +202,7 @@ Enable:
 - Provide key material via **one** of:
   - `SYNC_SERVER_ENCRYPTION_KEYRING_JSON`, or
   - `SYNC_SERVER_ENCRYPTION_KEYRING_PATH`
+  - (Optional shorthand) `SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64` (base64 32-byte key; creates a single-version keyring)
 
 The server will refuse to start if encryption is enabled but key material is missing.
 
