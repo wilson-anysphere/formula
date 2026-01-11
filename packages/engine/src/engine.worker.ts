@@ -199,13 +199,6 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
       return;
     }
 
-    const wb = await ensureWorkbook(wasmModuleUrl);
-
-    if (consumeCancellation(id)) {
-      markRequestCompleted(id);
-      return;
-    }
-
     const params = req.params as any;
     let result: unknown;
 
@@ -254,30 +247,42 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
         }
         result = null;
         break;
-      case "toJson":
-        result = wb.toJson();
-        break;
-      case "getCell":
-        result = wb.getCell(params.address, params.sheet);
-        break;
-      case "getRange":
-        result = wb.getRange(params.range, params.sheet);
-        break;
-      case "setCells":
-        for (const update of params.updates as Array<any>) {
-          wb.setCell(update.address, update.value, update.sheet);
-        }
-        result = null;
-        break;
-      case "setRange":
-        wb.setRange(params.range, params.values, params.sheet);
-        result = null;
-        break;
-      case "recalculate":
-        result = wb.recalculate(params.sheet);
-        break;
       default:
-        throw new Error(`unknown method: ${req.method}`);
+        {
+          const wb = await ensureWorkbook(wasmModuleUrl);
+
+          if (consumeCancellation(id)) {
+            markRequestCompleted(id);
+            return;
+          }
+
+          switch (req.method) {
+            case "toJson":
+              result = wb.toJson();
+              break;
+            case "getCell":
+              result = wb.getCell(params.address, params.sheet);
+              break;
+            case "getRange":
+              result = wb.getRange(params.range, params.sheet);
+              break;
+            case "setCells":
+              for (const update of params.updates as Array<any>) {
+                wb.setCell(update.address, update.value, update.sheet);
+              }
+              result = null;
+              break;
+            case "setRange":
+              wb.setRange(params.range, params.values, params.sheet);
+              result = null;
+              break;
+            case "recalculate":
+              result = wb.recalculate(params.sheet);
+              break;
+            default:
+              throw new Error(`unknown method: ${req.method}`);
+          }
+        }
     }
 
     if (isCancelled(id)) {
