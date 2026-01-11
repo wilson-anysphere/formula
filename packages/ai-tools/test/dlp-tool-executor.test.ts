@@ -316,4 +316,63 @@ describe("ToolExecutor DLP enforcement", () => {
     });
     expect(event.decision?.decision).toBe("redact");
   });
+
+  it("sort_range is denied when DLP requires redaction for the range", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Name" });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: "Salary" });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { value: "Alice" });
+    workbook.setCell(parseA1Cell("Sheet1!B2"), { value: 100 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 1,
+              col: 1
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ],
+        audit_logger
+      }
+    });
+
+    const result = await executor.execute({
+      name: "sort_range",
+      parameters: { range: "Sheet1!A1:B2", sort_by: [{ column: "B", order: "desc" }], has_header: true }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+    expect(result.error?.message).toMatch(/DLP policy blocks sorting Sheet1!A1:B2/);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "ai.tool.dlp",
+      tool: "sort_range",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet1!A1:B2",
+      redactedCellCount: 0
+    });
+    expect(event.decision?.decision).toBe("redact");
+  });
 });

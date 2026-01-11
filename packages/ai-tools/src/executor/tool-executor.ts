@@ -516,6 +516,14 @@ export class ToolExecutor {
 
   private sortRange(params: any): ToolResultDataByName["sort_range"] {
     const range = parseA1Range(params.range, this.options.default_sheet);
+    const dlp = this.evaluateDlpForRange("sort_range", range);
+    if (dlp && dlp.decision.decision !== DLP_DECISION.ALLOW) {
+      this.logToolDlpDecision({ tool: "sort_range", range, dlp, redactedCellCount: 0 });
+      throw toolError(
+        "permission_denied",
+        `DLP policy blocks sorting ${formatA1Range(range)} via sort_range (ai.cloudProcessing).`
+      );
+    }
     const hasHeader = Boolean(params.has_header);
 
     const data = this.spreadsheet.readRange(range);
@@ -546,6 +554,7 @@ export class ToolExecutor {
     this.spreadsheet.writeRange(range, sorted);
     this.refreshPivotsForRange(range);
 
+    if (dlp) this.logToolDlpDecision({ tool: "sort_range", range, dlp, redactedCellCount: 0 });
     return { range: formatA1Range(range), sorted_rows: body.length };
   }
 
