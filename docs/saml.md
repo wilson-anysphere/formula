@@ -69,6 +69,7 @@ Accepts `application/x-www-form-urlencoded` POSTs containing:
 On success, Formula:
 
 1. Validates response/assertion signatures, issuer/audience, and time conditions.
+   - If the IdP includes `InResponseTo`, Formula validates it against a short-lived request cache and consumes it (replay protection).
 2. Extracts identity via `attributeMapping` and normalizes email.
 3. Links the identity in `user_identities` (`provider = providerId`, `subject = NameID`, `org_id = orgId`).
 4. Provisions the user + org membership if needed.

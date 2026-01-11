@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import zlib from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { newDb } from "pg-mem";
 import type { Pool } from "pg";
@@ -9,6 +10,7 @@ import { SignedXml } from "xml-crypto";
 import { buildApp } from "../app";
 import type { AppConfig } from "../config";
 import { runMigrations } from "../db/migrations";
+import { deriveSecretStoreKey } from "../secrets/secretStore";
 
 function getMigrationsDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -16,9 +18,11 @@ function getMigrationsDir(): string {
   return path.resolve(here, "../../migrations");
 }
 
-function extractCookie(setCookieHeader: string | string[] | undefined): string {
+function extractCookie(setCookieHeader: string | string[] | undefined, cookieName?: string): string {
   if (!setCookieHeader) throw new Error("missing set-cookie header");
-  const raw = Array.isArray(setCookieHeader) ? setCookieHeader[0] : setCookieHeader;
+  const entries = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
+  const raw = cookieName ? entries.find((value) => value.startsWith(`${cookieName}=`)) : entries[0];
+  if (!raw) throw new Error(`missing set-cookie for ${cookieName ?? "cookie"}`);
   return raw.split(";")[0];
 }
 
@@ -106,6 +110,7 @@ function signAssertion(xml: string, assertionId: string): string {
 function buildSignedSamlResponse(options: {
   callbackUrl: string;
   audience: string;
+  inResponseTo?: string;
   nameId: string;
   email: string;
   name: string;
@@ -117,12 +122,13 @@ function buildSignedSamlResponse(options: {
   const notBefore = new Date(now.getTime() - 5_000).toISOString();
   const notOnOrAfter = new Date(now.getTime() + 5 * 60_000).toISOString();
 
+  const inResponseTo = options.inResponseTo ? ` InResponseTo="${options.inResponseTo}"` : "";
   const xml = `<?xml version="1.0"?>
 <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
                 xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
                 ID="${responseId}"
                 Version="2.0"
-                IssueInstant="${issueInstant}"
+                IssueInstant="${issueInstant}"${inResponseTo}
                 Destination="${options.callbackUrl}">
   <saml:Issuer>https://idp.example.test/metadata</saml:Issuer>
   <samlp:Status>
@@ -133,7 +139,9 @@ function buildSignedSamlResponse(options: {
     <saml:Subject>
       <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified">${options.nameId}</saml:NameID>
       <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
-        <saml:SubjectConfirmationData NotOnOrAfter="${notOnOrAfter}" Recipient="${options.callbackUrl}"/>
+        <saml:SubjectConfirmationData NotOnOrAfter="${notOnOrAfter}" Recipient="${options.callbackUrl}"${
+    options.inResponseTo ? ` InResponseTo="${options.inResponseTo}"` : ""
+  }/>
       </saml:SubjectConfirmation>
     </saml:Subject>
     <saml:Conditions NotBefore="${notBefore}" NotOnOrAfter="${notOnOrAfter}">
@@ -166,6 +174,15 @@ function buildSignedSamlResponse(options: {
   return Buffer.from(signed, "utf8").toString("base64");
 }
 
+function extractAuthnRequestId(samlRequest: string): string {
+  const inflated = zlib.inflateRawSync(Buffer.from(samlRequest, "base64")).toString("utf8");
+  const doc = new DOMParser().parseFromString(inflated, "text/xml");
+  const root = doc.documentElement;
+  const id = root.getAttribute("ID");
+  if (!id) throw new Error("missing AuthnRequest ID");
+  return id;
+}
+
 async function createTestApp(): Promise<{
   db: Pool;
   config: AppConfig;
@@ -183,9 +200,13 @@ async function createTestApp(): Promise<{
     sessionTtlSeconds: 60 * 60,
     cookieSecure: false,
     publicBaseUrl: "http://localhost",
+    corsAllowedOrigins: [],
     syncTokenSecret: "test-sync-secret",
     syncTokenTtlSeconds: 60,
-    secretStoreKey: "test-secret-store-key",
+    secretStoreKeys: {
+      currentKeyId: "legacy",
+      keys: { legacy: deriveSecretStoreKey("test-secret-store-key") }
+    },
     localKmsMasterKey: "test-local-kms-master-key",
     awsKmsEnabled: false,
     retentionSweepIntervalMs: null
@@ -208,7 +229,7 @@ describe("SAML provider admin APIs", () => {
       });
       expect(registerRes.statusCode).toBe(200);
       const orgId = (registerRes.json() as any).organization.id as string;
-      const cookie = extractCookie(registerRes.headers["set-cookie"]);
+      const cookie = extractCookie(registerRes.headers["set-cookie"], "formula_session");
 
       const listEmpty = await app.inject({
         method: "GET",
@@ -318,7 +339,9 @@ describe("SAML SSO", () => {
       expect(startRes.statusCode).toBe(302);
       const startUrl = new URL(startRes.headers.location as string);
       expect(`${startUrl.origin}${startUrl.pathname}`).toBe("http://idp.example.test/sso");
-      expect(startUrl.searchParams.get("SAMLRequest")).toBeTruthy();
+      const samlRequest = startUrl.searchParams.get("SAMLRequest");
+      expect(samlRequest).toBeTruthy();
+      const requestId = extractAuthnRequestId(samlRequest!);
       const relayState = startUrl.searchParams.get("RelayState");
       expect(relayState).toBeTruthy();
 
@@ -326,6 +349,7 @@ describe("SAML SSO", () => {
       const samlResponse = buildSignedSamlResponse({
         callbackUrl,
         audience: "http://sp.example.test/metadata",
+        inResponseTo: requestId,
         nameId: "saml-subject-123",
         email: "saml-user@example.com",
         name: "SAML User"
@@ -339,7 +363,7 @@ describe("SAML SSO", () => {
       });
       expect(callbackRes.statusCode).toBe(200);
 
-      const sessionCookie = extractCookie(callbackRes.headers["set-cookie"]);
+      const sessionCookie = extractCookie(callbackRes.headers["set-cookie"], config.sessionCookieName);
       expect(sessionCookie.startsWith(`${config.sessionCookieName}=`)).toBe(true);
 
       const me = await app.inject({ method: "GET", url: "/me", headers: { cookie: sessionCookie } });
@@ -366,6 +390,23 @@ describe("SAML SSO", () => {
       expect(audit.rowCount).toBe(1);
       expect(audit.rows[0].org_id).toBe(orgId);
       expect(parseJsonValue(audit.rows[0].details)).toMatchObject({ method: "saml", provider: "test" });
+
+      // Replay the same response against a fresh RelayState should fail because the
+      // original AuthnRequest ID (InResponseTo) is consumed.
+      const replayStart = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+      expect(replayStart.statusCode).toBe(302);
+      const replayUrl = new URL(replayStart.headers.location as string);
+      const replayState = replayUrl.searchParams.get("RelayState");
+      expect(replayState).toBeTruthy();
+
+      const replayRes = await app.inject({
+        method: "POST",
+        url: `/auth/saml/${orgId}/test/callback`,
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({ SAMLResponse: samlResponse, RelayState: replayState! }).toString()
+      });
+      expect(replayRes.statusCode).toBe(401);
+      expect((replayRes.json() as any).error).toBe("invalid_saml_response");
     } finally {
       await app.close();
       await db.end();

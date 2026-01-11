@@ -1,7 +1,8 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
 import { z } from "zod";
-import { SAML } from "@node-saml/node-saml";
+import { SAML, ValidateInResponseTo, type CacheItem, type CacheProvider } from "@node-saml/node-saml";
+import type { Pool } from "pg";
 import { createAuditEvent, writeAuditEvent } from "../../audit/audit";
 import { withTransaction } from "../../db/tx";
 import { getClientIp, getUserAgent } from "../../http/request-meta";
@@ -39,6 +40,59 @@ type AttributeMapping = {
 };
 
 const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+type RequestCacheRow = { value: string; created_at: Date };
+
+type DbClient = Pick<Pool, "query">;
+
+function createSamlRequestCacheProvider(db: DbClient): CacheProvider {
+  return {
+    async saveAsync(key: string, value: string): Promise<CacheItem | null> {
+      await db.query(
+        `
+          INSERT INTO saml_request_cache (id, value)
+          VALUES ($1, $2)
+          ON CONFLICT (id)
+          DO UPDATE SET value = EXCLUDED.value, created_at = now()
+        `,
+        [key, value]
+      );
+      return { value, createdAt: Date.now() };
+    },
+    async getAsync(key: string): Promise<string | null> {
+      const res = await db.query<RequestCacheRow>(
+        `
+          SELECT value, created_at
+          FROM saml_request_cache
+          WHERE id = $1
+          LIMIT 1
+        `,
+        [key]
+      );
+      if (res.rowCount !== 1) return null;
+      const row = res.rows[0] as RequestCacheRow;
+      const ageMs = Date.now() - new Date(row.created_at).getTime();
+      if (!Number.isFinite(ageMs) || ageMs > AUTH_STATE_TTL_MS) {
+        await db.query("DELETE FROM saml_request_cache WHERE id = $1", [key]);
+        return null;
+      }
+      return String(row.value);
+    },
+    async removeAsync(key: string | null): Promise<string | null> {
+      if (!key) return null;
+      const res = await db.query<{ value: string }>(
+        `
+          DELETE FROM saml_request_cache
+          WHERE id = $1
+          RETURNING value
+        `,
+        [key]
+      );
+      if (res.rowCount !== 1) return null;
+      return String((res.rows[0] as any).value);
+    }
+  };
+}
 
 function isProd(): boolean {
   return process.env.NODE_ENV === "production";
@@ -162,6 +216,7 @@ function buildSaml(options: {
   idpCertPem: string;
   wantAssertionsSigned: boolean;
   wantResponseSigned: boolean;
+  cacheProvider: CacheProvider;
 }): SAML {
   return new SAML({
     entryPoint: options.entryPoint,
@@ -173,7 +228,12 @@ function buildSaml(options: {
     wantAssertionsSigned: options.wantAssertionsSigned,
     wantAuthnResponseSigned: options.wantResponseSigned,
     // Allow small clock skew for NotBefore/NotOnOrAfter checks.
-    acceptedClockSkewMs: 5 * 60 * 1000
+    acceptedClockSkewMs: 5 * 60 * 1000,
+    // Validate (and consume) InResponseTo when the IdP includes it so assertions
+    // cannot be replayed against a fresh RelayState.
+    validateInResponseTo: ValidateInResponseTo.ifPresent,
+    requestIdExpirationPeriodMs: AUTH_STATE_TTL_MS,
+    cacheProvider: options.cacheProvider
   });
 }
 
@@ -331,13 +391,15 @@ export async function samlStart(request: FastifyRequest, reply: FastifyReply): P
 
   const callbackUrl = `${baseUrl}/auth/saml/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`;
 
+  const cacheProvider = createSamlRequestCacheProvider(request.server.db);
   const saml = buildSaml({
     entryPoint: provider.entryPoint,
     issuer: provider.issuer,
     callbackUrl,
     idpCertPem: provider.idpCertPem,
     wantAssertionsSigned: provider.wantAssertionsSigned,
-    wantResponseSigned: provider.wantResponseSigned
+    wantResponseSigned: provider.wantResponseSigned,
+    cacheProvider
   });
 
   const relayState = randomBase64Url(32);
@@ -458,13 +520,15 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
   }
   const callbackUrl = `${baseUrl}/auth/saml/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`;
 
+  const cacheProvider = createSamlRequestCacheProvider(request.server.db);
   const saml = buildSaml({
     entryPoint: provider.entryPoint,
     issuer: provider.issuer,
     callbackUrl,
     idpCertPem: provider.idpCertPem,
     wantAssertionsSigned: provider.wantAssertionsSigned,
-    wantResponseSigned: provider.wantResponseSigned
+    wantResponseSigned: provider.wantResponseSigned,
+    cacheProvider
   });
 
   let profile: Record<string, unknown>;
@@ -475,7 +539,19 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
     };
 
     const result = await saml.validatePostResponseAsync(container);
-    profile = (result?.profile ?? null) as Record<string, unknown>;
+    if (!result.profile || typeof result.profile !== "object") {
+      throw new Error("SAML response missing profile");
+    }
+    profile = result.profile as unknown as Record<string, unknown>;
+
+    const inResponseTo = (result.profile as any).inResponseTo;
+    if (typeof inResponseTo === "string" && inResponseTo.length > 0) {
+      try {
+        await cacheProvider.removeAsync(inResponseTo);
+      } catch {
+        // ignore cache cleanup failures; replay protection is best-effort
+      }
+    }
   } catch (err) {
     request.server.metrics.authFailuresTotal.inc({ reason: "invalid_saml_response" });
     await writeSamlFailureAudit({
