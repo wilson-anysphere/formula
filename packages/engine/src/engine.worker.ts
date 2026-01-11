@@ -33,6 +33,32 @@ let workbook: WasmWorkbookInstance | null = null;
 
 let cancelledRequests = new Set<number>();
 
+// Cancellation messages can arrive after the worker has already responded (e.g.
+// main thread aborts while a response is in-flight). Track a bounded set of
+// recently completed request IDs so late cancellations can be ignored without
+// growing `cancelledRequests` forever.
+const completedRequestIds = new Set<number>();
+const completedRequestQueue: number[] = [];
+const MAX_COMPLETED_REQUEST_IDS = 1024;
+
+function markRequestCompleted(id: number): void {
+  completedRequestIds.add(id);
+  completedRequestQueue.push(id);
+  if (completedRequestQueue.length > MAX_COMPLETED_REQUEST_IDS) {
+    const oldest = completedRequestQueue.shift();
+    if (oldest != null) {
+      completedRequestIds.delete(oldest);
+    }
+  }
+}
+
+function trackCancellation(id: number): void {
+  if (completedRequestIds.has(id)) {
+    return;
+  }
+  cancelledRequests.add(id);
+}
+
 let wasmModulePromise: Promise<WasmModule> | null = null;
 let wasmModulePromiseUrl: string | null = null;
 
@@ -96,7 +122,7 @@ function consumeCancellation(id: number): boolean {
 
 async function handleRequest(message: WorkerInboundMessage): Promise<void> {
   if (message.type === "cancel") {
-    cancelledRequests.add((message as RpcCancel).id);
+    trackCancellation((message as RpcCancel).id);
     return;
   }
 
@@ -110,10 +136,12 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
       ok: false,
       error: "worker not initialized",
     });
+    markRequestCompleted(id);
     return;
   }
 
   if (consumeCancellation(id)) {
+    markRequestCompleted(id);
     return;
   }
 
@@ -175,13 +203,16 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
       // Cancellation might arrive after the request starts; we still perform the work
       // but suppress the response.
       cancelledRequests.delete(id);
+      markRequestCompleted(id);
       return;
     }
 
     postMessageToMain({ type: "response", id, ok: true, result });
+    markRequestCompleted(id);
   } catch (err) {
     if (isCancelled(id)) {
       cancelledRequests.delete(id);
+      markRequestCompleted(id);
       return;
     }
 
@@ -191,6 +222,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     });
+    markRequestCompleted(id);
   }
 }
 
