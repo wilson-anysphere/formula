@@ -176,7 +176,10 @@ fn matches_numeric_criteria(op: CriteriaOp, rhs: f64, value: &Value) -> bool {
 
 fn matches_text_criteria(op: CriteriaOp, pattern: &TextCriteria, value: &Value) -> bool {
     let Some(value_text) = coerce_to_text(value) else {
-        return false;
+        // Excel criteria functions treat blanks as "not text" for text-pattern matching (e.g.
+        // COUNTIF(range,"*") does not count truly empty cells). For `<>` text criteria, non-text
+        // values still satisfy the predicate because they are not equal to the text pattern.
+        return matches!(op, CriteriaOp::Ne);
     };
     let value_folded = fold_case(&value_text);
 
@@ -296,7 +299,7 @@ fn coerce_to_number(value: &Value) -> Option<f64> {
 
 fn coerce_to_text(value: &Value) -> Option<String> {
     match value {
-        Value::Blank => Some(String::new()),
+        Value::Blank => None,
         Value::Number(_) | Value::Text(_) | Value::Bool(_) => value.coerce_to_string().ok(),
         Value::Error(_) | Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => None,
         Value::Array(arr) => coerce_to_text(&arr.top_left()),

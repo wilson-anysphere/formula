@@ -62,6 +62,16 @@ fn criteria_wildcard_matching() {
 }
 
 #[test]
+fn criteria_wildcard_star_does_not_match_blank_cells() {
+    let c = Criteria::parse(&Value::from("*")).unwrap();
+    // Excel criteria functions don't treat truly empty cells as text for wildcard matching.
+    assert!(!c.matches(&Value::Blank));
+    // Empty strings (e.g. formulas returning "") are still text.
+    assert!(c.matches(&Value::from("")));
+    assert!(c.matches(&Value::from("x")));
+}
+
+#[test]
 fn criteria_is_case_insensitive_unicode() {
     // Uses Unicode-aware uppercasing: ß -> SS.
     let c = Criteria::parse(&Value::from("straße")).unwrap();
