@@ -233,6 +233,25 @@ def main() -> int:
             f"count={actual_count} results={len(actual_results)}"
         )
 
+    # Developer ergonomics: `formula-excel-oracle` is frequently run with tag filters (or `--max-cases`)
+    # to keep iteration fast. If the user then runs `compare.py` without the same filters, the report
+    # is dominated by "missing-actual" noise and can look like a catastrophic regression.
+    #
+    # When compare has no filters enabled, sanity-check that the actual dataset appears to cover the
+    # full corpus before continuing.
+    if (
+        not args.include_tag
+        and not args.exclude_tag
+        and args.max_cases == 0
+        and len(actual_results) != len(cases.get("cases", []))
+    ):
+        raise SystemExit(
+            "Actual dataset does not cover the full case corpus. "
+            f"cases={len(cases.get('cases', []))} actual_results={len(actual_results)}. "
+            "If you generated the engine results with --include-tag/--exclude-tag or --max-cases, "
+            "re-run compare.py with the same filters, or regenerate the engine results without filtering."
+        )
+
     expected_index = _index_results(expected_results)
     actual_index = _index_results(actual_results)
 
