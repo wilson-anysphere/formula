@@ -245,13 +245,38 @@ impl AppState {
             .expect("workbook_info should succeed right after load")
     }
 
-    pub fn mark_saved(&mut self, new_path: Option<String>) -> Result<(), AppStateError> {
+    pub fn mark_saved(
+        &mut self,
+        new_path: Option<String>,
+        new_origin_xlsx_bytes: Option<std::sync::Arc<[u8]>>,
+    ) -> Result<(), AppStateError> {
         let workbook = self
             .workbook
             .as_mut()
             .ok_or(AppStateError::NoWorkbookLoaded)?;
         if let Some(path) = new_path {
             workbook.path = Some(path);
+        }
+        if let Some(bytes) = new_origin_xlsx_bytes {
+            workbook.origin_xlsx_bytes = Some(bytes);
+        }
+
+        // The workbook on disk now matches the in-memory model; clear per-sheet dirty tracking so
+        // subsequent saves can be no-ops unless new edits occur.
+        for sheet in &mut workbook.sheets {
+            sheet.clear_dirty_cells();
+        }
+
+        // If the saved file is `.xlsx`, macros are not preserved; clear any in-memory macro
+        // payloads so the UI doesn't continue to treat the workbook as macro-enabled.
+        if workbook
+            .path
+            .as_deref()
+            .and_then(|p| std::path::Path::new(p).extension().and_then(|s| s.to_str()))
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
+        {
+            workbook.vba_project_bin = None;
+            workbook.macro_fingerprint = None;
         }
         self.dirty = false;
         Ok(())

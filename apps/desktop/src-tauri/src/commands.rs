@@ -141,6 +141,8 @@ use crate::{
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
 #[cfg(feature = "desktop")]
+use std::sync::Arc;
+#[cfg(feature = "desktop")]
 use tauri::State;
 
 #[cfg(feature = "desktop")]
@@ -249,9 +251,15 @@ pub async fn save_workbook(
         .await
         .map_err(|e| e.to_string())?;
 
+    let saved_origin_xlsx_bytes = std::fs::read(&save_path)
+        .ok()
+        .map(Arc::<[u8]>::from);
+
     {
         let mut state = state.inner().lock().unwrap();
-        state.mark_saved(Some(save_path)).map_err(app_error)?;
+        state
+            .mark_saved(Some(save_path), saved_origin_xlsx_bytes)
+            .map_err(app_error)?;
     }
 
     Ok(())
