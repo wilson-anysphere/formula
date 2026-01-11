@@ -10,6 +10,24 @@ import { fetchWithOrgTls, type OrgTlsPolicy } from "../http/tls";
 
 type RetriableError = Error & { retriable?: boolean; status?: number; responseBody?: string };
 
+function sanitizeRedactionOptions(
+  options: SiemEndpointConfig["redactionOptions"] | undefined
+): { redactionText?: string; sensitiveKeyPatterns?: RegExp[] } | undefined {
+  if (!options) return undefined;
+
+  const redactionText = typeof options.redactionText === "string" ? options.redactionText : undefined;
+  const sensitiveKeyPatterns = Array.isArray((options as any).sensitiveKeyPatterns)
+    ? (options as any).sensitiveKeyPatterns.filter((pattern: unknown): pattern is RegExp => pattern instanceof RegExp)
+    : undefined;
+
+  if (!redactionText && (!sensitiveKeyPatterns || sensitiveKeyPatterns.length === 0)) return undefined;
+
+  return {
+    redactionText,
+    sensitiveKeyPatterns: sensitiveKeyPatterns && sensitiveKeyPatterns.length > 0 ? sensitiveKeyPatterns : undefined
+  };
+}
+
 function isNonRetriableTlsError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const code = (error as any).code as unknown;
@@ -166,9 +184,10 @@ export async function sendSiemBatch(
 ): Promise<void> {
   if (!events || events.length === 0) return;
 
+  const redactionOptions = sanitizeRedactionOptions(config.redactionOptions);
   const { body, contentType } = serializeBatch(events, {
     format: config.format ?? "json",
-    redactionOptions: config.redactionOptions
+    redactionOptions
   });
 
   const headers: Record<string, string> = {

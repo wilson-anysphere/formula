@@ -590,6 +590,62 @@ describe("SIEM export worker", () => {
     }
   });
 
+  it("applies custom redactionText and ignores invalid sensitiveKeyPatterns config values", async () => {
+    const orgId = crypto.randomUUID();
+    await insertOrg(db, orgId);
+
+    const event = createAuditEvent({
+      eventType: "client.audit_ingested",
+      actor: { type: "user", id: "user_1" },
+      context: {
+        orgId,
+        userEmail: "siem@example.com",
+        ipAddress: "203.0.113.5",
+        userAgent: "UnitTest/siem"
+      },
+      resource: { type: "document", id: "doc_123", name: "Doc" },
+      success: true,
+      details: { token: "super-secret" }
+    });
+    await writeAuditEvent(db, event);
+
+    const siem = await startSiemServer();
+    try {
+      const config: SiemEndpointConfig = {
+        endpointUrl: siem.url,
+        dataRegion: "us",
+        format: "json",
+        idempotencyKeyHeader: "Idempotency-Key",
+        // `sensitiveKeyPatterns` is not JSON-serializable, but tolerate bad values
+        // to avoid crashing the exporter if legacy configs contain them.
+        redactionOptions: {
+          redactionText: "<MASKED>",
+          sensitiveKeyPatterns: ["token"] as any
+        } as any,
+        retry: { maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 1, jitter: false }
+      };
+
+      const metrics = createMetrics();
+      const worker = new SiemExportWorker({
+        db,
+        configProvider: new StaticConfigProvider([{ orgId, config }]),
+        metrics,
+        logger: { info: () => {}, warn: () => {}, error: () => {} },
+        pollIntervalMs: 0
+      });
+
+      await worker.tick();
+
+      expect(siem.requests).toHaveLength(1);
+      const payload = JSON.parse(siem.requests[0]!.body) as any[];
+      const exported = payload.find((e) => e.eventType === "client.audit_ingested");
+      expect(exported).toBeTruthy();
+      expect(exported.details).toMatchObject({ token: "<MASKED>" });
+    } finally {
+      await siem.close();
+    }
+  });
+
   it("exports audit events inserted via writeAuditEvent (ingestion-compatible)", async () => {
     const orgId = crypto.randomUUID();
     await insertOrg(db, orgId);
