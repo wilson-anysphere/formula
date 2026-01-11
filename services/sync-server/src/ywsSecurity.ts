@@ -436,6 +436,16 @@ export function installYwsSecurity(
     rangeRestrictions.length > 0;
   const shadowDoc = enforceRangeRestrictions ? new Y.Doc() : null;
   const shadowCells = shadowDoc ? shadowDoc.getMap("cells") : null;
+  let loggedRangeRestrictionViolation = false;
+
+  const logRangeRestrictionOnce = (
+    event: string,
+    extra?: Record<string, unknown>
+  ): void => {
+    if (!enforceRangeRestrictions || loggedRangeRestrictionViolation) return;
+    loggedRangeRestrictionViolation = true;
+    logger.warn({ docName, userId, role, ...(extra ?? {}) }, event);
+  };
 
   if (shadowDoc && shadowCells) {
     try {
@@ -590,7 +600,7 @@ export function installYwsSecurity(
         };
 
         if (store.pendingStructs || store.pendingDs) {
-          logger.warn({ docName, userId, role }, "range_restriction_shadow_pending");
+          logRangeRestrictionOnce("range_restriction_shadow_pending");
           ws.close(1008, "range restrictions validation failed");
           return { drop: true };
         }
@@ -631,7 +641,7 @@ export function installYwsSecurity(
           Y.applyUpdate(shadowDoc, updateBytes);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          logger.warn({ docName, userId, role, err: message }, "range_restriction_apply_failed");
+          logRangeRestrictionOnce("range_restriction_apply_failed", { err: message });
           ws.close(1008, "range restrictions validation failed");
           return { drop: true };
         } finally {
@@ -641,7 +651,7 @@ export function installYwsSecurity(
         if (store.pendingStructs || store.pendingDs) {
           // The update could not be applied cleanly against our shadow state, so
           // we cannot confidently determine which cells were affected. Fail closed.
-          logger.warn({ docName, userId, role }, "range_restriction_update_pending");
+          logRangeRestrictionOnce("range_restriction_update_pending");
           ws.close(1008, "range restrictions validation failed");
           return { drop: true };
         }
@@ -649,7 +659,7 @@ export function installYwsSecurity(
         for (const cellKey of touchedCellKeys) {
           const parsed = parseCellKey(cellKey);
           if (!parsed) {
-            logger.warn({ docName, userId, role, cellKey }, "range_restriction_unparseable_cell");
+            logRangeRestrictionOnce("range_restriction_unparseable_cell", { cellKey });
             ws.close(1008, "unparseable cell key");
             return { drop: true };
           }
@@ -668,16 +678,16 @@ export function installYwsSecurity(
             }));
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            logger.warn(
-              { docName, userId, role, cellKey, err: message },
-              "range_restriction_permission_check_failed"
-            );
+            logRangeRestrictionOnce("range_restriction_permission_check_failed", {
+              cellKey,
+              err: message,
+            });
             ws.close(1008, "range restrictions validation failed");
             return { drop: true };
           }
 
           if (!canEdit) {
-            logger.warn({ docName, userId, role, cellKey }, "permission_violation");
+            logRangeRestrictionOnce("permission_violation", { cellKey });
             ws.close(1008, "permission violation");
             return { drop: true };
           }
