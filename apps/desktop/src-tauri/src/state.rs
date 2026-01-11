@@ -1136,13 +1136,13 @@ fn resolve_cell_ref(
         None => (default_sheet_name.to_string(), raw.to_string()),
     };
 
-    let sheet_id = if sheet_name == default_sheet_name {
+    let sheet_id = if sheet_name.eq_ignore_ascii_case(default_sheet_name) {
         default_sheet_id.to_string()
     } else {
         workbook
             .sheets
             .iter()
-            .find(|s| s.name == sheet_name)
+            .find(|s| s.name.eq_ignore_ascii_case(&sheet_name))
             .map(|s| s.id.clone())
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_name.clone()))?
     };
@@ -1719,6 +1719,37 @@ mod tests {
 
         let b1 = state.get_cell(&sheet1_id, 0, 1).unwrap();
         assert_eq!(b1.value, CellScalar::Number(42.0));
+    }
+
+    #[test]
+    fn what_if_sheet_name_resolution_is_case_insensitive() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("My Sheet".to_string());
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let my_sheet_id = workbook.sheets[1].id.clone();
+
+        let (resolved, row, col) = resolve_cell_ref(
+            &workbook,
+            &sheet1_id,
+            "Sheet1",
+            &WhatIfCellRef::from("sheet1!A1"),
+        )
+        .unwrap();
+        assert_eq!(resolved, sheet1_id);
+        assert_eq!(row, 0);
+        assert_eq!(col, 0);
+
+        let (resolved, row, col) = resolve_cell_ref(
+            &workbook,
+            &sheet1_id,
+            "Sheet1",
+            &WhatIfCellRef::from("'my sheet'!B2"),
+        )
+        .unwrap();
+        assert_eq!(resolved, my_sheet_id);
+        assert_eq!(row, 1);
+        assert_eq!(col, 1);
     }
 
     #[test]
