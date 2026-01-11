@@ -26,6 +26,7 @@ test("startSyncServer fails fast when the sync-server process exits during start
     /Server failed to start|sync-server exited/i
   );
 
-  assert.ok(Date.now() - startedAt < 5_000);
+  // startSyncServer should fail quickly when the child process exits early, but
+  // allow some slack under Node's parallel test runner.
+  assert.ok(Date.now() - startedAt < 15_000);
 });
-

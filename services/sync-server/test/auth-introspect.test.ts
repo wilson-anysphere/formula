@@ -27,9 +27,6 @@ async function expectConditionToStayFalse(
 
 test("auth:introspect enforces roles and caches introspection results", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-introspect-"));
-  t.after(async () => {
-    await rm(dataDir, { recursive: true, force: true });
-  });
 
   const internalAdminToken = "internal-admin-token";
   const hitsByToken = new Map<string, number>();
@@ -124,6 +121,7 @@ test("auth:introspect enforces roles and caches introspection results", async (t
     port,
     trustProxy: false,
     gc: true,
+    tls: null,
     dataDir,
     disableDataDirLock: true,
     persistence: {
@@ -139,6 +137,7 @@ test("auth:introspect enforces roles and caches introspection results", async (t
       cacheMs: 30_000,
       failOpen: false,
     },
+    enforceRangeRestrictions: false,
     internalAdminToken: null,
     retention: { ttlMs: 0, sweepIntervalMs: 0, tombstoneTtlMs: 7 * 24 * 60 * 60 * 1000 },
     limits: {
@@ -146,8 +145,13 @@ test("auth:introspect enforces roles and caches introspection results", async (t
       maxConnectionsPerIp: 100,
       maxConnAttemptsPerWindow: 500,
       connAttemptWindowMs: 60_000,
+      maxMessageBytes: 2 * 1024 * 1024,
       maxMessagesPerWindow: 5_000,
       messageWindowMs: 10_000,
+      maxAwarenessStateBytes: 64 * 1024,
+      maxAwarenessEntries: 10,
+      maxMessagesPerDocWindow: 10_000,
+      docMessageWindowMs: 10_000,
     },
     logLevel: "silent",
   };
@@ -157,6 +161,9 @@ test("auth:introspect enforces roles and caches introspection results", async (t
   await server.start();
   t.after(async () => {
     await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
   });
 
   const docName = `doc-${Math.random().toString(16).slice(2)}`;
@@ -218,4 +225,3 @@ test("auth:introspect enforces roles and caches introspection results", async (t
   assert.equal(hitsByToken.get(editorToken), 1);
   assert.equal(hitsByToken.get(viewerToken), 1);
 });
-

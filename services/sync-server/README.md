@@ -20,9 +20,17 @@ Required environment variables:
 
 - `SYNC_SERVER_HOST` (default: `127.0.0.1`)
 - `SYNC_SERVER_PORT` (default: `1234`)
-- One of:
-  - `SYNC_SERVER_AUTH_TOKEN` (opaque token), or
-  - `SYNC_SERVER_JWT_SECRET` (HS256 JWT)
+- Authentication (pick one):
+  - Opaque token:
+    - `SYNC_SERVER_AUTH_TOKEN` (opaque token)
+    - Optional: `SYNC_SERVER_AUTH_MODE=opaque`
+  - JWT (HS256):
+    - `SYNC_SERVER_JWT_SECRET`
+    - Optional: `SYNC_SERVER_AUTH_MODE=jwt-hs256` (or `jwt`)
+  - Token introspection (for centralized auth):
+    - `SYNC_SERVER_AUTH_MODE=introspect`
+    - `SYNC_SERVER_INTROSPECT_URL`
+    - `SYNC_SERVER_INTROSPECT_TOKEN`
 
 ## Auth modes
 
@@ -76,6 +84,36 @@ Optional claims:
   Notes:
   - `sheetName` is also accepted as an alias for `sheetId`.
   - Older clients may send `{ "range": { ... }, "editAllowlist": [...] }`, which is also accepted.
+
+### Token introspection
+
+Set:
+
+- `SYNC_SERVER_AUTH_MODE=introspect`
+- `SYNC_SERVER_INTROSPECT_URL` (base URL for the introspection service)
+- `SYNC_SERVER_INTROSPECT_TOKEN` (sent as `x-internal-admin-token` to the introspection service)
+- Optional:
+  - `SYNC_SERVER_INTROSPECT_CACHE_MS` (default: `30000`)
+  - `SYNC_SERVER_INTROSPECT_FAIL_OPEN` (default: `false`; ignored in production)
+
+The sync-server will call:
+
+```
+POST ${SYNC_SERVER_INTROSPECT_URL}/internal/sync/introspect
+Content-Type: application/json
+x-internal-admin-token: ${SYNC_SERVER_INTROSPECT_TOKEN}
+
+{ "token": "<client token>", "docId": "<requested doc id>" }
+```
+
+Expected response:
+
+```json
+{ "ok": true, "userId": "u1", "orgId": "o1", "role": "editor", "sessionId": "..." }
+```
+
+Introspection results are cached in-memory for `SYNC_SERVER_INTROSPECT_CACHE_MS`, so token revocation
+may not take effect immediately.
 
 ## Persistence backends
 

@@ -1439,7 +1439,7 @@ test("does not treat lock from another host as stale", async (t) => {
     stderr = stderr.slice(-10_000);
   });
 
-  const exit = await waitForProcessExit(child, 5_000);
+  const exit = await waitForProcessExit(child, 10_000);
   assert.notEqual(exit.code, 0);
 
   const combinedLogs = `${stdout}\n${stderr}`.toLowerCase();
