@@ -47,12 +47,12 @@ export class CellStructuralConflictMonitor {
    * @param {Y.Doc} opts.doc
    * @param {Y.Map<any>} [opts.cells]
    * @param {string} opts.localUserId
- * @param {any} [opts.origin]
- * @param {Set<any>} [opts.localOrigins]
- * @param {(conflict: CellStructuralConflict) => void} opts.onConflict
- * @param {number} [opts.maxOpRecordsPerUser] Maximum number of structural op
- *   records to retain per user in the shared `cellStructuralOps` log.
- */
+   * @param {any} [opts.origin]
+   * @param {Set<any>} [opts.localOrigins]
+   * @param {(conflict: CellStructuralConflict) => void} opts.onConflict
+   * @param {number} [opts.maxOpRecordsPerUser] Maximum number of structural op
+   *   records to retain per user in the shared `cellStructuralOps` log.
+   */
   constructor(opts) {
     this._maxOpRecordsPerUser = opts.maxOpRecordsPerUser ?? 2000;
     this.doc = opts.doc;
@@ -791,38 +791,38 @@ export class CellStructuralConflictMonitor {
     cellMap.set("modified", Date.now());
     cellMap.set("modifiedBy", this.localUserId);
   }
- }
- 
- /**
-  * @param {any} op
-  */
- function simplifyOpForConflict(op) {
-   if (!op || typeof op !== "object") return null;
-   if (op.kind === "move") {
-     return {
-       kind: "move",
-       fromCellKey: op.fromCellKey,
-       toCellKey: op.toCellKey,
-       cell: normalizeCell(op.cell)
-     };
-   }
- 
-   if (op.kind === "delete" || op.kind === "edit") {
-     return {
-       kind: op.kind,
-       cellKey: op.cellKey,
-       before: normalizeCell(op.before),
-       after: normalizeCell(op.after)
-     };
-   }
- 
-   return { ...op };
- }
- 
- /**
-  * @param {Map<number, number>} sv
-  * @returns {Array<[number, number]>}
-  */
+}
+
+/**
+ * @param {any} op
+ */
+function simplifyOpForConflict(op) {
+  if (!op || typeof op !== "object") return null;
+  if (op.kind === "move") {
+    return {
+      kind: "move",
+      fromCellKey: op.fromCellKey,
+      toCellKey: op.toCellKey,
+      cell: normalizeCell(op.cell)
+    };
+  }
+
+  if (op.kind === "delete" || op.kind === "edit") {
+    return {
+      kind: op.kind,
+      cellKey: op.cellKey,
+      before: normalizeCell(op.before),
+      after: normalizeCell(op.after)
+    };
+  }
+
+  return { ...op };
+}
+
+/**
+ * @param {Map<number, number>} sv
+ * @returns {Array<[number, number]>}
+ */
 function encodeStateVector(sv) {
   const out = [];
   for (const [client, clock] of sv.entries()) {
@@ -845,405 +845,404 @@ function stateVectorsEqual(a, b) {
   }
   return true;
 }
- 
- /**
-  * @param {Array<[number, number]> | Record<string, number> | null | undefined} encoded
-  * @returns {Map<number, number>}
-  */
- function decodeStateVector(encoded) {
-   const out = new Map();
-   if (Array.isArray(encoded)) {
-     for (const entry of encoded) {
-       if (!Array.isArray(entry) || entry.length < 2) continue;
-       out.set(Number(entry[0]), Number(entry[1]));
-     }
-     return out;
-   }
-   if (encoded && typeof encoded === "object") {
-     for (const [k, v] of Object.entries(encoded)) {
-       out.set(Number(k), Number(v));
-     }
-   }
-   return out;
- }
- 
- /**
-  * Returns true if state vector `a` dominates `b` (a >= b for all clients).
-  * @param {Map<number, number>} a
-  * @param {Map<number, number>} b
-  */
- function dominatesStateVector(a, b) {
-   for (const [client, clockB] of b.entries()) {
-     const clockA = a.get(client) ?? 0;
-     if (clockA < clockB) return false;
-   }
-   return true;
- }
- 
- /**
-  * @param {any} opA
-  * @param {any} opB
-  */
- function isCausallyConcurrent(opA, opB) {
-   const aBefore = decodeStateVector(opA.beforeState);
-   const aAfter = decodeStateVector(opA.afterState);
-   const bBefore = decodeStateVector(opB.beforeState);
-   const bAfter = decodeStateVector(opB.afterState);
- 
-   const aBeforeB = dominatesStateVector(bBefore, aAfter);
-   const bBeforeA = dominatesStateVector(aBefore, bAfter);
-   return !aBeforeB && !bBeforeA;
- }
- 
- /**
-  * @param {Array<any>} events
-  * @param {Y.Map<any>} cells
-  * @returns {{ moves: Array<{ fromCellKey: string, toCellKey: string, cell: NormalizedCell, fingerprint: string }>, deletes: Array<any>, edits: Array<any>, touchedCells: string[] } | null}
-  */
- function extractTransactionChanges(events, cells) {
-   /** @type {Map<string, { mapChange?: any, propChanges: Map<string, any> }>} */
-   const touched = new Map();
- 
-   for (const event of events) {
-     if (!event?.changes?.keys) continue;
- 
-     // Map-level changes on the "cells" map itself.
-     if (event.target === cells) {
-       for (const [key, change] of event.changes.keys.entries()) {
-         if (typeof key !== "string") continue;
-         const entry = touched.get(key) ?? { propChanges: new Map() };
-         entry.mapChange = change;
-         touched.set(key, entry);
-       }
-       continue;
-     }
- 
-     const path = event.path ?? [];
-     const cellKey = path[0];
-     if (typeof cellKey !== "string") continue;
- 
-      const entry = touched.get(cellKey) ?? { propChanges: new Map() };
-      touched.set(cellKey, entry);
- 
-      for (const [prop, change] of event.changes.keys.entries()) {
-        if (prop !== "value" && prop !== "formula" && prop !== "enc" && prop !== "format" && prop !== "style") continue;
-        entry.propChanges.set(prop, change);
-      }
+
+/**
+ * @param {Array<[number, number]> | Record<string, number> | null | undefined} encoded
+ * @returns {Map<number, number>}
+ */
+function decodeStateVector(encoded) {
+  const out = new Map();
+  if (Array.isArray(encoded)) {
+    for (const entry of encoded) {
+      if (!Array.isArray(entry) || entry.length < 2) continue;
+      out.set(Number(entry[0]), Number(entry[1]));
     }
- 
-   if (touched.size === 0) return null;
- 
-   /** @type {Array<{ cellKey: string, before: NormalizedCell | null, after: NormalizedCell | null, beforeFingerprint: string | null, afterFingerprint: string | null }>} */
-   const diffs = [];
- 
-   for (const [cellKey, entry] of touched.entries()) {
-     const after = normalizeCell(cells.get(cellKey));
- 
-     /** @type {NormalizedCell | null} */
-     let before = null;
- 
-     if (entry.mapChange?.action === "add") {
-       before = null;
-     } else if (entry.mapChange?.action === "delete" || entry.mapChange?.action === "update") {
-       before = normalizeCell(entry.mapChange.oldValue);
-     } else if (entry.propChanges.size > 0) {
-        const seed = after
-          ? { value: after.value ?? null, formula: after.formula ?? null, enc: after.enc ?? null, format: after.format ?? null }
-          : { value: null, formula: null, enc: null, format: null };
- 
-        for (const [prop, change] of entry.propChanges.entries()) {
-          if (prop === "value") seed.value = change.oldValue ?? null;
-          if (prop === "formula") seed.formula = change.oldValue ?? null;
-          if (prop === "enc") seed.enc = change.oldValue ?? null;
-          if (prop === "format" || prop === "style") seed.format = change.oldValue ?? null;
-        }
- 
-       before = normalizeCell(seed);
-     } else {
-       // Only non-structural metadata changed (e.g. modified timestamp).
-       continue;
-     }
- 
-     const beforeFingerprint = cellFingerprint(before);
-     const afterFingerprint = cellFingerprint(after);
- 
-     // Ignore pure metadata updates that don't affect the structural footprint.
-     if (beforeFingerprint === afterFingerprint) continue;
- 
-     diffs.push({ cellKey, before, after, beforeFingerprint, afterFingerprint });
-   }
- 
-   if (diffs.length === 0) return null;
- 
-   /** @type {Map<string, string[]>} */
-   const additionsByFingerprint = new Map();
-   for (const diff of diffs) {
-     if (diff.before === null && diff.after !== null && diff.afterFingerprint) {
-       const list = additionsByFingerprint.get(diff.afterFingerprint) ?? [];
-       list.push(diff.cellKey);
-       additionsByFingerprint.set(diff.afterFingerprint, list);
-     }
-   }
- 
-   /** @type {Set<string>} */
-   const consumedAddrs = new Set();
-   /** @type {Set<string>} */
-   const consumedFrom = new Set();
- 
-   /** @type {Array<{ fromCellKey: string, toCellKey: string, cell: NormalizedCell, fingerprint: string }>} */
-   const moves = [];
- 
-   for (const diff of diffs) {
-     if (diff.before === null || diff.after !== null) continue;
-     if (!diff.beforeFingerprint) continue;
-     const candidates = additionsByFingerprint.get(diff.beforeFingerprint) ?? [];
-     const target = candidates.find((k) => !consumedAddrs.has(k));
-     if (!target) continue;
-     moves.push({
-       fromCellKey: diff.cellKey,
-       toCellKey: target,
-       cell: diff.before,
-       fingerprint: diff.beforeFingerprint
-     });
-     consumedAddrs.add(target);
-     consumedFrom.add(diff.cellKey);
-   }
- 
-   /** @type {Array<any>} */
-   const deletes = [];
-   /** @type {Array<any>} */
-   const edits = [];
- 
-    for (const diff of diffs) {
-      if (consumedFrom.has(diff.cellKey) || consumedAddrs.has(diff.cellKey)) continue;
-  
-      if (diff.before !== null && diff.after === null) {
-        deletes.push({ cellKey: diff.cellKey, before: diff.before, fingerprint: diff.beforeFingerprint });
-        continue;
+    return out;
+  }
+  if (encoded && typeof encoded === "object") {
+    for (const [k, v] of Object.entries(encoded)) {
+      out.set(Number(k), Number(v));
+    }
+  }
+  return out;
+}
+
+/**
+ * Returns true if state vector `a` dominates `b` (a >= b for all clients).
+ * @param {Map<number, number>} a
+ * @param {Map<number, number>} b
+ */
+function dominatesStateVector(a, b) {
+  for (const [client, clockB] of b.entries()) {
+    const clockA = a.get(client) ?? 0;
+    if (clockA < clockB) return false;
+  }
+  return true;
+}
+
+/**
+ * @param {any} opA
+ * @param {any} opB
+ */
+function isCausallyConcurrent(opA, opB) {
+  const aBefore = decodeStateVector(opA.beforeState);
+  const aAfter = decodeStateVector(opA.afterState);
+  const bBefore = decodeStateVector(opB.beforeState);
+  const bAfter = decodeStateVector(opB.afterState);
+
+  const aBeforeB = dominatesStateVector(bBefore, aAfter);
+  const bBeforeA = dominatesStateVector(aBefore, bAfter);
+  return !aBeforeB && !bBeforeA;
+}
+
+/**
+ * @param {Array<any>} events
+ * @param {Y.Map<any>} cells
+ * @returns {{ moves: Array<{ fromCellKey: string, toCellKey: string, cell: NormalizedCell, fingerprint: string }>, deletes: Array<any>, edits: Array<any>, touchedCells: string[] } | null}
+ */
+function extractTransactionChanges(events, cells) {
+  /** @type {Map<string, { mapChange?: any, propChanges: Map<string, any> }>} */
+  const touched = new Map();
+
+  for (const event of events) {
+    if (!event?.changes?.keys) continue;
+
+    // Map-level changes on the "cells" map itself.
+    if (event.target === cells) {
+      for (const [key, change] of event.changes.keys.entries()) {
+        if (typeof key !== "string") continue;
+        const entry = touched.get(key) ?? { propChanges: new Map() };
+        entry.mapChange = change;
+        touched.set(key, entry);
+      }
+      continue;
+    }
+
+    const path = event.path ?? [];
+    const cellKey = path[0];
+    if (typeof cellKey !== "string") continue;
+
+    const entry = touched.get(cellKey) ?? { propChanges: new Map() };
+    touched.set(cellKey, entry);
+
+    for (const [prop, change] of event.changes.keys.entries()) {
+      if (prop !== "value" && prop !== "formula" && prop !== "enc" && prop !== "format" && prop !== "style") continue;
+      entry.propChanges.set(prop, change);
+    }
+  }
+
+  if (touched.size === 0) return null;
+
+  /** @type {Array<{ cellKey: string, before: NormalizedCell | null, after: NormalizedCell | null, beforeFingerprint: string | null, afterFingerprint: string | null }>} */
+  const diffs = [];
+
+  for (const [cellKey, entry] of touched.entries()) {
+    const after = normalizeCell(cells.get(cellKey));
+
+    /** @type {NormalizedCell | null} */
+    let before = null;
+
+    if (entry.mapChange?.action === "add") {
+      before = null;
+    } else if (entry.mapChange?.action === "delete" || entry.mapChange?.action === "update") {
+      before = normalizeCell(entry.mapChange.oldValue);
+    } else if (entry.propChanges.size > 0) {
+      const seed = after
+        ? { value: after.value ?? null, formula: after.formula ?? null, enc: after.enc ?? null, format: after.format ?? null }
+        : { value: null, formula: null, enc: null, format: null };
+
+      for (const [prop, change] of entry.propChanges.entries()) {
+        if (prop === "value") seed.value = change.oldValue ?? null;
+        if (prop === "formula") seed.formula = change.oldValue ?? null;
+        if (prop === "enc") seed.enc = change.oldValue ?? null;
+        if (prop === "format" || prop === "style") seed.format = change.oldValue ?? null;
       }
 
-      // Treat additions and in-place edits as `edit` ops so we can detect
-      // destination collisions against moves (e.g. move X->Y vs someone typing
-      // into Y while offline).
-      if (diff.after !== null) {
-        const contentChanged = didContentChange(diff.before, diff.after);
-        const formatChanged = didFormatChange(diff.before, diff.after);
-        edits.push({
-          cellKey: diff.cellKey,
-          before: diff.before,
-          after: diff.after,
-          beforeFingerprint: diff.beforeFingerprint,
-          afterFingerprint: diff.afterFingerprint,
-          contentChanged,
-          formatChanged
-        });
-      }
+      before = normalizeCell(seed);
+    } else {
+      // Only non-structural metadata changed (e.g. modified timestamp).
+      continue;
     }
- 
-   return {
-     moves,
-     deletes,
-     edits,
-     // Only include cells whose structural footprint changed (ignore metadata-only
-     // edits like modified timestamps).
-     touchedCells: Array.from(new Set(diffs.map((d) => d.cellKey)))
-   };
-  }
- 
-  /**
-   * Best-effort recovery of values from a deleted Y.Map.
-   *
-   * @param {any} map
-   * @param {string} key
-   * @returns {any}
-   */
-  function readDeletedYMapValue(map, key) {
-    // When a nested Y.Map is removed from its parent (e.g. `cells.delete(cellKey)`),
-    // Yjs marks the nested map's items as deleted before deep observers run.
-    // As a result, `map.get(key)` can return `undefined` even though the previous
-    // value is still present on the deleted `Item` content.
-    //
-    // We only attempt to recover values when the map itself is deleted (its
-    // integration item is deleted). For normal in-place edits, deleted entries
-    // should remain `undefined`.
-    if (!map || typeof map !== "object") return undefined;
-    const item = map._item;
-    if (!item || item.deleted !== true) return undefined;
 
-    const entries = map._map;
-    if (!(entries instanceof Map)) return undefined;
-    const entry = entries.get(key);
-    const content = entry?.content;
-    if (content && Array.isArray(content.arr) && content.arr.length > 0) {
-      return content.arr[0];
+    const beforeFingerprint = cellFingerprint(before);
+    const afterFingerprint = cellFingerprint(after);
+
+    // Ignore pure metadata updates that don't affect the structural footprint.
+    if (beforeFingerprint === afterFingerprint) continue;
+
+    diffs.push({ cellKey, before, after, beforeFingerprint, afterFingerprint });
+  }
+
+  if (diffs.length === 0) return null;
+
+  /** @type {Map<string, string[]>} */
+  const additionsByFingerprint = new Map();
+  for (const diff of diffs) {
+    if (diff.before === null && diff.after !== null && diff.afterFingerprint) {
+      const list = additionsByFingerprint.get(diff.afterFingerprint) ?? [];
+      list.push(diff.cellKey);
+      additionsByFingerprint.set(diff.afterFingerprint, list);
     }
-    if (content && content.type !== undefined) {
-      return content.type;
-    }
-    return undefined;
   }
 
-  function readYMapValue(map, key) {
-    if (!map || typeof map.get !== "function") return undefined;
-    const direct = map.get(key);
-    if (direct !== undefined) return direct;
-    return readDeletedYMapValue(map, key);
-  }
+  /** @type {Set<string>} */
+  const consumedAddrs = new Set();
+  /** @type {Set<string>} */
+  const consumedFrom = new Set();
 
-  function normalizeCell(cellData) {
-    if (cellData == null) return null;
- 
-   /** @type {any} */
-   let value = null;
-   /** @type {string | null} */
-   let formula = null;
-   /** @type {any} */
-   let enc = null;
-   /** @type {Record<string, unknown> | null} */
-   let format = null;
+  /** @type {Array<{ fromCellKey: string, toCellKey: string, cell: NormalizedCell, fingerprint: string }>} */
+  const moves = [];
 
-    if (isYMap(cellData)) {
-      value = readYMapValue(cellData, "value") ?? null;
-      formula = readYMapValue(cellData, "formula") ?? null;
-      enc = readYMapValue(cellData, "enc") ?? null;
-      format = (readYMapValue(cellData, "format") ?? readYMapValue(cellData, "style")) ?? null;
-    } else if (typeof cellData === "object") {
-      value = cellData.value ?? null;
-      formula = cellData.formula ?? null;
-      enc = cellData.enc ?? null;
-     format = cellData.format ?? cellData.style ?? null;
-   } else {
-     value = cellData;
-   }
- 
-   if (value && typeof value === "object" && value.t === "blank") {
-     value = null;
-   }
- 
-   const normalizedFormula = typeof formula === "string" ? formula.trim() : "";
-   formula = normalizedFormula ? normalizedFormula : null;
- 
-   if (format && typeof format !== "object") {
-     // Ensure format is JSON-friendly.
-     format = null;
-   }
- 
-   const hasEnc = enc !== null && enc !== undefined;
-   const hasValue = value !== null && value !== undefined;
-   const hasFormula = formula != null && formula !== "";
-   const hasFormat = format != null;
- 
-   if (!hasEnc && !hasValue && !hasFormula && !hasFormat) return null;
- 
-   /** @type {NormalizedCell} */
-   const out = {};
-   if (hasEnc) out.enc = enc;
-   else if (hasFormula) out.formula = formula;
-   else if (hasValue) out.value = value;
-   if (hasFormat) out.format = format;
-   return out;
-  }
-
- /**
-  * Duck-type Y.Map detection to avoid `instanceof` pitfalls when multiple Yjs
-  * module instances are present (e.g. pnpm workspaces + mixed ESM/CJS loaders).
-  *
-  * @param {any} value
-  * @returns {value is Y.Map<any>}
-  */
- function isYMap(value) {
-   if (value instanceof Y.Map) return true;
-   if (!value || typeof value !== "object") return false;
-   const maybe = value;
-   if (maybe.constructor?.name !== "YMap") return false;
-   if (typeof maybe.get !== "function") return false;
-   if (typeof maybe.set !== "function") return false;
-   if (typeof maybe.delete !== "function") return false;
-   return true;
- }
- 
- /**
-  * @param {NormalizedCell | null} cell
-  * @returns {string | null}
-  */
-  function cellFingerprint(cell) {
-    const normalized = normalizeCell(cell);
-    if (normalized === null) return null;
- 
-    return stableStringify({
-      value: normalized.value ?? null,
-      formula: normalizeFormula(normalized.formula) ?? null,
-      enc: normalized.enc ?? null,
-      format: normalized.format ?? null
+  for (const diff of diffs) {
+    if (diff.before === null || diff.after !== null) continue;
+    if (!diff.beforeFingerprint) continue;
+    const candidates = additionsByFingerprint.get(diff.beforeFingerprint) ?? [];
+    const target = candidates.find((k) => !consumedAddrs.has(k));
+    if (!target) continue;
+    moves.push({
+      fromCellKey: diff.cellKey,
+      toCellKey: target,
+      cell: diff.before,
+      fingerprint: diff.beforeFingerprint
     });
+    consumedAddrs.add(target);
+    consumedFrom.add(diff.cellKey);
   }
- 
- /**
-  * @param {string | null | undefined} formula
-  */
- function normalizeFormula(formula) {
-   const stripped = String(formula ?? "").trim().replace(/^\s*=\s*/, "");
-   if (!stripped) return null;
-   return stripped.replaceAll(/\s+/g, "").toUpperCase();
- }
- 
- /**
-  * Stable stringify for objects so we can build deterministic signatures.
-  * @param {any} value
-  * @returns {string}
-  */
- function stableStringify(value) {
-   if (value === null) return "null";
-   const t = typeof value;
-   if (t === "string") return JSON.stringify(value);
-   if (t === "number" || t === "boolean") return JSON.stringify(value);
-   if (t === "undefined") return "undefined";
-   if (t === "bigint") return JSON.stringify(String(value));
-   if (t === "function") return "\"[Function]\"";
-   if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-   if (t === "object") {
-     const keys = Object.keys(value).sort();
-     return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
-   }
-   return JSON.stringify(value);
- }
- 
- /**
-  * @param {NormalizedCell | null} a
-  * @param {NormalizedCell | null} b
-  */
- function cellsEqual(a, b) {
-   return stableStringify(a ?? null) === stableStringify(b ?? null);
- }
- 
- /**
-  * @param {NormalizedCell | null} a
-  * @param {NormalizedCell | null} b
-  */
-  function didContentChange(a, b) {
-    const na = normalizeCell(a);
-    const nb = normalizeCell(b);
-    return (
-      stableStringify({
-        value: na?.value ?? null,
-        formula: normalizeFormula(na?.formula) ?? null,
-        enc: na?.enc ?? null
-      }) !==
-      stableStringify({
-        value: nb?.value ?? null,
-        formula: normalizeFormula(nb?.formula) ?? null,
-        enc: nb?.enc ?? null
-      })
-    );
+
+  /** @type {Array<any>} */
+  const deletes = [];
+  /** @type {Array<any>} */
+  const edits = [];
+
+  for (const diff of diffs) {
+    if (consumedFrom.has(diff.cellKey) || consumedAddrs.has(diff.cellKey)) continue;
+
+    if (diff.before !== null && diff.after === null) {
+      deletes.push({ cellKey: diff.cellKey, before: diff.before, fingerprint: diff.beforeFingerprint });
+      continue;
+    }
+
+    // Treat additions and in-place edits as `edit` ops so we can detect
+    // destination collisions against moves (e.g. move X->Y vs someone typing
+    // into Y while offline).
+    if (diff.after !== null) {
+      const contentChanged = didContentChange(diff.before, diff.after);
+      const formatChanged = didFormatChange(diff.before, diff.after);
+      edits.push({
+        cellKey: diff.cellKey,
+        before: diff.before,
+        after: diff.after,
+        beforeFingerprint: diff.beforeFingerprint,
+        afterFingerprint: diff.afterFingerprint,
+        contentChanged,
+        formatChanged
+      });
+    }
   }
- 
- /**
-  * @param {NormalizedCell | null} a
-  * @param {NormalizedCell | null} b
-  */
- function didFormatChange(a, b) {
-   const na = normalizeCell(a);
-   const nb = normalizeCell(b);
-   return stableStringify(na?.format ?? null) !== stableStringify(nb?.format ?? null);
- }
- 
+
+  return {
+    moves,
+    deletes,
+    edits,
+    // Only include cells whose structural footprint changed (ignore metadata-only
+    // edits like modified timestamps).
+    touchedCells: Array.from(new Set(diffs.map((d) => d.cellKey)))
+  };
+}
+
+/**
+ * Best-effort recovery of values from a deleted Y.Map.
+ *
+ * @param {any} map
+ * @param {string} key
+ * @returns {any}
+ */
+function readDeletedYMapValue(map, key) {
+  // When a nested Y.Map is removed from its parent (e.g. `cells.delete(cellKey)`),
+  // Yjs marks the nested map's items as deleted before deep observers run.
+  // As a result, `map.get(key)` can return `undefined` even though the previous
+  // value is still present on the deleted `Item` content.
+  //
+  // We only attempt to recover values when the map itself is deleted (its
+  // integration item is deleted). For normal in-place edits, deleted entries
+  // should remain `undefined`.
+  if (!map || typeof map !== "object") return undefined;
+  const item = map._item;
+  if (!item || item.deleted !== true) return undefined;
+
+  const entries = map._map;
+  if (!(entries instanceof Map)) return undefined;
+  const entry = entries.get(key);
+  const content = entry?.content;
+  if (content && Array.isArray(content.arr) && content.arr.length > 0) {
+    return content.arr[0];
+  }
+  if (content && content.type !== undefined) {
+    return content.type;
+  }
+  return undefined;
+}
+
+function readYMapValue(map, key) {
+  if (!map || typeof map.get !== "function") return undefined;
+  const direct = map.get(key);
+  if (direct !== undefined) return direct;
+  return readDeletedYMapValue(map, key);
+}
+
+function normalizeCell(cellData) {
+  if (cellData == null) return null;
+
+  /** @type {any} */
+  let value = null;
+  /** @type {string | null} */
+  let formula = null;
+  /** @type {any} */
+  let enc = null;
+  /** @type {Record<string, unknown> | null} */
+  let format = null;
+
+  if (isYMap(cellData)) {
+    value = readYMapValue(cellData, "value") ?? null;
+    formula = readYMapValue(cellData, "formula") ?? null;
+    enc = readYMapValue(cellData, "enc") ?? null;
+    format = (readYMapValue(cellData, "format") ?? readYMapValue(cellData, "style")) ?? null;
+  } else if (typeof cellData === "object") {
+    value = cellData.value ?? null;
+    formula = cellData.formula ?? null;
+    enc = cellData.enc ?? null;
+    format = cellData.format ?? cellData.style ?? null;
+  } else {
+    value = cellData;
+  }
+
+  if (value && typeof value === "object" && value.t === "blank") {
+    value = null;
+  }
+
+  const normalizedFormula = typeof formula === "string" ? formula.trim() : "";
+  formula = normalizedFormula ? normalizedFormula : null;
+
+  if (format && typeof format !== "object") {
+    // Ensure format is JSON-friendly.
+    format = null;
+  }
+
+  const hasEnc = enc !== null && enc !== undefined;
+  const hasValue = value !== null && value !== undefined;
+  const hasFormula = formula != null && formula !== "";
+  const hasFormat = format != null;
+
+  if (!hasEnc && !hasValue && !hasFormula && !hasFormat) return null;
+
+  /** @type {NormalizedCell} */
+  const out = {};
+  if (hasEnc) out.enc = enc;
+  else if (hasFormula) out.formula = formula;
+  else if (hasValue) out.value = value;
+  if (hasFormat) out.format = format;
+  return out;
+}
+
+/**
+ * Duck-type Y.Map detection to avoid `instanceof` pitfalls when multiple Yjs
+ * module instances are present (e.g. pnpm workspaces + mixed ESM/CJS loaders).
+ *
+ * @param {any} value
+ * @returns {value is Y.Map<any>}
+ */
+function isYMap(value) {
+  if (value instanceof Y.Map) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = value;
+  if (maybe.constructor?.name !== "YMap") return false;
+  if (typeof maybe.get !== "function") return false;
+  if (typeof maybe.set !== "function") return false;
+  if (typeof maybe.delete !== "function") return false;
+  return true;
+}
+
+/**
+ * @param {NormalizedCell | null} cell
+ * @returns {string | null}
+ */
+function cellFingerprint(cell) {
+  const normalized = normalizeCell(cell);
+  if (normalized === null) return null;
+
+  return stableStringify({
+    value: normalized.value ?? null,
+    formula: normalizeFormula(normalized.formula) ?? null,
+    enc: normalized.enc ?? null,
+    format: normalized.format ?? null
+  });
+}
+
+/**
+ * @param {string | null | undefined} formula
+ */
+function normalizeFormula(formula) {
+  const stripped = String(formula ?? "").trim().replace(/^\s*=\s*/, "");
+  if (!stripped) return null;
+  return stripped.replaceAll(/\s+/g, "").toUpperCase();
+}
+
+/**
+ * Stable stringify for objects so we can build deterministic signatures.
+ * @param {any} value
+ * @returns {string}
+ */
+function stableStringify(value) {
+  if (value === null) return "null";
+  const t = typeof value;
+  if (t === "string") return JSON.stringify(value);
+  if (t === "number" || t === "boolean") return JSON.stringify(value);
+  if (t === "undefined") return "undefined";
+  if (t === "bigint") return JSON.stringify(String(value));
+  if (t === "function") return "\"[Function]\"";
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (t === "object") {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * @param {NormalizedCell | null} a
+ * @param {NormalizedCell | null} b
+ */
+function cellsEqual(a, b) {
+  return stableStringify(a ?? null) === stableStringify(b ?? null);
+}
+
+/**
+ * @param {NormalizedCell | null} a
+ * @param {NormalizedCell | null} b
+ */
+function didContentChange(a, b) {
+  const na = normalizeCell(a);
+  const nb = normalizeCell(b);
+  return (
+    stableStringify({
+      value: na?.value ?? null,
+      formula: normalizeFormula(na?.formula) ?? null,
+      enc: na?.enc ?? null
+    }) !==
+    stableStringify({
+      value: nb?.value ?? null,
+      formula: normalizeFormula(nb?.formula) ?? null,
+      enc: nb?.enc ?? null
+    })
+  );
+}
+
+/**
+ * @param {NormalizedCell | null} a
+ * @param {NormalizedCell | null} b
+ */
+function didFormatChange(a, b) {
+  const na = normalizeCell(a);
+  const nb = normalizeCell(b);
+  return stableStringify(na?.format ?? null) !== stableStringify(nb?.format ?? null);
+}
