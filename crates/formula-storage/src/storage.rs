@@ -1298,7 +1298,7 @@ impl Storage {
             let (model_sheet_id,): (Option<i64>,) = tx.query_row(
                 "SELECT model_sheet_id FROM sheets WHERE id = ?1",
                 params![sheet_id.to_string()],
-                |r| Ok((r.get(0)?,)),
+                |r| Ok((r.get::<_, Option<i64>>(0).ok().flatten(),)),
             )?;
 
             let mut sheet_order = Vec::new();
@@ -1314,7 +1314,7 @@ impl Storage {
             let mut rows = stmt.query(params![meta.workbook_id.to_string()])?;
             while let Some(row) = rows.next()? {
                 let name: String = row.get(0)?;
-                let model_sheet_id: Option<i64> = row.get(1)?;
+                let model_sheet_id: Option<i64> = row.get::<_, Option<i64>>(1).ok().flatten();
                 let parsed = model_sheet_id.and_then(|id| u32::try_from(id).ok());
                 sheet_order.push(name.clone());
                 ordered_sheet_ids.push((name, parsed));
@@ -2320,7 +2320,7 @@ fn sync_named_range_into_defined_names_tx(tx: &Transaction<'_>, range: &NamedRan
         let mut sheet_id: Option<u32> = None;
         while let Some(row) = rows.next()? {
             let name: String = row.get(0)?;
-            let model_sheet_id: Option<i64> = row.get(1)?;
+            let model_sheet_id: Option<i64> = row.get::<_, Option<i64>>(1).ok().flatten();
             if canonical_sheet_name_key(&name) == sheet_key {
                 sheet_id = model_sheet_id.and_then(|id| u32::try_from(id).ok());
                 break;

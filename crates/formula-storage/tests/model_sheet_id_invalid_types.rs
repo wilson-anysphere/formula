@@ -1,4 +1,5 @@
-use formula_storage::Storage;
+use formula_model::DefinedNameScope;
+use formula_storage::{NamedRange, Storage};
 use rusqlite::{Connection, OpenFlags};
 
 #[test]
@@ -29,8 +30,29 @@ fn export_and_create_sheet_tolerate_invalid_model_sheet_id_types() {
 
     // Creating a new sheet should still succeed even if existing rows contain invalid `model_sheet_id`
     // values.
-    storage
+    let _sheet2 = storage
         .create_sheet(workbook.id, "Sheet2", 1, None)
         .expect("create second sheet");
-}
 
+    // Ensure sheet-scoped named range sync tolerates invalid `model_sheet_id` values on other sheets.
+    storage
+        .upsert_named_range(&NamedRange {
+            workbook_id: workbook.id,
+            name: "Scoped".to_string(),
+            scope: "Sheet2".to_string(),
+            reference: "Sheet2!$A$1".to_string(),
+        })
+        .expect("upsert named range");
+
+    let exported = storage
+        .export_model_workbook(workbook.id)
+        .expect("export workbook");
+    assert!(exported.defined_names.iter().any(|name| {
+        name.name == "Scoped"
+            && name.scope == DefinedNameScope::Sheet(1)
+            && name.refers_to == "Sheet2!$A$1"
+    }));
+
+    // Deleting a sheet with a corrupt `model_sheet_id` should still succeed.
+    storage.delete_sheet(sheet1.id).expect("delete sheet");
+}
