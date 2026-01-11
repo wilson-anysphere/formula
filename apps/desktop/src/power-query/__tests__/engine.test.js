@@ -5,6 +5,7 @@ import { createDesktopQueryEngine } from "../engine.ts";
 import { createDefaultOrgPolicy } from "../../../../../packages/security/dlp/src/policy.js";
 import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js";
 import { getHttpSourceId } from "../../../../../packages/power-query/src/privacy/sourceId.js";
+import { DataTable } from "../../../../../packages/power-query/src/table.js";
 
 test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is unavailable", async () => {
   const originalTauri = globalThis.__TAURI__;
@@ -451,6 +452,83 @@ test("createDesktopQueryEngine maps DLP classification into workbook privacy lev
   await assert.rejects(
     engine.executeQuery(privateQuery, {
       queries: { q_public: publicQuery },
+      privacy: { levelsBySourceId: { [apiSourceId]: "public" } },
+    }),
+    /Formula\.Firewall/,
+  );
+});
+
+test("createDesktopQueryEngine does not apply workbook privacy levels to non-workbook provenance sourceIds", async () => {
+  const policy = createDefaultOrgPolicy();
+  // Allow external connectors for Internal documents so we can observe formula firewall behavior.
+  policy.rules[DLP_ACTION.EXTERNAL_CONNECTOR].maxAllowed = "Restricted";
+
+  const apiUrl = "https://public.example.com/data";
+  const apiSourceId = getHttpSourceId(apiUrl);
+
+  const engine = createDesktopQueryEngine({
+    privacyMode: "enforce",
+    dlp: {
+      documentId: "doc1",
+      classificationStore: {
+        list: () => [
+          {
+            selector: { scope: "document", documentId: "doc1" },
+            classification: { level: "Internal", labels: [] },
+          },
+        ],
+      },
+      policy,
+    },
+    fileAdapter: {
+      readText: async () => "",
+      readBinary: async () => new Uint8Array(),
+    },
+    fetch: async () =>
+      new Response(JSON.stringify([{ Id: 1, Region: "East" }]), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+
+  const sqlTable = DataTable.fromGrid([["Id", "Target"], [1, 10]], { hasHeaders: true, inferTypes: true });
+  const sqlSourceId = "sql:db1";
+  const now = new Date(0);
+  const sqlMeta = {
+    queryId: "q_sql",
+    startedAt: now,
+    completedAt: now,
+    refreshedAt: now,
+    sources: [
+      {
+        refreshedAt: now,
+        schema: { columns: sqlTable.columns, inferred: true },
+        rowCount: sqlTable.rowCount,
+        rowCountEstimate: sqlTable.rowCount,
+        // Include a sourceId here to ensure DesktopQueryEngine does not incorrectly
+        // treat it as a workbook source just because it has a sourceId field.
+        provenance: { kind: "sql", sourceId: sqlSourceId, connectionId: "db1", sql: "SELECT 1" },
+      },
+    ],
+    outputSchema: { columns: sqlTable.columns, inferred: true },
+    outputRowCount: sqlTable.rowCount,
+  };
+
+  const query = {
+    id: "q_merge",
+    name: "Merge Public API + SQL",
+    source: { type: "api", url: apiUrl, method: "GET" },
+    steps: [
+      {
+        id: "s_merge",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "q_sql", joinType: "left", leftKey: "Id", rightKey: "Id" },
+      },
+    ],
+  };
+
+  // Provide only the API privacy level; SQL should default to unknown (conservative),
+  // which should trigger the formula firewall when combined with Public.
+  await assert.rejects(
+    engine.executeQuery(query, {
+      queryResults: { q_sql: { table: sqlTable, meta: sqlMeta } },
       privacy: { levelsBySourceId: { [apiSourceId]: "public" } },
     }),
     /Formula\.Firewall/,

@@ -778,16 +778,16 @@ class DesktopQueryEngine extends QueryEngine {
           for (const source of sources) {
             const provenance = source?.provenance;
             if (!provenance || typeof provenance !== "object") continue;
+            const kind = (provenance as any).kind;
             const provenanceSourceId =
               typeof (provenance as any).sourceId === "string" ? String((provenance as any).sourceId) : "";
-            if (provenanceSourceId) {
-              base[provenanceSourceId] = this.workbookPrivacyLevel;
-              continue;
-            }
-            const kind = (provenance as any).kind;
-            if (kind === "table" && typeof (provenance as any).table === "string") {
-              base[`workbook:table:${(provenance as any).table}`] = this.workbookPrivacyLevel;
+            if (kind === "table") {
+              if (provenanceSourceId) base[provenanceSourceId] = this.workbookPrivacyLevel;
+              if (typeof (provenance as any).table === "string") {
+                base[`workbook:table:${(provenance as any).table}`] = this.workbookPrivacyLevel;
+              }
             } else if (kind === "range") {
+              if (provenanceSourceId) base[provenanceSourceId] = this.workbookPrivacyLevel;
               base["workbook:range"] = this.workbookPrivacyLevel;
             }
           }
