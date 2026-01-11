@@ -4,8 +4,10 @@
  * The desktop Script Editor panel can register this with Monaco via
  * `addExtraLib(...)` to provide in-editor autocomplete for scripts.
  */
-export const FORMULA_API_DTS = `// Auto-generated/hand-maintained Formula scripting API typings.
-// This file is intended to be loaded into Monaco as an extra lib.
+export const FORMULA_API_DTS = `// Formula scripting API typings.
+//
+// This file is intended for editor tooling (Monaco) and does not need to be
+// imported by application code.
 //
 // NOTE: We intentionally avoid declaring a global \`interface Range\` because it
 // would merge with the DOM \`Range\` type. Instead, spreadsheet types live under
@@ -14,22 +16,22 @@ export const FORMULA_API_DTS = `// Auto-generated/hand-maintained Formula script
 declare namespace Formula {
   export type CellValue = string | number | boolean | null;
 
-export interface CellFormat {
-  bold?: boolean;
-  italic?: boolean;
-  numberFormat?: string | null;
-  backgroundColor?: string | null;
-}
+  export interface CellFormat {
+    bold?: boolean;
+    italic?: boolean;
+    numberFormat?: string | null;
+    backgroundColor?: string | null;
+  }
 
-export interface Range {
-  readonly address: string;
-  getValues(): Promise<CellValue[][]>;
-  setValues(values: CellValue[][]): Promise<void>;
-  getValue(): Promise<CellValue>;
-  setValue(value: CellValue): Promise<void>;
-  getFormat(): Promise<CellFormat>;
-  setFormat(format: Partial<CellFormat> | null): Promise<void>;
-}
+  export interface Range {
+    readonly address: string;
+    getValues(): Promise<CellValue[][]>;
+    setValues(values: CellValue[][]): Promise<void>;
+    getValue(): Promise<CellValue>;
+    setValue(value: CellValue): Promise<void>;
+    getFormat(): Promise<CellFormat>;
+    setFormat(format: Partial<CellFormat> | null): Promise<void>;
+  }
 
   export interface Sheet {
     readonly name: string;
@@ -70,4 +72,4 @@ export interface Range {
 type ScriptContext = Formula.ScriptContext;
 
 declare const ctx: ScriptContext;
-`; 
+`;
