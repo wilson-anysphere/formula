@@ -6,7 +6,7 @@ import * as Y from "yjs";
 
 import { YjsVersionStore } from "../packages/versioning/src/store/yjsVersionStore.js";
 
-test("YjsVersionStore: can read versions when the versions root was created by a different Yjs module instance (CJS applyUpdate)", async () => {
+test("YjsVersionStore: can read and append versions when the roots were created by a different Yjs module instance (CJS applyUpdate)", async () => {
   const require = createRequire(import.meta.url);
   // eslint-disable-next-line import/no-named-as-default-member
   const Ycjs = require("yjs");
@@ -42,12 +42,36 @@ test("YjsVersionStore: can read versions when the versions root was created by a
   // Apply update using CJS Yjs to simulate y-websocket behavior.
   Ycjs.applyUpdate(doc, update);
 
-  const store = new YjsVersionStore({ doc });
+  const store = new YjsVersionStore({ doc, chunkSize: 2, compression: "none" });
 
-  const listed = await store.listVersions();
-  assert.equal(listed.length, 1);
-  assert.equal(listed[0]?.id, "v1");
-  assert.equal(listed[0]?.description, "from-cjs");
-  assert.deepEqual(Array.from(listed[0]?.snapshot ?? []), [1, 2, 3]);
+  const before = await store.listVersions();
+  assert.equal(before.length, 1);
+  assert.equal(before[0]?.id, "v1");
+  assert.equal(before[0]?.description, "from-cjs");
+  assert.deepEqual(Array.from(before[0]?.snapshot ?? []), [1, 2, 3]);
+
+  await store.saveVersion({
+    id: "v2",
+    kind: "snapshot",
+    timestampMs: 2,
+    userId: null,
+    userName: null,
+    description: "added-locally",
+    checkpointName: null,
+    checkpointLocked: null,
+    checkpointAnnotations: null,
+    snapshot: new Uint8Array([9, 8, 7, 6]),
+  });
+
+  const after = await store.listVersions();
+  assert.deepEqual(
+    after.map((v) => v.id),
+    ["v2", "v1"],
+    "expected newly-added version to be visible and ordered by timestamp desc",
+  );
+
+  const loaded = await store.getVersion("v2");
+  assert.ok(loaded);
+  assert.equal(loaded.description, "added-locally");
+  assert.deepEqual(Array.from(loaded.snapshot), [9, 8, 7, 6]);
 });
-

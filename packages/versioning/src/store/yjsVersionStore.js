@@ -86,6 +86,34 @@ function getMapRoot(doc, name) {
 }
 
 /**
+ * @param {any} map
+ * @returns {any}
+ */
+function mapConstructor(map) {
+  const ctor = map?.constructor;
+  return typeof ctor === "function" ? ctor : Y.Map;
+}
+
+/**
+ * @param {any} array
+ * @returns {any}
+ */
+function arrayConstructor(array) {
+  const ctor = array?.constructor;
+  return typeof ctor === "function" ? ctor : Y.Array;
+}
+
+/**
+ * @param {any} ctor
+ * @returns {any | null}
+ */
+function abstractTypeSuperclass(ctor) {
+  if (typeof ctor !== "function") return null;
+  const parent = Object.getPrototypeOf(ctor);
+  return typeof parent === "function" ? parent : null;
+}
+
+/**
  * @param {unknown} snapshot
  * @returns {Uint8Array}
  */
@@ -231,14 +259,57 @@ export class YjsVersionStore {
   }
 
   /**
-   * @returns {Y.Array<any>}
+   * @returns {Y.Array<any> | null}
    */
   _ensureOrderArray() {
     const existing = this.meta.get("order");
     if (isYArray(existing)) return existing;
-    const created = new Y.Array();
+
+    const metaCtor = mapConstructor(this.meta);
+    const arrayCtor = this._inferArrayCtorForMapCtor(metaCtor);
+    if (!arrayCtor) return null;
+    const created = new arrayCtor();
     this.meta.set("order", created);
     return created;
+  }
+
+  /**
+   * Try to infer a `Y.Array` constructor compatible with the given map constructor.
+   *
+   * This is needed when multiple `yjs` module instances are loaded (ESM vs CJS).
+   * Yjs does strict `instanceof AbstractType` checks when integrating nested types.
+   *
+   * @param {any} mapCtor
+   * @returns {any | null}
+   */
+  _inferArrayCtorForMapCtor(mapCtor) {
+    const moduleId = abstractTypeSuperclass(mapCtor);
+    if (!moduleId) return null;
+
+    const localModuleId = abstractTypeSuperclass(Y.Map);
+    if (moduleId === localModuleId) return Y.Array;
+
+    const existingOrder = this.meta.get("order");
+    if (isYArray(existingOrder)) {
+      const orderCtor = arrayConstructor(existingOrder);
+      if (abstractTypeSuperclass(orderCtor) === moduleId) return orderCtor;
+    }
+
+    /** @type {any | null} */
+    let ctor = null;
+    this.versions.forEach((value) => {
+      if (ctor) return;
+      if (!isYMap(value)) return;
+      if (abstractTypeSuperclass(value.constructor) !== moduleId) return;
+      const chunks = value.get("snapshotChunks");
+      if (isYArray(chunks)) {
+        const chunksCtor = arrayConstructor(chunks);
+        if (abstractTypeSuperclass(chunksCtor) === moduleId) ctor = chunksCtor;
+      }
+    });
+    if (ctor) return ctor;
+
+    return null;
   }
 
   /**
@@ -264,11 +335,16 @@ export class YjsVersionStore {
     const snapshot = normalizeSnapshotBytes(version.snapshot);
     const compression = this.compression;
     const snapshotBytes = await compressSnapshot(snapshot, compression);
-    const snapshotEncoding = this.snapshotEncoding;
+    const desiredSnapshotEncoding = this.snapshotEncoding;
 
     this.doc.transact(() => {
+      const MapCtor = mapConstructor(this.versions);
+      const arrayCtor =
+        desiredSnapshotEncoding === "chunks" ? this._inferArrayCtorForMapCtor(MapCtor) : null;
+      const actualSnapshotEncoding =
+        desiredSnapshotEncoding === "chunks" && arrayCtor ? "chunks" : "base64";
       /** @type {Y.Map<any>} */
-      const record = new Y.Map();
+      const record = new MapCtor();
       record.set("schemaVersion", 1);
       record.set("id", version.id);
       record.set("kind", version.kind);
@@ -281,13 +357,13 @@ export class YjsVersionStore {
       record.set("checkpointAnnotations", version.checkpointAnnotations ?? null);
 
       record.set("compression", compression);
-      record.set("snapshotEncoding", snapshotEncoding);
+      record.set("snapshotEncoding", actualSnapshotEncoding);
 
-      if (snapshotEncoding === "base64") {
+      if (actualSnapshotEncoding === "base64") {
         record.set("snapshotBase64", bytesToBase64(snapshotBytes));
       } else {
         const chunks = splitIntoChunks(snapshotBytes, this.chunkSize);
-        const arr = new Y.Array();
+        const arr = new arrayCtor();
         arr.push(chunks);
         record.set("snapshotChunks", arr);
       }
@@ -295,7 +371,7 @@ export class YjsVersionStore {
       this.versions.set(version.id, record);
 
       const order = this._ensureOrderArray();
-      order.push([version.id]);
+      if (order) order.push([version.id]);
     }, "versioning-store");
   }
 
