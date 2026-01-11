@@ -41,7 +41,14 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
                 show_main_window(app);
             }
             ITEM_CHECK_UPDATES => crate::updater::spawn_update_check(app),
-            ITEM_QUIT => std::process::exit(0),
+            ITEM_QUIT => {
+                // Delegate quit-handling to the frontend so it can:
+                // - fire `Workbook_BeforeClose` macros
+                // - prompt for unsaved changes
+                // - decide whether to exit or keep running
+                show_main_window(app);
+                let _ = app.emit("tray-quit", ());
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

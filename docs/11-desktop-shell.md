@@ -674,7 +674,11 @@ pub fn handle_tray_event(app: &tauri::AppHandle, event: SystemTrayEvent) {
                     app.emit_all("tray-open", ()).unwrap();
                 }
                 "quit" => {
-                    std::process::exit(0);
+                    // Delegate quit-handling to the frontend so it can:
+                    // - fire `Workbook_BeforeClose` macros
+                    // - prompt for unsaved changes
+                    // - decide whether to exit or keep running
+                    app.emit_all("tray-quit", ()).unwrap();
                 }
                 _ => {}
             }

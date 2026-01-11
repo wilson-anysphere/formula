@@ -81,13 +81,14 @@ fn main() {
              commands::set_macro_trust,
              commands::set_macro_ui_context,
              commands::run_macro,
-             commands::validate_vba_migration,
-             commands::run_python_script,
-             commands::fire_workbook_open,
-             commands::fire_workbook_before_close,
-             commands::fire_worksheet_change,
-             commands::fire_selection_change,
-         ])
+              commands::validate_vba_migration,
+              commands::run_python_script,
+              commands::quit_app,
+              commands::fire_workbook_open,
+              commands::fire_workbook_before_close,
+              commands::fire_worksheet_change,
+              commands::fire_selection_change,
+          ])
         .setup(|app| {
             tray::init(app)?;
 

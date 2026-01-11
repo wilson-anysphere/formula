@@ -2569,6 +2569,16 @@ pub async fn fire_selection_change(
     .map_err(|e| e.to_string())?
 }
 
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn quit_app() {
+    // We intentionally use a hard process exit here. The desktop shell already delegates
+    // "should we quit?" decisions (event macros + unsaved prompts) to the frontend.
+    // Once the frontend invokes this command, exiting immediately avoids re-entering the
+    // CloseRequested handler (which prevents default close to support hide-to-tray).
+    std::process::exit(0);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

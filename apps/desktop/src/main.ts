@@ -1517,6 +1517,12 @@ try {
     });
   });
 
+  void listen("tray-quit", () => {
+    void handleCloseRequest({ quit: true }).catch((err) => {
+      console.error("Failed to quit app:", err);
+    });
+  });
+
   void listen("shortcut-quick-open", () => {
     void promptOpenWorkbook().catch((err) => {
       console.error("Failed to open workbook:", err);
@@ -1525,7 +1531,7 @@ try {
   });
 
   let closeInFlight = false;
-  void listen("close-requested", async () => {
+  async function handleCloseRequest({ quit }: { quit: boolean }): Promise<void> {
     if (closeInFlight) return;
     closeInFlight = true;
     try {
@@ -1537,12 +1543,31 @@ try {
         const discard = window.confirm("You have unsaved changes. Discard them?");
         if (!discard) return;
       }
-      await hideTauriWindow();
+
+      if (!quit) {
+        await hideTauriWindow();
+        return;
+      }
+
+      // Best-effort flush of any macro-driven workbook edits before exiting.
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      await drainBackendSync();
+      if (!invoke) {
+        window.close();
+        return;
+      }
+      // Exit the desktop shell. The backend command hard-exits the process so this promise
+      // will never resolve in the success path.
+      await invoke("quit_app");
     } catch (err) {
       console.error("Failed to handle close request:", err);
     } finally {
       closeInFlight = false;
     }
+  }
+
+  void listen("close-requested", async () => {
+    await handleCloseRequest({ quit: false });
   });
 
   window.addEventListener("keydown", (e) => {
