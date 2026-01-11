@@ -144,6 +144,9 @@ type CellAddress = { sheetId: string; row: number; col: number };
 
 function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddress | null {
   if (typeof key !== "string" || key.length === 0) return null;
+  // Cell keys are short (e.g. `Sheet1:0:0`). Reject unusually large keys early to
+  // avoid expensive parsing/allocation work on hostile updates.
+  if (key.length > 1024) return null;
 
   const isValidIndex = (value: number): boolean => Number.isSafeInteger(value) && value >= 0;
 
@@ -190,6 +193,8 @@ function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddre
 
   const firstColon = key.indexOf(":");
   if (firstColon < 0) return null;
+  // Sheet ids are expected to be small (uuid-ish). Bound work and allocations.
+  if (firstColon > 256) return null;
 
   const sheetId = (firstColon === 0 ? "" : key.slice(0, firstColon)) || defaultSheetId;
   const secondColon = key.indexOf(":", firstColon + 1);
