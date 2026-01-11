@@ -545,6 +545,73 @@ fn pivot_columnar_group_by(
     }))
 }
 
+fn pivot_columnar_groups_with_measure_eval(
+    model: &DataModel,
+    base_table: &str,
+    group_by: &[GroupByColumn],
+    measures: &[PivotMeasure],
+    filter: &FilterContext,
+) -> DaxResult<Option<PivotResult>> {
+    if group_by.is_empty() || group_by.iter().any(|c| c.table != base_table) {
+        return Ok(None);
+    }
+
+    let engine = DaxEngine::new();
+
+    let table_ref = model
+        .table(base_table)
+        .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+
+    let mut group_idxs = Vec::with_capacity(group_by.len());
+    for col in group_by {
+        let idx = table_ref.column_idx(&col.column).ok_or_else(|| DaxError::UnknownColumn {
+            table: base_table.to_string(),
+            column: col.column.clone(),
+        })?;
+        group_idxs.push(idx);
+    }
+
+    let rows_buffer;
+    let rows = if filter.is_empty() {
+        None
+    } else {
+        rows_buffer = crate::engine::resolve_table_rows(model, filter, base_table)?;
+        Some(rows_buffer.as_slice())
+    };
+
+    let Some(mut groups) = table_ref.group_by_aggregations(&group_idxs, &[], rows) else {
+        return Ok(None);
+    };
+
+    groups.sort_by(|a, b| cmp_key(a, b));
+
+    let mut columns: Vec<String> = group_by
+        .iter()
+        .map(|c| format!("{}[{}]", c.table, c.column))
+        .collect();
+    columns.extend(measures.iter().map(|m| m.name.clone()));
+
+    let mut rows_out = Vec::with_capacity(groups.len());
+    let mut group_filter = filter.clone();
+    for mut key in groups {
+        for (col, value) in group_by.iter().zip(key.iter()) {
+            group_filter.set_column_equals(&col.table, &col.column, value.clone());
+        }
+
+        for measure in measures {
+            let value =
+                engine.evaluate_expr(model, &measure.parsed, &group_filter, &RowContext::default())?;
+            key.push(value);
+        }
+        rows_out.push(key);
+    }
+
+    Ok(Some(PivotResult {
+        columns,
+        rows: rows_out,
+    }))
+}
+
 fn pivot_planned_row_group_by(
     model: &DataModel,
     base_table: &str,
@@ -820,6 +887,12 @@ pub fn pivot(
     filter: &FilterContext,
 ) -> DaxResult<PivotResult> {
     if let Some(result) = pivot_columnar_group_by(model, base_table, group_by, measures, filter)? {
+        return Ok(result);
+    }
+
+    if let Some(result) =
+        pivot_columnar_groups_with_measure_eval(model, base_table, group_by, measures, filter)?
+    {
         return Ok(result);
     }
 
