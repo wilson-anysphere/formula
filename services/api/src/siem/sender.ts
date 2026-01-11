@@ -16,8 +16,9 @@ function sanitizeRedactionOptions(
   if (!options) return undefined;
 
   const redactionText = typeof options.redactionText === "string" ? options.redactionText : undefined;
-  const sensitiveKeyPatterns = Array.isArray((options as any).sensitiveKeyPatterns)
-    ? (options as any).sensitiveKeyPatterns.filter((pattern: unknown): pattern is RegExp => pattern instanceof RegExp)
+  const patterns = options.sensitiveKeyPatterns;
+  const sensitiveKeyPatterns = Array.isArray(patterns)
+    ? patterns.filter((pattern: unknown): pattern is RegExp => pattern instanceof RegExp)
     : undefined;
 
   if (!redactionText && (!sensitiveKeyPatterns || sensitiveKeyPatterns.length === 0)) return undefined;
