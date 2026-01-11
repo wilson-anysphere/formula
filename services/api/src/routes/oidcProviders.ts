@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
+import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
 import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { withTransaction } from "../db/tx";
 import { getClientIp, getUserAgent } from "../http/request-meta";
@@ -168,8 +169,10 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
     });
   };
 
-  app.get("/orgs/:orgId/oidc/providers", { preHandler: requireAuth }, listProviders);
-  app.get("/orgs/:orgId/oidc-providers", { preHandler: requireAuth }, listProviders);
+  const preHandlers = [requireAuth, enforceOrgIpAllowlistFromParams];
+
+  app.get("/orgs/:orgId/oidc/providers", { preHandler: preHandlers }, listProviders);
+  app.get("/orgs/:orgId/oidc-providers", { preHandler: preHandlers }, listProviders);
 
   const getProvider = async (request: FastifyRequest, reply: FastifyReply) => {
     const orgId = (request.params as { orgId: string; providerId: string }).orgId;
@@ -212,8 +215,8 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
     });
   };
 
-  app.get("/orgs/:orgId/oidc/providers/:providerId", { preHandler: requireAuth }, getProvider);
-  app.get("/orgs/:orgId/oidc-providers/:providerId", { preHandler: requireAuth }, getProvider);
+  app.get("/orgs/:orgId/oidc/providers/:providerId", { preHandler: preHandlers }, getProvider);
+  app.get("/orgs/:orgId/oidc-providers/:providerId", { preHandler: preHandlers }, getProvider);
 
   const putProvider = async (request: FastifyRequest, reply: FastifyReply) => {
     const orgId = (request.params as { orgId: string; providerId: string }).orgId;
@@ -331,8 +334,8 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
     });
   };
 
-  app.put("/orgs/:orgId/oidc/providers/:providerId", { preHandler: requireAuth }, putProvider);
-  app.put("/orgs/:orgId/oidc-providers/:providerId", { preHandler: requireAuth }, putProvider);
+  app.put("/orgs/:orgId/oidc/providers/:providerId", { preHandler: preHandlers }, putProvider);
+  app.put("/orgs/:orgId/oidc-providers/:providerId", { preHandler: preHandlers }, putProvider);
 
   const deleteProvider = async (request: FastifyRequest, reply: FastifyReply) => {
     const orgId = (request.params as { orgId: string; providerId: string }).orgId;
@@ -381,6 +384,6 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
     return reply.send({ ok: true });
   };
 
-  app.delete("/orgs/:orgId/oidc/providers/:providerId", { preHandler: requireAuth }, deleteProvider);
-  app.delete("/orgs/:orgId/oidc-providers/:providerId", { preHandler: requireAuth }, deleteProvider);
+  app.delete("/orgs/:orgId/oidc/providers/:providerId", { preHandler: preHandlers }, deleteProvider);
+  app.delete("/orgs/:orgId/oidc-providers/:providerId", { preHandler: preHandlers }, deleteProvider);
 }

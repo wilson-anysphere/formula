@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
+import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
 import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
@@ -402,7 +403,9 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
   };
 
   // Legacy endpoints kept for compatibility.
-  app.get("/orgs/:orgId/saml/providers", { preHandler: requireAuth }, async (request, reply) => {
+  const preHandlers = [requireAuth, enforceOrgIpAllowlistFromParams];
+
+  app.get("/orgs/:orgId/saml/providers", { preHandler: preHandlers }, async (request, reply) => {
     const orgId = (request.params as { orgId: string }).orgId;
     if (!isValidOrgId(orgId)) return reply.code(400).send({ error: "invalid_request" });
     const member = await requireOrgAdmin(request, reply, orgId);
@@ -413,7 +416,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
     return reply.send({ providers: providers.map((row) => providerToLegacyResponse(row)) });
   });
 
-  app.get("/orgs/:orgId/saml/providers/:providerId", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/orgs/:orgId/saml/providers/:providerId", { preHandler: preHandlers }, async (request, reply) => {
     const orgId = (request.params as { orgId: string; providerId: string }).orgId;
     const providerId = (request.params as { orgId: string; providerId: string }).providerId;
     if (!isValidOrgId(orgId)) return reply.code(400).send({ error: "invalid_request" });
@@ -437,7 +440,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
     return reply.send({ provider: providerToLegacyResponse(providerRes.rows[0]!) });
   });
 
-  app.put("/orgs/:orgId/saml/providers/:providerId", { preHandler: requireAuth }, async (request, reply) => {
+  app.put("/orgs/:orgId/saml/providers/:providerId", { preHandler: preHandlers }, async (request, reply) => {
     const params = request.params as { orgId: string; providerId: string };
     const orgId = params.orgId;
     const providerId = params.providerId;
@@ -484,7 +487,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
     reply.send({ provider: providerToLegacyResponse(row) });
   });
 
-  app.delete("/orgs/:orgId/saml/providers/:providerId", { preHandler: requireAuth }, async (request, reply) => {
+  app.delete("/orgs/:orgId/saml/providers/:providerId", { preHandler: preHandlers }, async (request, reply) => {
     const params = request.params as { orgId: string; providerId: string };
     const orgId = params.orgId;
     const providerId = params.providerId;
@@ -498,7 +501,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
   });
 
   // Required endpoints (per task spec).
-  app.get("/orgs/:orgId/saml-providers", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/orgs/:orgId/saml-providers", { preHandler: preHandlers }, async (request, reply) => {
     const orgId = (request.params as { orgId: string }).orgId;
     if (!isValidOrgId(orgId)) return reply.code(400).send({ error: "invalid_request" });
     const member = await requireOrgAdmin(request, reply, orgId);
@@ -509,7 +512,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
     return reply.send({ providers: providers.map((row) => providerToResponse(row)) });
   });
 
-  app.put("/orgs/:orgId/saml-providers/:providerId", { preHandler: requireAuth }, async (request, reply) => {
+  app.put("/orgs/:orgId/saml-providers/:providerId", { preHandler: preHandlers }, async (request, reply) => {
     const params = request.params as { orgId: string; providerId: string };
     const orgId = params.orgId;
     const providerId = params.providerId;
@@ -556,7 +559,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
     reply.send({ provider: providerToResponse(row) });
   });
 
-  app.delete("/orgs/:orgId/saml-providers/:providerId", { preHandler: requireAuth }, async (request, reply) => {
+  app.delete("/orgs/:orgId/saml-providers/:providerId", { preHandler: preHandlers }, async (request, reply) => {
     const params = request.params as { orgId: string; providerId: string };
     const orgId = params.orgId;
     const providerId = params.providerId;

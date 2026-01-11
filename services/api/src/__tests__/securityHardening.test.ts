@@ -279,6 +279,24 @@ describe("security hardening", () => {
     expect(blockedSiem.statusCode).toBe(403);
     expect((blockedSiem.json() as any).error).toBe("ip_not_allowed");
 
+    const blockedOidcProviders = await app.inject({
+      method: "GET",
+      url: `/orgs/${orgId}/oidc-providers`,
+      headers: { cookie },
+      remoteAddress: "203.0.113.10"
+    });
+    expect(blockedOidcProviders.statusCode).toBe(403);
+    expect((blockedOidcProviders.json() as any).error).toBe("ip_not_allowed");
+
+    const blockedSamlProviders = await app.inject({
+      method: "GET",
+      url: `/orgs/${orgId}/saml-providers`,
+      headers: { cookie },
+      remoteAddress: "203.0.113.10"
+    });
+    expect(blockedSamlProviders.statusCode).toBe(403);
+    expect((blockedSamlProviders.json() as any).error).toBe("ip_not_allowed");
+
     const blockedDoc = await app.inject({
       method: "GET",
       url: `/docs/${docId}`,
