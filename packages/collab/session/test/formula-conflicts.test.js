@@ -316,3 +316,71 @@ test("CollabSession value conflicts surface when enabled (formula+value mode)", 
   docA.destroy();
   docB.destroy();
 });
+
+test("CollabSession formula conflict monitor surfaces content conflicts for concurrent formula vs value edits (formula+value mode)", async () => {
+  // Deterministic tie-break: higher clientID wins map entry overwrites.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+  /** @type {Array<any>} */
+  const conflictsB = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      mode: "formula+value",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    formulaConflicts: {
+      localUserId: "user-b",
+      mode: "formula+value",
+      onConflict: (c) => conflictsB.push(c),
+    },
+  });
+
+  // Establish base cell map.
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "base");
+
+  // Offline concurrent edits: A writes a formula, B writes a value. B wins, so A
+  // should see a content conflict (formula vs value).
+  disconnect();
+  await sessionA.setCellFormula("Sheet1:0:0", "=1");
+  await sessionB.setCellValue("Sheet1:0:0", "bob");
+
+  disconnect = connectDocs(docA, docB);
+
+  const allConflicts = [...conflictsA, ...conflictsB];
+  assert.ok(allConflicts.length >= 1, "expected at least one conflict to be detected");
+
+  const conflict = allConflicts[0];
+  assert.equal(conflict.kind, "content");
+  assert.equal(conflict.local.type, "formula");
+  assert.equal(conflict.remote.type, "value");
+  assert.equal(conflict.remote.value, "bob");
+
+  // Choosing the remote value is a no-op (already applied) and should converge.
+  const conflictSide = conflictsA.length > 0 ? sessionA : sessionB;
+  assert.ok(conflictSide.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.remote));
+
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.formula, null);
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, null);
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.value, "bob");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "bob");
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
