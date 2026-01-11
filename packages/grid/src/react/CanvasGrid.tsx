@@ -4,7 +4,7 @@ import type { GridPresence } from "../presence/types";
 import { CanvasGridRenderer, formatCellDisplayText, type GridPerfStats } from "../rendering/CanvasGridRenderer";
 import type { GridTheme } from "../theme/GridTheme";
 import { resolveGridTheme } from "../theme/GridTheme";
-import { readGridThemeFromCssVars } from "../theme/resolveThemeFromCssVars";
+import { resolveGridThemeFromCssVars } from "../theme/resolveThemeFromCssVars";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 
 export interface GridApi {
@@ -351,7 +351,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const selectionCanvas = selectionCanvasRef.current;
     if (!container || !gridCanvas || !contentCanvas || !selectionCanvas) return;
 
-    const nextCssTheme = readGridThemeFromCssVars(getComputedStyle(container));
+    const nextCssTheme = resolveGridThemeFromCssVars(container);
     setCssTheme((prev) => (partialThemeEqual(prev, nextCssTheme) ? prev : nextCssTheme));
 
     const renderer = rendererFactory();
@@ -384,7 +384,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     if (!container) return;
 
     const refreshTheme = () => {
-      const next = readGridThemeFromCssVars(getComputedStyle(container));
+      const next = resolveGridThemeFromCssVars(container);
       setCssTheme((prev) => (partialThemeEqual(prev, next) ? prev : next));
     };
 

@@ -7,10 +7,10 @@ export type GridPlaceholderProps = {
 };
 
 const containerStyle: CSSProperties = {
-  border: "1px solid #e5e7eb",
+  border: "1px solid var(--formula-grid-line, #e5e7eb)",
   borderRadius: 8,
   overflow: "hidden",
-  background: "#fff",
+  background: "var(--formula-grid-bg, #fff)",
 };
 
 export function GridPlaceholder({
@@ -32,8 +32,8 @@ export function GridPlaceholder({
             // eslint-disable-next-line react/no-array-index-key
             key={index}
             style={{
-              borderRight: "1px solid #f1f5f9",
-              borderBottom: "1px solid #f1f5f9",
+              borderRight: "1px solid var(--formula-grid-line, #f1f5f9)",
+              borderBottom: "1px solid var(--formula-grid-line, #f1f5f9)",
             }}
           />
         ))}
@@ -41,4 +41,3 @@ export function GridPlaceholder({
     </div>
   );
 }
-

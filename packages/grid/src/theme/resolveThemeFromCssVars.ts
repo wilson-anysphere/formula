@@ -32,3 +32,47 @@ export function readGridThemeFromCssVars(style: { getPropertyValue: (name: strin
   return partial;
 }
 
+/**
+ * Resolve theme tokens from CSS variables on a live DOM element.
+ *
+ * `getComputedStyle(el).getPropertyValue("--token")` returns the *raw* custom
+ * property value. If the token is defined in terms of other CSS variables (e.g.
+ * `--formula-grid-bg: var(--app-bg)`), we need an actual CSS property to force
+ * variable substitution before passing the value to `canvas.fillStyle`.
+ *
+ * This helper uses a hidden probe element so the browser resolves nested
+ * `var(...)` references for us.
+ */
+export function resolveGridThemeFromCssVars(element: HTMLElement): Partial<GridTheme> {
+  const view = element.ownerDocument?.defaultView;
+  if (!view || typeof view.getComputedStyle !== "function") return {};
+
+  const raw = readGridThemeFromCssVars(view.getComputedStyle(element));
+  if (Object.keys(raw).length === 0) return raw;
+
+  const probe = element.ownerDocument.createElement("div");
+  probe.style.position = "absolute";
+  probe.style.width = "0";
+  probe.style.height = "0";
+  probe.style.overflow = "hidden";
+  probe.style.pointerEvents = "none";
+  probe.style.visibility = "hidden";
+  // Keep the probe from affecting layout/style calculations beyond color parsing.
+  probe.style.setProperty("contain", "strict");
+
+  element.appendChild(probe);
+
+  const resolved: Partial<GridTheme> = {};
+  try {
+    for (const [key, value] of Object.entries(raw) as Array<[keyof GridTheme, string]>) {
+      probe.style.backgroundColor = value;
+      const computed = view.getComputedStyle(probe).backgroundColor;
+      const normalized = computed?.trim();
+      resolved[key] = normalized ? normalized : value;
+    }
+  } finally {
+    probe.remove();
+  }
+
+  return resolved;
+}

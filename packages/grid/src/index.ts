@@ -9,7 +9,7 @@ export type { GridPresence, GridPresenceCursor, GridPresenceRange } from "./pres
 export type { GridPerfStats } from "./rendering/CanvasGridRenderer";
 export type { GridTheme } from "./theme/GridTheme";
 export { DEFAULT_GRID_THEME, resolveGridTheme } from "./theme/GridTheme";
-export { GRID_THEME_CSS_VAR_NAMES, readGridThemeFromCssVars } from "./theme/resolveThemeFromCssVars";
+export { GRID_THEME_CSS_VAR_NAMES, readGridThemeFromCssVars, resolveGridThemeFromCssVars } from "./theme/resolveThemeFromCssVars";
 
 export { CanvasGridRenderer } from "./rendering/CanvasGridRenderer";
 export { DirtyRegionTracker } from "./rendering/DirtyRegionTracker";
