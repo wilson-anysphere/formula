@@ -439,6 +439,9 @@ importers:
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
+      level-mem:
+        specifier: ^5.0.1
+        version: 5.0.1
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
@@ -1963,6 +1966,9 @@ packages:
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
 
+  immediate@3.2.3:
+    resolution: {integrity: sha512-RrGCXRm/fRVqMIhqXrGEX9rRADavPiDFSoMb/k64i9XMk8uH4r/Omi5Ctierj6XzNecwDbO4WuFbDD1zmpl3Tg==}
+
   immediate@3.3.0:
     resolution: {integrity: sha512-HR7EVodfFUdQCTIeySw+WDRFJlPcLOJbXfwwZ7Oom6tjsvZ3bOkCDJHehQC3nxJrv7+f9XecwazynjU8e4Vw3Q==}
 
@@ -2070,6 +2076,11 @@ packages:
     resolution: {integrity: sha512-SnBIDo2pdO5VXh02ZmtAyPP6/+6YTJg2ibLtl9C34pWvmtMEmRTWpra+qO/hifkUtBTOtfx6S9vLDjBsBK4gRg==}
     deprecated: Superseded by browser-level (https://github.com/Level/community#faq)
 
+  level-mem@5.0.1:
+    resolution: {integrity: sha512-qd+qUJHXsGSFoHTziptAKXoLX87QjR7v2KMbqncDXPxQuCdsQlzmyX+gwrEHhlzn08vkf8TyipYyMmiC6Gobzg==}
+    engines: {node: '>=6'}
+    deprecated: Superseded by memory-level (https://github.com/Level/community#faq)
+
   level-packager@5.1.1:
     resolution: {integrity: sha512-HMwMaQPlTC1IlcwT3+swhqf/NUO+ZhXVz6TY1zZIIZlIR0YSn8GtAAWmIvKjNY16ZkEg/JcpAuQskxsXqC0yOQ==}
     engines: {node: '>=6'}
@@ -2164,6 +2175,11 @@ packages:
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
+
+  memdown@5.1.0:
+    resolution: {integrity: sha512-B3J+UizMRAlEArDjWHTMmadet+UKwHd3UjMgGBkZcKAxAYVPS9o0Yeiha4qvz7iGiL2Sb3igUft6p7nbFWctpw==}
+    engines: {node: '>=6'}
+    deprecated: Superseded by memory-level (https://github.com/Level/community#faq)
 
   merge-stream@2.0.0:
     resolution: {integrity: sha512-abv/qOcuPfk3URPfDzmZU1LKmuw8kT+0nIHvKrKgFrwifol/doWcdA4ZqsWQ8ENrFKkd67Mfpo/LovbIUsbt3w==}
@@ -3896,7 +3912,6 @@ snapshots:
       level-concat-iterator: 2.0.1
       level-supports: 1.0.1
       xtend: 4.0.2
-    optional: true
 
   abstract-leveldown@6.3.0:
     dependencies:
@@ -3905,7 +3920,6 @@ snapshots:
       level-concat-iterator: 2.0.1
       level-supports: 1.0.1
       xtend: 4.0.2
-    optional: true
 
   abstract-logging@2.0.1: {}
 
@@ -3970,8 +3984,7 @@ snapshots:
       '@fastify/error': 4.2.0
       fastq: 1.20.1
 
-  base64-js@1.5.1:
-    optional: true
+  base64-js@1.5.1: {}
 
   baseline-browser-mapping@2.9.14: {}
 
@@ -3993,7 +4006,6 @@ snapshots:
     dependencies:
       base64-js: 1.5.1
       ieee754: 1.2.1
-    optional: true
 
   cac@6.7.14: {}
 
@@ -4119,7 +4131,6 @@ snapshots:
     dependencies:
       abstract-leveldown: 6.2.3
       inherits: 2.0.4
-    optional: true
 
   define-data-property@1.1.4:
     dependencies:
@@ -4155,14 +4166,12 @@ snapshots:
       inherits: 2.0.4
       level-codec: 9.0.2
       level-errors: 2.0.1
-    optional: true
 
   entities@6.0.1: {}
 
   errno@0.1.8:
     dependencies:
       prr: 1.0.1
-    optional: true
 
   es-define-property@1.0.1: {}
 
@@ -4438,11 +4447,11 @@ snapshots:
     dependencies:
       safer-buffer: 2.1.2
 
-  ieee754@1.2.1:
-    optional: true
+  ieee754@1.2.1: {}
 
-  immediate@3.3.0:
-    optional: true
+  immediate@3.2.3: {}
+
+  immediate@3.3.0: {}
 
   immutable@4.3.7: {}
 
@@ -4453,8 +4462,7 @@ snapshots:
       cjs-module-lexer: 1.4.3
       module-details-from-path: 1.0.4
 
-  inherits@2.0.4:
-    optional: true
+  inherits@2.0.4: {}
 
   ipaddr.js@2.3.0: {}
 
@@ -4549,22 +4557,18 @@ snapshots:
   level-codec@9.0.2:
     dependencies:
       buffer: 5.7.1
-    optional: true
 
-  level-concat-iterator@2.0.1:
-    optional: true
+  level-concat-iterator@2.0.1: {}
 
   level-errors@2.0.1:
     dependencies:
       errno: 0.1.8
-    optional: true
 
   level-iterator-stream@4.0.2:
     dependencies:
       inherits: 2.0.4
       readable-stream: 3.6.2
       xtend: 4.0.2
-    optional: true
 
   level-js@5.0.2:
     dependencies:
@@ -4574,16 +4578,19 @@ snapshots:
       ltgt: 2.2.1
     optional: true
 
+  level-mem@5.0.1:
+    dependencies:
+      level-packager: 5.1.1
+      memdown: 5.1.0
+
   level-packager@5.1.1:
     dependencies:
       encoding-down: 6.3.0
       levelup: 4.4.0
-    optional: true
 
   level-supports@1.0.1:
     dependencies:
       xtend: 4.0.2
-    optional: true
 
   level@6.0.1:
     dependencies:
@@ -4606,7 +4613,6 @@ snapshots:
       level-iterator-stream: 4.0.2
       level-supports: 1.0.1
       xtend: 4.0.2
-    optional: true
 
   lib0@0.2.117:
     dependencies:
@@ -4663,14 +4669,22 @@ snapshots:
     dependencies:
       yallist: 4.0.0
 
-  ltgt@2.2.1:
-    optional: true
+  ltgt@2.2.1: {}
 
   magic-string@0.30.21:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
   math-intrinsics@1.1.0: {}
+
+  memdown@5.1.0:
+    dependencies:
+      abstract-leveldown: 6.2.3
+      functional-red-black-tree: 1.0.1
+      immediate: 3.2.3
+      inherits: 2.0.4
+      ltgt: 2.2.1
+      safe-buffer: 5.2.1
 
   merge-stream@2.0.0: {}
 
@@ -4921,8 +4935,7 @@ snapshots:
       '@types/node': 22.19.5
       long: 5.3.2
 
-  prr@1.0.1:
-    optional: true
+  prr@1.0.1: {}
 
   psl@1.15.0:
     dependencies:
@@ -4960,7 +4973,6 @@ snapshots:
       inherits: 2.0.4
       string_decoder: 1.3.0
       util-deprecate: 1.0.2
-    optional: true
 
   real-require@0.2.0: {}
 
@@ -5084,7 +5096,6 @@ snapshots:
   string_decoder@1.3.0:
     dependencies:
       safe-buffer: 5.2.1
-    optional: true
 
   strip-final-newline@3.0.0: {}
 
@@ -5193,8 +5204,7 @@ snapshots:
       querystringify: 2.2.0
       requires-port: 1.0.0
 
-  util-deprecate@1.0.2:
-    optional: true
+  util-deprecate@1.0.2: {}
 
   vite-node@1.6.1(@types/node@22.19.5):
     dependencies:

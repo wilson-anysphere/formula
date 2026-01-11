@@ -34,6 +34,16 @@ export type SyncServerConfig = {
           mode: "keyring";
           keyRing: KeyRing;
         };
+    /**
+     * Optional encryption for y-leveldb persistence values.
+     *
+     * Note: this only encrypts LevelDB *values*. Keys (including doc ids) remain
+     * plaintext unless a separate doc-id hashing layer is added.
+     */
+    leveldbEncryption?: {
+      key: Buffer;
+      strict: boolean;
+    };
   };
 
   auth: AuthMode;
@@ -141,6 +151,30 @@ export function loadConfigFromEnv(): SyncServerConfig {
         }
       : { mode: "off" as const };
 
+  const leveldbEncryptionKeyB64 =
+    process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64;
+  const leveldbEncryptionStrictDefault = nodeEnv === "production";
+  const leveldbEncryptionStrict = envBool(
+    process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION_STRICT,
+    leveldbEncryptionStrictDefault
+  );
+  const leveldbEncryptionKey =
+    leveldbEncryptionKeyB64 === undefined
+      ? null
+      : Buffer.from(leveldbEncryptionKeyB64, "base64");
+  if (leveldbEncryptionKey !== null && leveldbEncryptionKey.byteLength !== 32) {
+    throw new Error(
+      "SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64 must be a base64-encoded 32-byte (256-bit) key."
+    );
+  }
+  const leveldbEncryption =
+    leveldbEncryptionKey === null
+      ? undefined
+      : {
+          key: leveldbEncryptionKey,
+          strict: leveldbEncryptionStrict,
+        };
+
   const internalAdminToken =
     process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN !== undefined
       ? process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN || null
@@ -182,7 +216,12 @@ export function loadConfigFromEnv(): SyncServerConfig {
     gc,
     dataDir,
     disableDataDirLock,
-    persistence: { backend, compactAfterUpdates, encryption },
+    persistence: {
+      backend,
+      compactAfterUpdates,
+      encryption,
+      leveldbEncryption,
+    },
     auth,
     internalAdminToken,
     retention: {

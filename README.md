@@ -100,6 +100,28 @@ You can switch persistence backends:
 - `SYNC_SERVER_PERSISTENCE_BACKEND=leveldb` (default)
 - `SYNC_SERVER_PERSISTENCE_BACKEND=file` (portable fallback)
 
+#### Encryption-at-rest (LevelDB values)
+
+When using `SYNC_SERVER_PERSISTENCE_BACKEND=leveldb`, you can enable **AES-256-GCM encryption-at-rest** for all persisted *values* (Yjs updates, state vectors, metadata).
+
+Enable:
+
+- `SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64=<base64>` (required; must decode to **32 bytes**)
+
+Optional:
+
+- `SYNC_SERVER_PERSISTENCE_ENCRYPTION_STRICT=true|false`
+  - Default: `true` in `NODE_ENV=production`, `false` in dev/test.
+  - `true`: reject plaintext reads (fails fast if the DB was previously unencrypted).
+  - `false`: allow reading plaintext values for migration/backcompat; new writes are encrypted.
+
+Migration notes:
+
+- Recommended: use a fresh `SYNC_SERVER_DATA_DIR` when enabling encryption.
+- With `STRICT=false`, mixed plaintext/ciphertext DBs can be read; documents are re-written encrypted over time (as updates are stored/compacted).
+
+Note: LevelDB *keys* are not encrypted (document IDs remain visible in keys).
+
 #### Retention / purge (LevelDB only)
 
 When using `SYNC_SERVER_PERSISTENCE_BACKEND=leveldb` with `y-leveldb` installed, the sync server stores per-document metadata:

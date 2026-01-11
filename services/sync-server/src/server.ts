@@ -26,6 +26,7 @@ import {
   FilePersistence,
   migrateLegacyPlaintextFilesToEncryptedFormat,
 } from "./persistence.js";
+import { createEncryptedLevelAdapter } from "./leveldbEncryption.js";
 import {
   DocConnectionTracker,
   LeveldbRetentionManager,
@@ -210,6 +211,9 @@ export function createSyncServer(
   const initPersistence = async () => {
     if (persistenceInitialized) return;
 
+    const nodeEnv = process.env.NODE_ENV ?? "development";
+    const leveldbEncryption = config.persistence.leveldbEncryption ?? null;
+
     if (config.persistence.backend === "file") {
       if (config.persistence.encryption.mode === "keyring") {
         await migrateLegacyPlaintextFilesToEncryptedFormat({
@@ -217,6 +221,18 @@ export function createSyncServer(
           logger,
           keyRing: config.persistence.encryption.keyRing,
         });
+      }
+
+      if (leveldbEncryption) {
+        if (nodeEnv === "production") {
+          throw new Error(
+            "SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64 is set but SYNC_SERVER_PERSISTENCE_BACKEND=file. LevelDB value encryption is only supported with SYNC_SERVER_PERSISTENCE_BACKEND=leveldb."
+          );
+        }
+        logger.warn(
+          { strict: leveldbEncryption.strict },
+          "persistence_leveldb_encryption_key_set_backend_file_running_unencrypted"
+        );
       }
 
       persistenceInitialized = true;
@@ -247,17 +263,18 @@ export function createSyncServer(
       const ldb = createLeveldbPersistence(config.dataDir);
       persistenceBackend = "leveldb";
 
-      const queues = new Map<string, Promise<void>>();
-      const enqueue = (docName: string, task: () => Promise<void>) => {
+      const queues = new Map<string, Promise<unknown>>();
+      const enqueue = <T>(docName: string, task: () => Promise<T>) => {
         const prev = queues.get(docName) ?? Promise.resolve();
         const next = prev
           .catch(() => {
             // Keep the queue alive even if a previous write failed.
           })
           .then(task);
-        queues.set(docName, next);
-        void next.finally(() => {
-          if (queues.get(docName) === next) queues.delete(docName);
+        const nextForQueue = next as Promise<unknown>;
+        queues.set(docName, nextForQueue);
+        void nextForQueue.finally(() => {
+          if (queues.get(docName) === nextForQueue) queues.delete(docName);
         });
         return next;
       };
@@ -326,16 +343,24 @@ export function createSyncServer(
     }
 
     const require = createRequire(import.meta.url);
-    let LeveldbPersistenceCtor: new (location: string) => LeveldbPersistence;
+    let LeveldbPersistenceCtor: new (
+      location: string,
+      opts?: any
+    ) => LeveldbPersistence;
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       ({ LeveldbPersistence: LeveldbPersistenceCtor } = require("y-leveldb") as {
-        LeveldbPersistence: new (location: string) => LeveldbPersistence;
+        LeveldbPersistence: new (location: string, opts?: any) => LeveldbPersistence;
       });
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "MODULE_NOT_FOUND") {
-        if ((process.env.NODE_ENV ?? "development") === "production") {
+        if (nodeEnv === "production") {
+          if (leveldbEncryption) {
+            throw new Error(
+              "SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64 is set but y-leveldb is not installed. Install y-leveldb (and its native deps) or set SYNC_SERVER_PERSISTENCE_BACKEND=file and unset SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64."
+            );
+          }
           throw new Error(
             "y-leveldb is required for LevelDB persistence. Install y-leveldb or set SYNC_SERVER_PERSISTENCE_BACKEND=file."
           );
@@ -352,6 +377,13 @@ export function createSyncServer(
             logger,
             keyRing: config.persistence.encryption.keyRing,
           });
+        }
+
+        if (leveldbEncryption) {
+          logger.warn(
+            { strict: leveldbEncryption.strict },
+            "persistence_leveldb_encryption_key_set_y-leveldb_missing_running_unencrypted"
+          );
         }
 
         persistenceInitialized = true;
@@ -391,20 +423,72 @@ export function createSyncServer(
     const maxAttempts = 5;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        const ldb = new LeveldbPersistenceCtor(config.dataDir);
+        let ldb: LeveldbPersistence;
+        if (leveldbEncryption) {
+          let baseLevel: any;
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            baseLevel = require("level");
+          } catch (err) {
+            if (nodeEnv === "production") {
+              throw new Error(
+                "SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64 is set but the 'level' module is not available. Ensure y-leveldb and its dependencies are installed."
+              );
+            }
+            logger.warn(
+              { err },
+              "level_module_not_installed_falling_back_to_file_persistence"
+            );
+            persistenceInitialized = true;
+            persistenceCleanup = null;
+            retentionManager = null;
+            persistenceBackend = "file";
+            const persistence = new FilePersistence(
+              config.dataDir,
+              logger,
+              config.persistence.compactAfterUpdates,
+              config.persistence.encryption,
+              shouldPersist
+            );
+            setPersistence(persistence);
+            clearPersistedDocument = (docName: string) =>
+              persistence.clearDocument(docName);
+            return;
+          }
+
+          const encryptedLevel = createEncryptedLevelAdapter({
+            baseLevel,
+            key: leveldbEncryption.key,
+            strict: leveldbEncryption.strict,
+          });
+
+          logger.info(
+            {
+              mode: leveldbEncryption.strict ? "strict" : "compat",
+              strict: leveldbEncryption.strict,
+            },
+            "persistence_leveldb_encryption_enabled"
+          );
+
+          ldb = new LeveldbPersistenceCtor(config.dataDir, { level: encryptedLevel });
+        } else {
+          ldb = new LeveldbPersistenceCtor(config.dataDir);
+        }
+
         persistenceBackend = "leveldb";
 
-        const queues = new Map<string, Promise<void>>();
-        const enqueue = (docName: string, task: () => Promise<void>) => {
+        const queues = new Map<string, Promise<unknown>>();
+        const enqueue = <T>(docName: string, task: () => Promise<T>) => {
           const prev = queues.get(docName) ?? Promise.resolve();
           const next = prev
             .catch(() => {
               // Keep the queue alive even if a previous write failed.
             })
             .then(task);
-          queues.set(docName, next);
-          void next.finally(() => {
-            if (queues.get(docName) === next) queues.delete(docName);
+          const nextForQueue = next as Promise<unknown>;
+          queues.set(docName, nextForQueue);
+          void nextForQueue.finally(() => {
+            if (queues.get(docName) === nextForQueue) queues.delete(docName);
           });
           return next;
         };
@@ -438,8 +522,8 @@ export function createSyncServer(
           provider: ldb,
           bindState: async (docName: string, ydoc: any) => {
             // Important: `y-websocket` does not await `bindState()`. Attach the
-           // update listener first so we don't miss early client updates.
-           const persistenceOrigin = "persistence:leveldb";
+            // update listener first so we don't miss early client updates.
+            const persistenceOrigin = "persistence:leveldb";
 
             ydoc.on("update", (update: Uint8Array, origin: unknown) => {
               if (origin === persistenceOrigin) return;
