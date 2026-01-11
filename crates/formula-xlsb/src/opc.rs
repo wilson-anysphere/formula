@@ -4,7 +4,9 @@ use crate::parser::{
     biff12, parse_shared_strings, parse_sheet, parse_sheet_stream, parse_workbook, Cell, CellValue,
     DefinedName, SheetData, SheetMeta, WorkbookProperties,
 };
-use crate::patch::{patch_sheet_bin, patch_sheet_bin_streaming, CellEdit};
+use crate::patch::{
+    patch_sheet_bin, patch_sheet_bin_streaming, value_edit_is_noop_inline_string, CellEdit,
+};
 use crate::shared_strings_write::SharedStringsWriter;
 use crate::styles::Styles;
 use crate::workbook_context::WorkbookContext;
@@ -561,15 +563,15 @@ impl XlsbWorkbook {
         };
 
         let targets: HashSet<(u32, u32)> = edits.iter().map(|e| (e.row, e.col)).collect();
-        let cell_record_ids = if targets.is_empty() {
+        let cell_records = if targets.is_empty() {
             HashMap::new()
         } else if let Some(sheet_bytes) = self.preserved_parts.get(&sheet_part) {
-            sheet_cell_record_ids(sheet_bytes, &targets)?
+            sheet_cell_records(sheet_bytes, &targets)?
         } else {
             let file = File::open(&self.path)?;
             let mut zip = ZipArchive::new(file)?;
             let mut entry = zip.by_name(&sheet_part)?;
-            sheet_cell_record_ids_streaming(&mut entry, &targets)?
+            sheet_cell_records_streaming(&mut entry, &targets)?
         };
 
         let mut sst = SharedStringsWriter::new(shared_strings_bytes)?;
@@ -581,9 +583,21 @@ impl XlsbWorkbook {
             };
 
             let coord = (edit.row, edit.col);
-            let record_id = cell_record_ids.get(&coord).copied();
+            let record = cell_records.get(&coord);
+            let record_id = record.map(|r| r.id);
             if record_id.is_some_and(is_formula_cell_record) {
                 continue;
+            }
+
+            if record_id == Some(biff12::CELL_ST) {
+                if let Some(record) = record {
+                    if value_edit_is_noop_inline_string(&record.payload, edit)? {
+                        // Preserve a byte-identical worksheet stream for no-op inline-string edits.
+                        // The workbook-level shared-string counts should also remain unchanged in
+                        // this case, since the cell still uses `BrtCellSt` storage.
+                        continue;
+                    }
+                }
             }
 
             edit.shared_string_index = Some(sst.intern_plain(text)?);
@@ -593,7 +607,8 @@ impl XlsbWorkbook {
             .iter()
             .map(|edit| {
                 let coord = (edit.row, edit.col);
-                let old_uses_sst = matches!(cell_record_ids.get(&coord), Some(&biff12::STRING));
+                let old_uses_sst =
+                    matches!(cell_records.get(&coord).map(|r| r.id), Some(biff12::STRING));
                 let new_uses_sst = matches!(edit.new_value, CellValue::Text(_))
                     && edit.shared_string_index.is_some();
                 match (old_uses_sst, new_uses_sst) {
@@ -1051,6 +1066,12 @@ fn preserve_part<R: Read + Seek>(
     Ok(())
 }
 
+#[derive(Debug)]
+struct CellRecordInfo {
+    id: u32,
+    payload: Vec<u8>,
+}
+
 fn sheet_cell_record_ids(
     sheet_bin: &[u8],
     targets: &HashSet<(u32, u32)>,
@@ -1104,13 +1125,72 @@ fn sheet_cell_record_ids(
     Ok(found)
 }
 
-fn sheet_cell_record_ids_streaming<R: Read>(
-    sheet_bin: &mut R,
+fn sheet_cell_records(
+    sheet_bin: &[u8],
     targets: &HashSet<(u32, u32)>,
-) -> Result<HashMap<(u32, u32), u32>, ParseError> {
+) -> Result<HashMap<(u32, u32), CellRecordInfo>, ParseError> {
+    let mut cursor = Cursor::new(sheet_bin);
     let mut in_sheet_data = false;
     let mut current_row = 0u32;
-    let mut found: HashMap<(u32, u32), u32> = HashMap::new();
+    let mut found: HashMap<(u32, u32), CellRecordInfo> = HashMap::new();
+
+    loop {
+        let Some(id) = biff12_varint::read_record_id(&mut cursor)? else {
+            break;
+        };
+        let Some(len) = biff12_varint::read_record_len(&mut cursor)? else {
+            return Err(ParseError::UnexpectedEof);
+        };
+        let len = len as usize;
+
+        let payload_start = cursor.position() as usize;
+        let payload_end = payload_start
+            .checked_add(len)
+            .filter(|&end| end <= sheet_bin.len())
+            .ok_or(ParseError::UnexpectedEof)?;
+        let payload = &sheet_bin[payload_start..payload_end];
+        cursor.set_position(payload_end as u64);
+
+        match id {
+            biff12::SHEETDATA => in_sheet_data = true,
+            biff12::SHEETDATA_END => in_sheet_data = false,
+            biff12::ROW if in_sheet_data => {
+                if payload.len() >= 4 {
+                    current_row = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                }
+            }
+            _ if in_sheet_data => {
+                if payload.len() >= 4 {
+                    let col = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                    let coord = (current_row, col);
+                    if targets.contains(&coord) {
+                        found.insert(
+                            coord,
+                            CellRecordInfo {
+                                id,
+                                payload: payload.to_vec(),
+                            },
+                        );
+                        if found.len() == targets.len() {
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(found)
+}
+
+fn sheet_cell_records_streaming<R: Read>(
+    sheet_bin: &mut R,
+    targets: &HashSet<(u32, u32)>,
+) -> Result<HashMap<(u32, u32), CellRecordInfo>, ParseError> {
+    let mut in_sheet_data = false;
+    let mut current_row = 0u32;
+    let mut found: HashMap<(u32, u32), CellRecordInfo> = HashMap::new();
 
     loop {
         let Some(id) = biff12_varint::read_record_id(sheet_bin)? else {
@@ -1142,16 +1222,22 @@ fn sheet_cell_record_ids_streaming<R: Read>(
             }
             _ if in_sheet_data => {
                 if len >= 4 {
-                    let mut buf = [0u8; 4];
-                    sheet_bin.read_exact(&mut buf)?;
-                    let col = u32::from_le_bytes(buf);
+                    let mut head = [0u8; 4];
+                    sheet_bin.read_exact(&mut head)?;
+                    let col = u32::from_le_bytes(head);
                     let coord = (current_row, col);
                     if targets.contains(&coord) {
-                        found.insert(coord, id);
+                        let mut payload = Vec::with_capacity(len);
+                        payload.extend_from_slice(&head);
+                        if len > 4 {
+                            payload.resize(len, 0);
+                            sheet_bin.read_exact(&mut payload[4..])?;
+                        }
+                        found.insert(coord, CellRecordInfo { id, payload });
                         if found.len() == targets.len() {
-                            skip_record_payload(sheet_bin, len - 4)?;
                             break;
                         }
+                        continue;
                     }
                     skip_record_payload(sheet_bin, len - 4)?;
                 } else {

@@ -1230,7 +1230,7 @@ fn value_edit_is_noop_shared_string(payload: &[u8], edit: &CellEdit) -> Result<b
     Ok(read_u32(payload, 8)? == isst)
 }
 
-fn value_edit_is_noop_inline_string(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+pub(crate) fn value_edit_is_noop_inline_string(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
     if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
         return Ok(false);
     }

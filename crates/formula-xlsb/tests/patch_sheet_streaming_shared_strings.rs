@@ -137,6 +137,14 @@ fn build_fixture_bytes() -> Vec<u8> {
     builder.build_bytes()
 }
 
+fn build_fixture_bytes_with_inline_string() -> Vec<u8> {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.add_shared_string("Hello");
+    builder.set_cell_sst(0, 0, 0); // A1 = "Hello" via SST
+    builder.set_cell_inline_string(0, 1, "Hello"); // B1 = "Hello" inline
+    builder.build_bytes()
+}
+
 #[test]
 fn streaming_shared_string_edit_updates_isst_and_preserves_counts() {
     let tmpdir = tempfile::tempdir().expect("create temp dir");
@@ -260,6 +268,49 @@ fn streaming_shared_string_noop_is_lossless() {
 
     // Ensure we didn't accidentally mutate the in-memory bytes either.
     assert_eq!(bytes, std::fs::read(&input_path).expect("read input workbook"));
+}
+
+#[test]
+fn streaming_shared_string_noop_inline_string_does_not_touch_shared_strings() {
+    let tmpdir = tempfile::tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    std::fs::write(&input_path, build_fixture_bytes_with_inline_string())
+        .expect("write input workbook");
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let out_path = tmpdir.path().join("out.xlsb");
+
+    // B1 is an inline string cell. Editing it to the same text should be a no-op, and should not
+    // mutate `xl/sharedStrings.bin` counts (since the cell still uses inline storage).
+    wb.save_with_cell_edits_streaming_shared_strings(
+        &out_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Text("Hello".to_string()),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("save_with_cell_edits_streaming_shared_strings");
+
+    let report = xlsx_diff::diff_workbooks(&input_path, &out_path).expect("diff workbooks");
+    assert!(
+        report.is_empty(),
+        "expected no OPC part diffs for no-op inline-string edit, got:\n{}",
+        format_report(&report)
+    );
+
+    let shared_strings_bin = read_zip_part(&out_path, "xl/sharedStrings.bin");
+    let stats = read_shared_strings_stats(&shared_strings_bin);
+    assert_eq!(stats.total_count, Some(1));
+    assert_eq!(stats.unique_count, Some(1));
+    assert_eq!(stats.si_count, 1);
+
+    let sheet_bin = read_zip_part(&out_path, "xl/worksheets/sheet1.bin");
+    let (id, _payload) = find_cell_record(&sheet_bin, 0, 1).expect("find B1 record");
+    assert_eq!(id, 0x0006, "expected BrtCellSt/CELL_ST record id");
 }
 
 #[test]
