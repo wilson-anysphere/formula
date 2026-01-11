@@ -432,6 +432,70 @@ mod tests {
     }
 
     #[test]
+    fn legacy_container_still_decrypts() {
+        let key = [5u8; KEY_LEN];
+        let keyring = KeyRing::from_key(1, key);
+        let plaintext = b"legacy container bytes";
+
+        let mut nonce_bytes = [0u8; NONCE_LEN];
+        nonce_bytes[0] = 1;
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+        let mut buffer = plaintext.to_vec();
+        let aad = aad_for_magic(LEGACY_MAGIC, Some(LEGACY_CONTAINER_VERSION), 1);
+        let tag = cipher
+            .encrypt_in_place_detached(nonce, &aad, &mut buffer)
+            .expect("encrypt legacy");
+
+        let mut container = Vec::new();
+        container.extend_from_slice(LEGACY_MAGIC);
+        container.push(LEGACY_CONTAINER_VERSION);
+        container.extend_from_slice(&1u32.to_be_bytes());
+        container.extend_from_slice(&nonce_bytes);
+        container.extend_from_slice(tag.as_slice());
+        container.extend_from_slice(&buffer);
+
+        let decrypted = decrypt_sqlite_bytes(&container, &keyring).expect("decrypt legacy");
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn unsupported_container_version_is_reported() {
+        let bytes = b"FMLENC02".to_vec();
+        let keyring = KeyRing::from_key(1, [0u8; KEY_LEN]);
+        let err = decrypt_sqlite_bytes(&bytes, &keyring).expect_err("should fail");
+        match err {
+            EncryptionError::UnsupportedContainerVersion(2) => {}
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tampered_key_version_fails_even_if_key_material_is_same() {
+        let key = [7u8; KEY_LEN];
+        let mut keyring = KeyRing::from_key(1, key);
+        // Add a second version with identical key bytes.
+        keyring.keys.insert(2, KeyBytes::new(key));
+
+        let plaintext = b"header auth";
+        let mut encrypted = encrypt_sqlite_bytes(plaintext, &keyring).expect("encrypt");
+        assert_eq!(
+            u32::from_be_bytes(encrypted[8..12].try_into().expect("key version bytes")),
+            1
+        );
+
+        // Flip keyVersion from 1 -> 2 while keeping ciphertext/tag intact.
+        encrypted[8..12].copy_from_slice(&2u32.to_be_bytes());
+
+        let err = decrypt_sqlite_bytes(&encrypted, &keyring).expect_err("should fail");
+        match err {
+            EncryptionError::Aead => {}
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
     fn keyring_json_is_compatible_with_padded_and_unpadded_base64() {
         let keyring = KeyRing::from_key(1, [0u8; KEY_LEN]);
         let mut json: serde_json::Value =
