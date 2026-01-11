@@ -278,7 +278,8 @@ test("RefreshOrchestrator: refreshAll() with no queryIds refreshes all registere
   assert.ok(callC);
   callB.deferred.resolve(makeResult("B"));
   callC.deferred.resolve(makeResult("C"));
-  await handle.promise;
+  const results = await handle.promise;
+  assert.deepEqual(new Set(Object.keys(results)), new Set(["A", "B", "C"]));
 });
 
 test("RefreshOrchestrator: dedup shared dependency results (A only loads once)", async () => {
