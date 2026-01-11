@@ -499,7 +499,7 @@ export class QueryFoldingEngine {
       }
     }
 
-    if (!isSqlFoldableJoinComparer(merge.comparer)) return null;
+    if (!isSqlFoldableJoinComparer(merge.comparers ?? merge.comparer)) return null;
 
     const join = joinTypeToSql(dialect, merge.joinType);
     if (!join) return null;
@@ -1020,7 +1020,7 @@ export class QueryFoldingEngine {
         const joinMode = operation.joinMode ?? "flat";
         if (joinMode !== "flat") return null;
 
-        if (!isSqlFoldableJoinComparer(operation.comparer)) return null;
+        if (!isSqlFoldableJoinComparer(operation.comparers ?? operation.comparer)) return null;
 
         const leftKeys =
           Array.isArray(operation.leftKeys) && operation.leftKeys.length > 0
@@ -1242,7 +1242,7 @@ export class QueryFoldingEngine {
         const joinMode = operation.joinMode ?? "flat";
         if (joinMode !== "flat") return "unsupported_join_mode";
 
-        if (!isSqlFoldableJoinComparer(operation.comparer)) return "unsupported_comparer";
+        if (!isSqlFoldableJoinComparer(operation.comparers ?? operation.comparer)) return "unsupported_comparer";
 
         const leftKeys =
           Array.isArray(operation.leftKeys) && operation.leftKeys.length > 0
@@ -1431,6 +1431,9 @@ function connectionsMatch(left, right) {
  */
 function isSqlFoldableJoinComparer(comparer) {
   if (comparer == null) return true;
+  if (Array.isArray(comparer)) {
+    return comparer.every((entry) => isSqlFoldableJoinComparer(entry));
+  }
   if (!comparer || typeof comparer !== "object" || Array.isArray(comparer)) return false;
   // @ts-ignore - runtime inspection
   const name = typeof comparer.comparer === "string" ? comparer.comparer.toLowerCase() : "";

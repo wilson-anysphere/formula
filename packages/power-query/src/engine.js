@@ -2435,25 +2435,29 @@ export class QueryEngine {
     const leftKeyIdx = leftKeys.map((key) => left.getColumnIndex(key));
     const rightKeyIdx = rightKeys.map((key) => right.getColumnIndex(key));
 
-    const comparerName =
-      op.comparer && typeof op.comparer === "object" && !Array.isArray(op.comparer)
-        ? // @ts-ignore - runtime inspection
-          String(op.comparer.comparer ?? "").toLowerCase()
-        : "";
-    const caseInsensitiveComparer =
-      op.comparer &&
-      typeof op.comparer === "object" &&
-      !Array.isArray(op.comparer) &&
-      // @ts-ignore - runtime inspection
-      (op.comparer.caseSensitive === false || comparerName === "ordinalignorecase");
-
     /**
-     * @param {unknown} value
+     * @param {unknown} comparer
+     * @returns {boolean}
      */
-    const normalizeJoinKey = (value) => {
-      if (caseInsensitiveComparer && typeof value === "string") return value.toLowerCase();
-      return value;
+    const isIgnoreCaseComparer = (comparer) => {
+      if (!comparer || typeof comparer !== "object" || Array.isArray(comparer)) return false;
+      // @ts-ignore - runtime inspection
+      const comparerName = typeof comparer.comparer === "string" ? comparer.comparer.toLowerCase() : "";
+      // @ts-ignore - runtime inspection
+      return comparer.caseSensitive === false || comparerName === "ordinalignorecase";
     };
+
+    /** @type {boolean[] | null} */
+    let keyIgnoreCase = null;
+    if (Array.isArray(op.comparers) && op.comparers.length > 0) {
+      if (op.comparers.length !== leftKeys.length) {
+        throw new Error(`merge comparers must match join key count (${leftKeys.length}), got ${op.comparers.length}`);
+      }
+      keyIgnoreCase = op.comparers.map(isIgnoreCaseComparer);
+    } else if (op.comparer) {
+      const flag = isIgnoreCaseComparer(op.comparer);
+      keyIgnoreCase = new Array(leftKeys.length).fill(flag);
+    }
 
     /**
      * @param {ITable} table
@@ -2461,7 +2465,13 @@ export class QueryEngine {
      * @param {number[]} keyIndices
      */
     const compositeKeyForRow = (table, rowIndex, keyIndices) => {
-      const parts = keyIndices.map((idx) => valueKey(normalizeJoinKey(table.getCell(rowIndex, idx))));
+      const parts = keyIndices.map((idx, keyPos) => {
+        let value = table.getCell(rowIndex, idx);
+        if (keyIgnoreCase && keyIgnoreCase[keyPos] && typeof value === "string") {
+          value = value.toLowerCase();
+        }
+        return valueKey(value);
+      });
       return JSON.stringify(parts);
     };
 

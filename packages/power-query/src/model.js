@@ -210,6 +210,11 @@
  *   //
  *   // When present, the comparer is applied to all join key columns.
  *   comparer?: { comparer: string; caseSensitive?: boolean } | null;
+ *   // Optional per-key equality comparers (Power Query `keyEqualityComparers`).
+ *   //
+ *   // When provided, this must contain one comparer per join key and overrides
+ *   // `comparer`.
+ *   comparers?: Array<{ comparer: string; caseSensitive?: boolean }> | null;
  *   // Join key columns on the left-hand input.
  *   //
  *   // Must be the same length as `rightKeys` and contain at least one entry.

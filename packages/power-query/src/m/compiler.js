@@ -871,7 +871,7 @@ function compileTableOperation(ctx, fnName, expr, schema) {
       if (!comparerExpr && algorithmOrComparerExpr && isComparerExpr(ctx, algorithmOrComparerExpr)) {
         comparerExpr = algorithmOrComparerExpr;
       }
-      const comparer = comparerExpr ? compileComparer(ctx, comparerExpr) : null;
+      const comparerSpec = comparerExpr ? compileJoinComparerArg(ctx, comparerExpr, leftKeys.length) : null;
 
       const rightQuery = expectQueryReferenceId(ctx, rightTableExpr, fnName);
       return {
@@ -884,7 +884,8 @@ function compileTableOperation(ctx, fnName, expr, schema) {
             rightKeys,
             joinMode: fnName === "Table.NestedJoin" ? "nested" : "flat",
             ...(newColumnName != null ? { newColumnName } : null),
-            ...(comparer != null ? { comparer } : null),
+            ...(comparerSpec?.comparer != null ? { comparer: comparerSpec.comparer } : null),
+            ...(comparerSpec?.comparers != null ? { comparers: comparerSpec.comparers } : null),
           },
         ],
         schema: null,
@@ -1339,67 +1340,80 @@ function isComparerExpr(ctx, expr) {
  * @param {MExpression} expr
  * @returns {{ comparer: string; caseSensitive?: boolean } | null}
  */
-function compileComparer(ctx, expr) {
+/**
+ * @param {CompilerContext} ctx
+ * @param {MExpression} expr
+ * @param {unknown} input
+ * @returns {{ comparer: string; caseSensitive: boolean } | null}
+ */
+function parseJoinComparer(ctx, expr, input) {
+  if (input == null) return null;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    ctx.error(expr, "Unsupported join comparer (expected Comparer.Ordinal or Comparer.OrdinalIgnoreCase)");
+  }
+
+  /** @type {Record<string, unknown>} */
+  const record = /** @type {any} */ (input);
+  let comparerName = null;
+  /** @type {boolean | undefined} */
+  let caseSensitive;
+
+  for (const [k, v] of Object.entries(record)) {
+    const key = k.toLowerCase();
+    if (key === "comparer") comparerName = typeof v === "string" ? v : String(v);
+    if (key === "casesensitive") caseSensitive = Boolean(v);
+  }
+
+  if (typeof comparerName !== "string") {
+    ctx.error(expr, "Unsupported join comparer (expected Comparer.Ordinal or Comparer.OrdinalIgnoreCase)");
+  }
+
+  const normalized = comparerName.trim().toLowerCase();
+  if (normalized === "ordinal") {
+    if (caseSensitive === false) ctx.error(expr, "Comparer.Ordinal must be case sensitive");
+    return { comparer: "ordinal", caseSensitive: true };
+  }
+  if (normalized === "ordinalignorecase") {
+    if (caseSensitive === true) ctx.error(expr, "Comparer.OrdinalIgnoreCase must be case insensitive");
+    return { comparer: "ordinalIgnoreCase", caseSensitive: false };
+  }
+
+  ctx.error(expr, "Unsupported join comparer (expected Comparer.Ordinal or Comparer.OrdinalIgnoreCase)");
+}
+
+/**
+ * @param {CompilerContext} ctx
+ * @param {MExpression} expr
+ * @param {number} keyCount
+ * @returns {{
+ *   comparer?: { comparer: string; caseSensitive: boolean } | null;
+ *   comparers?: Array<{ comparer: string; caseSensitive: boolean }> | null;
+ * } | null}
+ */
+function compileJoinComparerArg(ctx, expr, keyCount) {
   const raw = evaluateConstant(ctx, expr);
   if (raw == null) return null;
 
-  /**
-   * @param {unknown} input
-   * @returns {{ comparer: string; caseSensitive: boolean } | null}
-   */
-  const parseComparer = (input) => {
-    if (input == null) return null;
-    if (!input || typeof input !== "object" || Array.isArray(input)) {
-      ctx.error(expr, "Unsupported join comparer (expected Comparer.Ordinal or Comparer.OrdinalIgnoreCase)");
-    }
-
-    /** @type {Record<string, unknown>} */
-    const record = /** @type {any} */ (input);
-    let comparerName = null;
-    /** @type {boolean | undefined} */
-    let caseSensitive;
-
-    for (const [k, v] of Object.entries(record)) {
-      const key = k.toLowerCase();
-      if (key === "comparer") comparerName = typeof v === "string" ? v : String(v);
-      if (key === "casesensitive") caseSensitive = Boolean(v);
-    }
-
-    if (typeof comparerName !== "string") {
-      ctx.error(expr, "Unsupported join comparer (expected Comparer.Ordinal or Comparer.OrdinalIgnoreCase)");
-    }
-
-    const normalized = comparerName.trim().toLowerCase();
-    if (normalized === "ordinal") {
-      if (caseSensitive === false) ctx.error(expr, "Comparer.Ordinal must be case sensitive");
-      return { comparer: "ordinal", caseSensitive: true };
-    }
-    if (normalized === "ordinalignorecase") {
-      if (caseSensitive === true) ctx.error(expr, "Comparer.OrdinalIgnoreCase must be case insensitive");
-      return { comparer: "ordinalIgnoreCase", caseSensitive: false };
-    }
-
-    ctx.error(expr, "Unsupported join comparer (expected Comparer.Ordinal or Comparer.OrdinalIgnoreCase)");
-  };
+  const defaultComparer = { comparer: "ordinal", caseSensitive: true };
 
   if (Array.isArray(raw)) {
-    /** @type {{ comparer: string; caseSensitive: boolean } | null} */
-    let first = null;
-    for (const entry of raw) {
-      const parsed = parseComparer(entry);
-      if (!parsed) continue;
-      if (!first) {
-        first = parsed;
-        continue;
-      }
-      if (parsed.comparer !== first.comparer || parsed.caseSensitive !== first.caseSensitive) {
-        ctx.error(expr, "Unsupported join comparer list (all comparers must match in this subset)");
-      }
+    if (raw.length === 0) return null;
+    if (raw.length === 1) {
+      const parsed = parseJoinComparer(ctx, expr, raw[0]);
+      return parsed ? { comparer: parsed } : null;
     }
-    return first;
+    if (raw.length !== keyCount) {
+      ctx.error(expr, `Join comparer list must have length 1 or match join key count (${keyCount}), got ${raw.length}`);
+    }
+
+    const comparers = raw.map((entry) => parseJoinComparer(ctx, expr, entry) ?? defaultComparer);
+    const first = comparers[0] ?? defaultComparer;
+    const allSame = comparers.every((c) => c.comparer === first.comparer && c.caseSensitive === first.caseSensitive);
+    return allSame ? { comparer: first } : { comparers };
   }
 
-  return parseComparer(raw);
+  const parsed = parseJoinComparer(ctx, expr, raw);
+  return parsed ? { comparer: parsed } : null;
 }
 
 /**

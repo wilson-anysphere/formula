@@ -647,6 +647,68 @@ in
   assert.deepEqual(result.toGrid(), [["Id", "Name", "Score"]]);
 });
 
+test("m_language execution: Table.Join supports comparer lists (per-key)", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"First", "Last", "Id"},
+    {"Alice", "Smith", 1},
+    {"ALICE", "Smith", 2},
+    {"Alice", "SMITH", 3}
+  })
+in
+  Source
+`,
+    { id: "q_left_comparer_list", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"First", "Last", "Score"},
+    {"alice", "Smith", 10},
+    {"alice", "SMITH", 20}
+  })
+in
+  Source
+`,
+    { id: "q_right_comparer_list", name: "Right" },
+  );
+
+  const joinQuery = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_comparer_list"),
+  Right = Query.Reference("q_right_comparer_list"),
+  #"Merged Queries" = Table.Join(Left, {"First", "Last"}, Right, {"First", "Last"}, JoinKind.Inner, null, {Comparer.OrdinalIgnoreCase, Comparer.Ordinal})
+in
+  #"Merged Queries"
+`,
+    { id: "q_join_comparer_list", name: "Join comparer list" },
+  );
+
+  assert.equal(joinQuery.steps[0]?.operation.type, "merge");
+  assert.deepEqual(joinQuery.steps[0]?.operation.comparers, [
+    { comparer: "ordinalIgnoreCase", caseSensitive: false },
+    { comparer: "ordinal", caseSensitive: true },
+  ]);
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(
+    joinQuery,
+    { queries: { q_left_comparer_list: left, q_right_comparer_list: right } },
+    {},
+  );
+  assert.deepEqual(result.toGrid(), [
+    ["First", "Last", "Id", "Score"],
+    ["Alice", "Smith", 1, 10],
+    ["ALICE", "Smith", 2, 10],
+    ["Alice", "SMITH", 3, 20],
+  ]);
+});
+
 test("m_language execution: Table.Join supports multi-key joins (nulls compare equal)", async () => {
   const left = compileMToQuery(
     `

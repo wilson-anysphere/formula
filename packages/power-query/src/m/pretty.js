@@ -339,6 +339,14 @@ function joinComparerToM(comparer) {
 }
 
 /**
+ * @param {Array<{ comparer: string; caseSensitive?: boolean } | null | undefined>} comparers
+ * @returns {string}
+ */
+function joinComparerListToM(comparers) {
+  return `{${comparers.map((c) => joinComparerToM(c ?? null)).join(", ")}}`;
+}
+
+/**
  * @param {string} formula
  * @returns {string}
  */
@@ -545,8 +553,15 @@ function operationToM(operation, inputName) {
       const joinMode = operation.joinMode ?? "flat";
       const joinKind = joinTypeToM(operation.joinType);
       const right = `Query.Reference(${escapeMString(operation.rightQuery)})`;
-      const comparerArg =
-        operation.comparer != null ? `, null, ${joinComparerToM(operation.comparer)}` : "";
+      const comparerArg = (() => {
+        if (Array.isArray(operation.comparers) && operation.comparers.length > 0) {
+          return `, null, ${joinComparerListToM(operation.comparers)}`;
+        }
+        if (operation.comparer != null) {
+          return `, null, ${joinComparerToM(operation.comparer)}`;
+        }
+        return "";
+      })();
       if (joinMode === "nested") {
         if (typeof operation.newColumnName !== "string") {
           throw new Error("Nested join requires newColumnName");
