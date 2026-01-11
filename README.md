@@ -20,6 +20,7 @@ Formula supports modern scripting with a stable Python API (`import formula`) de
 For details, see:
 - [`docs/adr/ADR-0001-platform-target.md`](./docs/adr/ADR-0001-platform-target.md)
 - [`docs/adr/ADR-0002-engine-execution-model.md`](./docs/adr/ADR-0002-engine-execution-model.md)
+- [`docs/adr/ADR-0003-engine-protocol-parity.md`](./docs/adr/ADR-0003-engine-protocol-parity.md)
 
 ## Development
 
