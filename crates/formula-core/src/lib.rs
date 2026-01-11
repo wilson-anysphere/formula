@@ -313,15 +313,7 @@ impl Workbook {
             None => JsonValue::Null,
             Some(cell) => {
                 if let Some(formula) = cell.input.as_str().and_then(|s| s.strip_prefix('=')) {
-                    let num = eval_numeric_expr(formula, |addr| {
-                        let dep = parse_a1(addr)
-                            .map_err(|_| WorkbookError::InvalidAddress(addr.to_string()))?;
-                        self.eval_cell_as_number(sheet_name, dep, ctx)
-                    })?;
-                    JsonValue::Number(
-                        serde_json::Number::from_f64(num)
-                            .ok_or_else(|| WorkbookError::InvalidFormula(formula.to_string()))?,
-                    )
+                    eval_formula(formula, |dep| self.eval_cell_value(sheet_name, dep, ctx))?
                 } else {
                     cell.value.clone()
                 }
@@ -331,18 +323,6 @@ impl Workbook {
         ctx.visiting.remove(&coord);
         ctx.cache.insert(coord, value.clone());
         Ok(value)
-    }
-
-    fn eval_cell_as_number(
-        &self,
-        sheet_name: &str,
-        coord: CellCoord,
-        ctx: &mut EvalContext,
-    ) -> Result<f64, WorkbookError> {
-        let value = self.eval_cell_value(sheet_name, coord, ctx)?;
-        json_as_number(&value).ok_or_else(|| {
-            WorkbookError::InvalidFormula(format!("{} is not a number", format_a1(coord)))
-        })
     }
 }
 
@@ -358,16 +338,6 @@ fn is_formula_input(value: &JsonValue) -> bool {
         .is_some_and(|s| s.starts_with('=') && s.len() > 1)
 }
 
-fn json_as_number(value: &JsonValue) -> Option<f64> {
-    match value {
-        JsonValue::Null => Some(0.0),
-        JsonValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        JsonValue::Number(num) => num.as_f64(),
-        JsonValue::String(s) => s.trim().parse::<f64>().ok(),
-        _ => None,
-    }
-}
-
 fn is_scalar_json(value: &JsonValue) -> bool {
     matches!(
         value,
@@ -377,6 +347,9 @@ fn is_scalar_json(value: &JsonValue) -> bool {
 
 pub fn parse_a1(address: &str) -> Result<CellCoord, ()> {
     let mut chars = address.trim().chars().peekable();
+    if chars.peek().is_some_and(|ch| *ch == '$') {
+        chars.next();
+    }
     let mut col: u32 = 0;
     let mut saw_letter = false;
     while let Some(ch) = chars.peek().copied() {
@@ -394,6 +367,9 @@ pub fn parse_a1(address: &str) -> Result<CellCoord, ()> {
         return Err(());
     }
 
+    if chars.peek().is_some_and(|ch| *ch == '$') {
+        chars.next();
+    }
     let mut row_str = String::new();
     while let Some(ch) = chars.peek().copied() {
         if ch.is_ascii_digit() {
@@ -446,103 +422,221 @@ pub fn parse_range(range: &str) -> Result<(CellCoord, CellCoord), ()> {
     Ok((CellCoord::new(top, left), CellCoord::new(bottom, right)))
 }
 
+const ERROR_DIV0: &str = "#DIV/0!";
+const ERROR_NAME: &str = "#NAME?";
+const ERROR_REF: &str = "#REF!";
+const ERROR_VALUE: &str = "#VALUE!";
+const ERROR_NUM: &str = "#NUM!";
+
+#[derive(Clone, Debug, PartialEq)]
+enum Expr {
+    Empty,
+    Number(f64),
+    Reference(CellCoord),
+    Range(CellCoord, CellCoord),
+    Unary {
+        op: UnaryOp,
+        rhs: Box<Expr>,
+    },
+    Binary {
+        op: BinaryOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    FunctionCall {
+        name: String,
+        args: Vec<Expr>,
+    },
+    Error(&'static str),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Op {
+enum UnaryOp {
+    Plus,
+    Minus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BinaryOp {
     Add,
     Sub,
     Mul,
     Div,
-    Neg,
-}
-
-impl Op {
-    fn precedence(self) -> u8 {
-        match self {
-            Op::Neg => 3,
-            Op::Mul | Op::Div => 2,
-            Op::Add | Op::Sub => 1,
-        }
-    }
-
-    fn right_assoc(self) -> bool {
-        matches!(self, Op::Neg)
-    }
-
-    fn arity(self) -> usize {
-        match self {
-            Op::Neg => 1,
-            _ => 2,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum Token {
+enum FormulaToken {
     Number(f64),
-    CellRef(String),
-    Op(Op),
+    Ident(String),
+    Plus,
+    Minus,
+    Star,
+    Slash,
     LParen,
     RParen,
+    Comma,
+    Colon,
 }
 
-fn eval_numeric_expr<F>(expr: &str, mut resolve_cell: F) -> Result<f64, WorkbookError>
-where
-    F: FnMut(&str) -> Result<f64, WorkbookError>,
-{
-    let tokens = tokenize(expr)?;
-    let rpn = to_rpn(&tokens)?;
-    let mut stack: Vec<f64> = Vec::new();
+struct FormulaParser {
+    tokens: Vec<FormulaToken>,
+    pos: usize,
+}
 
-    for token in rpn {
-        match token {
-            Token::Number(num) => stack.push(num),
-            Token::CellRef(addr) => stack.push(resolve_cell(&addr)?),
-            Token::Op(op) => match op.arity() {
-                1 => {
-                    let a = stack.pop().ok_or_else(|| {
-                        WorkbookError::InvalidFormula("missing operand".to_string())
-                    })?;
-                    stack.push(-a);
+impl FormulaParser {
+    fn new(tokens: Vec<FormulaToken>) -> Self {
+        Self { tokens, pos: 0 }
+    }
+
+    fn peek(&self) -> Option<&FormulaToken> {
+        self.tokens.get(self.pos)
+    }
+
+    fn bump(&mut self) -> Option<FormulaToken> {
+        let tok = self.tokens.get(self.pos).cloned();
+        if tok.is_some() {
+            self.pos += 1;
+        }
+        tok
+    }
+
+    fn parse_expression(&mut self) -> Expr {
+        let mut expr = self.parse_term();
+        loop {
+            let op = match self.peek() {
+                Some(FormulaToken::Plus) => BinaryOp::Add,
+                Some(FormulaToken::Minus) => BinaryOp::Sub,
+                _ => break,
+            };
+            self.bump();
+            let rhs = self.parse_term();
+            expr = Expr::Binary {
+                op,
+                lhs: Box::new(expr),
+                rhs: Box::new(rhs),
+            };
+        }
+        expr
+    }
+
+    fn parse_term(&mut self) -> Expr {
+        let mut expr = self.parse_unary();
+        loop {
+            let op = match self.peek() {
+                Some(FormulaToken::Star) => BinaryOp::Mul,
+                Some(FormulaToken::Slash) => BinaryOp::Div,
+                _ => break,
+            };
+            self.bump();
+            let rhs = self.parse_unary();
+            expr = Expr::Binary {
+                op,
+                lhs: Box::new(expr),
+                rhs: Box::new(rhs),
+            };
+        }
+        expr
+    }
+
+    fn parse_unary(&mut self) -> Expr {
+        match self.peek() {
+            Some(FormulaToken::Plus) => {
+                self.bump();
+                Expr::Unary {
+                    op: UnaryOp::Plus,
+                    rhs: Box::new(self.parse_unary()),
                 }
-                2 => {
-                    let b = stack.pop().ok_or_else(|| {
-                        WorkbookError::InvalidFormula("missing operand".to_string())
-                    })?;
-                    let a = stack.pop().ok_or_else(|| {
-                        WorkbookError::InvalidFormula("missing operand".to_string())
-                    })?;
-                    let result = match op {
-                        Op::Add => a + b,
-                        Op::Sub => a - b,
-                        Op::Mul => a * b,
-                        Op::Div => a / b,
-                        Op::Neg => unreachable!("handled by arity"),
-                    };
-                    stack.push(result);
-                }
-                _ => unreachable!("op arity is 1 or 2"),
-            },
-            Token::LParen | Token::RParen => {
-                return Err(WorkbookError::InvalidFormula(
-                    "unexpected paren in rpn".to_string(),
-                ))
             }
+            Some(FormulaToken::Minus) => {
+                self.bump();
+                Expr::Unary {
+                    op: UnaryOp::Minus,
+                    rhs: Box::new(self.parse_unary()),
+                }
+            }
+            _ => self.parse_primary(),
         }
     }
 
-    if stack.len() != 1 {
-        return Err(WorkbookError::InvalidFormula(
-            "invalid expression".to_string(),
-        ));
+    fn parse_primary(&mut self) -> Expr {
+        match self.bump() {
+            None => Expr::Empty,
+            Some(FormulaToken::Number(n)) => Expr::Number(n),
+            Some(FormulaToken::Ident(name)) => self.parse_ident_primary(name),
+            Some(FormulaToken::LParen) => {
+                let inner = self.parse_expression();
+                if !matches!(self.bump(), Some(FormulaToken::RParen)) {
+                    return Expr::Error(ERROR_VALUE);
+                }
+                inner
+            }
+            _ => Expr::Error(ERROR_VALUE),
+        }
     }
 
-    Ok(stack[0])
+    fn parse_ident_primary(&mut self, ident: String) -> Expr {
+        if matches!(self.peek(), Some(FormulaToken::LParen)) {
+            self.bump();
+            let mut args = Vec::new();
+            if matches!(self.peek(), Some(FormulaToken::RParen)) {
+                self.bump();
+                return Expr::FunctionCall { name: ident, args };
+            }
+
+            loop {
+                args.push(self.parse_expression());
+                match self.peek() {
+                    Some(FormulaToken::Comma) => {
+                        self.bump();
+                        continue;
+                    }
+                    Some(FormulaToken::RParen) => {
+                        self.bump();
+                        break;
+                    }
+                    _ => return Expr::Error(ERROR_VALUE),
+                }
+            }
+
+            return Expr::FunctionCall { name: ident, args };
+        }
+
+        let start = match parse_reference_token(&ident) {
+            Ok(coord) => coord,
+            Err(code) => return Expr::Error(code),
+        };
+
+        if matches!(self.peek(), Some(FormulaToken::Colon)) {
+            self.bump();
+            let end_ident = match self.bump() {
+                Some(FormulaToken::Ident(name)) => name,
+                _ => return Expr::Error(ERROR_VALUE),
+            };
+            let end = match parse_reference_token(&end_ident) {
+                Ok(coord) => coord,
+                Err(_) => return Expr::Error(ERROR_REF),
+            };
+            Expr::Range(start, end)
+        } else {
+            Expr::Reference(start)
+        }
+    }
 }
 
-fn tokenize(expr: &str) -> Result<Vec<Token>, WorkbookError> {
+fn parse_reference_token(token: &str) -> Result<CellCoord, &'static str> {
+    parse_a1(token).map_err(|_| {
+        let stripped = token.replace('$', "");
+        if stripped.chars().any(|ch| ch.is_ascii_digit()) {
+            ERROR_REF
+        } else {
+            ERROR_NAME
+        }
+    })
+}
+
+fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, ()> {
     let mut tokens = Vec::new();
     let mut chars = expr.chars().peekable();
-    let mut prev_was_value = false;
 
     while let Some(ch) = chars.peek().copied() {
         if ch.is_whitespace() {
@@ -550,144 +644,314 @@ fn tokenize(expr: &str) -> Result<Vec<Token>, WorkbookError> {
             continue;
         }
 
-        if ch.is_ascii_digit() || ch == '.' {
-            let mut buf = String::new();
-            while let Some(ch2) = chars.peek().copied() {
-                if ch2.is_ascii_digit() || ch2 == '.' {
-                    buf.push(ch2);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            let number: f64 = buf.parse().map_err(|_| {
-                WorkbookError::InvalidFormula(format!("invalid number literal: {buf}"))
-            })?;
-            tokens.push(Token::Number(number));
-            prev_was_value = true;
-            continue;
-        }
-
-        if ch.is_ascii_alphabetic() {
-            let mut buf = String::new();
-            while let Some(ch2) = chars.peek().copied() {
-                if ch2.is_ascii_alphanumeric() {
-                    buf.push(ch2.to_ascii_uppercase());
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            if parse_a1(&buf).is_err() {
-                return Err(WorkbookError::InvalidFormula(format!(
-                    "invalid cell reference: {buf}"
-                )));
-            }
-            tokens.push(Token::CellRef(buf));
-            prev_was_value = true;
-            continue;
-        }
-
         match ch {
+            '0'..='9' | '.' => {
+                let mut buf = String::new();
+                while let Some(ch2) = chars.peek().copied() {
+                    if ch2.is_ascii_digit() || ch2 == '.' {
+                        buf.push(ch2);
+                        chars.next();
+                        continue;
+                    }
+
+                    if ch2 == 'e' || ch2 == 'E' {
+                        buf.push(ch2);
+                        chars.next();
+                        if let Some(sign) = chars.peek().copied() {
+                            if sign == '+' || sign == '-' {
+                                buf.push(sign);
+                                chars.next();
+                            }
+                        }
+
+                        let mut saw_exp_digit = false;
+                        while let Some(exp_ch) = chars.peek().copied() {
+                            if exp_ch.is_ascii_digit() {
+                                saw_exp_digit = true;
+                                buf.push(exp_ch);
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+
+                        if !saw_exp_digit {
+                            return Err(());
+                        }
+                        continue;
+                    }
+
+                    break;
+                }
+
+                let number: f64 = buf.parse().map_err(|_| ())?;
+                tokens.push(FormulaToken::Number(number));
+            }
             '+' => {
                 chars.next();
-                tokens.push(Token::Op(Op::Add));
-                prev_was_value = false;
+                tokens.push(FormulaToken::Plus);
             }
             '-' => {
                 chars.next();
-                let op = if prev_was_value { Op::Sub } else { Op::Neg };
-                tokens.push(Token::Op(op));
-                prev_was_value = false;
+                tokens.push(FormulaToken::Minus);
             }
             '*' => {
                 chars.next();
-                tokens.push(Token::Op(Op::Mul));
-                prev_was_value = false;
+                tokens.push(FormulaToken::Star);
             }
             '/' => {
                 chars.next();
-                tokens.push(Token::Op(Op::Div));
-                prev_was_value = false;
+                tokens.push(FormulaToken::Slash);
             }
             '(' => {
                 chars.next();
-                tokens.push(Token::LParen);
-                prev_was_value = false;
+                tokens.push(FormulaToken::LParen);
             }
             ')' => {
                 chars.next();
-                tokens.push(Token::RParen);
-                prev_was_value = true;
+                tokens.push(FormulaToken::RParen);
             }
-            _ => {
-                return Err(WorkbookError::InvalidFormula(format!(
-                    "unexpected character: {ch}"
-                )))
+            ',' => {
+                chars.next();
+                tokens.push(FormulaToken::Comma);
             }
+            ':' => {
+                chars.next();
+                tokens.push(FormulaToken::Colon);
+            }
+            _ if ch.is_ascii_alphabetic() || ch == '$' || ch == '_' => {
+                let mut buf = String::new();
+                while let Some(ch2) = chars.peek().copied() {
+                    if ch2.is_ascii_alphanumeric() || ch2 == '$' || ch2 == '_' {
+                        buf.push(ch2.to_ascii_uppercase());
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if buf.is_empty() {
+                    return Err(());
+                }
+                tokens.push(FormulaToken::Ident(buf));
+            }
+            _ => return Err(()),
         }
     }
 
     Ok(tokens)
 }
 
-fn to_rpn(tokens: &[Token]) -> Result<Vec<Token>, WorkbookError> {
-    let mut output = Vec::new();
-    let mut ops: Vec<Token> = Vec::new();
+#[derive(Clone, Debug, PartialEq)]
+enum EvalValue {
+    Scalar(JsonValue),
+    Array(Vec<JsonValue>),
+}
 
-    for token in tokens {
-        match token {
-            Token::Number(_) | Token::CellRef(_) => output.push(token.clone()),
-            Token::Op(op) => {
-                while let Some(top) = ops.last() {
-                    match top {
-                        Token::Op(top_op) => {
-                            let should_pop = if op.right_assoc() {
-                                op.precedence() < top_op.precedence()
-                            } else {
-                                op.precedence() <= top_op.precedence()
-                            };
-                            if should_pop {
-                                output.push(ops.pop().expect("exists"));
-                                continue;
-                            }
-                        }
-                        Token::LParen => {}
-                        _ => {}
-                    }
-                    break;
+fn eval_formula<F>(expr: &str, mut get_cell: F) -> Result<JsonValue, WorkbookError>
+where
+    F: FnMut(CellCoord) -> Result<JsonValue, WorkbookError>,
+{
+    let tokens = match tokenize_formula(expr) {
+        Ok(tokens) => tokens,
+        Err(_) => return Ok(JsonValue::String(ERROR_VALUE.to_string())),
+    };
+    if tokens.is_empty() {
+        return Ok(JsonValue::Null);
+    }
+
+    let mut parser = FormulaParser::new(tokens);
+    let parsed = parser.parse_expression();
+    if parser.pos != parser.tokens.len() {
+        return Ok(JsonValue::String(ERROR_VALUE.to_string()));
+    }
+
+    let value = eval_expr(&parsed, &mut get_cell)?;
+    Ok(match value {
+        EvalValue::Scalar(v) => v,
+        EvalValue::Array(arr) => arr.into_iter().next().unwrap_or(JsonValue::Null),
+    })
+}
+
+fn eval_expr<F>(expr: &Expr, get_cell: &mut F) -> Result<EvalValue, WorkbookError>
+where
+    F: FnMut(CellCoord) -> Result<JsonValue, WorkbookError>,
+{
+    match expr {
+        Expr::Empty => Ok(EvalValue::Scalar(JsonValue::Null)),
+        Expr::Error(code) => Ok(EvalValue::Scalar(JsonValue::String((*code).to_string()))),
+        Expr::Number(n) => Ok(EvalValue::Scalar(number_to_json(*n))),
+        Expr::Reference(coord) => Ok(EvalValue::Scalar(get_cell(*coord)?)),
+        Expr::Range(start, end) => {
+            let (top_left, bottom_right) = normalize_range(*start, *end);
+            let mut values = Vec::new();
+            for row in top_left.row..=bottom_right.row {
+                for col in top_left.col..=bottom_right.col {
+                    values.push(get_cell(CellCoord::new(row, col))?);
                 }
-                ops.push(Token::Op(*op));
             }
-            Token::LParen => ops.push(Token::LParen),
-            Token::RParen => {
-                let mut found = false;
-                while let Some(top) = ops.pop() {
-                    if matches!(top, Token::LParen) {
-                        found = true;
-                        break;
-                    }
-                    output.push(top);
+            Ok(EvalValue::Array(values))
+        }
+        Expr::Unary { op, rhs } => {
+            let rhs_value = eval_expr(rhs, get_cell)?;
+            Ok(apply_unary(*op, rhs_value))
+        }
+        Expr::Binary { op, lhs, rhs } => {
+            let lhs_value = eval_expr(lhs, get_cell)?;
+            let rhs_value = eval_expr(rhs, get_cell)?;
+            Ok(apply_binary(*op, lhs_value, rhs_value))
+        }
+        Expr::FunctionCall { name, args } => {
+            let mut evaluated = Vec::with_capacity(args.len());
+            for arg in args {
+                evaluated.push(eval_expr(arg, get_cell)?);
+            }
+            Ok(eval_function(name, &evaluated))
+        }
+    }
+}
+
+fn normalize_range(start: CellCoord, end: CellCoord) -> (CellCoord, CellCoord) {
+    let top = start.row.min(end.row);
+    let left = start.col.min(end.col);
+    let bottom = start.row.max(end.row);
+    let right = start.col.max(end.col);
+    (CellCoord::new(top, left), CellCoord::new(bottom, right))
+}
+
+fn is_error_code(value: &JsonValue) -> Option<&str> {
+    match value {
+        JsonValue::String(s) if s.starts_with('#') => Some(s),
+        _ => None,
+    }
+}
+
+fn to_number(value: &JsonValue) -> Option<f64> {
+    match value {
+        JsonValue::Null => Some(0.0),
+        JsonValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        JsonValue::Number(num) => num.as_f64().filter(|n| n.is_finite()),
+        JsonValue::String(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return Some(0.0);
+            }
+            let num = trimmed.parse::<f64>().ok()?;
+            if num.is_finite() { Some(num) } else { None }
+        }
+        _ => None,
+    }
+}
+
+fn number_to_json(value: f64) -> JsonValue {
+    if !value.is_finite() {
+        return JsonValue::String(ERROR_NUM.to_string());
+    }
+    match serde_json::Number::from_f64(value) {
+        Some(num) => JsonValue::Number(num),
+        None => JsonValue::String(ERROR_NUM.to_string()),
+    }
+}
+
+fn apply_unary(op: UnaryOp, rhs: EvalValue) -> EvalValue {
+    let rhs_scalar = match rhs {
+        EvalValue::Scalar(v) => v,
+        EvalValue::Array(_) => return EvalValue::Scalar(JsonValue::String(ERROR_VALUE.to_string())),
+    };
+
+    if let Some(err) = is_error_code(&rhs_scalar) {
+        return EvalValue::Scalar(JsonValue::String(err.to_string()));
+    }
+
+    let num = match to_number(&rhs_scalar) {
+        Some(n) => n,
+        None => return EvalValue::Scalar(JsonValue::String(ERROR_VALUE.to_string())),
+    };
+
+    match op {
+        UnaryOp::Plus => EvalValue::Scalar(number_to_json(num)),
+        UnaryOp::Minus => EvalValue::Scalar(number_to_json(-num)),
+    }
+}
+
+fn apply_binary(op: BinaryOp, lhs: EvalValue, rhs: EvalValue) -> EvalValue {
+    let lhs_scalar = match lhs {
+        EvalValue::Scalar(v) => v,
+        EvalValue::Array(_) => return EvalValue::Scalar(JsonValue::String(ERROR_VALUE.to_string())),
+    };
+    let rhs_scalar = match rhs {
+        EvalValue::Scalar(v) => v,
+        EvalValue::Array(_) => return EvalValue::Scalar(JsonValue::String(ERROR_VALUE.to_string())),
+    };
+
+    if let Some(err) = is_error_code(&lhs_scalar) {
+        return EvalValue::Scalar(JsonValue::String(err.to_string()));
+    }
+    if let Some(err) = is_error_code(&rhs_scalar) {
+        return EvalValue::Scalar(JsonValue::String(err.to_string()));
+    }
+
+    let lhs_num = match to_number(&lhs_scalar) {
+        Some(n) => n,
+        None => return EvalValue::Scalar(JsonValue::String(ERROR_VALUE.to_string())),
+    };
+    let rhs_num = match to_number(&rhs_scalar) {
+        Some(n) => n,
+        None => return EvalValue::Scalar(JsonValue::String(ERROR_VALUE.to_string())),
+    };
+
+    let result = match op {
+        BinaryOp::Add => lhs_num + rhs_num,
+        BinaryOp::Sub => lhs_num - rhs_num,
+        BinaryOp::Mul => lhs_num * rhs_num,
+        BinaryOp::Div => {
+            if rhs_num == 0.0 {
+                return EvalValue::Scalar(JsonValue::String(ERROR_DIV0.to_string()));
+            }
+            lhs_num / rhs_num
+        }
+    };
+
+    EvalValue::Scalar(number_to_json(result))
+}
+
+fn eval_function(name: &str, args: &[EvalValue]) -> EvalValue {
+    let upper = name.to_ascii_uppercase();
+    if upper == "SUM" {
+        let mut nums = Vec::new();
+        if let Some(err) = flatten_numbers(args, &mut nums) {
+            return EvalValue::Scalar(JsonValue::String(err));
+        }
+        let sum: f64 = nums.into_iter().sum();
+        return EvalValue::Scalar(number_to_json(sum));
+    }
+
+    EvalValue::Scalar(JsonValue::String(ERROR_NAME.to_string()))
+}
+
+fn flatten_numbers(values: &[EvalValue], out: &mut Vec<f64>) -> Option<String> {
+    for val in values {
+        match val {
+            EvalValue::Scalar(scalar) => {
+                if let Some(err) = is_error_code(scalar) {
+                    return Some(err.to_string());
                 }
-                if !found {
-                    return Err(WorkbookError::InvalidFormula(
-                        "mismatched parentheses".to_string(),
-                    ));
+                if let Some(num) = to_number(scalar) {
+                    out.push(num);
+                }
+            }
+            EvalValue::Array(arr) => {
+                for scalar in arr {
+                    if let Some(err) = is_error_code(scalar) {
+                        return Some(err.to_string());
+                    }
+                    if let Some(num) = to_number(scalar) {
+                        out.push(num);
+                    }
                 }
             }
         }
     }
-
-    while let Some(top) = ops.pop() {
-        if matches!(top, Token::LParen | Token::RParen) {
-            return Err(WorkbookError::InvalidFormula(
-                "mismatched parentheses".to_string(),
-            ));
-        }
-        output.push(top);
-    }
-
-    Ok(output)
+    None
 }
 
 #[cfg(test)]
@@ -699,6 +963,7 @@ mod tests {
     #[test]
     fn parse_and_format_a1() {
         assert_eq!(parse_a1("A1"), Ok(CellCoord::new(1, 1)));
+        assert_eq!(parse_a1("$A$1"), Ok(CellCoord::new(1, 1)));
         assert_eq!(parse_a1("AA12"), Ok(CellCoord::new(12, 27)));
         assert_eq!(format_a1(CellCoord::new(12, 27)), "AA12");
     }
@@ -721,5 +986,28 @@ mod tests {
 
         let cell = wb.get_cell("A2", None).unwrap();
         assert_eq!(cell.value, json!(2.0));
+    }
+
+    #[test]
+    fn sum_over_range_evaluates() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!(1), None).unwrap();
+        wb.set_cell("A2", json!(2), None).unwrap();
+        wb.set_cell("A3", json!("=SUM(A1:A2)"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        let cell = wb.get_cell("A3", None).unwrap();
+        assert_eq!(cell.value, json!(3.0));
+    }
+
+    #[test]
+    fn division_by_zero_returns_excel_error_code() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!(0), None).unwrap();
+        wb.set_cell("B1", json!("=1/A1"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        let cell = wb.get_cell("B1", None).unwrap();
+        assert_eq!(cell.value, json!(ERROR_DIV0));
     }
 }
