@@ -1,6 +1,7 @@
 import * as Y from "yjs";
 
 import { makeCellKey, normalizeCellKey, parseCellKey } from "../session/src/cell-key.js";
+import { getWorkbookRoots } from "../workbook/src/index.ts";
 import {
   decryptCellPlaintext,
   encryptCellPlaintext,
@@ -186,7 +187,7 @@ export function bindYjsToDocumentController(options) {
   if (!ydoc) throw new Error("bindYjsToDocumentController requires { ydoc }");
   if (!documentController) throw new Error("bindYjsToDocumentController requires { documentController }");
 
-  const cells = ydoc.getMap("cells");
+  const cells = getWorkbookRoots(ydoc).cells;
   const docIdForEncryption = ydoc.guid ?? "unknown";
 
   // Stable origin token for local DocumentController -> Yjs transactions when

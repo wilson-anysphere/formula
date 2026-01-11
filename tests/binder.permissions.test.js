@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
- 
+import { createRequire } from "node:module";
+  
 import * as Y from "yjs";
- 
+  
 import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { bindYjsToDocumentController } from "../packages/collab/binder/index.js";
 import { maskCellValue } from "../packages/collab/permissions/index.js";
@@ -135,6 +136,37 @@ test("binder: encrypted Yjs cells are masked and refuse plaintext writes", async
     assert.equal(yCell.get("formula"), undefined);
 
     assert.equal(documentController.getCell("Sheet1", "A1").value, maskCellValue(null));
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
+
+test("binder: initializes when cells root was created by a different Yjs instance (CJS Doc.getMap)", async () => {
+  const require = createRequire(import.meta.url);
+  // eslint-disable-next-line import/no-named-as-default-member
+  const Ycjs = require("yjs");
+
+  const ydoc = new Y.Doc();
+  const cells = Ycjs.Doc.prototype.getMap.call(ydoc, "cells");
+
+  // Populate a cell via the foreign Yjs instance to ensure the binder can read it.
+  Ycjs.Doc.prototype.transact.call(ydoc, () => {
+    const a1 = new Ycjs.Map();
+    a1.set("value", "hello");
+    a1.set("formula", null);
+    cells.set("Sheet1:0:0", a1);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({
+    ydoc,
+    documentController,
+    defaultSheetId: "Sheet1",
+  });
+
+  try {
+    await waitForCell(documentController, "Sheet1", "A1", { value: "hello", formula: null });
   } finally {
     binder.destroy();
     ydoc.destroy();
