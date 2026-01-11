@@ -175,3 +175,18 @@ fn averagea_treats_text_args_as_zero() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval(r#"=AVERAGEA("2",2)"#), 1.0);
 }
+
+#[test]
+fn sumsq_devsq_and_avedev_match_known_values() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=SUMSQ({1,2,3})"), 14.0);
+    assert_number(&sheet.eval("=DEVSQ({1,2,3})"), 2.0);
+    assert_number(&sheet.eval("=AVEDEV({1,2,3})"), 2.0 / 3.0);
+}
+
+#[test]
+fn devsq_returns_div0_when_no_numeric_values_in_reference() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Text("x".to_string()));
+    assert_eq!(sheet.eval("=DEVSQ(A1)"), Value::Error(ErrorKind::Div0));
+}

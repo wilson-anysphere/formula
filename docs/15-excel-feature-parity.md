@@ -92,7 +92,7 @@ This document tracks every Excel feature and our implementation status. Features
 | SUMIF | ⬜ | |
 | SUMIFS | ⬜ | |
 | SUMPRODUCT | ⬜ | |
-| SUMSQ | ⬜ | |
+| SUMSQ | ✅ | |
 | SUMX2MY2 | ⬜ | |
 | SUMX2PY2 | ⬜ | |
 | SUMXMY2 | ⬜ | |
@@ -247,7 +247,7 @@ This document tracks every Excel feature and our implementation status. Features
 
 | Function | Status | Notes |
 |----------|--------|-------|
-| AVEDEV | ⬜ | |
+| AVEDEV | ✅ | |
 | AVERAGE | ✅ | P0 |
 | AVERAGEA | ✅ | |
 | AVERAGEIF | ✅ | P0 |
@@ -272,7 +272,7 @@ This document tracks every Excel feature and our implementation status. Features
 | COUNTIFS | ✅ | P0 |
 | COVARIANCE.P | ✅ | |
 | COVARIANCE.S | ✅ | |
-| DEVSQ | ⬜ | |
+| DEVSQ | ✅ | |
 | EXPON.DIST | ⬜ | |
 | F.DIST | ⬜ | |
 | F.DIST.RT | ⬜ | |

@@ -297,6 +297,81 @@ fn mina_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     Value::Number(best.unwrap_or(0.0))
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "SUMSQ",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: sumsq_fn,
+    }
+}
+
+fn sumsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::sumsq(&values) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "DEVSQ",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: devsq_fn,
+    }
+}
+
+fn devsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::devsq(&values) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "AVEDEV",
+        min_args: 1,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: avedev_fn,
+    }
+}
+
+fn avedev_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let values = match collect_numbers(ctx, args) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    match crate::functions::statistical::avedev(&values) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
 fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec<Option<f64>>, ErrorKind> {
     match arg {
         ArgValue::Scalar(v) => match v {

@@ -89,6 +89,16 @@ export default {
       ]
     },
     {
+      "name": "AVEDEV",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "AVERAGE",
       "min_args": 1,
       "max_args": 255,
@@ -447,6 +457,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number"
+      ]
+    },
+    {
+      "name": "DEVSQ",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
       ]
     },
     {
@@ -1823,6 +1843,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any",
+        "any"
+      ]
+    },
+    {
+      "name": "SUMSQ",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
         "any"
       ]
     },

@@ -84,6 +84,56 @@ pub fn stdev_s(values: &[f64]) -> Result<f64, ErrorKind> {
     Ok(var_s(values)?.sqrt())
 }
 
+pub fn sumsq(values: &[f64]) -> Result<f64, ErrorKind> {
+    let mut sum = 0.0;
+    let mut c = 0.0;
+    for &x in values {
+        let term = x * x;
+        let y = term - c;
+        let t = sum + y;
+        c = (t - sum) - y;
+        sum = t;
+    }
+    if sum.is_finite() {
+        Ok(sum)
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
+
+pub fn devsq(values: &[f64]) -> Result<f64, ErrorKind> {
+    let (_mean, sse) = variance_components(values)?;
+    Ok(sse)
+}
+
+pub fn avedev(values: &[f64]) -> Result<f64, ErrorKind> {
+    if values.is_empty() {
+        return Err(ErrorKind::Div0);
+    }
+
+    let m = mean(values);
+    if !m.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+
+    let mut sum = 0.0;
+    let mut c = 0.0;
+    for &x in values {
+        let term = (x - m).abs();
+        let y = term - c;
+        let t = sum + y;
+        c = (t - sum) - y;
+        sum = t;
+    }
+
+    let out = sum / (values.len() as f64);
+    if out.is_finite() {
+        Ok(out)
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
+
 pub fn median(values: &[f64]) -> Result<f64, ErrorKind> {
     if values.is_empty() {
         return Err(ErrorKind::Num);
