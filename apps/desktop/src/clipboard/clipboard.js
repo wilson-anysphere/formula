@@ -158,6 +158,8 @@ export function getCellGridFromRange(doc, sheetId, range) {
 
   /** @type {CellGrid} */
   const grid = [];
+  /** @type {Map<number, any>} */
+  const formatCache = new Map();
 
   for (let row = r.start.row; row <= r.end.row; row++) {
     /** @type {CellState[]} */
@@ -165,11 +167,17 @@ export function getCellGridFromRange(doc, sheetId, range) {
     for (let col = r.start.col; col <= r.end.col; col++) {
       const cell = doc.getCell(sheetId, { row, col });
       const styleId = typeof cell?.styleId === "number" ? cell.styleId : 0;
-      const style =
-        styleId !== 0 && doc?.styleTable?.get && typeof doc.styleTable.get === "function"
-          ? doc.styleTable.get(styleId)
-          : null;
-      const format = styleToClipboardFormat(style);
+      let format = null;
+      if (styleId !== 0) {
+        if (formatCache.has(styleId)) {
+          format = formatCache.get(styleId) ?? null;
+        } else {
+          const style =
+            doc?.styleTable?.get && typeof doc.styleTable.get === "function" ? doc.styleTable.get(styleId) : null;
+          format = styleToClipboardFormat(style);
+          formatCache.set(styleId, format);
+        }
+      }
       outRow.push({ value: cell.value, formula: cell.formula, format });
     }
     grid.push(outRow);
