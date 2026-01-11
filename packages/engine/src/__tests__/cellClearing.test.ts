@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ensureFormulaWasmNodeBuild, formulaWasmNodeEntryUrl } from "../../../../scripts/build-formula-wasm-node.mjs";
+import { formulaWasmNodeEntryUrl } from "../../../../scripts/build-formula-wasm-node.mjs";
 
 import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker";
 import type {
@@ -60,17 +60,26 @@ function createMockChannel(): MessageChannelLike {
 
 async function loadFormulaWasm() {
   // The Node-compatible wasm-bindgen build lives under `crates/formula-wasm/pkg-node/`.
-  // It's a generated (gitignored) directory, so tests must ensure it's built/up-to-date
-  // before importing the entrypoint.
-  ensureFormulaWasmNodeBuild();
+  // It's a generated (gitignored) directory. Vitest's global setup (`scripts/vitest.global-setup.mjs`)
+  // builds/refreshes it for CI runs. If a test run skips that setup (e.g. by setting
+  // `FORMULA_SKIP_WASM_BUILD=1`), fail fast with a helpful error instead of trying to
+  // run a slow build inside a Vitest worker thread (which can trigger RPC timeouts).
   const entry = formulaWasmNodeEntryUrl();
 
   // wasm-pack `--target nodejs` outputs CommonJS. Under ESM dynamic import, the exports
   // are exposed on `default`.
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore - `@vite-ignore` is required for runtime-defined file URLs.
-  const mod = await import(/* @vite-ignore */ entry);
-  return (mod as any).default ?? mod;
+  try {
+    const mod = await import(/* @vite-ignore */ entry);
+    return (mod as any).default ?? mod;
+  } catch (err) {
+    throw new Error(
+      `Failed to import formula-wasm Node build (${entry}). ` +
+        `Run \`node scripts/build-formula-wasm-node.mjs\` (or rerun vitest without FORMULA_SKIP_WASM_BUILD=1).\n\n` +
+        `Original error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 class WasmBackedWorker implements WorkerLike {
