@@ -452,6 +452,14 @@ describe("CanvasGrid keyboard navigation", () => {
     expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 0, endRow: 2, startCol: 0, endCol: 3 });
 
     await act(async () => {
+      // Backwards into the merged range should resolve to its anchor cell.
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+    });
+
+    expect(apiRef.current?.getSelection()).toEqual({ row: 0, col: 0 });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 0, endRow: 2, startCol: 0, endCol: 3 });
+
+    await act(async () => {
       root.unmount();
     });
     host.remove();
@@ -503,6 +511,17 @@ describe("CanvasGrid keyboard navigation", () => {
     });
 
     // Shift+Enter should move back to the merged anchor.
+    expect(apiRef.current?.getSelection()).toEqual({ row: 0, col: 0 });
+
+    await act(async () => {
+      apiRef.current?.setSelection(2, 1);
+    });
+
+    await act(async () => {
+      // Shift+Enter into the merged range should resolve to its anchor cell.
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true }));
+    });
+
     expect(apiRef.current?.getSelection()).toEqual({ row: 0, col: 0 });
 
     await act(async () => {

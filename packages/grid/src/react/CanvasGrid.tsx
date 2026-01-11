@@ -1581,47 +1581,24 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
               if (!merged) break;
               if (merged.startRow === nextRow && merged.startCol === nextCol) break;
 
+              // Forward movement should skip over merged cell interiors to avoid getting stuck on
+              // the merged anchor. Backward movement can safely land on an interior cell because
+              // the renderer resolves it to the merged anchor cell.
+              if (backward) break;
+
               if (event.key === "Tab") {
-                if (!backward) {
-                  nextCol = merged.endCol;
-                  if (nextCol >= prevRange.endCol) {
-                    nextCol = prevRange.startCol;
-                    nextRow += 1;
-                    if (nextRow >= prevRange.endRow) nextRow = prevRange.startRow;
-                  }
-                } else {
-                  if (nextRow === merged.startRow) {
-                    nextRow = merged.startRow;
-                    nextCol = merged.startCol;
-                    break;
-                  }
-                  nextCol = merged.startCol - 1;
-                  if (nextCol < prevRange.startCol) {
-                    nextCol = prevRange.endCol - 1;
-                    nextRow -= 1;
-                    if (nextRow < prevRange.startRow) nextRow = prevRange.endRow - 1;
-                  }
+                nextCol = merged.endCol;
+                if (nextCol >= prevRange.endCol) {
+                  nextCol = prevRange.startCol;
+                  nextRow += 1;
+                  if (nextRow >= prevRange.endRow) nextRow = prevRange.startRow;
                 }
               } else {
-                if (!backward) {
-                  nextRow = merged.endRow;
-                  if (nextRow >= prevRange.endRow) {
-                    nextRow = prevRange.startRow;
-                    nextCol += 1;
-                    if (nextCol >= prevRange.endCol) nextCol = prevRange.startCol;
-                  }
-                } else {
-                  if (nextCol === merged.startCol) {
-                    nextRow = merged.startRow;
-                    nextCol = merged.startCol;
-                    break;
-                  }
-                  nextRow = merged.startRow - 1;
-                  if (nextRow < prevRange.startRow) {
-                    nextRow = prevRange.endRow - 1;
-                    nextCol -= 1;
-                    if (nextCol < prevRange.startCol) nextCol = prevRange.endCol - 1;
-                  }
+                nextRow = merged.endRow;
+                if (nextRow >= prevRange.endRow) {
+                  nextRow = prevRange.startRow;
+                  nextCol += 1;
+                  if (nextCol >= prevRange.endCol) nextCol = prevRange.startCol;
                 }
               }
             }
