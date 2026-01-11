@@ -316,6 +316,11 @@ export interface CollabSessionOptions {
   formulaConflicts?: {
     localUserId: string;
     onConflict: (conflict: FormulaConflict) => void;
+    /**
+     * Deprecated/ignored. Former wall-clock heuristic for inferring concurrency.
+     *
+     * Conflict detection is now causal (Yjs-based) and works across long offline periods.
+     */
     concurrencyWindowMs?: number;
     mode?: "formula" | "formula+value";
     includeValueConflicts?: boolean;

@@ -44,6 +44,11 @@ export class FormulaConflictMonitor {
     localOrigins?: Set<any>;
     onConflict: (conflict: FormulaConflict) => void;
     getCellValue?: (ref: { sheetId: string; row: number; col: number }) => any;
+    /**
+     * Deprecated/ignored. Former wall-clock heuristic for inferring concurrency.
+     *
+     * Conflict detection is now causal (Yjs-based) and works across long offline periods.
+     */
     concurrencyWindowMs?: number;
     mode?: "formula" | "formula+value";
     includeValueConflicts?: boolean;
