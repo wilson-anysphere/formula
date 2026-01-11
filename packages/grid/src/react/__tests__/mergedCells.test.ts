@@ -236,4 +236,35 @@ describe("merged cells + overflow", () => {
     expect(renderer.getCellRect(0, 0)).toEqual({ x: 0, y: 0, width: 10, height: 10 });
     expect(renderer.getCellRect(1, 1)).toEqual({ x: 0, y: 0, width: 10, height: 10 });
   });
+
+  it("scrollToCell ensures merged bounds are visible when possible", () => {
+    const merged: CellRange = { startRow: 0, endRow: 1, startCol: 5, endCol: 8 };
+    const provider = createMergedProvider({ rowCount: 5, colCount: 20, merged });
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    ctxByCanvas.set(gridCanvas, createMock2dContext({ canvas: gridCanvas }));
+    ctxByCanvas.set(contentCanvas, createMock2dContext({ canvas: contentCanvas }));
+    ctxByCanvas.set(selectionCanvas, createMock2dContext({ canvas: selectionCanvas }));
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 5, colCount: 20, defaultRowHeight: 10, defaultColWidth: 10 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(40, 40, 1);
+
+    // Scroll so the merged anchor cell (col 5) is visible but the merged region spills off the right edge.
+    renderer.setScroll(30, 0);
+    const before = renderer.getCellRect(0, 5);
+    expect(before).not.toBeNull();
+    expect(before!.x + before!.width).toBeGreaterThan(40);
+
+    renderer.scrollToCell(0, 5, { align: "auto" });
+    expect(renderer.scroll.getScroll().x).toBe(40);
+
+    const after = renderer.getCellRect(0, 5);
+    expect(after).not.toBeNull();
+    expect(after!.x).toBeGreaterThanOrEqual(0);
+    expect(after!.x + after!.width).toBeLessThanOrEqual(40);
+  });
 });

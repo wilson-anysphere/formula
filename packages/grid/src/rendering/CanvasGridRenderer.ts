@@ -572,13 +572,24 @@ export class CanvasGridRenderer {
     const colAxis = this.scroll.cols;
     const rowAxis = this.scroll.rows;
 
+    const merged = this.getMergedRangeForCell(row, col);
+    const crossesFrozenCols = merged ? merged.startCol < viewport.frozenCols && merged.endCol > viewport.frozenCols : false;
+    const crossesFrozenRows = merged ? merged.startRow < viewport.frozenRows && merged.endRow > viewport.frozenRows : false;
+    const useMerged = merged != null && !crossesFrozenCols && !crossesFrozenRows;
+
+    const rowStart = useMerged ? merged.startRow : row;
+    const rowEndExclusive = useMerged ? merged.endRow : row + 1;
+    const colStart = useMerged ? merged.startCol : col;
+    const colEndExclusive = useMerged ? merged.endCol : col + 1;
+
     const viewStartX = viewport.frozenWidth + padding;
     const viewEndX = Math.max(viewStartX, viewport.width - padding);
     const viewCenterX = viewport.frozenWidth + Math.max(0, viewport.width - viewport.frozenWidth) / 2;
+    const viewWidth = viewEndX - viewStartX;
 
-    if (col >= viewport.frozenCols) {
-      const colX = colAxis.positionOf(col);
-      const width = colAxis.getSize(col);
+    if (colStart >= viewport.frozenCols) {
+      const colX = colAxis.positionOf(colStart);
+      const width = colAxis.positionOf(colEndExclusive) - colX;
       const cellX = colX - current.x;
       const cellEnd = cellX + width;
 
@@ -592,7 +603,9 @@ export class CanvasGridRenderer {
         if (cellX < viewStartX) {
           targetX = colX - viewStartX;
         } else if (cellEnd > viewEndX) {
-          targetX = colX + width - viewEndX;
+          // If the cell is wider than the viewport, prefer aligning the left edge so the anchor
+          // remains visible (Excel-style behavior).
+          targetX = width > viewWidth ? colX - viewStartX : colX + width - viewEndX;
         }
       }
     }
@@ -600,10 +613,11 @@ export class CanvasGridRenderer {
     const viewStartY = viewport.frozenHeight + padding;
     const viewEndY = Math.max(viewStartY, viewport.height - padding);
     const viewCenterY = viewport.frozenHeight + Math.max(0, viewport.height - viewport.frozenHeight) / 2;
+    const viewHeight = viewEndY - viewStartY;
 
-    if (row >= viewport.frozenRows) {
-      const rowY = rowAxis.positionOf(row);
-      const height = rowAxis.getSize(row);
+    if (rowStart >= viewport.frozenRows) {
+      const rowY = rowAxis.positionOf(rowStart);
+      const height = rowAxis.positionOf(rowEndExclusive) - rowY;
       const cellY = rowY - current.y;
       const cellEnd = cellY + height;
 
@@ -617,7 +631,7 @@ export class CanvasGridRenderer {
         if (cellY < viewStartY) {
           targetY = rowY - viewStartY;
         } else if (cellEnd > viewEndY) {
-          targetY = rowY + height - viewEndY;
+          targetY = height > viewHeight ? rowY - viewStartY : rowY + height - viewEndY;
         }
       }
     }
