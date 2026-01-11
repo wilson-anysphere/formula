@@ -1381,6 +1381,7 @@ export const STREAMABLE_OPERATION_TYPES = new Set([
   "take",
   "skip",
   "removeRows",
+  "unpivot",
   "fillDown",
   "replaceValues",
   "removeRowsWithErrors",
@@ -1631,6 +1632,42 @@ export function compileStreamingPipeline(operations, inputColumns) {
           const prefix = prefixLen > 0 ? rows.slice(0, prefixLen) : [];
           const suffix = suffixStart < rows.length ? rows.slice(suffixStart) : [];
           return { rows: prefix.length === 0 ? suffix : prefix.concat(suffix), done: false };
+        });
+        break;
+      }
+      case "unpivot": {
+        const unpivotIdx = op.columns.map((name) => getColumnIndex(name));
+        const unpivotSet = new Set(unpivotIdx);
+        const keepIdx = columns
+          .map((_c, idx) => idx)
+          .filter((idx) => !unpivotSet.has(idx));
+
+        const keepColumns = keepIdx.map((idx) => columns[idx]);
+        const outColumns = [...keepColumns, { name: op.nameColumn, type: "string" }, { name: op.valueColumn, type: "any" }];
+
+        const seenNames = new Set();
+        for (const col of outColumns) {
+          if (seenNames.has(col.name)) {
+            throw new Error(`Duplicate column name '${col.name}'`);
+          }
+          seenNames.add(col.name);
+        }
+
+        const nameValues = unpivotIdx.map((idx) => columns[idx].name);
+        columns = outColumns;
+        columnIndex = buildIndex(columns);
+
+        transforms.push((rows) => {
+          /** @type {unknown[][]} */
+          const out = [];
+          for (const row of rows) {
+            const prefix = keepIdx.map((idx) => normalizeCell(row?.[idx]));
+            for (let i = 0; i < unpivotIdx.length; i++) {
+              const idx = unpivotIdx[i];
+              out.push([...prefix, nameValues[i], normalizeCell(row?.[idx])]);
+            }
+          }
+          return { rows: out, done: false };
         });
         break;
       }

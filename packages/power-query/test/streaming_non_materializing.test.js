@@ -515,6 +515,44 @@ test("executeQueryStreaming(..., materialize:false) streams promoteHeaders after
   assert.deepEqual(streamed, expected);
 });
 
+test("executeQueryStreaming(..., materialize:false) streams unpivot", async () => {
+  const csvText = ["ID,Q1,Q2", "A,10,20", "B,30,40"].join("\n") + "\n";
+
+  const engineStreaming = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        throw new Error("readText should not be called in streaming mode");
+      },
+      readTextStream: async function* () {
+        yield "ID,Q1,Q2\nA,10,20\n";
+        yield "B,30,40\n";
+      },
+    },
+  });
+
+  const engineMaterialized = new QueryEngine({
+    fileAdapter: {
+      readText: async () => csvText,
+    },
+  });
+
+  const query = {
+    id: "q_stream_unpivot",
+    name: "Stream unpivot",
+    source: { type: "csv", path: "/tmp/unpivot.csv", options: { hasHeaders: true } },
+    steps: [
+      { id: "s_unpivot", name: "Unpivot", operation: { type: "unpivot", columns: ["Q1", "Q2"], nameColumn: "Quarter", valueColumn: "Value" } },
+    ],
+  };
+
+  const batches = [];
+  await engineStreaming.executeQueryStreaming(query, {}, { batchSize: 2, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engineMaterialized.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
+
 test("executeQueryStreaming(..., materialize:false) streams demoteHeaders", async () => {
   const csvText = ["A,B", "1,2", "3,4"].join("\n") + "\n";
 
