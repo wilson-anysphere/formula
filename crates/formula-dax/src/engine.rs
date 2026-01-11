@@ -1772,9 +1772,9 @@ fn resolve_row_sets(
             if !is_active {
                 continue;
             }
-            changed |= propagate_filter(&mut sets, relationship, Direction::ToMany)?;
+            changed |= propagate_filter(&mut sets, relationship, Direction::ToMany, filter)?;
             if relationship.rel.cross_filter_direction == CrossFilterDirection::Both {
-                changed |= propagate_filter(&mut sets, relationship, Direction::ToOne)?;
+                changed |= propagate_filter(&mut sets, relationship, Direction::ToOne, filter)?;
             }
         }
     }
@@ -1791,6 +1791,7 @@ fn propagate_filter(
     sets: &mut HashMap<String, Vec<bool>>,
     relationship: &RelationshipInfo,
     direction: Direction,
+    filter: &FilterContext,
 ) -> DaxResult<bool> {
     match direction {
         Direction::ToMany => {
@@ -1803,10 +1804,11 @@ fn propagate_filter(
                 .get(to_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
 
-            // If the one-side table isn't filtered, it should not restrict the many-side table.
-            // This matches Tabular's behavior for unmatched foreign keys (they still contribute
-            // to totals unless the dimension is filtered).
-            if to_set.iter().all(|allowed| *allowed) {
+            let blank_row_allowed = blank_row_allowed(filter, to_table_name);
+
+            // If the one-side table is unfiltered (including the relationship's implicit blank
+            // row), it should not restrict the many-side table.
+            if blank_row_allowed && to_set.iter().all(|allowed| *allowed) {
                 return Ok(false);
             }
 
@@ -1826,6 +1828,20 @@ fn propagate_filter(
                     for &row in rows {
                         if from_set.get(row).copied().unwrap_or(false) {
                             next[row] = true;
+                        }
+                    }
+                }
+            }
+
+            if blank_row_allowed {
+                // Include fact rows whose foreign key does not match any key in the dimension.
+                // Tabular models treat those rows as belonging to a virtual blank dimension row.
+                for (key, rows) in &relationship.from_index {
+                    if key.is_blank() || !relationship.to_index.contains_key(key) {
+                        for &row in rows {
+                            if from_set.get(row).copied().unwrap_or(false) {
+                                next[row] = true;
+                            }
                         }
                     }
                 }
@@ -1952,4 +1968,21 @@ fn distinct_rows_by_all_columns(model: &DataModel, base: &TableResult) -> DaxRes
         table: base.table.clone(),
         rows,
     })
+}
+
+fn blank_row_allowed(filter: &FilterContext, table: &str) -> bool {
+    // Row filters represent explicit row sets (e.g. FILTER(table, ...)). Those filters do not
+    // include the relationship's implicit blank row, so unmatched foreign keys should be
+    // excluded whenever a row filter is present.
+    if filter.row_filters.contains_key(table) {
+        return false;
+    }
+
+    for ((t, _), values) in &filter.column_filters {
+        if t == table && !values.contains(&Value::Blank) {
+            return false;
+        }
+    }
+
+    true
 }
