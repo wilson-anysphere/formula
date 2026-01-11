@@ -394,9 +394,16 @@ function createDefaultFileAdapter(): DesktopQueryEngineOptions["fileAdapter"] {
 }
 
 function createDefaultCacheManager(): CacheManager {
+  // Keep Power Query caches bounded so long-lived desktop sessions don't accumulate
+  // unbounded IndexedDB storage.
+  const limits = { maxEntries: 256, maxBytes: 256 * 1024 * 1024 };
   const store =
     typeof indexedDB !== "undefined" ? new IndexedDBCacheStore({ dbName: "formula-power-query-cache" }) : new MemoryCacheStore();
-  return new CacheManager({ store });
+  const cache = new CacheManager({ store, limits });
+  // Best-effort: prune on startup to enforce quotas even if the cache directory/db
+  // was created by an older version without eviction.
+  cache.prune().catch(() => {});
+  return cache;
 }
 
 function defaultPermissionPrompt(kind: string, details: unknown): boolean {
