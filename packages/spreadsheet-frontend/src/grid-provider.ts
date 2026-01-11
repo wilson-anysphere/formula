@@ -108,6 +108,12 @@ export class EngineGridProvider implements CellProvider {
     }
   }
 
+  async recalculate(sheet?: string): Promise<CellChange[]> {
+    const changes = await this.cache.engine.recalculate(sheet ?? this.sheet);
+    this.applyRecalcChanges(changes);
+    return changes;
+  }
+
   subscribe(listener: (update: CellProviderUpdate) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

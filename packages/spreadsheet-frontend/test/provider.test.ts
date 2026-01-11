@@ -6,7 +6,10 @@ import { EngineCellCache, EngineGridProvider, fromA1, toA1 } from "../src/index.
 class FakeEngine {
   calls: Array<{ range: string; sheet?: string }> = [];
 
-  constructor(private readonly values: Map<string, CellScalar>) {}
+  constructor(
+    private readonly values: Map<string, CellScalar>,
+    private readonly recalcChanges: CellChange[] = []
+  ) {}
 
   async getRange(range: string, sheet?: string): Promise<EngineCellData[][]> {
     this.calls.push({ range, sheet });
@@ -33,6 +36,10 @@ class FakeEngine {
       rows.push(row);
     }
     return rows;
+  }
+
+  async recalculate(_sheet?: string): Promise<CellChange[]> {
+    return this.recalcChanges;
   }
 }
 
@@ -177,5 +184,26 @@ describe("EngineGridProvider", () => {
     const ranges = updates.map((u) => (u.type === "cells" ? u.range : null)).filter(Boolean);
     expect(ranges).toContainEqual({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
     expect(ranges).toContainEqual({ startRow: 0, endRow: 1, startCol: 2, endCol: 3 });
+  });
+
+  it("can recalculate via engine and update cache + subscribers", async () => {
+    const changes: CellChange[] = [
+      { sheet: "Sheet1", address: "A1", value: 1 },
+      { sheet: "Sheet1", address: "B1", value: 2 }
+    ];
+
+    const engine = new FakeEngine(new Map(), changes) as any;
+    const cache = new EngineCellCache(engine);
+    const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10 });
+
+    const updates: CellProviderUpdate[] = [];
+    provider.subscribe((update) => updates.push(update));
+
+    await provider.recalculate();
+    await flushMicrotasks();
+
+    expect(cache.getValue(0, 0)).toBe(1);
+    expect(cache.getValue(0, 1)).toBe(2);
+    expect(updates).toEqual([{ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 2 } }]);
   });
 });

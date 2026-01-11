@@ -67,7 +67,7 @@ export class EngineCellCache {
     if (existing) return existing;
 
     const task = (async () => {
-      const rows = (await this.engine.getRange(rangeA1, sheetName)) as EngineCellData[][];
+      const rows = await this.engine.getRange(rangeA1, sheetName);
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r] ?? [];
         for (let c = 0; c < row.length; c++) {
@@ -95,5 +95,10 @@ export class EngineCellCache {
       this.values.set(cacheKey(sheet, row0, col0), normalizeCellValue(change.value));
     }
   }
-}
 
+  async recalculate(sheet?: string): Promise<CellChange[]> {
+    const changes = await this.engine.recalculate(sheet);
+    this.applyRecalcChanges(changes);
+    return changes;
+  }
+}
