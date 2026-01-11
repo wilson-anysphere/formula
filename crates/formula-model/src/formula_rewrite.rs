@@ -60,6 +60,40 @@ fn looks_like_a1_cell_reference(name: &str) -> bool {
     col <= 16_384
 }
 
+fn looks_like_r1c1_cell_reference(name: &str) -> bool {
+    // In R1C1 notation, `R`/`C` are valid relative references. Excel may also treat
+    // `R123C456` as a cell reference even when the workbook is in A1 mode.
+    if name.eq_ignore_ascii_case("r") || name.eq_ignore_ascii_case("c") {
+        return true;
+    }
+
+    let bytes = name.as_bytes();
+    if bytes.first().copied().map(|b| b.to_ascii_uppercase()) != Some(b'R') {
+        return false;
+    }
+
+    let mut i = 1;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+
+    if i >= bytes.len() || bytes[i].to_ascii_uppercase() != b'C' {
+        return false;
+    }
+
+    i += 1;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+
+    i == bytes.len()
+}
+
+fn is_reserved_unquoted_sheet_name(name: &str) -> bool {
+    // Excel boolean literals are tokenized as keywords; quoting avoids ambiguity in formulas.
+    name.eq_ignore_ascii_case("true") || name.eq_ignore_ascii_case("false")
+}
+
 fn is_valid_unquoted_sheet_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
@@ -83,7 +117,11 @@ fn is_valid_unquoted_sheet_name(name: &str) -> bool {
         return false;
     }
 
-    !looks_like_a1_cell_reference(name)
+    if is_reserved_unquoted_sheet_name(name) {
+        return false;
+    }
+
+    !(looks_like_a1_cell_reference(name) || looks_like_r1c1_cell_reference(name))
 }
 
 fn needs_quoting_for_sheet_reference(
@@ -654,6 +692,8 @@ mod tests {
         assert_eq!(format_sheet_reference(None, "O'Brien", None), "'O''Brien'");
         assert_eq!(format_sheet_reference(None, "Résumé", None), "'Résumé'");
         assert_eq!(format_sheet_reference(None, "数据", None), "'数据'");
+        assert_eq!(format_sheet_reference(None, "TRUE", None), "'TRUE'");
+        assert_eq!(format_sheet_reference(None, "R1C1", None), "'R1C1'");
         assert_eq!(
             format_sheet_reference(None, "Sheet1", Some("Sheet3")),
             "Sheet1:Sheet3"
@@ -759,11 +799,7 @@ mod tests {
     #[test]
     fn rewrite_external_reference_with_brackets_in_path() {
         assert_eq!(
-            rewrite_sheet_names_in_formula(
-                "='C:\\[foo]\\[Book1.xlsx]Sheet1'!A1",
-                "Sheet1",
-                "Data",
-            ),
+            rewrite_sheet_names_in_formula("='C:\\[foo]\\[Book1.xlsx]Sheet1'!A1", "Sheet1", "Data",),
             "='C:\\[foo]\\[Book1.xlsx]Data'!A1"
         );
     }
@@ -785,6 +821,18 @@ mod tests {
         assert_eq!(
             rewrite_sheet_names_in_formula("=Sheet1!A1", "Sheet1", "数据"),
             "='数据'!A1"
+        );
+    }
+
+    #[test]
+    fn rewrite_quotes_reserved_sheet_names_in_output() {
+        assert_eq!(
+            rewrite_sheet_names_in_formula("=Sheet1!A1", "Sheet1", "TRUE"),
+            "='TRUE'!A1"
+        );
+        assert_eq!(
+            rewrite_sheet_names_in_formula("=Sheet1!A1", "Sheet1", "R1C1"),
+            "='R1C1'!A1"
         );
     }
 
