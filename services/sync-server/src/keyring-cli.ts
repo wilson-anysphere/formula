@@ -66,7 +66,27 @@ async function atomicWriteFile(filePath: string, contents: string): Promise<void
   const base = path.basename(filePath);
   const tmpPath = path.join(dir, `.${base}.${process.pid}.${Date.now()}.tmp`);
 
-  await fs.writeFile(tmpPath, contents, "utf8");
+  // KeyRing JSON contains secret key material. Default to owner-readable only,
+  // but preserve the existing file mode (if any) to avoid surprising operators.
+  let mode = 0o600;
+  let hadExistingMode = false;
+  try {
+    const st = await fs.stat(filePath);
+    mode = st.mode & 0o777;
+    hadExistingMode = true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") throw err;
+  }
+
+  if (hadExistingMode && (mode & 0o077) !== 0) {
+    const modeStr = mode.toString(8).padStart(3, "0");
+    process.stderr.write(
+      `Warning: ${filePath} has permissions ${modeStr}; keyring JSON contains secret key material (consider chmod 600).\n`
+    );
+  }
+
+  await fs.writeFile(tmpPath, contents, { encoding: "utf8", mode });
   try {
     await fs.rename(tmpPath, filePath);
   } catch (err) {

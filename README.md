@@ -178,6 +178,8 @@ pnpm -C services/sync-server -s keyring:validate --in keyring.json
 pnpm -C services/sync-server -s keyring:rotate --in keyring.json --out keyring.json
 ```
 
+The keyring JSON contains **secret key material**. Store it in your secret manager or lock down file permissions (e.g. `chmod 600 keyring.json`).
+
 In a built deployment you can run the compiled entrypoint directly:
 
 ```bash
