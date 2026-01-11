@@ -1273,6 +1273,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   // in-flight query executions cannot reuse cached table results from a
   // previously-opened workbook.
   refreshTableSignaturesFromBackend(doc, [], { workbookSignature });
+  refreshDefinedNameSignaturesFromBackend(doc, [], { workbookSignature });
   await app.restoreDocumentState(snapshot);
 
   // Refresh workbook metadata (defined names + tables) used by the name box and
