@@ -7,9 +7,12 @@ import { arrowTableFromColumns } from "../../data-io/src/index.js";
 
 import { ArrowTableAdapter } from "../src/arrowTable.js";
 import { CacheManager } from "../src/cache/cache.js";
+import { EncryptedFileSystemCacheStore } from "../src/cache/encryptedFilesystem.js";
 import { FileSystemCacheStore } from "../src/cache/filesystem.js";
 import { MemoryCacheStore } from "../src/cache/memory.js";
 import { deserializeAnyTable, serializeAnyTable } from "../src/cache/serialize.js";
+
+import { InMemoryKeychainProvider } from "../../security/crypto/keychain/inMemoryKeychain.js";
 
 function fmtMs(ms) {
   return `${ms.toFixed(1)}ms`;
@@ -110,4 +113,23 @@ try {
   );
 } finally {
   await rm(tmpDir, { recursive: true, force: true });
+}
+
+const tmpEncryptedDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-arrow-encrypted-"));
+try {
+  const keychainProvider = new InMemoryKeychainProvider();
+  await benchStore(
+    "EncryptedFileSystemCacheStore (plaintext)",
+    new EncryptedFileSystemCacheStore({ directory: tmpEncryptedDir, encryption: { enabled: false, keychainProvider } }),
+    cacheValue,
+    tablePayload.bytes.byteLength,
+  );
+  await benchStore(
+    "EncryptedFileSystemCacheStore (encrypted)",
+    new EncryptedFileSystemCacheStore({ directory: tmpEncryptedDir, encryption: { enabled: true, keychainProvider } }),
+    cacheValue,
+    tablePayload.bytes.byteLength,
+  );
+} finally {
+  await rm(tmpEncryptedDir, { recursive: true, force: true });
 }
