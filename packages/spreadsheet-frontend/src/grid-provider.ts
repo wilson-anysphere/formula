@@ -60,7 +60,11 @@ export class EngineGridProvider implements CellProvider {
     return { row, col, value, style: { fill } };
   }
 
-  async prefetch(range: CellRange): Promise<void> {
+  prefetch(range: CellRange): void {
+    void this.prefetchAsync(range);
+  }
+
+  async prefetchAsync(range: CellRange): Promise<void> {
     const offset = this.headers ? 1 : 0;
     const startRow0 = range.startRow - offset;
     const endRow0Exclusive = range.endRow - offset;
@@ -242,4 +246,3 @@ function canMergeRanges(a: CellRange, b: CellRange): boolean {
 
   return (rowOverlap && colNoGap) || (colOverlap && rowNoGap);
 }
-

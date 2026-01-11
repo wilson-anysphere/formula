@@ -55,7 +55,7 @@ describe("EngineGridProvider", () => {
     const updates: CellProviderUpdate[] = [];
     provider.subscribe((update) => updates.push(update));
 
-    await provider.prefetch({ startRow: 0, endRow: 1, startCol: 0, endCol: 2 });
+    await provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 0, endCol: 2 });
     await flushMicrotasks();
 
     expect(cache.getValue(0, 0)).toBe("TRUE");
@@ -78,13 +78,13 @@ describe("EngineGridProvider", () => {
     const updates: CellProviderUpdate[] = [];
     provider.subscribe((update) => updates.push(update));
 
-    await provider.prefetch({ startRow: 0, endRow: 1, startCol: 0, endCol: 2 });
+    await provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 0, endCol: 2 });
     await flushMicrotasks();
     expect(engine.calls).toHaveLength(1);
     expect(updates).toHaveLength(1);
 
     updates.length = 0;
-    await provider.prefetch({ startRow: 0, endRow: 1, startCol: 0, endCol: 2 });
+    await provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 0, endCol: 2 });
     await flushMicrotasks();
     expect(engine.calls).toHaveLength(1);
     expect(updates).toEqual([]);
@@ -102,8 +102,8 @@ describe("EngineGridProvider", () => {
     const updates: CellProviderUpdate[] = [];
     provider.subscribe((update) => updates.push(update));
 
-    const p1 = provider.prefetch({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
-    const p2 = provider.prefetch({ startRow: 0, endRow: 1, startCol: 1, endCol: 2 });
+    const p1 = provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+    const p2 = provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 1, endCol: 2 });
     await Promise.all([p1, p2]);
     await flushMicrotasks();
 
@@ -130,7 +130,7 @@ describe("EngineGridProvider", () => {
     const updates: CellProviderUpdate[] = [];
     provider.subscribe((update) => updates.push(update));
 
-    await provider.prefetch({ startRow: 0, endRow: 2, startCol: 0, endCol: 3 });
+    await provider.prefetchAsync({ startRow: 0, endRow: 2, startCol: 0, endCol: 3 });
     await flushMicrotasks();
 
     expect(engine.calls.map((c) => c.range)).toEqual(["A1:B1"]);
