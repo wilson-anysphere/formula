@@ -303,6 +303,62 @@ test("scan allowlist can permit otherwise-failing packages", async (t) => {
   }
 });
 
+test("requireScanPassedForDownload blocks pending scans from metadata/search/download", async (t) => {
+  try {
+    requireFromHere.resolve("sql.js");
+  } catch {
+    t.skip("sql.js dependency not installed in this environment");
+    return;
+  }
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-require-scan-"));
+  const dataDir = path.join(tmpRoot, "data");
+  const publisher = "temp-pub";
+  const name = "require-scan-ext";
+
+  const { dir } = await createTempExtensionDir({
+    publisher,
+    name,
+    version: "1.0.0",
+    jsSource: "module.exports = { activate() {} };\n",
+  });
+
+  try {
+    const keys = generateEd25519KeyPair();
+    const store = new MarketplaceStore({ dataDir, requireScanPassedForDownload: true });
+    await store.init();
+    await store.registerPublisher({
+      publisher,
+      tokenSha256: "ignored-for-unit-test",
+      publicKeyPem: keys.publicKeyPem,
+      verified: true,
+    });
+
+    const pkgBytes = await createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+    const published = await store.publishExtension({ publisher, packageBytes: pkgBytes, signatureBase64: null });
+
+    // Force the scan status back to pending to simulate an unscanned legacy version.
+    await store.db.withTransaction((db) => {
+      db.run(`UPDATE package_scans SET status = 'pending', scanned_at = NULL WHERE extension_id = ? AND version = ?`, [
+        published.id,
+        published.version,
+      ]);
+    });
+
+    const scan = await store.getPackageScan(published.id, published.version);
+    assert.ok(scan);
+    assert.equal(scan.status, "pending");
+
+    assert.equal(await store.getExtension(published.id), null);
+    const search = await store.search({ q: published.id });
+    assert.equal(search.results.length, 0);
+    assert.equal(await store.getPackage(published.id, published.version), null);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("publisher key rotation preserves ability to verify old versions", async (t) => {
   try {
     requireFromHere.resolve("sql.js");
