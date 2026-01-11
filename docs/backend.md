@@ -141,3 +141,25 @@ setTimeout(() => {
 }, 2_000);
 NODE
 ```
+
+If you just want to verify the token authorizes the WebSocket upgrade (without speaking the `y-websocket` protocol), you can also do a minimal connect/disconnect:
+
+```bash
+TOKEN=... DOC_ID=... node - <<'NODE'
+const token = process.env.TOKEN
+const docId = process.env.DOC_ID
+if (!token || !docId) throw new Error('Missing TOKEN or DOC_ID env var')
+
+if (typeof WebSocket !== 'function') {
+  throw new Error('WebSocket is not available (need Node 20+)')
+}
+
+const ws = new WebSocket(`ws://localhost:1234/${docId}?token=${encodeURIComponent(token)}`)
+ws.addEventListener('open', () => {
+  console.log('connected')
+  ws.close()
+})
+ws.addEventListener('close', (ev) => console.log('closed', ev.code))
+ws.addEventListener('error', (ev) => console.error('error', ev))
+NODE
+```
