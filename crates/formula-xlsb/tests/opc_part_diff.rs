@@ -88,6 +88,20 @@ fn format_report(report: &xlsx_diff::DiffReport) -> String {
         .join("\n")
 }
 
+fn assert_no_unexpected_extra_parts(report: &xlsx_diff::DiffReport) {
+    let extra_parts: Vec<_> = report
+        .differences
+        .iter()
+        .filter(|d| d.kind == "extra_part")
+        .map(|d| d.part.clone())
+        .collect();
+    assert!(
+        extra_parts.is_empty(),
+        "unexpected extra parts in diff: {extra_parts:?}\n{}",
+        format_report(report)
+    );
+}
+
 #[test]
 fn save_as_is_lossless_at_opc_part_level() {
     let fixture_path = fixture_path();
@@ -176,6 +190,7 @@ fn patch_writer_changes_only_target_sheet_part() {
 
     let report = xlsx_diff::diff_workbooks(&fixture_path, &out_path).expect("diff workbooks");
     let report_text = format_report(&report);
+    assert_no_unexpected_extra_parts(&report);
 
     assert!(
         report
@@ -256,6 +271,7 @@ fn patch_writer_allows_only_expected_calc_chain_side_effects() {
         .expect("save_with_edits");
 
     let report = xlsx_diff::diff_workbooks(&input_path, &out_path).expect("diff workbooks");
+    assert_no_unexpected_extra_parts(&report);
 
     // Edits must change the sheet part.
     assert!(
