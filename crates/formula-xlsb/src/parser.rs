@@ -636,6 +636,43 @@ mod tests {
         assert_eq!(sheets.len(), 1);
         assert_eq!(sheets[0].visibility, SheetVisibility::Hidden);
     }
+
+    #[test]
+    fn parses_shared_string_rich_runs_with_surrogate_pairs() {
+        // Rich SI with a surrogate pair (😀) to validate UTF-16 -> char index mapping.
+        let mut payload = Vec::new();
+        payload.push(0x01); // rich text flag
+        write_utf16_string(&mut payload, "Hi 😀Bold");
+
+        // cRun = 3
+        payload.extend_from_slice(&3u32.to_le_bytes());
+
+        // Runs: [ich (u32 UTF-16 offset)][ifnt (u16)][reserved (u16)]
+        // "Hi " starts at 0
+        payload.extend_from_slice(&0u32.to_le_bytes());
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        // "😀" starts after "Hi " (3 UTF-16 units)
+        payload.extend_from_slice(&3u32.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        // "Bold" starts after emoji (5 UTF-16 units)
+        payload.extend_from_slice(&5u32.to_le_bytes());
+        payload.extend_from_slice(&2u16.to_le_bytes());
+        payload.extend_from_slice(&0u16.to_le_bytes());
+
+        let si = parse_shared_string_item(&payload).expect("parse SI");
+        assert_eq!(si.plain_text(), "Hi 😀Bold");
+        assert_eq!(si.rich_text.runs.len(), 3);
+        assert_eq!(si.rich_text.slice_run_text(&si.rich_text.runs[0]), "Hi ");
+        assert_eq!(si.rich_text.slice_run_text(&si.rich_text.runs[1]), "😀");
+        assert_eq!(si.rich_text.slice_run_text(&si.rich_text.runs[2]), "Bold");
+
+        assert_eq!(si.run_formats.len(), 3);
+        assert_eq!(si.run_formats[0], vec![0, 0, 0, 0]);
+        assert_eq!(si.run_formats[1], vec![1, 0, 0, 0]);
+        assert_eq!(si.run_formats[2], vec![2, 0, 0, 0]);
+    }
 }
 
 pub(crate) fn parse_shared_strings<R: Read>(
