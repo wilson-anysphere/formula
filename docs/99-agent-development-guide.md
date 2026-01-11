@@ -43,12 +43,19 @@ Per-agent:        ~7 GB soft target
 **Every agent MUST set these** in their shell before running commands:
 
 ```bash
-# Add to ~/.bashrc or run at start of each session
+# Recommended (sets all of the below, including repo-local CARGO_HOME):
+source scripts/agent-init.sh
+
+# If you can't source agent-init.sh, set the memory limits globally:
+# (These are safe to put in ~/.bashrc.)
 export NODE_OPTIONS="--max-old-space-size=3072"  # 3GB limit for Node
 export CARGO_BUILD_JOBS=4                         # Limit Rust parallelism
-export CARGO_HOME="$PWD/target/cargo-home"        # Repo-local Cargo home (avoids ~/.cargo lock contention)
 export MAKEFLAGS="-j4"                            # Limit make parallelism
 export RUSTFLAGS="-C codegen-units=4"             # Reduce Rust memory per crate
+
+# CARGO_HOME must be set per-repo (run from repo root) to avoid cross-agent ~/.cargo locks:
+export CARGO_HOME="$(pwd)/target/cargo-home"
+mkdir -p "$CARGO_HOME"
 ```
 
 #### Cargo Home Isolation (Why `CARGO_HOME` is repo-local)
@@ -346,10 +353,14 @@ set -e
 # Memory limits
 export NODE_OPTIONS="--max-old-space-size=3072"
 export CARGO_BUILD_JOBS=4
-export CARGO_HOME="$PWD/target/cargo-home"
-mkdir -p "$CARGO_HOME"
 export MAKEFLAGS="-j4"
 export RUSTFLAGS="-C codegen-units=4"
+
+# Repo-local Cargo home (avoids cross-agent ~/.cargo lock contention)
+if [ -z "${CARGO_HOME:-}" ]; then
+  export CARGO_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/target/cargo-home"
+fi
+mkdir -p "$CARGO_HOME"
 
 # Headless display (if not already set)
 if [ -z "$DISPLAY" ]; then
@@ -364,6 +375,7 @@ fi
 echo "Agent environment initialized:"
 echo "  NODE_OPTIONS: $NODE_OPTIONS"
 echo "  CARGO_BUILD_JOBS: $CARGO_BUILD_JOBS"
+echo "  CARGO_HOME: $CARGO_HOME"
 echo "  DISPLAY: $DISPLAY"
 ```
 
