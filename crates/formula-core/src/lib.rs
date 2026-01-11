@@ -335,7 +335,7 @@ struct EvalContext {
 fn is_formula_input(value: &JsonValue) -> bool {
     value
         .as_str()
-        .is_some_and(|s| s.starts_with('=') && s.len() > 1)
+        .is_some_and(|s| s.starts_with('='))
 }
 
 fn is_scalar_json(value: &JsonValue) -> bool {
@@ -1251,6 +1251,15 @@ mod tests {
         wb.recalculate(None).unwrap();
         let cell = wb.get_cell("A3", None).unwrap();
         assert_eq!(cell.value, json!(3.0));
+    }
+
+    #[test]
+    fn lone_equals_sign_is_treated_as_blank_formula() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("="), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, JsonValue::Null);
     }
 
     #[test]
