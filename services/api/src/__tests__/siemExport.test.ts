@@ -270,6 +270,70 @@ describe("SIEM export worker", () => {
     }
   });
 
+  it("does not include __audit metadata in CEF/LEEF exports", async () => {
+    const formats: Array<"cef" | "leef"> = ["cef", "leef"];
+
+    for (const format of formats) {
+      const orgId = crypto.randomUUID();
+      await insertOrg(db, orgId);
+
+      const id = crypto.randomUUID();
+      const timestamp = "2025-01-01T05:00:00.000Z";
+
+      await writeAuditEvent(
+        db,
+        createAuditEvent({
+          id,
+          timestamp,
+          eventType: "test.siem_format",
+          actor: { type: "user", id: "user_1" },
+          context: {
+            orgId,
+            userEmail: "user@example.com",
+            ipAddress: "203.0.113.5",
+            userAgent: "UnitTest/1.0"
+          },
+          resource: { type: "document", id: "doc_1", name: "Q1 Plan" },
+          success: true,
+          details: { title: "Q1 Plan" },
+          correlation: { requestId: "req_123", traceId: "trace_abc" }
+        })
+      );
+
+      const siem = await startSiemServer();
+      try {
+        const config: SiemEndpointConfig = {
+          endpointUrl: siem.url,
+          format,
+          idempotencyKeyHeader: "Idempotency-Key",
+          retry: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 5, jitter: false }
+        };
+
+        const metrics = createMetrics();
+        const worker = new SiemExportWorker({
+          db,
+          configProvider: new StaticConfigProvider([{ orgId, config }]),
+          metrics,
+          logger: console,
+          pollIntervalMs: 0
+        });
+
+        await worker.tick();
+
+        expect(siem.requests).toHaveLength(1);
+        expect(siem.requests[0]!.headers["content-type"]).toBe("text/plain");
+        expect(siem.requests[0]!.body).not.toContain("__audit");
+        if (format === "cef") {
+          expect(siem.requests[0]!.body).toContain("CEF:0|");
+        } else {
+          expect(siem.requests[0]!.body).toContain("LEEF:2.0|");
+        }
+      } finally {
+        await siem.close();
+      }
+    }
+  });
+
   it("retries transient failures and eventually succeeds", async () => {
     const orgId = crypto.randomUUID();
     await insertOrg(db, orgId);
