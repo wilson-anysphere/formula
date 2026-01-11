@@ -575,6 +575,37 @@ test("compile: folds take (LIMIT) into SQL", () => {
   assert.deepEqual(plan, { type: "sql", sql: "SELECT * FROM (SELECT * FROM sales) AS t LIMIT ?", params: [10] });
 });
 
+test("compile: folds distinctRows (full-row DISTINCT) when projection is known", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_distinct",
+    name: "Distinct",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales", columns: ["Region", "Sales"] },
+    steps: [{ id: "s1", name: "Distinct", operation: { type: "distinctRows", columns: null } }],
+  };
+
+  const plan = folding.compile(query);
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT DISTINCT t."Region", t."Sales" FROM (SELECT * FROM sales) AS t',
+    params: [],
+  });
+});
+
+test("compile: distinctRows by specific columns breaks folding (requires first-row-wins semantics)", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_distinct_cols",
+    name: "Distinct",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales", columns: ["Region", "Sales"] },
+    steps: [{ id: "s1", name: "Distinct", operation: { type: "distinctRows", columns: ["Region"] } }],
+  };
+
+  const plan = folding.compile(query);
+  assert.equal(plan.type, "hybrid");
+  assert.deepEqual(plan.localSteps.map((s) => s.operation.type), ["distinctRows"]);
+});
+
 test("compile: folds removeColumns when projection is known", () => {
   const folding = new QueryFoldingEngine();
   const query = {
