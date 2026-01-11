@@ -16,6 +16,10 @@ const REDACT_PATHS = [
   // Encryption-at-rest (Task 169) — redact keys if a config object ever gets logged.
   "persistence.encryption.keyBase64",
   "config.persistence.encryption.keyBase64",
+  "persistence.encryption.keyRing",
+  "config.persistence.encryption.keyRing",
+  "persistence.leveldbEncryption.key",
+  "config.persistence.leveldbEncryption.key",
 
   // Common token fields (legacy / defensive).
   "token",

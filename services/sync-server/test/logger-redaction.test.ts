@@ -17,6 +17,7 @@ test("createLogger redacts internal admin headers + persistence encryption keys"
 
   const internalAdminToken = "token-should-not-appear";
   const encryptionKeyBase64 = "key-should-not-appear";
+  const leveldbEncryptionKey = "leveldb-key-should-not-appear";
 
   logger.info(
     {
@@ -27,7 +28,13 @@ test("createLogger redacts internal admin headers + persistence encryption keys"
           "x-sync-server-admin-token": internalAdminToken,
         },
       },
-      persistence: { encryption: { keyBase64: encryptionKeyBase64 } },
+      persistence: {
+        encryption: { keyBase64: encryptionKeyBase64 },
+        leveldbEncryption: { key: leveldbEncryptionKey, strict: true },
+      },
+      config: {
+        persistence: { leveldbEncryption: { key: leveldbEncryptionKey, strict: true } },
+      },
     },
     "redaction_test"
   );
@@ -38,11 +45,13 @@ test("createLogger redacts internal admin headers + persistence encryption keys"
   const raw = lines[0]!;
   assert.ok(!raw.includes(internalAdminToken));
   assert.ok(!raw.includes(encryptionKeyBase64));
+  assert.ok(!raw.includes(leveldbEncryptionKey));
 
   const parsed = JSON.parse(raw) as any;
   assert.ok(!("authorization" in (parsed.req?.headers ?? {})));
   assert.ok(!("x-internal-admin-token" in (parsed.req?.headers ?? {})));
   assert.ok(!("x-sync-server-admin-token" in (parsed.req?.headers ?? {})));
   assert.ok(!("keyBase64" in (parsed.persistence?.encryption ?? {})));
+  assert.ok(!("key" in (parsed.persistence?.leveldbEncryption ?? {})));
+  assert.ok(!("key" in (parsed.config?.persistence?.leveldbEncryption ?? {})));
 });
-
