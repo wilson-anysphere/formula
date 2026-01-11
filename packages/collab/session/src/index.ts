@@ -660,23 +660,63 @@ export class CollabSession {
   }
 
   canEditCell(cell: CellAddress): boolean {
-    if (!this.permissions) return true;
-    return getCellPermissions({
-      role: this.permissions.role,
-      restrictions: this.permissions.rangeRestrictions,
-      userId: this.permissions.userId,
-      cell,
-    }).canEdit;
+    const canEditByPermissions = this.permissions
+      ? getCellPermissions({
+          role: this.permissions.role,
+          restrictions: this.permissions.rangeRestrictions,
+          userId: this.permissions.userId,
+          cell,
+        }).canEdit
+      : true;
+    if (!canEditByPermissions) return false;
+
+    // If the cell is already encrypted in Yjs, only allow edits when a key is available
+    // so we can preserve encryption invariants (never write plaintext into an encrypted cell).
+    const cellKey = makeCellKey(cell);
+    const cellData = this.cells.get(cellKey);
+    const ycell = getYMapCell(cellData);
+    const encRaw = ycell?.get("enc");
+    if (encRaw !== undefined) {
+      const key = this.encryption?.keyForCell(cell) ?? null;
+      return Boolean(key);
+    }
+
+    if (this.encryption) {
+      const key = this.encryption.keyForCell(cell);
+      const shouldEncrypt =
+        typeof this.encryption.shouldEncryptCell === "function"
+          ? this.encryption.shouldEncryptCell(cell)
+          : key != null;
+      if (shouldEncrypt && !key) return false;
+    }
+
+    return true;
   }
 
   canReadCell(cell: CellAddress): boolean {
-    if (!this.permissions) return true;
-    return getCellPermissions({
-      role: this.permissions.role,
-      restrictions: this.permissions.rangeRestrictions,
-      userId: this.permissions.userId,
-      cell,
-    }).canRead;
+    const canReadByPermissions = this.permissions
+      ? getCellPermissions({
+          role: this.permissions.role,
+          restrictions: this.permissions.rangeRestrictions,
+          userId: this.permissions.userId,
+          cell,
+        }).canRead
+      : true;
+    if (!canReadByPermissions) return false;
+
+    // Encrypted cells require an encryption key to read. Treat malformed payloads as unreadable.
+    const cellKey = makeCellKey(cell);
+    const cellData = this.cells.get(cellKey);
+    const ycell = getYMapCell(cellData);
+    const encRaw = ycell?.get("enc");
+    if (encRaw !== undefined) {
+      const key = this.encryption?.keyForCell(cell) ?? null;
+      if (!key) return false;
+      if (!isEncryptedCellPayload(encRaw)) return false;
+      if (key.keyId !== encRaw.keyId) return false;
+    }
+
+    return true;
   }
 
   getEncryptionConfig(): CollabSessionOptions["encryption"] | null {
