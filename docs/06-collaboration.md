@@ -647,6 +647,48 @@ class CheckpointManager {
 
 ---
 
+## Collaborative Branching (Scenario Analysis)
+
+Formula supports Git-like **branch + merge workflows** for *collaborative* spreadsheets by storing
+the branch/commit graph **inside the same Yjs document** as workbook data.
+
+Key property: because branching metadata lives in the Yjs CRDT, it automatically:
+
+- syncs to all connected collaborators
+- persists via sync-server
+- can be restored by replaying Yjs updates (just like cell edits)
+
+### Yjs roots for branching metadata
+
+The following Yjs roots are reserved for branching:
+
+- `branching:branches` — `Y.Map<branchName, Y.Map>` (branch metadata + head commit pointer)
+- `branching:commits` — `Y.Map<commitId, Y.Map>` (commit graph; commits store patches and periodic snapshots)
+- `branching:meta.rootCommitId` — string (root commit id)
+- `branching:meta.currentBranchName` — string (the **globally checked-out branch** name)
+
+### Global checkout semantics (first iteration)
+
+Branch checkout and merge are currently **global operations**: checking out a branch applies that
+branch’s snapshot into the *live workbook* (mutating the shared `cells`, `sheets`, `metadata`,
+`namedRanges`, and `comments` roots). All collaborators will observe the checkout/merge result.
+
+Per-user “what-if views” (where each collaborator can independently browse branches without
+mutating the shared workbook) can be built later on top of the same commit graph.
+
+### Implementation modules
+
+- Branch graph storage: `packages/versioning/branches/src/store/YjsBranchStore.js`
+- Workbook snapshot adapter: `packages/versioning/branches/src/yjs/` (`yjsDocToDocumentState`, `applyDocumentStateToYjsDoc`)
+- Collab wrapper: `packages/collab/branching/index.js` (`CollabBranchingWorkflow`)
+
+Permission model:
+
+- **owner/admin**: branch management (create/rename/delete/checkout/merge)
+- **editor**: can still create commits (snapshot current shared workbook state)
+
+---
+
 ## Conflict Resolution
 
 ### Cell-Level Conflicts
