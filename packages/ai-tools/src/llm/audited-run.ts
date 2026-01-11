@@ -3,9 +3,8 @@ import type { AIAuditStore, AIMode, TokenUsage } from "@formula/ai-audit";
 
 import { runChatWithToolsStreaming } from "../../../llm/src/toolCallingStreaming.js";
 import { serializeToolResultForModel } from "../../../llm/src/toolResultSerialization.js";
-import type { ChatStreamEvent } from "../../../llm/src/types.js";
+import type { ChatStreamEvent, ToolCall } from "../../../llm/src/types.js";
 
-import type { LLMToolCall } from "./integration.js";
 import { classifyQueryNeedsTools, verifyAssistantClaims, verifyToolUsage, type VerificationResult } from "./verification.js";
 
 export interface AuditedRunOptions {
@@ -42,7 +41,7 @@ export interface AuditedRunParams {
   messages: any[];
   audit: AuditedRunOptions;
   max_iterations?: number;
-  require_approval?: (call: LLMToolCall) => Promise<boolean>;
+  require_approval?: (call: ToolCall) => Promise<boolean>;
   /**
    * When true, approval denials are surfaced to the model as tool results (ok:false)
    * and the loop continues, allowing the model to re-plan. Default behavior is to throw.
@@ -52,8 +51,8 @@ export interface AuditedRunParams {
    * Optional hooks for UI surfaces (e.g. chat panels) that still want to surface
    * tool call + result events while relying on this helper for audit logging.
    */
-  on_tool_call?: (call: LLMToolCall, meta: { requiresApproval: boolean }) => void;
-  on_tool_result?: (call: LLMToolCall, result: unknown) => void;
+  on_tool_call?: (call: ToolCall, meta: { requiresApproval: boolean }) => void;
+  on_tool_result?: (call: ToolCall, result: unknown) => void;
   /**
    * Optional stream hook for UI surfaces that want partial assistant output.
    */
