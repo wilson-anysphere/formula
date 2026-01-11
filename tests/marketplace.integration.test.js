@@ -1600,6 +1600,123 @@ test("revoked signing keys are rejected for publish + install", async () => {
   }
 });
 
+test("publisher revocation blocks publishing + hides extensions from search/metadata/downloads", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-publisher-revoke-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+  const extensionsDir = path.join(tmpRoot, "installed-extensions");
+  const statePath = path.join(tmpRoot, "extensions-state.json");
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken, rateLimits: { downloadPerIpPerMinute: 0 } });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSource = path.join(tmpRoot, "ext");
+    await copyDir(sampleExtensionSrc, extSource);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSource, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({
+      extensionDir: extSource,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    const marketplaceClient = new MarketplaceClient({ baseUrl });
+    const manager = new ExtensionManager({ marketplaceClient, extensionsDir, statePath });
+    await manager.install(extensionId);
+
+    const revokeRes = await fetch(
+      `${baseUrl}/api/admin/publishers/${encodeURIComponent(manifest.publisher)}/revoke`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ revoked: true }),
+      }
+    );
+    assert.equal(revokeRes.status, 200);
+
+    const packaged = await packageExtension(extSource, { privateKeyPem });
+    const publishBlocked = await fetch(`${baseUrl}/api/publish-bin`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/vnd.formula.extension-package",
+        "X-Package-Sha256": sha256(packaged.packageBytes),
+      },
+      body: packaged.packageBytes,
+    });
+    assert.equal(publishBlocked.status, 403);
+    const publishBlockedBody = await publishBlocked.json();
+    assert.match(String(publishBlockedBody?.error || ""), /publisher revoked/i);
+
+    assert.equal(await marketplaceClient.getExtension(extensionId), null);
+    const hiddenSearch = await marketplaceClient.search({ q: "sample" });
+    assert.ok(!hiddenSearch.results.some((r) => r.id === extensionId));
+    assert.equal(await marketplaceClient.downloadPackage(extensionId, manifest.version), null);
+
+    const unRevokeRes = await fetch(
+      `${baseUrl}/api/admin/publishers/${encodeURIComponent(manifest.publisher)}/revoke`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ revoked: false }),
+      }
+    );
+    assert.equal(unRevokeRes.status, 200);
+
+    await writeManifestVersion(extSource, "1.0.1");
+    await publishExtension({
+      extensionDir: extSource,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    const extMeta = await marketplaceClient.getExtension(extensionId);
+    assert.ok(extMeta);
+    assert.equal(extMeta.latestVersion, "1.0.1");
+    const downloaded = await marketplaceClient.downloadPackage(extensionId, "1.0.1");
+    assert.ok(downloaded);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("desktop client uses on-disk cache + If-None-Match for package downloads", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-client-cache-"));
   const dataDir = path.join(tmpRoot, "marketplace-data");

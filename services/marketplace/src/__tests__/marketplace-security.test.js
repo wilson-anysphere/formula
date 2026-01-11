@@ -92,6 +92,65 @@ test("publishing triggers a package scan record", async (t) => {
   }
 });
 
+test("revoking a publisher blocks publishing and hides extensions/downloads", async (t) => {
+  try {
+    requireFromHere.resolve("sql.js");
+  } catch {
+    t.skip("sql.js dependency not installed in this environment");
+    return;
+  }
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-publisher-revoke-"));
+  const dataDir = path.join(tmpRoot, "data");
+  const publisher = "temp-pub";
+  const name = "revoked-ext";
+
+  const { dir } = await createTempExtensionDir({
+    publisher,
+    name,
+    version: "1.0.0",
+    jsSource: "module.exports = { activate() {} };\n",
+  });
+
+  try {
+    const keys = generateEd25519KeyPair();
+    const store = new MarketplaceStore({ dataDir });
+    await store.init();
+    await store.registerPublisher({
+      publisher,
+      tokenSha256: "ignored-for-unit-test",
+      publicKeyPem: keys.publicKeyPem,
+      verified: true,
+    });
+
+    const pkgBytes = await createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+    const published = await store.publishExtension({ publisher, packageBytes: pkgBytes, signatureBase64: null });
+
+    await store.revokePublisher(publisher, { revoked: true });
+
+    const hidden = await store.getExtension(published.id);
+    assert.equal(hidden, null);
+
+    const adminView = await store.getExtension(published.id, { includeHidden: true });
+    assert.ok(adminView);
+    assert.equal(adminView.publisherRevoked, true);
+
+    const search = await store.search({ q: published.id });
+    assert.equal(search.results.length, 0);
+
+    const downloaded = await store.getPackage(published.id, published.version);
+    assert.equal(downloaded, null);
+
+    await assert.rejects(
+      () => store.publishExtension({ publisher, packageBytes: pkgBytes, signatureBase64: null }),
+      /publisher revoked/i
+    );
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("scan failed versions are not advertised as latestVersion", async (t) => {
   try {
     requireFromHere.resolve("sql.js");

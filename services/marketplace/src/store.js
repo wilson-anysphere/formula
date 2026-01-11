@@ -1890,9 +1890,11 @@ class MarketplaceStore {
       // Pull extensions + versions into memory for flexible semver + cursor pagination.
       const rows =
         db.exec(
-          `SELECT id, name, display_name, publisher, description, categories_json, tags_json, screenshots_json,
-                  verified, featured, deprecated, blocked, malicious, download_count, updated_at
-           FROM extensions`
+          `SELECT e.id, e.name, e.display_name, e.publisher, e.description, e.categories_json, e.tags_json, e.screenshots_json,
+                  e.verified, e.featured, e.deprecated, e.blocked, e.malicious, e.download_count, e.updated_at,
+                  p.revoked AS publisher_revoked
+           FROM extensions e
+           LEFT JOIN publishers p ON p.publisher = e.publisher`
         )[0]?.values || [];
 
       /** @type {Record<string, string[]>} */
@@ -1935,6 +1937,7 @@ class MarketplaceStore {
           vMalicious,
           downloadCount,
           updatedAt,
+          publisherRevoked,
         ] = row;
 
         const categories = normalizeStringArray(parseJsonArray(categoriesJson));
@@ -1957,12 +1960,14 @@ class MarketplaceStore {
           deprecated: Boolean(vDeprecated),
           blocked: Boolean(vBlocked),
           malicious: Boolean(vMalicious),
+          publisherRevoked: Boolean(publisherRevoked),
           downloadCount: Number(downloadCount || 0),
           updatedAt: String(updatedAt || ""),
           latestVersion,
         };
       })
       .filter((ext) => {
+        if (ext.publisherRevoked) return false;
         if (ext.blocked || ext.malicious || ext.deprecated) return false;
         if (!ext.latestVersion) return false;
         if (verified !== undefined && Boolean(verified) !== ext.verified) return false;
@@ -2101,9 +2106,13 @@ class MarketplaceStore {
   async getExtension(id, { includeHidden = false } = {}) {
     return this.db.withRead((db) => {
       const stmt = db.prepare(
-        `SELECT id, name, display_name, publisher, description, categories_json, tags_json, screenshots_json,
-                verified, featured, deprecated, blocked, malicious, download_count, created_at, updated_at
-         FROM extensions WHERE id = ? LIMIT 1`
+        `SELECT e.id, e.name, e.display_name, e.publisher, e.description, e.categories_json, e.tags_json, e.screenshots_json,
+                e.verified, e.featured, e.deprecated, e.blocked, e.malicious, e.download_count, e.created_at, e.updated_at,
+                p.revoked AS publisher_revoked,
+                p.revoked_at AS publisher_revoked_at
+         FROM extensions e
+         LEFT JOIN publishers p ON p.publisher = e.publisher
+         WHERE e.id = ? LIMIT 1`
       );
       stmt.bind([id]);
       if (!stmt.step()) {
@@ -2113,7 +2122,7 @@ class MarketplaceStore {
       const row = stmt.getAsObject();
       stmt.free();
 
-      const hidden = Boolean(row.blocked) || Boolean(row.malicious);
+      const hidden = Boolean(row.blocked) || Boolean(row.malicious) || Boolean(row.publisher_revoked);
       if (hidden && !includeHidden) return null;
 
       const versionsStmt = db.prepare(
@@ -2225,6 +2234,8 @@ class MarketplaceStore {
         latestVersion,
         versions,
         readme,
+        publisherRevoked: Boolean(row.publisher_revoked),
+        publisherRevokedAt: row.publisher_revoked_at ? String(row.publisher_revoked_at) : null,
         publisherPublicKeyPem,
         publisherKeys,
         updatedAt: String(row.updated_at || ""),
@@ -2236,15 +2247,18 @@ class MarketplaceStore {
   async getPackage(id, version, { includeBytes = true, incrementDownloadCount = includeBytes, includePath = false } = {}) {
     const meta = await this.db.withRead((db) => {
       const stmt = db.prepare(
-        `SELECT e.publisher, e.blocked, e.malicious,
+        `SELECT e.publisher,
+                p.revoked AS publisher_revoked,
+                e.blocked, e.malicious,
                 v.signature_base64, v.sha256, v.package_path, v.yanked, v.format_version,
                 v.signing_key_id,
                 v.files_json,
                 s.status AS scan_status
-         FROM extensions e
-         JOIN extension_versions v ON v.extension_id = e.id
-         LEFT JOIN package_scans s ON s.extension_id = v.extension_id AND s.version = v.version
-         WHERE e.id = ? AND v.version = ? LIMIT 1`
+          FROM extensions e
+          LEFT JOIN publishers p ON p.publisher = e.publisher
+          JOIN extension_versions v ON v.extension_id = e.id
+          LEFT JOIN package_scans s ON s.extension_id = v.extension_id AND s.version = v.version
+          WHERE e.id = ? AND v.version = ? LIMIT 1`
       );
       stmt.bind([id, version]);
       if (!stmt.step()) {
@@ -2254,7 +2268,7 @@ class MarketplaceStore {
       const row = stmt.getAsObject();
       stmt.free();
 
-      if (row.blocked || row.malicious || row.yanked) {
+      if (row.publisher_revoked || row.blocked || row.malicious || row.yanked) {
         return null;
       }
 

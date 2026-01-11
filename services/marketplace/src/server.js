@@ -321,7 +321,9 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
               .join("|")
           : "";
         const etag = `"${sha256Hex(
-          `${ext.id}|${ext.updatedAt || ""}|${ext.publisherPublicKeyPem || ""}|${publisherKeysTag}`
+          `${ext.id}|${ext.updatedAt || ""}|${ext.publisherPublicKeyPem || ""}|${publisherKeysTag}|requireScanPassed=${
+            store.requireScanPassedForDownload ? 1 : 0
+          }`
         )}"`;
         if (etagMatches(req.headers["if-none-match"], etag)) {
           statusCode = 304;
