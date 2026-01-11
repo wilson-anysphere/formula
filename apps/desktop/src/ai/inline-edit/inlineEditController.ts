@@ -41,6 +41,7 @@ export class InlineEditController {
   private readonly overlay: InlineEditOverlay;
   private readonly previewEngine = new PreviewEngine();
   private isRunning = false;
+  private abortController: AbortController | null = null;
 
   constructor(private readonly options: InlineEditControllerOptions) {
     this.overlay = new InlineEditOverlay(options.container);
@@ -62,8 +63,7 @@ export class InlineEditController {
 
     this.overlay.open(selectionLabel, {
       onCancel: () => {
-        this.overlay.close();
-        this.options.onClosed?.();
+        this.cancel();
       },
       onRun: (prompt) => {
         void this.runInlineEdit({ sheetId, range, prompt });
@@ -72,8 +72,7 @@ export class InlineEditController {
   }
 
   close(): void {
-    this.overlay.close();
-    this.options.onClosed?.();
+    this.cancel();
   }
 
   private async runInlineEdit(params: { sheetId: string; range: Range; prompt: string }): Promise<void> {
@@ -88,18 +87,25 @@ export class InlineEditController {
     }
 
     this.isRunning = true;
+    const abortController = new AbortController();
+    this.abortController = abortController;
+    const signal = abortController.signal;
+    let batchStarted = false;
     try {
-      const api = new DocumentControllerSpreadsheetApi(this.options.document);
+      const baseApi = new DocumentControllerSpreadsheetApi(this.options.document);
+      const api = createAbortableSpreadsheetApi(baseApi, signal);
       const executor = new ToolExecutor(api, { default_sheet: params.sheetId });
 
       const selectionRef = `${params.sheetId}!${rangeToA1(params.range)}`;
       const sampleRef = buildSampleRange(params.sheetId, params.range, { maxRows: 10, maxCols: 10 });
 
       this.overlay.setRunning("Reading selection…");
+      throwIfAborted(signal);
       const sampleResult = await executor.execute({
         name: "read_range",
         parameters: { range: sampleRef, include_formulas: false }
       });
+      throwIfAborted(signal);
 
       const sampleValues =
         sampleResult.ok && sampleResult.data && "values" in sampleResult.data ? (sampleResult.data as any).values : null;
@@ -116,18 +122,32 @@ export class InlineEditController {
         default_sheet: params.sheetId,
         require_approval_for_mutations: true
       });
+      const abortableToolExecutor = {
+        tools: toolExecutor.tools,
+        execute: async (call: any) => {
+          throwIfAborted(signal);
+          const result = await toolExecutor.execute(call);
+          throwIfAborted(signal);
+          return result;
+        }
+      };
 
       const auditStore = this.options.auditStore ?? new LocalStorageAIAuditStore();
       const sessionId = createSessionId();
       const workbookId = this.options.workbookId ?? "local-workbook";
 
-      this.options.document.beginBatch({ label: "AI Inline Edit" });
-
       try {
         this.overlay.setRunning("Running AI tools…");
         await runChatWithToolsAudited({
-          client,
-          tool_executor: toolExecutor as any,
+          client: {
+            chat: async (request: any) => {
+              throwIfAborted(signal);
+              const response = await client.chat({ ...request, signal });
+              throwIfAborted(signal);
+              return response;
+            }
+          },
+          tool_executor: abortableToolExecutor as any,
           messages,
            audit: {
              audit_store: auditStore,
@@ -138,34 +158,78 @@ export class InlineEditController {
            },
           require_approval: async (call) => {
             this.overlay.setRunning("Generating preview…");
+            throwIfAborted(signal);
             const preview = await this.previewEngine.generatePreview(
               [{ name: call.name, parameters: call.arguments } as any],
               api,
               { default_sheet: params.sheetId }
             );
+            throwIfAborted(signal);
             const approved = await this.overlay.requestApproval(preview);
             if (!approved) return false;
+
+            if (!batchStarted) {
+              this.options.document.beginBatch({ label: "AI Inline Edit" });
+              batchStarted = true;
+            }
             this.overlay.setRunning("Applying changes…");
             return true;
           }
         });
 
-        this.options.document.endBatch();
-        this.overlay.close();
+        if (batchStarted) {
+          this.options.document.endBatch();
+        }
+        this.closeOverlayIfOpen();
         this.options.onApplied?.();
-        this.options.onClosed?.();
       } catch (error) {
-        this.options.document.cancelBatch();
-        if (error instanceof Error && error.message.includes("was denied")) {
-          this.overlay.close();
-          this.options.onClosed?.();
+        if (batchStarted) {
+          this.options.document.cancelBatch();
+        }
+
+        if (isAbortError(error)) {
+          this.closeOverlayIfOpen();
           return;
         }
-        this.overlay.showError(error instanceof Error ? error.message : String(error));
+
+        if (error instanceof Error && error.message.includes("was denied")) {
+          this.closeOverlayIfOpen();
+          return;
+        }
+
+        if (this.overlay.isOpen()) {
+          this.overlay.showError(error instanceof Error ? error.message : String(error));
+        }
       }
     } finally {
       this.isRunning = false;
+      if (this.abortController === abortController) {
+        this.abortController = null;
+      }
     }
+  }
+
+  private closeOverlayIfOpen(): void {
+    if (!this.overlay.isOpen()) return;
+    this.overlay.close();
+    this.options.onClosed?.();
+  }
+
+  private cancel(): void {
+    if (this.isRunning) {
+      try {
+        this.abortController?.abort();
+      } catch {
+        // ignore
+      }
+      // Roll back any in-flight batch so subsequent user edits don't get swallowed.
+      try {
+        this.options.document.cancelBatch?.();
+      } catch {
+        // ignore
+      }
+    }
+    this.closeOverlayIfOpen();
   }
 }
 
@@ -199,6 +263,56 @@ function loadOpenAIApiKeyFromRuntime(): string | null {
   if (typeof envKey === "string" && envKey.length > 0) return envKey;
 
   return null;
+}
+
+function createAbortError(): Error {
+  const error = new Error("Inline edit was cancelled.");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (!signal.aborted) return;
+  throw createAbortError();
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof DOMException) return error.name === "AbortError";
+  if (error instanceof Error) return error.name === "AbortError";
+  return false;
+}
+
+function createAbortableSpreadsheetApi(api: any, signal: AbortSignal): any {
+  const guard = () => throwIfAborted(signal);
+  return {
+    listSheets: (...args: any[]) => api.listSheets(...args),
+    listNonEmptyCells: (...args: any[]) => api.listNonEmptyCells(...args),
+    getCell: (...args: any[]) => api.getCell(...args),
+    setCell: (...args: any[]) => {
+      guard();
+      return api.setCell(...args);
+    },
+    readRange: (...args: any[]) => api.readRange(...args),
+    writeRange: (...args: any[]) => {
+      guard();
+      return api.writeRange(...args);
+    },
+    applyFormatting: (...args: any[]) => {
+      guard();
+      return api.applyFormatting(...args);
+    },
+    getLastUsedRow: (...args: any[]) => api.getLastUsedRow(...args),
+    clone: () => createAbortableSpreadsheetApi(api.clone(), signal),
+    ...(typeof api.createChart === "function"
+      ? {
+          createChart: (...args: any[]) => {
+            guard();
+            return api.createChart(...args);
+          }
+        }
+      : {})
+  };
 }
 
 function buildMessages(options: {

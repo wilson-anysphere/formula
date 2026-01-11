@@ -296,4 +296,80 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
 
     expect(fetchMock).toHaveBeenCalled();
   });
+
+  it("cancels an in-flight inline edit run without hanging or applying changes", async () => {
+    const root = document.createElement("div");
+    root.tabIndex = 0;
+    root.getBoundingClientRect = () =>
+      ({
+        width: 800,
+        height: 600,
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      }) as any;
+    document.body.appendChild(root);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    let resolveChat: ((value: any) => void) | null = null;
+    const llmClient = {
+      chat: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveChat = resolve;
+          })
+      ),
+    };
+
+    const app = new SpreadsheetApp(root, status, {
+      inlineEdit: { llmClient, model: "unit-test-model" },
+    });
+
+    app.selectRange({ range: { startRow: 0, endRow: 2, startCol: 2, endCol: 2 } }); // C1:C3
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+
+    const overlay = await waitFor(() => document.querySelector<HTMLElement>('[data-testid="inline-edit-overlay"]'));
+    const input = overlay.querySelector<HTMLInputElement>('[data-testid="inline-edit-prompt"]');
+    input!.value = "Fill with 1..3";
+    overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-run"]')!.click();
+
+    await waitFor(() => (resolveChat ? overlay : null));
+
+    // Cancel while the tool loop is still waiting for the model response.
+    overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-cancel"]')!.click();
+    await waitFor(() => (overlay.style.display === "none" ? overlay : null));
+
+    // Let the model respond after cancellation (previously this would hang waiting
+    // for an approval UI that was no longer visible).
+    resolveChat!({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "call-1", name: "set_range", arguments: { range: "C1:C3", values: [[1], [2], [3]] } }],
+      },
+      usage: { promptTokens: 1, completionTokens: 1 },
+    });
+
+    // The run should terminate cleanly, allowing inline edit to open again.
+    await waitFor(() => {
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+      const el = document.querySelector<HTMLElement>('[data-testid="inline-edit-overlay"]');
+      return el && el.style.display !== "none" ? el : null;
+    });
+
+    const doc = app.getDocument();
+    expect(doc.getCell("Sheet1", "C1").value).toBeNull();
+    expect(doc.getCell("Sheet1", "C2").value).toBeNull();
+    expect(doc.getCell("Sheet1", "C3").value).toBeNull();
+    expect((doc as any).batchDepth ?? 0).toBe(0);
+  });
 });

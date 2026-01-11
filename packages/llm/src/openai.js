@@ -104,6 +104,18 @@ export class OpenAIClient {
    */
   async chat(request) {
     const controller = new AbortController();
+    const requestSignal = request?.signal;
+    /** @type {(() => void) | null} */
+    let removeRequestAbortListener = null;
+    if (requestSignal) {
+      if (requestSignal.aborted) {
+        controller.abort();
+      } else if (typeof requestSignal.addEventListener === "function") {
+        const onAbort = () => controller.abort();
+        requestSignal.addEventListener("abort", onAbort, { once: true });
+        removeRequestAbortListener = () => requestSignal.removeEventListener("abort", onAbort);
+      }
+    }
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -153,6 +165,7 @@ export class OpenAIClient {
       };
     } finally {
       clearTimeout(timeout);
+      removeRequestAbortListener?.();
     }
   }
 
@@ -164,6 +177,18 @@ export class OpenAIClient {
    */
   async *streamChat(request) {
     const controller = new AbortController();
+    const requestSignal = request?.signal;
+    /** @type {(() => void) | null} */
+    let removeRequestAbortListener = null;
+    if (requestSignal) {
+      if (requestSignal.aborted) {
+        controller.abort();
+      } else if (typeof requestSignal.addEventListener === "function") {
+        const onAbort = () => controller.abort();
+        requestSignal.addEventListener("abort", onAbort, { once: true });
+        removeRequestAbortListener = () => requestSignal.removeEventListener("abort", onAbort);
+      }
+    }
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -215,6 +240,7 @@ export class OpenAIClient {
       }
     } finally {
       clearTimeout(timeout);
+      removeRequestAbortListener?.();
     }
   }
 }

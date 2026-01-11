@@ -26,7 +26,8 @@
  *   toolChoice?: "auto" | "none",
  *   model?: string,
  *   temperature?: number,
- *   maxTokens?: number
+ *   maxTokens?: number,
+ *   signal?: AbortSignal
  * }} ChatRequest
  *
  * @typedef {{

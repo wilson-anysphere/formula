@@ -200,9 +200,15 @@ export class InlineEditOverlay {
   }
 
   close(): void {
+    if (this.approvalResolver) {
+      // Ensure pending approval prompts never hang if the overlay is closed externally
+      // (e.g. user cancels while the tool loop is still running).
+      const resolve = this.approvalResolver;
+      this.approvalResolver = null;
+      resolve(false);
+    }
     this.callbacks = null;
     this.mode = "prompt";
-    this.approvalResolver = null;
     this.element.style.display = "none";
     this.promptInput.value = "";
     this.previewContainer.style.display = "none";
@@ -234,6 +240,10 @@ export class InlineEditOverlay {
   }
 
   async requestApproval(preview: ToolPlanPreview): Promise<boolean> {
+    // If the overlay is not visible, we can't surface an approval UI.
+    // Fail closed (deny) to avoid hanging the tool loop.
+    if (!this.isOpen()) return false;
+
     if (this.approvalResolver) {
       // Shouldn't happen in normal usage, but ensure we never leave a pending promise.
       this.approvalResolver(false);
