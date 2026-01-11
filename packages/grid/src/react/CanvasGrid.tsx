@@ -1121,6 +1121,46 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   }, []);
 
   useEffect(() => {
+    const vTrack = vTrackRef.current;
+    if (!vTrack) return;
+
+    const onTrackPointerDown = (event: PointerEvent) => {
+      if (event.target !== vTrack) return;
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+
+      // Track clicks should scroll but must not start a selection drag.
+      event.preventDefault();
+      event.stopPropagation();
+
+      const viewport = renderer.scroll.getViewportState();
+      const maxScrollY = viewport.maxScrollY;
+      const trackRect = vTrack.getBoundingClientRect();
+
+      const thumb = computeScrollbarThumb({
+        scrollPos: renderer.scroll.getScroll().y,
+        viewportSize: Math.max(0, viewport.height - viewport.frozenHeight),
+        contentSize: Math.max(0, viewport.totalHeight - viewport.frozenHeight),
+        trackSize: trackRect.height
+      });
+
+      const thumbTravel = Math.max(0, trackRect.height - thumb.size);
+      if (thumbTravel === 0 || maxScrollY === 0) return;
+
+      const pointerPos = event.clientY - trackRect.top;
+      const targetOffset = pointerPos - thumb.size / 2;
+      const clamped = clamp(targetOffset, 0, thumbTravel);
+      const nextScroll = (clamped / thumbTravel) * maxScrollY;
+
+      renderer.setScroll(renderer.scroll.getScroll().x, nextScroll);
+      syncScrollbars();
+    };
+
+    vTrack.addEventListener("pointerdown", onTrackPointerDown, { passive: false });
+    return () => vTrack.removeEventListener("pointerdown", onTrackPointerDown);
+  }, []);
+
+  useEffect(() => {
     const hThumb = hThumbRef.current;
     const hTrack = hTrackRef.current;
     if (!hThumb || !hTrack) return;
@@ -1167,6 +1207,46 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     hThumb.addEventListener("pointerdown", onPointerDown, { passive: false });
     return () => hThumb.removeEventListener("pointerdown", onPointerDown);
+  }, []);
+
+  useEffect(() => {
+    const hTrack = hTrackRef.current;
+    if (!hTrack) return;
+
+    const onTrackPointerDown = (event: PointerEvent) => {
+      if (event.target !== hTrack) return;
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+
+      // Track clicks should scroll but must not start a selection drag.
+      event.preventDefault();
+      event.stopPropagation();
+
+      const viewport = renderer.scroll.getViewportState();
+      const maxScrollX = viewport.maxScrollX;
+      const trackRect = hTrack.getBoundingClientRect();
+
+      const thumb = computeScrollbarThumb({
+        scrollPos: renderer.scroll.getScroll().x,
+        viewportSize: Math.max(0, viewport.width - viewport.frozenWidth),
+        contentSize: Math.max(0, viewport.totalWidth - viewport.frozenWidth),
+        trackSize: trackRect.width
+      });
+
+      const thumbTravel = Math.max(0, trackRect.width - thumb.size);
+      if (thumbTravel === 0 || maxScrollX === 0) return;
+
+      const pointerPos = event.clientX - trackRect.left;
+      const targetOffset = pointerPos - thumb.size / 2;
+      const clamped = clamp(targetOffset, 0, thumbTravel);
+      const nextScroll = (clamped / thumbTravel) * maxScrollX;
+
+      renderer.setScroll(nextScroll, renderer.scroll.getScroll().y);
+      syncScrollbars();
+    };
+
+    hTrack.addEventListener("pointerdown", onTrackPointerDown, { passive: false });
+    return () => hTrack.removeEventListener("pointerdown", onTrackPointerDown);
   }, []);
 
   const requestCellEdit = (options?: { initialKey?: string }) => {
