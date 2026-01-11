@@ -568,51 +568,121 @@ function EngineDemoApp() {
     const sourceHeight = source0.endRow0Exclusive - source0.startRow0;
     const sourceWidth = source0.endCol0Exclusive - source0.startCol0;
 
-    const numericSeries = (() => {
+    const fillSeries = (() => {
       const eps = 1e-9;
 
-      const seriesFromValues = (values: number[]): { start: number; step: number } | null => {
+      type Series =
+        | { kind: "number"; start: number; step: number }
+        | { kind: "text"; prefix: string; suffix: string; start: number; step: number; padWidth: number };
+
+      const seriesFromNumbers = (values: number[]): Series | null => {
         if (values.length < 2) return null;
         const step = values[1] - values[0];
         for (let i = 2; i < values.length; i++) {
           const delta = values[i] - values[i - 1]!;
           if (Math.abs(delta - step) > eps) return null;
         }
-        return { start: values[0]!, step };
+        return { kind: "number", start: values[0]!, step };
+      };
+
+      const seriesFromText = (values: string[]): Series | null => {
+        if (values.length < 2) return null;
+        const parsed = values.map((value) => /^(.*?)(\d+)([^0-9]*)$/.exec(value));
+        if (parsed.some((match) => !match)) return null;
+
+        const [first] = parsed as RegExpExecArray[];
+        const prefix = first![1] ?? "";
+        const suffix = first![3] ?? "";
+        const width = (first![2] ?? "").length;
+        if (width === 0) return null;
+
+        const nums: number[] = [];
+        for (const match of parsed as RegExpExecArray[]) {
+          if ((match[1] ?? "") !== prefix) return null;
+          if ((match[3] ?? "") !== suffix) return null;
+          if ((match[2] ?? "").length !== width) return null;
+          nums.push(Number.parseInt(match[2]!, 10));
+        }
+
+        const step = nums[1]! - nums[0]!;
+        for (let i = 2; i < nums.length; i++) {
+          const delta = nums[i]! - nums[i - 1]!;
+          if (delta !== step) return null;
+        }
+
+        return { kind: "text", prefix, suffix, start: nums[0]!, step, padWidth: width };
       };
 
       const isVertical = direction === "down" || direction === "up";
       if (isVertical && sourceHeight >= 2) {
-        const columns: Array<{ start: number; step: number } | null> = [];
+        const columns: Array<Series | null> = [];
         for (let c = 0; c < sourceWidth; c++) {
-          const values: number[] = [];
+          let kind: "number" | "text" | null = null;
+          const numberValues: number[] = [];
+          const textValues: string[] = [];
           for (let r = 0; r < sourceHeight; r++) {
             const input = (sourceCells[r]?.[c]?.input ?? null) as CellScalar;
-            if (typeof input !== "number" || !Number.isFinite(input)) {
-              values.length = 0;
-              break;
+            if (typeof input === "number" && Number.isFinite(input)) {
+              if (kind === "text") {
+                kind = null;
+                break;
+              }
+              kind = "number";
+              numberValues.push(input);
+              continue;
             }
-            values.push(input);
+
+            if (typeof input === "string" && !isFormulaInput(input)) {
+              if (kind === "number") {
+                kind = null;
+                break;
+              }
+              kind = "text";
+              textValues.push(input);
+              continue;
+            }
+
+            kind = null;
+            break;
           }
-          columns.push(values.length > 0 ? seriesFromValues(values) : null);
+          columns.push(kind === "number" ? seriesFromNumbers(numberValues) : kind === "text" ? seriesFromText(textValues) : null);
         }
         return columns.some((series) => series) ? ({ axis: "vertical" as const, columns } as const) : null;
       }
 
       const isHorizontal = direction === "left" || direction === "right";
       if (isHorizontal && sourceWidth >= 2) {
-        const rows: Array<{ start: number; step: number } | null> = [];
+        const rows: Array<Series | null> = [];
         for (let r = 0; r < sourceHeight; r++) {
-          const values: number[] = [];
+          let kind: "number" | "text" | null = null;
+          const numberValues: number[] = [];
+          const textValues: string[] = [];
           for (let c = 0; c < sourceWidth; c++) {
             const input = (sourceCells[r]?.[c]?.input ?? null) as CellScalar;
-            if (typeof input !== "number" || !Number.isFinite(input)) {
-              values.length = 0;
-              break;
+            if (typeof input === "number" && Number.isFinite(input)) {
+              if (kind === "text") {
+                kind = null;
+                break;
+              }
+              kind = "number";
+              numberValues.push(input);
+              continue;
             }
-            values.push(input);
+
+            if (typeof input === "string" && !isFormulaInput(input)) {
+              if (kind === "number") {
+                kind = null;
+                break;
+              }
+              kind = "text";
+              textValues.push(input);
+              continue;
+            }
+
+            kind = null;
+            break;
           }
-          rows.push(values.length > 0 ? seriesFromValues(values) : null);
+          rows.push(kind === "number" ? seriesFromNumbers(numberValues) : kind === "text" ? seriesFromText(textValues) : null);
         }
         return rows.some((series) => series) ? ({ axis: "horizontal" as const, rows } as const) : null;
       }
@@ -625,20 +695,36 @@ function EngineDemoApp() {
     const updates: Array<{ address: string; value: CellScalar; sheet: string }> = [];
     for (let row0 = fillArea0.startRow0; row0 < fillArea0.endRow0Exclusive; row0++) {
       for (let col0 = fillArea0.startCol0; col0 < fillArea0.endCol0Exclusive; col0++) {
-        if (numericSeries?.axis === "vertical") {
-          const series = numericSeries.columns[col0 - source0.startCol0];
+        if (fillSeries?.axis === "vertical") {
+          const series = fillSeries.columns[col0 - source0.startCol0];
           if (series) {
             const k = row0 - source0.startRow0;
-            updates.push({ address: toA1(row0, col0), value: series.start + series.step * k, sheet: activeSheet });
+            let value: CellScalar;
+            if (series.kind === "number") {
+              value = series.start + series.step * k;
+            } else {
+              const n = series.start + series.step * k;
+              const digits = Math.abs(n).toString().padStart(series.padWidth, "0");
+              value = `${series.prefix}${n < 0 ? "-" : ""}${digits}${series.suffix}`;
+            }
+            updates.push({ address: toA1(row0, col0), value, sheet: activeSheet });
             continue;
           }
         }
 
-        if (numericSeries?.axis === "horizontal") {
-          const series = numericSeries.rows[row0 - source0.startRow0];
+        if (fillSeries?.axis === "horizontal") {
+          const series = fillSeries.rows[row0 - source0.startRow0];
           if (series) {
             const k = col0 - source0.startCol0;
-            updates.push({ address: toA1(row0, col0), value: series.start + series.step * k, sheet: activeSheet });
+            let value: CellScalar;
+            if (series.kind === "number") {
+              value = series.start + series.step * k;
+            } else {
+              const n = series.start + series.step * k;
+              const digits = Math.abs(n).toString().padStart(series.padWidth, "0");
+              value = `${series.prefix}${n < 0 ? "-" : ""}${digits}${series.suffix}`;
+            }
+            updates.push({ address: toA1(row0, col0), value, sheet: activeSheet });
             continue;
           }
         }

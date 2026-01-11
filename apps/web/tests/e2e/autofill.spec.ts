@@ -231,4 +231,42 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await page.mouse.click(k4Center.x, k4Center.y);
   await expect(page.getByTestId("active-address")).toHaveText("K4");
   await expect(page.getByTestId("formula-bar-value")).toHaveText("8");
+
+  // Text series: G8="Item 1", G9="Item 3" -> fill down to G11.
+  const g8Center = await cellCenter(7, 6);
+  await page.mouse.click(g8Center.x, g8Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("G8");
+  await expect(input).toHaveValue("");
+  await input.fill("Item 1");
+  await input.press("Enter");
+  await expect(input).toHaveValue("Item 1");
+
+  const g9Center = await cellCenter(8, 6);
+  await page.mouse.click(g9Center.x, g9Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("G9");
+  await expect(input).toHaveValue("");
+  await input.fill("Item 3");
+  await input.press("Enter");
+  await expect(input).toHaveValue("Item 3");
+
+  await page.mouse.move(g8Center.x, g8Center.y);
+  await page.mouse.down();
+  await page.mouse.move(g9Center.x, g9Center.y);
+  await page.mouse.up();
+
+  const g9Handle = await fillHandleCenter();
+  const g11Center = await cellCenter(10, 6);
+  await page.mouse.move(g9Handle.x, g9Handle.y);
+  await page.mouse.down();
+  await page.mouse.move(g9Handle.x, g11Center.y);
+  await page.mouse.up();
+
+  const g10Center = await cellCenter(9, 6);
+  await page.mouse.click(g10Center.x, g10Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("G10");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("Item 5");
+
+  await page.mouse.click(g11Center.x, g11Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("G11");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("Item 7");
 });
