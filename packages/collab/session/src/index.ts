@@ -6,6 +6,11 @@ import { FormulaConflictMonitor, type FormulaConflict } from "@formula/collab-co
 import { ensureWorkbookSchema } from "@formula/collab-workbook";
 
 import { assertValidRole, getCellPermissions, maskCellValue } from "../../permissions/index.js";
+import {
+  makeCellKey as makeCellKeyImpl,
+  normalizeCellKey as normalizeCellKeyImpl,
+  parseCellKey as parseCellKeyImpl,
+} from "./cell-key.js";
 
 export type DocumentRole = "owner" | "admin" | "editor" | "commenter" | "viewer";
 
@@ -106,40 +111,23 @@ export interface CollabCell {
 }
 
 export function makeCellKey(cell: CellAddress): string {
-  return `${cell.sheetId}:${cell.row}:${cell.col}`;
+  return makeCellKeyImpl(cell);
 }
 
 export function parseCellKey(
   key: string,
   options: { defaultSheetId?: string } = {}
 ): CellAddress | null {
-  const defaultSheetId = options.defaultSheetId ?? "Sheet1";
-  if (typeof key !== "string" || key.length === 0) return null;
+  const parsed = parseCellKeyImpl(key, options);
+  if (!parsed) return null;
+  return { sheetId: parsed.sheetId, row: parsed.row, col: parsed.col };
+}
 
-  const parts = key.split(":");
-  if (parts.length === 3) {
-    const sheetId = parts[0] || defaultSheetId;
-    const row = Number(parts[1]);
-    const col = Number(parts[2]);
-    if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) return null;
-    return { sheetId, row, col };
-  }
-
-  // Some internal modules use `${sheetId}:${row},${col}`.
-  if (parts.length === 2) {
-    const sheetId = parts[0] || defaultSheetId;
-    const m = parts[1].match(/^(\d+),(\d+)$/);
-    if (m) {
-      return { sheetId, row: Number(m[1]), col: Number(m[2]) };
-    }
-  }
-
-  const m = key.match(/^r(\d+)c(\d+)$/);
-  if (m) {
-    return { sheetId: defaultSheetId, row: Number(m[1]), col: Number(m[2]) };
-  }
-
-  return null;
+export function normalizeCellKey(
+  key: string,
+  options: { defaultSheetId?: string } = {}
+): string | null {
+  return normalizeCellKeyImpl(key, options);
 }
 
 function getYMapCell(cellData: unknown): Y.Map<unknown> | null {

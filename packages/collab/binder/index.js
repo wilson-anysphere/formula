@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 
-import { makeCellKey, parseCellKey } from "../session/src/index.ts";
+import { makeCellKey, normalizeCellKey, parseCellKey } from "../session/src/cell-key.js";
 
 function stableStringify(value) {
   if (value === undefined) return "undefined";
@@ -28,16 +28,17 @@ function getYMapCell(cellData) {
 }
 
 function normalizeFormula(value) {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? value : null;
+  if (value == null) return null;
+  const trimmed = String(value).trimStart();
+  if (trimmed === "") return null;
+  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
 }
 
 /**
  * @typedef {{
  *   value: any,
  *   formula: string | null,
- *   formatKey: string | null | undefined,
+ *   formatKey: string | undefined,
  * }} NormalizedCell
  */
 
@@ -46,7 +47,7 @@ function normalizeFormula(value) {
  *   value: any,
  *   formula: string | null,
  *   format: any | undefined,
- *   formatKey: string | null | undefined,
+ *   formatKey: string | undefined,
  * }} ParsedYjsCell
  */
 
@@ -68,6 +69,12 @@ function readCellFromYjs(cell) {
   return { value: cell.get("value") ?? null, formula: null, format, formatKey };
 }
 
+function sameNormalizedCell(a, b) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return a.formula === b.formula && Object.is(a.value, b.value) && a.formatKey === b.formatKey;
+}
+
 /**
  * Bind a Yjs spreadsheet document (the `cells` root type) to a desktop `DocumentController`.
  *
@@ -77,7 +84,7 @@ function readCellFromYjs(cell) {
  * @param {{
  *   ydoc: import("yjs").Doc,
  *   documentController: import("../../../apps/desktop/src/document/documentController.js").DocumentController,
- *   undoService?: { transact?: (fn: () => void) => void, origin?: any } | null,
+ *   undoService?: { transact?: (fn: () => void) => void, origin?: any, localOrigins?: Set<any> } | null,
  *   defaultSheetId?: string,
  *   userId?: string | null,
  * }} options
@@ -95,7 +102,33 @@ export function bindYjsToDocumentController(options) {
   if (!documentController) throw new Error("bindYjsToDocumentController requires { documentController }");
 
   const cells = ydoc.getMap("cells");
-  const localOrigin = undoService?.origin ?? { type: "document-controller:binder" };
+
+  // Stable origin token for local DocumentController -> Yjs transactions when
+  // we don't have a dedicated undo service wrapper.
+  const binderOrigin = undoService?.origin ?? { type: "document-controller:binder" };
+
+  /**
+   * Yjs "origin" values that correspond to local DocumentController-driven writes.
+   * We ignore these in the Yjs -> DocumentController observer to avoid echo work.
+   *
+   * Important: we intentionally do NOT ignore Y.UndoManager (used for undo/redo)
+   * origins so local undo/redo still updates the DocumentController.
+   * @type {Set<any>}
+   */
+  const localOrigins = new Set([binderOrigin]);
+
+  if (undoService?.origin) localOrigins.add(undoService.origin);
+
+  // Some undo services expose a `localOrigins` set which includes both the
+  // origin token and the UndoManager instance. We only want to treat the origin
+  // token as "local" for echo suppression.
+  const maybeLocalOrigins = undoService?.localOrigins;
+  if (maybeLocalOrigins && typeof maybeLocalOrigins[Symbol.iterator] === "function") {
+    for (const origin of maybeLocalOrigins) {
+      if (isUndoManager(origin)) continue;
+      localOrigins.add(origin);
+    }
+  }
 
   /** @type {Map<string, NormalizedCell>} */
   let cache = new Map();
@@ -103,24 +136,101 @@ export function bindYjsToDocumentController(options) {
   let applyingRemote = false;
 
   /**
-   * @param {string[]} cellKeys
-   * @returns {any[]}
+   * Track raw Yjs keys that correspond to a canonical `${sheetId}:${row}:${col}` key.
+   *
+   * This lets us apply DocumentController -> Yjs mutations without needing to scan
+   * the full cells map even when the doc contains historical key encodings
+   * (`${sheetId}:${row},${col}` or `r{row}c{col}`).
+   *
+   * @type {Map<string, Set<string>>}
    */
-  function computeExternalDeltas(cellKeys) {
+  const yjsKeysByCell = new Map();
+
+  /**
+   * @param {string} canonicalKey
+   * @param {string} rawKey
+   */
+  function trackRawKey(canonicalKey, rawKey) {
+    let set = yjsKeysByCell.get(canonicalKey);
+    if (!set) {
+      set = new Set();
+      yjsKeysByCell.set(canonicalKey, set);
+    }
+    set.add(rawKey);
+  }
+
+  /**
+   * @param {string} canonicalKey
+   * @param {string} rawKey
+   */
+  function untrackRawKey(canonicalKey, rawKey) {
+    const set = yjsKeysByCell.get(canonicalKey);
+    if (!set) return;
+    set.delete(rawKey);
+    if (set.size === 0) yjsKeysByCell.delete(canonicalKey);
+  }
+
+  /**
+   * @param {string} rawKey
+   * @returns {string | null}
+   */
+  function canonicalKeyFromRawKey(rawKey) {
+    return normalizeCellKey(rawKey, { defaultSheetId });
+  }
+
+  /**
+   * @param {string} canonicalKey
+   * @returns {ParsedYjsCell | null}
+   */
+  function readCanonicalCellFromYjs(canonicalKey) {
+    const rawKeys = yjsKeysByCell.get(canonicalKey);
+    let candidates;
+    if (rawKeys && rawKeys.size > 0) {
+      if (rawKeys.has(canonicalKey)) {
+        candidates = [canonicalKey, ...Array.from(rawKeys).filter((k) => k !== canonicalKey)];
+      } else {
+        candidates = rawKeys;
+      }
+    } else {
+      candidates = [canonicalKey];
+    }
+
+    for (const rawKey of candidates) {
+      const cellData = cells.get(rawKey);
+      const cell = getYMapCell(cellData);
+      if (!cell) continue;
+      const parsed = readCellFromYjs(cell);
+      const hasData =
+        parsed.value != null || parsed.formula != null || parsed.formatKey !== undefined;
+      if (!hasData) continue;
+      return parsed;
+    }
+
+    return null;
+  }
+
+  /**
+   * Apply a set of canonical cell keys from Yjs into DocumentController, batching
+   * into a single `applyExternalDeltas` call.
+   *
+   * @param {Set<string>} changedCanonicalKeys
+   */
+  function applyYjsChangesToDocumentController(changedCanonicalKeys) {
+    if (!changedCanonicalKeys || changedCanonicalKeys.size === 0) return;
+
     /** @type {any[]} */
     const deltas = [];
+    /** @type {Map<string, NormalizedCell | null>} */
+    const nextByKey = new Map();
 
-    for (const cellKey of cellKeys) {
-      const parsed = parseCellKey(cellKey, { defaultSheetId });
+    for (const canonicalKey of changedCanonicalKeys) {
+      const parsed = parseCellKey(canonicalKey, { defaultSheetId });
       if (!parsed) continue;
 
       const before = documentController.getCell(parsed.sheetId, { row: parsed.row, col: parsed.col });
+      const prev = cache.get(canonicalKey) ?? null;
 
-      const prev = cache.get(cellKey) ?? null;
-
-      const cellData = cells.get(cellKey);
-      const cell = getYMapCell(cellData);
-      const curr = cell ? readCellFromYjs(cell) : null;
+      const curr = readCanonicalCellFromYjs(canonicalKey);
 
       const currValue = curr?.formula ? null : (curr?.value ?? null);
       const currFormula = curr?.formula ?? null;
@@ -134,51 +244,43 @@ export function bindYjsToDocumentController(options) {
         styleId = 0;
       }
 
-      const after = {
-        value: currValue,
-        formula: currFormula,
-        styleId,
-      };
+      const next =
+        curr && (currValue != null || currFormula != null || curr.formatKey !== undefined)
+          ? { value: currValue, formula: currFormula, formatKey: curr.formatKey }
+          : null;
+      nextByKey.set(canonicalKey, next);
 
+      if (sameNormalizedCell(prev, next)) continue;
+
+      const after = { value: currValue, formula: currFormula, styleId };
       if (
         (before.value ?? null) === (after.value ?? null) &&
         (before.formula ?? null) === (after.formula ?? null) &&
         before.styleId === after.styleId
       ) {
-        // Even if the Yjs cell changed (e.g. modified timestamp), avoid
-        // generating a no-op external delta.
-      } else {
-        deltas.push({
-          sheetId: parsed.sheetId,
-          row: parsed.row,
-          col: parsed.col,
-          before,
-          after,
-        });
+        continue;
       }
 
-      // Update cache after computing the delta. Include format-only cells.
-      if (curr && (currValue != null || currFormula != null || curr.formatKey !== undefined)) {
-        cache.set(cellKey, { value: currValue, formula: currFormula, formatKey: curr.formatKey });
-      } else {
-        cache.delete(cellKey);
-      }
+      deltas.push({
+        sheetId: parsed.sheetId,
+        row: parsed.row,
+        col: parsed.col,
+        before,
+        after,
+      });
     }
 
-    return deltas;
-  }
+    const updateCache = () => {
+      for (const [canonicalKey, next] of nextByKey.entries()) {
+        if (!next) cache.delete(canonicalKey);
+        else cache.set(canonicalKey, next);
+      }
+    };
 
-  /**
-   * Apply Yjs changes for the provided cell keys into the DocumentController.
-   *
-   * This avoids rescanning the entire Yjs `cells` map on every update by relying on
-   * Yjs observeDeep events to supply the changed keys.
-   *
-   * @param {string[]} cellKeys
-   */
-  function applyYjsToDocumentController(cellKeys) {
-    const deltas = computeExternalDeltas(cellKeys);
-    if (deltas.length === 0) return;
+    if (deltas.length === 0) {
+      updateCache();
+      return;
+    }
 
     applyingRemote = true;
     try {
@@ -196,8 +298,76 @@ export function bindYjsToDocumentController(options) {
       }
     } finally {
       applyingRemote = false;
+      updateCache();
     }
   }
+
+  /**
+   * One-time initial hydration of existing Yjs state into DocumentController.
+   * Allowed to scan the full `cells` map exactly once at bind time.
+   */
+  function hydrateFromYjs() {
+    /** @type {Set<string>} */
+    const changedKeys = new Set();
+    cells.forEach((_cellData, rawKey) => {
+      const canonicalKey = canonicalKeyFromRawKey(rawKey);
+      if (!canonicalKey) return;
+      trackRawKey(canonicalKey, rawKey);
+      changedKeys.add(canonicalKey);
+    });
+
+    applyYjsChangesToDocumentController(changedKeys);
+  }
+
+  /**
+   * @param {any[]} events
+   * @param {any} transaction
+   */
+  const handleCellsDeepChange = (events, transaction) => {
+    if (!events || events.length === 0) return;
+    const origin = transaction?.origin ?? null;
+    if (localOrigins.has(origin)) return;
+
+    /** @type {Set<string>} */
+    const changed = new Set();
+
+    for (const event of events) {
+      // Nested map updates: event.path[0] is the root cells map key.
+      const path = event?.path;
+      if (Array.isArray(path) && path.length > 0) {
+        const rawKey = path[0];
+        if (typeof rawKey !== "string") continue;
+
+        const changes = event?.changes?.keys;
+        if (changes && !(changes.has("value") || changes.has("formula") || changes.has("format"))) continue;
+
+        const canonicalKey = canonicalKeyFromRawKey(rawKey);
+        if (!canonicalKey) continue;
+        trackRawKey(canonicalKey, rawKey);
+        changed.add(canonicalKey);
+        continue;
+      }
+
+      // Root map changes: keys added/updated/removed.
+      const changes = event?.changes?.keys;
+      if (!changes) continue;
+      for (const [rawKey, change] of changes.entries()) {
+        if (typeof rawKey !== "string") continue;
+        const canonicalKey = canonicalKeyFromRawKey(rawKey);
+        if (!canonicalKey) continue;
+
+        if (change?.action === "delete") {
+          untrackRawKey(canonicalKey, rawKey);
+        } else {
+          trackRawKey(canonicalKey, rawKey);
+        }
+
+        changed.add(canonicalKey);
+      }
+    }
+
+    applyYjsChangesToDocumentController(changed);
+  };
 
   /**
    * @param {any} payload
@@ -209,7 +379,7 @@ export function bindYjsToDocumentController(options) {
 
     const apply = () => {
       for (const delta of deltas) {
-        const cellKey = makeCellKey({ sheetId: delta.sheetId, row: delta.row, col: delta.col });
+        const canonicalKey = makeCellKey({ sheetId: delta.sheetId, row: delta.row, col: delta.col });
 
         const value = delta.after?.value ?? null;
         const formula = normalizeFormula(delta.after?.formula ?? null);
@@ -217,104 +387,82 @@ export function bindYjsToDocumentController(options) {
         const format = styleId === 0 ? null : documentController.styleTable.get(styleId);
         const formatKey = styleId === 0 ? undefined : stableStringify(format);
 
+        const rawKeys = yjsKeysByCell.get(canonicalKey);
+        const targets = rawKeys && rawKeys.size > 0 ? Array.from(rawKeys) : [canonicalKey];
+
         if (value == null && formula == null && styleId === 0) {
-          cells.delete(cellKey);
-          cache.delete(cellKey);
+          for (const rawKey of targets) {
+            cells.delete(rawKey);
+            untrackRawKey(canonicalKey, rawKey);
+          }
+          cache.delete(canonicalKey);
           continue;
         }
 
-        let cellData = cells.get(cellKey);
-        let cell = getYMapCell(cellData);
-        if (!cell) {
-          cell = new Y.Map();
-          cells.set(cellKey, cell);
+        for (const rawKey of targets) {
+          let cellData = cells.get(rawKey);
+          let cell = getYMapCell(cellData);
+          if (!cell) {
+            cell = new Y.Map();
+            cells.set(rawKey, cell);
+          }
+
+          if (formula != null) {
+            cell.set("formula", formula);
+            cell.set("value", null);
+          } else {
+            cell.delete("formula");
+            cell.set("value", value);
+          }
+
+          if (styleId === 0) {
+            cell.delete("format");
+          } else {
+            cell.set("format", format);
+          }
+
+          cell.set("modified", Date.now());
+          if (userId) cell.set("modifiedBy", userId);
+
+          trackRawKey(canonicalKey, rawKey);
         }
 
-        if (formula != null) {
-          cell.set("formula", formula);
-          cell.set("value", null);
-          cache.set(cellKey, { value: null, formula, formatKey });
+        const normalizedValue = formula != null ? null : value;
+        const normalizedFormula = formula != null ? formula : null;
+        if (normalizedValue != null || normalizedFormula != null || formatKey !== undefined) {
+          cache.set(canonicalKey, { value: normalizedValue, formula: normalizedFormula, formatKey });
         } else {
-          cell.delete("formula");
-          cell.set("value", value);
-          cache.set(cellKey, { value, formula: null, formatKey });
+          cache.delete(canonicalKey);
         }
-
-        if (styleId === 0) {
-          cell.delete("format");
-        } else {
-          cell.set("format", format);
-        }
-
-        cell.set("modified", Date.now());
-        if (userId) cell.set("modifiedBy", userId);
       }
     };
 
     if (typeof undoService?.transact === "function") {
       undoService.transact(apply);
     } else {
-      ydoc.transact(apply, localOrigin);
+      ydoc.transact(apply, binderOrigin);
     }
   };
 
   const unsubscribe = documentController.on("change", handleDocumentChange);
 
-  /**
-   * Observe deep Yjs changes so we can apply only the touched cell keys to the
-   * DocumentController, rather than rescanning the entire map on every update.
-   *
-   * @param {any[]} events
-   */
-  const handleYjsCellsChange = (events, transaction) => {
-    if (!Array.isArray(events) || events.length === 0) return;
-    const origin = transaction?.origin ?? events[0]?.transaction?.origin ?? null;
-    // Ignore transactions that originated from the DocumentController -> Yjs path.
-    if (origin === localOrigin) return;
-
-    /** @type {Set<string>} */
-    const changedKeys = new Set();
-
-    for (const event of events) {
-      if (!event) continue;
-
-      // Root map changes (cell added/removed/replaced).
-      if (event.target === cells) {
-        const changes = event.changes?.keys;
-        if (changes && typeof changes.forEach === "function") {
-          changes.forEach((_change, key) => {
-            if (typeof key === "string") changedKeys.add(key);
-          });
-        }
-        continue;
-      }
-
-      // Nested cell changes (value/formula/format/etc).
-      const path = event.path;
-      if (Array.isArray(path) && typeof path[0] === "string") {
-        changedKeys.add(path[0]);
-      }
-    }
-
-    if (changedKeys.size === 0) return;
-    applyYjsToDocumentController(Array.from(changedKeys));
-  };
-
-  cells.observeDeep(handleYjsCellsChange);
+  cells.observeDeep(handleCellsDeepChange);
 
   // Initial hydration (and for cases where the provider has already applied some state).
-  const allKeys = [];
-  cells.forEach((_cellData, key) => {
-    if (typeof key === "string") allKeys.push(key);
-  });
-  if (allKeys.length > 0) {
-    applyYjsToDocumentController(allKeys);
-  }
+  hydrateFromYjs();
 
   return {
     destroy() {
       unsubscribe?.();
-      cells.unobserveDeep(handleYjsCellsChange);
+      cells.unobserveDeep(handleCellsDeepChange);
     },
   };
 }
+
+function isUndoManager(value) {
+  if (!value || typeof value !== "object") return false;
+  const maybe = value;
+  if (maybe.constructor?.name === "UndoManager") return true;
+  return typeof maybe.undo === "function" && typeof maybe.redo === "function" && maybe.trackedOrigins instanceof Set;
+}
+

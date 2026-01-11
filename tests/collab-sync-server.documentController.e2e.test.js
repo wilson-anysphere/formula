@@ -123,6 +123,17 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
 
   await Promise.all([clientA.session.whenSynced(), clientB.session.whenSynced()]);
 
+  // After initial hydration, remote updates must not trigger full scans of the Yjs
+  // cells map (the binder should be O(changed-cells), not O(total-cells)).
+  const cellsB = clientB.session.cells;
+  const originalForEach = cellsB.forEach;
+  cellsB.forEach = () => {
+    throw new Error("binder performed a full cells-map scan after hydration");
+  };
+  t.after(() => {
+    cellsB.forEach = originalForEach;
+  });
+
   // --- Edits propagate A -> B ---
   clientA.session.setCellFormula("Sheet1:0:1", "=1+1");
   clientA.documentController.setCellValue("Sheet1", "A1", "hello");

@@ -1,37 +1,21 @@
 import * as Y from "yjs";
 import { cellKey } from "../diff/semanticDiff.js";
+import { parseCellKey } from "../../../collab/session/src/cell-key.js";
 
 /**
  * Parse a spreadsheet cell key. Supports:
  * - `${sheetId}:${row}:${col}` (docs/06-collaboration.md)
- * - `r{row}c{col}` (unit-test convenience)
+ * - `${sheetId}:${row},${col}` (legacy internal encoding)
+ * - `r{row}c{col}` (unit-test convenience, resolved against `defaultSheetId`)
  *
  * @param {string} key
- * @returns {{ sheetId: string | null, row: number, col: number } | null}
+ * @param {{ defaultSheetId?: string }} [opts]
+ * @returns {{ sheetId: string, row: number, col: number } | null}
  */
-export function parseSpreadsheetCellKey(key) {
-  const colon = key.split(":");
-  if (colon.length === 3) {
-    const row = Number(colon[1]);
-    const col = Number(colon[2]);
-    if (!Number.isFinite(row) || !Number.isFinite(col)) return null;
-    return { sheetId: colon[0], row, col };
-  }
-
-  // Some internal modules use `${sheetId}:${row},${col}`.
-  if (colon.length === 2) {
-    const m = colon[1].match(/^(\d+),(\d+)$/);
-    if (m) {
-      return { sheetId: colon[0], row: Number(m[1]), col: Number(m[2]) };
-    }
-  }
-
-  const m = key.match(/^r(\d+)c(\d+)$/);
-  if (m) {
-    return { sheetId: null, row: Number(m[1]), col: Number(m[2]) };
-  }
-
-  return null;
+export function parseSpreadsheetCellKey(key, opts = {}) {
+  const parsed = parseCellKey(key, { defaultSheetId: opts.defaultSheetId ?? "Sheet1" });
+  if (!parsed) return null;
+  return { sheetId: parsed.sheetId, row: parsed.row, col: parsed.col };
 }
 
 /**
