@@ -129,6 +129,107 @@ describe("CanvasGrid prefetch overscan", () => {
     restoreActEnvironment(previousActEnvironment);
   });
 
+  it("uses the default overscan when not provided", async () => {
+    const previousActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const prefetch = vi.fn<(range: CellRange) => void>();
+
+    vi.stubGlobal(
+      "ResizeObserver",
+      class ResizeObserver {
+        observe(_target: Element): void {}
+        unobserve(_target: Element): void {}
+        disconnect(): void {}
+      }
+    );
+
+    vi.stubGlobal("requestAnimationFrame", vi.fn((_cb: FrameRequestCallback) => 0));
+
+    const viewportWidth = 50;
+    const viewportHeight = 40;
+
+    const defaultOverscanRows = 10;
+    const defaultOverscanCols = 5;
+
+    const rowHeight = 10;
+    const colWidth = 10;
+
+    const boundingRect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(
+        () =>
+          ({
+            width: viewportWidth,
+            height: viewportHeight,
+            top: 0,
+            left: 0,
+            right: viewportWidth,
+            bottom: viewportHeight,
+            x: 0,
+            y: 0,
+            toJSON: () => ({})
+          }) as DOMRect
+      );
+
+    const ctxStub: Partial<CanvasRenderingContext2D> = {
+      setTransform: vi.fn(),
+      measureText: (text: string) =>
+        ({
+          width: text.length * 6,
+          actualBoundingBoxAscent: 8,
+          actualBoundingBoxDescent: 2
+        }) as TextMetrics
+    };
+
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .mockImplementation(() => ctxStub as any);
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        React.createElement(CanvasGrid, {
+          provider: {
+            getCell: () => null,
+            prefetch
+          },
+          rowCount: 100,
+          colCount: 100,
+          defaultRowHeight: rowHeight,
+          defaultColWidth: colWidth
+        })
+      );
+    });
+
+    const lastCall = prefetch.mock.calls.at(-1)?.[0];
+    expect(lastCall).toEqual({
+      startRow: 0,
+      endRow: 14,
+      startCol: 0,
+      endCol: 10
+    });
+    expect(prefetch).toHaveBeenCalledTimes(1);
+
+    // Sanity check: computed from the defaults.
+    expect(lastCall?.endRow).toBe(4 + defaultOverscanRows);
+    expect(lastCall?.endCol).toBe(5 + defaultOverscanCols);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+
+    boundingRect.mockRestore();
+    getContext.mockRestore();
+    vi.unstubAllGlobals();
+    restoreActEnvironment(previousActEnvironment);
+  });
+
   it("clamps overscanned prefetch range to grid bounds", async () => {
     const previousActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
