@@ -379,6 +379,74 @@ fn patcher_updates_cached_string_with_reserved_flags_and_4byte_extra() {
 }
 
 #[test]
+fn patcher_is_byte_identical_for_noop_brt_fmla_bool_with_extra_bytes() {
+    let flags = 0x2222;
+    let extra = [0xAA, 0xBB];
+    let sheet_bin = synthetic_sheet_brt_fmla_bool(flags, true, &extra);
+
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Bool(true),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet");
+
+    assert_eq!(patched, sheet_bin);
+}
+
+#[test]
+fn patcher_is_byte_identical_for_noop_brt_fmla_error_with_extra_bytes() {
+    let flags = 0x2222;
+    let extra = [0xAA, 0xBB];
+    let sheet_bin = synthetic_sheet_brt_fmla_error(flags, 0x07, &extra);
+
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Error(0x07),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet");
+
+    assert_eq!(patched, sheet_bin);
+}
+
+#[test]
+fn patcher_is_byte_identical_for_noop_brt_fmla_string_with_extra_bytes() {
+    // Use flags with reserved bits + phonetic bit set, but no actual phonetic payload. This is a
+    // common real-world shape and is handled by the cached-string offset parser.
+    let flags = 0x2222;
+    let extra = [0xAA, 0xBB, 0xCC, 0xDD];
+    let sheet_bin = synthetic_sheet_brt_fmla_string(flags, "Hello", &extra);
+
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("Hello".to_string()),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet");
+
+    assert_eq!(patched, sheet_bin);
+}
+
+#[test]
 fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_string_with_existing_extra() {
     fn ptg_str(s: &str) -> Vec<u8> {
         let mut out = vec![0x17]; // PtgStr
