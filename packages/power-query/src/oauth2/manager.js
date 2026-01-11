@@ -257,6 +257,9 @@ export class OAuth2Manager {
     }
 
     const accessToken = refreshed.access_token;
+    if (typeof accessToken !== "string" || accessToken.length === 0) {
+      throw new Error(`OAuth2 refresh response for provider '${params.provider.id}' did not include a valid access_token`);
+    }
     const expiresInSeconds = parsePositiveInt(refreshed.expires_in);
     const expiresAtMs = expiresInSeconds != null ? params.now() + expiresInSeconds * 1000 : null;
     const rotatedRefreshToken =
@@ -362,6 +365,9 @@ export class OAuth2Manager {
     });
 
     const accessToken = token.access_token;
+    if (typeof accessToken !== "string" || accessToken.length === 0) {
+      throw new Error(`OAuth2 token response for provider '${params.provider.id}' did not include a valid access_token`);
+    }
     const expiresInSeconds = parsePositiveInt(token.expires_in);
     const expiresAtMs = expiresInSeconds != null ? params.now() + expiresInSeconds * 1000 : null;
     const refreshToken = typeof token.refresh_token === "string" && token.refresh_token.length > 0 ? token.refresh_token : null;
@@ -508,6 +514,9 @@ export class OAuth2Manager {
     });
 
     const accessToken = token.access_token;
+    if (typeof accessToken !== "string" || accessToken.length === 0) {
+      throw new Error(`OAuth2 token response for provider '${provider.id}' did not include a valid access_token`);
+    }
     const tokenExpiresIn = parsePositiveInt(token.expires_in);
     const accessExpiresAtMs = tokenExpiresIn != null ? now() + tokenExpiresIn * 1000 : null;
     const refreshToken = typeof token.refresh_token === "string" && token.refresh_token.length > 0 ? token.refresh_token : null;

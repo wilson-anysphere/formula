@@ -334,3 +334,32 @@ test("OAuth2Manager: authorization code exchange is not skipped by an in-flight 
   assert.equal(refreshCalls, 1);
   assert.equal(exchangeCalls, 1);
 });
+
+test("OAuth2Manager: rejects token responses missing access_token", async () => {
+  const store = new InMemoryOAuthTokenStore();
+  const now = () => 1_000;
+
+  /** @type {typeof fetch} */
+  const mockFetch = async () =>
+    jsonResponse({
+      // access_token intentionally missing
+      token_type: "Bearer",
+      expires_in: 3600,
+      refresh_token: "refresh-1",
+    });
+
+  const manager = new OAuth2Manager({ tokenStore: store, fetch: mockFetch, now });
+  manager.registerProvider({ id: "example", clientId: "client", tokenEndpoint: "https://auth.example/token", redirectUri: "https://app/callback" });
+
+  await assert.rejects(
+    () =>
+      manager.exchangeAuthorizationCode({
+        providerId: "example",
+        code: "auth-code",
+        redirectUri: "https://app/callback",
+        codeVerifier: "verifier",
+        scopes: ["read"],
+      }),
+    /access_token/,
+  );
+});
