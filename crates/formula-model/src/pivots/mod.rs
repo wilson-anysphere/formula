@@ -9,6 +9,38 @@ pub mod slicers;
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SortOrder {
+    #[default]
+    Ascending,
+    Descending,
+    Manual,
+}
+
+/// Value representation used for manual pivot-field ordering.
+///
+/// This is intentionally lightweight and serde-friendly since it may cross IPC
+/// boundaries.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum PivotKeyPart {
+    Blank,
+    Number(u64),
+    Text(String),
+    Bool(bool),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotField {
+    pub source_field: String,
+    #[serde(default)]
+    pub sort_order: SortOrder,
+    #[serde(default)]
+    pub manual_sort: Option<Vec<PivotKeyPart>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ScalarValue {
     Text(String),

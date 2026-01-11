@@ -10,13 +10,15 @@
 //! - Compute aggregations (sum/count/avg/min/max + stddev/var variants)
 //! - Produce a table with grand totals and basic subtotals.
 
+use chrono::NaiveDate;
+use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub use formula_model::pivots::ShowAsType;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 #[derive(Debug, Error)]
 pub enum PivotError {
@@ -78,6 +80,7 @@ impl Default for GrandTotals {
 pub enum PivotValue {
     Blank,
     Number(f64),
+    Date(NaiveDate),
     Text(String),
     Bool(bool),
 }
@@ -87,6 +90,7 @@ impl PivotValue {
         match self {
             PivotValue::Blank => PivotKeyPart::Blank,
             PivotValue::Number(n) => PivotKeyPart::Number(n.to_bits()),
+            PivotValue::Date(d) => PivotKeyPart::Date(*d),
             PivotValue::Text(s) => PivotKeyPart::Text(s.clone()),
             PivotValue::Bool(b) => PivotKeyPart::Bool(*b),
         }
@@ -103,6 +107,7 @@ impl PivotValue {
                     format!("{n}")
                 }
             }
+            PivotValue::Date(d) => d.to_string(),
             PivotValue::Text(s) => s.clone(),
             PivotValue::Bool(b) => b.to_string(),
         }
@@ -144,6 +149,12 @@ impl From<i64> for PivotValue {
     }
 }
 
+impl From<NaiveDate> for PivotValue {
+    fn from(value: NaiveDate) -> Self {
+        PivotValue::Date(value)
+    }
+}
+
 impl From<bool> for PivotValue {
     fn from(value: bool) -> Self {
         PivotValue::Bool(value)
@@ -155,6 +166,7 @@ impl From<bool> for PivotValue {
 pub enum PivotKeyPart {
     Blank,
     Number(u64),
+    Date(NaiveDate),
     Text(String),
     Bool(bool),
 }
@@ -163,9 +175,8 @@ impl PivotKeyPart {
     fn display_string(&self) -> String {
         match self {
             PivotKeyPart::Blank => String::new(),
-            PivotKeyPart::Number(bits) => {
-                PivotValue::Number(f64::from_bits(*bits)).display_string()
-            }
+            PivotKeyPart::Number(bits) => PivotValue::Number(f64::from_bits(*bits)).display_string(),
+            PivotKeyPart::Date(d) => d.to_string(),
             PivotKeyPart::Text(s) => s.clone(),
             PivotKeyPart::Bool(b) => b.to_string(),
         }
@@ -201,6 +212,7 @@ pub struct PivotCache {
 pub enum PivotFieldType {
     Blank,
     Number,
+    Date,
     Text,
     Bool,
     Mixed,
@@ -300,6 +312,7 @@ impl PivotCache {
         for field in &self.fields {
             let mut samples = Vec::new();
             let mut saw_number = false;
+            let mut saw_date = false;
             let mut saw_text = false;
             let mut saw_bool = false;
             let mut saw_blank = false;
@@ -309,17 +322,19 @@ impl PivotCache {
                 match &value {
                     PivotValue::Blank => saw_blank = true,
                     PivotValue::Number(_) => saw_number = true,
+                    PivotValue::Date(_) => saw_date = true,
                     PivotValue::Text(_) => saw_text = true,
                     PivotValue::Bool(_) => saw_bool = true,
                 }
                 samples.push(value);
             }
 
-            let field_type = match (saw_number, saw_text, saw_bool, saw_blank) {
-                (false, false, false, true) => PivotFieldType::Blank,
-                (true, false, false, _) => PivotFieldType::Number,
-                (false, true, false, _) => PivotFieldType::Text,
-                (false, false, true, _) => PivotFieldType::Bool,
+            let field_type = match (saw_number, saw_date, saw_text, saw_bool, saw_blank) {
+                (false, false, false, false, true) => PivotFieldType::Blank,
+                (true, false, false, false, _) => PivotFieldType::Number,
+                (false, true, false, false, _) => PivotFieldType::Date,
+                (false, false, true, false, _) => PivotFieldType::Text,
+                (false, false, false, true, _) => PivotFieldType::Bool,
                 _ => PivotFieldType::Mixed,
             };
 
@@ -341,6 +356,34 @@ impl PivotCache {
 #[serde(rename_all = "camelCase")]
 pub struct PivotField {
     pub source_field: String,
+    #[serde(default)]
+    pub sort_order: SortOrder,
+    #[serde(default)]
+    pub manual_sort: Option<Vec<PivotKeyPart>>,
+}
+
+impl PivotField {
+    pub fn new(source_field: impl Into<String>) -> Self {
+        Self {
+            source_field: source_field.into(),
+            sort_order: SortOrder::default(),
+            manual_sort: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SortOrder {
+    Ascending,
+    Descending,
+    Manual,
+}
+
+impl Default for SortOrder {
+    fn default() -> Self {
+        Self::Ascending
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -468,12 +511,12 @@ impl CreatePivotTableRequest {
             row_fields: self
                 .row_fields
                 .into_iter()
-                .map(|source_field| PivotField { source_field })
+                .map(PivotField::new)
                 .collect(),
             column_fields: self
                 .column_fields
                 .into_iter()
-                .map(|source_field| PivotField { source_field })
+                .map(PivotField::new)
                 .collect(),
             value_fields: self
                 .value_fields
@@ -540,7 +583,7 @@ impl PivotTable {
 
 fn next_pivot_id() -> String {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-    format!("pivot-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
+    format!("pivot-{}", NEXT_ID.fetch_add(1, AtomicOrdering::Relaxed))
 }
 
 #[derive(Debug, Clone)]
@@ -736,10 +779,20 @@ impl PivotEngine {
         }
 
         let mut row_keys: Vec<PivotKey> = row_keys.into_iter().collect();
-        row_keys.sort_by(|a, b| a.display_strings().cmp(&b.display_strings()));
+        let row_sort_specs = cfg
+            .row_fields
+            .iter()
+            .map(KeySortSpec::for_field)
+            .collect::<Vec<_>>();
+        row_keys.sort_by(|a, b| compare_pivot_keys(a, b, &row_sort_specs));
 
         let mut col_keys: Vec<PivotKey> = col_keys.into_iter().collect();
-        col_keys.sort_by(|a, b| a.display_strings().cmp(&b.display_strings()));
+        let col_sort_specs = cfg
+            .column_fields
+            .iter()
+            .map(KeySortSpec::for_field)
+            .collect::<Vec<_>>();
+        col_keys.sort_by(|a, b| compare_pivot_keys(a, b, &col_sort_specs));
 
         // Ensure at least one column key exists to simplify output logic.
         if cfg.column_fields.is_empty() && col_keys.is_empty() {
@@ -1470,6 +1523,104 @@ impl FieldIndices {
     }
 }
 
+#[derive(Debug, Clone)]
+struct KeySortSpec {
+    sort_order: SortOrder,
+    manual_index: Option<HashMap<PivotKeyPart, usize>>,
+}
+
+impl KeySortSpec {
+    fn for_field(field: &PivotField) -> Self {
+        let manual_index = if field.sort_order == SortOrder::Manual {
+            field.manual_sort.as_ref().map(|items| {
+                let mut index = HashMap::with_capacity(items.len());
+                for (pos, part) in items.iter().enumerate() {
+                    index.entry(part.clone()).or_insert(pos);
+                }
+                index
+            })
+        } else {
+            None
+        };
+
+        Self {
+            sort_order: field.sort_order,
+            manual_index,
+        }
+    }
+}
+
+fn key_part_rank(part: &PivotKeyPart) -> u8 {
+    match part {
+        PivotKeyPart::Number(_) => 0,
+        PivotKeyPart::Date(_) => 1,
+        PivotKeyPart::Text(_) => 2,
+        PivotKeyPart::Bool(_) => 3,
+        PivotKeyPart::Blank => 4,
+    }
+}
+
+fn compare_key_parts_ascending(left: &PivotKeyPart, right: &PivotKeyPart) -> Ordering {
+    use PivotKeyPart::*;
+
+    match (left, right) {
+        (Blank, Blank) => Ordering::Equal,
+        (Blank, _) => Ordering::Greater,
+        (_, Blank) => Ordering::Less,
+
+        (Number(a_bits), Number(b_bits)) => {
+            let a = f64::from_bits(*a_bits);
+            let b = f64::from_bits(*b_bits);
+            a.total_cmp(&b)
+        }
+        (Date(a), Date(b)) => a.cmp(b),
+        (Text(a), Text(b)) => a.cmp(b),
+        (Bool(a), Bool(b)) => a.cmp(b),
+
+        _ => key_part_rank(left).cmp(&key_part_rank(right)),
+    }
+}
+
+fn compare_key_parts_for_field(left: &PivotKeyPart, right: &PivotKeyPart, spec: &KeySortSpec) -> Ordering {
+    // Blank values always sort last, regardless of ascending/descending/manual.
+    match (left, right) {
+        (PivotKeyPart::Blank, PivotKeyPart::Blank) => return Ordering::Equal,
+        (PivotKeyPart::Blank, _) => return Ordering::Greater,
+        (_, PivotKeyPart::Blank) => return Ordering::Less,
+        _ => {}
+    }
+
+    match spec.sort_order {
+        SortOrder::Ascending => compare_key_parts_ascending(left, right),
+        SortOrder::Descending => compare_key_parts_ascending(left, right).reverse(),
+        SortOrder::Manual => {
+            if let Some(index) = &spec.manual_index {
+                match (index.get(left), index.get(right)) {
+                    (Some(a_pos), Some(b_pos)) => a_pos.cmp(b_pos),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => compare_key_parts_ascending(left, right),
+                }
+            } else {
+                compare_key_parts_ascending(left, right)
+            }
+        }
+    }
+}
+
+fn compare_pivot_keys(left: &PivotKey, right: &PivotKey, specs: &[KeySortSpec]) -> Ordering {
+    let blank = PivotKeyPart::Blank;
+    for (idx, spec) in specs.iter().enumerate() {
+        let left_part = left.0.get(idx).unwrap_or(&blank);
+        let right_part = right.0.get(idx).unwrap_or(&blank);
+        let ord = compare_key_parts_for_field(left_part, right_part, spec);
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    Ordering::Equal
+}
+
 fn common_prefix_len(a: &[PivotKeyPart], b: &[PivotKeyPart]) -> usize {
     let mut i = 0;
     while i < a.len() && i < b.len() && a[i] == b[i] {
@@ -1501,9 +1652,7 @@ mod tests {
         let cache = PivotCache::from_range(&data).unwrap();
 
         let cfg = PivotConfig {
-            row_fields: vec![PivotField {
-                source_field: "Region".to_string(),
-            }],
+            row_fields: vec![PivotField::new("Region")],
             value_fields: vec![ValueField {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
@@ -1551,9 +1700,7 @@ mod tests {
         allowed.insert(PivotKeyPart::Text("East".to_string()));
 
         let cfg = PivotConfig {
-            row_fields: vec![PivotField {
-                source_field: "Region".to_string(),
-            }],
+            row_fields: vec![PivotField::new("Region")],
             value_fields: vec![ValueField {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
@@ -1600,12 +1747,8 @@ mod tests {
         let cache = PivotCache::from_range(&data).unwrap();
 
         let cfg = PivotConfig {
-            row_fields: vec![PivotField {
-                source_field: "Region".to_string(),
-            }],
-            column_fields: vec![PivotField {
-                source_field: "Product".to_string(),
-            }],
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![PivotField::new("Product")],
             value_fields: vec![ValueField {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
@@ -1643,6 +1786,153 @@ mod tests {
     }
 
     #[test]
+    fn sorts_row_keys_descending_for_numeric_field() {
+        let data = vec![
+            pv_row(&["Num".into(), "Value".into()]),
+            pv_row(&[1.into(), 10.into()]),
+            pv_row(&[2.into(), 20.into()]),
+            pv_row(&[10.into(), 30.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                sort_order: SortOrder::Descending,
+                ..PivotField::new("Num")
+            }],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Value".to_string(),
+                name: "Sum of Value".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Num".into(), "Sum of Value".into()],
+                vec!["10".into(), 30.into()],
+                vec!["2".into(), 20.into()],
+                vec!["1".into(), 10.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn sorts_column_keys_descending_for_text_field() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), 100.into()]),
+            pv_row(&["East".into(), "B".into(), 150.into()]),
+            pv_row(&["West".into(), "A".into(), 200.into()]),
+            pv_row(&["West".into(), "B".into(), 250.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![PivotField {
+                sort_order: SortOrder::Descending,
+                ..PivotField::new("Product")
+            }],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "B - Sum of Sales".into(), "A - Sum of Sales".into()],
+                vec!["East".into(), 150.into(), 100.into()],
+                vec!["West".into(), 250.into(), 200.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn sorts_manual_order_first_then_remaining_ascending() {
+        let data = vec![
+            pv_row(&["Region".into(), "Sales".into()]),
+            pv_row(&["East".into(), 100.into()]),
+            pv_row(&["West".into(), 200.into()]),
+            pv_row(&["North".into(), 50.into()]),
+            pv_row(&["South".into(), 40.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                sort_order: SortOrder::Manual,
+                manual_sort: Some(vec![
+                    PivotKeyPart::Text("West".to_string()),
+                    PivotKeyPart::Text("South".to_string()),
+                ]),
+                ..PivotField::new("Region")
+            }],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "Sum of Sales".into()],
+                vec!["West".into(), 200.into()],
+                vec!["South".into(), 40.into()],
+                vec!["East".into(), 100.into()],
+                vec!["North".into(), 50.into()],
+            ]
+        );
+    }
+
+    #[test]
     fn produces_basic_subtotals_for_multiple_row_fields() {
         let data = vec![
             pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
@@ -1656,12 +1946,8 @@ mod tests {
 
         let cfg = PivotConfig {
             row_fields: vec![
-                PivotField {
-                    source_field: "Region".to_string(),
-                },
-                PivotField {
-                    source_field: "Product".to_string(),
-                },
+                PivotField::new("Region"),
+                PivotField::new("Product"),
             ],
             column_fields: vec![],
             value_fields: vec![ValueField {
@@ -1708,9 +1994,7 @@ mod tests {
 
         let cache = PivotCache::from_range(&data).unwrap();
         let cfg = PivotConfig {
-            row_fields: vec![PivotField {
-                source_field: "Region".to_string(),
-            }],
+            row_fields: vec![PivotField::new("Region")],
             column_fields: vec![],
             value_fields: vec![ValueField {
                 source_field: "Sales".to_string(),
@@ -1754,12 +2038,8 @@ mod tests {
 
         let cache = PivotCache::from_range(&data).unwrap();
         let cfg = PivotConfig {
-            row_fields: vec![PivotField {
-                source_field: "Region".to_string(),
-            }],
-            column_fields: vec![PivotField {
-                source_field: "Product".to_string(),
-            }],
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![PivotField::new("Product")],
             value_fields: vec![ValueField {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
@@ -1806,12 +2086,8 @@ mod tests {
 
         let cache = PivotCache::from_range(&data).unwrap();
         let cfg = PivotConfig {
-            row_fields: vec![PivotField {
-                source_field: "Region".to_string(),
-            }],
-            column_fields: vec![PivotField {
-                source_field: "Product".to_string(),
-            }],
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![PivotField::new("Product")],
             value_fields: vec![ValueField {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
@@ -1857,9 +2133,7 @@ mod tests {
 
         let cache = PivotCache::from_range(&data).unwrap();
         let cfg = PivotConfig {
-            row_fields: vec![PivotField {
-                source_field: "Item".to_string(),
-            }],
+            row_fields: vec![PivotField::new("Item")],
             column_fields: vec![],
             value_fields: vec![ValueField {
                 source_field: "Sales".to_string(),
@@ -1902,9 +2176,7 @@ mod tests {
 
         let cache = PivotCache::from_range(&data).unwrap();
         let cfg = PivotConfig {
-            row_fields: vec![PivotField {
-                source_field: "Item".to_string(),
-            }],
+            row_fields: vec![PivotField::new("Item")],
             column_fields: vec![],
             value_fields: vec![ValueField {
                 source_field: "Sales".to_string(),
@@ -1947,9 +2219,7 @@ mod tests {
 
         let cache = PivotCache::from_range(&data).unwrap();
         let cfg = PivotConfig {
-            row_fields: vec![PivotField {
-                source_field: "Item".to_string(),
-            }],
+            row_fields: vec![PivotField::new("Item")],
             column_fields: vec![],
             value_fields: vec![ValueField {
                 source_field: "Sales".to_string(),
