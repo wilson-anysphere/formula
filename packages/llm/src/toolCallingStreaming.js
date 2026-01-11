@@ -111,11 +111,10 @@ async function collectAssistantMessageFromStream(stream, onStreamEvent) {
     });
   }
 
-  return {
-    role: "assistant",
-    content,
-    toolCalls: toolCalls.length ? toolCalls : undefined,
-  };
+  /** @type {any} */
+  const message = { role: "assistant", content };
+  if (toolCalls.length) message.toolCalls = toolCalls;
+  return message;
 }
 
 /**
