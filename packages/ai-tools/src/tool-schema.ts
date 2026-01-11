@@ -16,7 +16,7 @@ export type ToolName =
   | "compute_statistics"
   | "fetch_external_data";
 
-export type ToolCategory = "read" | "compute" | "mutate" | "format" | "external_network";
+export type ToolCategory = "read" | "analysis" | "mutate" | "format" | "chart" | "pivot" | "external_network";
 
 export interface ToolCapabilityMetadata {
   category: ToolCategory;
@@ -51,13 +51,13 @@ export const TOOL_CAPABILITIES: Record<ToolName, ToolCapabilityMetadata> = {
   write_cell: { category: "mutate", mutates_workbook: true, high_risk: false },
   set_range: { category: "mutate", mutates_workbook: true, high_risk: true },
   apply_formula_column: { category: "mutate", mutates_workbook: true, high_risk: true },
-  create_pivot_table: { category: "mutate", mutates_workbook: true, high_risk: true },
-  create_chart: { category: "mutate", mutates_workbook: true, high_risk: false },
+  create_pivot_table: { category: "pivot", mutates_workbook: true, high_risk: true },
+  create_chart: { category: "chart", mutates_workbook: true, high_risk: false },
   sort_range: { category: "mutate", mutates_workbook: true, high_risk: true },
   filter_range: { category: "read", mutates_workbook: false, high_risk: false },
   apply_formatting: { category: "format", mutates_workbook: true, high_risk: false },
-  detect_anomalies: { category: "compute", mutates_workbook: false, high_risk: false },
-  compute_statistics: { category: "compute", mutates_workbook: false, high_risk: false },
+  detect_anomalies: { category: "analysis", mutates_workbook: false, high_risk: false },
+  compute_statistics: { category: "analysis", mutates_workbook: false, high_risk: false },
   fetch_external_data: {
     category: "external_network",
     mutates_workbook: true,

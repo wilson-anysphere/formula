@@ -23,7 +23,7 @@ describe("llm integration helpers", () => {
   });
 
   it("filters tool definitions based on ToolPolicy", () => {
-    const defs = getSpreadsheetToolDefinitions({ toolPolicy: { allowCategories: ["read", "compute"] } });
+    const defs = getSpreadsheetToolDefinitions({ toolPolicy: { allowCategories: ["read", "analysis"] } });
     const names = defs.map((t) => t.name);
     expect(names).toContain("read_range");
     expect(names).toContain("compute_statistics");

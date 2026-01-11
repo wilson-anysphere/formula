@@ -55,7 +55,7 @@ function toolsByCategory(category: (typeof TOOL_CAPABILITIES)[ToolName]["categor
 }
 
 const READ_TOOLS = toolsByCategory("read");
-const COMPUTE_TOOLS = toolsByCategory("compute");
+const ANALYSIS_TOOLS = toolsByCategory("analysis");
 const FORMAT_TOOLS = toolsByCategory("format");
 const EXTERNAL_NETWORK_TOOLS = toolsByCategory("external_network");
 
@@ -128,7 +128,7 @@ export function decideAllowedTools(input: ToolPolicyInput): ToolPolicyDecision {
   // Side-effect-free modes: never allow mutation/network.
   if (mode === "cell_function") {
     reasons.push("mode=cell_function -> read+compute only");
-    return { allowed_tools: uniqueInToolOrder([...READ_TOOLS, ...COMPUTE_TOOLS]), reasons };
+    return { allowed_tools: uniqueInToolOrder([...READ_TOOLS, ...ANALYSIS_TOOLS]), reasons };
   }
 
   const externalRequested = wantsExternalDataFetch(text);
@@ -167,7 +167,7 @@ export function decideAllowedTools(input: ToolPolicyInput): ToolPolicyDecision {
   tools.push(...READ_TOOLS);
 
   if (analysis || mode === "agent") {
-    tools.push(...COMPUTE_TOOLS);
+    tools.push(...ANALYSIS_TOOLS);
   }
 
   if (wantsFilter(text)) {

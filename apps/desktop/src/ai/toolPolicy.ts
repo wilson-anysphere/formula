@@ -3,15 +3,34 @@ import type { ToolPolicy, ToolName } from "../../../../packages/ai-tools/src/too
 export type DesktopAiMode = "chat" | "inline_edit" | "agent";
 
 const CHAT_READ_ONLY_POLICY: ToolPolicy = {
-  allowCategories: ["read", "compute"],
-  mutationsAllowed: false,
+  allowCategories: ["read", "analysis"],
   externalNetworkAllowed: false
 };
 
-const CHAT_MUTATION_POLICY: ToolPolicy = {
-  allowCategories: ["read", "compute", "mutate", "format"],
-  externalNetworkAllowed: false
-};
+const CHAT_WRITE_INTENT_RE = new RegExp(
+  String.raw`\b(` +
+    [
+      "replace",
+      "fill",
+      "write",
+      "insert",
+      "update",
+      "set",
+      "edit",
+      "change",
+      "delete",
+      "remove",
+      "clear",
+      "sort",
+      "apply"
+    ].join("|") +
+    String.raw`)\b`,
+  "i"
+);
+
+const CHAT_FORMAT_INTENT_RE = /\b(format|bold|italic|underline|font|color|colour|highlight|background|number\s*format|currency|percent|percentage|align|alignment)\b/i;
+const CHAT_CHART_INTENT_RE = /\b(chart|plot|graph)\b/i;
+const CHAT_PIVOT_INTENT_RE = /\bpivot\b/i;
 
 const INLINE_EDIT_ALLOWED_TOOLS: ToolName[] = [
   "read_range",
@@ -32,34 +51,6 @@ const INLINE_EDIT_POLICY: ToolPolicy = {
 
 const AGENT_POLICY: ToolPolicy = {};
 
-const CHAT_MUTATION_INTENT_RE = new RegExp(
-  String.raw`\b(` +
-    [
-      "replace",
-      "fill",
-      "write",
-      "format",
-      "insert",
-      "update",
-      "set",
-      "edit",
-      "change",
-      "delete",
-      "remove",
-      "clear",
-      "sort",
-      "create",
-      "add",
-      "apply",
-      "chart",
-      "plot",
-      "graph",
-      "pivot"
-    ].join("|") +
-    String.raw`)\b`,
-  "i"
-);
-
 export function getDesktopToolPolicy(params: { mode: DesktopAiMode; prompt?: string }): ToolPolicy {
   switch (params.mode) {
     case "agent":
@@ -68,8 +59,21 @@ export function getDesktopToolPolicy(params: { mode: DesktopAiMode; prompt?: str
       return INLINE_EDIT_POLICY;
     case "chat": {
       const prompt = String(params.prompt ?? "").trim();
-      if (prompt && CHAT_MUTATION_INTENT_RE.test(prompt)) return CHAT_MUTATION_POLICY;
-      return CHAT_READ_ONLY_POLICY;
+      if (!prompt) return CHAT_READ_ONLY_POLICY;
+
+      const wantsWrite = CHAT_WRITE_INTENT_RE.test(prompt);
+      const wantsFormat = CHAT_FORMAT_INTENT_RE.test(prompt);
+      const wantsChart = CHAT_CHART_INTENT_RE.test(prompt);
+      const wantsPivot = CHAT_PIVOT_INTENT_RE.test(prompt);
+
+      if (!wantsWrite && !wantsFormat && !wantsChart && !wantsPivot) return CHAT_READ_ONLY_POLICY;
+
+      const allowCategories: NonNullable<ToolPolicy["allowCategories"]> = ["read", "analysis"];
+      if (wantsWrite) allowCategories.push("mutate");
+      if (wantsFormat) allowCategories.push("format");
+      if (wantsChart) allowCategories.push("chart");
+      if (wantsPivot) allowCategories.push("pivot");
+      return { allowCategories, externalNetworkAllowed: false };
     }
     default: {
       const exhaustive: never = params.mode;

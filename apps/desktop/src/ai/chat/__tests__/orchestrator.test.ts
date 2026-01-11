@@ -702,6 +702,9 @@ describe("ai chat orchestrator", () => {
     expect(toolNames).toContain("write_cell");
     expect(toolNames).toContain("set_range");
     expect(toolNames).not.toContain("fetch_external_data");
+    // Least privilege: don't expose chart/pivot tools for basic range edits.
+    expect(toolNames).not.toContain("create_chart");
+    expect(toolNames).not.toContain("create_pivot_table");
 
     const writeCell = toolDefs.find((t: any) => t.name === "write_cell");
     expect(writeCell?.requiresApproval).toBe(true);
