@@ -54,7 +54,7 @@ The sanitization pipeline is implemented in `tools/corpus/sanitize.py` and suppo
   - formula **string literals** are also redacted/hardened to prevent secrets surviving in formulas
   - pivot cache records/items are cleared (pivot caches can otherwise retain full plaintext copies of source data)
   - conditional formatting + data validation formulas (and their string literals) are hardened as well
-  - dialog sheets/macrosheets are sanitized like normal worksheets (same cell redaction rules)
+  - dialog sheets/macrosheets (and chart sheets) are sanitized like normal worksheets (same cell redaction rules)
 - **Hash strings** (`--hash-strings --hash-salt ...`)
   - shared strings / inline strings are replaced with stable `H_<digest>` tokens
   - additional text surfaces are hashed too (comments, headers/footers, drawing text, table names, formula string literals)

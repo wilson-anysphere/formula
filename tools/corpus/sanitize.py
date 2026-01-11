@@ -150,7 +150,7 @@ def _sanitize_inline_string(el: ET.Element, *, options: SanitizeOptions) -> None
 def _sanitize_worksheet(xml: bytes, *, options: SanitizeOptions) -> bytes:
     root = ET.fromstring(xml)
     local_root = root.tag.split("}")[-1]
-    if local_root not in {"worksheet", "dialogsheet"}:
+    if local_root.lower() not in {"worksheet", "dialogsheet", "macrosheet", "chartsheet"}:
         return xml
 
     for c in root.iter(qn(NS_MAIN, "c")):
@@ -1295,6 +1295,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                             name.startswith("xl/worksheets/")
                             or name.startswith("xl/macrosheets/")
                             or name.startswith("xl/dialogsheets/")
+                            or name.startswith("xl/chartsheets/")
                         )
                         and name.endswith(".xml")
                         and (

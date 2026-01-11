@@ -472,6 +472,62 @@ def _make_minimal_xlsx_with_dialogsheet_inline_str() -> bytes:
     return buf.getvalue()
 
 
+def _make_minimal_xlsx_with_macrosheet_inline_str() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/macrosheets/sheet1.xml" ContentType="application/vnd.ms-excel.macrosheet+xml"/>
+</Types>
+""",
+        )
+        z.writestr(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="MacroSheet" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>
+""",
+        )
+        z.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/xlMacrosheet" Target="macrosheets/sheet1.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/macrosheets/sheet1.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<macroSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>alice@example.com</t></is></c>
+    </row>
+  </sheetData>
+</macroSheet>
+""",
+        )
+    return buf.getvalue()
+
+
 class SanitizeTests(unittest.TestCase):
     def test_sanitize_removes_common_secret_bearing_parts(self) -> None:
         original = _make_minimal_xlsx_with_secrets()
@@ -732,6 +788,14 @@ class SanitizeTests(unittest.TestCase):
             dialog_xml = z.read("xl/dialogsheets/sheet1.xml").decode("utf-8", errors="ignore")
             self.assertNotIn("alice@example.com", dialog_xml)
             self.assertIn("REDACTED", dialog_xml)
+
+    def test_macrosheet_cell_values_are_sanitized(self) -> None:
+        original = _make_minimal_xlsx_with_macrosheet_inline_str()
+        sanitized, _ = sanitize_xlsx_bytes(original, options=SanitizeOptions())
+        with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
+            macro_xml = z.read("xl/macrosheets/sheet1.xml").decode("utf-8", errors="ignore")
+            self.assertNotIn("alice@example.com", macro_xml)
+            self.assertIn("REDACTED", macro_xml)
 
 
 if __name__ == "__main__":
