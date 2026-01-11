@@ -91,6 +91,20 @@ pub fn builtin_format_code(id: u16) -> Option<&'static str> {
     BUILTIN_FORMATS_EN_US.get(id as usize).copied()
 }
 
+/// Reverse lookup: return the built-in format ID for an exact (canonical) format
+/// code.
+///
+/// This uses the *en-US* built-in table and returns the first matching ID. Some
+/// format codes are duplicated across multiple built-in IDs (e.g. 23 and 37),
+/// so callers should treat the returned ID as a canonical representative rather
+/// than a guaranteed round-trip value.
+pub fn builtin_format_id(code: &str) -> Option<u16> {
+    BUILTIN_FORMATS_EN_US
+        .iter()
+        .position(|c| *c == code)
+        .and_then(|idx| u16::try_from(idx).ok())
+}
+
 /// Locale-aware resolver for Excel's built-in number format codes.
 ///
 /// This returns the best-effort format code Excel would use for the given

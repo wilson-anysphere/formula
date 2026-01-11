@@ -1,5 +1,6 @@
 use formula_format::{
-    builtin_format_code, builtin_format_code_with_locale, format_value, DateSystem, FormatOptions, Locale, Value,
+    builtin_format_code, builtin_format_code_with_locale, builtin_format_id, format_value, DateSystem,
+    FormatOptions, Locale, Value,
 };
 
 #[test]
@@ -41,6 +42,15 @@ fn builtin_format_mappings_include_representative_categories() {
 
     // Text.
     assert_eq!(builtin_format_code(49), Some("@"));
+}
+
+#[test]
+fn builtin_format_reverse_lookup_finds_canonical_id() {
+    assert_eq!(builtin_format_id("General"), Some(0));
+    assert_eq!(builtin_format_id("0"), Some(1));
+    assert_eq!(builtin_format_id("@"), Some(49));
+    assert_eq!(builtin_format_id("$#,##0.00_);($#,##0.00)"), Some(7));
+    assert_eq!(builtin_format_id("not a builtin"), None);
 }
 
 #[test]

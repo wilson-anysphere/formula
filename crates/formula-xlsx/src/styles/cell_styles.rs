@@ -952,15 +952,7 @@ fn builtin_num_fmt_id_for_code(code: &str) -> Option<u16> {
         return Some(7);
     }
 
-    for id in 0u16..=49u16 {
-        if let Some(builtin) = formula_format::builtin_format_code(id) {
-            if builtin == code {
-                return Some(id);
-            }
-        }
-    }
-
-    None
+    formula_format::builtin_format_id(code)
 }
 
 fn parse_builtin_placeholder(code: &str) -> Option<u16> {
