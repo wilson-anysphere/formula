@@ -4,7 +4,9 @@ import { RefreshManager } from "../../../../packages/power-query/src/refresh.js"
 
 import type { DocumentController } from "../document/documentController.js";
 
-import { applyTableToDocument, type ApplyToDocumentResult, type QuerySheetDestination } from "./applyToDocument.js";
+// Use `.ts` extension so Node's `--experimental-strip-types` test runner can resolve
+// the module without relying on bundler-specific `.js`→`.ts` mapping.
+import { applyTableToDocument, type ApplyToDocumentResult, type QuerySheetDestination } from "./applyToDocument.ts";
 
 // `packages/power-query` is authored in JS; in the desktop layer we treat refresh
 // events as an opaque payload and primarily use their `type` + `job` fields.
@@ -19,7 +21,7 @@ export type DesktopPowerQueryEvent =
   | { type: "apply:cancelled"; jobId: string; queryId: string };
 
 class Emitter<T> {
-  private listeners = new Set<(payload: T) => void>();
+  listeners: Set<(payload: T) => void> = new Set();
 
   on(handler: (payload: T) => void): () => void {
     this.listeners.add(handler);
@@ -46,7 +48,11 @@ function isQuerySheetDestination(dest: unknown): dest is QuerySheetDestination {
 }
 
 class RefreshingEngine {
-  constructor(private readonly engine: QueryEngine) {}
+  engine: QueryEngine;
+
+  constructor(engine: QueryEngine) {
+    this.engine = engine;
+  }
 
   executeQueryWithMeta(query: Query, context: QueryExecutionContext, options: any) {
     const nextOptions = {
@@ -69,13 +75,13 @@ export type DesktopPowerQueryRefreshOptions = {
  * Desktop wrapper around `RefreshManager` that applies refreshed query outputs into the sheet.
  */
 export class DesktopPowerQueryRefreshManager {
-  private readonly doc: DocumentController;
-  private readonly batchSize: number;
-  private readonly emitter = new Emitter<DesktopPowerQueryEvent>();
-  private readonly queries = new Map<string, Query>();
-  private readonly applyControllers = new Map<string, AbortController>();
+  doc: DocumentController;
+  batchSize: number;
+  emitter = new Emitter<DesktopPowerQueryEvent>();
+  queries = new Map<string, Query>();
+  applyControllers = new Map<string, AbortController>();
 
-  readonly manager: RefreshManager;
+  manager: RefreshManager;
 
   constructor(options: DesktopPowerQueryRefreshOptions) {
     this.doc = options.document;
@@ -133,7 +139,7 @@ export class DesktopPowerQueryRefreshManager {
     this.manager.dispose();
   }
 
-  private async applyCompletedJob(evt: any): Promise<void> {
+  async applyCompletedJob(evt: any): Promise<void> {
     const jobId = evt?.job?.id;
     const queryId = evt?.job?.queryId;
     if (typeof jobId !== "string" || typeof queryId !== "string") return;
