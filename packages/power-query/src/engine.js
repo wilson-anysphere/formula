@@ -2873,7 +2873,8 @@ export class QueryEngine {
       query.source.type === "query" ||
       (query.source.type === "csv" &&
         Boolean(fileConnector?.readTextStream || fileConnector?.readBinaryStream || fileConnector?.readText || fileConnector?.readBinary)) ||
-      (query.source.type === "parquet" && Boolean(fileConnector?.openFile || fileConnector?.readBinary));
+      (query.source.type === "parquet" &&
+        Boolean(fileConnector?.openFile || fileConnector?.readBinary || fileConnector?.readBinaryStream));
 
     if (!canStreamSteps || !canStreamSource) {
       // Fall back to the existing execution strategy when we can't safely stream.
@@ -3259,13 +3260,24 @@ export class QueryEngine {
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       await this.getCredentials("file", request, state);
 
-      const handle = connector.openFile
-        ? await connector.openFile(source.path, { signal: options.signal })
-        : connector.readBinary
-          ? new Blob([await connector.readBinary(source.path)])
-          : null;
+      /** @type {Blob | null} */
+      let handle = null;
+      if (connector.openFile) {
+        handle = await connector.openFile(source.path, { signal: options.signal });
+      } else if (connector.readBinary) {
+        handle = new Blob([await connector.readBinary(source.path)]);
+      } else if (connector.readBinaryStream) {
+        /** @type {Uint8Array[]} */
+        const chunks = [];
+        for await (const chunk of connector.readBinaryStream(source.path, { signal: options.signal })) {
+          throwIfAborted(options.signal);
+          if (chunk) chunks.push(chunk);
+        }
+        handle = new Blob(chunks);
+      }
+
       if (!handle) {
-        throw new Error("Parquet streaming requires a FileConnector openFile or readBinary adapter");
+        throw new Error("Parquet streaming requires a FileConnector openFile, readBinary, or readBinaryStream adapter");
       }
       throwIfAborted(options.signal);
 
@@ -3344,7 +3356,8 @@ export class QueryEngine {
       query.source.type === "query" ||
       (query.source.type === "csv" &&
         Boolean(fileConnector?.readTextStream || fileConnector?.readBinaryStream || fileConnector?.readText || fileConnector?.readBinary)) ||
-      (query.source.type === "parquet" && Boolean(fileConnector?.openFile || fileConnector?.readBinary));
+      (query.source.type === "parquet" &&
+        Boolean(fileConnector?.openFile || fileConnector?.readBinary || fileConnector?.readBinaryStream));
 
     if (!canStreamSteps || !canStreamSource) {
       // Fall back to materializing the referenced query when it can't be streamed.
