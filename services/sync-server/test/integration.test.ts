@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -1011,4 +1011,64 @@ test("does not treat lock from another host as stale", async (t) => {
       combinedLogs.includes("lock"),
     `expected lock acquisition error in logs.\nstdout:\n${stdout}\nstderr:\n${stderr}`
   );
+});
+
+test("removes stale lock from the same host and continues startup", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-lock-stale-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const stalePid = process.pid + 10_000_000;
+  const lockPath = path.join(dataDir, ".sync-server.lock");
+  await writeFile(
+    lockPath,
+    `${JSON.stringify({
+      pid: stalePid,
+      startedAtMs: Date.now(),
+      host: hostname(),
+    })}\n`
+  );
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const activeLock = JSON.parse(await readFile(lockPath, "utf8")) as {
+    pid?: unknown;
+  };
+  assert.equal(typeof activeLock.pid, "number");
+  assert.notEqual(activeLock.pid, stalePid);
+});
+
+test("/readyz returns 503 when data dir locking is disabled", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-readyz-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_DISABLE_DATA_DIR_LOCK: "true",
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const res = await fetch(`${server.httpUrl}/readyz`);
+  assert.equal(res.status, 503);
+
+  const body = (await res.json()) as { reason?: unknown };
+  assert.equal(body.reason, "data_dir_lock_disabled");
 });
