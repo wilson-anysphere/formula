@@ -25,15 +25,23 @@ export class LocalStorageBinaryStorage implements SqliteBinaryStorage {
   async load(): Promise<Uint8Array | null> {
     const storage = safeLocalStorage();
     if (!storage) return null;
-    const encoded = storage.getItem(this.key);
-    if (!encoded) return null;
-    return fromBase64(encoded);
+    try {
+      const encoded = storage.getItem(this.key);
+      if (!encoded) return null;
+      return fromBase64(encoded);
+    } catch {
+      return null;
+    }
   }
 
   async save(data: Uint8Array): Promise<void> {
     const storage = safeLocalStorage();
     if (!storage) return;
-    storage.setItem(this.key, toBase64(data));
+    try {
+      storage.setItem(this.key, toBase64(data));
+    } catch {
+      // Ignore persistence failures (e.g. quota exceeded / private mode).
+    }
   }
 }
 
