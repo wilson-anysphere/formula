@@ -301,6 +301,7 @@ pub(crate) fn parse_workbook<R: Read>(
     let mut supbooks: Vec<SupBook> = Vec::new();
     let mut namex_extern_names: HashMap<(u16, u16), ExternName> = HashMap::new();
     let mut namex_ixti_supbooks: HashMap<u16, u16> = HashMap::new();
+    let mut extern_sheet_entries: Option<Vec<ExternSheet>> = None;
 
     let mut current_supbook: Option<u16> = None;
     let mut current_extern_name_idx: u16 = 0;
@@ -349,6 +350,7 @@ pub(crate) fn parse_workbook<R: Read>(
                     for (ixti, entry) in entries.iter().enumerate() {
                         namex_ixti_supbooks.insert(ixti as u16, entry.supbook_index);
                     }
+                    extern_sheet_entries = Some(entries);
                 }
             }
             // Keep scanning after the sheets list; external tables often appear later.
@@ -361,6 +363,7 @@ pub(crate) fn parse_workbook<R: Read>(
                         for (ixti, entry) in entries.iter().enumerate() {
                             namex_ixti_supbooks.insert(ixti as u16, entry.supbook_index);
                         }
+                        extern_sheet_entries = Some(entries);
                     }
                 }
 
@@ -388,8 +391,123 @@ pub(crate) fn parse_workbook<R: Read>(
         }
     }
 
+    // Populate the ExternSheet table for 3D reference decoding/encoding when the ExternSheet
+    // entries refer back into the current workbook.
+    if let Some(entries) = &extern_sheet_entries {
+        for (ixti, entry) in entries.iter().enumerate() {
+            let supbook_kind = supbooks
+                .get(entry.supbook_index as usize)
+                .map(|sb| &sb.kind);
+            let is_internal = matches!(supbook_kind, Some(SupBookKind::Internal))
+                || (supbook_kind.is_none() && entry.supbook_index == 0);
+            if !is_internal {
+                continue;
+            }
+
+            let Some(first_sheet) = sheets.get(entry.sheet_first as usize) else {
+                continue;
+            };
+            let Some(last_sheet) = sheets.get(entry.sheet_last as usize) else {
+                continue;
+            };
+            ctx.add_extern_sheet(&first_sheet.name, &last_sheet.name, ixti as u16);
+        }
+    }
+
     ctx.set_namex_tables(supbooks, namex_extern_names, namex_ixti_supbooks);
     Ok((sheets, ctx))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rgce::{decode_rgce_with_context, encode_rgce_with_context, CellCoord};
+    use std::collections::HashMap;
+    use std::io::Cursor;
+
+    fn write_record(out: &mut Vec<u8>, id: u32, payload: &[u8]) {
+        biff12_varint::write_record_id(out, id).expect("write record id");
+        biff12_varint::write_record_len(out, payload.len() as u32).expect("write record len");
+        out.extend_from_slice(payload);
+    }
+
+    fn write_utf16_string(out: &mut Vec<u8>, s: &str) {
+        let units: Vec<u16> = s.encode_utf16().collect();
+        out.extend_from_slice(&(units.len() as u32).to_le_bytes());
+        for u in units {
+            out.extend_from_slice(&u.to_le_bytes());
+        }
+    }
+
+    #[test]
+    fn parse_workbook_populates_intern_extern_sheet_table() {
+        // workbook.bin containing two sheets + an internal SupBook + ExternSheet table.
+        let mut workbook_bin = Vec::new();
+
+        // Sheet1 (rId1).
+        let mut sheet1 = Vec::new();
+        sheet1.extend_from_slice(&0u32.to_le_bytes()); // flags/state
+        sheet1.extend_from_slice(&1u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet1, "rId1");
+        write_utf16_string(&mut sheet1, "Sheet1");
+        write_record(&mut workbook_bin, biff12::SHEET, &sheet1);
+
+        // Sheet2 (rId2).
+        let mut sheet2 = Vec::new();
+        sheet2.extend_from_slice(&0u32.to_le_bytes()); // flags/state
+        sheet2.extend_from_slice(&2u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet2, "rId2");
+        write_utf16_string(&mut sheet2, "Sheet2");
+        write_record(&mut workbook_bin, biff12::SHEET, &sheet2);
+
+        // End of sheets list (we keep scanning for context records).
+        write_record(&mut workbook_bin, biff12::SHEETS_END, &[]);
+
+        // Internal SupBook (raw name is empty string).
+        let mut supbook = Vec::new();
+        supbook.extend_from_slice(&2u16.to_le_bytes()); // ctab
+        supbook.extend_from_slice(&0u32.to_le_bytes()); // empty xlWideString
+        write_record(&mut workbook_bin, 0x01AE, &supbook);
+
+        // ExternSheet table mapping ixti 0 -> Sheet1, ixti 1 -> Sheet2.
+        let mut extern_sheet = Vec::new();
+        extern_sheet.extend_from_slice(&2u16.to_le_bytes()); // cxti
+        // ixti 0
+        extern_sheet.extend_from_slice(&0u16.to_le_bytes()); // supbook index
+        extern_sheet.extend_from_slice(&0u16.to_le_bytes()); // sheet first
+        extern_sheet.extend_from_slice(&0u16.to_le_bytes()); // sheet last
+        // ixti 1
+        extern_sheet.extend_from_slice(&0u16.to_le_bytes()); // supbook index
+        extern_sheet.extend_from_slice(&1u16.to_le_bytes()); // sheet first
+        extern_sheet.extend_from_slice(&1u16.to_le_bytes()); // sheet last
+        write_record(&mut workbook_bin, 0x0017, &extern_sheet);
+
+        let rels: HashMap<String, String> = HashMap::from([
+            ("rId1".to_string(), "worksheets/sheet1.bin".to_string()),
+            ("rId2".to_string(), "worksheets/sheet2.bin".to_string()),
+        ]);
+
+        let (_sheets, ctx) =
+            parse_workbook(&mut Cursor::new(&workbook_bin), &rels).expect("parse workbook.bin");
+
+        assert_eq!(ctx.extern_sheet_index("Sheet1"), Some(0));
+        assert_eq!(ctx.extern_sheet_index("Sheet2"), Some(1));
+
+        let encoded =
+            encode_rgce_with_context("=Sheet2!A1", &ctx, CellCoord::new(0, 0)).expect("encode");
+        assert_eq!(
+            encoded.rgce,
+            vec![
+                0x3A, // PtgRef3d
+                0x01, 0x00, // ixti (Sheet2)
+                0x00, 0x00, 0x00, 0x00, // row (A1)
+                0x00, 0xC0, // col+flags (A, relative row/col)
+            ]
+        );
+
+        let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+        assert_eq!(decoded, "Sheet2!A1");
+    }
 }
 
 pub(crate) fn parse_shared_strings<R: Read>(
