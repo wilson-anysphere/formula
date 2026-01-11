@@ -317,6 +317,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
 
   let selectionTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingSelectionRect: Rect | null = null;
+  let pendingSelectionSheetId: string | null = null;
   let pendingSelectionKey = "";
   let lastSelectionKeyFired = "";
   let selectionQueuedAfterMacro = false;
@@ -583,11 +584,13 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (disposed) return;
     if (eventsDisabled) {
       pendingSelectionRect = null;
+      pendingSelectionSheetId = null;
       pendingSelectionKey = "";
       return;
     }
     if (!eventsAllowed) {
       pendingSelectionRect = null;
+      pendingSelectionSheetId = null;
       pendingSelectionKey = "";
       return;
     }
@@ -604,13 +607,15 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
 
     const rect = pendingSelectionRect;
     const key = pendingSelectionKey;
+    const selectionSheetId = pendingSelectionSheetId;
     pendingSelectionRect = null;
+    pendingSelectionSheetId = null;
     pendingSelectionKey = "";
 
     if (!rect) return;
     if (key && key === lastSelectionKeyFired) return;
 
-    const sheetId = args.app.getCurrentSheetId();
+    const sheetId = selectionSheetId ?? args.app.getCurrentSheetId();
     await runEventMacro("selection_change", "fire_selection_change", {
       sheet_id: sheetId,
       start_row: rect.startRow,
@@ -639,6 +644,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
 
         if (eventsDisabled) {
           pendingSelectionRect = null;
+          pendingSelectionSheetId = null;
           pendingSelectionKey = "";
           selectionFlushQueued = false;
           return;
@@ -716,6 +722,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
 
     pendingSelectionKey = key;
     pendingSelectionRect = rect;
+    pendingSelectionSheetId = sheetId;
 
     if (selectionTimer) clearTimeout(selectionTimer);
     selectionTimer = setTimeout(() => {
@@ -740,6 +747,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       stopSelectionListening();
       pendingChangesBySheet.clear();
       pendingSelectionRect = null;
+      pendingSelectionSheetId = null;
       pendingSelectionKey = "";
       if (selectionTimer) {
         clearTimeout(selectionTimer);
