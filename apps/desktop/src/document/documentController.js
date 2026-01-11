@@ -656,6 +656,7 @@ export class DocumentController {
     const existingSheetIds = new Set(this.model.sheets.keys());
     const nextSheetIds = new Set(nextSheets.keys());
     const allSheetIds = new Set([...existingSheetIds, ...nextSheetIds]);
+    const removedSheetIds = Array.from(existingSheetIds).filter((id) => !nextSheetIds.has(id));
 
     /** @type {CellDelta[]} */
     const deltas = [];
@@ -695,6 +696,10 @@ export class DocumentController {
     this.#applyDeltas(deltas, { recalc: false, emitChange: true, source: "applyState" });
     this.engine?.endBatch?.();
     this.engine?.recalculate();
+
+    for (const sheetId of removedSheetIds) {
+      this.model.sheets.delete(sheetId);
+    }
 
     this.#emitHistory();
     this.#emitDirty();

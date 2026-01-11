@@ -46,6 +46,19 @@ test("applyState materializes empty sheets from snapshots", () => {
   assert.deepEqual(restored.getSheetIds(), ["EmptySheet"]);
 });
 
+test("applyState removes sheets that are not present in the snapshot", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.getCell("ExtraSheet", "A1"); // empty sheet
+
+  const next = new DocumentController();
+  next.setCellValue("OnlySheet", "A1", 2);
+
+  doc.applyState(next.encodeState());
+
+  assert.deepEqual(doc.getSheetIds(), ["OnlySheet"]);
+});
+
 test("update event fires on edits and undo/redo", () => {
   const doc = new DocumentController();
   let updates = 0;

@@ -628,6 +628,11 @@ export class SpreadsheetApp {
       await this.wasmSyncPromise;
       this.computedValues.clear();
       this.document.applyState(snapshot);
+      const sheetIds = this.document.getSheetIds();
+      if (sheetIds.length > 0 && !sheetIds.includes(this.sheetId)) {
+        this.sheetId = sheetIds[0];
+        this.chartStore.setDefaultSheet(this.sheetId);
+      }
       if (this.wasmEngine) {
         await this.enqueueWasmSync(async (engine) => {
           const changes = await engineHydrateFromDocument(engine, this.document);
