@@ -296,3 +296,61 @@ fn encrypted_workbook_survives_key_rotation() {
     assert_eq!(cells[0].0, (2, 3));
     assert_eq!(cells[0].1.value, CellValue::Number(123.0));
 }
+
+#[test]
+fn rotate_encryption_key_api_reencrypts_file() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("workbook.formula");
+    let key_provider = Arc::new(InMemoryKeyProvider::default());
+
+    let storage = Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
+    let workbook = storage
+        .create_workbook("Book1", None)
+        .expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Sheet1", 0, None)
+        .expect("create sheet");
+    storage
+        .apply_cell_changes(&[CellChange {
+            sheet_id: sheet.id,
+            row: 0,
+            col: 0,
+            data: CellData {
+                value: CellValue::Number(99.0),
+                formula: None,
+                style: None,
+            },
+            user_id: None,
+        }])
+        .expect("apply cells");
+    storage.persist().expect("persist v1");
+
+    let bytes_v1 = std::fs::read(&path).expect("read v1");
+    let key_version_v1 = u32::from_be_bytes(bytes_v1[8..12].try_into().expect("key version bytes"));
+    assert_eq!(key_version_v1, 1);
+
+    let rotated = storage
+        .rotate_encryption_key()
+        .expect("rotate encryption key")
+        .expect("should be encrypted");
+    assert_eq!(rotated, 2);
+
+    let bytes_v2 = std::fs::read(&path).expect("read v2");
+    let key_version_v2 = u32::from_be_bytes(bytes_v2[8..12].try_into().expect("key version bytes"));
+    assert_eq!(key_version_v2, 2);
+
+    let reopened = Storage::open_encrypted_path(&path, Arc::new(InMemoryKeyProvider::default()))
+        .expect_err("different provider should fail due to missing keyring");
+    assert!(matches!(reopened, StorageError::Encryption(_)));
+
+    drop(storage);
+
+    // Ensure the original provider can still decrypt and data survives the re-encryption.
+    let reopened = Storage::open_encrypted_path(&path, key_provider).expect("reopen after rotate");
+    let cells = reopened
+        .load_cells_in_range(sheet.id, CellRange::new(0, 5, 0, 5))
+        .expect("load cells");
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].0, (0, 0));
+    assert_eq!(cells[0].1.value, CellValue::Number(99.0));
+}

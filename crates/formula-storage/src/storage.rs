@@ -236,6 +236,23 @@ impl Storage {
         Ok(())
     }
 
+    /// Rotate the current encryption key (preserving older versions for decryption) and persist.
+    ///
+    /// Returns `Ok(None)` when this storage is not using encrypted-at-rest mode.
+    pub fn rotate_encryption_key(&self) -> Result<Option<u32>> {
+        let Some(ctx) = self.encrypted.as_ref() else {
+            return Ok(None);
+        };
+
+        let mut keyring = load_or_create_keyring(ctx.key_provider.as_ref(), true)?;
+        keyring.rotate();
+        ctx.key_provider
+            .store_keyring(&keyring)
+            .map_err(crate::encryption::EncryptionError::from)?;
+        self.persist()?;
+        Ok(Some(keyring.current_version))
+    }
+
     pub fn create_workbook(
         &self,
         name: &str,
