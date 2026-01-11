@@ -483,6 +483,14 @@ const SECURE_TLS_CONFIG: TLSConfig = {
 };
 ```
 
+In this repo, outbound enterprise integrations (starting with SIEM delivery) enforce a **minimum TLS version of TLS 1.3**.
+Organizations can optionally enable **certificate pinning** via `org_settings`:
+
+- `certificate_pinning_enabled` (boolean)
+- `certificate_pins` (JSON array of SHA-256 certificate fingerprints)
+
+For operational details (how pins are computed, rotation guidance), see `docs/tls-pinning.md`.
+
 ---
 
 ## Audit Logging

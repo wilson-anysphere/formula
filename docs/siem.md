@@ -2,6 +2,8 @@
 
 Formula records audit events in Postgres and can export them to enterprise SIEM tools (Splunk, Elastic, Datadog, Azure Sentinel, or a custom HTTP receiver). Exports are **batched**, **retried with exponential backoff**, and **redacted** to avoid leaking secrets into downstream logging systems.
 
+Outbound SIEM delivery enforces a **minimum TLS version of TLS 1.3** and can optionally enforce **certificate pinning** (SHA-256 fingerprint allowlist) via org policy fields in `org_settings`. See `docs/tls-pinning.md` for how to compute and configure pins.
+
 The current implementation lives in:
 
 - `packages/audit-core/**` – canonical `AuditEvent` schema + redaction + JSON/CEF/LEEF serialization (`serializeBatch`).
