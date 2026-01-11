@@ -70,6 +70,8 @@ export interface PresenceManagerOptions {
   user: { id: string; name: string; color: string };
   activeSheet: string;
   throttleMs?: number;
+  /** Filter out remote presences whose `lastActive` is older than `now() - staleAfterMs`. */
+  staleAfterMs?: number;
   now?: () => number;
   setTimeout?: typeof globalThis.setTimeout;
   clearTimeout?: typeof globalThis.clearTimeout;
@@ -92,7 +94,7 @@ export class PresenceManager {
   setCursor(cursor: PresenceCursor | null): void;
   setSelections(selections: Array<PresenceRange | { start: PresenceCursor; end: PresenceCursor }>): void;
 
-  getRemotePresences(options?: { activeSheet?: string }): RemotePresenceState[];
+  getRemotePresences(options?: { activeSheet?: string; includeOtherSheets?: boolean; staleAfterMs?: number }): RemotePresenceState[];
 
   subscribe(listener: (presences: RemotePresenceState[]) => void): () => void;
 }
@@ -102,4 +104,3 @@ export class InMemoryAwarenessHub {
 
   createAwareness(clientID?: number): AwarenessLike & { destroy(): void };
 }
-

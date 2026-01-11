@@ -70,6 +70,7 @@ export class PresenceManager {
       user,
       activeSheet,
       throttleMs = 100,
+      staleAfterMs,
       now = () => Date.now(),
       setTimeout: setTimeoutFn,
       clearTimeout: clearTimeoutFn,
@@ -83,6 +84,8 @@ export class PresenceManager {
 
     this.awareness = awareness;
     this.now = now;
+    this.staleAfterMs =
+      typeof staleAfterMs === "number" && Number.isFinite(staleAfterMs) && staleAfterMs >= 0 ? staleAfterMs : null;
     this._listeners = new Set();
     this._awarenessChangeHandler = (change) => {
       const localClientId = this.awareness.clientID;
@@ -221,21 +224,32 @@ export class PresenceManager {
     this._broadcastThrottled();
   }
 
-  getRemotePresences({ activeSheet } = {}) {
+  getRemotePresences({ activeSheet, includeOtherSheets = false, staleAfterMs } = {}) {
     const targetSheet = activeSheet ?? this.localPresence.activeSheet;
     const states = this.awareness.getStates?.();
     if (!states) return [];
 
     const localClientId = this.awareness.clientID;
     const result = [];
+    const staleAfterMsEffective = staleAfterMs ?? this.staleAfterMs;
+    const cutoff =
+      typeof staleAfterMsEffective === "number" && Number.isFinite(staleAfterMsEffective) && staleAfterMsEffective >= 0
+        ? this.now() - staleAfterMsEffective
+        : null;
 
     for (const [clientId, state] of states.entries()) {
       if (clientId === localClientId) continue;
       const presence = deserializePresenceState(state?.presence);
       if (!presence) continue;
-      if (presence.activeSheet !== targetSheet) continue;
+      if (cutoff !== null && presence.lastActive < cutoff) continue;
+      if (!includeOtherSheets && presence.activeSheet !== targetSheet) continue;
       result.push({ clientId, ...presence });
     }
+
+    result.sort((a, b) => {
+      if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+      return a.clientId - b.clientId;
+    });
 
     return result;
   }
