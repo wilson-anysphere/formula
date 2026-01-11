@@ -197,6 +197,34 @@ function isModuleScript(tsSource) {
   return /^\s*export\s+default\b/m.test(tsSource);
 }
 
+function findDynamicImportSpecifier(tsSource) {
+  if (ts) {
+    const sourceFile = ts.createSourceFile("user-script.ts", tsSource, ts.ScriptTarget.ES2022, true);
+    let found = null;
+
+    function visit(node) {
+      if (found) return;
+      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        const arg = node.arguments[0];
+        if (arg && ts.isStringLiteral(arg)) {
+          found = arg.text;
+        } else {
+          found = "<dynamic>";
+        }
+        return;
+      }
+      ts.forEachChild(node, visit);
+    }
+
+    visit(sourceFile);
+    return found;
+  }
+
+  // Best-effort fallback (only used in minimal environments without TypeScript).
+  if (/\bimport\s*\(/.test(tsSource)) return "<dynamic>";
+  return null;
+}
+
 function compileTypeScriptModule(tsSource) {
   if (!ts) {
     // Fallback: support scripts that use ESM `export default` but do not require
@@ -236,6 +264,15 @@ function compileTypeScriptModule(tsSource) {
 
 async function runUserScript(tsSource) {
   const isModule = isModuleScript(tsSource);
+  const dynamicImportSpecifier = findDynamicImportSpecifier(tsSource);
+  if (dynamicImportSpecifier) {
+    if (dynamicImportSpecifier === "<dynamic>") {
+      throw new Error("Imports are not supported in scripts (attempted to use dynamic import())");
+    }
+    throw new Error(
+      `Imports are not supported in scripts (attempted to use dynamic import(${JSON.stringify(dynamicImportSpecifier)}))`,
+    );
+  }
   const jsSource = isModule ? compileTypeScriptModule(tsSource) : compileTypeScript(tsSource);
 
   const networkSandbox = applyNetworkSandbox(workerData.permissions ?? {});

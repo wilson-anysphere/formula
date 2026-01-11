@@ -70,3 +70,19 @@ export default async function main(ctx) {
   assert.match(result.error.message, /Imports are not supported/i);
   assert.match(result.error.message, /node:fs/i);
 });
+
+test("scripting (node): script-body cannot use dynamic import()", async () => {
+  const workbook = new Workbook();
+  workbook.addSheet("Sheet1");
+  workbook.setActiveSheet("Sheet1");
+
+  const runtime = new ScriptRuntime(workbook);
+  const result = await runtime.run(`
+const mod = await import("node:fs");
+ctx.ui.log(mod);
+`);
+
+  assert.ok(result.error, "expected dynamic import to be rejected");
+  assert.match(result.error.message, /dynamic import/i);
+  assert.match(result.error.message, /node:fs/i);
+});

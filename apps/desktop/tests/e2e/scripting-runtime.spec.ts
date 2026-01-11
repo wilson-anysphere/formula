@@ -71,6 +71,11 @@ export default async function main(ctx) {
       },
     );
 
+    const dynamicImportDenied = await runtime.run(`
+// Dynamic import is intentionally unsupported (it could otherwise bypass fetch/WebSocket sandboxing).
+await import("https://example.com");
+`);
+
     return {
       mainRun,
       computed,
@@ -80,6 +85,7 @@ export default async function main(ctx) {
       allowlistedNetwork,
       allowlistDenied,
       allowlistWebSocketDenied,
+      dynamicImportDenied,
     };
   };
 
@@ -114,6 +120,8 @@ export default async function main(ctx) {
 
   expect(result.allowlistDenied.error?.message).toContain("example.com");
   expect(result.allowlistWebSocketDenied.error?.message).toContain("example.com");
+  expect(result.dynamicImportDenied.error?.message).toContain("dynamic import");
+  expect(result.dynamicImportDenied.error?.message).toContain("example.com");
 });
 
 test("scripting: times out hung scripts and ignores spoofed worker messages", async ({ page }) => {

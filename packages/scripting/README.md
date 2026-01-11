@@ -19,8 +19,8 @@ export default async function main(ctx: ScriptContext) {
 }
 ```
 
-> Note: runtime `import ... from "..."` is not supported yet. Prefer using the
-> global script types (via `FORMULA_API_DTS`) instead of importing.
+> Note: runtime imports are not supported yet (including `import ... from "..."` and dynamic `import(...)`).
+> Prefer using the global script types (via `FORMULA_API_DTS`) instead of importing.
 
 ### Legacy: script-body form (top-level await)
 

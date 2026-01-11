@@ -233,8 +233,42 @@ function isModuleScript(tsSource) {
   return false;
 }
 
+function findDynamicImportSpecifier(tsSource) {
+  const sourceFile = ts.createSourceFile("user-script.ts", tsSource, ts.ScriptTarget.ES2022, true);
+  /** @type {string | "<dynamic>" | null} */
+  let found = null;
+
+  /** @param {import("typescript").Node} node */
+  function visit(node) {
+    if (found) return;
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const arg = node.arguments[0];
+      if (arg && ts.isStringLiteral(arg)) {
+        found = arg.text;
+      } else {
+        found = "<dynamic>";
+      }
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return found;
+}
+
 async function runUserScript({ code, activeSheetName, selection, permissions }) {
   applyNetworkSandbox(permissions ?? {});
+
+  const dynamicImportSpecifier = findDynamicImportSpecifier(code);
+  if (dynamicImportSpecifier) {
+    if (dynamicImportSpecifier === "<dynamic>") {
+      throw new Error("Imports are not supported in scripts (attempted to use dynamic import())");
+    }
+    throw new Error(
+      `Imports are not supported in scripts (attempted to use dynamic import(${JSON.stringify(dynamicImportSpecifier)}))`,
+    );
+  }
 
   const isModule = isModuleScript(code);
   const jsSource = isModule
