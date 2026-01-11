@@ -159,7 +159,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         role: "system",
         content: `${baseSystemPrompt}\n\n${promptContext}`.trim()
       },
-      ...(params.history ?? []),
+      ...sanitizeHistory(params.history),
       {
         role: "user",
         content: formatUserMessage(text, attachments)
@@ -190,7 +190,9 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     const capturingAuditStore = new CapturingAuditStore(auditStore);
     try {
       const result = await runChatWithToolsAudited({
-        client: options.llmClient as any,
+        client: {
+          chat: (request: any) => options.llmClient.chat({ ...request, model: request?.model ?? options.model } as any)
+        } as any,
         tool_executor: {
           tools: toolExecutor.tools,
           execute: async (call: any) => {
@@ -219,7 +221,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
       return {
         finalText: result.final,
-        messages: result.messages as LLMMessage[],
+        messages: stripLeadingSystemMessage(result.messages as LLMMessage[]),
         toolResults,
         context: {
           workbookId: options.workbookId,
@@ -329,4 +331,17 @@ function createSessionId(workbookId: string): string {
     return `${workbookId}:${crypto.randomUUID()}`;
   }
   return `${workbookId}:${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function stripLeadingSystemMessage(messages: LLMMessage[]): LLMMessage[] {
+  const out = messages.slice();
+  if (out[0]?.role === "system") out.shift();
+  return out;
+}
+
+function sanitizeHistory(history: LLMMessage[] | undefined): LLMMessage[] {
+  if (!history) return [];
+  // The orchestrator always injects its own system prompt (including context).
+  // Drop any system messages that callers may have included.
+  return history.filter((m) => m.role !== "system");
 }

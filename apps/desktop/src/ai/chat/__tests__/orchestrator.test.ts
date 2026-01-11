@@ -137,6 +137,7 @@ describe("ai chat orchestrator", () => {
     });
 
     expect(result.finalText).toBe("ok");
+    expect(result.messages[0]?.role).toBe("user");
     expect(result.toolResults.length).toBe(1);
     expect(result.toolResults[0]?.ok).toBe(true);
     expect(controller.getCell("Sheet1", "A1").value).toBe(99);
@@ -151,4 +152,3 @@ describe("ai chat orchestrator", () => {
     expect(firstRequest.messages?.[0]?.content).toContain("Workbook summary");
   });
 });
-
