@@ -1,12 +1,12 @@
-import { createEngineClient } from "@formula/engine";
+import { createEngineClient, defaultWasmModuleUrl } from "@formula/engine";
 import { CanvasGrid, GridPlaceholder } from "@formula/grid";
+import { EngineCellCache, EngineGridProvider } from "@formula/spreadsheet-frontend";
 import { useEffect, useMemo, useState } from "react";
-import { EngineCellProvider } from "./EngineCellProvider";
 
 export function App() {
-  const engine = useMemo(() => createEngineClient(), []);
+  const engine = useMemo(() => createEngineClient({ wasmModuleUrl: defaultWasmModuleUrl() }), []);
   const [engineStatus, setEngineStatus] = useState("starting…");
-  const [provider, setProvider] = useState<EngineCellProvider | null>(null);
+  const [provider, setProvider] = useState<EngineGridProvider | null>(null);
 
   // +1 for frozen header row/col.
   const rowCount = 1_000_000 + 1;
@@ -34,7 +34,8 @@ export function App() {
         const pong = typeof engineAny.ping === "function" ? await engineAny.ping() : "ok";
         if (!cancelled) {
           setEngineStatus(`ready (${pong})`);
-          setProvider(new EngineCellProvider({ engine: engineAny, rowCount, colCount }));
+          const cache = new EngineCellCache(engine);
+          setProvider(new EngineGridProvider({ cache, rowCount, colCount, headers: true }));
         }
       } catch (error) {
         if (!cancelled)

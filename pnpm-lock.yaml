@@ -91,6 +91,9 @@ importers:
       '@formula/grid':
         specifier: workspace:*
         version: link:../../packages/grid
+      '@formula/spreadsheet-frontend':
+        specifier: workspace:*
+        version: link:../../packages/spreadsheet-frontend
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -153,6 +156,15 @@ importers:
         version: 0.7.1
 
   packages/engine: {}
+
+  packages/spreadsheet-frontend:
+    dependencies:
+      '@formula/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@formula/grid':
+        specifier: workspace:*
+        version: link:../grid
 
   packages/extension-api: {}
 
