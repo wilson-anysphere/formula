@@ -6,9 +6,11 @@ import { newDb } from "pg-mem";
 import type { Pool } from "pg";
 import { runMigrations } from "../db/migrations";
 import {
+  deleteSecret,
   decryptSecretValue,
   encryptSecretValue,
   getSecret,
+  listSecrets,
   type SecretStoreKeyring
 } from "../secrets/secretStore";
 import { runSecretsRotation } from "../secrets/rotation";
@@ -99,6 +101,40 @@ describe("secrets rotation (integration)", () => {
       expect(await getSecret(db, keyring, "alpha")).toBe("alpha-value");
       expect(await getSecret(db, keyring, "beta")).toBe("beta-value");
       expect(await getSecret(db, keyring, "gamma")).toBe("gamma-value");
+    } finally {
+      await db.end();
+    }
+  });
+
+  it("lists and deletes secrets", async () => {
+    const db = await createDb();
+    try {
+      const key = crypto.randomBytes(32);
+      const keyring: SecretStoreKeyring = { currentKeyId: "k1", keys: { k1: key } };
+
+      await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", [
+        "alpha",
+        encryptSecretValue(keyring, "alpha", "a")
+      ]);
+      await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", [
+        "pre%fix",
+        encryptSecretValue(keyring, "pre%fix", "literal-percent")
+      ]);
+      await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", [
+        "pre_fix",
+        encryptSecretValue(keyring, "pre_fix", "literal-underscore")
+      ]);
+      await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", [
+        "prefix",
+        encryptSecretValue(keyring, "prefix", "prefix")
+      ]);
+
+      expect(await listSecrets(db)).toEqual(["alpha", "pre%fix", "pre_fix", "prefix"]);
+      expect(await listSecrets(db, "pre%")).toEqual(["pre%fix"]);
+      expect(await listSecrets(db, "pre_")).toEqual(["pre_fix"]);
+
+      await deleteSecret(db, "alpha");
+      expect(await listSecrets(db)).toEqual(["pre%fix", "pre_fix", "prefix"]);
     } finally {
       await db.end();
     }
