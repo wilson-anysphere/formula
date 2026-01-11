@@ -823,7 +823,7 @@ export class CellStructuralConflictMonitor {
    }
  
    const hasEnc = enc !== null && enc !== undefined;
-   const hasValue = value !== null && value !== undefined && value !== "";
+   const hasValue = value !== null && value !== undefined;
    const hasFormula = formula != null && formula !== "";
    const hasFormat = format != null;
  
