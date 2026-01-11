@@ -43,6 +43,7 @@ fn main() {
         .manage(macro_trust)
         .invoke_handler(tauri::generate_handler![
             commands::open_workbook,
+            commands::new_workbook,
             commands::save_workbook,
             commands::get_cell,
             commands::set_cell,

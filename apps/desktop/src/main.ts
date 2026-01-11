@@ -752,7 +752,15 @@ async function promptOpenWorkbook(): Promise<void> {
 }
 
 async function handleSave(): Promise<void> {
+  if (!tauriBackend) return;
+  if (!activeWorkbook) return;
   if (!workbookSync) return;
+
+  if (!activeWorkbook.path) {
+    await handleSaveAs();
+    return;
+  }
+
   await workbookSync.markSaved();
 }
 
@@ -772,6 +780,41 @@ async function handleSaveAs(): Promise<void> {
   await tauriBackend.saveWorkbook(path);
   activeWorkbook = { ...activeWorkbook, path };
   app.getDocument().markSaved();
+}
+
+async function handleNewWorkbook(): Promise<void> {
+  if (!tauriBackend) return;
+  const ok = await confirmDiscardDirtyState("create a new workbook");
+  if (!ok) return;
+
+  // Ensure any scheduled workbook IPC flush runs before we replace the backend workbook.
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+  const hadActiveWorkbook = activeWorkbook != null;
+
+  workbookSync?.stop();
+  workbookSync = null;
+
+  try {
+    await pendingBackendSync;
+    pendingBackendSync = Promise.resolve();
+
+    activeWorkbook = await tauriBackend.newWorkbook();
+    await loadWorkbookIntoDocument(activeWorkbook);
+
+    workbookSync = startWorkbookSync({
+      document: app.getDocument(),
+      engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
+    });
+  } catch (err) {
+    if (hadActiveWorkbook) {
+      workbookSync = startWorkbookSync({
+        document: app.getDocument(),
+        engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
+      });
+    }
+    throw err;
+  }
 }
 
 try {
@@ -799,6 +842,13 @@ try {
     void promptOpenWorkbook().catch((err) => {
       console.error("Failed to open workbook:", err);
       window.alert(`Failed to open workbook: ${String(err)}`);
+    });
+  });
+
+  void listen("tray-new", () => {
+    void handleNewWorkbook().catch((err) => {
+      console.error("Failed to create workbook:", err);
+      window.alert(`Failed to create workbook: ${String(err)}`);
     });
   });
 

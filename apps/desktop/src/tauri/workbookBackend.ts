@@ -55,6 +55,11 @@ export class TauriWorkbookBackend {
     return info as WorkbookInfo;
   }
 
+  async newWorkbook(): Promise<WorkbookInfo> {
+    const info = await this.invoke("new_workbook");
+    return info as WorkbookInfo;
+  }
+
   async saveWorkbook(path?: string): Promise<void> {
     const args: Record<string, unknown> = {};
     if (path) args.path = path;

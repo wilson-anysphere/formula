@@ -231,6 +231,34 @@ pub async fn open_workbook(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
+pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookInfo, String> {
+    let shared = state.inner().clone();
+    let info = tauri::async_runtime::spawn_blocking(move || {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        let mut state = shared.lock().unwrap();
+        state.load_workbook(workbook)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(WorkbookInfo {
+        path: info.path,
+        origin_path: info.origin_path,
+        sheets: info
+            .sheets
+            .into_iter()
+            .map(|s| SheetInfo {
+                id: s.id,
+                name: s.name,
+            })
+            .collect(),
+    })
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
 pub async fn save_workbook(
     path: Option<String>,
     state: State<'_, SharedAppState>,
