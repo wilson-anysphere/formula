@@ -22,6 +22,16 @@ export type FormulaConflict =
       remoteValue: any;
       remoteUserId: string;
       detectedAt: number;
+    }
+  | {
+      kind: "content";
+      id: string;
+      cell: { sheetId: string; row: number; col: number };
+      cellKey: string;
+      local: { type: "formula"; formula: string; preview?: any } | { type: "value"; value: any };
+      remote: { type: "formula"; formula: string; preview?: any } | { type: "value"; value: any };
+      remoteUserId: string;
+      detectedAt: number;
     };
 
 export interface CellConflict {

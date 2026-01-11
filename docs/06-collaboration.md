@@ -774,6 +774,9 @@ Implementation notes (see `packages/collab/conflicts/src/formula-conflict-monito
   (instead of deleting the key) so overwrites can reference the deletion via
   `Item.origin`.
 - Value conflicts are optionally supported via `mode: "formula+value"`.
+- In `"formula+value"` mode, value edits clear formulas via `formula = null`
+  (not key deletion) so later formula writes can causally reference the clear.
+  Concurrent value-vs-formula edits surface as a `"content"` conflict.
 
 ```typescript
 class FormulaConflictResolver {

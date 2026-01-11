@@ -234,8 +234,8 @@ test("sequential remote deletes that use key deletion do not surface value confl
   assert.equal(getValue(alice.cells, "s:0:0"), null);
 });
 
-test("choosing remote value in a value conflict does not clobber a concurrent formula", () => {
-  // Ensure deterministic tie-breaking for concurrent value writes:
+test("concurrent value vs formula surfaces a content conflict on the value writer (and choosing remote does not clobber the formula)", () => {
+  // Ensure deterministic tie-breaking for concurrent map-entry overwrites:
   // higher clientID wins in Yjs.
   const alice = createClient("alice", { clientID: 2, mode: "formula+value" });
   const bob = createClient("bob", { clientID: 1, mode: "formula+value" });
@@ -245,24 +245,68 @@ test("choosing remote value in a value conflict does not clobber a concurrent fo
   syncDocs(alice.doc, bob.doc);
 
   // Offline concurrent edits: alice sets a formula; bob sets a literal value.
-  // Alice's formula write also sets value=null, which will win and overwrite bob's value
-  // (clientID 2 > 1), producing a value conflict on bob's side.
+  // Alice wins both formula + value keys (clientID 2 > 1), so bob is the "losing"
+  // side and should see a content conflict (value vs formula).
   alice.monitor.setLocalFormula("s:0:0", "=1");
   bob.monitor.setLocalValue("s:0:0", "bob");
 
   syncDocs(alice.doc, bob.doc);
 
-  const conflict = bob.conflicts.find((c) => c.kind === "value") ?? null;
-  assert.ok(conflict, "expected a value conflict on bob");
+  const conflict = bob.conflicts.find((c) => c.kind === "content") ?? null;
+  assert.ok(conflict, "expected a content conflict on bob");
+  assert.equal(conflict.remote.type, "formula");
+  assert.equal(conflict.remote.formula, "=1");
+  assert.equal(conflict.local.type, "value");
+  assert.equal(conflict.local.value, "bob");
 
   // The concurrently-written formula should be present in the doc at conflict time.
   assert.equal(getFormula(bob.cells, "s:0:0"), "=1");
 
-  // Choosing the remote value is a no-op (remote state is already applied) and must not
+  // Choosing the remote formula is a no-op (remote state is already applied) and must not
   // clear the formula via setLocalValue().
-  assert.ok(bob.monitor.resolveConflict(conflict.id, conflict.remoteValue));
+  assert.ok(bob.monitor.resolveConflict(conflict.id, conflict.remote));
   syncDocs(alice.doc, bob.doc);
 
   assert.equal(getFormula(alice.cells, "s:0:0"), "=1");
   assert.equal(getFormula(bob.cells, "s:0:0"), "=1");
+});
+
+test("concurrent value vs formula can surface a formula conflict on the formula writer when the value writer wins", () => {
+  // Value writer has higher clientID, so their formula=null write wins and clears
+  // the concurrent formula.
+  const alice = createClient("alice", { clientID: 1, mode: "formula+value" });
+  const bob = createClient("bob", { clientID: 2, mode: "formula+value" });
+
+  alice.monitor.setLocalValue("s:0:0", "base");
+  syncDocs(alice.doc, bob.doc);
+
+  alice.monitor.setLocalFormula("s:0:0", "=1");
+  bob.monitor.setLocalValue("s:0:0", "bob");
+  syncDocs(alice.doc, bob.doc);
+
+  const conflict = alice.conflicts.find((c) => c.kind === "formula") ?? null;
+  assert.ok(conflict, "expected a formula conflict on alice");
+  assert.equal(conflict.localFormula.trim(), "=1");
+  assert.equal(conflict.remoteFormula.trim(), "");
+
+  // Choosing the remote (empty formula) is a no-op and must preserve the remote value.
+  assert.ok(alice.monitor.resolveConflict(conflict.id, conflict.remoteFormula));
+  syncDocs(alice.doc, bob.doc);
+  assert.equal(getValue(alice.cells, "s:0:0"), "bob");
+  assert.equal(getValue(bob.cells, "s:0:0"), "bob");
+});
+
+test("sequential value -> formula edits do not surface a content conflict", () => {
+  const alice = createClient("alice", { mode: "formula+value" });
+  const bob = createClient("bob", { mode: "formula+value" });
+
+  alice.monitor.setLocalValue("s:0:0", "x");
+  syncDocs(alice.doc, bob.doc);
+
+  // Bob sees Alice's value write (including the formula=null marker) before applying the formula.
+  bob.monitor.setLocalFormula("s:0:0", "=1");
+  syncDocs(alice.doc, bob.doc);
+
+  assert.equal(alice.conflicts.length, 0);
+  assert.equal(bob.conflicts.length, 0);
 });

@@ -32,7 +32,28 @@ import { tryEvaluateFormula } from "./formula-eval.js";
  */
 
 /**
- * @typedef {FormulaTextConflict | ValueConflict} FormulaConflict
+ * @typedef {{ type: "formula", formula: string, preview?: any } | { type: "value", value: any }} CellContentChoice
+ */
+
+/**
+ * @typedef {FormulaConflictBase & {
+ *   kind: "content",
+ *   local: CellContentChoice,
+ *   remote: CellContentChoice
+ * }} ContentConflict
+ */
+
+/**
+ * @typedef {FormulaTextConflict | ValueConflict | ContentConflict} FormulaConflict
+ */
+
+/**
+ * @typedef {{ client: number, clock: number }} ItemId
+ */
+
+/**
+ * @typedef {{ kind: "formula", formula: string, formulaItemId: ItemId, valueItemId: ItemId }
+ *   | { kind: "value", value: any, valueItemId: ItemId, formulaItemId: ItemId }} LocalContentEdit
  */
 
 /**
@@ -49,6 +70,11 @@ import { tryEvaluateFormula } from "./formula-eval.js";
  * Note: To detect delete-vs-overwrite conflicts deterministically, local formula
  * clears are written as `cell.set("formula", null)` (not `cell.delete("formula")`)
  * so Yjs creates an Item that later overwrites can reference via `origin`.
+ *
+ * Likewise, when value conflict detection is enabled (`mode: "formula+value"`),
+ * value writes clear formulas via `cell.set("formula", null)` so later formula
+ * writes can causally reference the clear via `Item.origin`. This also allows us
+ * to detect true formula-vs-value content conflicts deterministically.
  */
 export class FormulaConflictMonitor {
   /**
@@ -84,6 +110,9 @@ export class FormulaConflictMonitor {
 
     /** @type {Map<string, { value: any, itemId: { client: number, clock: number } }>} */
     this._lastLocalValueEditByCellKey = new Map();
+
+    /** @type {Map<string, LocalContentEdit>} */
+    this._lastLocalContentEditByCellKey = new Map();
 
     /** @type {Map<string, FormulaConflict>} */
     this._conflicts = new Map();
@@ -139,6 +168,13 @@ export class FormulaConflictMonitor {
       formula: nextFormula,
       itemId: { client: localClientId, clock: startClock }
     });
+
+    this._lastLocalContentEditByCellKey.set(cellKey, {
+      kind: "formula",
+      formula: nextFormula,
+      formulaItemId: { client: localClientId, clock: startClock },
+      valueItemId: { client: localClientId, clock: startClock + 1 }
+    });
   }
 
   /**
@@ -159,13 +195,27 @@ export class FormulaConflictMonitor {
 
     this.doc.transact(() => {
       cell.set("value", nextValue);
-      cell.delete("formula");
+      if (this.includeValueConflicts) {
+        // Store a null marker rather than deleting so subsequent formula writes
+        // can causally reference this clear via Item.origin.
+        cell.set("formula", null);
+      } else {
+        cell.delete("formula");
+      }
       cell.set("modified", ts);
       cell.set("modifiedBy", this.localUserId);
     }, this.origin);
 
     if (this.includeValueConflicts) {
       this._lastLocalValueEditByCellKey.set(cellKey, { value: nextValue, itemId: { client: localClientId, clock: startClock } });
+
+      // Track the full "content" change so we can detect formula-vs-value conflicts.
+      this._lastLocalContentEditByCellKey.set(cellKey, {
+        kind: "value",
+        value: nextValue,
+        valueItemId: { client: localClientId, clock: startClock },
+        formulaItemId: { client: localClientId, clock: startClock + 1 }
+      });
     }
   }
 
@@ -180,6 +230,27 @@ export class FormulaConflictMonitor {
   resolveConflict(conflictId, chosen) {
     const conflict = this._conflicts.get(conflictId);
     if (!conflict) return false;
+
+    if (conflict.kind === "content") {
+      const choice = /** @type {any} */ (chosen);
+      if (!choice || typeof choice !== "object") return false;
+
+      if (choice.type === "formula") {
+        const chosenFormula = String(choice.formula ?? "");
+        if (!(conflict.remote.type === "formula" && formulasRoughlyEqual(chosenFormula, conflict.remote.formula))) {
+          this.setLocalFormula(conflict.cellKey, chosenFormula);
+        }
+      } else if (choice.type === "value") {
+        const chosenValue = choice.value ?? null;
+        if (!(conflict.remote.type === "value" && valuesDeeplyEqual(chosenValue, conflict.remote.value))) {
+          this.setLocalValue(conflict.cellKey, chosenValue);
+        }
+      } else {
+        return false;
+      }
+      this._conflicts.delete(conflictId);
+      return true;
+    }
 
     if (conflict.kind === "value") {
       // The remote value is already applied in the doc at conflict time, so
@@ -276,6 +347,67 @@ export class FormulaConflictMonitor {
     const isLocal = this.localOrigins.has(origin);
     if (isLocal) return;
 
+    // When value-conflict mode is enabled, local value writes clear formulas via
+    // `formula=null` (creating an Item id). If a remote user concurrently writes
+    // a formula, surface a content conflict that presents the local value vs the
+    // remote formula, rather than a confusing "value null vs value" conflict.
+    if (this.includeValueConflicts) {
+      const lastContent = this._lastLocalContentEditByCellKey.get(cellKey);
+      if (lastContent?.kind === "value") {
+        const remoteFormula = newFormula.trim();
+        if (remoteFormula) {
+          // Did this remote update overwrite the formula clear marker we wrote as part
+          // of the value edit?
+          if (!formulasRoughlyEqual(oldFormula, "")) return;
+
+          // Sequential overwrite (remote saw our clear) - ignore.
+          if (idsEqual(newItemOriginId, lastContent.formulaItemId)) {
+            this._lastLocalContentEditByCellKey.delete(cellKey);
+            this._lastLocalValueEditByCellKey.delete(cellKey);
+            return;
+          }
+
+          // If the remote deleted the exact marker item we wrote (legacy clients may
+          // still use key deletion), treat it as sequential and do not surface a conflict.
+          if (action === "delete" && idsEqual(itemId, lastContent.formulaItemId)) {
+            this._lastLocalContentEditByCellKey.delete(cellKey);
+            this._lastLocalValueEditByCellKey.delete(cellKey);
+            return;
+          }
+
+          // We no longer consider that local edit "pending" for conflict detection.
+          this._lastLocalContentEditByCellKey.delete(cellKey);
+          this._lastLocalValueEditByCellKey.delete(cellKey);
+
+          const cell = cellRefFromKey(cellKey);
+
+          const conflict = /** @type {FormulaConflict} */ ({
+            id: crypto.randomUUID(),
+            kind: "content",
+            cell,
+            cellKey,
+            local: { type: "value", value: lastContent.value },
+            remote: { type: "formula", formula: remoteFormula },
+            remoteUserId,
+            detectedAt: Date.now()
+          });
+
+          if (this.getCellValue) {
+            const remotePreview = tryEvaluateFormula(remoteFormula, {
+              getCellValue: ({ col, row }) => this.getCellValue({ sheetId: cell.sheetId, col, row })
+            });
+            if (conflict.remote.type === "formula") {
+              conflict.remote.preview = remotePreview.ok ? remotePreview.value : null;
+            }
+          }
+
+          this._conflicts.set(conflict.id, conflict);
+          this.onConflict(conflict);
+          return;
+        }
+      }
+    }
+
     const lastLocal = this._lastLocalFormulaEditByCellKey.get(cellKey);
     if (!lastLocal) return;
 
@@ -286,17 +418,20 @@ export class FormulaConflictMonitor {
     // Map deletes don't create a new Item, so we can't use origin ids like we do for overwrites.
     if (action === "delete" && lastLocal.itemId && idsEqual(itemId, lastLocal.itemId)) {
       this._lastLocalFormulaEditByCellKey.delete(cellKey);
+      this._lastLocalContentEditByCellKey.delete(cellKey);
       return;
     }
 
     // Sequential overwrite (remote saw our write) - ignore.
     if (lastLocal.itemId && idsEqual(newItemOriginId, lastLocal.itemId)) {
       this._lastLocalFormulaEditByCellKey.delete(cellKey);
+      this._lastLocalContentEditByCellKey.delete(cellKey);
       return;
     }
 
     // We no longer consider that local edit "pending" for conflict detection.
     this._lastLocalFormulaEditByCellKey.delete(cellKey);
+    this._lastLocalContentEditByCellKey.delete(cellKey);
 
     const localFormula = oldFormula.trim();
     const remoteFormula = newFormula.trim();
@@ -372,17 +507,20 @@ export class FormulaConflictMonitor {
     // Map deletes don't create a new Item, so we can't use origin ids like we do for overwrites.
     if (action === "delete" && idsEqual(itemId, lastLocal.itemId)) {
       this._lastLocalValueEditByCellKey.delete(cellKey);
+      this._lastLocalContentEditByCellKey.delete(cellKey);
       return;
     }
 
     // Sequential overwrite (remote saw our write) - ignore.
     if (idsEqual(newItemOriginId, lastLocal.itemId)) {
       this._lastLocalValueEditByCellKey.delete(cellKey);
+      this._lastLocalContentEditByCellKey.delete(cellKey);
       return;
     }
 
     // We no longer consider that local edit "pending" for conflict detection.
     this._lastLocalValueEditByCellKey.delete(cellKey);
+    this._lastLocalContentEditByCellKey.delete(cellKey);
 
     // Auto-resolve when the values are deep-equal.
     if (valuesDeeplyEqual(newValue, lastLocal.value)) return;

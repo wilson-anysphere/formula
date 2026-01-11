@@ -56,7 +56,7 @@ export class ConflictUiController {
     const msg = document.createElement("div");
     if (this.conflicts.length === 1) {
       const conflict = this.conflicts[0];
-      const label = conflict.kind === "value" ? "Value" : "Formula";
+      const label = conflict.kind === "value" ? "Value" : conflict.kind === "content" ? "Content" : "Formula";
       msg.textContent = `${label} conflict detected (${formatCell(conflict.cell)})`;
     } else {
       msg.textContent = `${this.conflicts.length} conflicts detected`;
@@ -84,7 +84,7 @@ export class ConflictUiController {
     dialog.dataset.testid = "conflict-dialog";
 
     const title = document.createElement("h2");
-    const label = conflict.kind === "value" ? "value" : "formula";
+    const label = conflict.kind === "value" ? "value" : conflict.kind === "content" ? "content" : "formula";
     title.textContent = `Resolve ${label} conflict in ${formatCell(conflict.cell)}`;
     dialog.appendChild(title);
 
@@ -92,32 +92,18 @@ export class ConflictUiController {
     body.style.display = "flex";
     body.style.gap = "16px";
 
-    const left =
-      conflict.kind === "value"
-        ? this._renderValuePanel({
-            testid: "conflict-local",
-            label: "Yours",
-            value: conflict.localValue
-          })
-        : this._renderFormulaPanel({
-            testid: "conflict-local",
-            label: "Yours",
-            formula: conflict.localFormula,
-            preview: conflict.localPreview
-          });
-    const right =
-      conflict.kind === "value"
-        ? this._renderValuePanel({
-            testid: "conflict-remote",
-            label: `Theirs (${conflict.remoteUserId})`,
-            value: conflict.remoteValue
-          })
-        : this._renderFormulaPanel({
-            testid: "conflict-remote",
-            label: `Theirs (${conflict.remoteUserId})`,
-            formula: conflict.remoteFormula,
-            preview: conflict.remotePreview
-          });
+    const left = this._renderConflictSide({
+      testid: "conflict-local",
+      label: "Yours",
+      conflict,
+      side: "local"
+    });
+    const right = this._renderConflictSide({
+      testid: "conflict-remote",
+      label: `Theirs (${conflict.remoteUserId})`,
+      conflict,
+      side: "remote"
+    });
 
     body.appendChild(left);
     body.appendChild(right);
@@ -130,17 +116,19 @@ export class ConflictUiController {
 
     actions.appendChild(
       this._button("Keep yours", "conflict-choose-local", () => {
-        const chosen = conflict.kind === "value" ? conflict.localValue : conflict.localFormula;
+        const chosen =
+          conflict.kind === "content" ? conflict.local : conflict.kind === "value" ? conflict.localValue : conflict.localFormula;
         this._resolve(conflict.id, chosen);
       })
     );
     actions.appendChild(
       this._button("Use theirs", "conflict-choose-remote", () => {
-        const chosen = conflict.kind === "value" ? conflict.remoteValue : conflict.remoteFormula;
+        const chosen =
+          conflict.kind === "content" ? conflict.remote : conflict.kind === "value" ? conflict.remoteValue : conflict.remoteFormula;
         this._resolve(conflict.id, chosen);
       })
     );
-    if (conflict.kind !== "value") {
+    if (conflict.kind === "formula") {
       actions.appendChild(
         this._button("Edit…", "conflict-edit", () => {
           this._renderManualEditor(dialog, conflict);
@@ -156,6 +144,45 @@ export class ConflictUiController {
 
     dialog.appendChild(actions);
     this._dialogEl.appendChild(dialog);
+  }
+
+  /**
+   * @param {object} input
+   * @param {string} input.testid
+   * @param {string} input.label
+   * @param {any} input.conflict
+   * @param {"local" | "remote"} input.side
+   */
+  _renderConflictSide(input) {
+    const { conflict } = input;
+
+    if (conflict.kind === "content") {
+      const choice = input.side === "local" ? conflict.local : conflict.remote;
+      if (choice?.type === "formula") {
+        return this._renderFormulaPanel({
+          testid: input.testid,
+          label: input.label,
+          formula: choice.formula,
+          preview: choice.preview
+        });
+      }
+      return this._renderValuePanel({ testid: input.testid, label: input.label, value: choice?.value ?? null });
+    }
+
+    if (conflict.kind === "value") {
+      return this._renderValuePanel({
+        testid: input.testid,
+        label: input.label,
+        value: input.side === "local" ? conflict.localValue : conflict.remoteValue
+      });
+    }
+
+    return this._renderFormulaPanel({
+      testid: input.testid,
+      label: input.label,
+      formula: input.side === "local" ? conflict.localFormula : conflict.remoteFormula,
+      preview: input.side === "local" ? conflict.localPreview : conflict.remotePreview
+    });
   }
 
   /**
