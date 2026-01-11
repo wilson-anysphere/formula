@@ -35,7 +35,13 @@ describe("FormulaBarView tab completion (integration)", () => {
 
     await completion.flushTabCompletion();
 
+    expect(view.model.aiSuggestion()).toBe("=SUM(A1:A10)");
     expect(view.model.aiGhostText()).toBe("1:A10)");
+
+    const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    expect(highlight?.textContent).toBe("=SUM(A1:A10)");
+    expect(highlight?.querySelectorAll(".formula-bar-ghost")).toHaveLength(1);
+    expect(highlight?.querySelector(".formula-bar-ghost")?.textContent).toBe("1:A10)");
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
     expect(view.model.draft).toBe("=SUM(A1:A10)");
@@ -66,10 +72,13 @@ describe("FormulaBarView tab completion (integration)", () => {
 
     await completion.flushTabCompletion();
 
+    expect(view.model.aiSuggestion()).toBe("=VLOOKUP(");
     expect(view.model.aiGhostText()).toBe("OKUP(");
 
     const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
     expect(highlight?.textContent).toBe("=VLOOKUP(");
+    expect(highlight?.querySelectorAll(".formula-bar-ghost")).toHaveLength(1);
+    expect(highlight?.querySelector(".formula-bar-ghost")?.textContent).toBe("OKUP(");
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
     expect(view.model.draft).toBe("=VLOOKUP(");
