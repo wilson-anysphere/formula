@@ -337,6 +337,32 @@ if (typeof globalThis.XMLHttpRequest === "function") {
   lockDownGlobal("XMLHttpRequest", PermissionedXMLHttpRequest);
 }
 
+// Prevent bypassing the permission-gated network APIs by spawning nested workers
+// with pristine globals (native fetch/WebSocket/XHR).
+if (typeof globalThis.Worker === "function") {
+  class PermissionedWorker {
+    constructor() {
+      throw new Error("Worker is not allowed in extensions");
+    }
+  }
+  lockDownGlobal("Worker", PermissionedWorker);
+}
+
+if (typeof globalThis.SharedWorker === "function") {
+  class PermissionedSharedWorker {
+    constructor() {
+      throw new Error("SharedWorker is not allowed in extensions");
+    }
+  }
+  lockDownGlobal("SharedWorker", PermissionedSharedWorker);
+}
+
+if (typeof globalThis.importScripts === "function") {
+  lockDownGlobal("importScripts", () => {
+    throw new Error("importScripts is not allowed in extensions");
+  });
+}
+
 async function activateExtension() {
   if (activated) return;
   if (activationPromise) return activationPromise;
