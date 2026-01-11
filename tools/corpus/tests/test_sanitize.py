@@ -182,12 +182,14 @@ class SanitizeTests(unittest.TestCase):
         self.assertIn("xl/comments1.xml", summary.rewritten_parts)
         self.assertIn("xl/charts/chart1.xml", summary.rewritten_parts)
         self.assertIn("xl/drawings/drawing1.xml", summary.rewritten_parts)
+        self.assertIn("xl/tables/table1.xml", summary.rewritten_parts)
 
         sensitive_tokens = [
             "alice@example.com",
             "leaky.example.com",
             "ACME_SECRET_NAME",
             "ACME_SECRET_TOKEN",
+            "ACME_TABLE_SECRET",
             "CHART_TOKEN_123",
             "DRAWING_TOKEN",
             "VBASECRET",

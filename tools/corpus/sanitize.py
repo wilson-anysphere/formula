@@ -294,12 +294,15 @@ def _sanitize_drawing(xml: bytes, *, options: SanitizeOptions) -> bytes:
         _sanitize_xml_text_elements(root, options=options, local_names={"t"})
         _sanitize_xml_attributes(root, options=options, attr_names={"name", "descr", "title"})
 
-    # Images can contain PII; remove picture nodes when secret removal is enabled.
+    # Images can contain PII; remove entire anchors that embed raster content when secret
+    # removal is enabled. Removing just `<xdr:pic>` can leave invalid anchors behind.
     if options.remove_secrets:
-        for parent in list(root.iter()):
-            for child in list(parent):
-                if child.tag.split("}")[-1] == "pic":
-                    parent.remove(child)
+        for anchor in list(root):
+            local = anchor.tag.split("}")[-1]
+            if local not in {"twoCellAnchor", "oneCellAnchor", "absoluteAnchor"}:
+                continue
+            if any(el.tag.split("}")[-1] in {"pic", "blip"} for el in anchor.iter()):
+                root.remove(anchor)
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
@@ -510,7 +513,7 @@ def _rewrite_formula_table_references(formula: str, *, table_rename_map: dict[st
     for old, new in table_rename_map.items():
         if not old:
             continue
-        out = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(old)}(?=\\[)", new, out)
+        out = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(old)}(?=\[)", new, out)
     return out
 
 
