@@ -26,6 +26,20 @@ export interface CanvasGridProps {
   frozenCols?: number;
   defaultRowHeight?: number;
   defaultColWidth?: number;
+  /**
+   * How many extra rows beyond the visible viewport to prefetch.
+   *
+   * This reduces flicker/blank cells when using async (engine-backed) providers
+   * by warming the cache ahead of fast scrolls.
+   */
+  prefetchOverscanRows?: number;
+  /**
+   * How many extra columns beyond the visible viewport to prefetch.
+   *
+   * This reduces flicker/blank cells when using async (engine-backed) providers
+   * by warming the cache ahead of fast scrolls.
+   */
+  prefetchOverscanCols?: number;
   remotePresences?: GridPresence[] | null;
   apiRef?: React.Ref<GridApi>;
   onSelectionChange?: (cell: { row: number; col: number } | null) => void;
@@ -54,6 +68,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
   const frozenRows = props.frozenRows ?? 0;
   const frozenCols = props.frozenCols ?? 0;
+  const prefetchOverscanRows = props.prefetchOverscanRows ?? 10;
+  const prefetchOverscanCols = props.prefetchOverscanCols ?? 5;
 
   const rendererFactory = useMemo(
     () =>
@@ -63,9 +79,19 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           rowCount: props.rowCount,
           colCount: props.colCount,
           defaultRowHeight: props.defaultRowHeight,
-          defaultColWidth: props.defaultColWidth
+          defaultColWidth: props.defaultColWidth,
+          prefetchOverscanRows,
+          prefetchOverscanCols
         }),
-    [props.provider, props.rowCount, props.colCount, props.defaultRowHeight, props.defaultColWidth]
+    [
+      props.provider,
+      props.rowCount,
+      props.colCount,
+      props.defaultRowHeight,
+      props.defaultColWidth,
+      prefetchOverscanRows,
+      prefetchOverscanCols
+    ]
   );
 
   const syncScrollbars = () => {

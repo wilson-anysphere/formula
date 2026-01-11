@@ -71,6 +71,9 @@ export class CanvasGridRenderer {
   private readonly provider: CellProvider;
   readonly scroll: VirtualScrollManager;
 
+  private readonly prefetchOverscanRows: number;
+  private readonly prefetchOverscanCols: number;
+
   private gridCanvas?: HTMLCanvasElement;
   private gridCtx?: CanvasRenderingContext2D;
   private contentCanvas?: HTMLCanvasElement;
@@ -123,8 +126,12 @@ export class CanvasGridRenderer {
     colCount: number;
     defaultRowHeight?: number;
     defaultColWidth?: number;
+    prefetchOverscanRows?: number;
+    prefetchOverscanCols?: number;
   }) {
     this.provider = options.provider;
+    this.prefetchOverscanRows = CanvasGridRenderer.sanitizeOverscan(options.prefetchOverscanRows);
+    this.prefetchOverscanCols = CanvasGridRenderer.sanitizeOverscan(options.prefetchOverscanCols);
     this.scroll = new VirtualScrollManager({
       rowCount: options.rowCount,
       colCount: options.colCount,
@@ -349,12 +356,7 @@ export class CanvasGridRenderer {
     this.dirty.content.markDirty(full);
     this.dirty.selection.markDirty(full);
     this.forceFullRedraw = true;
-    this.provider.prefetch?.({
-      startRow: viewport.main.rows.start,
-      endRow: viewport.main.rows.end,
-      startCol: viewport.main.cols.start,
-      endCol: viewport.main.cols.end
-    });
+    this.prefetchVisibleRange(viewport);
     this.requestRender();
   }
 
@@ -408,13 +410,27 @@ export class CanvasGridRenderer {
 
   private invalidateForScroll(): void {
     const viewport = this.scroll.getViewportState();
-    this.provider.prefetch?.({
-      startRow: viewport.main.rows.start,
-      endRow: viewport.main.rows.end,
-      startCol: viewport.main.cols.start,
-      endCol: viewport.main.cols.end
-    });
+    this.prefetchVisibleRange(viewport);
     this.requestRender();
+  }
+
+  private prefetchVisibleRange(viewport: GridViewportState): void {
+    if (!this.provider.prefetch) return;
+
+    const rowCount = this.getRowCount();
+    const colCount = this.getColCount();
+
+    this.provider.prefetch({
+      startRow: Math.max(0, viewport.main.rows.start - this.prefetchOverscanRows),
+      endRow: Math.min(rowCount, viewport.main.rows.end + this.prefetchOverscanRows),
+      startCol: Math.max(0, viewport.main.cols.start - this.prefetchOverscanCols),
+      endCol: Math.min(colCount, viewport.main.cols.end + this.prefetchOverscanCols)
+    });
+  }
+
+  private static sanitizeOverscan(value: number | undefined): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.floor(value));
   }
 
   private alignScrollToDevicePixels(pos: { x: number; y: number }): { x: number; y: number } {
