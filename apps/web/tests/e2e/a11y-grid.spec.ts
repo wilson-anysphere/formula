@@ -9,6 +9,8 @@ test("grid container is focusable and announces selection via live region", asyn
   await expect(gridContainer).toHaveAttribute("tabindex", "0");
   await expect(gridContainer).toHaveAttribute("role", "grid");
   await expect(gridContainer).toHaveAttribute("aria-multiselectable", "true");
+  await expect(gridContainer).toHaveAttribute("aria-rowcount", /^\d+$/);
+  await expect(gridContainer).toHaveAttribute("aria-colcount", /^\d+$/);
   await expect(gridContainer).toHaveAccessibleName("Spreadsheet grid");
 
   await expect(page.getByTestId("canvas-grid-background")).toHaveAttribute("aria-hidden", "true");
