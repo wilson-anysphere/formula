@@ -37,6 +37,12 @@ export type SyncServerConfig = {
 
   auth: AuthMode;
 
+  internalAdminToken: string | null;
+  retention: {
+    ttlMs: number;
+    sweepIntervalMs: number;
+  };
+
   limits: {
     maxConnections: number;
     maxConnectionsPerIp: number;
@@ -120,6 +126,17 @@ export function loadConfigFromEnv(): SyncServerConfig {
           keyRing: loadKeyRingFromEnv(),
         }
       : { mode: "off" as const };
+  const internalAdminToken =
+    process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN &&
+    process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN.length > 0
+      ? process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN
+      : null;
+
+  const retentionTtlMs = envInt(process.env.SYNC_SERVER_RETENTION_TTL_MS, 0);
+  const retentionSweepIntervalMs = envInt(
+    process.env.SYNC_SERVER_RETENTION_SWEEP_INTERVAL_MS,
+    0
+  );
 
   const opaqueToken = process.env.SYNC_SERVER_AUTH_TOKEN;
   const jwtSecret = process.env.SYNC_SERVER_JWT_SECRET;
@@ -152,6 +169,11 @@ export function loadConfigFromEnv(): SyncServerConfig {
     dataDir,
     persistence: { backend, compactAfterUpdates, encryption },
     auth,
+    internalAdminToken,
+    retention: {
+      ttlMs: retentionTtlMs,
+      sweepIntervalMs: retentionSweepIntervalMs,
+    },
     limits: {
       maxConnections: envInt(process.env.SYNC_SERVER_MAX_CONNECTIONS, 1000),
       maxConnectionsPerIp: envInt(

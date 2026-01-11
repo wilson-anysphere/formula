@@ -94,6 +94,29 @@ You can switch persistence backends:
 - `SYNC_SERVER_PERSISTENCE_BACKEND=leveldb` (default)
 - `SYNC_SERVER_PERSISTENCE_BACKEND=file` (portable fallback)
 
+#### Retention / purge (LevelDB only)
+
+When using `SYNC_SERVER_PERSISTENCE_BACKEND=leveldb` with `y-leveldb` installed, the sync server stores per-document metadata:
+
+- `lastSeenMs`: updated when a document is loaded and on subsequent updates (throttled).
+
+You can purge old documents from the LevelDB store without external bookkeeping:
+
+- Enable internal admin endpoints:
+  - `SYNC_SERVER_INTERNAL_ADMIN_TOKEN=<token>`
+- Configure retention TTL (required for purging):
+  - `SYNC_SERVER_RETENTION_TTL_MS=<milliseconds>`
+- (Optional) Run periodic sweeps in the background:
+  - `SYNC_SERVER_RETENTION_SWEEP_INTERVAL_MS=<milliseconds>`
+
+Trigger a sweep manually:
+
+```bash
+curl -X POST \
+  -H "x-internal-admin-token: $SYNC_SERVER_INTERNAL_ADMIN_TOKEN" \
+  http://127.0.0.1:1234/internal/retention/sweep
+```
+
 #### Encryption at rest (file persistence)
 
 The `file` persistence backend supports **encryption at rest** (AES-256-GCM) for persisted `.yjs` documents.

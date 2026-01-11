@@ -24,6 +24,11 @@ import {
   FilePersistence,
   migrateLegacyPlaintextFilesToEncryptedFormat,
 } from "./persistence.js";
+import {
+  DocConnectionTracker,
+  LeveldbRetentionManager,
+  type LeveldbPersistenceLike,
+} from "./retention.js";
 import { Y } from "./yjs.js";
 import { installYwsSecurity } from "./ywsSecurity.js";
 
@@ -74,17 +79,63 @@ export type SyncServerHandle = {
   getWsUrl: () => string;
 };
 
-export function createSyncServer(config: SyncServerConfig, logger: Logger) {
+type LeveldbPersistence = LeveldbPersistenceLike & {
+  getYDoc: (docName: string) => Promise<any>;
+  storeUpdate: (docName: string, update: Uint8Array) => Promise<unknown>;
+  flushDocument: (docName: string) => Promise<void>;
+  destroy: () => Promise<void>;
+};
+
+export type SyncServerCreateOptions = {
+  createLeveldbPersistence?: (location: string) => LeveldbPersistence;
+};
+
+export function createSyncServer(
+  config: SyncServerConfig,
+  logger: Logger,
+  { createLeveldbPersistence }: SyncServerCreateOptions = {}
+) {
   const connectionTracker = new ConnectionTracker(
     config.limits.maxConnections,
     config.limits.maxConnectionsPerIp
   );
+  const docConnectionTracker = new DocConnectionTracker();
   const connectionAttemptLimiter = new TokenBucketRateLimiter(
     config.limits.maxConnAttemptsPerWindow,
     config.limits.connAttemptWindowMs
   );
   let persistenceInitialized = false;
   let persistenceCleanup: (() => Promise<void>) | null = null;
+  let retentionManager: LeveldbRetentionManager | null = null;
+  let retentionSweepTimer: NodeJS.Timeout | null = null;
+
+  const maybeStartRetentionSweeper = () => {
+    if (
+      retentionSweepTimer ||
+      !retentionManager ||
+      config.retention.ttlMs <= 0 ||
+      config.retention.sweepIntervalMs <= 0
+    ) {
+      return;
+    }
+
+    retentionSweepTimer = setInterval(() => {
+      void retentionManager
+        ?.sweep()
+        .then((result) => {
+          logger.info(
+            {
+              ...result,
+              ttlMs: config.retention.ttlMs,
+              intervalMs: config.retention.sweepIntervalMs,
+            },
+            "retention_sweep_completed"
+          );
+        })
+        .catch((err) => logger.error({ err }, "retention_sweep_failed"));
+    }, config.retention.sweepIntervalMs);
+    retentionSweepTimer.unref();
+  };
 
   const initPersistence = async () => {
     if (persistenceInitialized) return;
@@ -100,6 +151,7 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
 
       persistenceInitialized = true;
       persistenceCleanup = null;
+      retentionManager = null;
       setPersistence(
         new FilePersistence(
           config.dataDir,
@@ -118,12 +170,57 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
       return;
     }
 
+    if (createLeveldbPersistence) {
+      const ldb = createLeveldbPersistence(config.dataDir);
+      retentionManager = new LeveldbRetentionManager(
+        ldb,
+        docConnectionTracker,
+        logger,
+        config.retention.ttlMs
+      );
+
+      persistenceInitialized = true;
+      persistenceCleanup = async () => {
+        await ldb.destroy();
+      };
+
+      setPersistence({
+        provider: ldb,
+        bindState: async (docName: string, ydoc: any) => {
+          const persistenceOrigin = "persistence:leveldb";
+
+          ydoc.on("update", (update: Uint8Array, origin: unknown) => {
+            if (origin === persistenceOrigin) return;
+            void ldb.storeUpdate(docName, update);
+            void retentionManager?.markSeen(docName);
+          });
+
+          void retentionManager?.markSeen(docName, { force: true });
+
+          const persistedYdoc = await ldb.getYDoc(docName);
+          Y.applyUpdate(
+            ydoc,
+            Y.encodeStateAsUpdate(persistedYdoc),
+            persistenceOrigin
+          );
+        },
+        writeState: async (docName: string) => {
+          await ldb.flushDocument(docName);
+          void retentionManager?.markFlushed(docName);
+        },
+      });
+
+      maybeStartRetentionSweeper();
+      logger.info({ dir: config.dataDir }, "persistence_leveldb_enabled");
+      return;
+    }
+
     const require = createRequire(import.meta.url);
-    let LeveldbPersistence: new (location: string) => any;
+    let LeveldbPersistenceCtor: new (location: string) => LeveldbPersistence;
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      ({ LeveldbPersistence } = require("y-leveldb") as {
-        LeveldbPersistence: new (location: string) => any;
+      ({ LeveldbPersistence: LeveldbPersistenceCtor } = require("y-leveldb") as {
+        LeveldbPersistence: new (location: string) => LeveldbPersistence;
       });
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
@@ -149,6 +246,7 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
 
         persistenceInitialized = true;
         persistenceCleanup = null;
+        retentionManager = null;
         setPersistence(
           new FilePersistence(
             config.dataDir,
@@ -178,7 +276,13 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
     const maxAttempts = 5;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        const ldb = new LeveldbPersistence(config.dataDir);
+        const ldb = new LeveldbPersistenceCtor(config.dataDir);
+        retentionManager = new LeveldbRetentionManager(
+          ldb,
+          docConnectionTracker,
+          logger,
+          config.retention.ttlMs
+        );
 
         persistenceInitialized = true;
         persistenceCleanup = async () => {
@@ -189,13 +293,16 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
           provider: ldb,
           bindState: async (docName: string, ydoc: any) => {
             // Important: `y-websocket` does not await `bindState()`. Attach the
-            // update listener first so we don't miss early client updates.
-            const persistenceOrigin = "persistence:leveldb";
+           // update listener first so we don't miss early client updates.
+           const persistenceOrigin = "persistence:leveldb";
 
             ydoc.on("update", (update: Uint8Array, origin: unknown) => {
               if (origin === persistenceOrigin) return;
               void ldb.storeUpdate(docName, update);
+              void retentionManager?.markSeen(docName);
             });
+
+            void retentionManager?.markSeen(docName, { force: true });
 
             const persistedYdoc = await ldb.getYDoc(docName);
             Y.applyUpdate(
@@ -207,9 +314,11 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
           writeState: async (docName: string) => {
             // Compact updates on last client disconnect to keep DB size bounded.
             await ldb.flushDocument(docName);
+            void retentionManager?.markFlushed(docName);
           },
         });
 
+        maybeStartRetentionSweeper();
         logger.info({ dir: config.dataDir }, "persistence_leveldb_enabled");
         return;
       } catch (err) {
@@ -228,27 +337,80 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
   };
 
   const server = http.createServer((req, res) => {
-    if (!req.url) {
-      res.writeHead(400).end();
-      return;
-    }
+    void (async () => {
+      if (!req.url) {
+        res.writeHead(400).end();
+        return;
+      }
 
-    const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
-    if (req.method === "GET" && url.pathname === "/healthz") {
-      const snapshot = connectionTracker.snapshot();
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({
-          status: "ok",
-          uptimeSec: Math.round(process.uptime()),
-          connections: snapshot,
-        })
-      );
-      return;
-    }
+      const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+      if (req.method === "GET" && url.pathname === "/healthz") {
+        const snapshot = connectionTracker.snapshot();
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            status: "ok",
+            uptimeSec: Math.round(process.uptime()),
+            connections: snapshot,
+          })
+        );
+        return;
+      }
 
-    res.writeHead(404, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: "not_found" }));
+      if (req.method === "POST" && url.pathname === "/internal/retention/sweep") {
+        req.resume();
+
+        if (!config.internalAdminToken) {
+          res.writeHead(404, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "not_found" }));
+          return;
+        }
+
+        const token = req.headers["x-internal-admin-token"];
+        if (token !== config.internalAdminToken) {
+          res.writeHead(403, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "forbidden" }));
+          return;
+        }
+
+        if (config.retention.ttlMs <= 0) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: "retention_disabled",
+              message:
+                "Retention is disabled. Set SYNC_SERVER_RETENTION_TTL_MS to a positive integer (milliseconds).",
+            })
+          );
+          return;
+        }
+
+        if (!retentionManager) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              error: "retention_not_supported",
+              message:
+                "Retention is only supported when SYNC_SERVER_PERSISTENCE_BACKEND=leveldb and y-leveldb is installed.",
+            })
+          );
+          return;
+        }
+
+        const result = await retentionManager.sweep();
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, ...result }));
+        return;
+      }
+
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "not_found" }));
+    })().catch((err) => {
+      logger.error({ err }, "http_request_failed");
+      if (res.headersSent) return;
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "internal_server_error" }));
+    });
   });
 
   const wss = new WebSocketServer({ noServer: true });
@@ -281,6 +443,7 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
     ws.on("close", () => {
       clearInterval(messageWindow);
       connectionTracker.unregister(ip);
+      docConnectionTracker.unregister(docName);
       logger.info(
         { ip, docName, userId: authCtx?.userId },
         "ws_connection_closed"
@@ -301,6 +464,14 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
       },
       "ws_connection_open"
     );
+
+    void retentionManager?.markSeen(docName);
+
+    if (retentionManager?.isPurging(docName)) {
+      logger.warn({ ip, docName }, "ws_connection_rejected_doc_purging");
+      ws.close(1013, "Document is being purged");
+      return;
+    }
 
     installYwsSecurity(ws, { docName, auth: authCtx, logger });
     setupWSConnection(ws, req, { gc: config.gc });
@@ -327,6 +498,11 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
         return;
       }
 
+      if (retentionManager?.isPurging(docName)) {
+        sendUpgradeRejection(socket, 503, "Document is being purged");
+        return;
+      }
+
       const token = extractToken(req, url);
       let authCtx;
       try {
@@ -344,6 +520,7 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
         sendUpgradeRejection(socket, 429, connResult.reason);
         return;
       }
+      docConnectionTracker.register(docName);
 
       (req as IncomingMessage & { auth?: unknown }).auth = authCtx;
 
@@ -353,6 +530,7 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
         });
       } catch (err) {
         connectionTracker.unregister(ip);
+        docConnectionTracker.unregister(docName);
         throw err;
       }
     } catch (err) {
@@ -392,6 +570,11 @@ export function createSyncServer(config: SyncServerConfig, logger: Logger) {
       await new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve()))
       );
+
+      if (retentionSweepTimer) {
+        clearInterval(retentionSweepTimer);
+        retentionSweepTimer = null;
+      }
 
       if (persistenceCleanup) {
         await persistenceCleanup();
