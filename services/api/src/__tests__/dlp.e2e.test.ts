@@ -304,6 +304,27 @@ describe("API e2e: DLP policy + classification endpoints", () => {
       source: { scope: "range", selectorKey: `range:${docId}:Sheet1:0,0:2,2` }
     });
 
+    const resolveSubRange = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/classifications/resolve`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        selector: {
+          scope: "range",
+          documentId: docId,
+          sheetId: "Sheet1",
+          range: { start: { row: 1, col: 1 }, end: { row: 2, col: 2 } }
+        }
+      }
+    });
+    expect(resolveSubRange.statusCode).toBe(200);
+    // Range resolution is based on the most specific *containing* range and should not include
+    // cell labels from within the range (those are included in the aggregate range classifier).
+    expect(resolveSubRange.json()).toMatchObject({
+      classification: { level: "Restricted", labels: ["PII"] },
+      source: { scope: "range", selectorKey: `range:${docId}:Sheet1:0,0:2,2` }
+    });
+
     const evaluateCopy = await app.inject({
       method: "POST",
       url: `/docs/${docId}/dlp/evaluate`,
