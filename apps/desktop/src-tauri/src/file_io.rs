@@ -1392,6 +1392,15 @@ mod tests {
             "/../../../fixtures/xlsx/basic/image.xlsx"
         ));
         let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
+        let original_sheet_xml =
+            std::str::from_utf8(original_pkg.part("xl/worksheets/sheet1.xml").unwrap())
+                .expect("original sheet1.xml utf8");
+        assert!(
+            original_sheet_xml.contains("<drawing"),
+            "expected fixture sheet1.xml to contain a drawing relationship"
+        );
+
         let mut workbook = read_xlsx_blocking(fixture_path).expect("read image fixture workbook");
 
         let sheet_id = workbook.sheets[0].id.clone();
@@ -1412,6 +1421,15 @@ mod tests {
 
         assert_non_worksheet_parts_preserved(&original_bytes, &written_bytes);
 
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+        let written_sheet_xml =
+            std::str::from_utf8(written_pkg.part("xl/worksheets/sheet1.xml").unwrap())
+                .expect("written sheet1.xml utf8");
+        assert!(
+            written_sheet_xml.contains("<drawing"),
+            "expected patched sheet1.xml to retain drawing relationship"
+        );
+
         let written = read_xlsx_blocking(&out_path).expect("read edited workbook");
         assert_eq!(
             written.sheets[0].get_cell(1, 1).computed_value,
@@ -1426,6 +1444,15 @@ mod tests {
             "/../../../fixtures/xlsx/hyperlinks/hyperlinks.xlsx"
         ));
         let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
+        let original_sheet_xml =
+            std::str::from_utf8(original_pkg.part("xl/worksheets/sheet1.xml").unwrap())
+                .expect("original sheet1.xml utf8");
+        assert!(
+            original_sheet_xml.contains("<hyperlinks>"),
+            "expected fixture sheet1.xml to contain hyperlinks"
+        );
+
         let mut workbook =
             read_xlsx_blocking(fixture_path).expect("read hyperlinks fixture workbook");
 
@@ -1446,6 +1473,19 @@ mod tests {
         );
 
         assert_non_worksheet_parts_preserved(&original_bytes, &written_bytes);
+
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+        let written_sheet_xml =
+            std::str::from_utf8(written_pkg.part("xl/worksheets/sheet1.xml").unwrap())
+                .expect("written sheet1.xml utf8");
+        assert!(
+            written_sheet_xml.contains("<hyperlinks>"),
+            "expected patched sheet1.xml to retain hyperlinks"
+        );
+        assert!(
+            written_sheet_xml.contains("ref=\"A1\""),
+            "expected patched sheet1.xml to retain hyperlink refs"
+        );
 
         let written = read_xlsx_blocking(&out_path).expect("read edited workbook");
         assert_eq!(
