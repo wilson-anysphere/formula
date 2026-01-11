@@ -33,7 +33,14 @@ function connectDocs(docA, docB) {
   };
 }
 
-test("CollabSession formula conflict monitor detects offline concurrent edits and converges after resolution", async () => {
+/**
+ * @param {number} ms
+ */
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+test("CollabSession formula conflict monitor detects true offline concurrent edits via causality", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
   let disconnect = connectDocs(docA, docB);
@@ -43,9 +50,9 @@ test("CollabSession formula conflict monitor detects offline concurrent edits an
   /** @type {Array<any>} */
   const conflictsB = [];
 
-  // Formerly used by FormulaConflictMonitor's wall-clock heuristic (now ignored). Keep a small
-  // value so this test would fail under the old implementation when we wait below.
-  const concurrencyWindowMs = 50;
+  // Deliberately tiny: causal conflict detection should still fire even if the
+  // offline window far exceeds this old heuristic parameter.
+  const concurrencyWindowMs = 5;
 
   const sessionA = createCollabSession({
     doc: docA,
@@ -76,6 +83,9 @@ test("CollabSession formula conflict monitor detects offline concurrent edits an
   await new Promise((r) => setTimeout(r, concurrencyWindowMs + 150));
   await sessionB.setCellFormula("Sheet1:0:0", "=2");
 
+  // Simulate a long offline period relative to the old heuristic.
+  await sleep(concurrencyWindowMs + 25);
+
   // Reconnect and sync state.
   disconnect = connectDocs(docA, docB);
 
@@ -85,6 +95,7 @@ test("CollabSession formula conflict monitor detects offline concurrent edits an
   const conflictSide = conflictsA.length > 0 ? sessionA : sessionB;
   const conflict = conflictsA.length > 0 ? conflictsA[0] : conflictsB[0];
 
+  assert.equal(conflict.kind, "formula");
   assert.ok(conflictSide.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.localFormula));
 
   assert.equal((await sessionA.getCell("Sheet1:0:0"))?.formula, conflict.localFormula.trim());
@@ -97,7 +108,7 @@ test("CollabSession formula conflict monitor detects offline concurrent edits an
   docB.destroy();
 });
 
-test("CollabSession formula conflict monitor does not flag sequential edits", async () => {
+test("CollabSession formula conflict monitor does not emit conflicts for sequential overwrites", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
   const disconnect = connectDocs(docA, docB);
@@ -111,6 +122,7 @@ test("CollabSession formula conflict monitor does not flag sequential edits", as
     doc: docA,
     formulaConflicts: {
       localUserId: "user-a",
+      concurrencyWindowMs: 1,
       onConflict: (c) => conflictsA.push(c),
     },
   });
@@ -118,15 +130,15 @@ test("CollabSession formula conflict monitor does not flag sequential edits", as
     doc: docB,
     formulaConflicts: {
       localUserId: "user-b",
+      concurrencyWindowMs: 1,
       onConflict: (c) => conflictsB.push(c),
     },
   });
 
-  // Ensure cell exists in both docs.
   await sessionA.setCellFormula("Sheet1:0:0", "=0");
   assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, "=0");
 
-  // Sequential overwrite: B edits after receiving A's update.
+  // Sequential: B sees A's edit before overwriting.
   await sessionA.setCellFormula("Sheet1:0:0", "=1");
   assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, "=1");
   await sessionB.setCellFormula("Sheet1:0:0", "=2");
@@ -134,6 +146,66 @@ test("CollabSession formula conflict monitor does not flag sequential edits", as
 
   assert.equal(conflictsA.length, 0);
   assert.equal(conflictsB.length, 0);
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
+test("CollabSession value conflicts surface when enabled (formula+value mode)", async () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+  /** @type {Array<any>} */
+  const conflictsB = [];
+
+  const concurrencyWindowMs = 5;
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      concurrencyWindowMs,
+      mode: "formula+value",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    formulaConflicts: {
+      localUserId: "user-b",
+      concurrencyWindowMs,
+      mode: "formula+value",
+      onConflict: (c) => conflictsB.push(c),
+    },
+  });
+
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "base");
+
+  disconnect();
+  await sessionA.setCellValue("Sheet1:0:0", "a");
+  await sessionB.setCellValue("Sheet1:0:0", "b");
+  await sleep(concurrencyWindowMs + 25);
+
+  disconnect = connectDocs(docA, docB);
+
+  const allConflicts = [...conflictsA, ...conflictsB];
+  assert.ok(allConflicts.length >= 1, "expected at least one value conflict to be detected");
+
+  const conflictSide = conflictsA.length > 0 ? sessionA : sessionB;
+  const conflict = conflictsA.length > 0 ? conflictsA[0] : conflictsB[0];
+  assert.equal(conflict.kind, "value");
+
+  assert.ok(conflictSide.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.localValue));
+
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.value, conflict.localValue);
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, conflict.localValue);
 
   sessionA.destroy();
   sessionB.destroy();

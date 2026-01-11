@@ -1,16 +1,28 @@
 import type * as Y from "yjs";
 
-export interface FormulaConflict {
-  id: string;
-  cell: { sheetId: string; row: number; col: number };
-  cellKey: string;
-  localFormula: string;
-  remoteFormula: string;
-  remoteUserId: string;
-  detectedAt: number;
-  localPreview?: any;
-  remotePreview?: any;
-}
+export type FormulaConflict =
+  | {
+      kind: "formula";
+      id: string;
+      cell: { sheetId: string; row: number; col: number };
+      cellKey: string;
+      localFormula: string;
+      remoteFormula: string;
+      remoteUserId: string;
+      detectedAt: number;
+      localPreview?: any;
+      remotePreview?: any;
+    }
+  | {
+      kind: "value";
+      id: string;
+      cell: { sheetId: string; row: number; col: number };
+      cellKey: string;
+      localValue: any;
+      remoteValue: any;
+      remoteUserId: string;
+      detectedAt: number;
+    };
 
 export interface CellConflict {
   id: string;
@@ -33,12 +45,15 @@ export class FormulaConflictMonitor {
     onConflict: (conflict: FormulaConflict) => void;
     getCellValue?: (ref: { sheetId: string; row: number; col: number }) => any;
     concurrencyWindowMs?: number;
+    mode?: "formula" | "formula+value";
+    includeValueConflicts?: boolean;
   });
 
   dispose(): void;
   listConflicts(): Array<FormulaConflict>;
   setLocalFormula(cellKey: string, formula: string): void;
-  resolveConflict(conflictId: string, chosenFormula: string): boolean;
+  setLocalValue(cellKey: string, value: any): void;
+  resolveConflict(conflictId: string, chosen: any): boolean;
 }
 
 export interface CellStructuralConflict {

@@ -183,6 +183,8 @@ export interface CollabSessionOptions {
     localUserId: string;
     onConflict: (conflict: FormulaConflict) => void;
     concurrencyWindowMs?: number;
+    mode?: "formula" | "formula+value";
+    includeValueConflicts?: boolean;
   };
   /**
    * When enabled, the session monitors structural operations (moves / deletes)
@@ -335,6 +337,7 @@ export class CollabSession {
   private sheetsSchemaObserver: ((event: any, transaction: Y.Transaction) => void) | null = null;
   private ensuringSchema = false;
   private readonly offlineAutoConnectAfterLoad: boolean;
+  private readonly formulaConflictsIncludeValueConflicts: boolean;
   private isDestroyed = false;
 
   constructor(options: CollabSessionOptions = {}) {
@@ -439,6 +442,11 @@ export class CollabSession {
     this.formulaConflictMonitor = null;
     this.cellConflictMonitor = null;
     this.cellValueConflictMonitor = null;
+    const formulaConflictMode =
+      options.formulaConflicts?.mode ??
+      (options.formulaConflicts?.includeValueConflicts ? "formula+value" : "formula");
+    this.formulaConflictsIncludeValueConflicts =
+      options.formulaConflicts != null && formulaConflictMode === "formula+value";
 
     if (schemaAutoInit) {
       const provider = this.provider;
@@ -578,6 +586,8 @@ export class CollabSession {
         localOrigins: this.localOrigins,
         onConflict: options.formulaConflicts.onConflict,
         concurrencyWindowMs: options.formulaConflicts.concurrencyWindowMs,
+        mode: options.formulaConflicts.mode,
+        includeValueConflicts: options.formulaConflicts.includeValueConflicts,
       });
     }
 
@@ -891,6 +901,7 @@ export class CollabSession {
       });
     }
 
+    const monitor = this.formulaConflictMonitor;
     this.transactLocal(() => {
       let cellData = this.cells.get(cellKey);
       let cell = getYMapCell(cellData);
@@ -903,6 +914,11 @@ export class CollabSession {
       // may have encrypted this cell while we were preparing a plaintext write.
       if (!encryptedPayload && cell.get("enc") !== undefined) {
         throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
+      }
+
+      if (!encryptedPayload && monitor && this.formulaConflictsIncludeValueConflicts) {
+        monitor.setLocalValue(cellKey, value ?? null);
+        return;
       }
 
       if (encryptedPayload) {
