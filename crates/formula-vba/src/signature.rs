@@ -225,7 +225,8 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
     {
         // NOVERIFY skips certificate chain verification. We still validate the signature itself and
         // any messageDigest attributes over the embedded content.
-        let flags = Pkcs7Flags::NOVERIFY;
+        // BINARY avoids any canonicalization (e.g. newline conversions) when verifying.
+        let flags = Pkcs7Flags::NOVERIFY | Pkcs7Flags::BINARY;
 
         // First try verifying as a "normal" PKCS#7 blob with embedded content.
         if pkcs7.verify(certs, &store, None, None, flags).is_ok() {
