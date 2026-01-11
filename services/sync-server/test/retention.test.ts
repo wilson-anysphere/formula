@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import WebSocket from "ws";
@@ -10,6 +13,8 @@ import { sha256Hex } from "../src/leveldb-docname.js";
 import { createLogger } from "../src/logger.js";
 import { LAST_SEEN_META_KEY } from "../src/retention.js";
 import { createSyncServer } from "../src/server.js";
+
+import { loadYLeveldbFromTarball } from "./y-leveldb-tarball.js";
 
 function waitForProviderSync(provider: {
   on: (event: string, cb: (...args: any[]) => void) => void;
@@ -416,4 +421,58 @@ test("retention sweep endpoint returns 400 when retention TTL is disabled", asyn
   const body = (await res.json()) as any;
   assert.equal(body.error, "retention_disabled");
   assert.equal(typeof body.message, "string");
+});
+
+test("retention sweep purges docs using y-leveldb + level-mem (no native LevelDB)", async (t) => {
+  const { LeveldbPersistence } = await loadYLeveldbFromTarball(t);
+
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-leveldb-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  let ldb: any;
+  const logger = createLogger("silent");
+  const server = createSyncServer({ ...createConfig(1_000), dataDir }, logger, {
+    createLeveldbPersistence: (location: string) => {
+      ldb = new LeveldbPersistence(location);
+      return ldb;
+    },
+  });
+
+  await server.start();
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const now = Date.now();
+
+  await ldb.storeUpdate("purge-me", seedUpdate("a"));
+  await ldb.setMeta("purge-me", LAST_SEEN_META_KEY, now - 10_000);
+
+  await ldb.storeUpdate("keep-me", seedUpdate("b"));
+  await ldb.setMeta("keep-me", LAST_SEEN_META_KEY, now);
+
+  await ldb.storeUpdate("no-meta", seedUpdate("c"));
+
+  const res = await fetch(`${server.getHttpUrl()}/internal/retention/sweep`, {
+    method: "POST",
+    headers: {
+      "x-internal-admin-token": "admin-token",
+    },
+  });
+
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as any;
+  assert.deepEqual(body, {
+    ok: true,
+    scanned: 3,
+    purged: 1,
+    skippedActive: 0,
+    skippedNoMeta: 1,
+    errors: [],
+  });
+
+  const remaining = (await ldb.getAllDocNames()).sort();
+  assert.deepEqual(remaining, ["keep-me", "no-meta"]);
 });
