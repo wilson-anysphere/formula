@@ -1,9 +1,23 @@
 /**
  * Refresh policy + scheduling for queries.
  *
+ * Supports `manual`, `interval`, `on-open`, and `cron` refresh policies.
+ *
+ * Cron policies use a conservative 5-field format:
+ *   minute hour day-of-month month day-of-week
+ *
+ * Cron schedules default to the host's local timezone. Tests and hosts can force
+ * UTC by passing `RefreshManagerOptions.timezone = "utc"`.
+ *
  * `RefreshManager` is designed to be UI-agnostic. Host applications can wire
  * events into whatever UX they want (progress bars, notifications, prompts).
+ *
+ * Hosts can optionally provide a `stateStore` to persist refresh policies and
+ * the last successful refresh time across sessions (Excel parity: refresh on
+ * open + scheduled refresh).
  */
+
+import { nextCronRun, parseCronExpression } from "./cron.js";
 
 /**
  * @typedef {import("./model.js").Query} Query
@@ -15,7 +29,7 @@
  */
 
 /**
- * @typedef {"manual" | "interval" | "on-open"} RefreshReason
+ * @typedef {"manual" | "interval" | "on-open" | "cron"} RefreshReason
  */
 
 /**
@@ -52,6 +66,17 @@
  *   type: "cancelled";
  *   job: RefreshJobInfo;
  * }} RefreshEvent
+ */
+
+/**
+ * @typedef {{ [queryId: string]: { policy: RefreshPolicy, lastRunAtMs?: number } }} RefreshState
+ */
+
+/**
+ * @typedef {{
+ *   load(): Promise<RefreshState>;
+ *   save(state: RefreshState): Promise<void>;
+ * }} RefreshStateStore
  */
 
 class Emitter {
@@ -114,6 +139,8 @@ function abortError(message) {
  *   concurrency?: number;
  *   timers?: { setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout };
  *   now?: () => number;
+ *   timezone?: "local" | "utc";
+ *   stateStore?: RefreshStateStore;
  * }} RefreshManagerOptions
  */
 
@@ -127,10 +154,31 @@ export class RefreshManager {
     this.concurrency = Math.max(1, options.concurrency ?? 2);
     this.timers = options.timers ?? { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
     this.now = options.now ?? (() => Date.now());
+    this.timezone = options.timezone ?? "local";
+    this.stateStore = options.stateStore;
+
+    /** @type {RefreshState} */
+    this.state = {};
+    /** @type {Promise<void>} */
+    this.stateReady = this.stateStore
+      ? Promise.resolve()
+          .then(() => this.stateStore.load())
+          .then((loaded) => {
+            this.state = loaded ?? {};
+          })
+          .catch(() => {
+            // Best-effort: persistence should never break refresh.
+            this.state = {};
+          })
+      : Promise.resolve();
+    // Public readiness hook for hosts/tests that want to await state restoration.
+    this.ready = this.stateReady;
+    this.stateSaveInFlight = false;
+    this.stateSaveQueued = false;
 
     this.emitter = new Emitter();
 
-    /** @type {Map<string, { query: Query, policy: RefreshPolicy, timer: any }>} */
+    /** @type {Map<string, { query: Query, policy: RefreshPolicy, timer: any, token: number, cronSchedule?: any }>} */
     this.registrations = new Map();
     /** @type {RefreshJob[]} */
     this.queue = [];
@@ -138,6 +186,7 @@ export class RefreshManager {
     this.running = new Map();
 
     this.nextJobId = 1;
+    this.nextRegistrationToken = 1;
   }
 
   /**
@@ -153,15 +202,37 @@ export class RefreshManager {
    * @param {Query} query
    * @param {RefreshPolicy} [policy]
    */
-  registerQuery(query, policy = query.refreshPolicy ?? { type: "manual" }) {
+  registerQuery(query, policy) {
+    const providedPolicy = policy ?? query.refreshPolicy;
     this.unregisterQuery(query.id);
 
+    const token = this.nextRegistrationToken++;
+    /** @type {RefreshPolicy} */
+    const initialPolicy = providedPolicy ?? { type: "manual" };
     const timer = null;
-    this.registrations.set(query.id, { query, policy, timer });
+    this.registrations.set(query.id, { query, policy: initialPolicy, timer, token });
 
-    if (policy.type === "interval") {
-      this.scheduleInterval(query.id, policy.intervalMs);
+    // Validate explicit cron expressions eagerly so callers get synchronous errors.
+    if (initialPolicy.type === "cron") {
+      parseCronExpression(initialPolicy.cron);
     }
+
+    if (!this.stateStore) {
+      // Preserve historical behavior: scheduling starts synchronously when there is
+      // no persistence layer to await.
+      if (initialPolicy.type === "interval") {
+        this.scheduleInterval(query.id, initialPolicy.intervalMs, { token });
+      } else if (initialPolicy.type === "cron") {
+        const reg = this.registrations.get(query.id);
+        if (reg) {
+          reg.cronSchedule = parseCronExpression(initialPolicy.cron);
+          this.scheduleCron(query.id, reg.cronSchedule, token);
+        }
+      }
+      return;
+    }
+
+    void this.configureRegistration(query.id, token, providedPolicy);
   }
 
   /**
@@ -316,18 +387,141 @@ export class RefreshManager {
   /**
    * @private
    * @param {string} queryId
-   * @param {number} intervalMs
+   * @param {number} token
+   * @param {RefreshPolicy | undefined} providedPolicy
    */
-  scheduleInterval(queryId, intervalMs) {
+  async configureRegistration(queryId, token, providedPolicy) {
+    await this.stateReady;
+    const reg = this.registrations.get(queryId);
+    if (!reg || reg.token !== token) return;
+
+    const existingState = this.state[queryId];
+    let effectivePolicy = reg.policy;
+    if (!providedPolicy && existingState?.policy) {
+      effectivePolicy = existingState.policy;
+    }
+
+    reg.policy = effectivePolicy;
+
+    // Persist the policy (and keep any persisted last-run timestamp).
+    this.state[queryId] = { policy: effectivePolicy, lastRunAtMs: existingState?.lastRunAtMs };
+    this.persistState();
+
+    if (effectivePolicy.type === "interval") {
+      let delayMs = effectivePolicy.intervalMs;
+      if (typeof existingState?.lastRunAtMs === "number") {
+        delayMs = Math.max(0, existingState.lastRunAtMs + effectivePolicy.intervalMs - this.now());
+      }
+      this.scheduleInterval(queryId, effectivePolicy.intervalMs, { delayMs, token });
+      return;
+    }
+
+    if (effectivePolicy.type === "cron") {
+      try {
+        reg.cronSchedule = parseCronExpression(effectivePolicy.cron);
+      } catch {
+        // Best-effort: ignore invalid persisted cron expressions.
+        return;
+      }
+      this.scheduleCron(queryId, reg.cronSchedule, token);
+    }
+  }
+
+  /**
+   * @private
+   * @param {string} queryId
+   * @param {number} completedAtMs
+   */
+  recordSuccessfulRun(queryId, completedAtMs) {
+    if (!this.stateStore) return;
+    void this.stateReady.then(() => {
+      const policy =
+        this.registrations.get(queryId)?.policy ??
+        this.state[queryId]?.policy ?? { type: "manual" };
+      this.state[queryId] = { policy, lastRunAtMs: completedAtMs };
+      this.persistState();
+    });
+  }
+
+  /**
+   * @private
+   */
+  persistState() {
+    if (!this.stateStore) return;
+    if (this.stateSaveInFlight) {
+      this.stateSaveQueued = true;
+      return;
+    }
+
+    this.stateSaveInFlight = true;
+    const snapshot = typeof globalThis.structuredClone === "function" ? globalThis.structuredClone(this.state) : JSON.parse(JSON.stringify(this.state));
+    let savePromise;
+    try {
+      savePromise = Promise.resolve(this.stateStore.save(snapshot));
+    } catch {
+      savePromise = Promise.resolve();
+    }
+
+    savePromise
+      .catch(() => {})
+      .finally(() => {
+        this.stateSaveInFlight = false;
+        if (this.stateSaveQueued) {
+          this.stateSaveQueued = false;
+          this.persistState();
+        }
+      });
+  }
+
+  /**
+   * @private
+   * @param {string} queryId
+   * @param {number} intervalMs
+   * @param {{ delayMs?: number, token?: number }} [options]
+   */
+  scheduleInterval(queryId, intervalMs, options) {
     const reg = this.registrations.get(queryId);
     if (!reg) return;
     if (reg.timer) this.timers.clearTimeout(reg.timer);
 
+    const delayMs = options?.delayMs ?? intervalMs;
+    const token = options?.token ?? reg.token;
     reg.timer = this.timers.setTimeout(() => {
-      if (!this.registrations.has(queryId)) return;
+      const current = this.registrations.get(queryId);
+      if (!current || current.token !== token) return;
       this.enqueue(queryId, "interval", { dedupe: true });
-      this.scheduleInterval(queryId, intervalMs);
-    }, intervalMs);
+      this.scheduleInterval(queryId, intervalMs, { token });
+    }, delayMs);
+  }
+
+  /**
+   * @private
+   * @param {string} queryId
+   * @param {any} cronSchedule
+   * @param {number} token
+   */
+  scheduleCron(queryId, cronSchedule, token) {
+    const reg = this.registrations.get(queryId);
+    if (!reg) return;
+    if (reg.timer) this.timers.clearTimeout(reg.timer);
+
+    const nowMs = this.now();
+    const lastRunAtMs = this.state[queryId]?.lastRunAtMs;
+    const afterMs = Math.max(nowMs, typeof lastRunAtMs === "number" ? lastRunAtMs : -Infinity);
+    let nextAtMs;
+    try {
+      nextAtMs = nextCronRun(cronSchedule, afterMs, this.timezone);
+    } catch {
+      return;
+    }
+    const delayMs = Math.max(0, nextAtMs - nowMs);
+
+    reg.timer = this.timers.setTimeout(() => {
+      const current = this.registrations.get(queryId);
+      if (!current || current.token !== token) return;
+      this.enqueue(queryId, "cron", { dedupe: true });
+      this.scheduleCron(queryId, cronSchedule, token);
+    }, delayMs);
   }
 
   /**
@@ -358,9 +552,11 @@ export class RefreshManager {
           this.emitter.emit("event", /** @type {RefreshEvent} */ ({ type: "progress", job: { ...job.info }, event }));
         },
       });
-      job.info.completedAt = new Date(this.now());
+      const completedAtMs = this.now();
+      job.info.completedAt = new Date(completedAtMs);
       this.emitter.emit("event", /** @type {RefreshEvent} */ ({ type: "completed", job: { ...job.info }, result }));
       job.resolve(result);
+      this.recordSuccessfulRun(job.info.queryId, completedAtMs);
     } catch (error) {
       job.info.completedAt = new Date(this.now());
       if (job.controller.signal.aborted || /** @type {any} */ (error)?.name === "AbortError") {

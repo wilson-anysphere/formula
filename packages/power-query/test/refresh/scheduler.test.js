@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { nextCronRun, parseCronExpression } from "../../src/cron.js";
 import { RefreshManager } from "../../src/refresh.js";
+import { InMemoryRefreshStateStore } from "../../src/refreshStateStore.js";
 import { DataTable } from "../../src/table.js";
 
 function deferred() {
@@ -195,4 +197,154 @@ test("RefreshManager: interval policy schedules refreshes via injected timers", 
   engine.calls[0].deferred.resolve(makeResult("q_interval"));
   await completed;
   manager.dispose();
+});
+
+test("cron: parse supports wildcards, lists, ranges, and steps", () => {
+  const schedule = parseCronExpression("*/20 0,12 1-5 1,6 0-6");
+  assert.deepEqual(schedule.minutes, [0, 20, 40]);
+  assert.deepEqual(schedule.hours, [0, 12]);
+  assert.deepEqual(schedule.daysOfMonth, [1, 2, 3, 4, 5]);
+  assert.deepEqual(schedule.months, [1, 6]);
+  assert.deepEqual(schedule.daysOfWeek, [0, 1, 2, 3, 4, 5, 6]);
+});
+
+test("cron: nextCronRun returns the next matching minute (UTC)", () => {
+  const schedule = parseCronExpression("*/15 * * * *");
+  assert.equal(nextCronRun(schedule, 0, "utc"), 15 * 60 * 1000);
+});
+
+test("RefreshManager: cron policy schedules refreshes and reschedules on register/unregister", async () => {
+  const engine = new ControlledEngine();
+  const timers = new FakeTimers();
+  const manager = new RefreshManager({
+    engine,
+    concurrency: 1,
+    timers: { setTimeout: (...args) => timers.setTimeout(...args), clearTimeout: (id) => timers.clearTimeout(id) },
+    now: () => timers.now,
+    timezone: "utc",
+  });
+
+  manager.registerQuery(makeQuery("q_cron", { type: "cron", cron: "*/5 * * * *" }));
+  // Update policy before the first tick to ensure we reschedule.
+  manager.registerQuery(makeQuery("q_cron", { type: "cron", cron: "*/10 * * * *" }));
+
+  const completed = new Promise((resolve) => {
+    manager.onEvent((evt) => {
+      if (evt.type === "completed" && evt.job.queryId === "q_cron") resolve(undefined);
+    });
+  });
+
+  timers.advance(5 * 60 * 1000);
+  assert.equal(engine.calls.length, 0, "old cron schedule should be cleared when policy changes");
+
+  timers.advance(5 * 60 * 1000);
+  assert.equal(engine.calls.length, 1);
+  engine.calls[0].deferred.resolve(makeResult("q_cron"));
+  await completed;
+
+  manager.unregisterQuery("q_cron");
+  timers.advance(10 * 60 * 1000);
+  assert.equal(engine.calls.length, 1, "unregistered cron query should not run again");
+
+  manager.dispose();
+});
+
+test("RefreshManager: cron tick dedupes while a refresh is running", async () => {
+  const engine = new ControlledEngine();
+  const timers = new FakeTimers();
+  const manager = new RefreshManager({
+    engine,
+    concurrency: 1,
+    timers: { setTimeout: (...args) => timers.setTimeout(...args), clearTimeout: (id) => timers.clearTimeout(id) },
+    now: () => timers.now,
+    timezone: "utc",
+  });
+
+  manager.registerQuery(makeQuery("q_dedupe", { type: "cron", cron: "* * * * *" }));
+
+  const completed = new Promise((resolve) => {
+    manager.onEvent((evt) => {
+      if (evt.type === "completed" && evt.job.queryId === "q_dedupe") resolve(undefined);
+    });
+  });
+
+  timers.advance(60 * 1000);
+  assert.equal(engine.calls.length, 1);
+
+  // Next cron tick fires while the refresh is still running; it should dedupe.
+  timers.advance(60 * 1000);
+  assert.equal(engine.calls.length, 1);
+
+  engine.calls[0].deferred.resolve(makeResult("q_dedupe"));
+  await completed;
+
+  timers.advance(60 * 1000);
+  assert.equal(engine.calls.length, 2, "a future tick should start a new refresh once the previous completes");
+  engine.calls[1].deferred.resolve(makeResult("q_dedupe"));
+  await engine.calls[1].deferred.promise;
+
+  manager.dispose();
+});
+
+test("RefreshManager: state store restores interval schedules across instances", async () => {
+  const store = new InMemoryRefreshStateStore();
+  const timers = new FakeTimers();
+
+  const engine1 = new ControlledEngine();
+  const manager1 = new RefreshManager({
+    engine: engine1,
+    concurrency: 1,
+    timers: { setTimeout: (...args) => timers.setTimeout(...args), clearTimeout: (id) => timers.clearTimeout(id) },
+    now: () => timers.now,
+    stateStore: store,
+  });
+
+  manager1.registerQuery(makeQuery("q_persist", { type: "interval", intervalMs: 10 }));
+  await manager1.ready;
+
+  const completed1 = new Promise((resolve) => {
+    manager1.onEvent((evt) => {
+      if (evt.type === "completed" && evt.job.queryId === "q_persist") resolve(undefined);
+    });
+  });
+
+  timers.advance(10);
+  assert.equal(engine1.calls.length, 1);
+  engine1.calls[0].deferred.resolve(makeResult("q_persist"));
+  await completed1;
+  await Promise.resolve(); // allow persistence save
+
+  timers.advance(5); // now = 15
+  manager1.dispose();
+
+  const engine2 = new ControlledEngine();
+  const manager2 = new RefreshManager({
+    engine: engine2,
+    concurrency: 1,
+    timers: { setTimeout: (...args) => timers.setTimeout(...args), clearTimeout: (id) => timers.clearTimeout(id) },
+    now: () => timers.now,
+    stateStore: store,
+  });
+
+  const query2 = makeQuery("q_persist");
+  // Simulate a host that didn't rehydrate refresh settings into the query model.
+  // The manager should fall back to the persisted policy.
+  delete query2.refreshPolicy;
+  manager2.registerQuery(query2);
+  await manager2.ready;
+
+  const completed2 = new Promise((resolve) => {
+    manager2.onEvent((evt) => {
+      if (evt.type === "completed" && evt.job.queryId === "q_persist") resolve(undefined);
+    });
+  });
+
+  timers.advance(4);
+  assert.equal(engine2.calls.length, 0);
+  timers.advance(1);
+  assert.equal(engine2.calls.length, 1, "next interval run should be scheduled relative to persisted lastRunAtMs");
+  engine2.calls[0].deferred.resolve(makeResult("q_persist"));
+  await completed2;
+
+  manager2.dispose();
 });

@@ -186,6 +186,11 @@
  *   type: "on-open"
  * } | {
  *   type: "cron",
+ *   /**
+ *    * 5-field cron schedule: `minute hour day-of-month month day-of-week`
+ *    *
+ *    * Example: `*\/15 9-17 * * 1-5` (every 15 minutes during business hours, Mon-Fri)
+ *    */
  *   cron: string
  * }} RefreshPolicy
  */
