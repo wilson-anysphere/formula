@@ -302,6 +302,7 @@ export class FileSystemCacheStore {
   async pruneExpired(nowMs = Date.now()) {
     await this.ensureDir();
     const { fs, path } = await this.deps();
+    const tmpGraceMs = 5 * 60 * 1000;
 
     /** @type {import("node:fs").Dirent[]} */
     let entries = [];
@@ -313,6 +314,24 @@ export class FileSystemCacheStore {
 
     for (const entry of entries) {
       if (!entry.isFile()) continue;
+
+      // Best-effort cleanup of stale temp files left behind by interrupted writes.
+      // We only remove temp files older than a small grace period to avoid racing
+      // concurrent writers.
+      if (entry.name.includes(".tmp-") || entry.name.endsWith(".tmp")) {
+        const tmpPath = path.join(this.directory, entry.name);
+        try {
+          const stats = await fs.stat(tmpPath);
+          const ageMs = nowMs - stats.mtimeMs;
+          if (Number.isFinite(stats.mtimeMs) && ageMs > tmpGraceMs) {
+            await fs.rm(tmpPath, { force: true });
+          }
+        } catch {
+          // ignore
+        }
+        continue;
+      }
+
       if (!entry.name.endsWith(".json")) continue;
       const jsonPath = path.join(this.directory, entry.name);
       const binPath = path.join(this.directory, `${entry.name.slice(0, -".json".length)}.bin`);

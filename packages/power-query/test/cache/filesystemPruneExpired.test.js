@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -46,3 +46,19 @@ test("FileSystemCacheStore.pruneExpired removes expired entries (and .bin blobs)
   }
 });
 
+test("FileSystemCacheStore.pruneExpired cleans up stale temp files", async () => {
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-prune-fs-tmp-"));
+  try {
+    const store = new FileSystemCacheStore({ directory: cacheDir });
+    await store.ensureDir();
+
+    const tmpPath = path.join(cacheDir, "dead.json.tmp-0-abc");
+    await writeFile(tmpPath, "partial", "utf8");
+    await utimes(tmpPath, 0, 0);
+
+    await store.pruneExpired(10 * 60 * 1000);
+    await assert.rejects(stat(tmpPath));
+  } finally {
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+});

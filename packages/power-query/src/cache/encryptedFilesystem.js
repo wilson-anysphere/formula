@@ -414,10 +414,38 @@ export class EncryptedFileSystemCacheStore {
    */
   async pruneExpired(nowMs = Date.now()) {
     await this.ensureDir();
-    const { fs } = await this.deps();
-    const files = await this._listEntryFiles();
-    for (const filePath of files) {
-      const binPath = filePath.replace(/\.json$/, ".bin");
+    const { fs, path } = await this.deps();
+    const tmpGraceMs = 5 * 60 * 1000;
+
+    /** @type {import("node:fs").Dirent[]} */
+    let entries = [];
+    try {
+      entries = await fs.readdir(this.directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+
+      // Best-effort cleanup of stale temp files left behind by interrupted writes.
+      if (entry.name.includes(".tmp-") || entry.name.endsWith(".tmp")) {
+        const tmpPath = path.join(this.directory, entry.name);
+        try {
+          const stats = await fs.stat(tmpPath);
+          const ageMs = nowMs - stats.mtimeMs;
+          if (Number.isFinite(stats.mtimeMs) && ageMs > tmpGraceMs) {
+            await fs.rm(tmpPath, { force: true });
+          }
+        } catch {
+          // ignore
+        }
+        continue;
+      }
+
+      if (!entry.name.endsWith(".json")) continue;
+      const filePath = path.join(this.directory, entry.name);
+      const binPath = path.join(this.directory, `${entry.name.slice(0, -".json".length)}.bin`);
 
       /** @type {Buffer} */
       let bytes;

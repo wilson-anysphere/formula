@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -36,3 +36,19 @@ test("EncryptedFileSystemCacheStore.pruneExpired removes expired entries and blo
   }
 });
 
+test("EncryptedFileSystemCacheStore.pruneExpired cleans up stale temp files", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-prune-efs-tmp-"));
+  try {
+    const keychainProvider = new InMemoryKeychainProvider();
+    const store = new EncryptedFileSystemCacheStore({ directory: dir, encryption: { enabled: true, keychainProvider } });
+
+    const tmpPath = path.join(dir, "dead.bin.tmp-0-abc");
+    await writeFile(tmpPath, "partial", "utf8");
+    await utimes(tmpPath, 0, 0);
+
+    await store.pruneExpired(10 * 60 * 1000);
+    await assert.rejects(stat(tmpPath));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
