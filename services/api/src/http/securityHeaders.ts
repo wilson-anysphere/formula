@@ -11,6 +11,10 @@ export function registerSecurityHeaders(app: FastifyInstance): void {
     if (!reply.hasHeader("x-content-type-options")) reply.header("x-content-type-options", "nosniff");
     if (!reply.hasHeader("x-frame-options")) reply.header("x-frame-options", "DENY");
     if (!reply.hasHeader("referrer-policy")) reply.header("referrer-policy", "no-referrer");
+    if (!reply.hasHeader("content-security-policy")) {
+      // Baseline CSP for API-style responses. Endpoints that intentionally serve HTML can override.
+      reply.header("content-security-policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    }
     if (!reply.hasHeader("cache-control")) reply.header("cache-control", "no-store");
     if (!reply.hasHeader("permissions-policy")) {
       reply.header(
