@@ -87,6 +87,56 @@ End Sub
 }
 
 #[test]
+fn paste_special_respects_xlpastevalues_constant_and_option_explicit() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Range("A1").Copy
+    Range("B1").PasteSpecial Paste:=xlPasteValues
+    Range("C1").PasteSpecial
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+    wb.set_value_a1("Sheet1", "A1", VbaValue::Double(2.0)).unwrap();
+    wb.set_formula_a1("Sheet1", "A1", "=1+1").unwrap();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+
+    assert_eq!(wb.get_value_a1("Sheet1", "B1").unwrap(), VbaValue::Double(2.0));
+    assert_eq!(wb.get_formula_a1("Sheet1", "B1").unwrap(), None);
+    assert_eq!(
+        wb.get_formula_a1("Sheet1", "C1").unwrap(),
+        Some("=1+1".to_string())
+    );
+}
+
+#[test]
+fn range_end_uses_direction_constants() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Range("A1") = 1
+    Range("A2") = 2
+    Range("A3") = 3
+    Range("B1") = Range("A1").End(xlDown).Row
+    Range("B2") = Range("A3").End(xlUp).Row
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+
+    assert_eq!(wb.get_value_a1("Sheet1", "B1").unwrap(), VbaValue::Double(3.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "B2").unwrap(), VbaValue::Double(1.0));
+}
+
+#[test]
 fn for_each_over_array_and_collection() {
     let code = r#"
 Sub Test()

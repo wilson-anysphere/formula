@@ -166,7 +166,37 @@ fn init_globals(program: &VbaProgram) -> GlobalState {
         }
     }
 
+    insert_builtin_excel_constants(&mut state);
     state
+}
+
+fn insert_builtin_excel_constants(state: &mut GlobalState) {
+    // Common Excel/VBA constants referenced by recorded macros. These are provided by the Excel
+    // object library in real VBA and should remain available even when `Option Explicit` is on.
+    //
+    // We intentionally keep this list small and grow it as we discover new real-world macros.
+    const BUILTINS: &[(&str, f64)] = &[
+        // PasteSpecial
+        ("xlpasteall", -4104.0),
+        ("xlpastevalues", -4163.0),
+        ("xlpasteformulas", -4123.0),
+        ("xlpasteformats", -4122.0),
+        // Misc
+        ("xlnone", -4142.0),
+        // Direction (used by Range.End)
+        ("xldown", -4121.0),
+        ("xlup", -4162.0),
+        ("xltoleft", -4159.0),
+        ("xltoright", -4161.0),
+    ];
+
+    for (name, value) in BUILTINS {
+        if state.values.contains_key(*name) || state.const_exprs.contains_key(*name) {
+            continue;
+        }
+        state.values.insert((*name).to_string(), VbaValue::Double(*value));
+        state.consts.insert((*name).to_string());
+    }
 }
 
 fn default_value_for_decl(decl: &VarDecl) -> Result<VbaValue, VbaError> {
@@ -1098,7 +1128,7 @@ impl<'a> Executor<'a> {
         let member_lc = member.to_ascii_lowercase();
         match &mut *obj.borrow_mut() {
             VbaObject::Range(range) => match member_lc.as_str() {
-                "value" => {
+                "value" | "value2" => {
                     for r in range.start_row..=range.end_row {
                         for c in range.start_col..=range.end_col {
                             self.tick()?;
@@ -1200,31 +1230,43 @@ impl<'a> Executor<'a> {
         }
 
         // Built-in global properties without explicit object.
-        match name_lc.as_str() {
-            "activesheet" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
+        if name_lc == "activesheet" {
+            return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
                 sheet: self.sheet.active_sheet(),
-            }))),
-            "activecell" => {
-                let (r, c) = self.sheet.active_cell();
-                Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
-                    VbaRangeRef {
-                        sheet: self.sheet.active_sheet(),
-                        start_row: r,
-                        start_col: c,
-                        end_row: r,
-                        end_col: c,
-                    },
-                ))))
+            })));
+        }
+        if name_lc == "activecell" {
+            let (r, c) = self.sheet.active_cell();
+            return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
+                VbaRangeRef {
+                    sheet: self.sheet.active_sheet(),
+                    start_row: r,
+                    start_col: c,
+                    end_row: r,
+                    end_col: c,
+                },
+            ))));
+        }
+
+        // VBA allows calling some 0-argument functions without parentheses (e.g. `Now`, `Date`).
+        if matches!(name_lc.as_str(), "now" | "date" | "time") {
+            return self.call_global(frame, name, &[]);
+        }
+
+        // User-defined no-arg functions can also be called without parentheses.
+        if let Some(proc) = self.program.get(&name_lc) {
+            if proc.kind == ProcedureKind::Function && proc.params.is_empty() {
+                let res = self.call_procedure(proc, &[])?;
+                return Ok(res.returned.unwrap_or(VbaValue::Empty));
             }
-            _ => {
-                if self.program.option_explicit {
-                    Err(VbaError::Runtime(format!(
-                        "Variable not defined: `{name}`"
-                    )))
-                } else {
-                    Ok(VbaValue::Empty)
-                }
-            }
+        }
+
+        if self.program.option_explicit {
+            Err(VbaError::Runtime(format!(
+                "Variable not defined: `{name}`"
+            )))
+        } else {
+            Ok(VbaValue::Empty)
         }
     }
 
@@ -1457,7 +1499,7 @@ impl<'a> Executor<'a> {
                     VbaArray::new(0, values),
                 ))))
             }
-            "worksheets" => {
+            "worksheets" | "sheets" => {
                 let name = self
                     .eval_expr(
                         frame,
@@ -1779,7 +1821,26 @@ impl<'a> Executor<'a> {
                     // Best-effort:
                     // - `PasteSpecial` with no args behaves like "paste everything" (values+formulas).
                     // - `PasteSpecial ...` (typically `Paste:=xlPasteValues`) pastes values only.
-                    let include_formulas = args.is_empty();
+                    let include_formulas = if args.is_empty() {
+                        true
+                    } else if let Some(paste_arg) = arg_named_or_pos(args, "paste", 0) {
+                        if matches!(paste_arg.expr, Expr::Missing) {
+                            true
+                        } else {
+                            let paste = self.eval_expr(frame, &paste_arg.expr)?;
+                            let code = paste.to_f64().unwrap_or(0.0) as i64;
+                            match code {
+                                // xlPasteAll
+                                -4104 => true,
+                                // xlPasteFormulas
+                                -4123 => true,
+                                // xlPasteValues (and everything else we don't understand)
+                                _ => false,
+                            }
+                        }
+                    } else {
+                        false
+                    };
                     if let Some(clip) = self.clipboard.clone() {
                         self.paste_clipboard(&clip, range, include_formulas)?;
                     }
@@ -1847,6 +1908,12 @@ impl<'a> Executor<'a> {
                         new,
                     ))))
                 }
+                "end" => {
+                    let dir = self.eval_required_arg(frame, args, 0, "End")?;
+                    let dir = dir.to_f64().unwrap_or(0.0) as i64;
+                    let end = self.range_end(range, dir)?;
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(end))))
+                }
                 "clearcontents" => {
                     for r in range.start_row..=range.end_row {
                         for c in range.start_col..=range.end_col {
@@ -1865,7 +1932,7 @@ impl<'a> Executor<'a> {
                     let a1 = self.eval_required_arg(frame, args, 0, "Range")?.to_string_lossy();
                     Ok(VbaValue::Object(range_on_active_sheet(self.sheet, &a1)?))
                 }
-                "worksheets" => {
+                "worksheets" | "sheets" => {
                     let name = self
                         .eval_required_arg(frame, args, 0, "Worksheets")?
                         .to_string_lossy();
@@ -1882,7 +1949,7 @@ impl<'a> Executor<'a> {
                 ))),
             },
             VbaObject::Workbook => match member_lc.as_str() {
-                "worksheets" => {
+                "worksheets" | "sheets" => {
                     let name = self
                         .eval_required_arg(frame, args, 0, "Worksheets")?
                         .to_string_lossy();
@@ -2053,7 +2120,7 @@ impl<'a> Executor<'a> {
                 ))),
             },
             VbaObject::Range(range) => match member_lc.as_str() {
-                "value" => self
+                "value" | "value2" => self
                     .sheet
                     .get_cell_value(range.sheet, range.start_row, range.start_col),
                 "formula" => Ok(self
@@ -2121,6 +2188,95 @@ impl<'a> Executor<'a> {
                 "{feature} requires permission: {permission:?}"
             )))
         }
+    }
+
+    fn range_end(&mut self, range: VbaRangeRef, dir: i64) -> Result<VbaRangeRef, VbaError> {
+        // Excel direction constants (subset).
+        const XL_DOWN: i64 = -4121;
+        const XL_UP: i64 = -4162;
+        const XL_TO_LEFT: i64 = -4159;
+        const XL_TO_RIGHT: i64 = -4161;
+        const MAX_ROW: u32 = 1_048_576;
+        const MAX_COL: u32 = 16_384;
+
+        let (drow, dcol): (i32, i32) = match dir {
+            XL_DOWN => (1, 0),
+            XL_UP => (-1, 0),
+            XL_TO_LEFT => (0, -1),
+            XL_TO_RIGHT => (0, 1),
+            _ => {
+                return Err(VbaError::Runtime(format!(
+                    "Range.End unsupported direction: {dir}"
+                )))
+            }
+        };
+
+        let sheet = range.sheet;
+        let mut row = range.start_row;
+        let mut col = range.start_col;
+
+        let next_cell = |row: u32, col: u32| -> Option<(u32, u32)> {
+            let nr = row as i32 + drow;
+            let nc = col as i32 + dcol;
+            if nr <= 0 || nc <= 0 {
+                return None;
+            }
+            let nr = nr as u32;
+            let nc = nc as u32;
+            if nr > MAX_ROW || nc > MAX_COL {
+                return None;
+            }
+            Some((nr, nc))
+        };
+
+        let mut has_content = self.cell_has_content(sheet, row, col)?;
+        if !has_content {
+            // From an empty cell, scan forward until we find content (best-effort).
+            let mut cursor = (row, col);
+            loop {
+                let Some(next) = next_cell(cursor.0, cursor.1) else {
+                    break;
+                };
+                cursor = next;
+                if self.cell_has_content(sheet, cursor.0, cursor.1)? {
+                    row = cursor.0;
+                    col = cursor.1;
+                    has_content = true;
+                    break;
+                }
+            }
+        }
+
+        if has_content {
+            // Move until the next cell is empty.
+            loop {
+                let Some((nr, nc)) = next_cell(row, col) else {
+                    break;
+                };
+                if !self.cell_has_content(sheet, nr, nc)? {
+                    break;
+                }
+                row = nr;
+                col = nc;
+            }
+        }
+
+        Ok(VbaRangeRef {
+            sheet,
+            start_row: row,
+            start_col: col,
+            end_row: row,
+            end_col: col,
+        })
+    }
+
+    fn cell_has_content(&mut self, sheet: usize, row: u32, col: u32) -> Result<bool, VbaError> {
+        self.tick()?;
+        let value = self.sheet.get_cell_value(sheet, row, col)?;
+        if !matches!(value, VbaValue::Empty) {
+            return Ok(true);
+        }
+        Ok(self.sheet.get_cell_formula(sheet, row, col)?.is_some())
     }
 
     fn snapshot_range(&mut self, range: VbaRangeRef) -> Result<Clipboard, VbaError> {
