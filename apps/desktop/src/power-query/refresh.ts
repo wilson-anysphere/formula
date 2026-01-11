@@ -215,7 +215,13 @@ export class DesktopPowerQueryRefreshManager {
    */
   refreshWithDependencies(queryId: string, reason: DesktopPowerQueryRefreshReason = "manual") {
     const handle = this.refreshAll([queryId], reason);
-    const promise = handle.promise.then((results: any) => results?.[queryId]);
+    const promise = handle.promise.then((results: any) => {
+      const result = results?.[queryId];
+      if (!result) {
+        throw new Error(`Missing refresh result for query '${queryId}'`);
+      }
+      return result;
+    });
     promise.catch(() => {});
 
     return {
