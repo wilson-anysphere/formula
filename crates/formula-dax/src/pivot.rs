@@ -756,7 +756,6 @@ fn pivot_row_scan(
         .then(|| crate::engine::resolve_table_rows(model, filter, base_table))
         .transpose()?;
     let mut seen: HashSet<Vec<Value>> = HashSet::new();
-    let mut groups: Vec<Vec<Value>> = Vec::new();
     let (_, group_key_accessors) = build_group_key_accessors(model, base_table, group_by)?;
     let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
 
@@ -764,9 +763,7 @@ fn pivot_row_scan(
     // groups that actually exist in the fact table under the current filter context.
     let mut process_row = |row: usize| -> DaxResult<()> {
         fill_group_key(&group_key_accessors, table_ref, row, &mut key_buf);
-        if seen.insert(key_buf.clone()) {
-            groups.push(key_buf.clone());
-        }
+        let _ = seen.insert(key_buf.clone());
         Ok(())
     };
 
@@ -780,6 +777,7 @@ fn pivot_row_scan(
         }
     }
 
+    let mut groups: Vec<Vec<Value>> = seen.into_iter().collect();
     groups.sort_by(|a, b| cmp_key(a, b));
 
     let mut columns: Vec<String> = group_by
