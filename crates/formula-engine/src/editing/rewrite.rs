@@ -1,7 +1,7 @@
 use std::cmp::{max, min};
 
 use crate::{
-    parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellRef as AstCellRef,
+    parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CellAddr, CellRef as AstCellRef,
     ColRef as AstColRef, Coord, Expr, FunctionCall, ParseOptions, PostfixExpr,
     RowRef as AstRowRef, SerializeOptions, UnaryExpr,
 };
@@ -9,7 +9,7 @@ use crate::{
 const REF_ERROR: &str = "#REF!";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct GridRange {
+pub struct GridRange {
     pub start_row: u32,
     pub start_col: u32,
     pub end_row: u32,
@@ -17,7 +17,7 @@ pub(crate) struct GridRange {
 }
 
 impl GridRange {
-    pub(crate) fn new(start_row: u32, start_col: u32, end_row: u32, end_col: u32) -> Self {
+    pub fn new(start_row: u32, start_col: u32, end_row: u32, end_col: u32) -> Self {
         let sr = min(start_row, end_row);
         let er = max(start_row, end_row);
         let sc = min(start_col, end_col);
@@ -30,19 +30,21 @@ impl GridRange {
         }
     }
 
-    pub(crate) fn contains(&self, row: u32, col: u32) -> bool {
+    pub fn contains(&self, row: u32, col: u32) -> bool {
         row >= self.start_row && row <= self.end_row && col >= self.start_col && col <= self.end_col
     }
 }
 
-pub(crate) enum StructuralEdit {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StructuralEdit {
     InsertRows { sheet: String, row: u32, count: u32 },
     DeleteRows { sheet: String, row: u32, count: u32 },
     InsertCols { sheet: String, col: u32, count: u32 },
     DeleteCols { sheet: String, col: u32, count: u32 },
 }
 
-pub(crate) struct RangeMapEdit {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RangeMapEdit {
     pub sheet: String,
     pub moved_region: GridRange,
     pub delta_row: i32,
@@ -50,32 +52,41 @@ pub(crate) struct RangeMapEdit {
     pub deleted_region: Option<GridRange>,
 }
 
-pub(crate) fn rewrite_formula_for_structural_edit(
+pub fn rewrite_formula_for_structural_edit(
     formula: &str,
     ctx_sheet: &str,
+    cell_origin: CellAddr,
     edit: &StructuralEdit,
 ) -> (String, bool) {
-    rewrite_formula_via_ast(formula, |expr| rewrite_expr_for_structural_edit(expr, ctx_sheet, edit))
+    rewrite_formula_via_ast(formula, cell_origin, |expr| {
+        rewrite_expr_for_structural_edit(expr, ctx_sheet, edit)
+    })
 }
 
-pub(crate) fn rewrite_formula_for_copy_delta(
+pub fn rewrite_formula_for_copy_delta(
     formula: &str,
     _ctx_sheet: &str,
+    cell_origin: CellAddr,
     delta_row: i32,
     delta_col: i32,
 ) -> (String, bool) {
-    rewrite_formula_via_ast(formula, |expr| rewrite_expr_for_copy_delta(expr, delta_row, delta_col))
+    rewrite_formula_via_ast(formula, cell_origin, |expr| {
+        rewrite_expr_for_copy_delta(expr, delta_row, delta_col)
+    })
 }
 
-pub(crate) fn rewrite_formula_for_range_map(
+pub fn rewrite_formula_for_range_map(
     formula: &str,
     ctx_sheet: &str,
+    cell_origin: CellAddr,
     edit: &RangeMapEdit,
 ) -> (String, bool) {
-    rewrite_formula_via_ast(formula, |expr| rewrite_expr_for_range_map(expr, ctx_sheet, edit))
+    rewrite_formula_via_ast(formula, cell_origin, |expr| {
+        rewrite_expr_for_range_map(expr, ctx_sheet, edit)
+    })
 }
 
-fn rewrite_formula_via_ast<F>(formula: &str, f: F) -> (String, bool)
+fn rewrite_formula_via_ast<F>(formula: &str, cell_origin: CellAddr, f: F) -> (String, bool)
 where
     F: FnOnce(&Expr) -> (Expr, bool),
 {
@@ -103,6 +114,7 @@ where
     let mut opts = SerializeOptions::default();
     // Preserve `_xlfn.` prefixes for newer Excel functions.
     opts.include_xlfn_prefix = true;
+    opts.origin = Some(cell_origin);
 
     match new_ast.to_string(opts) {
         Ok(out) => (format!("{leading_ws}{out}"), true),
@@ -1420,26 +1432,26 @@ mod tests {
 
     #[test]
     fn copy_delta_updates_row_and_column_ranges() {
-        let (out, changed) = rewrite_formula_for_copy_delta("=A:A", "Sheet1", 0, 1);
+        let (out, changed) = rewrite_formula_for_copy_delta("=A:A", "Sheet1", CellAddr::new(0, 0), 0, 1);
         assert!(changed);
         assert_eq!(out, "=B:B");
 
-        let (out, changed) = rewrite_formula_for_copy_delta("=1:1", "Sheet1", 1, 0);
+        let (out, changed) = rewrite_formula_for_copy_delta("=1:1", "Sheet1", CellAddr::new(0, 0), 1, 0);
         assert!(changed);
         assert_eq!(out, "=2:2");
     }
 
     #[test]
     fn copy_delta_turns_entire_range_into_ref_error_if_any_endpoint_underflows() {
-        let (out, changed) = rewrite_formula_for_copy_delta("=A1:B2", "Sheet1", -1, 0);
+        let (out, changed) = rewrite_formula_for_copy_delta("=A1:B2", "Sheet1", CellAddr::new(0, 0), -1, 0);
         assert!(changed);
         assert_eq!(out, "=#REF!");
 
-        let (out, changed) = rewrite_formula_for_copy_delta("=1:2", "Sheet1", -1, 0);
+        let (out, changed) = rewrite_formula_for_copy_delta("=1:2", "Sheet1", CellAddr::new(0, 0), -1, 0);
         assert!(changed);
         assert_eq!(out, "=#REF!");
 
-        let (out, changed) = rewrite_formula_for_copy_delta("=A:B", "Sheet1", 0, -1);
+        let (out, changed) = rewrite_formula_for_copy_delta("=A:B", "Sheet1", CellAddr::new(0, 0), 0, -1);
         assert!(changed);
         assert_eq!(out, "=#REF!");
     }
@@ -1451,7 +1463,12 @@ mod tests {
             row: 0,
             count: 1,
         };
-        let (out, changed) = rewrite_formula_for_structural_edit("=SUM(Sheet1!A1:B2)", "Other", &edit);
+        let (out, changed) = rewrite_formula_for_structural_edit(
+            "=SUM(Sheet1!A1:B2)",
+            "Other",
+            CellAddr::new(0, 0),
+            &edit,
+        );
         assert!(changed);
         assert_eq!(out, "=SUM(Sheet1!A2:B3)");
     }
@@ -1463,7 +1480,8 @@ mod tests {
             col: 0,
             count: 1,
         };
-        let (out, changed) = rewrite_formula_for_structural_edit("=A:A", "Sheet1", &insert);
+        let (out, changed) =
+            rewrite_formula_for_structural_edit("=A:A", "Sheet1", CellAddr::new(0, 0), &insert);
         assert!(changed);
         assert_eq!(out, "=B:B");
 
@@ -1472,11 +1490,13 @@ mod tests {
             col: 0,
             count: 1,
         };
-        let (out, changed) = rewrite_formula_for_structural_edit("=A:B", "Sheet1", &delete);
+        let (out, changed) =
+            rewrite_formula_for_structural_edit("=A:B", "Sheet1", CellAddr::new(0, 0), &delete);
         assert!(changed);
         assert_eq!(out, "=A:A");
 
-        let (out, changed) = rewrite_formula_for_structural_edit("=A:A", "Sheet1", &delete);
+        let (out, changed) =
+            rewrite_formula_for_structural_edit("=A:A", "Sheet1", CellAddr::new(0, 0), &delete);
         assert!(changed);
         assert_eq!(out, "=#REF!");
     }
@@ -1488,7 +1508,12 @@ mod tests {
             row: 0,
             count: 1,
         };
-        let (out, changed) = rewrite_formula_for_structural_edit("=[Book.xlsx]Sheet1!A1", "Sheet1", &edit);
+        let (out, changed) = rewrite_formula_for_structural_edit(
+            "=[Book.xlsx]Sheet1!A1",
+            "Sheet1",
+            CellAddr::new(0, 0),
+            &edit,
+        );
         assert!(!changed);
         assert_eq!(out, "=[Book.xlsx]Sheet1!A1");
     }
@@ -1502,7 +1527,8 @@ mod tests {
             delta_col: 0,
             deleted_region: Some(GridRange::new(0, 1, 0, 1)), // delete B1
         };
-        let (out, changed) = rewrite_formula_for_range_map("=A1:C1", "Sheet1", &edit);
+        let (out, changed) =
+            rewrite_formula_for_range_map("=A1:C1", "Sheet1", CellAddr::new(0, 0), &edit);
         assert!(changed);
         assert_eq!(out, "=A1,C1");
     }
@@ -1516,14 +1542,15 @@ mod tests {
             delta_col: 1,
             deleted_region: None,
         };
-        let (out, changed) = rewrite_formula_for_range_map("=A1", "Sheet1", &edit);
+        let (out, changed) =
+            rewrite_formula_for_range_map("=A1", "Sheet1", CellAddr::new(0, 0), &edit);
         assert!(changed);
         assert_eq!(out, "=B2");
     }
 
     #[test]
     fn rewrite_preserves_leading_whitespace_before_equals() {
-        let (out, changed) = rewrite_formula_for_copy_delta("   =A1", "Sheet1", 1, 0);
+        let (out, changed) = rewrite_formula_for_copy_delta("   =A1", "Sheet1", CellAddr::new(0, 0), 1, 0);
         assert!(changed);
         assert_eq!(out, "   =A2");
     }
@@ -1540,7 +1567,12 @@ mod tests {
             delta_col: -1,
             deleted_region: Some(GridRange::new(0, 1, 0, 1)), // delete B1
         };
-        let (out, changed) = rewrite_formula_for_range_map("=SUM(A1:C1)", "Sheet1", &edit);
+        let (out, changed) = rewrite_formula_for_range_map(
+            "=SUM(A1:C1)",
+            "Sheet1",
+            CellAddr::new(0, 0),
+            &edit,
+        );
         assert!(changed);
         assert_eq!(out, "=SUM((A1,B1))");
     }
@@ -1552,11 +1584,12 @@ mod tests {
             col: 0,
             count: 1,
         };
-        let (out, changed) = rewrite_formula_for_structural_edit("=A1#", "Sheet1", &delete_col);
+        let (out, changed) =
+            rewrite_formula_for_structural_edit("=A1#", "Sheet1", CellAddr::new(0, 0), &delete_col);
         assert!(changed);
         assert_eq!(out, "=#REF!");
 
-        let (out, changed) = rewrite_formula_for_copy_delta("=A1#", "Sheet1", 0, -1);
+        let (out, changed) = rewrite_formula_for_copy_delta("=A1#", "Sheet1", CellAddr::new(0, 0), 0, -1);
         assert!(changed);
         assert_eq!(out, "=#REF!");
 
@@ -1567,7 +1600,8 @@ mod tests {
             delta_col: 0,
             deleted_region: Some(GridRange::new(0, 0, 0, 0)),
         };
-        let (out, changed) = rewrite_formula_for_range_map("=A1#", "Sheet1", &range_map);
+        let (out, changed) =
+            rewrite_formula_for_range_map("=A1#", "Sheet1", CellAddr::new(0, 0), &range_map);
         assert!(changed);
         assert_eq!(out, "=#REF!");
     }

@@ -7,8 +7,8 @@ use crate::editing::{
     CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange,
 };
 use crate::editing::rewrite::{
-    rewrite_formula_for_copy_delta, rewrite_formula_for_range_map, rewrite_formula_for_structural_edit,
-    GridRange, RangeMapEdit, StructuralEdit,
+    rewrite_formula_for_copy_delta, rewrite_formula_for_range_map, rewrite_formula_for_structural_edit, GridRange,
+    RangeMapEdit, StructuralEdit,
 };
 use crate::graph::{CellDeps, DependencyGraph as CalcGraph, Precedent, SheetRange};
 use crate::locale::{canonicalize_formula, canonicalize_formula_with_style, FormulaLocale};
@@ -2657,8 +2657,9 @@ fn copy_range(
         let target = CellRef::new(dst.start.row + dr, dst.start.col + dc);
 
         if let Some(formula) = &value.formula {
+            let origin = crate::CellAddr::new(target.row, target.col);
             let (new_formula, _) =
-                rewrite_formula_for_copy_delta(formula, sheet_name, delta_row, delta_col);
+                rewrite_formula_for_copy_delta(formula, sheet_name, origin, delta_row, delta_col);
             if &new_formula != formula {
                 formula_rewrites.push(FormulaRewrite {
                     sheet: sheet_name.to_string(),
@@ -2705,8 +2706,9 @@ fn fill_range(
         if let Some(formula) = &value.formula {
             let delta_row = cell.row as i32 - src_cell.row as i32;
             let delta_col = cell.col as i32 - src_cell.col as i32;
+            let origin = crate::CellAddr::new(cell.row, cell.col);
             let (new_formula, _) =
-                rewrite_formula_for_copy_delta(formula, sheet_name, delta_row, delta_col);
+                rewrite_formula_for_copy_delta(formula, sheet_name, origin, delta_row, delta_col);
             if &new_formula != formula {
                 formula_rewrites.push(FormulaRewrite {
                     sheet: sheet_name.to_string(),
@@ -2735,8 +2737,9 @@ fn rewrite_all_formulas_structural(
             let Some(formula) = &cell.formula else {
                 continue;
             };
+            let origin = crate::CellAddr::new(addr.row, addr.col);
             let (new_formula, changed) =
-                rewrite_formula_for_structural_edit(formula, ctx_sheet, &edit);
+                rewrite_formula_for_structural_edit(formula, ctx_sheet, origin, &edit);
             if changed {
                 rewrites.push(FormulaRewrite {
                     sheet: ctx_sheet.clone(),
@@ -2765,7 +2768,8 @@ fn rewrite_all_formulas_range_map(
             let Some(formula) = &cell.formula else {
                 continue;
             };
-            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, edit);
+            let origin = crate::CellAddr::new(addr.row, addr.col);
+            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
             if changed {
                 rewrites.push(FormulaRewrite {
                     sheet: ctx_sheet.clone(),
@@ -3808,16 +3812,17 @@ fn rewrite_defined_name_structural(
     ctx_sheet: &str,
     edit: &StructuralEdit,
 ) -> Result<Option<(NameDefinition, CompiledExpr)>, EngineError> {
+    let origin = crate::CellAddr::new(0, 0);
     let (new_def, changed) = match &def.definition {
         NameDefinition::Constant(_) => return Ok(None),
         NameDefinition::Reference(formula) => {
             let (new_formula, changed) =
-                rewrite_formula_for_structural_edit(formula, ctx_sheet, edit);
+                rewrite_formula_for_structural_edit(formula, ctx_sheet, origin, edit);
             (NameDefinition::Reference(new_formula), changed)
         }
         NameDefinition::Formula(formula) => {
             let (new_formula, changed) =
-                rewrite_formula_for_structural_edit(formula, ctx_sheet, edit);
+                rewrite_formula_for_structural_edit(formula, ctx_sheet, origin, edit);
             (NameDefinition::Formula(new_formula), changed)
         }
     };
@@ -3841,14 +3846,15 @@ fn rewrite_defined_name_range_map(
     ctx_sheet: &str,
     edit: &RangeMapEdit,
 ) -> Result<Option<(NameDefinition, CompiledExpr)>, EngineError> {
+    let origin = crate::CellAddr::new(0, 0);
     let (new_def, changed) = match &def.definition {
         NameDefinition::Constant(_) => return Ok(None),
         NameDefinition::Reference(formula) => {
-            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, edit);
+            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
             (NameDefinition::Reference(new_formula), changed)
         }
         NameDefinition::Formula(formula) => {
-            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, edit);
+            let (new_formula, changed) = rewrite_formula_for_range_map(formula, ctx_sheet, origin, edit);
             (NameDefinition::Formula(new_formula), changed)
         }
     };
