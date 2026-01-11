@@ -204,3 +204,22 @@ in
   const query2 = compileMToQuery(printed);
   assert.deepEqual(toJson(query2), toJson(query));
 });
+
+test("m_language round-trip: prettyPrintQueryToM (Decimal.FromText + Binary.FromText)", () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"Dec", "Bin"},
+    {Decimal.FromText("123.450"), Binary.FromText("AQID", BinaryEncoding.Base64)}
+  })
+in
+  Source
+`;
+
+  const query = compileMToQuery(script);
+  const printed = prettyPrintQueryToM(query);
+  assert.match(printed, /Decimal\.FromText\(\"123\.450\"\)/);
+  assert.match(printed, /Binary\.FromText\(\"AQID\", BinaryEncoding\.Base64\)/);
+  const query2 = compileMToQuery(printed);
+  assert.deepEqual(toJson(query2), toJson(query));
+});

@@ -135,6 +135,8 @@ export function constantIdentifierValue(name) {
       return "ignore";
     case "MissingField.UseNull":
       return "useNull";
+    case "BinaryEncoding.Base64":
+      return "base64";
     case "Comparer.Ordinal":
       return { comparer: "ordinal", caseSensitive: true };
     case "Comparer.OrdinalIgnoreCase":

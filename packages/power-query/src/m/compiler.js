@@ -1,7 +1,7 @@
 import { parseM } from "./parser.js";
 import { MLanguageCompileError } from "./errors.js";
 import { valueKey } from "../valueKey.js";
-import { MS_PER_DAY, PqDateTimeZone, PqDuration, PqTime } from "../values.js";
+import { MS_PER_DAY, PqDateTimeZone, PqDecimal, PqDuration, PqTime } from "../values.js";
 import {
   SOURCE_FUNCTIONS,
   TABLE_FUNCTIONS,
@@ -1944,6 +1944,21 @@ function evaluateConstant(ctx, expr) {
  * @returns {unknown}
  */
 function evaluateCallConstant(ctx, name, expr) {
+  /**
+   * @param {string} encoded
+   * @returns {Uint8Array}
+   */
+  const base64ToBytes = (encoded) => {
+    if (typeof Buffer !== "undefined") {
+      return new Uint8Array(Buffer.from(encoded, "base64"));
+    }
+    // eslint-disable-next-line no-undef
+    const binary = atob(encoded);
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out;
+  };
+
   switch (name) {
     case "File.Contents": {
       const pathExpr = expr.args[0];
@@ -1994,6 +2009,30 @@ function evaluateCallConstant(ctx, name, expr) {
       const millis = secMs - wholeSeconds * 1000;
       const utcMs = Date.UTC(y, mo - 1, d, hh, mm, wholeSeconds, millis) - offsetMinutes * 60 * 1000;
       return new PqDateTimeZone(new Date(utcMs), offsetMinutes);
+    }
+    case "Decimal.FromText": {
+      const textExpr = expr.args[0];
+      if (!textExpr) ctx.error(expr, "Decimal.FromText requires a text argument");
+      const text = evaluateConstant(ctx, textExpr);
+      if (typeof text !== "string") ctx.error(expr, "Decimal.FromText requires a text argument");
+      return new PqDecimal(text);
+    }
+    case "Binary.FromText": {
+      const textExpr = expr.args[0];
+      if (!textExpr) ctx.error(expr, "Binary.FromText requires a text argument");
+      const payload = evaluateConstant(ctx, textExpr);
+      if (typeof payload !== "string") ctx.error(expr, "Binary.FromText requires a text argument");
+
+      const encodingExpr = expr.args[1] ?? null;
+      const encoding = encodingExpr ? evaluateConstant(ctx, encodingExpr) : "base64";
+      if (encoding !== "base64") {
+        ctx.error(expr, "Binary.FromText only supports BinaryEncoding.Base64 in this subset");
+      }
+      try {
+        return base64ToBytes(payload);
+      } catch {
+        ctx.error(expr, "Binary.FromText requires valid base64 input");
+      }
     }
     default: {
       const constant = constantIdentifierValue(name);

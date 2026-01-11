@@ -9,7 +9,7 @@
  */
 
 import { parseFormula } from "../expr/index.js";
-import { MS_PER_DAY, PqDateTimeZone, PqDuration, PqTime, hasUtcTimeComponent } from "../values.js";
+import { MS_PER_DAY, PqDateTimeZone, PqDecimal, PqDuration, PqTime, hasUtcTimeComponent } from "../values.js";
 
 /**
  * @param {string} name
@@ -64,6 +64,9 @@ function valueToM(value) {
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "null";
   if (typeof value === "string") return escapeMString(value);
+  if (value instanceof PqDecimal) {
+    return `Decimal.FromText(${escapeMString(value.value)})`;
+  }
   if (value instanceof PqDateTimeZone) {
     const local = new Date(value.date.getTime() + value.offsetMinutes * 60 * 1000);
     const seconds = local.getUTCSeconds();
@@ -108,6 +111,18 @@ function valueToM(value) {
     const millis = value.getUTCMilliseconds();
     const secArg = millis === 0 ? String(seconds) : `${seconds}.${String(millis).padStart(3, "0")}`;
     return `#datetime(${value.getUTCFullYear()}, ${value.getUTCMonth() + 1}, ${value.getUTCDate()}, ${value.getUTCHours()}, ${value.getUTCMinutes()}, ${secArg})`;
+  }
+  if (value instanceof Uint8Array) {
+    let base64;
+    if (typeof Buffer !== "undefined") {
+      base64 = Buffer.from(value).toString("base64");
+    } else {
+      let binary = "";
+      for (let i = 0; i < value.length; i++) binary += String.fromCharCode(value[i]);
+      // eslint-disable-next-line no-undef
+      base64 = btoa(binary);
+    }
+    return `Binary.FromText(${escapeMString(base64)}, BinaryEncoding.Base64)`;
   }
   if (Array.isArray(value)) return `{${value.map(valueToM).join(", ")}}`;
   if (typeof value === "object") {
