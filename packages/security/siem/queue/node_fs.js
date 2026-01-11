@@ -59,6 +59,16 @@ async function syncDir(dirPath) {
   }
 }
 
+async function touchFile(filePath) {
+  try {
+    // Overwrite contents to bump mtime. This is intentionally lightweight; the lock file is advisory.
+    await writeFile(filePath, JSON.stringify({ pid: process.pid, updatedAt: Date.now() }), "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+}
+
 async function safeReadJson(filePath) {
   try {
     const raw = await readFile(filePath, "utf8");
@@ -493,6 +503,7 @@ export class NodeFsOfflineAuditQueue {
             acked += batch.length;
             sent += batch.length;
             await atomicWriteJson(segment.cursorPath, { acked });
+            await touchFile(this.lockPath);
           }
 
           if (acked >= lineCount) {
