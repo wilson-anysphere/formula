@@ -112,7 +112,8 @@ export class PyodideRuntime {
     }
     if (typeof SharedArrayBuffer === "undefined" || globalThis.crossOriginIsolated !== true) {
       throw new Error(
-        "PyodideRuntime worker mode requires SharedArrayBuffer in a cross-origin isolated context (COOP/COEP)",
+        "PyodideRuntime worker mode requires crossOriginIsolated + SharedArrayBuffer (COOP/COEP). " +
+          "Use mode: 'mainThread' to run without SharedArrayBuffer (UI may freeze).",
       );
     }
   }
@@ -275,6 +276,9 @@ export class PyodideRuntime {
       // Already initialized. The worker-side RPC handler and main-thread bridge
       // both read `this.api` at call time, so callers can swap the bridge by
       // updating `api` + `activeSheetId` without reloading Pyodide.
+      if (selectedMode === "mainThread" && this.pyodide) {
+        setFormulaBridgeApi(this.pyodide, this.api);
+      }
       return;
     }
 

@@ -225,7 +225,10 @@ function normalizeRpcParams(params) {
 
 function rpcCallSync(method, params) {
   if (typeof SharedArrayBuffer === "undefined") {
-    throw new Error("SharedArrayBuffer is required for the Pyodide formula bridge (enable crossOriginIsolated)");
+    throw new Error(
+      "SharedArrayBuffer is required for the worker-backed Pyodide formula bridge. " +
+        "Enable crossOriginIsolated (COOP/COEP) or run Pyodide on the main thread.",
+    );
   }
 
   const normalizedParams = normalizeRpcParams(params);
