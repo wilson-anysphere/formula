@@ -53,6 +53,14 @@ test("CollabSession E2E cell encryption: encrypted in Yjs, decrypted with key, m
   });
   const sessionB = createCollabSession({ doc: docB });
 
+  // Simulate historical docs where the same cell is stored under a legacy key encoding.
+  // When we later encrypt the cell, we must not leave plaintext behind under the legacy key.
+  docA.transact(() => {
+    const legacy = new Y.Map();
+    legacy.set("value", "old-plaintext");
+    sessionA.cells.set("Sheet1:0,0", legacy);
+  });
+
   await sessionA.setCellValue("Sheet1:0:0", "top-secret");
 
   // Raw Yjs should not contain plaintext.
@@ -63,6 +71,13 @@ test("CollabSession E2E cell encryption: encrypted in Yjs, decrypted with key, m
   assert.equal(cellMap.get("formula"), undefined);
   assert.ok(cellMap.get("enc"), "expected encrypted payload under `enc`");
   assert.equal(JSON.stringify(cellMap.toJSON()).includes("top-secret"), false);
+
+  const legacyCellMap = sessionA.cells.get("Sheet1:0,0");
+  assert.ok(legacyCellMap, "expected legacy key cell map to exist");
+  assert.equal(legacyCellMap.get("value"), undefined);
+  assert.equal(legacyCellMap.get("formula"), undefined);
+  assert.ok(legacyCellMap.get("enc"), "expected encrypted payload to overwrite legacy key value");
+  assert.equal(JSON.stringify(legacyCellMap.toJSON()).includes("old-plaintext"), false);
 
   assert.equal((await sessionA.getCell("Sheet1:0:0"))?.value, "top-secret");
 

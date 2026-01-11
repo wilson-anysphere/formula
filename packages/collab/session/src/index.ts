@@ -1094,16 +1094,12 @@ export class CollabSession {
 
     const monitor = this.formulaConflictMonitor;
     this.transactLocal(() => {
-      let cellData = this.cells.get(cellKey);
-      let cell = getYMapCell(cellData);
-      if (!cell) {
-        cell = new Y.Map();
-        this.cells.set(cellKey, cell);
-      }
+      const modified = Date.now();
 
       // Re-check inside the transaction to avoid racing with remote updates that
       // may have encrypted this cell while we were preparing a plaintext write.
-      if (!encryptedPayload && cell.get("enc") !== undefined) {
+      const existing = getYMapCell(this.cells.get(cellKey));
+      if (!encryptedPayload && existing?.get("enc") !== undefined) {
         throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
       }
 
@@ -1113,15 +1109,43 @@ export class CollabSession {
       }
 
       if (encryptedPayload) {
-        cell.set("enc", encryptedPayload);
-        cell.delete("value");
-        cell.delete("formula");
-      } else {
-        cell.delete("enc");
-        cell.set("value", value ?? null);
-        cell.delete("formula");
+        const keysToUpdate = parsed
+          ? Array.from(
+              new Set([
+                cellKey,
+                makeCellKey(parsed),
+                `${parsed.sheetId}:${parsed.row},${parsed.col}`,
+                ...(parsed.sheetId === this.defaultSheetId ? [`r${parsed.row}c${parsed.col}`] : []),
+              ])
+            )
+          : [cellKey];
+
+        for (const key of keysToUpdate) {
+          if (key !== cellKey && !this.cells.has(key)) continue;
+          let ycell = getYMapCell(this.cells.get(key));
+          if (!ycell) {
+            ycell = new Y.Map();
+            this.cells.set(key, ycell);
+          }
+          ycell.set("enc", encryptedPayload);
+          ycell.delete("value");
+          ycell.delete("formula");
+          ycell.set("modified", modified);
+          if (userId) ycell.set("modifiedBy", userId);
+        }
+        return;
       }
-      cell.set("modified", Date.now());
+
+      let cell = existing;
+      if (!cell) {
+        cell = new Y.Map();
+        this.cells.set(cellKey, cell);
+      }
+
+      cell.delete("enc");
+      cell.set("value", value ?? null);
+      cell.delete("formula");
+      cell.set("modified", modified);
       if (userId) cell.set("modifiedBy", userId);
     });
   }
@@ -1160,19 +1184,29 @@ export class CollabSession {
 
       const userId = this.permissions?.userId ?? null;
       this.transactLocal(() => {
-        let cellData = this.cells.get(cellKey);
-        let cell = getYMapCell(cellData);
-        if (!cell) {
-          cell = new Y.Map();
-          this.cells.set(cellKey, cell);
+        const modified = Date.now();
+        const keysToUpdate = Array.from(
+          new Set([
+            cellKey,
+            makeCellKey(parsed),
+            `${parsed.sheetId}:${parsed.row},${parsed.col}`,
+            ...(parsed.sheetId === this.defaultSheetId ? [`r${parsed.row}c${parsed.col}`] : []),
+          ])
+        );
+
+        for (const key of keysToUpdate) {
+          if (key !== cellKey && !this.cells.has(key)) continue;
+          let cell = getYMapCell(this.cells.get(key));
+          if (!cell) {
+            cell = new Y.Map();
+            this.cells.set(key, cell);
+          }
+          cell.set("enc", encryptedPayload);
+          cell.delete("value");
+          cell.delete("formula");
+          cell.set("modified", modified);
+          if (userId) cell.set("modifiedBy", userId);
         }
-
-        cell.set("enc", encryptedPayload);
-        cell.delete("value");
-        cell.delete("formula");
-
-        cell.set("modified", Date.now());
-        if (userId) cell.set("modifiedBy", userId);
       });
       return;
     }
