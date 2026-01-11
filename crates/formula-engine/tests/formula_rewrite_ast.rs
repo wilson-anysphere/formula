@@ -148,3 +148,30 @@ fn structural_edits_rewrite_sheet_range_refs_when_edit_sheet_in_span() {
     assert!(changed);
     assert_eq!(out, "=SUM(Sheet1:Sheet3!A2)");
 }
+
+#[test]
+fn structural_edits_rewrite_reversed_sheet_range_refs_when_edit_sheet_in_span() {
+    let edit = StructuralEdit::InsertRows {
+        sheet: "Sheet2".to_string(),
+        row: 0,
+        count: 1,
+    };
+    let origin = CellAddr::new(0, 0);
+
+    let (out, changed) = rewrite_formula_for_structural_edit_with_resolver(
+        "=SUM(Sheet3:Sheet1!A1)",
+        "Summary",
+        origin,
+        &edit,
+        |name| match name {
+            "Sheet1" => Some(0),
+            "Sheet2" => Some(1),
+            "Sheet3" => Some(2),
+            "Summary" => Some(3),
+            _ => None,
+        },
+    );
+
+    assert!(changed);
+    assert_eq!(out, "=SUM(Sheet3:Sheet1!A2)");
+}
