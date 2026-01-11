@@ -64,6 +64,20 @@ test("search scopes: overlapping selection ranges do not produce duplicate match
   assert.deepEqual(matches.map((m) => m.address), ["Sheet1!A1", "Sheet1!B1"]);
 });
 
+test("search scopes: workbook starts from current sheet (Excel semantics)", async () => {
+  const wb = new InMemoryWorkbook();
+  const s1 = wb.addSheet("Sheet1");
+  const s2 = wb.addSheet("Sheet2");
+  const s3 = wb.addSheet("Sheet3");
+
+  s1.setValue(0, 0, "foo");
+  s2.setValue(0, 0, "foo");
+  s3.setValue(0, 0, "foo");
+
+  const matches = await findAll(wb, "foo", { scope: "workbook", currentSheetName: "Sheet2" });
+  assert.deepEqual(matches.map((m) => m.address), ["Sheet2!A1", "Sheet3!A1", "Sheet1!A1"]);
+});
+
 test("search order: by rows vs by columns", async () => {
   const wb = new InMemoryWorkbook();
   const sheet = wb.addSheet("Sheet1");

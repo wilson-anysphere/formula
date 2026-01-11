@@ -81,7 +81,16 @@ export function buildScopeSegments(workbook, { scope, currentSheetName, selectio
   const segments = [];
 
   if (scope === "workbook") {
-    for (const sheet of workbook.sheets ?? []) {
+    const sheets = workbook.sheets ?? [];
+    let ordered = sheets;
+    if (currentSheetName) {
+      const start = sheets.findIndex((s) => s.name === currentSheetName);
+      if (start > 0) {
+        ordered = sheets.slice(start).concat(sheets.slice(0, start));
+      }
+    }
+
+    for (const sheet of ordered) {
       const range = getUsedRange(sheet);
       if (!range) continue;
       segments.push({ sheetName: sheet.name, ranges: [range] });
