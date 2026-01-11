@@ -7,8 +7,9 @@ import http, { type IncomingMessage } from "node:http";
 import crypto from "node:crypto";
 import { runMigrations } from "../db/migrations";
 import { createMetrics } from "../observability/metrics";
-import type { EnabledSiemOrg, SiemConfigProvider } from "../siem/configProvider";
+import { DbSiemConfigProvider, type EnabledSiemOrg, type SiemConfigProvider } from "../siem/configProvider";
 import type { SiemEndpointConfig } from "../siem/types";
+import { putSecret } from "../secrets/secretStore";
 import { SiemExportWorker } from "../siem/worker";
 
 function getMigrationsDir(): string {
@@ -297,5 +298,61 @@ describe("SIEM export worker", () => {
       await siem.close();
     }
   });
-});
 
+  it("resolves SIEM auth secrets from the encrypted secret store", async () => {
+    const orgId = crypto.randomUUID();
+    await insertOrg(db, orgId);
+
+    const eventId = crypto.randomUUID();
+    await insertAuditEvent({
+      db,
+      table: "audit_log",
+      id: eventId,
+      orgId,
+      createdAt: new Date("2025-01-01T02:00:00.000Z"),
+      eventType: "test.secret"
+    });
+
+    const siem = await startSiemServer();
+    try {
+      const encryptionSecret = "test-secret-store-key";
+      const secretName = `siem:${orgId}:headerValue:authorization`;
+      await putSecret(db, encryptionSecret, secretName, "Splunk supersecret-token");
+
+      const storedConfig: SiemEndpointConfig = {
+        endpointUrl: siem.url,
+        format: "json",
+        auth: {
+          type: "header",
+          name: "Authorization",
+          value: { secretRef: secretName }
+        },
+        retry: { maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 5, jitter: false }
+      };
+
+      await db.query(
+        `
+          INSERT INTO org_siem_configs (org_id, enabled, config)
+          VALUES ($1, true, $2)
+        `,
+        [orgId, JSON.stringify(storedConfig)]
+      );
+
+      const metrics = createMetrics();
+      const worker = new SiemExportWorker({
+        db,
+        configProvider: new DbSiemConfigProvider(db, encryptionSecret, console),
+        metrics,
+        logger: console,
+        pollIntervalMs: 0
+      });
+
+      await worker.tick();
+
+      expect(siem.requests).toHaveLength(1);
+      expect(siem.requests[0]!.headers["authorization"]).toBe("Splunk supersecret-token");
+    } finally {
+      await siem.close();
+    }
+  });
+});

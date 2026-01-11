@@ -60,6 +60,12 @@ async function resolveSecret(value: MaybeEncryptedSecret | undefined): Promise<s
   if (!value) return undefined;
   if (typeof value === "string") return value;
 
+  if ("secretRef" in value && typeof value.secretRef === "string") {
+    // Secret refs must be resolved (decrypted) by the config provider before the
+    // sender is invoked.
+    throw new Error("Unresolved secretRef in SIEM config");
+  }
+
   if ("encrypted" in value && typeof value.encrypted === "string") {
     // Placeholder until the encrypted secret store task lands. In the interim,
     // configs may store plaintext here (or self-encrypted values).

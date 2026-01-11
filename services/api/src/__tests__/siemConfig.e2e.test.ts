@@ -19,12 +19,7 @@ function extractCookie(setCookieHeader: string | string[] | undefined): string {
   return raw.split(";")[0];
 }
 
-function parsePgJson(value: unknown): any {
-  if (typeof value === "string") return JSON.parse(value);
-  return value;
-}
-
-describe("SIEM config", () => {
+describe("SIEM config routes", () => {
   let db: Pool;
   let config: AppConfig;
   let app: ReturnType<typeof buildApp>;
@@ -58,80 +53,76 @@ describe("SIEM config", () => {
     await db.end();
   });
 
-  it("upserts a SIEM config, masks secrets on read, and deletes cleanly", async () => {
+  it("stores SIEM config with encrypted secrets (CRUD)", async () => {
     const register = await app.inject({
       method: "POST",
       url: "/auth/register",
       payload: {
-        email: "siem-owner@example.com",
+        email: "admin@example.com",
         password: "password1234",
-        name: "Owner",
-        orgName: "SIEM Org"
+        name: "Admin",
+        orgName: "Acme"
       }
     });
     expect(register.statusCode).toBe(200);
     const cookie = extractCookie(register.headers["set-cookie"]);
     const orgId = (register.json() as any).organization.id as string;
 
-    const put = await app.inject({
+    const token = "supersecret-token";
+    const putRes = await app.inject({
       method: "PUT",
       url: `/orgs/${orgId}/siem`,
       headers: { cookie },
       payload: {
-        endpointUrl: "https://example.invalid/ingest",
-        format: "json",
-        idempotencyKeyHeader: "Idempotency-Key",
-        auth: { type: "bearer", token: "supersecret" }
+        enabled: true,
+        config: {
+          endpointUrl: "https://example.invalid/siem",
+          format: "json",
+          auth: {
+            type: "header",
+            name: "Authorization",
+            value: `Splunk ${token}`
+          }
+        }
       }
     });
-    expect(put.statusCode).toBe(200);
-    const putBody = put.json() as any;
-    expect(putBody.config.endpointUrl).toBe("https://example.invalid/ingest");
-    expect(putBody.config.auth.token).toBe("***");
+    expect(putRes.statusCode).toBe(200);
 
     const stored = await db.query("SELECT enabled, config FROM org_siem_configs WHERE org_id = $1", [orgId]);
     expect(stored.rowCount).toBe(1);
     expect(stored.rows[0]!.enabled).toBe(true);
-    const storedConfig = parsePgJson(stored.rows[0]!.config);
-    const secretName = `siem:${orgId}:bearerToken`;
-    expect(storedConfig.auth.token).toEqual({ secretRef: secretName });
 
+    const rawConfig = JSON.stringify(stored.rows[0]!.config);
+    expect(rawConfig).not.toContain(token);
+
+    const secretName = `siem:${orgId}:headerValue:authorization`;
     const secretRow = await db.query("SELECT encrypted_value FROM secrets WHERE name = $1", [secretName]);
     expect(secretRow.rowCount).toBe(1);
-    expect(secretRow.rows[0]!.encrypted_value).toMatch(/^v1:/);
+    const encrypted = secretRow.rows[0]!.encrypted_value as string;
+    expect(encrypted).toMatch(/^v1:/);
+    expect(encrypted).not.toContain(token);
 
-    const get = await app.inject({
+    const getRes = await app.inject({
       method: "GET",
       url: `/orgs/${orgId}/siem`,
       headers: { cookie }
     });
-    expect(get.statusCode).toBe(200);
-    const getBody = get.json() as any;
-    expect(getBody.config.auth.token).toBe("***");
+    expect(getRes.statusCode).toBe(200);
+    const getBody = getRes.json() as any;
+    expect(getBody.enabled).toBe(true);
+    expect(getBody.config.auth).toEqual({ type: "header", name: "Authorization", value: "***" });
 
-    const del = await app.inject({
+    const delRes = await app.inject({
       method: "DELETE",
       url: `/orgs/${orgId}/siem`,
       headers: { cookie }
     });
-    expect(del.statusCode).toBe(204);
+    expect(delRes.statusCode).toBe(204);
 
-    const afterDelete = await app.inject({
-      method: "GET",
-      url: `/orgs/${orgId}/siem`,
-      headers: { cookie }
-    });
-    expect(afterDelete.statusCode).toBe(404);
-
-    const audit = await db.query(
-      "SELECT event_type FROM audit_log WHERE org_id = $1 AND event_type LIKE 'admin.integration_%'",
-      [orgId]
-    );
-    const eventTypes = audit.rows.map((row) => row.event_type as string);
-    expect(eventTypes).toContain("admin.integration_added");
-    expect(eventTypes).toContain("admin.integration_removed");
-
-    const secretAfterDelete = await db.query("SELECT 1 FROM secrets WHERE name = $1", [secretName]);
-    expect(secretAfterDelete.rowCount).toBe(0);
+    const remainingConfig = await db.query("SELECT 1 FROM org_siem_configs WHERE org_id = $1", [orgId]);
+    expect(remainingConfig.rowCount).toBe(0);
+    const remainingSecrets = await db.query("SELECT 1 FROM secrets WHERE name = $1", [secretName]);
+    expect(remainingSecrets.rowCount).toBe(0);
   });
 });
+

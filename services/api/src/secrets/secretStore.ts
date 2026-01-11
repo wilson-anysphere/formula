@@ -62,3 +62,6 @@ export async function getSecret(
   return decryptValue(key, row.encrypted_value);
 }
 
+export async function deleteSecret(db: Queryable, name: string): Promise<void> {
+  await db.query("DELETE FROM secrets WHERE name = $1", [name]);
+}

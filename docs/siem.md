@@ -78,6 +78,8 @@ Endpoints:
 - `GET /orgs/:orgId/siem` – fetch sanitized config (auth secrets are masked as `"***"`).
 - `DELETE /orgs/:orgId/siem` – remove SIEM configuration (disables exports).
 
+Auth secrets are stored encrypted in the database-backed secret store (`secrets` table; key = `SECRET_STORE_KEY`) and referenced from `org_siem_configs.config` via `{ "secretRef": "siem:<orgId>:..." }` entries (never plaintext).
+
 Example payload:
 
 ```json

@@ -36,7 +36,7 @@ async function main(): Promise<void> {
 
   const siemWorker = new SiemExportWorker({
     db: pool,
-    configProvider: new DbSiemConfigProvider(pool, app.log),
+    configProvider: new DbSiemConfigProvider(pool, config.secretStoreKey, app.log),
     metrics: app.metrics,
     logger: app.log
   });

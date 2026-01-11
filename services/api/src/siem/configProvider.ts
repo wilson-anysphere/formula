@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
-import type { SiemEndpointConfig } from "./types";
+import { getSecret } from "../secrets/secretStore";
+import type { MaybeEncryptedSecret, SiemEndpointConfig, SiemAuthConfig } from "./types";
 
 export interface EnabledSiemOrg {
   orgId: string;
@@ -8,30 +9,6 @@ export interface EnabledSiemOrg {
 
 export interface SiemConfigProvider {
   listEnabledOrgs(): Promise<EnabledSiemOrg[]>;
-}
-
-async function tableExists(db: Pool, tableName: string): Promise<boolean> {
-  // `to_regclass` is Postgres-specific and not supported by pg-mem; fall back
-  // to information_schema.
-  try {
-    const res = await db.query("SELECT to_regclass($1) AS reg", [tableName]);
-    const reg = res.rows?.[0]?.reg as string | null | undefined;
-    return Boolean(reg);
-  } catch {
-    try {
-      const res = await db.query(
-        `
-          SELECT 1
-          FROM information_schema.tables
-          WHERE table_schema = 'public' AND table_name = $1
-        `,
-        [tableName]
-      );
-      return (res.rowCount ?? 0) > 0;
-    } catch {
-      return false;
-    }
-  }
 }
 
 function parseConfig(raw: unknown): SiemEndpointConfig | null {
@@ -52,30 +29,68 @@ function parseConfig(raw: unknown): SiemEndpointConfig | null {
   return config as unknown as SiemEndpointConfig;
 }
 
-/**
- * Best-effort DB-backed config provider.
- *
- * This intentionally tolerates missing schema so the API can run against
- * databases that have not (yet) applied the SIEM config migrations.
- */
-export class DbSiemConfigProvider implements SiemConfigProvider {
-  private resolvedMode: "unknown" | "org_siem_configs" | "none" = "unknown";
+async function resolveSecretValue(
+  db: Pool,
+  encryptionSecret: string,
+  value: MaybeEncryptedSecret | undefined
+): Promise<string | undefined> {
+  if (!value) return undefined;
+  if (typeof value === "string") return value;
 
+  if ("secretRef" in value && typeof value.secretRef === "string") {
+    try {
+      const resolved = await getSecret(db, encryptionSecret, value.secretRef);
+      return resolved ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // Backwards-compatible placeholders (pre secret store integration).
+  if ("encrypted" in value && typeof value.encrypted === "string") return value.encrypted;
+  if ("ciphertext" in value && typeof value.ciphertext === "string") return value.ciphertext;
+
+  return undefined;
+}
+
+async function resolveAuthSecrets(
+  db: Pool,
+  encryptionSecret: string,
+  auth: SiemAuthConfig | undefined
+): Promise<SiemAuthConfig | undefined | null> {
+  if (!auth) return undefined;
+  if (auth.type === "none") return auth;
+
+  if (auth.type === "bearer") {
+    const token = await resolveSecretValue(db, encryptionSecret, auth.token);
+    if (!token) return null;
+    return { type: "bearer", token };
+  }
+
+  if (auth.type === "basic") {
+    const username = await resolveSecretValue(db, encryptionSecret, auth.username);
+    const password = await resolveSecretValue(db, encryptionSecret, auth.password);
+    if (!username || !password) return null;
+    return { type: "basic", username, password };
+  }
+
+  if (auth.type === "header") {
+    const value = await resolveSecretValue(db, encryptionSecret, auth.value);
+    if (!auth.name || !value) return null;
+    return { type: "header", name: auth.name, value };
+  }
+
+  return null;
+}
+
+export class DbSiemConfigProvider implements SiemConfigProvider {
   constructor(
     private readonly db: Pool,
+    private readonly encryptionSecret: string,
     private readonly logger: { debug: (...args: any[]) => void; warn: (...args: any[]) => void } = console
   ) {}
 
   async listEnabledOrgs(): Promise<EnabledSiemOrg[]> {
-    if (this.resolvedMode === "none") return [];
-
-    if (this.resolvedMode === "unknown") {
-      const hasOrgSiemConfigs = await tableExists(this.db, "public.org_siem_configs");
-      this.resolvedMode = hasOrgSiemConfigs ? "org_siem_configs" : "none";
-    }
-
-    if (this.resolvedMode !== "org_siem_configs") return [];
-
     try {
       const res = await this.db.query(
         `
@@ -85,13 +100,28 @@ export class DbSiemConfigProvider implements SiemConfigProvider {
         `
       );
 
-      return res.rows
-        .map((row) => {
-          const config = parseConfig(row.config);
-          if (!config) return null;
-          return { orgId: String(row.org_id), config } satisfies EnabledSiemOrg;
-        })
-        .filter((row): row is EnabledSiemOrg => Boolean(row));
+      const enabled: EnabledSiemOrg[] = [];
+      for (const row of res.rows) {
+        const orgId = String(row.org_id);
+        const config = parseConfig(row.config);
+        if (!config) continue;
+
+        const resolvedAuth = await resolveAuthSecrets(this.db, this.encryptionSecret, config.auth);
+        if (resolvedAuth === null) {
+          this.logger.warn({ orgId }, "siem_config_secret_resolution_failed");
+          continue;
+        }
+
+        enabled.push({
+          orgId,
+          config: {
+            ...config,
+            auth: resolvedAuth
+          }
+        });
+      }
+
+      return enabled;
     } catch (err) {
       this.logger.warn({ err }, "siem_config_list_failed");
       return [];

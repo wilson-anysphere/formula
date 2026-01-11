@@ -1,6 +1,13 @@
 export type MaybeEncryptedSecret =
   | string
   | {
+      /**
+       * Reference to a value stored in the database-backed encrypted secret store
+       * (`secrets` table).
+       */
+      secretRef: string;
+    }
+  | {
       // Minimal placeholder for encrypted secrets until the API secret store lands.
       // The secret store task will define the canonical format.
       encrypted: string;
@@ -72,4 +79,3 @@ export type ExportableAuditEvent = CanonicalAuditEvent & {
    */
   createdAt: Date;
 };
-
