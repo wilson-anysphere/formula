@@ -342,16 +342,15 @@ export async function authenticateRequest(
 
   if (auth.mode === "introspect") {
     const cache = options.introspectCache ?? null;
-    const tokenHash = cache ? sha256Hex(token) : null;
+    // Cache entries are scoped per (token, doc) so a single user/session token can
+    // be safely used across multiple documents.
+    const tokenHash = cache ? sha256Hex(`${token}\n${docName}`) : null;
     const now = Date.now();
     if (cache && tokenHash) {
       maybeSweepIntrospectCache(cache, now, auth.cacheMs);
       const cached = cache.get(tokenHash);
       if (cached) {
         if (cached.expiresAtMs > now) {
-          if (cached.ctx.docId !== docName) {
-            throw new AuthError("Token is not authorized for this document", 403);
-          }
           return cached.ctx;
         }
         cache.delete(tokenHash);

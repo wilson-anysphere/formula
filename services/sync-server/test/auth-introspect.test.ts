@@ -28,7 +28,7 @@ test("auth:introspect enforces roles and caches introspection results", async (t
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-introspect-"));
 
   const internalAdminToken = "internal-admin-token";
-  const hitsByToken = new Map<string, number>();
+  const hitsByKey = new Map<string, number>();
 
   const introspectionServer = http.createServer(async (req, res) => {
     if (req.method !== "POST" || req.url !== "/internal/sync/introspect") {
@@ -76,7 +76,8 @@ test("auth:introspect enforces roles and caches introspection results", async (t
       return;
     }
 
-    hitsByToken.set(token, (hitsByToken.get(token) ?? 0) + 1);
+    const key = `${token}\n${docId}`;
+    hitsByKey.set(key, (hitsByKey.get(key) ?? 0) + 1);
 
     const role =
       token === "editor-token"
@@ -170,6 +171,7 @@ test("auth:introspect enforces roles and caches introspection results", async (t
   });
 
   const docName = `doc-${Math.random().toString(16).slice(2)}`;
+  const otherDocName = `doc-${Math.random().toString(16).slice(2)}`;
   const editorToken = "editor-token";
   const viewerToken = "viewer-token";
 
@@ -225,6 +227,25 @@ test("auth:introspect enforces roles and caches introspection results", async (t
   await waitForProviderSync(providerEditor2);
   await waitForCondition(() => docEditor2.getText("t").toString() === "hello", 10_000);
 
-  assert.equal(hitsByToken.get(editorToken), 1);
-  assert.equal(hitsByToken.get(viewerToken), 1);
+  const doc1EditorKey = `${editorToken}\n${docName}`;
+  const doc1ViewerKey = `${viewerToken}\n${docName}`;
+
+  assert.equal(hitsByKey.get(doc1EditorKey), 1);
+  assert.equal(hitsByKey.get(doc1ViewerKey), 1);
+
+  // The same token should be usable across multiple docs; caching is scoped per
+  // (token, docId).
+  const docEditor3 = new Y.Doc();
+  const providerEditor3 = new WebsocketProvider(server.getWsUrl(), otherDocName, docEditor3, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: editorToken },
+  });
+  t.after(() => {
+    providerEditor3.destroy();
+    docEditor3.destroy();
+  });
+  await waitForProviderSync(providerEditor3);
+
+  assert.equal(hitsByKey.get(`${editorToken}\n${otherDocName}`), 1);
 });
