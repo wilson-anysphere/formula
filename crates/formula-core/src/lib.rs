@@ -599,6 +599,42 @@ impl FormulaParser {
             return Expr::Scalar(JsonValue::Bool(false));
         }
 
+        let stripped: String = ident.chars().filter(|ch| *ch != '$').collect();
+
+        // The JS tokenizer matches cell references before identifiers/functions, so a token
+        // that looks like an A1 reference should never be parsed as a function call—even
+        // if it's followed by `(`.
+        if looks_like_a1_reference(&stripped) {
+            let start = match parse_reference_token(&ident) {
+                Ok(coord) => coord,
+                Err(code) => return Expr::Error(code),
+            };
+
+            if matches!(self.peek(), Some(FormulaToken::Colon)) {
+                // Only treat this as a range if the token following the colon looks like an A1
+                // reference. Otherwise, leave the colon unconsumed so higher-level parsing
+                // can handle it (matching JS behavior for `A1:` and `A1:FOO`).
+                let next_is_ref = matches!(self.tokens.get(self.pos + 1), Some(FormulaToken::Ident(end_ident))
+                    if looks_like_a1_reference(&end_ident.chars().filter(|ch| *ch != '$').collect::<String>())
+                );
+
+                if next_is_ref {
+                    self.bump(); // colon
+                    let end_ident = match self.bump() {
+                        Some(FormulaToken::Ident(name)) => name,
+                        _ => return Expr::Error(ERROR_VALUE),
+                    };
+                    let end = match parse_reference_token(&end_ident) {
+                        Ok(coord) => coord,
+                        Err(_) => return Expr::Error(ERROR_REF),
+                    };
+                    return Expr::Range(start, end);
+                }
+            }
+
+            return Expr::Reference(start);
+        }
+
         if matches!(self.peek(), Some(FormulaToken::LParen)) {
             self.bump();
             let mut args = Vec::new();
@@ -880,10 +916,34 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
                 chars.next();
                 tokens.push(FormulaToken::Colon);
             }
-            _ if ch.is_ascii_alphabetic() || ch == '$' || ch == '_' => {
+            '_' => {
                 let mut buf = String::new();
                 while let Some(ch2) = chars.peek().copied() {
-                    if ch2.is_ascii_alphanumeric() || ch2 == '$' || ch2 == '_' || ch2 == '.' {
+                    if ch2.is_ascii_alphanumeric() || ch2 == '_' || ch2 == '.' {
+                        buf.push(ch2.to_ascii_uppercase());
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                tokens.push(FormulaToken::Ident(buf));
+            }
+            _ if ch.is_ascii_alphabetic() || ch == '$' => {
+                if let Some(reference) = try_read_cell_ref_token(&mut chars) {
+                    tokens.push(FormulaToken::Ident(reference));
+                    continue;
+                }
+
+                // `$` only has meaning in absolute references. If it doesn't start a
+                // valid cell reference, treat it as an unknown token (matching the
+                // JS evaluator).
+                if ch == '$' {
+                    return Err(ERROR_VALUE);
+                }
+
+                let mut buf = String::new();
+                while let Some(ch2) = chars.peek().copied() {
+                    if ch2.is_ascii_alphanumeric() || ch2 == '_' || ch2 == '.' {
                         buf.push(ch2.to_ascii_uppercase());
                         chars.next();
                     } else {
@@ -900,6 +960,63 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
     }
 
     Ok(tokens)
+}
+
+fn try_read_cell_ref_token(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
+    // Mirror the JS evaluator's reference tokenization:
+    // - optional `$`
+    // - 1-3 letters
+    // - optional `$`
+    // - 1+ digits
+    // Note: JS does not validate the row number is >= 1 during tokenization.
+    let mut lookahead = chars.clone();
+    let mut buf = String::new();
+
+    if lookahead.peek().copied() == Some('$') {
+        buf.push('$');
+        lookahead.next();
+    }
+
+    let mut letters = String::new();
+    while let Some(next) = lookahead.peek().copied() {
+        if next.is_ascii_alphabetic() {
+            if letters.len() >= 3 {
+                return None;
+            }
+            letters.push(next.to_ascii_uppercase());
+            lookahead.next();
+        } else {
+            break;
+        }
+    }
+
+    if letters.is_empty() {
+        return None;
+    }
+    buf.push_str(&letters);
+
+    if lookahead.peek().copied() == Some('$') {
+        buf.push('$');
+        lookahead.next();
+    }
+
+    let mut digits = String::new();
+    while let Some(next) = lookahead.peek().copied() {
+        if next.is_ascii_digit() {
+            digits.push(next);
+            lookahead.next();
+        } else {
+            break;
+        }
+    }
+
+    if digits.is_empty() {
+        return None;
+    }
+    buf.push_str(&digits);
+
+    *chars = lookahead;
+    Some(buf)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1256,6 +1373,20 @@ mod tests {
         wb.recalculate(None).unwrap();
         let cell = wb.get_cell("A3", None).unwrap();
         assert_eq!(cell.value, json!(3.0));
+    }
+
+    #[test]
+    fn incomplete_ranges_match_js_parsing_behavior() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!(5), None).unwrap();
+        // Top-level expression ignores the trailing ":" token.
+        wb.set_cell("B1", json!("=A1:"), None).unwrap();
+        // Inside a function call, trailing tokens cause a parse error.
+        wb.set_cell("C1", json!("=SUM(A1:)"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("B1", None).unwrap().value, json!(5));
+        assert_eq!(wb.get_cell("C1", None).unwrap().value, json!(ERROR_VALUE));
     }
 
     #[test]
