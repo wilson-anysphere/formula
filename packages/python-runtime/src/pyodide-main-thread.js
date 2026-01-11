@@ -126,7 +126,7 @@ export async function loadPyodideMainThread(options = {}) {
   const cached = byIndexURL.get(resolvedIndexURL);
   if (cached) return await cached;
 
-  const promise = loader({ indexURL: resolvedIndexURL });
+  const promise = Promise.resolve(loader({ indexURL: resolvedIndexURL }));
   byIndexURL.set(resolvedIndexURL, promise);
   promise.catch(() => byIndexURL.delete(resolvedIndexURL));
 
