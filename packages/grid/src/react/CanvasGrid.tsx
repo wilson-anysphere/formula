@@ -33,6 +33,8 @@ export interface GridApi {
   setPerfStatsEnabled(enabled: boolean): void;
   scrollToCell(row: number, col: number, opts?: { align?: ScrollToCellAlign; padding?: number }): void;
   getCellRect(row: number, col: number): { x: number; y: number; width: number; height: number } | null;
+  /** Returns the fill-handle rect for the active selection range, in viewport coordinates. */
+  getFillHandleRect(): { x: number; y: number; width: number; height: number } | null;
   getViewportState(): GridViewportState | null;
   /**
    * Set a transient range selection overlay.
@@ -558,6 +560,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         syncScrollbars();
       },
       getCellRect: (row, col) => rendererRef.current?.getCellRect(row, col) ?? null,
+      getFillHandleRect: () => rendererRef.current?.getFillHandleRect() ?? null,
       getViewportState: () => rendererRef.current?.getViewportState() ?? null,
       setRangeSelection: (range) => rendererRef.current?.setRangeSelection(range),
       setReferenceHighlights: (highlights) => rendererRef.current?.setReferenceHighlights(highlights),
