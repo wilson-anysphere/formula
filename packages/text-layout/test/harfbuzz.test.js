@@ -106,3 +106,25 @@ test("per-run font changes are reflected in measurement (multi-run mixed sizes)"
   assert.equal(round(layout.lines[0].width, 3), 79.458);
 });
 
+test("contiguous runs with the same font are measured together (cross-run kerning)", () => {
+  const font = { family: "Noto Sans", sizePx: 13, weight: 400 };
+
+  const combined = engine.measure("AV", font).width;
+
+  const layout = engine.layout({
+    runs: [
+      { text: "A", font, color: "red" },
+      { text: "V", font, color: "blue" },
+    ],
+    font,
+    maxWidth: Infinity,
+    wrapMode: "none",
+    align: "left",
+    direction: "ltr",
+  });
+
+  assert.equal(layout.lines.length, 1);
+  assert.equal(layout.lines[0].text, "AV");
+  assert.equal(round(layout.lines[0].width, 3), round(combined, 3));
+  assert.equal(round(layout.lines[0].width, 3), 15.587);
+});
