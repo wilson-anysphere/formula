@@ -85,9 +85,11 @@ export class PyodideRuntime {
     this._executeQueue = Promise.resolve();
     this.backendMode = null;
     this.initialized = false;
+    this._generation = 0;
   }
 
   destroy() {
+    this._generation += 1;
     if (this.worker) {
       try {
         if (this._onRpcMessage) {
@@ -109,7 +111,13 @@ export class PyodideRuntime {
       // instance so it can be swapped without re-registering modules. Clear it
       // here to avoid retaining host references after the runtime is destroyed.
       try {
-        setFormulaBridgeApi(this.pyodide, null);
+        // Only clear if this runtime was the last one to install its bridge API.
+        // Multiple PyodideRuntime instances may share a cached/singleton Pyodide
+        // instance, and clearing unconditionally could break another in-flight
+        // execution.
+        if (this.pyodide.__formulaPyodideBridgeApi === this.api) {
+          setFormulaBridgeApi(this.pyodide, null);
+        }
       } catch {
         // ignore
       }
@@ -411,11 +419,15 @@ export class PyodideRuntime {
       throw new Error("PyodideRuntime mainThread backend not initialized; call initialize() first");
     }
 
+    const generation = this._generation;
     const pyodide = this.pyodide;
     const api = this.api;
     const interruptView = this._interruptView;
 
     const run = async () => {
+      if (this._generation !== generation || !this.initialized || this.backendMode !== "mainThread" || this.pyodide !== pyodide) {
+        throw new Error("PyodideRuntime was destroyed");
+      }
       let stdout = "";
       let stderr = "";
       setFormulaBridgeApi(pyodide, api);
