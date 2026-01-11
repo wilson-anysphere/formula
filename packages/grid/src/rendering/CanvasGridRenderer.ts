@@ -1201,6 +1201,20 @@ export class CanvasGridRenderer {
       const rowHeight = this.scroll.rows.getSize(row);
       const y = rowYSheet - quadrant.scrollBaseY + quadrant.originY;
 
+      // Batch contiguous fills (per row) to cut down on `fillRect` calls for the
+      // common case where large runs share the same background color.
+      let fillRunColor: string | null = null;
+      let fillRunX = 0;
+      let fillRunWidth = 0;
+      const flushFillRun = () => {
+        if (!fillRunColor || fillRunWidth <= 0) return;
+        if (fillRunColor !== currentGridFill) {
+          gridCtx.fillStyle = fillRunColor;
+          currentGridFill = fillRunColor;
+        }
+        gridCtx.fillRect(fillRunX, y, fillRunWidth, rowHeight);
+      };
+
       let colXSheet = startColXSheet;
       for (let col = startCol; col < endCol; col++) {
         const colWidth = this.scroll.cols.getSize(col);
@@ -1211,12 +1225,20 @@ export class CanvasGridRenderer {
 
         // Background fill (grid layer).
         const fill = style?.fill;
-        if (fill) {
-          if (fill !== currentGridFill) {
-            gridCtx.fillStyle = fill;
-            currentGridFill = fill;
+        const fillToDraw = fill && fill !== this.theme.gridBg ? fill : null;
+        if (fillToDraw) {
+          if (fillToDraw !== fillRunColor) {
+            flushFillRun();
+            fillRunColor = fillToDraw;
+            fillRunX = x;
+            fillRunWidth = colWidth;
+          } else {
+            fillRunWidth += colWidth;
           }
-          gridCtx.fillRect(x, y, colWidth, rowHeight);
+        } else if (fillRunColor) {
+          flushFillRun();
+          fillRunColor = null;
+          fillRunWidth = 0;
         }
 
         // Content text + comment indicator.
@@ -1372,6 +1394,7 @@ export class CanvasGridRenderer {
         colXSheet += colWidth;
       }
 
+      flushFillRun();
       rowYSheet += rowHeight;
     }
 
