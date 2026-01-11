@@ -2,6 +2,7 @@ import path from "node:path";
 import { loadConfig } from "./config";
 import { createPool } from "./db/pool";
 import { runMigrations } from "./db/migrations";
+import { cleanupOidcAuthStates } from "./auth/oidc/oidc";
 import { initOpenTelemetry } from "./observability/otel";
 import { runRetentionSweep } from "./retention";
 import { DbSiemConfigProvider } from "./siem/configProvider";
@@ -98,6 +99,29 @@ async function main(): Promise<void> {
         app.log.error({ err }, "retention sweep failed");
       });
     }, config.retentionSweepIntervalMs);
+  }
+
+  if (config.oidcAuthStateCleanupIntervalMs != null) {
+    const sweep = async () => {
+      const deleted = await cleanupOidcAuthStates(pool);
+      if (deleted > 0) {
+        app.log.debug({ deleted }, "oidc_auth_state_cleanup");
+      }
+    };
+
+    void sweep().catch((err) => {
+      app.log.warn({ err }, "oidc_auth_state_cleanup_failed");
+    });
+
+    const timer = setInterval(() => {
+      void sweep().catch((err) => {
+        app.log.warn({ err }, "oidc_auth_state_cleanup_failed");
+      });
+    }, config.oidcAuthStateCleanupIntervalMs);
+
+    app.addHook("onClose", async () => {
+      clearInterval(timer);
+    });
   }
 
   await app.listen({ port: config.port, host: "0.0.0.0" });

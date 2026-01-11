@@ -52,6 +52,9 @@ describe("API e2e: DLP policy + classification endpoints", () => {
     config = {
       port: 0,
       databaseUrl: "postgres://unused",
+      publicBaseUrl: "http://localhost",
+      publicBaseUrlHostAllowlist: ["localhost"],
+      trustProxy: false,
       sessionCookieName: "formula_session",
       sessionTtlSeconds: 60 * 60,
       cookieSecure: false,
@@ -64,7 +67,8 @@ describe("API e2e: DLP policy + classification endpoints", () => {
       },
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
-      retentionSweepIntervalMs: null
+      retentionSweepIntervalMs: null,
+      oidcAuthStateCleanupIntervalMs: null
     };
 
     app = buildApp({ db, config });
@@ -76,11 +80,13 @@ describe("API e2e: DLP policy + classification endpoints", () => {
     await db.end();
   });
 
-  it("stores org policy, doc policy overrides, and document classifications", async () => {
-    const ownerRegister = await app.inject({
-      method: "POST",
-      url: "/auth/register",
-      payload: {
+  it(
+    "stores org policy, doc policy overrides, and document classifications",
+    async () => {
+      const ownerRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
         email: "dlp-owner@example.com",
         password: "password1234",
         name: "Owner",
@@ -204,5 +210,7 @@ describe("API e2e: DLP policy + classification endpoints", () => {
     });
     expect(listAfterDelete.statusCode).toBe(200);
     expect((listAfterDelete.json() as any).classifications).toHaveLength(0);
-  });
+    },
+    20_000
+  );
 });

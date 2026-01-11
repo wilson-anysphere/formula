@@ -26,6 +26,9 @@ describe("observability: request-id, log correlation, db spans", () => {
     config = {
       port: 0,
       databaseUrl: "postgres://unused",
+      publicBaseUrl: "http://localhost",
+      publicBaseUrlHostAllowlist: ["localhost"],
+      trustProxy: false,
       sessionCookieName: "formula_session",
       sessionTtlSeconds: 60 * 60,
       cookieSecure: false,
@@ -38,7 +41,8 @@ describe("observability: request-id, log correlation, db spans", () => {
       },
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
-      retentionSweepIntervalMs: null
+      retentionSweepIntervalMs: null,
+      oidcAuthStateCleanupIntervalMs: null
     };
 
     const stream = new Writable({

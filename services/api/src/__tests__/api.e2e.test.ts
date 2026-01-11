@@ -41,6 +41,9 @@ describe("API e2e: auth + RBAC + sync token", () => {
     config = {
       port: 0,
       databaseUrl: "postgres://unused",
+      publicBaseUrl: "http://localhost",
+      publicBaseUrlHostAllowlist: ["localhost"],
+      trustProxy: false,
       sessionCookieName: "formula_session",
       sessionTtlSeconds: 60 * 60,
       cookieSecure: false,
@@ -53,7 +56,8 @@ describe("API e2e: auth + RBAC + sync token", () => {
       },
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
-      retentionSweepIntervalMs: null
+      retentionSweepIntervalMs: null,
+      oidcAuthStateCleanupIntervalMs: null
     };
 
     app = buildApp({ db, config });
@@ -214,70 +218,74 @@ describe("API e2e: auth + RBAC + sync token", () => {
     20_000
   );
 
-  it("enforces document share permission (viewer cannot invite)", async () => {
-    const ownerRes = await app.inject({
-      method: "POST",
-      url: "/auth/register",
-      payload: {
-        email: "owner@example.com",
-        password: "password1234",
-        name: "Owner",
-        orgName: "Org"
-      }
-    });
-    const ownerCookie = extractCookie(ownerRes.headers["set-cookie"]);
-    const orgId = (ownerRes.json() as any).organization.id as string;
+  it(
+    "enforces document share permission (viewer cannot invite)",
+    async () => {
+      const ownerRes = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "owner@example.com",
+          password: "password1234",
+          name: "Owner",
+          orgName: "Org"
+        }
+      });
+      const ownerCookie = extractCookie(ownerRes.headers["set-cookie"]);
+      const orgId = (ownerRes.json() as any).organization.id as string;
 
-    await app.inject({
-      method: "POST",
-      url: "/auth/register",
-      payload: {
-        email: "viewer@example.com",
-        password: "password1234",
-        name: "Viewer"
-      }
-    });
-    await app.inject({
-      method: "POST",
-      url: "/auth/register",
-      payload: {
-        email: "third@example.com",
-        password: "password1234",
-        name: "Third"
-      }
-    });
+      await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "viewer@example.com",
+          password: "password1234",
+          name: "Viewer"
+        }
+      });
+      await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "third@example.com",
+          password: "password1234",
+          name: "Third"
+        }
+      });
 
-    const docRes = await app.inject({
-      method: "POST",
-      url: "/docs",
-      headers: { cookie: ownerCookie },
-      payload: { orgId, title: "Doc" }
-    });
-    const docId = (docRes.json() as any).document.id as string;
+      const docRes = await app.inject({
+        method: "POST",
+        url: "/docs",
+        headers: { cookie: ownerCookie },
+        payload: { orgId, title: "Doc" }
+      });
+      const docId = (docRes.json() as any).document.id as string;
 
-    await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/invite`,
-      headers: { cookie: ownerCookie },
-      payload: { email: "viewer@example.com", role: "viewer" }
-    });
+      await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/invite`,
+        headers: { cookie: ownerCookie },
+        payload: { email: "viewer@example.com", role: "viewer" }
+      });
 
-    const viewerLogin = await app.inject({
-      method: "POST",
-      url: "/auth/login",
-      payload: { email: "viewer@example.com", password: "password1234" }
-    });
-    const viewerCookie = extractCookie(viewerLogin.headers["set-cookie"]);
+      const viewerLogin = await app.inject({
+        method: "POST",
+        url: "/auth/login",
+        payload: { email: "viewer@example.com", password: "password1234" }
+      });
+      const viewerCookie = extractCookie(viewerLogin.headers["set-cookie"]);
 
-    const forbiddenInvite = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/invite`,
-      headers: { cookie: viewerCookie },
-      payload: { email: "third@example.com", role: "viewer" }
-    });
+      const forbiddenInvite = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/invite`,
+        headers: { cookie: viewerCookie },
+        payload: { email: "third@example.com", role: "viewer" }
+      });
 
-    expect(forbiddenInvite.statusCode).toBe(403);
-  }, 20_000);
+      expect(forbiddenInvite.statusCode).toBe(403);
+    },
+    20_000
+  );
 
   it("creates share links (public/private), redeems public link, and exposes permissions", async () => {
     const ownerRes = await app.inject({

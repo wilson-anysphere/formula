@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
 import jwt, { type Algorithm } from "jsonwebtoken";
+import type { Pool, PoolClient } from "pg";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../../audit/audit";
 import { createSession } from "../sessions";
@@ -35,7 +36,15 @@ type OrgAuthSettingsRow = {
   require_mfa: boolean;
 };
 
-const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
+export const OIDC_AUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+type Queryable = Pick<Pool, "query"> | Pick<PoolClient, "query">;
+
+export async function cleanupOidcAuthStates(db: Queryable): Promise<number> {
+  const cutoff = new Date(Date.now() - OIDC_AUTH_STATE_TTL_MS);
+  const res = await db.query("DELETE FROM oidc_auth_states WHERE created_at < $1", [cutoff]);
+  return typeof res?.rowCount === "number" ? res.rowCount : 0;
+}
 
 function parseStringArray(value: unknown): string[] {
   if (!value) return [];
@@ -95,11 +104,66 @@ function extractProto(request: FastifyRequest): string {
 }
 
 function externalBaseUrl(request: FastifyRequest): string {
-  // Prefer an explicit external base URL so we do not rely on potentially spoofed
-  // Host / forwarded headers when generating security-sensitive redirect URIs.
   const configured = request.server.config.publicBaseUrl;
   if (typeof configured === "string" && configured.length > 0) return configured;
-  return `${extractProto(request)}://${extractHost(request)}`;
+
+  if (!request.server.config.trustProxy) {
+    throw new Error("PUBLIC_BASE_URL is required when trustProxy is disabled");
+  }
+
+  const host = extractHost(request);
+  if (!isHostAllowed(host, request.server.config.publicBaseUrlHostAllowlist)) {
+    throw new Error("Untrusted host for OIDC redirect URI");
+  }
+
+  return `${extractProto(request)}://${host}`;
+}
+
+function isHostAllowed(host: string, allowlist: string[]): boolean {
+  let parsedHost: URL;
+  try {
+    parsedHost = new URL(`http://${host}`);
+  } catch {
+    return false;
+  }
+
+  const hostLower = parsedHost.host.toLowerCase();
+  const hostnameLower = parsedHost.hostname.toLowerCase();
+
+  for (const entry of allowlist) {
+    const trimmed = entry.trim().toLowerCase();
+    if (!trimmed) continue;
+
+    try {
+      const parsedEntry = new URL(`http://${trimmed}`);
+      // If the entry has an explicit port, require an exact host match.
+      if (parsedEntry.port) {
+        if (parsedEntry.host.toLowerCase() === hostLower) return true;
+        continue;
+      }
+      // Otherwise treat it as a hostname allowlist entry (port-agnostic).
+      if (parsedEntry.hostname.toLowerCase() === hostnameLower) return true;
+    } catch {
+      // Fall back to a raw hostname comparison for entries that aren't parseable
+      // as host specs (should be rare).
+      if (trimmed === hostnameLower) return true;
+    }
+  }
+
+  return false;
+}
+
+function buildRedirectUri(baseUrl: string, pathname: string): string {
+  const base = new URL(baseUrl);
+  // `PUBLIC_BASE_URL` should be a stable origin/prefix, not a full request URL.
+  // Strip any search/hash so we don't accidentally embed it into redirect_uri.
+  base.search = "";
+  base.hash = "";
+  // Ensure the base URL behaves like a directory for URL resolution so optional
+  // path prefixes (e.g. https://example.com/api/) are preserved.
+  if (!base.pathname.endsWith("/")) base.pathname = `${base.pathname}/`;
+  const relative = pathname.startsWith("/") ? pathname.slice(1) : pathname;
+  return new URL(relative, base).toString();
 }
 
 async function loadOrgSettings(
@@ -327,9 +391,17 @@ export async function oidcStart(request: FastifyRequest, reply: FastifyReply): P
   const pkceVerifier = randomBase64Url(32);
   const pkceChallenge = sha256Base64Url(pkceVerifier);
 
-  const redirectUri = `${externalBaseUrl(request)}/auth/oidc/${encodeURIComponent(
-    orgId
-  )}/${encodeURIComponent(providerId)}/callback`;
+  let redirectUri: string;
+  try {
+    redirectUri = buildRedirectUri(
+      externalBaseUrl(request),
+      `/auth/oidc/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`
+    );
+  } catch (err) {
+    request.server.log.warn({ err }, "oidc_redirect_uri_base_url_invalid");
+    reply.code(500).send({ error: "oidc_not_configured" });
+    return;
+  }
 
   await request.server.db.query(
     `
@@ -410,7 +482,7 @@ export async function oidcCallback(request: FastifyRequest, reply: FastifyReply)
   }
 
   const ageMs = Date.now() - new Date(authState.created_at).getTime();
-  if (!Number.isFinite(ageMs) || ageMs > AUTH_STATE_TTL_MS) {
+  if (!Number.isFinite(ageMs) || ageMs > OIDC_AUTH_STATE_TTL_MS) {
     request.server.metrics.authFailuresTotal.inc({ reason: "state_expired" });
     await writeOidcFailureAudit({ request, orgId, providerId, errorCode: "state_expired" });
     reply.code(401).send({ error: "invalid_state" });

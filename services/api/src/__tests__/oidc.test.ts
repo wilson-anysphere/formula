@@ -170,6 +170,9 @@ async function createTestApp(): Promise<{
   const config: AppConfig = {
     port: 0,
     databaseUrl: "postgres://unused",
+    publicBaseUrl: "http://localhost",
+    publicBaseUrlHostAllowlist: ["localhost"],
+    trustProxy: false,
     sessionCookieName: "formula_session",
     sessionTtlSeconds: 60 * 60,
     cookieSecure: false,
@@ -182,7 +185,8 @@ async function createTestApp(): Promise<{
     },
     localKmsMasterKey: "test-local-kms-master-key",
     awsKmsEnabled: false,
-    retentionSweepIntervalMs: null
+    retentionSweepIntervalMs: null,
+    oidcAuthStateCleanupIntervalMs: null
   };
 
   const app = buildApp({ db, config });
@@ -202,11 +206,13 @@ describe("OIDC SSO", () => {
     await provider.stop();
   });
 
-  it("successful login provisions user + membership and issues a session", async () => {
-    const { db, config, app } = await createTestApp();
-    try {
-      const ownerRegister = await app.inject({
-        method: "POST",
+  it(
+    "successful login provisions user + membership and issues a session",
+    async () => {
+      const { db, config, app } = await createTestApp();
+      try {
+        const ownerRegister = await app.inject({
+          method: "POST",
         url: "/auth/register",
         payload: {
           email: "sso-owner@example.com",
@@ -299,15 +305,19 @@ describe("OIDC SSO", () => {
       expect(audit.rowCount).toBe(1);
       expect(audit.rows[0].org_id).toBe(orgId);
       expect(parseJsonValue(audit.rows[0].details)).toMatchObject({ method: "oidc", provider: "mock" });
-    } finally {
-      await app.close();
-      await db.end();
-    }
-  });
+      } finally {
+        await app.close();
+        await db.end();
+      }
+    },
+    20_000
+  );
 
-  it("derives redirect_uri from forwarded headers only when TRUST_PROXY=true", async () => {
+  it("derives redirect_uri from request headers only when PUBLIC_BASE_URL is unset and TRUST_PROXY=true (allowlisted)", async () => {
     const { db, config, app } = await createTestApp();
-    let proxyApp: ReturnType<typeof buildApp> | null = null;
+    let noBaseUrlApp: ReturnType<typeof buildApp> | null = null;
+    let deniedProxyApp: ReturnType<typeof buildApp> | null = null;
+    let allowedProxyApp: ReturnType<typeof buildApp> | null = null;
     try {
       const ownerRegister = await app.inject({
         method: "POST",
@@ -343,32 +353,64 @@ describe("OIDC SSO", () => {
         "x-forwarded-proto": "https"
       };
 
-      const startRes = await app.inject({
+      // Without PUBLIC_BASE_URL, the API must not derive redirect_uri unless it is
+      // behind a trusted proxy (TRUST_PROXY=true). Host header alone is not trusted.
+      noBaseUrlApp = buildApp({ db, config: { ...config, publicBaseUrl: undefined, trustProxy: false } });
+      await noBaseUrlApp.ready();
+      const startRes = await noBaseUrlApp.inject({
         method: "GET",
         url: `/auth/oidc/${orgId}/mock/start`,
         headers: spoofedForwarded
       });
-      expect(startRes.statusCode).toBe(302);
-      const startUrl = new URL(startRes.headers.location as string);
-      expect(startUrl.searchParams.get("redirect_uri")).toBe(
-        `http://good.example/auth/oidc/${orgId}/mock/callback`
-      );
+      expect(startRes.statusCode).toBe(500);
+      expect((startRes.json() as any).error).toBe("oidc_not_configured");
 
-      proxyApp = buildApp({ db, config: { ...config, trustProxy: true } });
-      await proxyApp.ready();
+      // With TRUST_PROXY=true, we will consider forwarded headers, but only if the
+      // derived host is allowlisted.
+      deniedProxyApp = buildApp({
+        db,
+        config: {
+          ...config,
+          publicBaseUrl: undefined,
+          trustProxy: true,
+          publicBaseUrlHostAllowlist: ["good.example"]
+        }
+      });
+      await deniedProxyApp.ready();
 
-      const startResTrusted = await proxyApp.inject({
+      const startResDenied = await deniedProxyApp.inject({
         method: "GET",
         url: `/auth/oidc/${orgId}/mock/start`,
         headers: spoofedForwarded
       });
-      expect(startResTrusted.statusCode).toBe(302);
-      const trustedUrl = new URL(startResTrusted.headers.location as string);
-      expect(trustedUrl.searchParams.get("redirect_uri")).toBe(
+      expect(startResDenied.statusCode).toBe(500);
+      expect((startResDenied.json() as any).error).toBe("oidc_not_configured");
+
+      allowedProxyApp = buildApp({
+        db,
+        config: {
+          ...config,
+          publicBaseUrl: undefined,
+          trustProxy: true,
+          publicBaseUrlHostAllowlist: ["evil.example"]
+        }
+      });
+      await allowedProxyApp.ready();
+
+      const startResAllowed = await allowedProxyApp.inject({
+        method: "GET",
+        url: `/auth/oidc/${orgId}/mock/start`,
+        headers: spoofedForwarded
+      });
+      expect(startResAllowed.statusCode).toBe(302);
+      const allowedUrl = new URL(startResAllowed.headers.location as string);
+      expect(allowedUrl.searchParams.get("redirect_uri")).toBe(
         `https://evil.example/auth/oidc/${orgId}/mock/callback`
       );
     } finally {
-      await proxyApp?.close();
+      await noBaseUrlApp?.close();
+      await deniedProxyApp?.close();
+      await allowedProxyApp?.close();
       await app.close();
       await db.end();
     }

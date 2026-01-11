@@ -18,8 +18,21 @@ export interface AppConfig {
    * This is used for security-sensitive flows that need to generate absolute URLs,
    * such as OIDC `redirect_uri`. Production deployments must set this explicitly
    * to avoid host-header / forwarded-header spoofing.
+   *
+   * Environment variables:
+   * - `PUBLIC_BASE_URL` (preferred)
+   * - `EXTERNAL_BASE_URL` (legacy alias)
    */
   publicBaseUrl?: string;
+  /**
+   * When `publicBaseUrl` is not configured (dev/test), the server may fall back
+   * to deriving the external base URL from request headers, but only when:
+   * - Fastify has `trustProxy=true`, and
+   * - the derived host is in this allowlist.
+   *
+   * Env: `PUBLIC_BASE_URL_HOST_ALLOWLIST` (comma-separated).
+   */
+  publicBaseUrlHostAllowlist: string[];
   /**
    * Comma-separated allowlist of allowed CORS origins.
    *
@@ -54,15 +67,15 @@ export interface AppConfig {
    */
   syncServerInternalAdminToken?: string;
   /**
-    * Legacy secret used to decrypt historical (envelope schema v1) rows that were
-    * encrypted using the previous HKDF-based local KMS model.
-    *
-    * The canonical local KMS provider persists versioned KEKs in Postgres
-    * (`org_kms_local_state`) and does not require this secret for new writes.
-    *
-    * Note: This remains configurable so existing deployments can migrate without
-    * data loss.
-    */
+   * Legacy secret used to decrypt historical (envelope schema v1) rows that were
+   * encrypted using the previous HKDF-based local KMS model.
+   *
+   * The canonical local KMS provider persists versioned KEKs in Postgres
+   * (`org_kms_local_state`) and does not require this secret for new writes.
+   *
+   * Note: This remains configurable so existing deployments can migrate without
+   * data loss.
+   */
   localKmsMasterKey: string;
   /**
    * Enable AWS KMS provider support (requires @aws-sdk/client-kms).
@@ -76,6 +89,14 @@ export interface AppConfig {
    * If null, retention sweeps are disabled.
    */
   retentionSweepIntervalMs: number | null;
+  /**
+   * Interval for deleting stale `oidc_auth_states` rows.
+   *
+   * If null, cleanup is disabled.
+   *
+   * Env: `OIDC_AUTH_STATE_CLEANUP_INTERVAL_MS` (set to `0` to disable)
+   */
+  oidcAuthStateCleanupIntervalMs: number | null;
   /**
    * Optional shared secret for internal endpoints (retention sweeps, etc).
    * If unset, internal endpoints are disabled.
@@ -124,6 +145,16 @@ function parseCorsAllowedOrigins(value: string | undefined, nodeEnv: string): st
     "http://localhost:3000",
     "http://127.0.0.1:3000"
   ];
+}
+
+function parseHostAllowlist(value: string | undefined): string[] {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return ["localhost", "127.0.0.1", "[::1]"];
+  const parsed = raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return parsed.length > 0 ? parsed : ["localhost", "127.0.0.1", "[::1]"];
 }
 
 function loadSecretStoreKeys(env: NodeJS.ProcessEnv, legacySecret: string): SecretStoreKeyring {
@@ -193,13 +224,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const sessionTtlSeconds = parseIntEnv(env.SESSION_TTL_SECONDS, 60 * 60 * 24);
   const cookieSecure = env.COOKIE_SECURE === "true";
   const trustProxy = env.TRUST_PROXY === "true";
-  const publicBaseUrlEnv = readStringEnv(env.PUBLIC_BASE_URL, "");
+
+  const publicBaseUrlEnv = readStringEnv(env.PUBLIC_BASE_URL ?? env.EXTERNAL_BASE_URL, "");
   const publicBaseUrl =
-    publicBaseUrlEnv.length > 0 ? (() => {
-      const url = new URL(publicBaseUrlEnv);
-      if (url.origin === "null") throw new Error("PUBLIC_BASE_URL must not be null");
-      return url.origin;
-    })() : undefined;
+    publicBaseUrlEnv.length > 0
+      ? (() => {
+          const url = new URL(publicBaseUrlEnv);
+          if (url.origin === "null") throw new Error("PUBLIC_BASE_URL must not be null");
+          return url.origin;
+        })()
+      : undefined;
+  const publicBaseUrlHostAllowlist = parseHostAllowlist(env.PUBLIC_BASE_URL_HOST_ALLOWLIST);
+
   const corsAllowedOrigins = parseCorsAllowedOrigins(env.CORS_ALLOWED_ORIGINS, nodeEnv);
   const syncTokenSecret = readStringEnv(env.SYNC_TOKEN_SECRET, DEV_SYNC_TOKEN_SECRET);
   const syncTokenTtlSeconds = parseIntEnv(env.SYNC_TOKEN_TTL_SECONDS, 60 * 5);
@@ -218,6 +254,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env.RETENTION_SWEEP_INTERVAL_MS === "0"
       ? null
       : parseIntEnv(env.RETENTION_SWEEP_INTERVAL_MS, 60 * 60 * 1000);
+  const oidcAuthStateCleanupIntervalMs =
+    env.OIDC_AUTH_STATE_CLEANUP_INTERVAL_MS === "0"
+      ? null
+      : parseIntEnv(env.OIDC_AUTH_STATE_CLEANUP_INTERVAL_MS, 60 * 1000);
   const internalAdminToken = readStringEnv(env.INTERNAL_ADMIN_TOKEN, "");
 
   const config: AppConfig = {
@@ -228,6 +268,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cookieSecure,
     trustProxy,
     publicBaseUrl,
+    publicBaseUrlHostAllowlist,
     corsAllowedOrigins,
     syncTokenSecret,
     syncTokenTtlSeconds,
@@ -239,11 +280,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     awsKmsEnabled,
     awsRegion: awsRegion.length > 0 ? awsRegion : undefined,
     retentionSweepIntervalMs,
+    oidcAuthStateCleanupIntervalMs,
     internalAdminToken: internalAdminToken.length > 0 ? internalAdminToken : undefined
   };
 
   if (nodeEnv === "production") {
-    if (config.publicBaseUrl && !config.publicBaseUrl.startsWith("https://")) {
+    if (!config.publicBaseUrl) {
+      throw new Error("Refusing to start in production without PUBLIC_BASE_URL");
+    }
+    if (!config.publicBaseUrl.startsWith("https://")) {
       throw new Error("Refusing to start in production with PUBLIC_BASE_URL that is not https");
     }
 
@@ -277,3 +322,4 @@ function rawJsonIsEmpty(env: NodeJS.ProcessEnv): boolean {
   const rawJson = typeof env.SECRET_STORE_KEYS_JSON === "string" ? env.SECRET_STORE_KEYS_JSON.trim() : "";
   return rawJson.length === 0;
 }
+

@@ -14,6 +14,7 @@ import { registerApiKeyRoutes } from "./routes/apiKeys";
 import { registerDocRoutes } from "./routes/docs";
 import { registerDlpRoutes } from "./routes/dlp";
 import { registerInternalRoutes } from "./routes/internal";
+import { registerOidcProviderRoutes } from "./routes/oidcProviders";
 import { registerOrgRoutes } from "./routes/orgs";
 import { registerSamlProviderRoutes } from "./routes/samlProviders";
 import { registerScimAdminRoutes } from "./routes/scimAdmin";
@@ -83,6 +84,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   registerAuditRoutes(app);
   registerSiemRoutes(app);
   registerInternalRoutes(app);
+  registerOidcProviderRoutes(app);
 
   return app;
 }
