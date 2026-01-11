@@ -23,13 +23,13 @@ fn recalculate_reports_changed_cells() {
         vec![CellChange {
             sheet: formula_core::DEFAULT_SHEET.to_string(),
             address: "A2".to_string(),
-            value: json!(2.0),
+            value: json!(2),
         }]
     );
 
     let cell_js = wb.get_cell("A2".to_string(), None).unwrap();
     let cell: formula_core::CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
-    assert_eq!(cell.value, json!(2.0));
+    assert_eq!(cell.value, json!(2));
 }
 
 #[wasm_bindgen_test]
@@ -45,7 +45,7 @@ fn from_xlsx_bytes_imports_formulas_and_recalculates() {
     let cell_js = wb.get_cell("C1".to_string(), None).unwrap();
     let cell: formula_core::CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
     assert_eq!(cell.input, json!("=A1+B1"));
-    assert_eq!(cell.value, json!(3.0));
+    assert_eq!(cell.value, json!(3));
 }
 
 #[wasm_bindgen_test]
@@ -64,8 +64,8 @@ fn from_xlsx_bytes_loads_basic_fixture() {
 
     let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
     let a1: formula_core::CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
-    assert_eq!(a1.input, json!(1.0));
-    assert_eq!(a1.value, json!(1.0));
+    assert_eq!(a1.input, json!(1));
+    assert_eq!(a1.value, json!(1));
 
     let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
     let b1: formula_core::CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
@@ -93,7 +93,7 @@ fn null_inputs_clear_cells_and_recalculate_dependents() {
         vec![CellChange {
             sheet: formula_core::DEFAULT_SHEET.to_string(),
             address: "A2".to_string(),
-            value: json!(0.0),
+            value: json!(0),
         }]
     );
 
