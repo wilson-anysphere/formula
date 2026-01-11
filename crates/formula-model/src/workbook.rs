@@ -9,8 +9,9 @@ use crate::names::{
 };
 use crate::sheet_name::{validate_sheet_name, SheetNameError};
 use crate::{
-    rewrite_sheet_names_in_formula, CalcSettings, DateSystem, SheetVisibility, Style, StyleTable,
-    TabColor, Table, ThemePalette, WorkbookProtection, Worksheet, WorksheetId,
+    rewrite_sheet_names_in_formula, CalcSettings, DateSystem, ManualPageBreaks, PageSetup,
+    PrintTitles, Range, SheetPrintSettings, SheetVisibility, Style, StyleTable, TabColor, Table,
+    ThemePalette, WorkbookPrintSettings, WorkbookProtection, Worksheet, WorksheetId,
 };
 
 /// Identifier for a workbook.
@@ -61,6 +62,10 @@ pub struct Workbook {
     /// Defined names (named ranges / constants / formulas).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub defined_names: Vec<DefinedName>,
+
+    /// Workbook print settings (print area/titles, page setup, margins, scaling, manual breaks).
+    #[serde(default, skip_serializing_if = "WorkbookPrintSettings::is_empty")]
+    pub print_settings: WorkbookPrintSettings,
 
     /// Next worksheet id to allocate (runtime-only).
     #[serde(skip)]
@@ -115,6 +120,7 @@ impl Workbook {
             theme: ThemePalette::default(),
             workbook_protection: WorkbookProtection::default(),
             defined_names: Vec::new(),
+            print_settings: WorkbookPrintSettings::default(),
             next_sheet_id: 1,
             next_defined_name_id: 1,
         }
@@ -210,6 +216,14 @@ impl Workbook {
         }
 
         self.sheets[sheet_index].name = new_name.to_string();
+
+        // Keep print settings aligned with the sheet name (XLSX print settings are keyed by name).
+        for settings in &mut self.print_settings.sheets {
+            if crate::formula_rewrite::sheet_name_eq_case_insensitive(&settings.sheet_name, &old_name) {
+                settings.sheet_name = new_name.to_string();
+            }
+        }
+
         Ok(())
     }
 
@@ -226,6 +240,7 @@ impl Workbook {
         }
         let sheet = self.sheets.remove(current);
         self.sheets.insert(new_index, sheet);
+        self.sort_print_settings_by_sheet_order();
         true
     }
 
@@ -378,6 +393,189 @@ impl Workbook {
             .filter(|n| scope.map_or(true, |s| n.scope == s))
             .collect()
     }
+
+    /// Get print settings for a sheet, defaulting when no settings are stored.
+    ///
+    /// If `id` does not match an existing sheet, this returns default settings with an empty
+    /// `sheet_name`.
+    pub fn sheet_print_settings(&self, id: WorksheetId) -> SheetPrintSettings {
+        let sheet_name = self.sheet(id).map(|s| s.name.as_str()).unwrap_or_default();
+        self.sheet_print_settings_by_name(sheet_name)
+    }
+
+    /// Get print settings for a sheet by name, defaulting when no settings are stored.
+    pub fn sheet_print_settings_by_name(&self, sheet_name: &str) -> SheetPrintSettings {
+        let sheet_name = self
+            .sheet_by_name(sheet_name)
+            .map(|s| s.name.as_str())
+            .unwrap_or(sheet_name);
+
+        self.print_settings
+            .sheets
+            .iter()
+            .find(|s| {
+                crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.sheet_name, sheet_name)
+            })
+            .cloned()
+            .map(|mut settings| {
+                settings.sheet_name = sheet_name.to_string();
+                settings
+            })
+            .unwrap_or_else(|| SheetPrintSettings::new(sheet_name))
+    }
+
+    /// Set (or clear) the print area for a sheet.
+    pub fn set_sheet_print_area(&mut self, id: WorksheetId, print_area: Option<Vec<Range>>) -> bool {
+        let Some(sheet_name) = self.sheet(id).map(|s| s.name.clone()) else {
+            return false;
+        };
+        self.set_sheet_print_area_by_name(&sheet_name, print_area)
+    }
+
+    /// Set (or clear) the print area for a sheet by name.
+    pub fn set_sheet_print_area_by_name(
+        &mut self,
+        sheet_name: &str,
+        print_area: Option<Vec<Range>>,
+    ) -> bool {
+        let Some(sheet_name) = self.sheet_by_name(sheet_name).map(|s| s.name.clone()) else {
+            return false;
+        };
+
+        let print_area = print_area
+            .and_then(|ranges| (!ranges.is_empty()).then_some(ranges))
+            .map(|ranges| {
+                ranges
+                    .into_iter()
+                    .map(|r| Range::new(r.start, r.end))
+                    .collect::<Vec<_>>()
+            });
+
+        self.update_sheet_print_settings(&sheet_name, |settings| settings.print_area = print_area);
+        true
+    }
+
+    /// Set (or clear) the print titles for a sheet.
+    pub fn set_sheet_print_titles(
+        &mut self,
+        id: WorksheetId,
+        print_titles: Option<PrintTitles>,
+    ) -> bool {
+        let Some(sheet_name) = self.sheet(id).map(|s| s.name.clone()) else {
+            return false;
+        };
+        self.set_sheet_print_titles_by_name(&sheet_name, print_titles)
+    }
+
+    /// Set (or clear) the print titles for a sheet by name.
+    pub fn set_sheet_print_titles_by_name(
+        &mut self,
+        sheet_name: &str,
+        print_titles: Option<PrintTitles>,
+    ) -> bool {
+        let Some(sheet_name) = self.sheet_by_name(sheet_name).map(|s| s.name.clone()) else {
+            return false;
+        };
+
+        let print_titles = print_titles.map(|t| PrintTitles {
+            repeat_rows: t.repeat_rows.map(|r| r.normalized()),
+            repeat_cols: t.repeat_cols.map(|c| c.normalized()),
+        });
+
+        self.update_sheet_print_settings(&sheet_name, |settings| settings.print_titles = print_titles);
+        true
+    }
+
+    /// Set the page setup for a sheet.
+    pub fn set_sheet_page_setup(&mut self, id: WorksheetId, page_setup: PageSetup) -> bool {
+        let Some(sheet_name) = self.sheet(id).map(|s| s.name.clone()) else {
+            return false;
+        };
+        self.set_sheet_page_setup_by_name(&sheet_name, page_setup)
+    }
+
+    /// Set the page setup for a sheet by name.
+    pub fn set_sheet_page_setup_by_name(&mut self, sheet_name: &str, page_setup: PageSetup) -> bool {
+        let Some(sheet_name) = self.sheet_by_name(sheet_name).map(|s| s.name.clone()) else {
+            return false;
+        };
+
+        self.update_sheet_print_settings(&sheet_name, |settings| settings.page_setup = page_setup);
+        true
+    }
+
+    /// Set manual page breaks for a sheet.
+    pub fn set_manual_page_breaks(
+        &mut self,
+        id: WorksheetId,
+        manual_page_breaks: ManualPageBreaks,
+    ) -> bool {
+        let Some(sheet_name) = self.sheet(id).map(|s| s.name.clone()) else {
+            return false;
+        };
+        self.set_manual_page_breaks_by_name(&sheet_name, manual_page_breaks)
+    }
+
+    /// Set manual page breaks for a sheet by name.
+    pub fn set_manual_page_breaks_by_name(
+        &mut self,
+        sheet_name: &str,
+        manual_page_breaks: ManualPageBreaks,
+    ) -> bool {
+        let Some(sheet_name) = self.sheet_by_name(sheet_name).map(|s| s.name.clone()) else {
+            return false;
+        };
+
+        self.update_sheet_print_settings(&sheet_name, |settings| {
+            settings.manual_page_breaks = manual_page_breaks
+        });
+        true
+    }
+
+    fn update_sheet_print_settings<F: FnOnce(&mut SheetPrintSettings)>(
+        &mut self,
+        sheet_name: &str,
+        update: F,
+    ) {
+        let idx = self.print_settings.sheets.iter().position(|s| {
+            crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.sheet_name, sheet_name)
+        });
+
+        match idx {
+            Some(i) => {
+                // Canonicalize the stored name to match the workbook sheet name.
+                self.print_settings.sheets[i].sheet_name = sheet_name.to_string();
+                update(&mut self.print_settings.sheets[i]);
+                if self.print_settings.sheets[i].is_default() {
+                    self.print_settings.sheets.remove(i);
+                }
+            }
+            None => {
+                let mut settings = SheetPrintSettings::new(sheet_name);
+                update(&mut settings);
+                if !settings.is_default() {
+                    self.print_settings.sheets.push(settings);
+                }
+            }
+        }
+
+        self.sort_print_settings_by_sheet_order();
+    }
+
+    fn sort_print_settings_by_sheet_order(&mut self) {
+        use std::collections::HashMap;
+
+        let order: HashMap<&str, usize> = self
+            .sheets
+            .iter()
+            .enumerate()
+            .map(|(idx, s)| (s.name.as_str(), idx))
+            .collect();
+
+        self.print_settings
+            .sheets
+            .sort_by_key(|s| order.get(s.sheet_name.as_str()).copied().unwrap_or(usize::MAX));
+    }
 }
 
 fn normalize_refers_to(refers_to: String) -> String {
@@ -415,6 +613,8 @@ impl<'de> Deserialize<'de> for Workbook {
             workbook_protection: WorkbookProtection,
             #[serde(default)]
             defined_names: Vec<DefinedName>,
+            #[serde(default)]
+            print_settings: WorkbookPrintSettings,
         }
 
         let helper = Helper::deserialize(deserializer)?;
@@ -427,35 +627,51 @@ impl<'de> Deserialize<'de> for Workbook {
             )));
         }
 
-        let next_sheet_id = helper
-            .sheets
+        let sheets = helper.sheets;
+        let defined_names = helper.defined_names;
+
+        let next_sheet_id = sheets
             .iter()
             .map(|s| s.id)
             .max()
             .unwrap_or(0)
             .wrapping_add(1);
 
-        let next_defined_name_id = helper
-            .defined_names
+        let next_defined_name_id = defined_names
             .iter()
             .map(|n| n.id)
             .max()
             .unwrap_or(0)
             .wrapping_add(1);
 
-        Ok(Workbook {
+        let mut print_settings = helper.print_settings;
+        for sheet_settings in &mut print_settings.sheets {
+            if let Some(sheet) = sheets.iter().find(|s| {
+                crate::formula_rewrite::sheet_name_eq_case_insensitive(&s.name, &sheet_settings.sheet_name)
+            }) {
+                sheet_settings.sheet_name = sheet.name.clone();
+            }
+        }
+
+        let mut workbook = Workbook {
             schema_version: helper.schema_version,
             id: helper.id,
-            sheets: helper.sheets,
+            sheets,
             styles: helper.styles,
             images: helper.images,
             calc_settings: helper.calc_settings,
             date_system: helper.date_system,
             theme: helper.theme,
             workbook_protection: helper.workbook_protection,
-            defined_names: helper.defined_names,
+            defined_names,
+            print_settings,
             next_sheet_id,
             next_defined_name_id,
-        })
+        };
+
+        // Ensure deterministic ordering for serialization and UX.
+        workbook.sort_print_settings_by_sheet_order();
+
+        Ok(workbook)
     }
 }
