@@ -200,6 +200,33 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(api.getCell({ sheet: "Sheet1", row: 1, col: 2 }).format).toEqual({ bold: true });
   });
 
+  it("sort_range moves formatting with values without duplicating styles", async () => {
+    const controller = new DocumentController();
+    controller.setRangeValues("Sheet1", "A1", [[3], [1], [2]]);
+    controller.setRangeFormat("Sheet1", "A2", { font: { bold: true } }, { label: "Bold" });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+
+    const result = await executor.execute({
+      name: "sort_range",
+      parameters: {
+        range: "A1:A3",
+        sort_by: [{ column: "A", order: "asc" }],
+        has_header: false
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(controller.getCell("Sheet1", "A1").value).toBe(1);
+    expect(controller.getCell("Sheet1", "A2").value).toBe(2);
+    expect(controller.getCell("Sheet1", "A3").value).toBe(3);
+
+    expect(api.getCell({ sheet: "Sheet1", row: 1, col: 1 }).format).toEqual({ bold: true });
+    expect(api.getCell({ sheet: "Sheet1", row: 2, col: 1 }).format).toBeUndefined();
+    expect(api.getCell({ sheet: "Sheet1", row: 3, col: 1 }).format).toBeUndefined();
+  });
+
   it("validates writeRange dimensions like the ai-tools InMemoryWorkbook", () => {
     const controller = new DocumentController();
     const api = new DocumentControllerSpreadsheetApi(controller);
