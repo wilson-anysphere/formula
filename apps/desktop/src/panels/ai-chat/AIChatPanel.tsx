@@ -34,6 +34,10 @@ export function AIChatPanel(props: AIChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [sending, setSending] = useState(false);
+  // Provider-facing history is stored separately from UI messages. UI tool
+  // entries created in `onToolCall` / `onToolResult` are for display only and
+  // don't carry the `toolCallId` required by the LLM protocol.
+  const [llmHistory, setLlmHistory] = useState<LLMMessage[]>([]);
 
   function messageId(): string {
     const maybeCrypto = globalThis.crypto as Crypto | undefined;
@@ -81,15 +85,10 @@ export function AIChatPanel(props: AIChatPanelProps) {
     setInput("");
     setAttachments([]);
 
-    const llmMessages = [
-      { role: "system" as const, content: systemPrompt },
-      ...messages.map((m) => ({ role: m.role === "tool" ? ("tool" as const) : (m.role as any), content: m.content })),
-      {
-        role: "user" as const,
-        content:
-          attachments.length > 0 ? `${text}\n\nAttachments:\n${formatAttachmentsForPrompt(attachments)}` : text,
-      },
-    ];
+    const userContent =
+      attachments.length > 0 ? `${text}\n\nAttachments:\n${formatAttachmentsForPrompt(attachments)}` : text;
+    const base = llmHistory.length ? llmHistory : [{ role: "system", content: systemPrompt } satisfies LLMMessage];
+    const requestMessages: LLMMessage[] = [...base, { role: "user", content: userContent }];
 
     try {
       setMessages((prev) => [
@@ -126,19 +125,20 @@ export function AIChatPanel(props: AIChatPanelProps) {
           runChatWithTools({
             client: props.client,
             toolExecutor: props.toolExecutor,
-            messages: messages as any,
+            messages,
             onToolCall,
             onToolResult,
             requireApproval: props.onRequestToolApproval ?? (async () => true),
-          }) as any);
+          }));
 
       const result = await runner({
-        messages: llmMessages as any,
+        messages: requestMessages,
         userText: text,
         attachments,
         onToolCall,
         onToolResult,
       });
+      setLlmHistory(result.messages);
 
       setMessages((prev) => {
         const next = prev.slice();
