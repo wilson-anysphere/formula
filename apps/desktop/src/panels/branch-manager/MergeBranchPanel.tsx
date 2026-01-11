@@ -274,7 +274,11 @@ export function MergeBranchPanel({
                             ? window.prompt(t("branchMerge.prompt.manualJson"), String(c.ours ?? ""))
                             : c.type === "sheet" && c.reason === "order"
                               ? window.prompt(t("branchMerge.prompt.manualJson"), JSON.stringify(c.ours ?? []))
-                              : window.prompt(t("branchMerge.prompt.manualJson"), JSON.stringify(c.ours ?? null));
+                              : c.type === "sheet" && c.reason === "presence"
+                                ? // Presence conflicts can embed large cell maps; avoid
+                                  // pre-populating the prompt with a giant JSON blob.
+                                  window.prompt(t("branchMerge.prompt.manualJson"), "")
+                                : window.prompt(t("branchMerge.prompt.manualJson"), JSON.stringify(c.ours ?? null));
 
                       if (manual === null) return;
 
