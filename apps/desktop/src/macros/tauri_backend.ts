@@ -17,15 +17,27 @@ function getTauriInvoke(): TauriInvoke {
 }
 
 function normalizeUpdates(raw: any[] | undefined): MacroCellUpdate[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  return raw.map((u) => ({
-    sheetId: String(u.sheet_id ?? ""),
-    row: Number(u.row ?? 0),
-    col: Number(u.col ?? 0),
-    value: u.value ?? null,
-    formula: u.formula ?? null,
-    displayValue: String(u.display_value ?? ""),
-  }));
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const out: MacroCellUpdate[] = [];
+  for (const u of raw) {
+    if (!u || typeof u !== "object") continue;
+    const sheetId = String((u as any).sheet_id ?? "").trim();
+    const row = Number((u as any).row);
+    const col = Number((u as any).col);
+    if (!sheetId) continue;
+    if (!Number.isInteger(row) || row < 0) continue;
+    if (!Number.isInteger(col) || col < 0) continue;
+
+    out.push({
+      sheetId,
+      row,
+      col,
+      value: (u as any).value ?? null,
+      formula: typeof (u as any).formula === "string" ? (u as any).formula : null,
+      displayValue: String((u as any).display_value ?? ""),
+    });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 export class TauriMacroBackend implements MacroBackend {
