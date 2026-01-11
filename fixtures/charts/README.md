@@ -62,3 +62,15 @@ cargo test -p formula-xlsx --test chart_fixture_models_match
 2. Select the chart.
 3. Export / copy as picture → **PNG** at **800 × 600 px**.
 4. Save to `fixtures/charts/golden/excel/<workbook-stem>.png`.
+
+### Optional: scripted export (Windows + Excel)
+
+If you have Microsoft Excel installed on Windows, you can export all goldens via
+COM automation:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/export-chart-goldens.ps1
+```
+
+The script exports the first embedded chart in each workbook under
+`fixtures/charts/xlsx/` to `fixtures/charts/golden/excel/` at 800×600 px.
