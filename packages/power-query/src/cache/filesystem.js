@@ -246,9 +246,17 @@ export class FileSystemCacheStore {
   async get(key) {
     await this.ensureDir();
     const { jsonPath, binPath, binFileName } = await this.pathsForKey(key);
+    const { fs } = await this.deps();
+
+    /** @type {string} */
+    let text;
     try {
-      const { fs } = await this.deps();
-      const text = await fs.readFile(jsonPath, "utf8");
+      text = await fs.readFile(jsonPath, "utf8");
+    } catch {
+      return null;
+    }
+
+    try {
       const hasBinaryMarkers = text.includes(`"${BINARY_MARKER_KEY}":`);
       const parsed = JSON.parse(text);
       if (!parsed || parsed.key !== key) return null;
@@ -264,6 +272,10 @@ export class FileSystemCacheStore {
 
       return entry;
     } catch {
+      // Best-effort cleanup of corrupted cache entries so we don't repeatedly
+      // attempt to hydrate invalid JSON / binary markers.
+      await fs.rm(jsonPath, { force: true }).catch(() => {});
+      await fs.rm(binPath, { force: true }).catch(() => {});
       return null;
     }
   }
