@@ -800,6 +800,21 @@ class ExtensionPublisher {
 
 ## Extension Examples
 
+### Repo sample extension (runnable)
+
+This repository includes a runnable reference extension at `extensions/sample-hello/` which is used
+by integration tests and marketplace packaging tests. It demonstrates:
+
+- Command registration + execution
+- Panels + view activation + webview messaging
+- Permission-gated APIs (network, clipboard, cells)
+- Custom functions (`SAMPLEHELLO_DOUBLE`)
+
+`extensions/sample-hello/src/extension.js` is the source of truth, and
+`extensions/sample-hello/dist/extension.js` is the built entrypoint referenced by the extension
+manifest. Run `node extensions/sample-hello/build.js` to regenerate the dist file; CI enforces that
+`dist/extension.js` stays in sync with `src/extension.js`.
+
 ### 1. Custom Visualization Extension
 
 ```typescript
