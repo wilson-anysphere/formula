@@ -482,3 +482,77 @@ fn save_with_cell_edits_can_patch_bool_error_blank_cells() {
         CellValue::Number(123.0)
     );
 }
+
+#[test]
+fn save_with_cell_edits_can_patch_formula_bool_string_error_cells() {
+    fn ptg_str(s: &str) -> Vec<u8> {
+        let mut out = vec![0x17]; // PtgStr
+        let units: Vec<u16> = s.encode_utf16().collect();
+        out.extend_from_slice(&(units.len() as u16).to_le_bytes());
+        for u in units {
+            out.extend_from_slice(&u.to_le_bytes());
+        }
+        out
+    }
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("FormulaTypes");
+    builder.set_cell_formula_bool(0, 0, true, vec![0x1D, 0x01]); // TRUE
+    builder.set_cell_formula_str(0, 1, "Hello", ptg_str("Hello"));
+    builder.set_cell_formula_err(0, 2, 0x07, vec![0x1C, 0x07]); // #DIV/0!
+
+    let bytes = builder.build_bytes();
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("formula_types_input.xlsb");
+    let output_path = tmpdir.path().join("formula_types_output.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open generated xlsb");
+
+    let edits = [
+        CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Bool(false),
+            new_formula: Some(vec![0x1D, 0x00]), // FALSE
+        },
+        CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Text("World".to_string()),
+            new_formula: Some(ptg_str("World")),
+        },
+        CellEdit {
+            row: 0,
+            col: 2,
+            new_value: CellValue::Error(0x2A), // #N/A
+            new_formula: Some(vec![0x1C, 0x2A]),
+        },
+    ];
+
+    wb.save_with_cell_edits(&output_path, 0, &edits)
+        .expect("save_with_cell_edits");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open patched workbook");
+    let sheet = wb2.read_sheet(0).expect("read sheet");
+    let mut cells = sheet
+        .cells
+        .iter()
+        .map(|c| ((c.row, c.col), c))
+        .collect::<HashMap<_, _>>();
+
+    let a1 = cells.remove(&(0, 0)).expect("A1 exists");
+    assert_eq!(a1.value, CellValue::Bool(false));
+    let a1_formula = a1.formula.as_ref().expect("A1 formula");
+    assert_eq!(a1_formula.rgce, vec![0x1D, 0x00]);
+
+    let b1 = cells.remove(&(0, 1)).expect("B1 exists");
+    assert_eq!(b1.value, CellValue::Text("World".to_string()));
+    let b1_formula = b1.formula.as_ref().expect("B1 formula");
+    assert_eq!(b1_formula.rgce, ptg_str("World"));
+
+    let c1 = cells.remove(&(0, 2)).expect("C1 exists");
+    assert_eq!(c1.value, CellValue::Error(0x2A));
+    let c1_formula = c1.formula.as_ref().expect("C1 formula");
+    assert_eq!(c1_formula.rgce, vec![0x1C, 0x2A]);
+}

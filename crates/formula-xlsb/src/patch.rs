@@ -111,6 +111,9 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
             | biff12::STRING
             | biff12::CELL_ST
             | biff12::FORMULA_FLOAT
+            | biff12::FORMULA_STRING
+            | biff12::FORMULA_BOOL
+            | biff12::FORMULA_BOOLERR
                 if in_sheet_data =>
             {
                 let row = current_row.unwrap_or(0);
@@ -133,7 +136,28 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if formula_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                        patch_fmla_num(&mut writer, payload, col, style, edit)?;
+                            patch_fmla_num(&mut writer, payload, col, style, edit)?;
+                        }
+                    }
+                    biff12::FORMULA_STRING => {
+                        if formula_string_edit_is_noop(payload, edit)? {
+                            writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else {
+                            patch_fmla_string(&mut writer, payload, col, style, edit)?;
+                        }
+                    }
+                    biff12::FORMULA_BOOL => {
+                        if formula_bool_edit_is_noop(payload, edit)? {
+                            writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else {
+                            patch_fmla_bool(&mut writer, payload, col, style, edit)?;
+                        }
+                    }
+                    biff12::FORMULA_BOOLERR => {
+                        if formula_error_edit_is_noop(payload, edit)? {
+                            writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else {
+                            patch_fmla_error(&mut writer, payload, col, style, edit)?;
                         }
                     }
                     biff12::FLOAT => {
@@ -282,6 +306,75 @@ fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> 
     let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
 
     Ok(existing_cached.to_bits() == desired_cached.to_bits() && rgce == desired_rgce)
+}
+
+fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    let desired_cached = match &edit.new_value {
+        CellValue::Text(s) => s,
+        _ => return Ok(false),
+    };
+
+    let cch = read_u32(payload, 8)? as usize;
+    let _flags = read_u16(payload, 12)?; // bounds check
+
+    let str_bytes_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+    let str_start = 14usize;
+    let str_end = str_start
+        .checked_add(str_bytes_len)
+        .ok_or(Error::UnexpectedEof)?;
+    let raw = payload
+        .get(str_start..str_end)
+        .ok_or(Error::UnexpectedEof)?;
+
+    if desired_cached.encode_utf16().count() != cch {
+        return Ok(false);
+    }
+
+    let mut desired_bytes = Vec::with_capacity(str_bytes_len);
+    for unit in desired_cached.encode_utf16() {
+        desired_bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    if desired_bytes != raw {
+        return Ok(false);
+    }
+
+    let cce = read_u32(payload, str_end)? as usize;
+    let rgce_offset = str_end.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
+
+    let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
+    Ok(rgce == desired_rgce)
+}
+
+fn formula_bool_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    let desired_cached = match &edit.new_value {
+        CellValue::Bool(v) => *v,
+        _ => return Ok(false),
+    };
+    let existing_cached = read_u8(payload, 8)? != 0;
+    let _flags = read_u16(payload, 9)?; // bounds check
+    let cce = read_u32(payload, 11)? as usize;
+    let rgce_offset = 15usize;
+    let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
+    let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
+    Ok(existing_cached == desired_cached && rgce == desired_rgce)
+}
+
+fn formula_error_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    let desired_cached = match &edit.new_value {
+        CellValue::Error(v) => *v,
+        _ => return Ok(false),
+    };
+    let existing_cached = read_u8(payload, 8)?;
+    let _flags = read_u16(payload, 9)?; // bounds check
+    let cce = read_u32(payload, 11)? as usize;
+    let rgce_offset = 15usize;
+    let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
+    let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
+    Ok(existing_cached == desired_cached && rgce == desired_rgce)
 }
 
 fn value_edit_is_noop_float(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
@@ -495,6 +588,228 @@ fn patch_fmla_num<W: io::Write>(
     Ok(())
 }
 
+fn patch_fmla_bool<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    payload: &[u8],
+    col: u32,
+    style: u32,
+    edit: &CellEdit,
+) -> Result<(), Error> {
+    // BrtFmlaBool: [col: u32][style: u32][value: u8][flags: u16][cce: u32][rgce bytes...][extra...]
+    let flags = read_u16(payload, 9)?;
+    let cce = read_u32(payload, 11)? as usize;
+    let rgce_offset = 15usize;
+    let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload
+        .get(rgce_offset..rgce_end)
+        .ok_or(Error::UnexpectedEof)?;
+    let extra = payload.get(rgce_end..).unwrap_or(&[]);
+
+    let new_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
+    if edit.new_formula.is_some() && !extra.is_empty() && new_rgce != rgce {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot replace formula rgce for BrtFmlaBool at ({}, {}) with trailing rgcb bytes",
+                edit.row, edit.col
+            ),
+        )));
+    }
+
+    let cached = match &edit.new_value {
+        CellValue::Bool(v) => *v,
+        _ => {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "BrtFmlaBool edit requires boolean cached value at ({}, {})",
+                    edit.row, edit.col
+                ),
+            )));
+        }
+    };
+
+    let new_rgce_len = u32::try_from(new_rgce.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula token stream is too large",
+        ))
+    })?;
+    let extra_len = u32::try_from(extra.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula trailing payload is too large",
+        ))
+    })?;
+    let payload_len = 15u32
+        .checked_add(new_rgce_len)
+        .and_then(|v| v.checked_add(extra_len))
+        .ok_or(Error::UnexpectedEof)?;
+
+    writer.write_record_header(biff12::FORMULA_BOOL, payload_len)?;
+    writer.write_u32(col)?;
+    writer.write_u32(style)?;
+    writer.write_raw(&[u8::from(cached)])?;
+    writer.write_u16(flags)?;
+    writer.write_u32(new_rgce_len)?;
+    writer.write_raw(new_rgce)?;
+    writer.write_raw(extra)?;
+    Ok(())
+}
+
+fn patch_fmla_error<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    payload: &[u8],
+    col: u32,
+    style: u32,
+    edit: &CellEdit,
+) -> Result<(), Error> {
+    // BrtFmlaError: [col: u32][style: u32][value: u8][flags: u16][cce: u32][rgce bytes...][extra...]
+    let flags = read_u16(payload, 9)?;
+    let cce = read_u32(payload, 11)? as usize;
+    let rgce_offset = 15usize;
+    let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload
+        .get(rgce_offset..rgce_end)
+        .ok_or(Error::UnexpectedEof)?;
+    let extra = payload.get(rgce_end..).unwrap_or(&[]);
+
+    let new_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
+    if edit.new_formula.is_some() && !extra.is_empty() && new_rgce != rgce {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot replace formula rgce for BrtFmlaError at ({}, {}) with trailing rgcb bytes",
+                edit.row, edit.col
+            ),
+        )));
+    }
+
+    let cached = match &edit.new_value {
+        CellValue::Error(v) => *v,
+        _ => {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "BrtFmlaError edit requires error cached value at ({}, {})",
+                    edit.row, edit.col
+                ),
+            )));
+        }
+    };
+
+    let new_rgce_len = u32::try_from(new_rgce.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula token stream is too large",
+        ))
+    })?;
+    let extra_len = u32::try_from(extra.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula trailing payload is too large",
+        ))
+    })?;
+    let payload_len = 15u32
+        .checked_add(new_rgce_len)
+        .and_then(|v| v.checked_add(extra_len))
+        .ok_or(Error::UnexpectedEof)?;
+
+    writer.write_record_header(biff12::FORMULA_BOOLERR, payload_len)?;
+    writer.write_u32(col)?;
+    writer.write_u32(style)?;
+    writer.write_raw(&[cached])?;
+    writer.write_u16(flags)?;
+    writer.write_u32(new_rgce_len)?;
+    writer.write_raw(new_rgce)?;
+    writer.write_raw(extra)?;
+    Ok(())
+}
+
+fn patch_fmla_string<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    payload: &[u8],
+    col: u32,
+    style: u32,
+    edit: &CellEdit,
+) -> Result<(), Error> {
+    // BrtFmlaString: [col: u32][style: u32][cch: u32][flags: u16][utf16 chars...][cce: u32][rgce bytes...][extra...]
+    let cch = read_u32(payload, 8)? as usize;
+    let flags = read_u16(payload, 12)?;
+    let str_bytes_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+    let str_start = 14usize;
+    let str_end = str_start
+        .checked_add(str_bytes_len)
+        .ok_or(Error::UnexpectedEof)?;
+    let cce = read_u32(payload, str_end)? as usize;
+    let rgce_offset = str_end.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
+    let extra = payload.get(rgce_end..).unwrap_or(&[]);
+
+    let new_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
+    if edit.new_formula.is_some() && !extra.is_empty() && new_rgce != rgce {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot replace formula rgce for BrtFmlaString at ({}, {}) with trailing rgcb bytes",
+                edit.row, edit.col
+            ),
+        )));
+    }
+
+    let cached = match &edit.new_value {
+        CellValue::Text(s) => s,
+        _ => {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "BrtFmlaString edit requires text cached value at ({}, {})",
+                    edit.row, edit.col
+                ),
+            )));
+        }
+    };
+
+    let cch = cached.encode_utf16().count();
+    let cch = u32::try_from(cch).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "string is too large",
+        ))
+    })?;
+    let str_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+
+    let new_rgce_len = u32::try_from(new_rgce.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula token stream is too large",
+        ))
+    })?;
+    let extra_len = u32::try_from(extra.len()).map_err(|_| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "formula trailing payload is too large",
+        ))
+    })?;
+    let payload_len = 18u32
+        .checked_add(str_len)
+        .and_then(|v| v.checked_add(new_rgce_len))
+        .and_then(|v| v.checked_add(extra_len))
+        .ok_or(Error::UnexpectedEof)?;
+
+    writer.write_record_header(biff12::FORMULA_STRING, payload_len)?;
+    writer.write_u32(col)?;
+    writer.write_u32(style)?;
+    writer.write_u32(cch)?;
+    writer.write_u16(flags)?;
+    write_utf16_chars(writer, cached)?;
+    writer.write_u32(new_rgce_len)?;
+    writer.write_raw(new_rgce)?;
+    writer.write_raw(extra)?;
+    Ok(())
+}
+
 fn read_u16(data: &[u8], offset: usize) -> Result<u16, Error> {
     let bytes: [u8; 2] = data
         .get(offset..offset + 2)
@@ -601,6 +916,13 @@ fn encode_rk_number(value: f64) -> Option<u32> {
     }
 
     None
+}
+
+fn write_utf16_chars<W: io::Write>(writer: &mut Biff12Writer<W>, s: &str) -> Result<(), Error> {
+    for unit in s.encode_utf16() {
+        writer.write_u16(unit)?;
+    }
+    Ok(())
 }
 
 fn decode_rk_number(raw: u32) -> f64 {
