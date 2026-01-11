@@ -1431,6 +1431,7 @@ class MarketplaceStore {
       /** @type {{ id: string, publicKeyPem: string, revoked: boolean }[]} */
       const publisherKeys = [];
       let primaryKeyPem = null;
+      let firstActiveKeyPem = null;
       while (publisherKeysStmt.step()) {
         const keyRow = publisherKeysStmt.getAsObject();
         const revoked = Boolean(keyRow.revoked);
@@ -1441,13 +1442,18 @@ class MarketplaceStore {
           publicKeyPem: pem,
           revoked,
         });
+        if (!revoked && !firstActiveKeyPem) {
+          firstActiveKeyPem = pem;
+        }
         if (!primaryKeyPem && isPrimary && !revoked) {
           primaryKeyPem = pem;
         }
       }
       publisherKeysStmt.free();
 
-      const publisherPublicKeyPem = primaryKeyPem || (publisherRow ? String(publisherRow.public_key_pem) : null);
+      const legacyPublisherKeyPem = publisherRow ? String(publisherRow.public_key_pem) : null;
+      const publisherPublicKeyPem =
+        primaryKeyPem || firstActiveKeyPem || (publisherKeys.length === 0 && legacyPublisherKeyPem ? legacyPublisherKeyPem : null);
       if (publisherKeys.length === 0 && publisherPublicKeyPem) {
         try {
           const normalized = normalizePublicKeyPem(publisherPublicKeyPem);

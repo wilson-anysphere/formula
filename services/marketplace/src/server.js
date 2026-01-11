@@ -595,6 +595,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         segments.length === 6
       ) {
         route = "/api/publishers/:publisher/keys/:id/revoke";
+        res.setHeader("Cache-Control", CACHE_CONTROL_NO_STORE);
         if (!adminToken) {
           statusCode = 404;
           return sendJson(res, 404, { error: "Endpoint disabled" });
