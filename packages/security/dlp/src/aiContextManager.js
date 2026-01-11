@@ -2,8 +2,9 @@ import { DLP_ACTION } from "./actions.js";
 import { evaluatePolicy, DLP_DECISION } from "./policyEngine.js";
 import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "./selectors.js";
 import { DlpViolationError } from "./errors.js";
+import dlpCore from "./core.js";
 
-const REDACTION_PLACEHOLDER = "[REDACTED]";
+const { redact } = dlpCore;
 
 /**
  * Build AI context from spreadsheet cells while respecting DLP classification.
@@ -87,10 +88,10 @@ export class AiContextManager {
         });
 
         if (allowedDecision.decision !== DLP_DECISION.ALLOW) {
-          // Individual cell is not allowed to be sent to the cloud (either "block" or
-          // "redact"). Since the overall request is permitted via redaction, replace the
-          // cell with a placeholder.
-          rowValues.push(REDACTION_PLACEHOLDER);
+           // Individual cell is not allowed to be sent to the cloud (either "block" or
+           // "redact"). Since the overall request is permitted via redaction, replace the
+           // cell with a placeholder.
+          rowValues.push(redact(value, null));
           redactedCount++;
           redactions.push({ row, col, classification });
         } else {

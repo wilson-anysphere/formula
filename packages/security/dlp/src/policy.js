@@ -1,5 +1,8 @@
-import { CLASSIFICATION_LEVELS, classificationRank } from "./classification.js";
+import { classificationRank } from "./classification.js";
 import { DLP_ACTION } from "./actions.js";
+import dlpCore from "./core.js";
+
+const { DLP_POLICY_VERSION, validateDlpPolicy } = dlpCore;
 
 export const POLICY_SOURCE = Object.freeze({
   ORG: "org",
@@ -29,7 +32,7 @@ export const POLICY_SOURCE = Object.freeze({
 
 export function createDefaultOrgPolicy() {
   return {
-    version: 1,
+    version: DLP_POLICY_VERSION,
     allowDocumentOverrides: true,
     rules: {
       [DLP_ACTION.SHARE_EXTERNAL_LINK]: { maxAllowed: "Internal" },
@@ -49,32 +52,8 @@ export function createDefaultOrgPolicy() {
   };
 }
 
-function validateLevel(level) {
-  if (level === null) return;
-  if (!CLASSIFICATION_LEVELS.includes(level)) {
-    throw new Error(`Invalid classification level in policy: ${level}`);
-  }
-}
-
 export function validatePolicy(policy) {
-  if (!policy || typeof policy !== "object") throw new Error("Policy must be an object");
-  if (!Number.isInteger(policy.version)) throw new Error("Policy.version must be an integer");
-  if (typeof policy.allowDocumentOverrides !== "boolean") {
-    throw new Error("Policy.allowDocumentOverrides must be a boolean");
-  }
-  if (!policy.rules || typeof policy.rules !== "object") throw new Error("Policy.rules must be an object");
-  for (const [action, rule] of Object.entries(policy.rules)) {
-    if (!rule || typeof rule !== "object") throw new Error(`Rule for ${action} must be an object`);
-    validateLevel(rule.maxAllowed);
-    if (action === DLP_ACTION.AI_CLOUD_PROCESSING) {
-      if (typeof rule.allowRestrictedContent !== "boolean") {
-        throw new Error("AI rule allowRestrictedContent must be boolean");
-      }
-      if (typeof rule.redactDisallowed !== "boolean") {
-        throw new Error("AI rule redactDisallowed must be boolean");
-      }
-    }
-  }
+  validateDlpPolicy(policy);
 }
 
 function minLevel(a, b) {

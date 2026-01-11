@@ -1,4 +1,9 @@
 import { CLASSIFICATION_LEVEL, DEFAULT_CLASSIFICATION, maxClassification } from "./classification.js";
+import dlpCore from "./core.js";
+
+const { normalizeRange, selectorKey } = dlpCore;
+
+export { normalizeRange, selectorKey };
 
 /**
  * A selector identifies the scope a classification applies to.
@@ -71,23 +76,6 @@ export function a1ToCell(a1) {
 }
 
 /**
- * @param {{start:{row:number,col:number}, end:{row:number,col:number}}} range
- */
-export function normalizeRange(range) {
-  if (!range || !range.start || !range.end) {
-    throw new Error(`Invalid range: ${JSON.stringify(range)}`);
-  }
-  const startRow = Math.min(range.start.row, range.end.row);
-  const endRow = Math.max(range.start.row, range.end.row);
-  const startCol = Math.min(range.start.col, range.end.col);
-  const endCol = Math.max(range.start.col, range.end.col);
-  return {
-    start: { row: startRow, col: startCol },
-    end: { row: endRow, col: endCol },
-  };
-}
-
-/**
  * @param {{row:number,col:number}} cell
  * @param {{start:{row:number,col:number}, end:{row:number,col:number}}} range
  */
@@ -116,35 +104,6 @@ export function rangesIntersect(a, b) {
 /**
  * @param {any} selector
  */
-export function selectorKey(selector) {
-  if (!selector || typeof selector !== "object") throw new Error("Selector must be an object");
-  switch (selector.scope) {
-    case CLASSIFICATION_SCOPE.DOCUMENT:
-      return `document:${selector.documentId}`;
-    case CLASSIFICATION_SCOPE.SHEET:
-      return `sheet:${selector.documentId}:${selector.sheetId}`;
-    case CLASSIFICATION_SCOPE.COLUMN: {
-      const tablePart = selector.tableId ? `:table:${selector.tableId}` : "";
-      const colPart =
-        typeof selector.columnIndex === "number"
-          ? `:col:${selector.columnIndex}`
-          : selector.columnId
-            ? `:colId:${selector.columnId}`
-            : "";
-      if (!colPart) throw new Error("Column selector must include columnIndex or columnId");
-      return `column:${selector.documentId}:${selector.sheetId}${tablePart}${colPart}`;
-    }
-    case CLASSIFICATION_SCOPE.CELL:
-      return `cell:${selector.documentId}:${selector.sheetId}:${selector.row},${selector.col}`;
-    case CLASSIFICATION_SCOPE.RANGE: {
-      const range = normalizeRange(selector.range);
-      return `range:${selector.documentId}:${selector.sheetId}:${range.start.row},${range.start.col}:${range.end.row},${range.end.col}`;
-    }
-    default:
-      throw new Error(`Unknown selector scope: ${selector.scope}`);
-  }
-}
-
 /**
  * @param {any} selector
  * @param {{documentId:string, sheetId?:string, row?:number, col?:number}} cellRef

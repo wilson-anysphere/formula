@@ -5,13 +5,6 @@
  * local storage and the cloud backend without migrations caused by code
  * refactors.
  */
-export const DLP_ACTION = Object.freeze({
-  SHARE_EXTERNAL_LINK: "sharing.externalLink",
-  EXPORT_CSV: "export.csv",
-  EXPORT_PDF: "export.pdf",
-  EXPORT_XLSX: "export.xlsx",
-  CLIPBOARD_COPY: "clipboard.copy",
-  AI_CLOUD_PROCESSING: "ai.cloudProcessing",
-  EXTERNAL_CONNECTOR: "connector.external",
-});
+import dlpCore from "./core.js";
 
+export const { DLP_ACTION } = dlpCore;

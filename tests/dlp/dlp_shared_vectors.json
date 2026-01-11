@@ -1,0 +1,185 @@
+{
+  "selectorKey": [
+    {
+      "name": "document",
+      "selector": { "scope": "document", "documentId": "doc_123" },
+      "expected": "document:doc_123"
+    },
+    {
+      "name": "sheet",
+      "selector": { "scope": "sheet", "documentId": "doc_123", "sheetId": "Sheet1" },
+      "expected": "sheet:doc_123:Sheet1"
+    },
+    {
+      "name": "columnByIndex",
+      "selector": { "scope": "column", "documentId": "doc_123", "sheetId": "Sheet1", "columnIndex": 7 },
+      "expected": "column:doc_123:Sheet1:col:7"
+    },
+    {
+      "name": "columnByIdWithTable",
+      "selector": {
+        "scope": "column",
+        "documentId": "doc_123",
+        "sheetId": "Sheet1",
+        "tableId": "tbl_1",
+        "columnId": "col_abc"
+      },
+      "expected": "column:doc_123:Sheet1:table:tbl_1:colId:col_abc"
+    },
+    {
+      "name": "cell",
+      "selector": { "scope": "cell", "documentId": "doc_123", "sheetId": "Sheet1", "row": 0, "col": 1 },
+      "expected": "cell:doc_123:Sheet1:0,1"
+    },
+    {
+      "name": "rangeNormalizesCoordinates",
+      "selector": {
+        "scope": "range",
+        "documentId": "doc_123",
+        "sheetId": "Sheet1",
+        "range": { "start": { "row": 5, "col": 4 }, "end": { "row": 1, "col": 2 } }
+      },
+      "expected": "range:doc_123:Sheet1:1,2:5,4"
+    }
+  ],
+  "policyValidation": [
+    {
+      "name": "validV1",
+      "policy": {
+        "version": 1,
+        "allowDocumentOverrides": true,
+        "rules": {
+          "clipboard.copy": { "maxAllowed": "Confidential" },
+          "ai.cloudProcessing": {
+            "maxAllowed": "Confidential",
+            "allowRestrictedContent": false,
+            "redactDisallowed": true
+          }
+        }
+      },
+      "expectValid": true
+    },
+    {
+      "name": "unsupportedFutureVersion",
+      "policy": {
+        "version": 999,
+        "allowDocumentOverrides": true,
+        "rules": {
+          "clipboard.copy": { "maxAllowed": "Confidential" }
+        }
+      },
+      "expectValid": false,
+      "errorContains": "Unsupported policy version: 999"
+    }
+  ],
+  "policyEvaluation": [
+    {
+      "name": "clipboardAllowedAtOrBelowMaxAllowed",
+      "policy": {
+        "version": 1,
+        "allowDocumentOverrides": true,
+        "rules": {
+          "clipboard.copy": { "maxAllowed": "Confidential" }
+        }
+      },
+      "action": "clipboard.copy",
+      "classification": { "level": "Confidential", "labels": ["PII"] },
+      "expected": {
+        "decision": "allow",
+        "maxAllowed": "Confidential",
+        "classification": { "level": "Confidential", "labels": ["PII"] }
+      }
+    },
+    {
+      "name": "clipboardBlockedAboveMaxAllowed",
+      "policy": {
+        "version": 1,
+        "allowDocumentOverrides": true,
+        "rules": {
+          "clipboard.copy": { "maxAllowed": "Confidential" }
+        }
+      },
+      "action": "clipboard.copy",
+      "classification": { "level": "Restricted" },
+      "expected": {
+        "decision": "block",
+        "maxAllowed": "Confidential",
+        "classification": { "level": "Restricted", "labels": [] }
+      }
+    },
+    {
+      "name": "aiRestrictedIsRedactedByDefault",
+      "policy": {
+        "version": 1,
+        "allowDocumentOverrides": true,
+        "rules": {
+          "ai.cloudProcessing": {
+            "maxAllowed": "Confidential",
+            "allowRestrictedContent": false,
+            "redactDisallowed": true
+          }
+        }
+      },
+      "action": "ai.cloudProcessing",
+      "classification": { "level": "Restricted" },
+      "options": { "includeRestrictedContent": false },
+      "expected": {
+        "decision": "redact",
+        "maxAllowed": "Confidential",
+        "classification": { "level": "Restricted", "labels": [] }
+      }
+    },
+    {
+      "name": "aiExplicitRestrictedInclusionIsBlockedUnlessAllowed",
+      "policy": {
+        "version": 1,
+        "allowDocumentOverrides": true,
+        "rules": {
+          "ai.cloudProcessing": {
+            "maxAllowed": "Confidential",
+            "allowRestrictedContent": false,
+            "redactDisallowed": true
+          }
+        }
+      },
+      "action": "ai.cloudProcessing",
+      "classification": { "level": "Restricted" },
+      "options": { "includeRestrictedContent": true },
+      "expected": {
+        "decision": "block",
+        "maxAllowed": "Confidential",
+        "classification": { "level": "Restricted", "labels": [] }
+      }
+    },
+    {
+      "name": "aiExplicitRestrictedInclusionIsAllowedWhenPermitted",
+      "policy": {
+        "version": 1,
+        "allowDocumentOverrides": true,
+        "rules": {
+          "ai.cloudProcessing": {
+            "maxAllowed": "Confidential",
+            "allowRestrictedContent": true,
+            "redactDisallowed": true
+          }
+        }
+      },
+      "action": "ai.cloudProcessing",
+      "classification": { "level": "Restricted" },
+      "options": { "includeRestrictedContent": true },
+      "expected": {
+        "decision": "allow",
+        "maxAllowed": "Confidential",
+        "classification": { "level": "Restricted", "labels": [] }
+      }
+    }
+  ],
+  "redaction": [
+    {
+      "name": "placeholder",
+      "value": "secret",
+      "expected": "[REDACTED]"
+    }
+  ]
+}
+
