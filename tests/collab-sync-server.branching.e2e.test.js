@@ -28,6 +28,23 @@ function getYMap(value) {
   return maybe;
 }
 
+function readYMapOrObject(value, key) {
+  const map = getYMap(value);
+  if (map) return map.get(key);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value[key];
+}
+
+function sheetNameFromDoc(doc, sheetId) {
+  const sheets = doc.getArray("sheets");
+  for (const entry of sheets.toArray()) {
+    const id = readYMapOrObject(entry, "id");
+    if (id !== sheetId) continue;
+    return readYMapOrObject(entry, "name") ?? null;
+  }
+  return null;
+}
+
 /**
  * @param {import("../packages/collab/session/src/index.ts").CollabSession} session
  */
@@ -140,6 +157,13 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   sessionA.doc.transact(() => {
     const cell = getYMap(sessionA.cells.get("Sheet1:0:1"));
     if (cell) cell.set("format", { numberFormat: "percent" });
+    const sheets = sessionA.doc.getArray("sheets");
+    if (sheets.length > 0) sheets.delete(0, sheets.length);
+    sheets.push([{ id: "Sheet1", name: "FeatureName" }]);
+    sessionA.doc.getMap("namedRanges").set("NR1", {
+      sheetId: "Sheet1",
+      rect: { r0: 0, c0: 0, r1: 0, c1: 0 },
+    });
   }, sessionA.origin);
   await workflow.commitCurrentState(owner, "feature edit");
 
@@ -148,27 +172,43 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   sessionA.doc.transact(() => {
     const cell = getYMap(sessionA.cells.get("Sheet1:0:1"));
     if (cell) cell.set("format", { numberFormat: "accounting" });
+    const sheets = sessionA.doc.getArray("sheets");
+    if (sheets.length > 0) sheets.delete(0, sheets.length);
+    sheets.push([{ id: "Sheet1", name: "MainName" }]);
+    sessionA.doc.getMap("namedRanges").set("NR1", {
+      sheetId: "Sheet1",
+      rect: { r0: 0, c0: 1, r1: 0, c1: 1 },
+    });
   }, sessionA.origin);
   await workflow.commitCurrentState(owner, "main edit");
 
   const preview = await workflow.previewMerge(owner, { sourceBranch: "feature" });
-  assert.equal(preview.conflicts.length, 2);
+  assert.equal(preview.conflicts.length, 4);
   const a1Idx = preview.conflicts.findIndex(
     (c) => c.type === "cell" && c.sheetId === "Sheet1" && c.cell === "A1"
   );
   const b1Idx = preview.conflicts.findIndex(
     (c) => c.type === "cell" && c.sheetId === "Sheet1" && c.cell === "B1"
   );
+  const sheetIdx = preview.conflicts.findIndex(
+    (c) => c.type === "sheet" && c.reason === "rename" && c.sheetId === "Sheet1"
+  );
+  const namedRangeIdx = preview.conflicts.findIndex((c) => c.type === "namedRange" && c.key === "NR1");
   assert.ok(a1Idx >= 0);
   assert.ok(b1Idx >= 0);
+  assert.ok(sheetIdx >= 0);
+  assert.ok(namedRangeIdx >= 0);
   assert.equal(preview.conflicts[a1Idx]?.reason, "content");
   assert.equal(preview.conflicts[b1Idx]?.reason, "format");
+  assert.equal(preview.conflicts[sheetIdx]?.reason, "rename");
 
   await workflow.merge(owner, {
     sourceBranch: "feature",
     resolutions: [
       { conflictIndex: a1Idx, choice: "theirs" },
       { conflictIndex: b1Idx, choice: "theirs" },
+      { conflictIndex: sheetIdx, choice: "theirs" },
+      { conflictIndex: namedRangeIdx, choice: "theirs" },
     ],
     message: "merge feature into main",
   });
@@ -186,6 +226,16 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   }, 10_000);
   assert.deepEqual(getYMap(sessionB.cells.get("Sheet1:0:1"))?.get("format"), {
     numberFormat: "percent",
+  });
+  await waitForCondition(() => sheetNameFromDoc(sessionB.doc, "Sheet1") === "FeatureName", 10_000);
+  assert.equal(sheetNameFromDoc(sessionB.doc, "Sheet1"), "FeatureName");
+  await waitForCondition(() => {
+    const nr = sessionB.doc.getMap("namedRanges").get("NR1");
+    return nr?.rect?.c0 === 0;
+  }, 10_000);
+  assert.deepEqual(sessionB.doc.getMap("namedRanges").get("NR1"), {
+    rect: { c0: 0, c1: 0, r0: 0, r1: 0 },
+    sheetId: "Sheet1",
   });
 
   // --- Branch metadata propagates too (stored in the same Y.Doc) ---
@@ -249,6 +299,11 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   assert.equal((await sessionC.getCell("Sheet1:0:2"))?.value, 99);
   assert.deepEqual(getYMap(sessionC.cells.get("Sheet1:0:1"))?.get("format"), {
     numberFormat: "percent",
+  });
+  assert.equal(sheetNameFromDoc(sessionC.doc, "Sheet1"), "FeatureName");
+  assert.deepEqual(sessionC.doc.getMap("namedRanges").get("NR1"), {
+    rect: { c0: 0, c1: 0, r0: 0, r1: 0 },
+    sheetId: "Sheet1",
   });
 
   // --- Branch metadata persisted inside the Y.Doc ---
