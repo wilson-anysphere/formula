@@ -455,3 +455,120 @@ fn patch_sheet_bin_streaming_is_lossless_for_noop_formula_edit() {
         sheet_bin
     );
 }
+
+#[test]
+fn patch_sheet_bin_streaming_can_insert_into_empty_sheet() {
+    let builder = XlsbFixtureBuilder::new();
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 5,
+        col: 3,
+        new_value: CellValue::Number(123.0),
+        new_formula: None,
+        new_rgcb: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert!(changed);
+    assert_eq!(patched_stream, patched_in_mem);
+    assert_eq!(cell_coords_in_stream_order(&patched_stream), vec![(5, 3)]);
+    assert_eq!(read_dimension_bounds(&patched_stream), Some((0, 5, 0, 3)));
+}
+
+#[test]
+fn patch_sheet_bin_streaming_noop_insertions_in_empty_sheet_are_lossless() {
+    let builder = XlsbFixtureBuilder::new();
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [
+        CellEdit {
+            row: 5,
+            col: 3,
+            new_value: CellValue::Blank,
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        },
+        CellEdit {
+            row: 5,
+            col: 4,
+            new_value: CellValue::Blank,
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        },
+    ];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+    assert_eq!(patched_in_mem, sheet_bin);
+
+    let mut patched_stream = Vec::new();
+    let changed = patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert!(!changed);
+    assert_eq!(patched_stream, sheet_bin);
+}
+
+#[test]
+fn patch_sheet_bin_streaming_inserts_missing_rows_before_first_row() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(5, 0, 1.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Number(2.0),
+        new_formula: None,
+        new_rgcb: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert_eq!(patched_stream, patched_in_mem);
+    assert_eq!(cell_coords_in_stream_order(&patched_stream), vec![(0, 0), (5, 0)]);
+    assert_eq!(read_dimension_bounds(&patched_stream), Some((0, 5, 0, 0)));
+}
+
+#[test]
+fn patch_sheet_bin_streaming_inserts_missing_rows_between_existing_rows() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    builder.set_cell_number(5, 0, 3.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 3,
+        col: 0,
+        new_value: CellValue::Number(2.0),
+        new_formula: None,
+        new_rgcb: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert_eq!(patched_stream, patched_in_mem);
+    assert_eq!(
+        cell_coords_in_stream_order(&patched_stream),
+        vec![(0, 0), (3, 0), (5, 0)]
+    );
+    assert_eq!(read_dimension_bounds(&patched_stream), Some((0, 5, 0, 0)));
+}
