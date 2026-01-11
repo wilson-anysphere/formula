@@ -348,6 +348,48 @@ class CellPermissionManager {
 
 ---
 
+## Data Classification & DLP
+
+Formula supports attaching **data classifications** to parts of a document (document/sheet/column/range/cell). These classifications are then used by Data Loss Prevention (DLP) policy checks to decide whether operations like sharing, export, clipboard, or AI processing are allowed, blocked, or redacted.
+
+### Selector scopes
+
+Classifications are stored as `document_classifications` records with a `selector` describing the scope:
+
+- `document`: `{ scope: "document", documentId }`
+- `sheet`: `{ scope: "sheet", documentId, sheetId }`
+- `column`: `{ scope: "column", documentId, sheetId, columnIndex }`
+- `range`: `{ scope: "range", documentId, sheetId, range: { start, end } }`
+- `cell`: `{ scope: "cell", documentId, sheetId, row, col }`
+
+### Effective classification resolution
+
+To enforce DLP server-side, the backend resolves an **effective classification** for a query selector:
+
+- **Cell query** matches:
+  - the exact `cell` selector
+  - any `range` selectors that **contain** the cell
+  - matching `column` selector
+  - matching `sheet` selector
+  - matching `document` selector
+- **Range query** matches any selectors that **intersect** the queried range (including cells inside the range).
+
+The effective classification is computed using conservative “max” semantics:
+
+- **Level:** maximum classification level across all matched selectors (e.g. any `Restricted` makes the result `Restricted`)
+- **Labels:** union of labels across all matched selectors
+
+This intentionally prevents narrower selectors from weakening broader restrictions (e.g. a `Public` cell inside a `Restricted` range is still effectively `Restricted`).
+
+### API: resolve endpoint
+
+`services/api` exposes `POST /docs/:docId/classifications/resolve` (requires document read permission):
+
+- Request body: `{ selector: <cell|range selector>, includeMatched?: boolean }`
+- Response: `{ effectiveClassification, matchedCount, matched?: [...] }`
+
+Large range requests are accepted, but requesting debug matches (`includeMatched: true`) is rejected for extremely large ranges to keep the endpoint bounded.
+
 ## Data Encryption
 
 ### Encryption at Rest

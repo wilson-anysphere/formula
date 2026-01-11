@@ -10,7 +10,9 @@ import {
   maxClassification,
   normalizeClassification as coreNormalizeClassification,
   normalizeDlpPolicy,
+  normalizeSelector,
   redact,
+  resolveClassification,
   selectorKey,
   validateDlpPolicy,
 } from "../../../../shared/dlp-core";
@@ -35,7 +37,9 @@ export {
   isAllowed,
   maxClassification,
   normalizeDlpPolicy,
+  normalizeSelector,
   redact,
+  resolveClassification,
   selectorKey,
   validateDlpPolicy,
 };

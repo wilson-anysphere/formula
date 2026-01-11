@@ -2,15 +2,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
-import {
-  enforceOrgIpAllowlistForSession,
-  enforceOrgIpAllowlistForSessionWithAllowlist
-} from "../auth/orgIpAllowlist";
+import { enforceOrgIpAllowlistForSession, enforceOrgIpAllowlistForSessionWithAllowlist } from "../auth/orgIpAllowlist";
 import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { KmsProviderFactory } from "../crypto/kms";
-import { DLP_ACTION, DLP_DECISION, normalizeClassification, selectorKey, validateDlpPolicy } from "../dlp/dlp";
+import { DLP_ACTION, DLP_DECISION, normalizeClassification, normalizeSelector, resolveClassification, selectorKey, validateDlpPolicy } from "../dlp/dlp";
 import { evaluateDocumentDlpPolicy } from "../dlp/effective";
-import { getEffectiveClassificationForSelector, normalizeSelectorColumns } from "../dlp/classificationResolver";
+import { normalizeSelectorColumns } from "../dlp/classificationResolver";
 import { createDocumentVersion, encryptDocumentVersionData, getDocumentVersionData } from "../db/documentVersions";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { canDocument, type DocumentRole } from "../rbac/roles";
@@ -1368,6 +1365,62 @@ export function registerDocRoutes(app: FastifyInstance): void {
     };
   });
 
+  const ResolveClassificationBody = z.object({
+    selector: z.unknown(),
+    includeMatched: z.boolean().optional()
+  });
+
+  app.post("/docs/:docId/classifications/resolve", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
+
+    const parsed = ResolveClassificationBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    let selector;
+    try {
+      selector = normalizeSelector(parsed.data.selector);
+      if (selector.documentId !== docId) throw new Error("Selector documentId must match route docId");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid selector";
+      return reply.code(400).send({ error: "invalid_request", message });
+    }
+
+    const res = await app.db.query(
+      `
+        SELECT selector, classification
+        FROM document_classifications
+        WHERE document_id = $1
+      `,
+      [docId]
+    );
+
+    let resolved;
+    try {
+      resolved = resolveClassification({
+        querySelector: selector,
+        records: res.rows.map((row) => ({ selector: row.selector, classification: row.classification })),
+        options: {
+          includeMatchedSelectors: Boolean(parsed.data.includeMatched)
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to resolve classification";
+      return reply.code(400).send({ error: "invalid_request", message });
+    }
+
+    return reply.send({
+      effectiveClassification: resolved.effectiveClassification,
+      matchedCount: resolved.matchedCount,
+      matched: resolved.matchedSelectors
+    });
+  });
+
   const UpsertClassificationBody = z.object({
     selector: z.unknown(),
     classification: z.unknown()
@@ -1391,9 +1444,8 @@ export function registerDocRoutes(app: FastifyInstance): void {
     let selectorColumns;
 
     try {
-      selector = parsed.data.selector;
-      if (typeof selector !== "object" || selector === null) throw new Error("Selector must be an object");
-      if ((selector as any).documentId !== docId) throw new Error("Selector documentId must match route docId");
+      selector = normalizeSelector(parsed.data.selector);
+      if (selector.documentId !== docId) throw new Error("Selector documentId must match route docId");
 
       classification = normalizeClassification(parsed.data.classification);
       key = selectorKey(selector);
@@ -1463,39 +1515,6 @@ export function registerDocRoutes(app: FastifyInstance): void {
     );
 
     return reply.send({ ok: true });
-  });
-
-  const ResolveClassificationBody = z.object({ selector: z.unknown() });
-
-  app.post("/docs/:docId/classifications/resolve", { preHandler: requireAuth }, async (request, reply) => {
-    const docId = (request.params as { docId: string }).docId;
-    const membership = await requireDocRole(request, reply, docId);
-    if (!membership) return;
-    if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
-    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
-      return reply.code(403).send({ error: "mfa_required" });
-    }
-
-    const parsed = ResolveClassificationBody.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
-
-    let selector;
-    try {
-      selector = parsed.data.selector;
-      if (typeof selector !== "object" || selector === null) throw new Error("Selector must be an object");
-      if ((selector as any).documentId !== docId) throw new Error("Selector documentId must match route docId");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Invalid selector";
-      return reply.code(400).send({ error: "invalid_request", message });
-    }
-
-    try {
-      const result = await getEffectiveClassificationForSelector(app.db, docId, selector);
-      return reply.send(result);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to resolve classification";
-      return reply.code(400).send({ error: "invalid_request", message });
-    }
   });
 
   app.delete("/docs/:docId/classifications/:selectorKey", { preHandler: requireAuth }, async (request, reply) => {

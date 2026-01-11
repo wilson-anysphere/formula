@@ -212,179 +212,216 @@ describe("API e2e: DLP policy + classification endpoints", () => {
   );
 
   it(
-    "resolves effective classification with selector precedence",
+    "resolves effective classification for cell/range selectors (max + label union)",
     async () => {
-    const ownerRegister = await app.inject({
-      method: "POST",
-      url: "/auth/register",
-      payload: {
-        email: "dlp-resolve-owner@example.com",
-        password: "password1234",
-        name: "Owner",
-        orgName: "DLP Resolve Org"
-      }
-    });
-    expect(ownerRegister.statusCode).toBe(200);
-    const ownerCookie = extractCookie(ownerRegister.headers["set-cookie"]);
-    const orgId = (ownerRegister.json() as any).organization.id as string;
+      const ownerRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "dlp-resolve-owner@example.com",
+          password: "password1234",
+          name: "Owner",
+          orgName: "DLP Resolve Org",
+        },
+      });
+      expect(ownerRegister.statusCode).toBe(200);
+      const ownerCookie = extractCookie(ownerRegister.headers["set-cookie"]);
+      const orgId = (ownerRegister.json() as any).organization.id as string;
 
-    const putOrgPolicy = await app.inject({
-      method: "PUT",
-      url: `/orgs/${orgId}/dlp-policy`,
-      headers: { cookie: ownerCookie },
-      payload: { policy: DEFAULT_DLP_POLICY }
-    });
-    expect(putOrgPolicy.statusCode).toBe(200);
+      const putOrgPolicy = await app.inject({
+        method: "PUT",
+        url: `/orgs/${orgId}/dlp-policy`,
+        headers: { cookie: ownerCookie },
+        payload: { policy: DEFAULT_DLP_POLICY },
+      });
+      expect(putOrgPolicy.statusCode).toBe(200);
 
-    const createDoc = await app.inject({
-      method: "POST",
-      url: "/docs",
-      headers: { cookie: ownerCookie },
-      payload: { orgId, title: "DLP resolve doc" }
-    });
-    expect(createDoc.statusCode).toBe(200);
-    const docId = (createDoc.json() as any).document.id as string;
+      const createDoc = await app.inject({
+        method: "POST",
+        url: "/docs",
+        headers: { cookie: ownerCookie },
+        payload: { orgId, title: "DLP resolve doc" },
+      });
+      expect(createDoc.statusCode).toBe(200);
+      const docId = (createDoc.json() as any).document.id as string;
 
-    const rangeSelector = {
-      scope: "range",
-      documentId: docId,
-      sheetId: "Sheet1",
-      range: { start: { row: 0, col: 0 }, end: { row: 2, col: 2 } }
-    };
-    const putRange = await app.inject({
-      method: "PUT",
-      url: `/docs/${docId}/classifications`,
-      headers: { cookie: ownerCookie },
-      payload: { selector: rangeSelector, classification: { level: "Restricted", labels: ["PII"] } }
-    });
-    expect(putRange.statusCode).toBe(200);
+      const rangeSelector = {
+        scope: "range",
+        documentId: docId,
+        sheetId: "Sheet1",
+        range: { start: { row: 0, col: 0 }, end: { row: 2, col: 2 } },
+      };
+      const putRange = await app.inject({
+        method: "PUT",
+        url: `/docs/${docId}/classifications`,
+        headers: { cookie: ownerCookie },
+        payload: { selector: rangeSelector, classification: { level: "Restricted", labels: ["PII"] } },
+      });
+      expect(putRange.statusCode).toBe(200);
 
-    const cellSelector = {
-      scope: "cell",
-      documentId: docId,
-      sheetId: "Sheet1",
-      row: 0,
-      col: 0
-    };
-    const putCell = await app.inject({
-      method: "PUT",
-      url: `/docs/${docId}/classifications`,
-      headers: { cookie: ownerCookie },
-      payload: { selector: cellSelector, classification: { level: "Internal", labels: ["Mask"] } }
-    });
-    expect(putCell.statusCode).toBe(200);
+      const cellSelector = {
+        scope: "cell",
+        documentId: docId,
+        sheetId: "Sheet1",
+        row: 0,
+        col: 0,
+      };
+      const putCell = await app.inject({
+        method: "PUT",
+        url: `/docs/${docId}/classifications`,
+        headers: { cookie: ownerCookie },
+        payload: { selector: cellSelector, classification: { level: "Internal", labels: ["Mask"] } },
+      });
+      expect(putCell.statusCode).toBe(200);
 
-    const resolveCell = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/classifications/resolve`,
-      headers: { cookie: ownerCookie },
-      payload: { selector: cellSelector }
-    });
-    expect(resolveCell.statusCode).toBe(200);
-    expect(resolveCell.json()).toMatchObject({
-      classification: { level: "Internal", labels: ["Mask"] },
-      source: { scope: "cell", selectorKey: `cell:${docId}:Sheet1:0,0` }
-    });
+      const resolveCell = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/classifications/resolve`,
+        headers: { cookie: ownerCookie },
+        payload: { selector: cellSelector },
+      });
+      expect(resolveCell.statusCode).toBe(200);
+      expect(resolveCell.json()).toMatchObject({
+        effectiveClassification: { level: "Restricted", labels: ["Mask", "PII"] },
+        matchedCount: 2,
+      });
 
-    const resolveInRange = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/classifications/resolve`,
-      headers: { cookie: ownerCookie },
-      payload: {
-        selector: {
-          scope: "cell",
-          documentId: docId,
-          sheetId: "Sheet1",
-          row: 0,
-          col: 1
-        }
-      }
-    });
-    expect(resolveInRange.statusCode).toBe(200);
-    expect(resolveInRange.json()).toMatchObject({
-      classification: { level: "Restricted", labels: ["PII"] },
-      source: { scope: "range", selectorKey: `range:${docId}:Sheet1:0,0:2,2` }
-    });
+      const resolveCellDebug = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/classifications/resolve`,
+        headers: { cookie: ownerCookie },
+        payload: { selector: cellSelector, includeMatched: true },
+      });
+      expect(resolveCellDebug.statusCode).toBe(200);
+      const debugJson = resolveCellDebug.json() as any;
+      expect(Array.isArray(debugJson.matched)).toBe(true);
+      expect(debugJson.matched).toHaveLength(2);
+      expect(debugJson.matched[0]).toMatchObject({
+        selectorKey: `cell:${docId}:Sheet1:0,0`,
+        selector: cellSelector,
+        classification: { level: "Internal", labels: ["Mask"] },
+      });
+      expect(debugJson.matched[1]).toMatchObject({
+        selectorKey: `range:${docId}:Sheet1:0,0:2,2`,
+        selector: rangeSelector,
+        classification: { level: "Restricted", labels: ["PII"] },
+      });
 
-    const resolveSubRange = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/classifications/resolve`,
-      headers: { cookie: ownerCookie },
-      payload: {
-        selector: {
-          scope: "range",
-          documentId: docId,
-          sheetId: "Sheet1",
-          range: { start: { row: 1, col: 1 }, end: { row: 2, col: 2 } }
-        }
-      }
-    });
-    expect(resolveSubRange.statusCode).toBe(200);
-    // Range resolution is based on the most specific *containing* range and should not include
-    // cell labels from within the range (those are included in the aggregate range classifier).
-    expect(resolveSubRange.json()).toMatchObject({
-      classification: { level: "Restricted", labels: ["PII"] },
-      source: { scope: "range", selectorKey: `range:${docId}:Sheet1:0,0:2,2` }
-    });
+      const resolveInRange = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/classifications/resolve`,
+        headers: { cookie: ownerCookie },
+        payload: {
+          selector: {
+            scope: "cell",
+            documentId: docId,
+            sheetId: "Sheet1",
+            row: 0,
+            col: 1,
+          },
+        },
+      });
+      expect(resolveInRange.statusCode).toBe(200);
+      expect(resolveInRange.json()).toMatchObject({
+        effectiveClassification: { level: "Restricted", labels: ["PII"] },
+        matchedCount: 1,
+      });
+      const resolveRange = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/classifications/resolve`,
+        headers: { cookie: ownerCookie },
+        payload: {
+          selector: {
+            scope: "range",
+            documentId: docId,
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 1 } },
+          },
+        },
+      });
+      expect(resolveRange.statusCode).toBe(200);
+      expect(resolveRange.json()).toMatchObject({
+        effectiveClassification: { level: "Restricted", labels: ["Mask", "PII"] },
+        matchedCount: 2,
+      });
 
-    const evaluateCellOverride = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/dlp/evaluate`,
-      headers: { cookie: ownerCookie },
-      payload: {
-        action: "clipboard.copy",
-        selector: cellSelector
-      }
-    });
-    expect(evaluateCellOverride.statusCode).toBe(200);
-    expect(evaluateCellOverride.json()).toMatchObject({
-      decision: "allow",
-      classification: { level: "Internal", labels: ["Mask"] },
-      maxAllowed: "Confidential"
-    });
+      const resolveSubRange = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/classifications/resolve`,
+        headers: { cookie: ownerCookie },
+        payload: {
+          selector: {
+            scope: "range",
+            documentId: docId,
+            sheetId: "Sheet1",
+            range: { start: { row: 1, col: 1 }, end: { row: 2, col: 2 } },
+          },
+        },
+      });
+      expect(resolveSubRange.statusCode).toBe(200);
+      expect(resolveSubRange.json()).toMatchObject({
+        effectiveClassification: { level: "Restricted", labels: ["PII"] },
+        matchedCount: 1,
+      });
 
-    const evaluateCopy = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/dlp/evaluate`,
-      headers: { cookie: ownerCookie },
-      payload: {
-        action: "clipboard.copy",
-        selector: {
-          scope: "cell",
-          documentId: docId,
-          sheetId: "Sheet1",
-          row: 0,
-          col: 1
-        }
-      }
-    });
-    expect(evaluateCopy.statusCode).toBe(200);
-    expect(evaluateCopy.json()).toMatchObject({
-      decision: "block",
-      classification: { level: "Restricted", labels: ["PII"] },
-      maxAllowed: "Confidential"
-    });
+      const evaluateCell = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/dlp/evaluate`,
+        headers: { cookie: ownerCookie },
+        payload: {
+          action: "clipboard.copy",
+          selector: cellSelector,
+        },
+      });
+      expect(evaluateCell.statusCode).toBe(200);
+      expect(evaluateCell.json()).toMatchObject({
+        decision: "block",
+        classification: { level: "Restricted", labels: ["Mask", "PII"] },
+        maxAllowed: "Confidential",
+      });
 
-    const evaluateRange = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/dlp/evaluate`,
-      headers: { cookie: ownerCookie },
-      payload: {
-        action: "clipboard.copy",
-        selector: {
-          scope: "range",
-          documentId: docId,
-          sheetId: "Sheet1",
-          range: { start: { row: 0, col: 0 }, end: { row: 0, col: 1 } }
-        }
-      }
-    });
-    expect(evaluateRange.statusCode).toBe(200);
-    expect(evaluateRange.json()).toMatchObject({
-      decision: "block",
-      classification: { level: "Restricted", labels: ["Mask", "PII"] },
-      maxAllowed: "Confidential"
-    });
+      const evaluateCopy = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/dlp/evaluate`,
+        headers: { cookie: ownerCookie },
+        payload: {
+          action: "clipboard.copy",
+          selector: {
+            scope: "cell",
+            documentId: docId,
+            sheetId: "Sheet1",
+            row: 0,
+            col: 1,
+          },
+        },
+      });
+      expect(evaluateCopy.statusCode).toBe(200);
+      expect(evaluateCopy.json()).toMatchObject({
+        decision: "block",
+        classification: { level: "Restricted", labels: ["PII"] },
+        maxAllowed: "Confidential",
+      });
+
+      const evaluateRange = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/dlp/evaluate`,
+        headers: { cookie: ownerCookie },
+        payload: {
+          action: "clipboard.copy",
+          selector: {
+            scope: "range",
+            documentId: docId,
+            sheetId: "Sheet1",
+            range: { start: { row: 0, col: 0 }, end: { row: 0, col: 1 } },
+          },
+        },
+      });
+      expect(evaluateRange.statusCode).toBe(200);
+      expect(evaluateRange.json()).toMatchObject({
+        decision: "block",
+        classification: { level: "Restricted", labels: ["Mask", "PII"] },
+        maxAllowed: "Confidential",
+      });
     },
     20_000
   );

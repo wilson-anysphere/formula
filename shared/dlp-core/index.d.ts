@@ -57,6 +57,57 @@ export type CellRange = { start: CellCoord; end: CellCoord };
 export function normalizeRange(range: CellRange): CellRange;
 export function selectorKey(selector: unknown): string;
 
+export type ClassificationScope = "document" | "sheet" | "column" | "range" | "cell";
+
+export type DocumentSelector = { scope: "document"; documentId: string };
+export type SheetSelector = { scope: "sheet"; documentId: string; sheetId: string };
+export type ColumnSelector = {
+  scope: "column";
+  documentId: string;
+  sheetId: string;
+  columnIndex?: number;
+  tableId?: string;
+  columnId?: string;
+};
+export type CellSelector = {
+  scope: "cell";
+  documentId: string;
+  sheetId: string;
+  row: number;
+  col: number;
+  tableId?: string;
+  columnId?: string;
+};
+export type RangeSelector = { scope: "range"; documentId: string; sheetId: string; range: CellRange };
+
+export type ClassificationSelector = DocumentSelector | SheetSelector | ColumnSelector | CellSelector | RangeSelector;
+
+export function normalizeSelector(selector: unknown): ClassificationSelector;
+
+export type ClassificationRecord = { selector: unknown; classification: unknown };
+
+export type ResolvedClassificationMatch = {
+  selector: ClassificationSelector;
+  selectorKey: string;
+  classification: Classification;
+};
+
+export interface ResolveClassificationOptions {
+  includeMatchedSelectors?: boolean;
+  maxMatchedSelectors?: number;
+  maxRangeCellsForMatchedSelectors?: number;
+}
+
+export function resolveClassification(params: {
+  querySelector: unknown;
+  records: ClassificationRecord[];
+  options?: ResolveClassificationOptions;
+}): {
+  effectiveClassification: Classification;
+  matchedCount: number;
+  matchedSelectors?: ResolvedClassificationMatch[];
+};
+
 export const DLP_DECISION: Readonly<{
   ALLOW: "allow";
   BLOCK: "block";
