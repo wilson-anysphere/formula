@@ -446,6 +446,17 @@ const network = {
   async fetch(url, init) {
     const result = await rpcCall("network", "fetch", [String(url), init]);
     return createFetchResponse(result);
+  },
+
+  /**
+   * Used by worker runtimes to permission-gate WebSocket connections before they
+   * call the platform WebSocket implementation directly.
+   *
+   * @param {string} url
+   * @returns {Promise<void>}
+   */
+  async openWebSocket(url) {
+    await rpcCall("network", "openWebSocket", [String(url)]);
   }
 };
 

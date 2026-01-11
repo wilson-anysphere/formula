@@ -103,6 +103,7 @@ export interface FetchResponse {
 
 export namespace network {
   function fetch(url: string, init?: any): Promise<FetchResponse>;
+  function openWebSocket(url: string): Promise<void>;
 }
 
 export namespace clipboard {
