@@ -1,36 +1,41 @@
-let transport = null;
-let currentContext = { extensionId: "", extensionPath: "" };
+const GLOBAL_STATE_KEY = Symbol.for("formula.extensionApi.state");
+const state = globalThis[GLOBAL_STATE_KEY] ?? {
+  transport: null,
+  currentContext: { extensionId: "", extensionPath: "" },
+  nextRequestId: 1,
+  pendingRequests: new Map(),
+  commandHandlers: new Map(),
+  eventHandlers: new Map(),
+  panelMessageHandlers: new Map(),
+  customFunctionHandlers: new Map()
+};
 
-let nextRequestId = 1;
-const pendingRequests = new Map();
-
-const commandHandlers = new Map();
-const eventHandlers = new Map();
-const panelMessageHandlers = new Map();
-const customFunctionHandlers = new Map();
+// Ensure we always reuse the same shared state even if the package is loaded via both
+// `require` (CJS) and `import` (ESM) within the same runtime (eg: Node workers).
+globalThis[GLOBAL_STATE_KEY] = state;
 
 function __setTransport(nextTransport) {
-  transport = nextTransport;
+  state.transport = nextTransport;
 }
 
 function __setContext(ctx) {
-  currentContext = {
+  state.currentContext = {
     extensionId: String(ctx?.extensionId ?? ""),
     extensionPath: String(ctx?.extensionPath ?? "")
   };
 }
 
 function getTransportOrThrow() {
-  if (!transport || typeof transport.postMessage !== "function") {
+  if (!state.transport || typeof state.transport.postMessage !== "function") {
     throw new Error(
       "Extension API transport not initialized. This module must be run inside an extension host worker."
     );
   }
-  return transport;
+  return state.transport;
 }
 
 function createRequestId() {
-  return String(nextRequestId++);
+  return String(state.nextRequestId++);
 }
 
 function rpcCall(namespace, method, args) {
@@ -46,7 +51,7 @@ function rpcCall(namespace, method, args) {
   });
 
   return new Promise((resolve, reject) => {
-    pendingRequests.set(id, { resolve, reject });
+    state.pendingRequests.set(id, { resolve, reject });
   });
 }
 
@@ -64,16 +69,16 @@ function __handleMessage(message) {
 
   switch (message.type) {
     case "api_result": {
-      const pending = pendingRequests.get(message.id);
+      const pending = state.pendingRequests.get(message.id);
       if (!pending) return;
-      pendingRequests.delete(message.id);
+      state.pendingRequests.delete(message.id);
       pending.resolve(message.result);
       return;
     }
     case "api_error": {
-      const pending = pendingRequests.get(message.id);
+      const pending = state.pendingRequests.get(message.id);
       if (!pending) return;
-      pendingRequests.delete(message.id);
+      state.pendingRequests.delete(message.id);
       const errorMessage =
         typeof message.error === "string"
           ? message.error
@@ -87,7 +92,7 @@ function __handleMessage(message) {
       const { id, commandId, args } = message;
       Promise.resolve()
         .then(async () => {
-          const handler = commandHandlers.get(commandId);
+          const handler = state.commandHandlers.get(commandId);
           if (!handler) {
             throw new Error(`Command not registered: ${commandId}`);
           }
@@ -115,7 +120,7 @@ function __handleMessage(message) {
       const { id, functionName, args } = message;
       Promise.resolve()
         .then(async () => {
-          const handler = customFunctionHandlers.get(functionName);
+          const handler = state.customFunctionHandlers.get(functionName);
           if (!handler) {
             throw new Error(`Custom function not registered: ${functionName}`);
           }
@@ -141,7 +146,7 @@ function __handleMessage(message) {
     }
     case "panel_message": {
       const panelId = String(message.panelId ?? "");
-      const handlers = panelMessageHandlers.get(panelId);
+      const handlers = state.panelMessageHandlers.get(panelId);
       if (!handlers) return;
       for (const handler of handlers) {
         try {
@@ -153,7 +158,7 @@ function __handleMessage(message) {
       return;
     }
     case "event": {
-      const handlers = eventHandlers.get(message.event);
+      const handlers = state.eventHandlers.get(message.event);
       if (!handlers) return;
       for (const handler of handlers) {
         try {
@@ -174,12 +179,12 @@ function addEventHandler(event, handler) {
     throw new Error("Event handler must be a function");
   }
   const key = String(event);
-  if (!eventHandlers.has(key)) eventHandlers.set(key, new Set());
-  const set = eventHandlers.get(key);
+  if (!state.eventHandlers.has(key)) state.eventHandlers.set(key, new Set());
+  const set = state.eventHandlers.get(key);
   set.add(handler);
   return new DisposableImpl(() => {
     set.delete(handler);
-    if (set.size === 0) eventHandlers.delete(key);
+    if (set.size === 0) state.eventHandlers.delete(key);
   });
 }
 
@@ -219,12 +224,13 @@ class PanelImpl {
         if (typeof handler !== "function") {
           throw new Error("onDidReceiveMessage handler must be a function");
         }
-        if (!panelMessageHandlers.has(panelId)) panelMessageHandlers.set(panelId, new Set());
-        const set = panelMessageHandlers.get(panelId);
+        if (!state.panelMessageHandlers.has(panelId))
+          state.panelMessageHandlers.set(panelId, new Set());
+        const set = state.panelMessageHandlers.get(panelId);
         set.add(handler);
         return new DisposableImpl(() => {
           set.delete(handler);
-          if (set.size === 0) panelMessageHandlers.delete(panelId);
+          if (set.size === 0) state.panelMessageHandlers.delete(panelId);
         });
       }
     };
@@ -270,11 +276,11 @@ const commands = {
       throw new Error("Command handler must be a function");
     }
 
-    commandHandlers.set(id, handler);
+    state.commandHandlers.set(id, handler);
     await rpcCall("commands", "registerCommand", [id]);
 
     return new DisposableImpl(() => {
-      commandHandlers.delete(id);
+      state.commandHandlers.delete(id);
       rpcCall("commands", "unregisterCommand", [id]).catch(notifyError);
     });
   },
@@ -291,7 +297,7 @@ const functions = {
     if (!def || typeof def !== "object") throw new Error("Function definition must be an object");
     if (typeof def.handler !== "function") throw new Error("Function definition must include handler()");
 
-    customFunctionHandlers.set(fnName, def.handler);
+    state.customFunctionHandlers.set(fnName, def.handler);
     await rpcCall("functions", "register", [
       fnName,
       {
@@ -304,7 +310,7 @@ const functions = {
     ]);
 
     return new DisposableImpl(() => {
-      customFunctionHandlers.delete(fnName);
+      state.customFunctionHandlers.delete(fnName);
       rpcCall("functions", "unregister", [fnName]).catch(notifyError);
     });
   }
@@ -407,8 +413,8 @@ const context = new Proxy(
   {},
   {
     get(_target, prop) {
-      if (prop === "extensionId") return currentContext.extensionId;
-      if (prop === "extensionPath") return currentContext.extensionPath;
+      if (prop === "extensionId") return state.currentContext.extensionId;
+      if (prop === "extensionPath") return state.currentContext.extensionPath;
       return undefined;
     }
   }
@@ -431,4 +437,3 @@ export {
   __setContext,
   __handleMessage
 };
-

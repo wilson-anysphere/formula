@@ -38,6 +38,7 @@ const API_PERMISSIONS = {
   "functions.unregister": [],
 
   "network.fetch": ["network"],
+  "network.openWebSocket": ["network"],
 
   "clipboard.readText": ["clipboard"],
   "clipboard.writeText": ["clipboard"],
@@ -826,6 +827,11 @@ class ExtensionHost {
           bodyText
         };
       }
+
+      case "network.openWebSocket":
+        // Used by worker runtimes to permission-gate WebSocket connections before they
+        // call the platform WebSocket implementation directly.
+        return null;
 
       case "clipboard.readText":
         return this._clipboardText;
