@@ -71,8 +71,8 @@ test("CollabSession↔DocumentController binder masks unreadable remote values/f
   const dcA = new DocumentController();
   const dcB = new DocumentController();
 
-  const binderA = bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
-  const binderB = bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB });
+  const binderA = await bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
+  const binderB = await bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB });
 
   // Perform edits via DocumentController (typical UI path) so we exercise
   // DocumentController→Yjs propagation as well.
@@ -137,8 +137,8 @@ test("CollabSession↔DocumentController binder blocks edits to non-editable cel
   const dcA = new DocumentController();
   const dcB = new DocumentController();
 
-  const binderA = bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
-  const binderB = bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB });
+  const binderA = await bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
+  const binderB = await bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB });
 
   // Seed a value as the editable user.
   dcA.setCellValue("Sheet1", "A1", "original");

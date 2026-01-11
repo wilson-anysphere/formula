@@ -21,7 +21,6 @@ import {
 } from "@formula/collab-encryption";
 
 import { assertValidRole, getCellPermissions, maskCellValue } from "../../permissions/index.js";
-import { bindYjsToDocumentController } from "../../binder/index.js";
 import {
   makeCellKey as makeCellKeyImpl,
   normalizeCellKey as normalizeCellKeyImpl,
@@ -944,7 +943,7 @@ export function createCollabSession(options: CollabSessionOptions = {}): CollabS
 // Backwards-compatible alias (Task 133 naming).
 export const createSession = createCollabSession;
 
-export function bindCollabSessionToDocumentController(options: {
+export async function bindCollabSessionToDocumentController(options: {
   session: CollabSession;
   documentController: any;
   undoService?: { transact?: (fn: () => void) => void; origin?: any } | null;
@@ -955,6 +954,10 @@ export function bindCollabSessionToDocumentController(options: {
   if (!session) throw new Error("bindCollabSessionToDocumentController requires { session }");
   if (!documentController)
     throw new Error("bindCollabSessionToDocumentController requires { documentController }");
+
+  // Avoid importing the Node-oriented binder (and its encryption dependencies)
+  // unless a consumer explicitly opts into DocumentController wiring.
+  const { bindYjsToDocumentController } = await import("../../binder/index.js");
 
   return bindYjsToDocumentController({
     ydoc: session.doc,
