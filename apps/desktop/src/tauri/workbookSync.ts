@@ -17,7 +17,7 @@ type CellDelta = {
 };
 
 type DocumentControllerLike = {
-  on(event: "change", listener: (payload: { deltas: CellDelta[] }) => void): () => void;
+  on(event: "change", listener: (payload: { deltas: CellDelta[]; source?: string }) => void): () => void;
   markSaved(): void;
 };
 

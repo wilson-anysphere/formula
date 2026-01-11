@@ -15,6 +15,10 @@ test("encodeState/applyState roundtrip restores cell inputs and clears history",
   assert.ok(snapshot instanceof Uint8Array);
 
   const restored = new DocumentController();
+  let lastChange = null;
+  restored.on("change", (payload) => {
+    lastChange = payload;
+  });
   restored.applyState(snapshot);
 
   // applyState clears history and marks dirty until the host explicitly marks saved.
@@ -22,6 +26,7 @@ test("encodeState/applyState roundtrip restores cell inputs and clears history",
   assert.equal(restored.canRedo, false);
   assert.equal(restored.isDirty, true);
 
+  assert.equal(lastChange?.source, "applyState");
   assert.equal(restored.getCell("Sheet1", "A1").value, 1);
   const a1 = restored.getCell("Sheet1", "A1");
   assert.deepEqual(restored.styleTable.get(a1.styleId), { bold: true });

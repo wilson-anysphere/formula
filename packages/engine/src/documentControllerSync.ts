@@ -51,7 +51,7 @@ function parseRowColKey(key: string): { row: number; col: number } | null {
 function normalizeFormulaText(formula: string): string {
   const trimmed = formula.trimStart();
   if (trimmed.startsWith("=")) return trimmed;
-  return `=${formula}`;
+  return `=${trimmed}`;
 }
 
 function isRichTextValue(value: unknown): value is { text: string } {

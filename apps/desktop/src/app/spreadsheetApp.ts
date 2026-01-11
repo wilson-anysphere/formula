@@ -218,6 +218,7 @@ export class SpreadsheetApp {
   private wasmEngine: EngineClient | null = null;
   private wasmSyncSuspended = false;
   private wasmUnsubscribe: (() => void) | null = null;
+  private wasmSyncPromise: Promise<void> = Promise.resolve();
 
   private gridCanvas: HTMLCanvasElement;
   private chartLayer: HTMLDivElement;
@@ -551,6 +552,28 @@ export class SpreadsheetApp {
     return this.chartStore.listCharts();
   }
 
+  private enqueueWasmSync(task: (engine: EngineClient) => Promise<void>): Promise<void> {
+    const engine = this.wasmEngine;
+    if (!engine) return Promise.resolve();
+
+    const run = async () => {
+      // The engine may have been replaced/terminated while the task was queued.
+      if (this.wasmEngine !== engine) return;
+      await task(engine);
+    };
+
+    this.wasmSyncPromise = this.wasmSyncPromise
+      .catch(() => {
+        // Ignore prior errors so the chain keeps flowing.
+      })
+      .then(run)
+      .catch(() => {
+        // Ignore WASM sync failures; the DocumentController remains the source of truth.
+      });
+
+    return this.wasmSyncPromise;
+  }
+
   /**
    * Replace the DocumentController state from a snapshot, then hydrate the WASM engine in one step.
    *
@@ -559,13 +582,11 @@ export class SpreadsheetApp {
   async restoreDocumentState(snapshot: Uint8Array): Promise<void> {
     this.wasmSyncSuspended = true;
     try {
+      // Ensure any in-flight sync operations finish before we replace the workbook.
+      await this.wasmSyncPromise;
       this.document.applyState(snapshot);
       if (this.wasmEngine) {
-        try {
-          await engineHydrateFromDocument(this.wasmEngine, this.document);
-        } catch {
-          // Ignore WASM sync failures; the DocumentController remains the source of truth.
-        }
+        await this.enqueueWasmSync((engine) => engineHydrateFromDocument(engine, this.document));
       }
     } finally {
       this.wasmSyncSuspended = false;
@@ -591,16 +612,13 @@ export class SpreadsheetApp {
       this.wasmEngine = engine;
       this.wasmUnsubscribe = this.document.on("change", ({ deltas, source }: { deltas: any[]; source?: string }) => {
         if (!this.wasmEngine || this.wasmSyncSuspended) return;
-        const syncError = () => {
-          // Ignore WASM sync failures; the DocumentController remains the source of truth.
-        };
 
         if (source === "applyState") {
-          void engineHydrateFromDocument(this.wasmEngine, this.document).catch(syncError);
+          void this.enqueueWasmSync((worker) => engineHydrateFromDocument(worker, this.document));
           return;
         }
 
-        void engineApplyDeltas(this.wasmEngine, deltas).catch(syncError);
+        void this.enqueueWasmSync((worker) => engineApplyDeltas(worker, deltas));
       });
     } catch {
       // Ignore initialization failures (e.g. missing WASM bundle).
