@@ -87,6 +87,29 @@ fn sumif_supports_wildcards_and_blank_criteria() {
 }
 
 #[test]
+fn criteria_aggregates_reject_scalar_range_args() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1);
+
+    assert_eq!(
+        sheet.eval(r#"=SUMIF(1,">0")"#),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval(r#"=AVERAGEIF(1,">0")"#),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval(r#"=SUMIFS(1,A1:A1,">0")"#),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval(r#"=AVERAGEIFS(1,A1:A1,">0")"#),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
 fn sumif_propagates_sum_range_errors_only_when_included() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1);
@@ -181,4 +204,3 @@ fn sumif_parses_date_criteria_strings() {
 
     assert_number(&sheet.eval(r#"=SUMIF(A1:A3,">1/1/2020",B1:B3)"#), 3.0);
 }
-
