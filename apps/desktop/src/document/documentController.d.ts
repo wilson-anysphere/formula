@@ -4,5 +4,10 @@ export class DocumentController {
   // area (the runtime implementation is authoritative).
   [key: string]: any;
   constructor(...args: any[]);
-}
 
+  getSheetIds(): string[];
+
+  setCellValue(sheetId: string, coord: unknown, value: unknown, options?: unknown): void;
+  setCellFormula(sheetId: string, coord: unknown, formula: string | null, options?: unknown): void;
+  setRangeFormat(sheetId: string, range: unknown, stylePatch: Record<string, any> | null, options?: unknown): void;
+}

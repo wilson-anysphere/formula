@@ -508,7 +508,7 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
   fetch_external_data: {
     name: "fetch_external_data",
     description:
-      "Fetch external data from an API and write it into the sheet. This tool performs network access and should only run with explicit user approval (it is disabled by default unless allow_external_data is enabled and the host is allowlisted).",
+      "Fetch external data from an API and write it into the sheet. This tool performs network access and should only run with explicit user approval (it is disabled by default unless allow_external_data is enabled and the host is allowlisted). Tool results include provenance metadata (status_code, content_type, content_length_bytes, fetched_at_ms) and report the final resolved URL with secrets redacted for source attribution.",
     paramsSchema: FetchExternalDataParamsSchema,
     jsonSchema: {
       type: "object",
