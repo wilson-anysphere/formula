@@ -633,6 +633,24 @@ Key properties:
 Implication: extensions should be shipped as a bundled CommonJS entrypoint (and can include relative
 chunks inside the extension folder if needed).
 
+### Browser extension sandbox (best-effort)
+
+In the browser runtime, extensions run inside a Web Worker. JavaScript does not provide the same
+process-level or `vm` isolation primitives as Node, so the browser host applies **best-effort**
+guardrails:
+
+- Replace `fetch` and `WebSocket` with permission-gated wrappers and lock them down on `globalThis`
+  (and the prototype chain when possible).
+- Disable other obvious network primitives such as `XMLHttpRequest`.
+- Disable nested script-loading/execution primitives (`importScripts`, `Worker`, `SharedWorker`) to
+  avoid spawning a fresh worker with pristine globals.
+
+Limitations:
+
+- The ESM loader in browsers can still fetch module graphs via `import`/`import()` in ways that are
+  not interceptable from inside a standard worker. Production deployments should pair the worker
+  guardrails with CSP / extension packaging policies that prevent loading untrusted remote scripts.
+
 ### Permission System
 
 ```typescript
