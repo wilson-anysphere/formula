@@ -60,6 +60,7 @@ function strokeAttrs(stroke: Stroke | undefined): string[] {
   attrs.push(...paintAttrs(stroke.paint, "stroke"));
   attrs.push(`stroke-width="${formatNumber(stroke.width)}"`);
   if (stroke.dash?.length) attrs.push(`stroke-dasharray="${stroke.dash.map(formatNumber).join(" ")}"`);
+  if (stroke.dashOffset != null) attrs.push(`stroke-dashoffset="${formatNumber(stroke.dashOffset)}"`);
   if (stroke.lineCap) attrs.push(`stroke-linecap="${stroke.lineCap}"`);
   if (stroke.lineJoin) attrs.push(`stroke-linejoin="${stroke.lineJoin}"`);
   if (stroke.miterLimit != null) attrs.push(`stroke-miterlimit="${formatNumber(stroke.miterLimit)}"`);

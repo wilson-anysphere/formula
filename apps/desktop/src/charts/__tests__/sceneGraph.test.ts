@@ -141,6 +141,7 @@ describe("charts scene graph", () => {
           stroke: {
             paint: { color: "#000000" },
             width: 2,
+            dashOffset: 3,
             lineCap: "round",
             lineJoin: "bevel",
             miterLimit: 2,
@@ -150,6 +151,7 @@ describe("charts scene graph", () => {
     };
 
     const svg = renderSceneToSvg(scene, { width: 10, height: 10 });
+    expect(svg).toContain('stroke-dashoffset="3"');
     expect(svg).toContain('stroke-linecap="round"');
     expect(svg).toContain('stroke-linejoin="bevel"');
     expect(svg).toContain('stroke-miterlimit="2"');

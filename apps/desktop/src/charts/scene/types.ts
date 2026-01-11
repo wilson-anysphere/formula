@@ -17,6 +17,7 @@ export interface Stroke {
   paint: Paint;
   width: number;
   dash?: number[];
+  dashOffset?: number;
   lineCap?: LineCap;
   lineJoin?: LineJoin;
   miterLimit?: number;

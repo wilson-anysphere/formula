@@ -22,6 +22,7 @@ function applyStroke(ctx: CanvasRenderingContext2D, stroke: Stroke | undefined):
   if (stroke.lineJoin) ctx.lineJoin = stroke.lineJoin;
   if (stroke.miterLimit != null) ctx.miterLimit = stroke.miterLimit;
   ctx.setLineDash(stroke.dash ?? []);
+  if (stroke.dashOffset != null) ctx.lineDashOffset = stroke.dashOffset;
   return true;
 }
 
