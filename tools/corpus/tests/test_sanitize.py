@@ -579,6 +579,19 @@ class SanitizeTests(unittest.TestCase):
             rels = z.read("xl/drawings/_rels/vmlDrawing1.vml.rels").decode("utf-8", errors="ignore")
             self.assertNotIn("image1.jpeg", rels)
 
+    def test_leak_scanner_detects_high_risk_patterns(self) -> None:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            z.writestr("xl/workbook.xml", "alice@example.com https://evil.example.com AKIA0123456789ABCDEF eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c \\\\server\\\\share")
+
+        scan = scan_xlsx_bytes_for_leaks(buf.getvalue())
+        self.assertFalse(scan.ok)
+        kinds = {f.kind for f in scan.findings}
+        self.assertIn("email", kinds)
+        self.assertIn("url", kinds)
+        self.assertIn("aws_key", kinds)
+        self.assertIn("jwt", kinds)
+
 
 if __name__ == "__main__":
     unittest.main()
