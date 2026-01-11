@@ -7,10 +7,21 @@ export interface ToolPolicyInput {
   user_text: string;
   has_attachments?: boolean;
   /**
-   * Host configuration: only when enabled and the user explicitly requests external data
-   * will `fetch_external_data` be exposed to the model.
+   * Host configuration: only when enabled *and* the user explicitly requests external
+   * data will `fetch_external_data` be exposed to the model.
+   *
+   * Note: `fetch_external_data` also requires an explicit host allowlist
+   * (`allowed_external_hosts`). If the allowlist is empty, external fetch is treated
+   * as disabled (defense in depth).
    */
   allow_external_data?: boolean;
+  /**
+   * Explicit host allowlist for `fetch_external_data`.
+   *
+   * If omitted or empty, external fetch is treated as disabled even when
+   * `allow_external_data` is true.
+   */
+  allowed_external_hosts?: string[];
 }
 
 export interface ToolPolicyDecision {
@@ -63,6 +74,12 @@ const INLINE_EDIT_BASE_TOOLS: ToolName[] = ["read_range", "write_cell", "set_ran
 
 function normalizeText(value: string): string {
   return String(value ?? "").trim();
+}
+
+function normalizeAllowedExternalHosts(hosts: ToolPolicyInput["allowed_external_hosts"]): string[] {
+  return (hosts ?? [])
+    .map((host) => String(host).trim().toLowerCase())
+    .filter((host) => host.length > 0);
 }
 
 function wantsAnalysis(text: string, hasAttachments: boolean): boolean {
@@ -122,6 +139,7 @@ export function decideAllowedTools(input: ToolPolicyInput): ToolPolicyDecision {
   const text = normalizeText(input.user_text);
   const hasAttachments = Boolean(input.has_attachments);
   const allowExternalData = Boolean(input.allow_external_data);
+  const allowedExternalHosts = normalizeAllowedExternalHosts(input.allowed_external_hosts);
 
   const reasons: string[] = [];
 
@@ -152,9 +170,12 @@ export function decideAllowedTools(input: ToolPolicyInput): ToolPolicyDecision {
   }
 
   // External data fetch is opt-in and always explicit.
-  const includeNetwork = externalRequested && allowExternalData;
+  const externalFetchEnabled = allowExternalData && allowedExternalHosts.length > 0;
+  const includeNetwork = externalRequested && externalFetchEnabled;
   if (externalRequested && !allowExternalData) {
     reasons.push("external data requested but allow_external_data=false -> network tools disabled");
+  } else if (externalRequested && allowExternalData && allowedExternalHosts.length === 0) {
+    reasons.push("external data requested but allowed_external_hosts is empty -> network tools disabled");
   }
 
   // Chat defaults to analysis unless mutation intent is detected.

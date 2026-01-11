@@ -39,9 +39,18 @@ describe("tool policy", () => {
       mode: "chat",
       user_text: "Fetch data from https://example.com/data.json and put it in Sheet1!A1",
       has_attachments: false,
-      allow_external_data: true
+      allow_external_data: true,
+      allowed_external_hosts: ["example.com"]
     });
     expect(requestedAndEnabled.allowed_tools).toContain("fetch_external_data");
+
+    const requestedButMissingAllowlist = decideAllowedTools({
+      mode: "chat",
+      user_text: "Fetch data from https://example.com/data.json and put it in Sheet1!A1",
+      has_attachments: false,
+      allow_external_data: true
+    });
+    expect(requestedButMissingAllowlist.allowed_tools).not.toContain("fetch_external_data");
   });
 
   it("inline_edit never exposes network tools and only exposes formatting when requested", () => {
@@ -78,4 +87,3 @@ describe("tool policy", () => {
     expect(policy.allowed_tools).not.toContain("set_range");
   });
 });
-
