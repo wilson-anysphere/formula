@@ -1,5 +1,6 @@
 use formula_columnar::{
-    ColumnSchema, ColumnType, MutableColumnarTable, PageCacheConfig, TableOptions, Value,
+    ColumnSchema, ColumnType, ColumnarTableBuilder, MutableColumnarTable, PageCacheConfig,
+    TableOptions, Value,
 };
 use std::sync::Arc;
 
@@ -207,4 +208,30 @@ fn delete_rows_rebuilds_and_shifts_indices() {
     assert_eq!(table.get_cell(3, 0), Value::Number(100.0)); // old row 5
     assert_eq!(table.get_cell(4, 0), Value::Number(6.0));
     assert_eq!(table.get_cell(5, 0), Value::Number(7.0));
+}
+
+#[test]
+fn distinct_count_survives_snapshot_and_append() {
+    let schema = vec![ColumnSchema {
+        name: "x".to_owned(),
+        column_type: ColumnType::Number,
+    }];
+    let options = TableOptions {
+        page_size_rows: 4,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+
+    let mut builder = ColumnarTableBuilder::new(schema, options);
+    for v in [1.0, 2.0, 3.0] {
+        builder.append_row(&[Value::Number(v)]);
+    }
+    let table = builder.finalize();
+    assert_eq!(table.scan().stats(0).unwrap().distinct_count, 3);
+
+    let mut mutable = table.into_mutable();
+    mutable.append_row(&[Value::Number(3.0)]);
+    mutable.append_row(&[Value::Number(4.0)]);
+
+    let stats = mutable.column_stats(0).unwrap();
+    assert_eq!(stats.distinct_count, 4);
 }
