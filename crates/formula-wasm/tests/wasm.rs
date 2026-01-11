@@ -149,6 +149,59 @@ fn recalculate_filters_changes_by_sheet_name() {
 }
 
 #[wasm_bindgen_test]
+fn recalculate_orders_changes_by_sheet_row_col() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
+        .unwrap();
+    wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), None)
+        .unwrap();
+
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_f64(10.0),
+        Some("Sheet2".to_string()),
+    )
+    .unwrap();
+    wb.set_cell(
+        "A2".to_string(),
+        JsValue::from_str("=A1*2"),
+        Some("Sheet2".to_string()),
+    )
+    .unwrap();
+
+    // Establish initial formula values.
+    wb.recalculate(None).unwrap();
+
+    // Dirty both sheets before a single recalc tick so ordering is deterministic.
+    wb.set_cell("A1".to_string(), JsValue::from_f64(2.0), None)
+        .unwrap();
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_f64(11.0),
+        Some("Sheet2".to_string()),
+    )
+    .unwrap();
+
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert_eq!(
+        changes,
+        vec![
+            CellChange {
+                sheet: "Sheet1".to_string(),
+                address: "A2".to_string(),
+                value: json!(4),
+            },
+            CellChange {
+                sheet: "Sheet2".to_string(),
+                address: "A2".to_string(),
+                value: json!(22),
+            },
+        ]
+    );
+}
+
+#[wasm_bindgen_test]
 fn recalculate_reports_cleared_spill_outputs_after_edit() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell(
