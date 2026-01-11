@@ -1,3 +1,4 @@
+import * as fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -126,6 +127,9 @@ export class ExtensionHostManager {
     // unload/reload the same extension simultaneously.
     this._syncRunner = null;
     this._syncRequested = false;
+
+    this._stateWatcher = null;
+    this._stateWatchTimer = null;
   }
 
   _runHostOperation(fn) {
@@ -236,10 +240,75 @@ export class ExtensionHostManager {
       }
       this._extensionManagerSubscription = null;
     }
+    this.unwatchStateFile();
     await this._runHostOperation(async () => {
       await this._host.dispose();
       this._started = false;
     });
+  }
+
+  async watchStateFile({ debounceMs = 200 } = {}) {
+    if (this._stateWatcher) return;
+
+    const resolvedStatePath = path.resolve(this.statePath);
+    const dir = path.dirname(resolvedStatePath);
+    const base = path.basename(resolvedStatePath);
+
+    await fs.mkdir(dir, { recursive: true });
+
+    const debounce = Number.isFinite(debounceMs) ? Math.max(0, debounceMs) : 200;
+
+    const scheduleSync = () => {
+      if (this._stateWatchTimer) clearTimeout(this._stateWatchTimer);
+      this._stateWatchTimer = setTimeout(() => {
+        this._stateWatchTimer = null;
+        void this.syncInstalledExtensions().catch((error) => {
+          // eslint-disable-next-line no-console
+          console.warn(`Failed to sync installed extensions: ${String(error?.message ?? error)}`);
+        });
+      }, debounce);
+    };
+
+    try {
+      this._stateWatcher = fsSync.watch(dir, { persistent: false }, (_eventType, filename) => {
+        if (!filename) {
+          scheduleSync();
+          return;
+        }
+        const changed = filename instanceof Buffer ? filename.toString("utf8") : String(filename);
+        if (!changed) {
+          scheduleSync();
+          return;
+        }
+        // Some platforms return a full path (or other non-basename strings) here. Be permissive
+        // and sync whenever the reported filename appears to refer to the state file.
+        if (changed === base || changed.endsWith(`/${base}`) || changed.endsWith(`\\${base}`) || changed.endsWith(base)) {
+          scheduleSync();
+        }
+      });
+    } catch (error) {
+      throw new Error(`Failed to watch extension state file: ${error?.message ?? String(error)}`);
+    }
+
+    this._stateWatcher.on("error", (error) => {
+      // eslint-disable-next-line no-console
+      console.warn(`Extension state file watcher error: ${String(error?.message ?? error)}`);
+    });
+  }
+
+  unwatchStateFile() {
+    if (this._stateWatchTimer) {
+      clearTimeout(this._stateWatchTimer);
+      this._stateWatchTimer = null;
+    }
+    if (this._stateWatcher) {
+      try {
+        this._stateWatcher.close();
+      } catch {
+        // ignore
+      }
+      this._stateWatcher = null;
+    }
   }
 
   bindToExtensionManager(extensionManager) {
