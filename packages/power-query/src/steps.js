@@ -3,6 +3,7 @@ import { DataTable, inferColumnType, makeUniqueColumnNames } from "./table.js";
 import { compilePredicate, compileRowPredicate } from "./predicate.js";
 import { valueKey } from "./valueKey.js";
 import { bindExprColumns, collectExprColumnRefs, evaluateExpr, parseFormula } from "./expr/index.js";
+import { MS_PER_DAY, PqDateTimeZone, PqDecimal, PqDuration, PqTime, parseIsoLikeToUtcDate } from "./values.js";
 
 /** @type {((columns: Record<string, any[] | ArrayLike<any>>) => any) | null} */
 let arrowTableFromColumns = null;
@@ -84,6 +85,14 @@ function compareNonNull(a, b) {
   if (typeof a === "number" && typeof b === "number") return a - b;
   if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
   if (isDate(a) && isDate(b)) return a.getTime() - b.getTime();
+  if (a instanceof PqDateTimeZone && b instanceof PqDateTimeZone) return a.toDate().getTime() - b.toDate().getTime();
+  if (a instanceof PqTime && b instanceof PqTime) return a.milliseconds - b.milliseconds;
+  if (a instanceof PqDuration && b instanceof PqDuration) return a.milliseconds - b.milliseconds;
+  if (a instanceof PqDecimal && b instanceof PqDecimal) {
+    const aNum = Number(a.value);
+    const bNum = Number(b.value);
+    if (Number.isFinite(aNum) && Number.isFinite(bNum)) return aNum - bNum;
+  }
   return valueToString(a).localeCompare(valueToString(b));
 }
 
@@ -364,6 +373,10 @@ const NUMBER_TEXT_RE = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+
  * @returns {number | null}
  */
 function toNumberOrNull(value) {
+  if (value instanceof PqDecimal) {
+    const parsed = Number(value.value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -373,6 +386,39 @@ function toNumberOrNull(value) {
     return Number.isFinite(num) ? num : null;
   }
   return null;
+}
+
+/**
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+function bytesToBase64(bytes) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64");
+  }
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  // eslint-disable-next-line no-undef
+  return btoa(binary);
+}
+
+/**
+ * @param {string} encoded
+ * @returns {Uint8Array}
+ */
+function base64ToBytes(encoded) {
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(encoded, "base64"));
+  }
+  // eslint-disable-next-line no-undef
+  const binary = atob(encoded);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    out[i] = binary.charCodeAt(i);
+  }
+  return out;
 }
 
 /**
@@ -540,6 +586,7 @@ function coerceType(type, value) {
     case "any":
       return value;
     case "string":
+      if (value instanceof Uint8Array) return bytesToBase64(value);
       return String(value);
     case "number": {
       const num = toNumberOrNull(value);
@@ -555,14 +602,98 @@ function coerceType(type, value) {
       }
       return Boolean(value);
     case "date":
-      if (isDate(value)) return value;
+      if (isDate(value)) {
+        // Represent dates as midnight UTC to avoid leaking time components into a date-typed column.
+        return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+      }
+      if (value instanceof PqDateTimeZone) {
+        const d = value.toDate();
+        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+      }
       if (typeof value === "number") {
+        // Engine convention: numbers are treated as epoch milliseconds.
+        // (Excel serial conversion is handled by the host layer.)
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return null;
+        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+      }
+      if (typeof value === "string") {
+        const d = parseIsoLikeToUtcDate(value);
+        if (!d) return null;
+        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+      }
+      return null;
+    case "datetime":
+      if (isDate(value)) return value;
+      if (value instanceof PqDateTimeZone) return value.toDate();
+      if (typeof value === "number") {
+        // Engine convention: numbers are treated as epoch milliseconds.
+        // (Excel serial conversion is handled by the host layer.)
         const d = new Date(value);
         return Number.isNaN(d.getTime()) ? null : d;
       }
       if (typeof value === "string") {
+        const d = parseIsoLikeToUtcDate(value);
+        return d ?? null;
+      }
+      return null;
+    case "datetimezone":
+      if (value instanceof PqDateTimeZone) return value;
+      if (isDate(value)) return new PqDateTimeZone(value, 0);
+      if (typeof value === "number") {
+        // Engine convention: numbers are treated as epoch milliseconds.
+        // (Excel serial conversion is handled by the host layer.)
         const d = new Date(value);
-        return Number.isNaN(d.getTime()) ? null : d;
+        return Number.isNaN(d.getTime()) ? null : new PqDateTimeZone(d, 0);
+      }
+      if (typeof value === "string") {
+        return PqDateTimeZone.from(value) ?? null;
+      }
+      return null;
+    case "time":
+      if (value instanceof PqTime) return value;
+      if (isDate(value)) {
+        return new PqTime(
+          value.getUTCHours() * 3_600_000 + value.getUTCMinutes() * 60_000 + value.getUTCSeconds() * 1000 + value.getUTCMilliseconds(),
+        );
+      }
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return new PqTime(value * MS_PER_DAY);
+      }
+      if (typeof value === "string") {
+        return PqTime.from(value) ?? null;
+      }
+      return null;
+    case "duration":
+      if (value instanceof PqDuration) return value;
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return new PqDuration(value * MS_PER_DAY);
+      }
+      if (typeof value === "string") {
+        return PqDuration.from(value) ?? null;
+      }
+      return null;
+    case "decimal":
+      if (value instanceof PqDecimal) return value;
+      if (typeof value === "number" && Number.isFinite(value)) return new PqDecimal(String(value));
+      if (typeof value === "bigint") return new PqDecimal(value.toString());
+      if (typeof value === "boolean") return new PqDecimal(value ? "1" : "0");
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed === "") return null;
+        if (!NUMBER_TEXT_RE.test(trimmed)) return null;
+        return new PqDecimal(trimmed);
+      }
+      return null;
+    case "binary":
+      if (value instanceof Uint8Array) return value;
+      if (value instanceof ArrayBuffer) return new Uint8Array(value);
+      if (typeof value === "string") {
+        try {
+          return base64ToBytes(value);
+        } catch {
+          return null;
+        }
       }
       return null;
     default: {
@@ -584,7 +715,9 @@ function changeType(table, column, newType) {
   const columns = table.columns.map((col, i) => (i === idx ? { ...col, type: newType } : col));
 
   if (table instanceof ArrowTableAdapter) {
-    if (!arrowTableFromColumns) {
+    const requiresRowTable =
+      newType === "time" || newType === "duration" || newType === "decimal" || newType === "datetimezone";
+    if (!arrowTableFromColumns || requiresRowTable) {
       const vectors = table.columns.map((_c, i) => table.getColumnVector(i));
       const outRows = new Array(table.rowCount);
       for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {

@@ -17,6 +17,7 @@ try {
 
 import { ArrowTableAdapter } from "../arrowTable.js";
 import { DataTable } from "../table.js";
+import { PqDateTimeZone, PqDecimal, PqDuration, PqTime, hasUtcTimeComponent } from "../values.js";
 
 /**
  * @typedef {import("../table.js").Column} Column
@@ -63,11 +64,23 @@ function base64ToBytes(encoded) {
  * @returns {unknown}
  */
 function serializeCell(value) {
+  if (value instanceof PqDateTimeZone) {
+    return { [TYPE_KEY]: "datetimezone", value: value.toString() };
+  }
+  if (value instanceof PqTime) {
+    return { [TYPE_KEY]: "time", value: value.toString() };
+  }
+  if (value instanceof PqDuration) {
+    return { [TYPE_KEY]: "duration", value: value.toString() };
+  }
+  if (value instanceof PqDecimal) {
+    return { [TYPE_KEY]: "decimal", value: value.toString() };
+  }
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return { [TYPE_KEY]: "date", value: value.toISOString() };
+    return { [TYPE_KEY]: hasUtcTimeComponent(value) ? "datetime" : "date", value: value.toISOString() };
   }
   if (value instanceof Uint8Array) {
-    return { [TYPE_KEY]: "bytes", value: bytesToBase64(value) };
+    return { [TYPE_KEY]: "binary", value: bytesToBase64(value) };
   }
   if (value instanceof DataTable || value instanceof ArrowTableAdapter) {
     // Nested tables (e.g. Table.NestedJoin) can appear as cell values. Serialize them
@@ -109,17 +122,36 @@ function deserializeCell(value) {
       }
     }
     // @ts-ignore - runtime
-    if (value[TYPE_KEY] === "date" && typeof value.value === "string") {
+    if ((value[TYPE_KEY] === "date" || value[TYPE_KEY] === "datetime") && typeof value.value === "string") {
       const parsed = new Date(value.value);
       if (!Number.isNaN(parsed.getTime())) return parsed;
     }
     // @ts-ignore - runtime
-    if (value[TYPE_KEY] === "bytes" && typeof value.value === "string") {
+    if ((value[TYPE_KEY] === "binary" || value[TYPE_KEY] === "bytes") && typeof value.value === "string") {
       try {
         return base64ToBytes(value.value);
       } catch {
         return value;
       }
+    }
+    // @ts-ignore - runtime
+    if (value[TYPE_KEY] === "datetimezone" && typeof value.value === "string") {
+      const parsed = PqDateTimeZone.from(value.value);
+      return parsed ?? value;
+    }
+    // @ts-ignore - runtime
+    if (value[TYPE_KEY] === "time" && typeof value.value === "string") {
+      const parsed = PqTime.from(value.value);
+      return parsed ?? value;
+    }
+    // @ts-ignore - runtime
+    if (value[TYPE_KEY] === "duration" && typeof value.value === "string") {
+      const parsed = PqDuration.from(value.value);
+      return parsed ?? value;
+    }
+    // @ts-ignore - runtime
+    if (value[TYPE_KEY] === "decimal" && typeof value.value === "string") {
+      return new PqDecimal(value.value);
     }
     // @ts-ignore - runtime
     if (value[TYPE_KEY] === "number" && typeof value.value === "string") {

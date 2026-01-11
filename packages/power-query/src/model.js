@@ -5,7 +5,7 @@
  */
 
 /**
- * @typedef {"any" | "string" | "number" | "boolean" | "date"} DataType
+ * @typedef {"any" | "string" | "number" | "boolean" | "date" | "datetime" | "datetimezone" | "time" | "duration" | "decimal" | "binary"} DataType
  */
 
 /**

@@ -1,4 +1,21 @@
 import { stableStringify } from "./cache/key.js";
+import { PqDateTimeZone, PqDecimal, PqDuration, PqTime } from "./values.js";
+
+/**
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+function bytesToBase64(bytes) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64");
+  }
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  // eslint-disable-next-line no-undef
+  return btoa(binary);
+}
 
 /**
  * Compute a deterministic string key for a JS value.
@@ -42,6 +59,26 @@ export function valueKey(value) {
         return Number.isNaN(time) ? "date:NaN" : `date:${time}`;
       }
 
+      if (value instanceof PqDecimal) {
+        return `decimal:${value.value}`;
+      }
+
+      if (value instanceof PqTime) {
+        return `time:${value.toString()}`;
+      }
+
+      if (value instanceof PqDuration) {
+        return `duration:${value.toString()}`;
+      }
+
+      if (value instanceof PqDateTimeZone) {
+        return `datetimezone:${value.toString()}`;
+      }
+
+      if (value instanceof Uint8Array) {
+        return `binary:${bytesToBase64(value)}`;
+      }
+
       if (Array.isArray(value)) {
         return `array:${stableStringify(value)}`;
       }
@@ -55,4 +92,3 @@ export function valueKey(value) {
     }
   }
 }
-

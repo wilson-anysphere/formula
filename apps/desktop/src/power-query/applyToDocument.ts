@@ -5,6 +5,7 @@ import { DataTable } from "../../../../packages/power-query/src/table.js";
 
 import type { DocumentController } from "../document/documentController.js";
 import { dateToExcelSerial } from "../shared/valueParsing.js";
+import { MS_PER_DAY, PqDateTimeZone, PqDuration, PqTime } from "../../../../packages/power-query/src/values.js";
 
 export type QuerySheetDestination = {
   sheetId: string;
@@ -60,6 +61,32 @@ function throwIfAborted(signal?: AbortSignal): void {
 type GridBatch = { rowOffset: number; values: unknown[][] };
 
 function cellValueToDocumentInput(value: unknown): unknown {
+  if (value instanceof PqDateTimeZone) {
+    return dateToExcelSerial(value.toDate());
+  }
+
+  if (value instanceof PqTime) {
+    // Excel stores times as a fraction of a day.
+    return value.milliseconds / MS_PER_DAY;
+  }
+
+  if (value instanceof PqDuration) {
+    // Excel stores durations as a number of days (can be fractional / negative).
+    return value.milliseconds / MS_PER_DAY;
+  }
+
+  if (value instanceof Uint8Array) {
+    if (typeof Buffer !== "undefined") {
+      return Buffer.from(value).toString("base64");
+    }
+    let binary = "";
+    for (let i = 0; i < value.length; i++) {
+      binary += String.fromCharCode(value[i]);
+    }
+    // eslint-disable-next-line no-undef
+    return btoa(binary);
+  }
+
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     // Spreadsheet engines expect dates/times as numeric serials (Excel 1900 system).
     // Convert Date objects to serials so they behave like real Excel dates.

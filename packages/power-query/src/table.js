@@ -8,8 +8,10 @@
  * formatting, etc.) so it can run in both the UI preview and a backend worker.
  */
 
+import { hasUtcTimeComponent, isPqDateTimeZone, isPqDecimal, isPqDuration, isPqTime } from "./values.js";
+
 /**
- * @typedef {"any" | "string" | "number" | "boolean" | "date"} DataType
+ * @typedef {"any" | "string" | "number" | "boolean" | "date" | "datetime" | "datetimezone" | "time" | "duration" | "decimal" | "binary"} DataType
  */
 
 /**
@@ -82,6 +84,14 @@ function isDate(value) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {value is Uint8Array}
+ */
+function isBinary(value) {
+  return value instanceof Uint8Array;
+}
+
+/**
  * @param {unknown[]} values
  * @returns {DataType}
  */
@@ -89,6 +99,12 @@ export function inferColumnType(values) {
   let sawNumber = false;
   let sawBoolean = false;
   let sawDate = false;
+  let sawDateTime = false;
+  let sawDateTimeZone = false;
+  let sawTime = false;
+  let sawDuration = false;
+  let sawDecimal = false;
+  let sawBinary = false;
   let sawOther = false;
 
   for (const value of values) {
@@ -101,19 +117,55 @@ export function inferColumnType(values) {
       sawBoolean = true;
       continue;
     }
+    if (isPqDecimal(value)) {
+      sawDecimal = true;
+      continue;
+    }
+    if (isBinary(value)) {
+      sawBinary = true;
+      continue;
+    }
+    if (isPqTime(value)) {
+      sawTime = true;
+      continue;
+    }
+    if (isPqDuration(value)) {
+      sawDuration = true;
+      continue;
+    }
+    if (isPqDateTimeZone(value)) {
+      sawDateTimeZone = true;
+      continue;
+    }
     if (isDate(value)) {
       sawDate = true;
+      if (hasUtcTimeComponent(value)) sawDateTime = true;
       continue;
     }
     sawOther = true;
   }
 
-  const kinds = [sawNumber, sawBoolean, sawDate, sawOther].filter(Boolean).length;
+  const kinds = [
+    sawNumber,
+    sawBoolean,
+    sawDecimal,
+    sawBinary,
+    sawTime,
+    sawDuration,
+    sawDateTimeZone,
+    sawDate,
+    sawOther,
+  ].filter(Boolean).length;
   if (kinds === 0) return "any";
   if (kinds > 1) return "any";
   if (sawNumber) return "number";
   if (sawBoolean) return "boolean";
-  if (sawDate) return "date";
+  if (sawDecimal) return "decimal";
+  if (sawBinary) return "binary";
+  if (sawTime) return "time";
+  if (sawDuration) return "duration";
+  if (sawDateTimeZone) return "datetimezone";
+  if (sawDate) return sawDateTime ? "datetime" : "date";
   return "string";
 }
 

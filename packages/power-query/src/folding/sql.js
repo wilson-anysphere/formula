@@ -6,6 +6,7 @@ import { compileExprToSql, parseFormula } from "../expr/index.js";
 import { collectSourcePrivacy, distinctPrivacyLevels } from "../privacy/firewall.js";
 import { getPrivacyLevel } from "../privacy/levels.js";
 import { getSqlSourceId } from "../privacy/sourceId.js";
+import { PqDateTimeZone } from "../values.js";
 
 /**
  * @typedef {import("../model.js").Query} Query
@@ -1617,6 +1618,10 @@ function makeParam(dialect, params) {
       params.push(dialect.formatDateParam(value));
       return "?";
     }
+    if (value instanceof PqDateTimeZone) {
+      params.push(dialect.formatDateParam(value.toDate()));
+      return "?";
+    }
     params.push(value === undefined ? null : value);
     return "?";
   };
@@ -1758,6 +1763,18 @@ function dataTypeToSqlType(dialect, type) {
           return "BOOLEAN";
         case "date":
           return "TIMESTAMPTZ";
+        case "datetime":
+          return "TIMESTAMP";
+        case "datetimezone":
+          return "TIMESTAMPTZ";
+        case "time":
+          return "TIME";
+        case "duration":
+          return "INTERVAL";
+        case "decimal":
+          return "NUMERIC";
+        case "binary":
+          return "BYTEA";
         default: {
           /** @type {never} */
           const exhausted = type;
@@ -1774,6 +1791,18 @@ function dataTypeToSqlType(dialect, type) {
           return "BOOLEAN";
         case "date":
           return "DATETIME";
+        case "datetime":
+          return "DATETIME";
+        case "datetimezone":
+          return "DATETIME";
+        case "time":
+          return "TIME";
+        case "duration":
+          return null;
+        case "decimal":
+          return "DECIMAL";
+        case "binary":
+          return "BLOB";
         default: {
           /** @type {never} */
           const exhausted = type;
@@ -1790,6 +1819,14 @@ function dataTypeToSqlType(dialect, type) {
           return "INTEGER";
         case "date":
           return "TEXT";
+        case "datetime":
+        case "datetimezone":
+        case "time":
+        case "duration":
+        case "decimal":
+          return "TEXT";
+        case "binary":
+          return "BLOB";
         default: {
           /** @type {never} */
           const exhausted = type;
@@ -1832,8 +1869,44 @@ function changeTypeToSqlExpr(dialect, colRef, newType) {
       return dialect.castText(colRef);
     case "number":
       return safeCastNumberToSql(dialect, colRef);
+    case "datetime":
+    case "datetimezone":
+      return safeCastDateTimeToSql(dialect, colRef, newType);
     default:
       return null;
+  }
+}
+
+/**
+ * @param {SqlDialect} dialect
+ * @param {string} colRef
+ * @param {"datetime" | "datetimezone"} newType
+ * @returns {string | null}
+ */
+function safeCastDateTimeToSql(dialect, colRef, newType) {
+  const sqlType = dataTypeToSqlType(dialect, newType);
+  if (!sqlType) return null;
+
+  // Local `changeType` semantics map unparseable inputs to `null` instead of
+  // throwing. We approximate that behavior by regex-gating the cast. Dialects
+  // without a regex operator (e.g. SQLite) fall back to local execution.
+  const trimmed = `TRIM(${dialect.castText(colRef)})`;
+  const pattern =
+    "'^\\\\d{4}-\\\\d{2}-\\\\d{2}([ T]\\\\d{2}:\\\\d{2}(:\\\\d{2}(\\\\.\\\\d{1,9})?)?([zZ]|[+-]\\\\d{2}(:?\\\\d{2})?)?)?$'";
+  const casted = `CAST(${trimmed} AS ${sqlType})`;
+
+  switch (dialect.name) {
+    case "postgres":
+      return `CASE WHEN ${trimmed} = '' THEN NULL WHEN ${trimmed} ~ ${pattern} THEN ${casted} ELSE NULL END`;
+    case "mysql":
+      return `CASE WHEN ${trimmed} = '' THEN NULL WHEN ${trimmed} REGEXP ${pattern} THEN ${casted} ELSE NULL END`;
+    case "sqlite":
+      return null;
+    default: {
+      /** @type {never} */
+      const exhausted = dialect.name;
+      throw new Error(`Unsupported dialect '${exhausted}'`);
+    }
   }
 }
 

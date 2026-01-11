@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { DataTable } from "../src/table.js";
 import { applyOperation } from "../src/steps.js";
+import { MS_PER_DAY, PqDecimal, PqDuration, PqTime } from "../src/values.js";
 
 function sampleTable() {
   return DataTable.fromGrid(
@@ -158,4 +159,97 @@ test("replaceValues matches Date values by timestamp (not identity)", () => {
   });
 
   assert.deepEqual(result.toGrid(), [["When"], [new Date(ms2)], [new Date(ms2)]]);
+});
+
+test("changeType supports datetime coercion from ISO strings", () => {
+  const table = DataTable.fromGrid(
+    [
+      ["When"],
+      ["2024-01-01T01:02:03.004Z"],
+      ["not a date"],
+    ],
+    { hasHeaders: true, inferTypes: false },
+  );
+
+  const result = applyOperation(table, { type: "changeType", column: "When", newType: "datetime" });
+  const grid = result.toGrid();
+  assert.ok(grid[1][0] instanceof Date);
+  assert.equal(grid[1][0].toISOString(), "2024-01-01T01:02:03.004Z");
+  assert.equal(grid[2][0], null);
+});
+
+test("changeType supports time coercion from numbers (Excel day fraction)", () => {
+  const table = DataTable.fromGrid(
+    [
+      ["Time"],
+      [0.25],
+      [0.5],
+    ],
+    { hasHeaders: true, inferTypes: false },
+  );
+
+  const result = applyOperation(table, { type: "changeType", column: "Time", newType: "time" });
+  const grid = result.toGrid();
+  assert.ok(grid[1][0] instanceof PqTime);
+  assert.equal(grid[1][0].toString(), "06:00:00");
+  assert.ok(grid[2][0] instanceof PqTime);
+  assert.equal(grid[2][0].toString(), "12:00:00");
+});
+
+test("changeType supports duration coercion from numbers (days)", () => {
+  const table = DataTable.fromGrid(
+    [
+      ["Dur"],
+      [1.5],
+      ["P1DT12H"],
+      ["bad"],
+    ],
+    { hasHeaders: true, inferTypes: false },
+  );
+
+  const result = applyOperation(table, { type: "changeType", column: "Dur", newType: "duration" });
+  const grid = result.toGrid();
+  assert.ok(grid[1][0] instanceof PqDuration);
+  assert.equal(grid[1][0].milliseconds, 1.5 * MS_PER_DAY);
+  assert.ok(grid[2][0] instanceof PqDuration);
+  assert.equal(grid[2][0].toString(), "P1DT12H");
+  assert.equal(grid[3][0], null);
+});
+
+test("changeType supports decimal coercion", () => {
+  const table = DataTable.fromGrid(
+    [
+      ["Dec"],
+      ["123.450"],
+      [1.25],
+      [true],
+      ["bad"],
+    ],
+    { hasHeaders: true, inferTypes: false },
+  );
+
+  const result = applyOperation(table, { type: "changeType", column: "Dec", newType: "decimal" });
+  const grid = result.toGrid();
+  assert.ok(grid[1][0] instanceof PqDecimal);
+  assert.equal(grid[1][0].toString(), "123.450");
+  assert.ok(grid[2][0] instanceof PqDecimal);
+  assert.equal(grid[2][0].toString(), "1.25");
+  assert.ok(grid[3][0] instanceof PqDecimal);
+  assert.equal(grid[3][0].toString(), "1");
+  assert.equal(grid[4][0], null);
+});
+
+test("changeType supports binary coercion from base64 strings", () => {
+  const table = DataTable.fromGrid(
+    [
+      ["Bin"],
+      ["AQID"],
+    ],
+    { hasHeaders: true, inferTypes: false },
+  );
+
+  const result = applyOperation(table, { type: "changeType", column: "Bin", newType: "binary" });
+  const grid = result.toGrid();
+  assert.ok(grid[1][0] instanceof Uint8Array);
+  assert.deepEqual(grid[1][0], new Uint8Array([1, 2, 3]));
 });

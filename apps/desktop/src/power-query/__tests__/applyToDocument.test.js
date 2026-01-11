@@ -9,6 +9,7 @@ import { MockEngine } from "../../document/engine.js";
 
 import { applyQueryToDocument } from "../applyToDocument.ts";
 import { dateToExcelSerial } from "../../shared/valueParsing.js";
+import { MS_PER_DAY, PqDuration, PqTime } from "../../../../../packages/power-query/src/values.js";
 
 test("applyQueryToDocument requests non-materializing streaming execution", async () => {
   const engine = {
@@ -126,6 +127,38 @@ test("applyQueryToDocument converts Date objects into Excel serial numbers", asy
   const cell = doc.getCell("Sheet1", { row: 1, col: 0 });
   assert.equal(cell.value, dateToExcelSerial(when));
   assert.equal(cell.formula, null);
+});
+
+test("applyQueryToDocument converts datetime/time/duration values into Excel serial numbers", async () => {
+  const engine = new QueryEngine();
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const when = new Date("2020-01-01T12:00:00.000Z");
+  const time = new PqTime(6 * 60 * 60 * 1000 + 30 * 60 * 1000);
+  const duration = new PqDuration(1.5 * MS_PER_DAY);
+
+  const query = {
+    id: "q_datetime_time_duration",
+    name: "Datetime/Time/Duration",
+    source: {
+      type: "range",
+      range: {
+        values: [
+          ["When", "Time", "Duration"],
+          [when, time, duration],
+        ],
+        hasHeaders: true,
+      },
+    },
+    steps: [],
+  };
+
+  const destination = { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true };
+  await applyQueryToDocument(doc, query, destination, { engine, batchSize: 2 });
+
+  assert.equal(doc.getCell("Sheet1", { row: 1, col: 0 }).value, dateToExcelSerial(when));
+  assert.equal(doc.getCell("Sheet1", { row: 1, col: 1 }).value, time.milliseconds / MS_PER_DAY);
+  assert.equal(doc.getCell("Sheet1", { row: 1, col: 2 }).value, duration.milliseconds / MS_PER_DAY);
 });
 
 test("applyQueryToDocument supports HTTP sources via injected HttpConnector", async () => {

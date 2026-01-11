@@ -80,9 +80,15 @@ export function identifierPartsToName(parts) {
 export function mTypeNameToDataType(name) {
   const lower = name.trim().toLowerCase();
   if (lower === "number") return "number";
+  if (lower === "decimal" || lower === "currency") return "decimal";
   if (lower === "text" || lower === "string") return "string";
   if (lower === "logical" || lower === "bool" || lower === "boolean") return "boolean";
   if (lower === "date") return "date";
+  if (lower === "datetime") return "datetime";
+  if (lower === "datetimezone") return "datetimezone";
+  if (lower === "time") return "time";
+  if (lower === "duration") return "duration";
+  if (lower === "binary") return "binary";
   return "any";
 }
 
@@ -93,12 +99,18 @@ export function mTypeNameToDataType(name) {
  */
 export function identifierToDataType(name) {
   const lower = name.toLowerCase();
-  if (lower === "int64.type" || lower === "double.type" || lower === "currency.type" || lower === "number.type") {
+  if (lower === "int64.type" || lower === "double.type" || lower === "number.type") {
     return "number";
   }
+  if (lower === "currency.type" || lower === "decimal.type") return "decimal";
   if (lower === "text.type" || lower === "string.type") return "string";
   if (lower === "logical.type" || lower === "bool.type" || lower === "boolean.type") return "boolean";
   if (lower === "date.type") return "date";
+  if (lower === "datetime.type") return "datetime";
+  if (lower === "datetimezone.type") return "datetimezone";
+  if (lower === "time.type") return "time";
+  if (lower === "duration.type") return "duration";
+  if (lower === "binary.type") return "binary";
   if (lower === "any.type") return "any";
   return null;
 }
