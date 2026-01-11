@@ -1,54 +1,57 @@
 .git
 .github
+.gitignore
 
-# Node / monorepo artifacts
-node_modules
-**/node_modules
-.pnpm-store
-**/.pnpm-store
-dist
-**/dist
-build
-**/build
+# Rust build output
+target/
+**/target/
 
-# Rust artifacts
-target
-**/target
+# Node build output / deps
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+**/build/
+.pnpm-store/
+**/.pnpm-store/
+.turbo/
+**/.turbo/
+.vite/
+**/.vite/
+.cache/
+**/.cache/
+coverage/
+**/coverage/
+playwright-report/
+**/playwright-report/
+test-results/
+**/test-results/
 
-# Tooling / caches
-.cache
-**/.cache
-.turbo
-**/.turbo
-.vite
-**/.vite
-coverage
-**/coverage
-playwright-report
-**/playwright-report
-test-results
-**/test-results
-
-# Local runtime state
-.sync-server-data
-services/sync-server/.sync-server-data
-.formula
-apps/desktop/.formula
-
-# Local secrets (don't send to the daemon as build context)
+# Local state / secrets
 .env
 .env.*
 **/.env
 **/.env.*
+.sync-server-data/
+services/sync-server/.sync-server-data/
 
-# Misc
+# App/runtime state
+.formula/
+apps/desktop/.formula/
+
+# Misc logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
+
+# OS/editor noise
 .DS_Store
 **/.DS_Store
+.idea/
+.vscode/
 
-# Local-only agent files
+# Local-only agent files (never commit)
 scratchpad.md
 handoff.md

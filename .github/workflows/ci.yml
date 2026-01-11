@@ -102,3 +102,37 @@ jobs:
 
       - name: Run node:test suite
         run: pnpm test:node
+
+  sync-server-docker:
+    name: Sync server Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build sync-server image
+        run: docker build -f services/sync-server/Dockerfile . -t formula-sync-server:ci
+
+      - name: Smoke test container
+        run: |
+          set -euo pipefail
+          docker run -d \
+            -p 12345:1234 \
+            -e SYNC_SERVER_AUTH_TOKEN=ci-token \
+            --name sync-server \
+            formula-sync-server:ci
+
+          cleanup() {
+            docker logs sync-server --tail 200 || true
+            docker rm -f sync-server || true
+          }
+          trap cleanup EXIT
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:12345/healthz > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          curl -fsS http://127.0.0.1:12345/healthz
