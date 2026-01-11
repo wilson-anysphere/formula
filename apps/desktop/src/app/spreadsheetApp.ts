@@ -350,6 +350,7 @@ export class SpreadsheetApp {
     this.sheetId = sheetId;
     this.chartStore.setDefaultSheet(sheetId);
     this.renderGrid();
+    this.renderCharts();
     this.renderSelection();
     this.updateStatus();
   }
@@ -360,7 +361,9 @@ export class SpreadsheetApp {
   activateCell(target: { sheetId?: string; row: number; col: number }): void {
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
+      this.chartStore.setDefaultSheet(target.sheetId);
       this.renderGrid();
+      this.renderCharts();
     }
     this.selection = setActiveCell(this.selection, { row: target.row, col: target.col }, this.limits);
     this.renderSelection();
@@ -374,7 +377,9 @@ export class SpreadsheetApp {
   selectRange(target: { sheetId?: string; range: Range }): void {
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
+      this.chartStore.setDefaultSheet(target.sheetId);
       this.renderGrid();
+      this.renderCharts();
     }
     const active = { row: target.range.startRow, col: target.range.startCol };
     this.selection = buildSelection(
@@ -858,12 +863,13 @@ export class SpreadsheetApp {
       getRange: (rangeRef: string) => {
         const parsed = parseA1Range(rangeRef);
         if (!parsed) return [];
+        const sheetId = parsed.sheetName ?? this.sheetId;
 
         const out: unknown[][] = [];
         for (let r = parsed.startRow; r <= parsed.endRow; r += 1) {
           const row: unknown[] = [];
           for (let c = parsed.startCol; c <= parsed.endCol; c += 1) {
-            const state = this.document.getCell(this.sheetId, { row: r, col: c }) as {
+            const state = this.document.getCell(sheetId, { row: r, col: c }) as {
               value: unknown;
               formula: string | null;
             };
