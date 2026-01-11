@@ -2,7 +2,7 @@ import type { SpreadsheetApi } from "../spreadsheet/api.js";
 import type { ToolExecutorOptions, ToolExecutionResult } from "../executor/tool-executor.js";
 import { ToolExecutor } from "../executor/tool-executor.js";
 import { PreviewEngine, type PreviewEngineOptions, type ToolPlanPreview } from "../preview/preview-engine.js";
-import { SPREADSHEET_TOOL_DEFINITIONS, type ToolDefinition, type ToolName } from "../tool-schema.js";
+import { SPREADSHEET_TOOL_DEFINITIONS, TOOL_CAPABILITIES, ToolNameSchema, type ToolDefinition, type ToolName } from "../tool-schema.js";
 
 export interface LLMToolCall {
   id?: string;
@@ -59,6 +59,15 @@ export interface SpreadsheetLLMToolExecutorOptions extends ToolExecutorOptions {
    * external network access.
    */
   require_approval_for_mutations?: boolean;
+
+  /**
+   * Optional allowlist for tools exposed to the model.
+   *
+   * This is enforced at two levels:
+   * - `SpreadsheetLLMToolExecutor.tools` only includes allowed tool definitions
+   * - `SpreadsheetLLMToolExecutor.execute` rejects disallowed tool calls even if a model attempts them
+   */
+  allowed_tools?: ToolName[] | ((name: ToolName) => boolean);
 }
 
 export interface LLMToolDefinition extends ToolDefinition {
@@ -66,15 +75,7 @@ export interface LLMToolDefinition extends ToolDefinition {
 }
 
 export function isSpreadsheetMutationTool(name: ToolName): boolean {
-  switch (name) {
-    case "read_range":
-    case "filter_range":
-    case "detect_anomalies":
-    case "compute_statistics":
-      return false;
-    default:
-      return true;
-  }
+  return TOOL_CAPABILITIES[name].mutates_workbook;
 }
 
 export function getSpreadsheetToolDefinitions(options: { require_approval_for_mutations?: boolean } = {}): LLMToolDefinition[] {
@@ -99,13 +100,55 @@ export function getSpreadsheetToolDefinitions(options: { require_approval_for_mu
 export class SpreadsheetLLMToolExecutor {
   readonly tools: LLMToolDefinition[];
   private readonly executor: ToolExecutor;
+  private readonly isAllowedTool: (name: ToolName) => boolean;
 
   constructor(spreadsheet: SpreadsheetApi, options: SpreadsheetLLMToolExecutorOptions = {}) {
     this.executor = new ToolExecutor(spreadsheet, options);
-    this.tools = getSpreadsheetToolDefinitions({ require_approval_for_mutations: options.require_approval_for_mutations });
+    this.isAllowedTool = createAllowedToolPredicate(options.allowed_tools);
+
+    const allTools = getSpreadsheetToolDefinitions({ require_approval_for_mutations: options.require_approval_for_mutations });
+    this.tools = options.allowed_tools ? allTools.filter((tool) => this.isAllowedTool(tool.name)) : allTools;
   }
 
   async execute(call: LLMToolCall): Promise<ToolExecutionResult> {
+    const startedAt = nowMs();
+
+    const nameParse = ToolNameSchema.safeParse(call.name);
+    if (!nameParse.success) {
+      return {
+        tool: "read_range",
+        ok: false,
+        timing: { started_at_ms: startedAt, duration_ms: nowMs() - startedAt },
+        error: { code: "not_implemented", message: `Tool "${call.name}" is not implemented.` }
+      } as ToolExecutionResult;
+    }
+
+    const name = nameParse.data;
+    if (!this.isAllowedTool(name)) {
+      return {
+        tool: name,
+        ok: false,
+        timing: { started_at_ms: startedAt, duration_ms: nowMs() - startedAt },
+        error: { code: "permission_denied", message: `Tool "${name}" is not allowed in this context.` }
+      } as ToolExecutionResult;
+    }
+
     return this.executor.execute({ name: call.name, parameters: call.arguments });
   }
+}
+
+function createAllowedToolPredicate(
+  allowedTools: SpreadsheetLLMToolExecutorOptions["allowed_tools"]
+): (name: ToolName) => boolean {
+  if (!allowedTools) return () => true;
+  if (Array.isArray(allowedTools)) {
+    const allowSet = new Set<ToolName>(allowedTools);
+    return (name) => allowSet.has(name);
+  }
+  return allowedTools;
+}
+
+function nowMs(): number {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
+  return Date.now();
 }

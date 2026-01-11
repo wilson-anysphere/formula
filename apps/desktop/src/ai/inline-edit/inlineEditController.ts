@@ -4,6 +4,7 @@ import type { Range } from "../../selection/types";
 
 import { ToolExecutor, PreviewEngine, runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/index.js";
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
+import { decideAllowedTools } from "../../../../../packages/ai-tools/src/llm/toolPolicy.js";
 
 import { OpenAIClient } from "../../../../../packages/llm/src/openai.js";
 
@@ -180,10 +181,17 @@ export class InlineEditController {
         prompt: params.prompt
       });
 
+      const toolPolicy = decideAllowedTools({
+        mode: "inline_edit",
+        user_text: params.prompt,
+        has_attachments: true,
+        allow_external_data: false
+      });
       const toolExecutor = new SpreadsheetLLMToolExecutor(api, {
         default_sheet: params.sheetId,
         require_approval_for_mutations: true,
-        dlp
+        dlp,
+        allowed_tools: toolPolicy.allowed_tools
       });
       const abortableToolExecutor = {
         tools: toolExecutor.tools,
@@ -200,6 +208,7 @@ export class InlineEditController {
 
       try {
         this.overlay.setRunning("Running AI tools…");
+        const offeredTools = toolExecutor.tools.map((t) => t.name);
         await runChatWithToolsAudited({
           client: {
             chat: async (request: any) => {
@@ -227,14 +236,20 @@ export class InlineEditController {
           },
           tool_executor: abortableToolExecutor as any,
           messages,
-           audit: {
-              audit_store: auditStore,
-              session_id: sessionId,
-              workbook_id: workbookId,
-              mode: "inline_edit",
-              input: { prompt: params.prompt, selection: selectionRef, workbookId, sheetId: params.sheetId },
-              model
+          audit: {
+            audit_store: auditStore,
+            session_id: sessionId,
+            workbook_id: workbookId,
+            mode: "inline_edit",
+            input: {
+              prompt: params.prompt,
+              selection: selectionRef,
+              workbookId,
+              sheetId: params.sheetId,
+              offered_tools: offeredTools
             },
+            model
+          },
           require_approval: async (call) => {
             this.overlay.setRunning("Generating preview…");
             throwIfAborted(signal);

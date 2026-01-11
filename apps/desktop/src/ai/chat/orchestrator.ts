@@ -18,6 +18,7 @@ import type {
 } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import { SpreadsheetLLMToolExecutor, createPreviewApprovalHandler } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import { runChatWithToolsAuditedVerified } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
+import { decideAllowedTools } from "../../../../../packages/ai-tools/src/llm/toolPolicy.js";
 import type { PreviewEngineOptions, ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 
@@ -244,11 +245,18 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     ];
 
     const toolResults: ToolExecutionResult[] = [];
+    const toolPolicy = decideAllowedTools({
+      mode: "chat",
+      user_text: text,
+      has_attachments: attachments.length > 0,
+      allow_external_data: Boolean(options.toolExecutorOptions?.allow_external_data)
+    });
     const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
       ...(options.toolExecutorOptions ?? {}),
       default_sheet: activeSheetId,
       require_approval_for_mutations: true,
-      dlp
+      dlp,
+      allowed_tools: toolPolicy.allowed_tools
     });
 
     const toolTokens = estimateToolDefinitionTokens(toolExecutor.tools as any, estimator);
@@ -357,7 +365,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
             attachments,
             workbookId: options.workbookId,
             sheetId: activeSheetId,
-            context: summarizeContextForAudit(workbookContext)
+            context: summarizeContextForAudit(workbookContext),
+            offered_tools: toolPolicy.allowed_tools
           }
         }
       });

@@ -16,6 +16,42 @@ export type ToolName =
   | "compute_statistics"
   | "fetch_external_data";
 
+export type ToolCategory = "read" | "compute" | "mutate" | "format" | "network";
+
+export interface ToolCapabilityMetadata {
+  category: ToolCategory;
+  mutates_workbook: boolean;
+  /**
+   * Higher risk tools include external network access and operations that are
+   * commonly large/diffuse (e.g. bulk range writes, sorts).
+   *
+   * NOTE: This is static metadata; runtime preview + approval gating remains the
+   * authoritative safety mechanism.
+   */
+  high_risk: boolean;
+}
+
+/**
+ * Static capability metadata for each spreadsheet tool.
+ *
+ * IMPORTANT: This metadata is TypeScript-only and must not affect the JSON
+ * schema sent to LLM providers.
+ */
+export const TOOL_CAPABILITIES: Record<ToolName, ToolCapabilityMetadata> = {
+  read_range: { category: "read", mutates_workbook: false, high_risk: false },
+  write_cell: { category: "mutate", mutates_workbook: true, high_risk: false },
+  set_range: { category: "mutate", mutates_workbook: true, high_risk: true },
+  apply_formula_column: { category: "mutate", mutates_workbook: true, high_risk: true },
+  create_pivot_table: { category: "mutate", mutates_workbook: true, high_risk: true },
+  create_chart: { category: "mutate", mutates_workbook: true, high_risk: false },
+  sort_range: { category: "mutate", mutates_workbook: true, high_risk: true },
+  filter_range: { category: "read", mutates_workbook: false, high_risk: false },
+  apply_formatting: { category: "format", mutates_workbook: true, high_risk: false },
+  detect_anomalies: { category: "compute", mutates_workbook: false, high_risk: false },
+  compute_statistics: { category: "compute", mutates_workbook: false, high_risk: false },
+  fetch_external_data: { category: "network", mutates_workbook: true, high_risk: true }
+};
+
 export const ToolNameSchema = z.enum([
   "read_range",
   "write_cell",

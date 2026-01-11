@@ -63,4 +63,30 @@ describe("llm integration helpers", () => {
     expect(result.ok).toBe(true);
     expect(workbook.getCell(parseA1Cell("Sheet1!A1")).value).toBe(42);
   });
+
+  it("SpreadsheetLLMToolExecutor enforces allowed_tools (disallowed tools cannot execute)", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+
+    const executor = new SpreadsheetLLMToolExecutor(workbook, { allowed_tools: ["read_range"] });
+    expect(executor.tools.map((t) => t.name)).toEqual(["read_range"]);
+
+    const denied = await executor.execute({
+      id: "call-1",
+      name: "write_cell",
+      arguments: { cell: "Sheet1!A1", value: 42 }
+    });
+
+    expect(denied.ok).toBe(false);
+    expect(denied.error?.code).toBe("permission_denied");
+    expect(workbook.getCell(parseA1Cell("Sheet1!A1")).value).toBe(1);
+
+    const unknown = await executor.execute({
+      id: "call-2",
+      name: "nonexistent_tool",
+      arguments: {}
+    });
+    expect(unknown.ok).toBe(false);
+    expect(unknown.error?.code).toBe("not_implemented");
+  });
 });
