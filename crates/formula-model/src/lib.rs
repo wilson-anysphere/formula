@@ -23,6 +23,7 @@ pub mod pivots;
 mod merge;
 mod outline;
 mod style;
+mod theme;
 pub mod table;
 mod value;
 mod workbook;
@@ -42,6 +43,11 @@ pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
 pub use style::{
     Alignment, Border, BorderEdge, BorderStyle, Color, Fill, FillPattern, Font,
     HorizontalAlignment, Protection, Style, StyleTable, VerticalAlignment,
+};
+pub use theme::{
+    indexed_color_argb, number_format_color, parse_number_format_color_token, resolve_color,
+    resolve_color_in_context, resolve_number_format_color, ArgbColor, ColorContext, ThemeColorSlot,
+    ThemePalette,
 };
 pub use table::{
     AutoFilter, FilterColumn, SortCondition, SortState, Table, TableArea, TableColumn, TableStyleInfo,

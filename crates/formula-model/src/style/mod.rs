@@ -5,6 +5,8 @@ use serde::de::Error as _;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::theme::{ColorContext, ThemePalette};
+
 /// An Excel color reference.
 ///
 /// `Argb` serializes as a `#AARRGGBB` hex string for IPC friendliness.
@@ -38,6 +40,23 @@ impl Color {
             Color::Argb(v) => Some(v),
             _ => None,
         }
+    }
+
+    /// Resolve this color reference into a concrete ARGB value (`0xAARRGGBB`).
+    ///
+    /// For context-dependent colors like `Auto`, prefer [`Color::resolve_in_context`].
+    pub fn resolve(self, theme: Option<&ThemePalette>) -> Option<u32> {
+        crate::resolve_color(self, theme)
+    }
+
+    /// Resolve this color reference into a concrete ARGB value (`0xAARRGGBB`), using `context`
+    /// to determine how `Auto` should be rendered.
+    pub fn resolve_in_context(
+        self,
+        theme: Option<&ThemePalette>,
+        context: ColorContext,
+    ) -> Option<u32> {
+        crate::resolve_color_in_context(self, theme, context)
     }
 
     fn to_hex(self) -> Option<String> {

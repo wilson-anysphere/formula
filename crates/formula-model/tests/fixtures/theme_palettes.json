@@ -1,0 +1,30 @@
+{
+  "office_2007": {
+    "dk1": "#FF000000",
+    "lt1": "#FFFFFFFF",
+    "dk2": "#FF1F497D",
+    "lt2": "#FFEEECE1",
+    "accent1": "#FF4F81BD",
+    "accent2": "#FFC0504D",
+    "accent3": "#FF9BBB59",
+    "accent4": "#FF8064A2",
+    "accent5": "#FF4BACC6",
+    "accent6": "#FFF79646",
+    "hlink": "#FF0000FF",
+    "folHlink": "#FF800080"
+  },
+  "office_2013": {
+    "dk1": "#FF000000",
+    "lt1": "#FFFFFFFF",
+    "dk2": "#FF44546A",
+    "lt2": "#FFE7E6E6",
+    "accent1": "#FF5B9BD5",
+    "accent2": "#FFED7D31",
+    "accent3": "#FFA5A5A5",
+    "accent4": "#FFFFC000",
+    "accent5": "#FF4472C4",
+    "accent6": "#FF70AD47",
+    "hlink": "#FF0563C1",
+    "folHlink": "#FF954F72"
+  }
+}
