@@ -246,7 +246,15 @@ export class VersionManager extends EventEmitter {
     if (retention.maxSnapshots == null && retention.maxAgeMs == null) return;
 
     const versions = await this.store.listVersions();
-    const ordered = [...versions].sort((a, b) => b.timestampMs - a.timestampMs);
+    // Preserve the store's ordering as a stable tie-breaker when timestamps are equal.
+    // (Some stores maintain an insertion index; re-sorting purely by timestamp can
+    // lead to unstable pruning when snapshots are created within the same ms.)
+    const originalIndex = new Map(versions.map((v, idx) => [v.id, idx]));
+    const ordered = [...versions].sort((a, b) => {
+      const dt = b.timestampMs - a.timestampMs;
+      if (dt !== 0) return dt;
+      return (originalIndex.get(a.id) ?? 0) - (originalIndex.get(b.id) ?? 0);
+    });
 
     /** @type {Set<string>} */
     const deleteIds = new Set();
