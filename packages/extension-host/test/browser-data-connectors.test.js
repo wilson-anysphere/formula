@@ -306,3 +306,58 @@ test("BrowserExtensionHost: data connector timeout terminates worker and allows 
 
   assert.deepEqual(await host.invokeDataConnector(connectorId, "browse", {}), { ok: true });
 });
+
+test("BrowserExtensionHost: unloadExtension releases connector ids for future loads", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  const scenarios = [{ onPostMessage(msg) { if (msg?.type === "init") return; } }];
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const connectorId = "test.connector";
+  const extensionAId = "test.data-connector-unload-a";
+  const extensionBId = "test.data-connector-unload-b";
+
+  await host.loadExtension({
+    extensionId: extensionAId,
+    extensionPath: "memory://connectors/a/",
+    mainUrl: "memory://connectors/a/main.mjs",
+    manifest: {
+      name: "data-connector-unload-a",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [], dataConnectors: [{ id: connectorId, name: "Test" }] },
+      activationEvents: [],
+      permissions: []
+    }
+  });
+
+  await host.unloadExtension(extensionAId);
+
+  await assert.doesNotReject(() =>
+    host.loadExtension({
+      extensionId: extensionBId,
+      extensionPath: "memory://connectors/b/",
+      mainUrl: "memory://connectors/b/main.mjs",
+      manifest: {
+        name: "data-connector-unload-b",
+        publisher: "test",
+        version: "1.0.0",
+        engines: { formula: "^1.0.0" },
+        contributes: { commands: [], customFunctions: [], dataConnectors: [{ id: connectorId, name: "Test" }] },
+        activationEvents: [],
+        permissions: []
+      }
+    })
+  );
+});

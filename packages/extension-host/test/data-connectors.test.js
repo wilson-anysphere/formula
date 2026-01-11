@@ -219,6 +219,60 @@ test("data connectors: timeout terminates worker, rejects in-flight requests, an
   assert.deepEqual(await host.invokeDataConnector(connectorId, "browse", {}), { ok: true });
 });
 
+test("data connectors: unloadExtension releases connector ids for future loads", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-data-connector-unload-"));
+  const extADir = path.join(dir, "ext-a");
+  const extBDir = path.join(dir, "ext-b");
+
+  const connectorId = "test.connector";
+
+  await writeExtension(
+    extADir,
+    {
+      name: "data-connector-unload-a",
+      version: "1.0.0",
+      publisher: "test",
+      main: "extension.js",
+      engines: { formula: "^1.0.0" },
+      contributes: {
+        dataConnectors: [{ id: connectorId, name: "Test Connector" }]
+      }
+    },
+    `module.exports.activate = async () => {};`
+  );
+
+  await writeExtension(
+    extBDir,
+    {
+      name: "data-connector-unload-b",
+      version: "1.0.0",
+      publisher: "test",
+      main: "extension.js",
+      engines: { formula: "^1.0.0" },
+      contributes: {
+        dataConnectors: [{ id: connectorId, name: "Test Connector" }]
+      }
+    },
+    `module.exports.activate = async () => {};`
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionAId = await host.loadExtension(extADir);
+  await host.unloadExtension(extensionAId);
+
+  await assert.doesNotReject(() => host.loadExtension(extBDir));
+});
+
 test("sample-hello: sample data connector can be invoked", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sample-connector-"));
 
@@ -245,4 +299,3 @@ test("sample-hello: sample data connector can be invoked", async (t) => {
     ]
   });
 });
-
