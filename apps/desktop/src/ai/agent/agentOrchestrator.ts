@@ -275,7 +275,12 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
         iteration += 1;
         emit({ type: "planning", iteration });
         await refreshSystemMessage(request.messages);
-        return guard(params.llmClient.chat({ ...request, model: request.model ?? params.model }));
+        const response = await guard(params.llmClient.chat({ ...request, model: request.model ?? params.model }));
+        const content = response?.message?.content;
+        if (typeof content === "string" && content.trim()) {
+          emit({ type: "assistant_message", iteration, content });
+        }
+        return response;
       }
     };
 
@@ -334,8 +339,6 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
         }
       })
     );
-
-    emit({ type: "assistant_message", iteration, content: result.final });
 
     const finalResult: AgentTaskResult = {
       status: "complete",
