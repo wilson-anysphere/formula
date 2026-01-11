@@ -113,6 +113,14 @@ export class VersionManager extends EventEmitter {
   }
 
   /**
+   * @param {string} versionId
+   */
+  async deleteVersion(versionId) {
+    await this.store.deleteVersion(versionId);
+    this.emit("versionDeleted", { id: versionId });
+  }
+
+  /**
    * Create a periodic snapshot (auto-save) iff the document is dirty.
    * @returns {Promise<VersionRecord | null>}
    */

@@ -5,6 +5,22 @@ export const EMU_PER_INCH = 914_400;
 export const PX_PER_INCH = 96;
 export const EMU_PER_PX = EMU_PER_INCH / PX_PER_INCH;
 
+function resolveOverlayColorTokens(): {
+  placeholderChartStroke: string;
+  placeholderOtherStroke: string;
+  placeholderLabel: string;
+  selectionStroke: string;
+  selectionHandleFill: string;
+} {
+  return {
+    placeholderChartStroke: resolveCssVar("--chart-series-1", "blue"),
+    placeholderOtherStroke: resolveCssVar("--chart-series-2", "cyan"),
+    placeholderLabel: resolveCssVar("--text-primary", "black"),
+    selectionStroke: resolveCssVar("--selection-border", "blue"),
+    selectionHandleFill: resolveCssVar("--bg-primary", "white")
+  };
+}
+
 export interface GridGeometry {
   /** Sheet-space pixel origin for the top-left of a cell. */
   cellOriginPx(cell: { row: number; col: number }): { x: number; y: number };
@@ -102,6 +118,7 @@ export class DrawingOverlay {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, viewport.width, viewport.height);
 
+    const colors = resolveOverlayColorTokens();
     const ordered = [...objects].sort((a, b) => a.zOrder - b.zOrder);
 
     for (const obj of ordered) {
@@ -148,16 +165,13 @@ export class DrawingOverlay {
 
       // Placeholder rendering for shapes/charts/unknown.
       ctx.save();
-      const chartStroke = resolveCssVar("--chart-series-1", "blue");
-      const shapeStroke = resolveCssVar("--chart-series-2", "cyan");
-      const labelColor = resolveCssVar("--text-primary", "black");
-
-      ctx.strokeStyle = obj.kind.type === "chart" ? chartStroke : shapeStroke;
+      ctx.strokeStyle =
+        obj.kind.type === "chart" ? colors.placeholderChartStroke : colors.placeholderOtherStroke;
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 2]);
       ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
       ctx.setLineDash([]);
-      ctx.fillStyle = labelColor;
+      ctx.fillStyle = colors.placeholderLabel;
       ctx.globalAlpha = 0.6;
       ctx.font = "12px sans-serif";
       ctx.fillText(obj.kind.type, screenRect.x + 4, screenRect.y + 14);
@@ -175,7 +189,7 @@ export class DrawingOverlay {
           width: rect.width,
           height: rect.height,
         };
-        drawSelection(ctx, screen);
+        drawSelection(ctx, screen, colors);
       }
     }
   }
@@ -200,12 +214,13 @@ function intersects(a: Rect, b: Rect): boolean {
   );
 }
 
-function drawSelection(ctx: CanvasRenderingContext2D, rect: Rect): void {
+function drawSelection(
+  ctx: CanvasRenderingContext2D,
+  rect: Rect,
+  colors: ReturnType<typeof resolveOverlayColorTokens>,
+): void {
   ctx.save();
-  const borderColor = resolveCssVar("--selection-border", "blue");
-  const handleBg = resolveCssVar("--bg-primary", "white");
-
-  ctx.strokeStyle = borderColor;
+  ctx.strokeStyle = colors.selectionStroke;
   ctx.lineWidth = 2;
   ctx.setLineDash([]);
   ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
@@ -219,8 +234,8 @@ function drawSelection(ctx: CanvasRenderingContext2D, rect: Rect): void {
     { x: rect.x, y: rect.y + rect.height },
   ];
 
-  ctx.fillStyle = handleBg;
-  ctx.strokeStyle = borderColor;
+  ctx.fillStyle = colors.selectionHandleFill;
+  ctx.strokeStyle = colors.selectionStroke;
   ctx.lineWidth = 1;
   for (const p of points) {
     ctx.beginPath();
