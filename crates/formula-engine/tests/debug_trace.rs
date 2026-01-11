@@ -170,3 +170,28 @@ fn trace_preserves_reference_context_for_named_ranges() {
         })
     );
 }
+
+#[test]
+fn debug_trace_supports_array_literals() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "={1,2;3,4}")
+        .unwrap();
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "{1,2;3,4}");
+    assert!(matches!(
+        dbg.trace.kind,
+        TraceKind::ArrayLiteral { rows: 2, cols: 2 }
+    ));
+
+    let Value::Array(arr) = dbg.value else {
+        panic!("expected Value::Array from debug evaluation, got {:?}", dbg.value);
+    };
+    assert_eq!(arr.rows, 2);
+    assert_eq!(arr.cols, 2);
+    assert_eq!(arr.get(0, 0), Some(&Value::Number(1.0)));
+    assert_eq!(arr.get(0, 1), Some(&Value::Number(2.0)));
+    assert_eq!(arr.get(1, 0), Some(&Value::Number(3.0)));
+    assert_eq!(arr.get(1, 1), Some(&Value::Number(4.0)));
+}

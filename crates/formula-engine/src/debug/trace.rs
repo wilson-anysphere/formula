@@ -32,6 +32,7 @@ pub enum TraceKind {
     Bool,
     Blank,
     Error,
+    ArrayLiteral { rows: usize, cols: usize },
     CellRef,
     RangeRef,
     NameRef { name: String },
@@ -72,7 +73,9 @@ pub enum SpannedExprKind<S> {
     Number(f64),
     Text(String),
     Bool(bool),
+    Blank,
     Error(ErrorKind),
+    ArrayLiteral { rows: Vec<Vec<SpannedExpr<S>>> },
     CellRef(crate::eval::CellRef<S>),
     RangeRef(crate::eval::RangeRef<S>),
     NameRef(crate::eval::NameRef<S>),
@@ -109,7 +112,14 @@ impl<S: Clone> SpannedExpr<S> {
             SpannedExprKind::Number(n) => SpannedExprKind::Number(*n),
             SpannedExprKind::Text(s) => SpannedExprKind::Text(s.clone()),
             SpannedExprKind::Bool(b) => SpannedExprKind::Bool(*b),
+            SpannedExprKind::Blank => SpannedExprKind::Blank,
             SpannedExprKind::Error(e) => SpannedExprKind::Error(*e),
+            SpannedExprKind::ArrayLiteral { rows } => SpannedExprKind::ArrayLiteral {
+                rows: rows
+                    .iter()
+                    .map(|row| row.iter().map(|e| e.map_sheets(f)).collect())
+                    .collect(),
+            },
             SpannedExprKind::CellRef(r) => SpannedExprKind::CellRef(crate::eval::CellRef {
                 sheet: f(&r.sheet),
                 addr: r.addr,
@@ -194,9 +204,12 @@ enum TokenKind {
     Ident(String),
     SheetName(String),
     Error(ErrorKind),
+    LBrace,
+    RBrace,
     LParen,
     RParen,
     Comma,
+    Semi,
     Colon,
     Bang,
     At,
@@ -259,9 +272,21 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                     TokenKind::RParen
                 }
+                '{' => {
+                    self.pos += 1;
+                    TokenKind::LBrace
+                }
+                '}' => {
+                    self.pos += 1;
+                    TokenKind::RBrace
+                }
                 ',' => {
                     self.pos += 1;
                     TokenKind::Comma
+                }
+                ';' => {
+                    self.pos += 1;
+                    TokenKind::Semi
                 }
                 ':' => {
                     self.pos += 1;
@@ -702,6 +727,7 @@ impl ParserImpl {
                     kind: SpannedExprKind::Group(Box::new(expr)),
                 })
             }
+            TokenKind::LBrace => self.parse_array_literal(),
             other => Err(FormulaParseError::UnexpectedToken(format!("{other:?}"))),
         }?;
 
@@ -714,6 +740,80 @@ impl ParserImpl {
         }
 
         Ok(expr)
+    }
+
+    fn parse_array_literal(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
+        let open = self.expect(TokenKind::LBrace)?;
+        let mut rows: Vec<Vec<SpannedExpr<String>>> = Vec::new();
+        let mut current_row: Vec<SpannedExpr<String>> = Vec::new();
+        let mut expecting_value = true;
+
+        let blank_at = |pos: usize| SpannedExpr {
+            span: Span::new(pos, pos),
+            kind: SpannedExprKind::Blank,
+        };
+
+        loop {
+            match &self.peek().kind {
+                TokenKind::RBrace => {
+                    let close = self.next();
+                    if expecting_value && (!current_row.is_empty() || !rows.is_empty()) {
+                        current_row.push(blank_at(close.span.start));
+                    }
+                    if !current_row.is_empty() || !rows.is_empty() {
+                        rows.push(current_row);
+                    }
+                    return Ok(SpannedExpr {
+                        span: Span::new(open.span.start, close.span.end),
+                        kind: SpannedExprKind::ArrayLiteral { rows },
+                    });
+                }
+                TokenKind::End => return Err(FormulaParseError::UnexpectedEof),
+                TokenKind::Comma => {
+                    // Blank element (e.g. `{1,,3}`).
+                    let comma = self.next();
+                    current_row.push(blank_at(comma.span.start));
+                    expecting_value = true;
+                    continue;
+                }
+                TokenKind::Semi => {
+                    // Blank element at end of row (e.g. `{1,;2,3}`).
+                    let semi = self.next();
+                    current_row.push(blank_at(semi.span.start));
+                    rows.push(current_row);
+                    current_row = Vec::new();
+                    expecting_value = true;
+                    continue;
+                }
+                _ => {}
+            }
+
+            let el = self.parse_compare()?;
+            expecting_value = false;
+            current_row.push(el);
+
+            match &self.peek().kind {
+                TokenKind::Comma => {
+                    self.next();
+                    expecting_value = true;
+                }
+                TokenKind::Semi => {
+                    self.next();
+                    rows.push(current_row);
+                    current_row = Vec::new();
+                    expecting_value = true;
+                }
+                TokenKind::RBrace => {
+                    // loop will close
+                }
+                TokenKind::End => return Err(FormulaParseError::UnexpectedEof),
+                other => {
+                    return Err(FormulaParseError::UnexpectedToken(format!(
+                        "expected array separator or '}}', got {other:?}"
+                    )))
+                }
+            }
+        }
     }
 
     fn parse_function_call(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
@@ -957,6 +1057,16 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     },
                 )
             }
+            SpannedExprKind::Blank => (
+                EvalValue::Scalar(Value::Blank),
+                TraceNode {
+                    kind: TraceKind::Blank,
+                    span: expr.span,
+                    value: Value::Blank,
+                    reference: None,
+                    children: Vec::new(),
+                },
+            ),
             SpannedExprKind::Error(e) => {
                 let value = Value::Error(*e);
                 (
@@ -967,6 +1077,65 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         value,
                         reference: None,
                         children: Vec::new(),
+                    },
+                )
+            }
+            SpannedExprKind::ArrayLiteral { rows } => {
+                let row_count = rows.len();
+                let col_count = rows.first().map(|r| r.len()).unwrap_or(0);
+
+                if row_count == 0
+                    || col_count == 0
+                    || rows.iter().any(|r| r.len() != col_count)
+                {
+                    let value = Value::Error(ErrorKind::Value);
+                    return (
+                        EvalValue::Scalar(value.clone()),
+                        TraceNode {
+                            kind: TraceKind::ArrayLiteral {
+                                rows: row_count,
+                                cols: col_count,
+                            },
+                            span: expr.span,
+                            value,
+                            reference: None,
+                            children: Vec::new(),
+                        },
+                    );
+                }
+
+                let mut children = Vec::with_capacity(row_count.saturating_mul(col_count));
+                let mut out_values = Vec::with_capacity(row_count.saturating_mul(col_count));
+
+                for row in rows {
+                    for el in row {
+                        let (ev, mut trace) = self.eval_value(el);
+                        let v = match ev {
+                            EvalValue::Scalar(v) => v,
+                            EvalValue::Reference(r) => self.apply_implicit_intersection(r),
+                        };
+                        let v = match v {
+                            Value::Array(_) | Value::Spill { .. } => Value::Error(ErrorKind::Value),
+                            other => other,
+                        };
+                        trace.value = v.clone();
+                        out_values.push(v);
+                        children.push(trace);
+                    }
+                }
+
+                let value = Value::Array(crate::value::Array::new(row_count, col_count, out_values));
+                (
+                    EvalValue::Scalar(value.clone()),
+                    TraceNode {
+                        kind: TraceKind::ArrayLiteral {
+                            rows: row_count,
+                            cols: col_count,
+                        },
+                        span: expr.span,
+                        value,
+                        reference: None,
+                        children,
                     },
                 )
             }
