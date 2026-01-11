@@ -34,6 +34,7 @@ fn patch_sheet_bin_is_byte_identical_for_noop_numeric_edit() {
             col: 1,
             new_value: CellValue::Number(42.5),
             new_formula: None,
+            shared_string_index: None,
         }],
     )
     .expect("patch sheet bin");
@@ -60,18 +61,22 @@ fn patch_sheet_bin_round_trips_numeric_cell_preserving_formula() {
     let sheet_bin = read_zip_part(fixture, &sheet_part);
     let patched_sheet_bin = patch_sheet_bin(
         &sheet_bin,
-        &[CellEdit {
-            row: 0,
-            col: 0,
-            new_value: CellValue::Text("World".to_string()),
-            new_formula: None,
-        },
-        CellEdit {
-            row: 0,
-            col: 1,
-            new_value: CellValue::Number(100.0),
-            new_formula: None,
-        }],
+        &[
+            CellEdit {
+                row: 0,
+                col: 0,
+                new_value: CellValue::Text("World".to_string()),
+                new_formula: None,
+                shared_string_index: None,
+            },
+            CellEdit {
+                row: 0,
+                col: 1,
+                new_value: CellValue::Number(100.0),
+                new_formula: None,
+                shared_string_index: None,
+            },
+        ],
     )
     .expect("patch sheet bin");
 
@@ -104,7 +109,10 @@ fn patch_sheet_bin_round_trips_numeric_cell_preserving_formula() {
 
     let formula_cell = cells.remove(&(0, 2)).expect("formula cell still present");
     assert_eq!(formula_cell.value, CellValue::Number(85.0));
-    let formula = formula_cell.formula.as_ref().expect("formula metadata preserved");
+    let formula = formula_cell
+        .formula
+        .as_ref()
+        .expect("formula metadata preserved");
     assert_eq!(formula.text.as_deref(), Some("B1*2"));
     assert_eq!(formula.rgce.as_slice(), original_formula_rgce.as_slice());
 }
@@ -133,6 +141,7 @@ fn patch_sheet_bin_can_update_formula_cached_result() {
             col: 2,
             new_value: CellValue::Number(200.0),
             new_formula: None,
+            shared_string_index: None,
         }],
     )
     .expect("patch sheet bin");
@@ -156,7 +165,10 @@ fn patch_sheet_bin_can_update_formula_cached_result() {
         .expect("formula cell still present");
 
     assert_eq!(formula_cell.value, CellValue::Number(200.0));
-    let formula = formula_cell.formula.as_ref().expect("formula metadata preserved");
+    let formula = formula_cell
+        .formula
+        .as_ref()
+        .expect("formula metadata preserved");
     assert_eq!(formula.text.as_deref(), Some("B1*2"));
     assert_eq!(formula.rgce.as_slice(), original_formula_rgce.as_slice());
 }
@@ -191,6 +203,7 @@ fn patch_sheet_bin_can_update_formula_rgce_bytes() {
             col: 2,
             new_value: CellValue::Number(127.5),
             new_formula: Some(new_rgce.clone()),
+            shared_string_index: None,
         }],
     )
     .expect("patch sheet bin");
@@ -221,7 +234,10 @@ fn patch_sheet_bin_can_update_formula_rgce_bytes() {
         .expect("formula cell still present");
 
     assert_eq!(formula_cell.value, CellValue::Number(127.5));
-    let formula = formula_cell.formula.as_ref().expect("formula metadata preserved");
+    let formula = formula_cell
+        .formula
+        .as_ref()
+        .expect("formula metadata preserved");
     assert_eq!(formula.text.as_deref(), Some("B1*3"));
     assert_eq!(formula.rgce.as_slice(), new_rgce.as_slice());
 }
@@ -242,6 +258,7 @@ fn patch_sheet_bin_can_update_formula_from_text() {
             col: 2,
             new_value: CellValue::Number(1.0),
             new_formula: Some(rgce),
+            shared_string_index: None,
         }],
     )
     .expect("patch sheet bin");
@@ -265,7 +282,10 @@ fn patch_sheet_bin_can_update_formula_from_text() {
         .expect("formula cell still present");
 
     assert_eq!(formula_cell.value, CellValue::Number(1.0));
-    let formula = formula_cell.formula.as_ref().expect("formula metadata preserved");
+    let formula = formula_cell
+        .formula
+        .as_ref()
+        .expect("formula metadata preserved");
     assert_eq!(formula.text.as_deref(), Some("IF(B1>0,B1*3,0)"));
 }
 
@@ -291,6 +311,7 @@ fn patch_sheet_bin_can_update_udf_formula_using_workbook_context() {
             col: 3,
             new_value: CellValue::Number(0.0),
             new_formula: Some(encoded.rgce),
+            shared_string_index: None,
         }],
     )
     .expect("patch sheet bin");
@@ -313,7 +334,10 @@ fn patch_sheet_bin_can_update_udf_formula_using_workbook_context() {
         .find(|c| (c.row, c.col) == (0, 3))
         .expect("D1 cell");
     assert_eq!(udf_cell.value, CellValue::Number(0.0));
-    let formula = udf_cell.formula.as_ref().expect("formula metadata preserved");
+    let formula = udf_cell
+        .formula
+        .as_ref()
+        .expect("formula metadata preserved");
     assert_eq!(formula.text.as_deref(), Some("MyAddinFunc(1,2,3)"));
 }
 
@@ -344,6 +368,7 @@ fn patch_sheet_bin_preserves_formula_trailing_bytes() {
             col: 0,
             new_value: CellValue::Number(1.0),
             new_formula: None,
+            shared_string_index: None,
         }],
     )
     .expect("patch sheet bin");
@@ -402,18 +427,21 @@ fn patch_sheet_bin_is_byte_identical_for_noop_bool_error_blank_edits() {
                 col: 0,
                 new_value: CellValue::Bool(true),
                 new_formula: None,
+                shared_string_index: None,
             },
             CellEdit {
                 row: 0,
                 col: 1,
                 new_value: CellValue::Error(0x07),
                 new_formula: None,
+                shared_string_index: None,
             },
             CellEdit {
                 row: 0,
                 col: 2,
                 new_value: CellValue::Blank,
                 new_formula: None,
+                shared_string_index: None,
             },
         ],
     )
@@ -446,12 +474,14 @@ fn save_with_cell_edits_can_patch_bool_error_blank_cells() {
                 col: 0,
                 new_value: CellValue::Bool(false),
                 new_formula: None,
+                shared_string_index: None,
             },
             CellEdit {
                 row: 0,
                 col: 1,
                 new_value: CellValue::Error(0x2A),
                 new_formula: None,
+                shared_string_index: None,
             },
             // Patch the blank cell into a numeric value.
             CellEdit {
@@ -459,6 +489,7 @@ fn save_with_cell_edits_can_patch_bool_error_blank_cells() {
                 col: 2,
                 new_value: CellValue::Number(123.0),
                 new_formula: None,
+                shared_string_index: None,
             },
         ],
     )
@@ -472,7 +503,10 @@ fn save_with_cell_edits_can_patch_bool_error_blank_cells() {
         .map(|c| ((c.row, c.col), c.value.clone()))
         .collect::<HashMap<_, _>>();
 
-    assert_eq!(cells.remove(&(0, 0)).expect("A1 exists"), CellValue::Bool(false));
+    assert_eq!(
+        cells.remove(&(0, 0)).expect("A1 exists"),
+        CellValue::Bool(false)
+    );
     assert_eq!(
         cells.remove(&(0, 1)).expect("B1 exists"),
         CellValue::Error(0x2A)
@@ -515,18 +549,21 @@ fn save_with_cell_edits_can_patch_formula_bool_string_error_cells() {
             col: 0,
             new_value: CellValue::Bool(false),
             new_formula: Some(vec![0x1D, 0x00]), // FALSE
+            shared_string_index: None,
         },
         CellEdit {
             row: 0,
             col: 1,
             new_value: CellValue::Text("World".to_string()),
             new_formula: Some(ptg_str("World")),
+            shared_string_index: None,
         },
         CellEdit {
             row: 0,
             col: 2,
             new_value: CellValue::Error(0x2A), // #N/A
             new_formula: Some(vec![0x1C, 0x2A]),
+            shared_string_index: None,
         },
     ];
 
@@ -636,6 +673,7 @@ fn patch_sheet_bin_is_byte_identical_for_noop_rk_float_edit() {
             col: 1,
             new_value: CellValue::Number(0.125),
             new_formula: None,
+            shared_string_index: None,
         }],
     )
     .expect("patch sheet bin");
@@ -664,6 +702,7 @@ fn patch_sheet_bin_keeps_rk_record_for_float_rk_values() {
             col: 1,
             new_value: CellValue::Number(0.125),
             new_formula: None,
+            shared_string_index: None,
         }],
     )
     .expect("patch sheet bin");

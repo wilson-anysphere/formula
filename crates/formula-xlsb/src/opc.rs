@@ -5,6 +5,7 @@ use crate::parser::{
     SheetData, SheetMeta, WorkbookProperties,
 };
 use crate::patch::{patch_sheet_bin, CellEdit};
+use crate::shared_strings_write::SharedStringsWriter;
 use crate::styles::Styles;
 use crate::workbook_context::WorkbookContext;
 use crate::SharedString;
@@ -318,6 +319,7 @@ impl XlsbWorkbook {
                 col,
                 new_value: CellValue::Number(value),
                 new_formula: None,
+                shared_string_index: None,
             }],
         )
     }
@@ -348,6 +350,89 @@ impl XlsbWorkbook {
 
         let patched = patch_sheet_bin(&sheet_bytes, edits)?;
         self.save_with_part_overrides(dest, &HashMap::from([(sheet_part, patched)]))
+    }
+
+    /// Save the workbook with a set of edits for a single worksheet, updating `xl/sharedStrings.bin`
+    /// as needed so shared-string (`BrtCellIsst`) cells can stay as shared-string references.
+    pub fn save_with_cell_edits_shared_strings(
+        &self,
+        dest: impl AsRef<Path>,
+        sheet_index: usize,
+        edits: &[CellEdit],
+    ) -> Result<(), ParseError> {
+        let meta = self
+            .sheets
+            .get(sheet_index)
+            .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
+        let sheet_part = meta.part_path.clone();
+
+        let sheet_bytes = if let Some(bytes) = self.preserved_parts.get(&sheet_part) {
+            bytes.clone()
+        } else {
+            let file = File::open(&self.path)?;
+            let mut zip = ZipArchive::new(file)?;
+            let mut entry = zip.by_name(&sheet_part)?;
+            let mut bytes = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut bytes)?;
+            bytes
+        };
+
+        let shared_strings_bytes = match self.preserved_parts.get("xl/sharedStrings.bin") {
+            Some(bytes) => bytes.clone(),
+            None => {
+                let file = File::open(&self.path)?;
+                let mut zip = ZipArchive::new(file)?;
+                match read_zip_entry(&mut zip, "xl/sharedStrings.bin")? {
+                    Some(bytes) => bytes,
+                    None => {
+                        // Workbook has no shared string table. Fall back to the generic patcher
+                        // which may convert shared-string cells to inline strings.
+                        return self.save_with_cell_edits(dest, sheet_index, edits);
+                    }
+                }
+            }
+        };
+
+        // Identify which edits target existing `BrtCellIsst` (`0x0007`) cells so we can write a
+        // shared-string index instead of rewriting them as inline strings.
+        let mut text_targets = HashSet::new();
+        for edit in edits {
+            if matches!(edit.new_value, CellValue::Text(_)) {
+                text_targets.insert((edit.row, edit.col));
+            }
+        }
+        let cell_record_ids = if text_targets.is_empty() {
+            HashMap::new()
+        } else {
+            sheet_cell_record_ids(&sheet_bytes, &text_targets)?
+        };
+
+        let mut sst = SharedStringsWriter::new(shared_strings_bytes)?;
+
+        let mut updated_edits = edits.to_vec();
+        for edit in &mut updated_edits {
+            let CellValue::Text(text) = &edit.new_value else {
+                continue;
+            };
+            let coord = (edit.row, edit.col);
+            if matches!(cell_record_ids.get(&coord), Some(&biff12::STRING)) {
+                edit.shared_string_index = Some(sst.intern_plain(text)?);
+            }
+        }
+
+        let updated_shared_strings_bytes = sst.into_bytes()?;
+        let patched_sheet = patch_sheet_bin(&sheet_bytes, &updated_edits)?;
+
+        self.save_with_part_overrides(
+            dest,
+            &HashMap::from([
+                (sheet_part, patched_sheet),
+                (
+                    "xl/sharedStrings.bin".to_string(),
+                    updated_shared_strings_bytes,
+                ),
+            ]),
+        )
     }
 
     /// Save the workbook while overriding specific part payloads.
@@ -575,6 +660,59 @@ fn preserve_part<R: Read + Seek>(
         preserved.insert(name.to_string(), bytes);
     }
     Ok(())
+}
+
+fn sheet_cell_record_ids(
+    sheet_bin: &[u8],
+    targets: &HashSet<(u32, u32)>,
+) -> Result<HashMap<(u32, u32), u32>, ParseError> {
+    let mut cursor = Cursor::new(sheet_bin);
+    let mut in_sheet_data = false;
+    let mut current_row = 0u32;
+    let mut found: HashMap<(u32, u32), u32> = HashMap::new();
+
+    loop {
+        let Some(id) = biff12_varint::read_record_id(&mut cursor)? else {
+            break;
+        };
+        let Some(len) = biff12_varint::read_record_len(&mut cursor)? else {
+            return Err(ParseError::UnexpectedEof);
+        };
+        let len = len as usize;
+
+        let payload_start = cursor.position() as usize;
+        let payload_end = payload_start
+            .checked_add(len)
+            .filter(|&end| end <= sheet_bin.len())
+            .ok_or(ParseError::UnexpectedEof)?;
+        let payload = &sheet_bin[payload_start..payload_end];
+        cursor.set_position(payload_end as u64);
+
+        match id {
+            biff12::SHEETDATA => in_sheet_data = true,
+            biff12::SHEETDATA_END => in_sheet_data = false,
+            biff12::ROW if in_sheet_data => {
+                if payload.len() >= 4 {
+                    current_row = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                }
+            }
+            _ if in_sheet_data => {
+                if payload.len() >= 4 {
+                    let col = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                    let coord = (current_row, col);
+                    if targets.contains(&coord) {
+                        found.insert(coord, id);
+                        if found.len() == targets.len() {
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(found)
 }
 
 fn worksheets_edited<R: Read + Seek>(

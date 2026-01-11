@@ -7,22 +7,23 @@ pub mod errors;
 pub mod format;
 pub mod formula_text;
 pub mod ftab;
-pub mod rgce;
-pub mod workbook_context;
 mod opc;
-mod patch;
 mod parser;
+mod patch;
+pub mod rgce;
 mod shared_strings;
+mod shared_strings_write;
 mod strings;
-mod writer;
 mod styles;
+pub mod workbook_context;
+mod writer;
 
 pub use opc::{OpenOptions, XlsbWorkbook};
-pub use patch::{patch_sheet_bin, CellEdit};
 pub use parser::{
     CalcMode, Cell, CellValue, Dimension, Error, Formula, SheetData, SheetMeta, SheetVisibility,
     WorkbookProperties,
 };
+pub use patch::{patch_sheet_bin, CellEdit};
 pub use shared_strings::SharedString;
 pub use strings::{OpaqueRichText, ParsedXlsbString};
 pub use styles::{StyleInfo, Styles};

@@ -146,6 +146,7 @@ fn patcher_preserves_flagged_inline_string_record_for_noop_edits() {
         col: 0,
         new_value: CellValue::Text(inline_text),
         new_formula: None,
+        shared_string_index: None,
     };
 
     let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
@@ -154,21 +155,15 @@ fn patcher_preserves_flagged_inline_string_record_for_noop_edits() {
 
 #[test]
 fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
-    let (
-        sheet_bin,
-        _inline_text,
-        rich_runs,
-        rich_text,
-        phonetic_bytes,
-        pho_text,
-        new_rgce,
-    ) = build_sheet_bin();
+    let (sheet_bin, _inline_text, rich_runs, rich_text, phonetic_bytes, pho_text, new_rgce) =
+        build_sheet_bin();
 
     let edit_rich = CellEdit {
         row: 0,
         col: 1,
         new_value: CellValue::Text(rich_text.clone()),
         new_formula: Some(new_rgce.clone()),
+        shared_string_index: None,
     };
     let patched_rich = patch_sheet_bin(&sheet_bin, &[edit_rich]).expect("patch rich formula");
 
@@ -196,6 +191,7 @@ fn patcher_updates_formula_rgce_without_losing_rich_or_phonetic_cached_bytes() {
         col: 2,
         new_value: CellValue::Text(pho_text.clone()),
         new_formula: Some(new_rgce.clone()),
+        shared_string_index: None,
     };
     let patched_pho = patch_sheet_bin(&sheet_bin, &[edit_pho]).expect("patch phonetic formula");
 
@@ -227,6 +223,7 @@ fn patcher_clears_rich_phonetic_flags_when_rewriting_cached_string_value() {
         col: 1,
         new_value: CellValue::Text("New".to_string()),
         new_formula: None,
+        shared_string_index: None,
     };
     let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch cached string");
 
@@ -238,7 +235,8 @@ fn patcher_clears_rich_phonetic_flags_when_rewriting_cached_string_value() {
         "expected rich run bytes to be dropped when cached value changes"
     );
 
-    let parsed = formula_xlsb::parse_sheet_bin(&mut Cursor::new(&patched), &[]).expect("parse sheet");
+    let parsed =
+        formula_xlsb::parse_sheet_bin(&mut Cursor::new(&patched), &[]).expect("parse sheet");
     let cell = parsed
         .cells
         .iter()

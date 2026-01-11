@@ -26,6 +26,16 @@ pub struct CellEdit {
     pub new_value: CellValue,
     /// If set, replaces the raw formula token stream (`rgce`) for formula cells.
     pub new_formula: Option<Vec<u8>>,
+    /// Optional shared string table index (`isst`) to use when writing `CellValue::Text`.
+    ///
+    /// XLSB can store text cells either as inline strings (`BrtCellSt`, record id `0x0006`)
+    /// or as shared-string references (`BrtCellIsst`, record id `0x0007` / [`biff12::STRING`]).
+    ///
+    /// When patching an existing `BrtCellIsst` record, providing `shared_string_index` lets the
+    /// patcher keep the cell as a shared-string reference. When this is `None`, the patcher
+    /// falls back to writing an inline string because it has no access to (or ability to update)
+    /// `xl/sharedStrings.bin`.
+    pub shared_string_index: Option<u32>,
 }
 
 #[cfg(feature = "write")]
@@ -45,6 +55,7 @@ impl CellEdit {
             col,
             new_value,
             new_formula: Some(rgce),
+            shared_string_index: None,
         })
     }
 
@@ -304,6 +315,46 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_inline_string(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
+                            if edit.new_formula.is_some() {
+                                return Err(Error::Io(io::Error::new(
+                                    io::ErrorKind::InvalidInput,
+                                    format!(
+                                        "attempted to set formula for non-formula cell at ({row}, {col})"
+                                    ),
+                                )));
+                            }
+                            patch_value_cell(&mut writer, col, style, edit)?;
+                        }
+                    }
+                    biff12::STRING => {
+                        if value_edit_is_noop_shared_string(payload, edit)? {
+                            writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else if let (CellValue::Text(_), Some(isst)) =
+                            (&edit.new_value, edit.shared_string_index)
+                        {
+                            if edit.new_formula.is_some() {
+                                return Err(Error::Io(io::Error::new(
+                                    io::ErrorKind::InvalidInput,
+                                    format!(
+                                        "attempted to set formula for non-formula cell at ({row}, {col})"
+                                    ),
+                                )));
+                            }
+
+                            // BrtCellIsst: [col: u32][style: u32][isst: u32]
+                            let mut patched = [0u8; 12];
+                            patched[0..4].copy_from_slice(&col.to_le_bytes());
+                            patched[4..8].copy_from_slice(&style.to_le_bytes());
+                            patched[8..12].copy_from_slice(&isst.to_le_bytes());
+                            writer.write_record(biff12::STRING, &patched)?;
+                        } else {
+                            // No shared-string index provided: fall back to the generic writer
+                            // (FLOAT / inline string).
+                            //
+                            // NOTE: This converts `BrtCellIsst` (shared string reference) cells
+                            // into `BrtCellSt` (inline string) when writing a text value. Use the
+                            // shared-strings-aware workbook API (`XlsbWorkbook::save_with_cell_edits_shared_strings`)
+                            // to keep shared-string semantics.
                             if edit.new_formula.is_some() {
                                 return Err(Error::Io(io::Error::new(
                                     io::ErrorKind::InvalidInput,
@@ -862,7 +913,9 @@ fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> 
     let cce = read_u32(payload, 18)? as usize;
     let rgce_offset = 22usize;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
-    let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload
+        .get(rgce_offset..rgce_end)
+        .ok_or(Error::UnexpectedEof)?;
 
     let desired_cached = match &edit.new_value {
         CellValue::Number(v) => *v,
@@ -901,7 +954,9 @@ fn formula_string_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, 
     let cce = read_u32(payload, ws.end)? as usize;
     let rgce_offset = ws.end.checked_add(4).ok_or(Error::UnexpectedEof)?;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
-    let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload
+        .get(rgce_offset..rgce_end)
+        .ok_or(Error::UnexpectedEof)?;
 
     let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
     Ok(rgce == desired_rgce)
@@ -917,7 +972,9 @@ fn formula_bool_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Er
     let cce = read_u32(payload, 11)? as usize;
     let rgce_offset = 15usize;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
-    let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload
+        .get(rgce_offset..rgce_end)
+        .ok_or(Error::UnexpectedEof)?;
     let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
     Ok(existing_cached == desired_cached && rgce == desired_rgce)
 }
@@ -932,7 +989,9 @@ fn formula_error_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, E
     let cce = read_u32(payload, 11)? as usize;
     let rgce_offset = 15usize;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
-    let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload
+        .get(rgce_offset..rgce_end)
+        .ok_or(Error::UnexpectedEof)?;
     let desired_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
     Ok(existing_cached == desired_cached && rgce == desired_rgce)
 }
@@ -956,6 +1015,16 @@ fn value_edit_is_noop_rk(payload: &[u8], edit: &CellEdit) -> Result<bool, Error>
     Ok(existing.to_bits() == desired.to_bits())
 }
 
+fn value_edit_is_noop_shared_string(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
+    let Some(isst) = edit.shared_string_index else {
+        return Ok(false);
+    };
+    if !matches!(edit.new_value, CellValue::Text(_)) {
+        return Ok(false);
+    }
+    Ok(read_u32(payload, 8)? == isst)
+}
+
 fn value_edit_is_noop_inline_string(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
     let desired = match &edit.new_value {
         CellValue::Text(s) => s,
@@ -964,9 +1033,7 @@ fn value_edit_is_noop_inline_string(payload: &[u8], edit: &CellEdit) -> Result<b
 
     let len_chars = read_u32(payload, 8)? as usize;
     let byte_len = len_chars.checked_mul(2).ok_or(Error::UnexpectedEof)?;
-    let expected_simple_len = 12usize
-        .checked_add(byte_len)
-        .ok_or(Error::UnexpectedEof)?;
+    let expected_simple_len = 12usize.checked_add(byte_len).ok_or(Error::UnexpectedEof)?;
     let raw = if payload.len() == expected_simple_len {
         // Simple layout: [col][style][cch][utf16 chars...]
         payload
@@ -1048,6 +1115,16 @@ fn patch_value_cell<W: io::Write>(
             writer.write_record(biff12::BOOLERR, &payload)?;
         }
         CellValue::Text(s) => {
+            if let Some(isst) = edit.shared_string_index {
+                // BrtCellIsst: [col: u32][style: u32][isst: u32]
+                let mut payload = [0u8; 12];
+                payload[0..4].copy_from_slice(&col.to_le_bytes());
+                payload[4..8].copy_from_slice(&style.to_le_bytes());
+                payload[8..12].copy_from_slice(&isst.to_le_bytes());
+                writer.write_record(biff12::STRING, &payload)?;
+                return Ok(());
+            }
+
             let char_len = s.encode_utf16().count();
             let char_len = u32::try_from(char_len).map_err(|_| {
                 Error::Io(io::Error::new(
@@ -1315,7 +1392,9 @@ fn patch_fmla_string<W: io::Write>(
     let cce = read_u32(payload, ws.end)? as usize;
     let rgce_offset = ws.end.checked_add(4).ok_or(Error::UnexpectedEof)?;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
-    let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload
+        .get(rgce_offset..rgce_end)
+        .ok_or(Error::UnexpectedEof)?;
     let extra = payload.get(rgce_end..).unwrap_or(&[]);
 
     let new_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
@@ -1349,9 +1428,7 @@ fn patch_fmla_string<W: io::Write>(
             "string is too large",
         ))
     })?;
-    let desired_str_len = desired_cch_u32
-        .checked_mul(2)
-        .ok_or(Error::UnexpectedEof)?;
+    let desired_str_len = desired_cch_u32.checked_mul(2).ok_or(Error::UnexpectedEof)?;
 
     let existing_utf16 = payload
         .get(ws.utf16_start..ws.utf16_end)
