@@ -490,6 +490,15 @@ function buildPostgresAuditLogInsert(event) {
   // NOTE: audit_log.resource_type is NOT NULL in the schema. If callers omit resource,
   // we still insert a placeholder so audits never fail the user request.
   const resourceType = res.type || "unknown";
+  const storedDetails = {
+    ...(event.details ?? {}),
+    __audit: {
+      schemaVersion: event.schemaVersion,
+      actor: event.actor,
+      correlation: event.correlation,
+      resourceName: res.name ?? null
+    }
+  };
 
   return {
     text: `
@@ -514,10 +523,97 @@ function buildPostgresAuditLogInsert(event) {
       event.success,
       error.code ?? null,
       error.message ?? null,
-      JSON.stringify(event.details ?? {}),
+      JSON.stringify(storedDetails),
       event.timestamp
     ]
   };
+}
+
+function normalizePgJson(value) {
+  if (value === null || value === undefined) return {};
+  if (isPlainObject(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return isPlainObject(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function auditLogRowToAuditEvent(row) {
+  if (!row || typeof row !== "object") {
+    throw new TypeError("auditLogRowToAuditEvent requires a row object");
+  }
+
+  const detailsWithMeta = normalizePgJson(row.details);
+  const meta = isPlainObject(detailsWithMeta.__audit) ? detailsWithMeta.__audit : null;
+
+  /** @type {Record<string, unknown>} */
+  const details = { ...detailsWithMeta };
+  delete details.__audit;
+
+  const orgId = row.org_id ?? null;
+  const userId = row.user_id ?? null;
+  const userEmail = row.user_email ?? null;
+
+  const actorFromMeta = meta && isPlainObject(meta.actor) ? meta.actor : null;
+  const actor =
+    actorFromMeta && isNonEmptyString(actorFromMeta.type) && isNonEmptyString(actorFromMeta.id)
+      ? { type: actorFromMeta.type, id: actorFromMeta.id }
+      : isNonEmptyString(userId)
+        ? { type: "user", id: userId }
+        : isNonEmptyString(userEmail)
+          ? { type: "anonymous", id: userEmail }
+          : { type: "system", id: "api" };
+
+  const correlationFromMeta = meta && isPlainObject(meta.correlation) ? meta.correlation : null;
+  const correlation =
+    correlationFromMeta && (isOptionalString(correlationFromMeta.requestId) || isOptionalString(correlationFromMeta.traceId))
+      ? {
+          requestId: correlationFromMeta.requestId ?? null,
+          traceId: correlationFromMeta.traceId ?? null
+        }
+      : undefined;
+
+  const resourceName = meta && (typeof meta.resourceName === "string" || meta.resourceName === null) ? meta.resourceName : null;
+  const resource = row.resource_type
+    ? {
+        type: String(row.resource_type),
+        id: row.resource_id ?? null,
+        name: resourceName
+      }
+    : undefined;
+
+  const error =
+    row.error_code || row.error_message
+      ? { code: row.error_code ?? null, message: row.error_message ?? null }
+      : undefined;
+
+  const timestamp = new Date(row.created_at).toISOString();
+
+  return createAuditEvent({
+    schemaVersion: AUDIT_EVENT_SCHEMA_VERSION,
+    id: String(row.id),
+    timestamp,
+    eventType: String(row.event_type),
+    actor,
+    context: {
+      orgId,
+      userId,
+      userEmail,
+      ipAddress: row.ip_address ?? null,
+      userAgent: row.user_agent ?? null,
+      sessionId: row.session_id ?? null
+    },
+    resource,
+    success: Boolean(row.success),
+    error,
+    details,
+    correlation
+  });
 }
 
 function retentionCutoffMs(now, retentionDays) {
@@ -543,5 +639,6 @@ module.exports = {
   serializeBatch,
   auditEventToSqliteRow,
   buildPostgresAuditLogInsert,
+  auditLogRowToAuditEvent,
   retentionCutoffMs
 };

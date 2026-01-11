@@ -146,5 +146,24 @@ export function buildPostgresAuditLogInsert(event: AuditEvent): {
   values: unknown[];
 };
 
-export function retentionCutoffMs(now: number, retentionDays: number): number;
+export interface PostgresAuditLogRow {
+  id: string;
+  org_id?: string | null;
+  user_id?: string | null;
+  user_email?: string | null;
+  event_type: string;
+  resource_type: string;
+  resource_id?: string | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  session_id?: string | null;
+  success: boolean;
+  error_code?: string | null;
+  error_message?: string | null;
+  details?: unknown;
+  created_at: string | Date;
+}
 
+export function auditLogRowToAuditEvent(row: PostgresAuditLogRow): AuditEvent;
+
+export function retentionCutoffMs(now: number, retentionDays: number): number;

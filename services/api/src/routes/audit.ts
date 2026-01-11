@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { auditLogRowToAuditEvent, redactAuditEvent, serializeBatch } from "@formula/audit-core";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
 
@@ -34,6 +35,9 @@ export function registerAuditRoutes(app: FastifyInstance): void {
     success: z.enum(["true", "false"]).optional(),
     limit: z.string().optional(),
     offset: z.string().optional()
+  });
+  const AuditExportQuery = AuditQuery.extend({
+    format: z.enum(["json", "cef", "leef"]).optional()
   });
 
   app.get("/orgs/:orgId/audit", { preHandler: requireAuth }, async (request, reply) => {
@@ -77,7 +81,8 @@ export function registerAuditRoutes(app: FastifyInstance): void {
       values
     );
 
-    return { events: result.rows };
+    const events = result.rows.map((row) => redactAuditEvent(auditLogRowToAuditEvent(row as any)));
+    return { events };
   });
 
   app.get("/orgs/:orgId/audit/export", { preHandler: requireAuth }, async (request, reply) => {
@@ -85,7 +90,7 @@ export function registerAuditRoutes(app: FastifyInstance): void {
     const role = await requireOrgAdminRole(request, reply, orgId);
     if (!role) return;
 
-    const parsed = AuditQuery.safeParse(request.query);
+    const parsed = AuditExportQuery.safeParse(request.query);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
 
     const where: string[] = ["org_id = $1"];
@@ -113,7 +118,11 @@ export function registerAuditRoutes(app: FastifyInstance): void {
       values
     );
 
-    reply.header("content-type", "application/x-ndjson");
-    reply.send(result.rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const events = result.rows.map((row) => auditLogRowToAuditEvent(row as any));
+    const format = parsed.data.format ?? "json";
+    const { contentType, body } = serializeBatch(events, { format });
+
+    reply.header("content-type", contentType);
+    reply.send(body);
   });
 }

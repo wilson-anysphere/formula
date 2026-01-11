@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   assertAuditEvent,
+  auditLogRowToAuditEvent,
+  buildPostgresAuditLogInsert,
   createAuditEvent,
   serializeBatch,
   toCef,
@@ -107,4 +109,54 @@ test("audit-core schema validator rejects legacy audit event shapes", () => {
   const result = validateAuditEvent(legacy);
   assert.equal(result.valid, false);
   assert.ok(result.errors.some((e) => e.includes("Legacy fields")));
+});
+
+test("audit-core postgres adapter persists actor/correlation via details meta and can reconstruct canonical events", () => {
+  const event = createAuditEvent({
+    id: "11111111-1111-4111-8111-111111111111",
+    timestamp: "2026-01-01T00:00:00.000Z",
+    eventType: "auth.login_failed",
+    actor: { type: "anonymous", id: "user@example.com" },
+    context: { orgId: "org_1", userEmail: "user@example.com", ipAddress: "203.0.113.5" },
+    resource: { type: "user", id: null, name: "User record" },
+    correlation: { requestId: "req_1", traceId: "trace_1" },
+    success: false,
+    error: { code: "invalid_credentials" },
+    details: { token: "supersecret", nested: { password: "p@ssw0rd" } }
+  });
+
+  const { values } = buildPostgresAuditLogInsert(event);
+  const storedDetails = JSON.parse(values[13]);
+  assert.equal(storedDetails.__audit.actor.type, "anonymous");
+  assert.equal(storedDetails.__audit.correlation.requestId, "req_1");
+  assert.equal(storedDetails.__audit.resourceName, "User record");
+
+  const reconstructed = auditLogRowToAuditEvent({
+    id: event.id,
+    org_id: event.context.orgId,
+    user_id: event.context.userId ?? null,
+    user_email: event.context.userEmail ?? null,
+    event_type: event.eventType,
+    resource_type: event.resource.type,
+    resource_id: event.resource.id,
+    ip_address: event.context.ipAddress ?? null,
+    user_agent: event.context.userAgent ?? null,
+    session_id: event.context.sessionId ?? null,
+    success: event.success,
+    error_code: event.error.code ?? null,
+    error_message: event.error.message ?? null,
+    details: storedDetails,
+    created_at: event.timestamp
+  });
+
+  assert.equal(reconstructed.actor.type, "anonymous");
+  assert.equal(reconstructed.actor.id, "user@example.com");
+  assert.equal(reconstructed.correlation.requestId, "req_1");
+  assert.equal(reconstructed.correlation.traceId, "trace_1");
+  assert.equal(reconstructed.resource.name, "User record");
+  assert.ok(!("__audit" in reconstructed.details));
+
+  const exported = JSON.parse(serializeBatch([reconstructed]).body.toString("utf8"));
+  assert.equal(exported[0].details.token, "[REDACTED]");
+  assert.equal(exported[0].details.nested.password, "[REDACTED]");
 });
