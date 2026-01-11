@@ -363,3 +363,41 @@ fn debug_trace_supports_unquoted_external_refs_with_non_ident_workbook_names() {
         })
     );
 }
+
+#[test]
+fn trace_preserves_reference_context_for_sum_over_external_ranges() {
+    let provider = Arc::new(TestExternalProvider::default());
+    provider.set(
+        "[Book.xlsx]Sheet1",
+        CellAddr { row: 0, col: 0 },
+        1.0,
+    );
+    provider.set(
+        "[Book.xlsx]Sheet1",
+        CellAddr { row: 1, col: 0 },
+        2.0,
+    );
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM([Book.xlsx]Sheet1!A1:A2)")
+        .unwrap();
+    engine.recalculate();
+
+    let dbg = engine.debug_evaluate("Sheet1", "B1").unwrap();
+    assert_eq!(dbg.value, Value::Number(3.0));
+
+    let range_node = &dbg.trace.children[0];
+    assert_eq!(slice(&dbg.formula, range_node.span), "[Book.xlsx]Sheet1!A1:A2");
+    assert!(matches!(range_node.kind, TraceKind::RangeRef));
+    assert_eq!(range_node.value, Value::Blank);
+    assert_eq!(
+        range_node.reference,
+        Some(TraceRef::Range {
+            sheet: formula_engine::functions::SheetId::External("[Book.xlsx]Sheet1".to_string()),
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr { row: 1, col: 0 }
+        })
+    );
+}
