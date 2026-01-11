@@ -7,8 +7,8 @@ use formula_model::{
 #[test]
 fn rename_sheet_rewrites_all_modeled_surfaces() {
     let mut workbook = Workbook::new();
-    let old_sheet_id = workbook.add_sheet("OldSheet");
-    let other_sheet_id = workbook.add_sheet("Sheet2");
+    let old_sheet_id = workbook.add_sheet("OldSheet").unwrap();
+    let other_sheet_id = workbook.add_sheet("Sheet2").unwrap();
 
     let other_sheet = workbook.sheet_mut(other_sheet_id).expect("sheet2");
 

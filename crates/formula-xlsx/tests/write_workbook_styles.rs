@@ -10,7 +10,7 @@ use zip::ZipArchive;
 #[test]
 fn write_workbook_emits_style_xfs_and_cell_s_mapping() -> Result<(), Box<dyn std::error::Error>> {
     let mut workbook = Workbook::new();
-    let sheet_id = workbook.add_sheet("Sheet1");
+    let sheet_id = workbook.add_sheet("Sheet1").unwrap();
 
     let italic_style_id = workbook.intern_style(Style {
         font: Some(Font {
