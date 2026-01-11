@@ -83,10 +83,6 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
         EngineValue::Array(_) | EngineValue::Spill { .. } => {
             JsonValue::String(ErrorKind::Spill.as_code().to_string())
         }
-        // LAMBDA values are valid Excel scalars but cannot be represented in the current
-        // worker JSON protocol. Use a descriptive placeholder so the UI does not crash
-        // when a formula returns a lambda.
-        EngineValue::Lambda(_) => JsonValue::String("<LAMBDA>".to_string()),
     }
 }
 

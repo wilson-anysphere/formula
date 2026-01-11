@@ -187,11 +187,27 @@ export function tokenizeFormula(input: string): FormulaToken[] {
       continue;
     }
 
-    const ref = tryReadReference(input, i);
-    if (ref) {
-      tokens.push({ type: "reference", text: ref.text, start: i, end: ref.end });
-      i = ref.end;
-      continue;
+    // Disambiguation: `My Sheet!A1` is an invalid unquoted sheet-qualified reference
+    // (sheet names containing spaces must be quoted as `'My Sheet'!A1`). When users
+    // type it anyway, highlight just the cell reference (`A1`) rather than treating
+    // `Sheet!A1` as a sheet-qualified reference and ignoring the `My ` prefix.
+    const lastToken = tokens[tokens.length - 1];
+    const precededByWhitespace = lastToken?.type === "whitespace";
+    const prevNonWhitespace = (() => {
+      for (let j = tokens.length - 1; j >= 0; j--) {
+        if (tokens[j]?.type !== "whitespace") return tokens[j];
+      }
+      return null;
+    })();
+    const possibleSheetPrefix = input[i] !== "'" && precededByWhitespace ? tryReadSheetPrefix(input, i) : null;
+
+    if (!(possibleSheetPrefix && prevNonWhitespace?.type === "identifier")) {
+      const ref = tryReadReference(input, i);
+      if (ref) {
+        tokens.push({ type: "reference", text: ref.text, start: i, end: ref.end });
+        i = ref.end;
+        continue;
+      }
     }
 
     if (isIdentifierStart(ch)) {
