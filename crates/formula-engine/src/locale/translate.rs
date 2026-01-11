@@ -1,6 +1,6 @@
 use crate::eval::FormulaParseError;
 use crate::parser::{lex, Token, TokenKind};
-use crate::LocaleConfig;
+use crate::{LocaleConfig, ParseOptions, ReferenceStyle};
 
 use super::FormulaLocale;
 
@@ -53,7 +53,12 @@ fn translate_formula(
         Direction::ToLocalized => (&canonical_config, &locale.config),
     };
 
-    let tokens = lex(expr_src, src_config).map_err(map_lex_error)?;
+    let parse_opts = ParseOptions {
+        locale: src_config.clone(),
+        reference_style: ReferenceStyle::A1,
+        normalize_relative_to: None,
+    };
+    let tokens = lex(expr_src, &parse_opts).map_err(map_lex_error)?;
 
     let mut out = String::with_capacity(trimmed.len());
     if has_equals {
