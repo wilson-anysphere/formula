@@ -200,6 +200,7 @@ function validateActivationEvents(activationEvents, contributes) {
   const knownCommands = new Set((contributes.commands ?? []).map((c) => c.command));
   const knownPanels = new Set((contributes.panels ?? []).map((p) => p.id));
   const knownCustomFunctions = new Set((contributes.customFunctions ?? []).map((f) => f.name));
+  const knownDataConnectors = new Set((contributes.dataConnectors ?? []).map((c) => c.id));
 
   for (const [idx, event] of list.entries()) {
     const ev = assertString(event, `activationEvents[${idx}]`);
@@ -225,6 +226,14 @@ function validateActivationEvents(activationEvents, contributes) {
       const name = ev.slice("onCustomFunction:".length);
       if (!knownCustomFunctions.has(name)) {
         throw new ManifestError(`activationEvents references unknown custom function: ${name}`);
+      }
+      continue;
+    }
+
+    if (ev.startsWith("onDataConnector:")) {
+      const id = ev.slice("onDataConnector:".length);
+      if (!knownDataConnectors.has(id)) {
+        throw new ManifestError(`activationEvents references unknown data connector: ${id}`);
       }
       continue;
     }

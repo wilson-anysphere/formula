@@ -3,6 +3,7 @@ const formula = require("@formula/extension-api");
 
 const PANEL_ID = "sampleHello.panel";
 const PANEL_TITLE = "Sample Hello Panel";
+const CONNECTOR_ID = "sampleHello.connector";
 
 /** @type {import("@formula/extension-api").Panel | null} */
 let panel = null;
@@ -152,6 +153,30 @@ async function activate(context) {
   );
 
   context.subscriptions.push(
+    await formula.dataConnectors.register(CONNECTOR_ID, {
+      async browse(_config, path) {
+        if (path) return [];
+        return [
+          { id: "hello", name: "Hello", type: "table" },
+          { id: "world", name: "World", type: "table" }
+        ];
+      },
+      async query() {
+        return {
+          columns: ["id", "label"],
+          rows: [
+            [1, "hello"],
+            [2, "world"]
+          ]
+        };
+      },
+      async testConnection() {
+        return { success: true };
+      }
+    })
+  );
+
+  context.subscriptions.push(
     formula.events.onViewActivated(({ viewId }) => {
       if (viewId !== PANEL_ID) return;
       void ensurePanel(context).catch((error) => {
@@ -165,4 +190,3 @@ async function activate(context) {
 module.exports = {
   activate
 };
-

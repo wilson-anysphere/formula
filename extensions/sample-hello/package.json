@@ -18,7 +18,8 @@
     "onCommand:sampleHello.copySumToClipboard",
     "onCommand:sampleHello.showGreeting",
     "onView:sampleHello.panel",
-    "onCustomFunction:SAMPLEHELLO_DOUBLE"
+    "onCustomFunction:SAMPLEHELLO_DOUBLE",
+    "onDataConnector:sampleHello.connector"
   ],
   "contributes": {
     "commands": [
@@ -78,6 +79,12 @@
         "result": {
           "type": "number"
         }
+      }
+    ],
+    "dataConnectors": [
+      {
+        "id": "sampleHello.connector",
+        "name": "Sample Hello Connector"
       }
     ]
   },

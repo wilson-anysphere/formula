@@ -13,12 +13,21 @@ const state = globalThis[GLOBAL_STATE_KEY] ?? {
   commandHandlers: new Map(),
   eventHandlers: new Map(),
   panelMessageHandlers: new Map(),
-  customFunctionHandlers: new Map()
+  customFunctionHandlers: new Map(),
+  dataConnectorHandlers: new Map()
 };
 
 // Ensure we always reuse the same shared state even if the package is loaded via both
 // `require` (CJS) and `import` (ESM) within the same runtime (eg: Node workers).
 globalThis[GLOBAL_STATE_KEY] = state;
+
+const DATA_CONNECTOR_METHODS = new Set([
+  "browse",
+  "query",
+  "getConnectionConfig",
+  "testConnection",
+  "getQueryBuilder"
+]);
 
 function __setTransport(nextTransport) {
   state.transport = nextTransport;
@@ -146,6 +155,45 @@ function __handleMessage(message) {
           (error) => {
             getTransportOrThrow().postMessage({
               type: "custom_function_error",
+              id,
+              error: { message: String(error?.message ?? error), stack: error?.stack }
+            });
+          }
+        );
+      return;
+    }
+    case "invoke_data_connector": {
+      const { id, connectorId, method, args } = message;
+      Promise.resolve()
+        .then(async () => {
+          const key = String(connectorId ?? "");
+          const impl = state.dataConnectorHandlers.get(key);
+          if (!impl) {
+            throw new Error(`Data connector not registered: ${key}`);
+          }
+
+          const methodName = String(method ?? "");
+          if (!DATA_CONNECTOR_METHODS.has(methodName)) {
+            throw new Error(`Unsupported data connector method: ${methodName}`);
+          }
+
+          const fn = impl[methodName];
+          if (typeof fn !== "function") {
+            throw new Error(`Data connector method not implemented: ${key}.${methodName}`);
+          }
+          return fn(...(Array.isArray(args) ? args : []));
+        })
+        .then(
+          (result) => {
+            getTransportOrThrow().postMessage({
+              type: "data_connector_result",
+              id,
+              result
+            });
+          },
+          (error) => {
+            getTransportOrThrow().postMessage({
+              type: "data_connector_error",
               id,
               error: { message: String(error?.message ?? error), stack: error?.stack }
             });
@@ -519,6 +567,37 @@ const functions = {
   }
 };
 
+const dataConnectors = {
+  async register(connectorId, impl) {
+    const id = String(connectorId);
+    if (id.trim().length === 0) {
+      throw new Error("Data connector id must be a non-empty string");
+    }
+    if (!impl || typeof impl !== "object") {
+      throw new Error("Data connector implementation must be an object");
+    }
+    if (typeof impl.browse !== "function") {
+      throw new Error("Data connector implementation must provide browse()");
+    }
+    if (typeof impl.query !== "function") {
+      throw new Error("Data connector implementation must provide query()");
+    }
+
+    state.dataConnectorHandlers.set(id, impl);
+    try {
+      await rpcCall("dataConnectors", "register", [id]);
+    } catch (err) {
+      state.dataConnectorHandlers.delete(id);
+      throw err;
+    }
+
+    return new DisposableImpl(() => {
+      state.dataConnectorHandlers.delete(id);
+      rpcCall("dataConnectors", "unregister", [id]).catch(notifyError);
+    });
+  }
+};
+
 const ui = {
   async showMessage(message, type = "info") {
     await rpcCall("ui", "showMessage", [String(message), String(type)]);
@@ -707,6 +786,7 @@ const api = {
   cells,
   commands,
   functions,
+  dataConnectors,
   network,
   clipboard,
   ui,
@@ -724,4 +804,3 @@ const GLOBAL_API_KEY = Symbol.for("formula.extensionApi.api");
 if (!globalThis[GLOBAL_API_KEY]) {
   globalThis[GLOBAL_API_KEY] = api;
 }
-

@@ -24,7 +24,9 @@ test("extension-api types file exports the expected surface", async () => {
     "export namespace events",
     "function onSheetActivated",
     "function onWorkbookOpened",
-    "function onBeforeSave"
+    "function onBeforeSave",
+    "export namespace dataConnectors",
+    "function register(connectorId: string, impl: DataConnectorImplementation): Promise<Disposable>;"
   ]) {
     assert.ok(text.includes(fragment), `Missing declaration fragment: ${fragment}`);
   }

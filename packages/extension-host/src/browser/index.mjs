@@ -38,6 +38,9 @@ const API_PERMISSIONS = {
   "functions.register": [],
   "functions.unregister": [],
 
+  "dataConnectors.register": [],
+  "dataConnectors.unregister": [],
+
   "network.fetch": ["network"],
   "network.openWebSocket": ["network"],
 
@@ -268,6 +271,7 @@ class BrowserExtensionHost {
     activationTimeoutMs = 5000,
     commandTimeoutMs = 5000,
     customFunctionTimeoutMs = 5000,
+    dataConnectorTimeoutMs = 5000,
     sandbox
   } = {}) {
     if (!spreadsheetApi) {
@@ -280,6 +284,7 @@ class BrowserExtensionHost {
     this._panels = new Map();
     this._contextMenus = new Map();
     this._customFunctions = new Map();
+    this._dataConnectors = new Map();
     this._messages = [];
     this._activationTimeoutMs = Number.isFinite(activationTimeoutMs)
       ? Math.max(0, activationTimeoutMs)
@@ -287,6 +292,9 @@ class BrowserExtensionHost {
     this._commandTimeoutMs = Number.isFinite(commandTimeoutMs) ? Math.max(0, commandTimeoutMs) : 5000;
     this._customFunctionTimeoutMs = Number.isFinite(customFunctionTimeoutMs)
       ? Math.max(0, customFunctionTimeoutMs)
+      : 5000;
+    this._dataConnectorTimeoutMs = Number.isFinite(dataConnectorTimeoutMs)
+      ? Math.max(0, dataConnectorTimeoutMs)
       : 5000;
 
     this._sandbox = normalizeSandboxOptions(sandbox);
@@ -486,6 +494,13 @@ class BrowserExtensionHost {
       this._customFunctions.set(fn.name, extensionId);
     }
 
+    for (const connector of manifest.contributes.dataConnectors ?? []) {
+      if (this._dataConnectors.has(connector.id)) {
+        throw new Error(`Duplicate data connector id: ${connector.id}`);
+      }
+      this._dataConnectors.set(connector.id, extensionId);
+    }
+
     this._extensions.set(extensionId, extension);
     this._spawnWorker(extension);
     return extensionId;
@@ -591,6 +606,41 @@ class BrowserExtensionHost {
       {
         timeoutMs: this._customFunctionTimeoutMs,
         operation: `custom function '${name}'`
+      }
+    );
+  }
+
+  async invokeDataConnector(connectorId, method, ...args) {
+    const id = String(connectorId);
+    const extensionId = this._dataConnectors.get(id);
+    if (!extensionId) throw new Error(`Unknown data connector: ${id}`);
+
+    const extension = this._extensions.get(extensionId);
+    if (!extension) throw new Error(`Extension not loaded: ${extensionId}`);
+
+    const methodName = String(method);
+    if (methodName.trim().length === 0) throw new Error("Data connector method must be a non-empty string");
+
+    if (!extension.active) {
+      const activationEvent = `onDataConnector:${id}`;
+      if (!(extension.manifest.activationEvents ?? []).includes(activationEvent)) {
+        throw new Error(`Extension ${extensionId} is not activated for ${activationEvent}`);
+      }
+      await this._activateExtension(extension, activationEvent);
+    }
+
+    await this._ensureWorker(extension);
+    return this._requestFromWorker(
+      extension,
+      {
+        type: "invoke_data_connector",
+        connectorId: id,
+        method: methodName,
+        args
+      },
+      {
+        timeoutMs: this._dataConnectorTimeoutMs,
+        operation: `data connector '${id}' (${methodName})`
       }
     );
   }
@@ -772,6 +822,7 @@ class BrowserExtensionHost {
     this._panels.clear();
     this._contextMenus.clear();
     this._customFunctions.clear();
+    this._dataConnectors.clear();
     this._messages = [];
 
     for (const ext of extensions) {
@@ -1195,6 +1246,26 @@ class BrowserExtensionHost {
         return null;
       }
 
+      case "dataConnectors.register": {
+        const connectorId = String(args[0]);
+        const contributed = (extension.manifest.contributes.dataConnectors ?? []).some(
+          (c) => c.id === connectorId
+        );
+        if (!contributed) {
+          throw new Error(`Data connector not declared in manifest: ${connectorId}`);
+        }
+        if (this._dataConnectors.has(connectorId) && this._dataConnectors.get(connectorId) !== extension.id) {
+          throw new Error(`Data connector already registered by another extension: ${connectorId}`);
+        }
+        this._dataConnectors.set(connectorId, extension.id);
+        return null;
+      }
+      case "dataConnectors.unregister": {
+        const connectorId = String(args[0]);
+        if (this._dataConnectors.get(connectorId) === extension.id) this._dataConnectors.delete(connectorId);
+        return null;
+      }
+
       case "network.fetch": {
         if (typeof fetch !== "function") {
           throw new Error("Network fetch is not available in this runtime");
@@ -1462,6 +1533,22 @@ class BrowserExtensionHost {
         return;
       }
       case "custom_function_error": {
+        const pending = extension.pendingRequests.get(message.id);
+        if (!pending) return;
+        extension.pendingRequests.delete(message.id);
+        if (pending.timeout) clearTimeout(pending.timeout);
+        pending.reject(deserializeError(message.error));
+        return;
+      }
+      case "data_connector_result": {
+        const pending = extension.pendingRequests.get(message.id);
+        if (!pending) return;
+        extension.pendingRequests.delete(message.id);
+        if (pending.timeout) clearTimeout(pending.timeout);
+        pending.resolve(message.result);
+        return;
+      }
+      case "data_connector_error": {
         const pending = extension.pendingRequests.get(message.id);
         if (!pending) return;
         extension.pendingRequests.delete(message.id);

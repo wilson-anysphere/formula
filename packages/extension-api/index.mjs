@@ -10,6 +10,7 @@ export const sheets = api.sheets;
 export const cells = api.cells;
 export const commands = api.commands;
 export const functions = api.functions;
+export const dataConnectors = api.dataConnectors;
 export const network = api.network;
 export const clipboard = api.clipboard;
 export const ui = api.ui;

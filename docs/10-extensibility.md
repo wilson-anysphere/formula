@@ -73,7 +73,8 @@ The desktop app wires marketplace installs into the Node extension host runtime:
     "onStartupFinished",
     "onCommand:myExtension.run",
     "onView:myExtension.panel",
-    "onCustomFunction:MYFUNCTION"
+    "onCustomFunction:MYFUNCTION",
+    "onDataConnector:myExtension.connector"
   ],
   
   "contributes": {
@@ -289,6 +290,23 @@ declare namespace formula {
     ): Promise<Disposable>;
   }
 
+  export interface DataConnectorQueryResult {
+    columns: string[];
+    rows: any[][];
+  }
+
+  export interface DataConnectorImplementation {
+    browse(config: any, path?: string | null): Promise<any>;
+    query(config: any, query: any): Promise<DataConnectorQueryResult>;
+    getConnectionConfig?: (...args: any[]) => Promise<any>;
+    testConnection?: (...args: any[]) => Promise<any>;
+    getQueryBuilder?: (...args: any[]) => Promise<any>;
+  }
+
+  export namespace dataConnectors {
+    function register(connectorId: string, impl: DataConnectorImplementation): Promise<Disposable>;
+  }
+
   export namespace network {
     function fetch(url: string, init?: any): Promise<{
       readonly ok: boolean;
@@ -481,11 +499,9 @@ export function activate(context: ExtensionContext) {
 
 ```typescript
 export function activate(context: ExtensionContext) {
-  const connector = formula.dataConnectors.register("myExtension.salesforce", {
-    id: "salesforce",
-    name: "Salesforce",
-    icon: "$(cloud)",
-    
+  // The connector's metadata (name/icon) is declared in the extension manifest via
+  // `contributes.dataConnectors`. Runtime registration only supplies implementation.
+  const connector = await formula.dataConnectors.register("myExtension.salesforce", {
     // Connection configuration
     getConnectionConfig: async () => {
       return [
@@ -665,8 +681,8 @@ misbehaving extension cannot hang or OOM the main app:
 - **Command/custom function timeouts**: command handlers and custom function invocations are also
   bounded (default: 5s). Timeouts terminate the worker and reject any other in-flight requests for
   that worker to avoid leaks.
-- **Configurable**: hosts may override defaults via `activationTimeoutMs`, `commandTimeoutMs`, and
-  `customFunctionTimeoutMs` when constructing the extension host.
+- **Configurable**: hosts may override defaults via `activationTimeoutMs`, `commandTimeoutMs`,
+  `customFunctionTimeoutMs`, and `dataConnectorTimeoutMs` when constructing the extension host.
 - **Memory caps (best-effort)**: extension workers are started with `worker_threads` `resourceLimits`
   based on a per-host `memoryMb` setting (default: 256MB, Node host only). This caps the V8 heap, but
   does not cover all native/external allocations.
@@ -958,6 +974,7 @@ by integration tests and marketplace packaging tests. It demonstrates:
 - Panels + view activation + webview messaging
 - Permission-gated APIs (network, clipboard, cells)
 - Custom functions (`SAMPLEHELLO_DOUBLE`)
+- Data connectors (`sampleHello.connector`)
 
 `extensions/sample-hello/src/extension.js` is the source of truth, and
 `extensions/sample-hello/dist/extension.js` is the built entrypoint referenced by the extension
@@ -1047,10 +1064,8 @@ export function activate(context: formula.ExtensionContext) {
     }
   });
   
-  // Register data connector
-  const connector = formula.dataConnectors.register("stockData.connector", {
-    name: "Stock Market Data",
-    
+  // Register data connector (metadata is declared in the manifest)
+  const connector = await formula.dataConnectors.register("stockData.connector", {
     browse: async (config) => {
       return [
         { id: "quotes", name: "Real-time Quotes", type: "table" },
@@ -1060,8 +1075,9 @@ export function activate(context: formula.ExtensionContext) {
     },
     
     query: async (config, query) => {
-      const apiKey = formula.config.get<string>("stockData.apiKey");
+      const apiKey = await formula.config.get<string>("stockData.apiKey");
       // Execute query...
+      return { columns: [], rows: [] };
     }
   });
   

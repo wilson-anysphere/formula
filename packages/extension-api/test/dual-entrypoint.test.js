@@ -139,6 +139,7 @@ test("dual entrypoint: CJS + ESM stay in lockstep", async (t) => {
       "cells",
       "commands",
       "functions",
+      "dataConnectors",
       "network",
       "clipboard",
       "ui",
@@ -347,3 +348,4 @@ test("dual entrypoint: CJS + ESM stay in lockstep", async (t) => {
     });
   });
 });
+

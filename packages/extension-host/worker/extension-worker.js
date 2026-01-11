@@ -725,6 +725,155 @@ function loadModuleFromFile(filename) {
   }
 }
 
+// The extension API itself is trusted host code, but it must still be evaluated inside the VM
+// realm so objects/promises returned to extensions originate from the sandbox. The API package is
+// allowed to `require()` *relative* helper modules within its own folder (eg: ./src/runtime.js),
+// but must not load Node builtins or arbitrary files.
+const extensionApiRoot = fs.realpathSync(path.dirname(workerData.apiModulePath));
+const apiModuleCache = new Map(); // real filename -> sandbox module record
+
+function assertAllowedExtensionApiRequest(request) {
+  if (typeof request !== "string") {
+    throw createSandboxError(`Invalid require specifier: ${String(request)}`);
+  }
+
+  const normalized = normalizeBuiltinRequest(request);
+  if (builtinModules.has(normalized)) {
+    throw createSandboxError(
+      `Access to Node builtin module '${normalized}' is not allowed in extensions`
+    );
+  }
+
+  const isRelative =
+    request.startsWith("./") ||
+    request.startsWith("../") ||
+    request.startsWith(".\\") ||
+    request.startsWith("..\\");
+  if (!isRelative) {
+    throw createSandboxError("The Formula extension API cannot require external modules");
+  }
+}
+
+function assertWithinExtensionApiRoot(resolvedPath, request) {
+  const real = fs.realpathSync(resolvedPath);
+  const relative = path.relative(extensionApiRoot, real);
+  const inside =
+    relative === "" ||
+    (!relative.startsWith(".." + path.sep) && relative !== ".." && !path.isAbsolute(relative));
+  if (!inside) {
+    throw createSandboxError(
+      `The Formula extension API cannot require modules outside its package folder: '${request}' resolved to '${real}'`
+    );
+  }
+  return real;
+}
+
+function resolveExtensionApiModulePath(request, parentFilename) {
+  assertAllowedExtensionApiRequest(request);
+
+  const baseDir = parentFilename ? path.dirname(parentFilename) : extensionApiRoot;
+  const resolvedBase = path.resolve(baseDir, request);
+
+  const direct = resolveAsFile(resolvedBase) ?? resolveAsDirectory(resolvedBase);
+  if (direct) return { filename: assertWithinExtensionApiRoot(direct, request) };
+
+  const withJs = resolveAsFile(`${resolvedBase}.js`);
+  if (withJs) return { filename: assertWithinExtensionApiRoot(withJs, request) };
+
+  const withJson = resolveAsFile(`${resolvedBase}.json`);
+  if (withJson) return { filename: assertWithinExtensionApiRoot(withJson, request) };
+
+  throw createSandboxError(`Cannot find module '${request}'`);
+}
+
+function loadExtensionApiModuleFromFile(filename) {
+  const ext = path.extname(filename);
+  const realFilename = fs.realpathSync(filename);
+
+  if (apiModuleCache.has(realFilename)) {
+    return apiModuleCache.get(realFilename).exports;
+  }
+
+  const module = new SandboxObject();
+  module.id = realFilename;
+  module.filename = realFilename;
+  module.loaded = false;
+  module.exports = new SandboxObject();
+
+  apiModuleCache.set(realFilename, module);
+
+  const hostRequire = hardenHostFunction((specifier) => {
+    try {
+      const resolved = resolveExtensionApiModulePath(specifier, realFilename);
+      return loadExtensionApiModuleFromFile(resolved.filename);
+    } catch (error) {
+      if (error instanceof SandboxError) throw error;
+      const err = createSandboxError(String(error?.message ?? error));
+      if (error?.stack) err.stack = String(error.stack);
+      throw err;
+    }
+  });
+
+  const requireFn = makeRequire(hostRequire);
+
+  if (ext === ".json") {
+    try {
+      const raw = fs.readFileSync(realFilename, "utf8");
+      module.exports = sandboxJSONParse(String(raw));
+      module.loaded = true;
+      return module.exports;
+    } catch (error) {
+      if (error instanceof SandboxError) throw error;
+      const err = createSandboxError(String(error?.message ?? error));
+      if (error?.stack) err.stack = String(error.stack);
+      throw err;
+    }
+  }
+
+  if (ext !== ".js" && ext !== ".cjs") {
+    throw createSandboxError(`Unsupported module type '${ext}' for '${realFilename}'`);
+  }
+
+  let code;
+  try {
+    code = fs.readFileSync(realFilename, "utf8");
+  } catch (error) {
+    throw createSandboxError(`Failed to read module '${realFilename}': ${String(error?.message ?? error)}`);
+  }
+
+  checkForDynamicImport(code, realFilename);
+
+  const wrapped = `(function (exports, require, module, __filename, __dirname) {\n'use strict';\n${code}\n});`;
+
+  let wrapperFn;
+  try {
+    const script = new vm.Script(wrapped, { filename: realFilename });
+    wrapperFn = script.runInContext(sandboxContext);
+  } catch (error) {
+    const err = createSandboxError(String(error?.message ?? error));
+    if (error?.stack) err.stack = String(error.stack);
+    throw err;
+  }
+
+  try {
+    wrapperFn.call(
+      module.exports,
+      module.exports,
+      requireFn,
+      module,
+      realFilename,
+      path.dirname(realFilename)
+    );
+    module.loaded = true;
+    return module.exports;
+  } catch (error) {
+    if (error instanceof SandboxError) throw error;
+    const err = createSandboxError(String(error?.message ?? error));
+    if (error?.stack) err.stack = String(error.stack);
+    throw err;
+  }
+}
+
 // Load the extension API module inside the sandbox so returned objects/promises
 // are created within the VM realm (preventing constructor-based escapes).
 const apiCode = fs.readFileSync(workerData.apiModulePath, "utf8");
@@ -742,8 +891,9 @@ try {
   const script = new vm.Script(apiWrapper, { filename: workerData.apiModulePath });
   const fn = script.runInContext(sandboxContext);
   const apiRequire = makeRequire(
-    hardenHostFunction(() => {
-      throw createSandboxError("The Formula extension API cannot require external modules");
+    hardenHostFunction((specifier) => {
+      const resolved = resolveExtensionApiModulePath(specifier, workerData.apiModulePath);
+      return loadExtensionApiModuleFromFile(resolved.filename);
     })
   );
   fn.call(

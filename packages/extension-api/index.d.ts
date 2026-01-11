@@ -105,6 +105,23 @@ export namespace functions {
   function register(name: string, def: CustomFunctionDefinition): Promise<Disposable>;
 }
 
+export interface DataConnectorQueryResult {
+  columns: string[];
+  rows: any[][];
+}
+
+export interface DataConnectorImplementation {
+  browse(config: any, path?: string | null): Promise<any>;
+  query(config: any, query: any): Promise<DataConnectorQueryResult>;
+  getConnectionConfig?: (...args: any[]) => Promise<any>;
+  testConnection?: (...args: any[]) => Promise<any>;
+  getQueryBuilder?: (...args: any[]) => Promise<any>;
+}
+
+export namespace dataConnectors {
+  function register(connectorId: string, impl: DataConnectorImplementation): Promise<Disposable>;
+}
+
 export interface FetchResponse {
   readonly ok: boolean;
   readonly status: number;
