@@ -100,6 +100,22 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(cell.format).toEqual({ bold: true, italic: true });
   });
 
+  it("preserves existing formatting when write_cell updates values", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", 1);
+    controller.setRangeFormat("Sheet1", "A1", { font: { bold: true } }, { label: "Bold" });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+
+    await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "A1", value: 2 }
+    });
+
+    expect(api.getCell({ sheet: "Sheet1", row: 1, col: 1 }).format).toEqual({ bold: true });
+  });
+
   it("filters out cells that are empty per ai-tools semantics (no value, formula, or supported format)", () => {
     const controller = new DocumentController();
     controller.setRangeFormat(
@@ -198,6 +214,22 @@ describe("DocumentControllerSpreadsheetApi", () => {
 
     expect(api.getCell({ sheet: "Sheet1", row: 1, col: 1 }).format).toBeUndefined();
     expect(api.getCell({ sheet: "Sheet1", row: 1, col: 2 }).format).toEqual({ bold: true });
+  });
+
+  it("preserves formatting when set_range updates values", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", 1);
+    controller.setRangeFormat("Sheet1", "A1", { font: { bold: true } }, { label: "Bold" });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+
+    await executor.execute({
+      name: "set_range",
+      parameters: { range: "A1", values: [[5]] }
+    });
+
+    expect(api.getCell({ sheet: "Sheet1", row: 1, col: 1 }).format).toEqual({ bold: true });
   });
 
   it("sort_range moves formatting with values without duplicating styles", async () => {
