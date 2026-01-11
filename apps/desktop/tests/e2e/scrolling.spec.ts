@@ -123,6 +123,7 @@ test.describe("grid scrolling + virtualization", () => {
     expect(scrollBefore).toBe(0);
 
     const track = page.getByTestId("scrollbar-track-y");
+    await expect(track).toBeVisible();
     const box = await track.boundingBox();
     expect(box).toBeTruthy();
     // Click near the bottom of the track (page down).
@@ -144,6 +145,7 @@ test.describe("grid scrolling + virtualization", () => {
     expect(scrollBefore).toBe(0);
 
     const track = page.getByTestId("scrollbar-track-x");
+    await expect(track).toBeVisible();
     const box = await track.boundingBox();
     expect(box).toBeTruthy();
     await page.mouse.click(box!.x + box!.width - 4, box!.y + box!.height / 2);
@@ -164,6 +166,7 @@ test.describe("grid scrolling + virtualization", () => {
     expect(scrollBefore).toBe(0);
 
     const thumb = page.getByTestId("scrollbar-thumb-y");
+    await expect(thumb).toBeVisible();
     const box = await thumb.boundingBox();
     expect(box).toBeTruthy();
 
