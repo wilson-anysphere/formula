@@ -12,6 +12,7 @@ import type {
 type WasmWorkbookInstance = {
   getCell(address: string, sheet?: string): unknown;
   setCell(address: string, value: CellScalar, sheet?: string): void;
+  setCells?: (updates: Array<{ address: string; value: CellScalar; sheet?: string }>) => void;
   getRange(range: string, sheet?: string): unknown;
   setRange(range: string, values: CellScalar[][], sheet?: string): void;
   recalculate(sheet?: string): unknown;
@@ -269,8 +270,12 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               result = wb.getRange(params.range, params.sheet);
               break;
             case "setCells":
-              for (const update of params.updates as Array<any>) {
-                wb.setCell(update.address, update.value, update.sheet);
+              if (typeof (wb as any).setCells === "function") {
+                (wb as any).setCells(params.updates);
+              } else {
+                for (const update of params.updates as Array<any>) {
+                  wb.setCell(update.address, update.value, update.sheet);
+                }
               }
               result = null;
               break;

@@ -701,6 +701,27 @@ impl WasmWorkbook {
         self.inner.set_cell_internal(sheet, &address, input)
     }
 
+    #[wasm_bindgen(js_name = "setCells")]
+    pub fn set_cells(&mut self, updates: JsValue) -> Result<(), JsValue> {
+        #[derive(Deserialize)]
+        struct CellUpdate {
+            address: String,
+            value: JsonValue,
+            sheet: Option<String>,
+        }
+
+        let updates: Vec<CellUpdate> =
+            serde_wasm_bindgen::from_value(updates).map_err(|err| js_err(err.to_string()))?;
+
+        for update in updates {
+            let sheet = update.sheet.as_deref().unwrap_or(DEFAULT_SHEET);
+            self.inner
+                .set_cell_internal(sheet, &update.address, update.value)?;
+        }
+
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = "getRange")]
     pub fn get_range(&self, range: String, sheet: Option<String>) -> Result<JsValue, JsValue> {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
