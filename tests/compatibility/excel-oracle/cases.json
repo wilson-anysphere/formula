@@ -15175,6 +15175,3370 @@
       "id": "sum_rng_text_9ca3ab1db1c7"
     },
     {
+      "formula": "=COUNTIF(A1:A15,\"ap*\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "wildcards"
+      ],
+      "id": "criteria_countif_83e2922e83a7"
+    },
+    {
+      "formula": "=COUNTIF(A1:A15,\"*x*\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "wildcards"
+      ],
+      "id": "criteria_countif_3e3a17990e85"
+    },
+    {
+      "formula": "=COUNTIF(A1:A15,\"?a?\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "wildcards"
+      ],
+      "id": "criteria_countif_43bfc659dacd"
+    },
+    {
+      "formula": "=COUNTIF(A1:A15,\"~*\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "escapes"
+      ],
+      "id": "criteria_countif_1f45debe018d"
+    },
+    {
+      "formula": "=COUNTIF(A1:A15,\"~?\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "escapes"
+      ],
+      "id": "criteria_countif_c8d8101870af"
+    },
+    {
+      "formula": "=COUNTIF(A1:A15,\"~~\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "escapes"
+      ],
+      "id": "criteria_countif_248b6d65e70f"
+    },
+    {
+      "formula": "=COUNTIF(A1:A15,\"~a\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "escapes"
+      ],
+      "id": "criteria_countif_ded05bee9b8b"
+    },
+    {
+      "formula": "=COUNTIF(A1:A15,\"\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "blanks"
+      ],
+      "id": "criteria_countif_304ed4092e0d"
+    },
+    {
+      "formula": "=COUNTIF(A1:A15,\"=\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "blanks"
+      ],
+      "id": "criteria_countif_fcd0b4402910"
+    },
+    {
+      "formula": "=COUNTIF(A1:A15,\"<>\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "blanks"
+      ],
+      "id": "criteria_countif_32ed7615cde0"
+    },
+    {
+      "formula": "=COUNTIF(A1:A15,\"#DIV/0!\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "errors"
+      ],
+      "id": "criteria_countif_d9d4945c3e0d"
+    },
+    {
+      "formula": "=COUNTIF(A1:A15,\"#N/A\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "apple"
+        },
+        {
+          "cell": "A2",
+          "value": "apricot"
+        },
+        {
+          "cell": "A3",
+          "value": "apex"
+        },
+        {
+          "cell": "A4",
+          "value": "fax"
+        },
+        {
+          "cell": "A5",
+          "value": "xylophone"
+        },
+        {
+          "cell": "A6",
+          "value": "max"
+        },
+        {
+          "cell": "A7",
+          "value": "*"
+        },
+        {
+          "cell": "A8",
+          "value": "?"
+        },
+        {
+          "cell": "A9",
+          "value": "~"
+        },
+        {
+          "cell": "A10",
+          "value": "~a"
+        },
+        {
+          "cell": "A11",
+          "value": "a"
+        },
+        {
+          "cell": "A12",
+          "value": ""
+        },
+        {
+          "cell": "A13",
+          "value": null
+        },
+        {
+          "cell": "A14",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "A15",
+          "formula": "=NA()"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "errors"
+      ],
+      "id": "criteria_countif_0a8a01d2dac0"
+    },
+    {
+      "formula": "=COUNTIF(B1:B10,\">5\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "B1",
+          "value": 5
+        },
+        {
+          "cell": "B2",
+          "value": "5"
+        },
+        {
+          "cell": "B3",
+          "value": 6
+        },
+        {
+          "cell": "B4",
+          "value": "6"
+        },
+        {
+          "cell": "B5",
+          "value": 0
+        },
+        {
+          "cell": "B6",
+          "value": "0"
+        },
+        {
+          "cell": "B7",
+          "value": 3
+        },
+        {
+          "cell": "B8",
+          "value": "3"
+        },
+        {
+          "cell": "B9",
+          "value": null
+        },
+        {
+          "cell": "B10",
+          "value": ""
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "operators"
+      ],
+      "id": "criteria_countif_a426f448aab3"
+    },
+    {
+      "formula": "=COUNTIF(B1:B10,\"<=0\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "B1",
+          "value": 5
+        },
+        {
+          "cell": "B2",
+          "value": "5"
+        },
+        {
+          "cell": "B3",
+          "value": 6
+        },
+        {
+          "cell": "B4",
+          "value": "6"
+        },
+        {
+          "cell": "B5",
+          "value": 0
+        },
+        {
+          "cell": "B6",
+          "value": "0"
+        },
+        {
+          "cell": "B7",
+          "value": 3
+        },
+        {
+          "cell": "B8",
+          "value": "3"
+        },
+        {
+          "cell": "B9",
+          "value": null
+        },
+        {
+          "cell": "B10",
+          "value": ""
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "operators"
+      ],
+      "id": "criteria_countif_c506c73341e5"
+    },
+    {
+      "formula": "=COUNTIF(B1:B10,\"<>3\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "B1",
+          "value": 5
+        },
+        {
+          "cell": "B2",
+          "value": "5"
+        },
+        {
+          "cell": "B3",
+          "value": 6
+        },
+        {
+          "cell": "B4",
+          "value": "6"
+        },
+        {
+          "cell": "B5",
+          "value": 0
+        },
+        {
+          "cell": "B6",
+          "value": "0"
+        },
+        {
+          "cell": "B7",
+          "value": 3
+        },
+        {
+          "cell": "B8",
+          "value": "3"
+        },
+        {
+          "cell": "B9",
+          "value": null
+        },
+        {
+          "cell": "B10",
+          "value": ""
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "operators"
+      ],
+      "id": "criteria_countif_786f6d49b2ff"
+    },
+    {
+      "formula": "=COUNTIF(B1:B10,\"5\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "B1",
+          "value": 5
+        },
+        {
+          "cell": "B2",
+          "value": "5"
+        },
+        {
+          "cell": "B3",
+          "value": 6
+        },
+        {
+          "cell": "B4",
+          "value": "6"
+        },
+        {
+          "cell": "B5",
+          "value": 0
+        },
+        {
+          "cell": "B6",
+          "value": "0"
+        },
+        {
+          "cell": "B7",
+          "value": 3
+        },
+        {
+          "cell": "B8",
+          "value": "3"
+        },
+        {
+          "cell": "B9",
+          "value": null
+        },
+        {
+          "cell": "B10",
+          "value": ""
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "numeric-vs-text"
+      ],
+      "id": "criteria_countif_0efb8e1d4292"
+    },
+    {
+      "formula": "=COUNTIF(B1:B10,5)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "B1",
+          "value": 5
+        },
+        {
+          "cell": "B2",
+          "value": "5"
+        },
+        {
+          "cell": "B3",
+          "value": 6
+        },
+        {
+          "cell": "B4",
+          "value": "6"
+        },
+        {
+          "cell": "B5",
+          "value": 0
+        },
+        {
+          "cell": "B6",
+          "value": "0"
+        },
+        {
+          "cell": "B7",
+          "value": 3
+        },
+        {
+          "cell": "B8",
+          "value": "3"
+        },
+        {
+          "cell": "B9",
+          "value": null
+        },
+        {
+          "cell": "B10",
+          "value": ""
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "numeric-vs-text"
+      ],
+      "id": "criteria_countif_800132fd8cf4"
+    },
+    {
+      "formula": "=COUNTIF(B1:B10,\"5*\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "B1",
+          "value": 5
+        },
+        {
+          "cell": "B2",
+          "value": "5"
+        },
+        {
+          "cell": "B3",
+          "value": 6
+        },
+        {
+          "cell": "B4",
+          "value": "6"
+        },
+        {
+          "cell": "B5",
+          "value": 0
+        },
+        {
+          "cell": "B6",
+          "value": "0"
+        },
+        {
+          "cell": "B7",
+          "value": 3
+        },
+        {
+          "cell": "B8",
+          "value": "3"
+        },
+        {
+          "cell": "B9",
+          "value": null
+        },
+        {
+          "cell": "B10",
+          "value": ""
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "numeric-vs-text"
+      ],
+      "id": "criteria_countif_7fd424c355e7"
+    },
+    {
+      "formula": "=COUNTIF(C1:C7,TRUE)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "C1",
+          "value": true
+        },
+        {
+          "cell": "C2",
+          "value": false
+        },
+        {
+          "cell": "C3",
+          "value": 1
+        },
+        {
+          "cell": "C4",
+          "value": 0
+        },
+        {
+          "cell": "C5",
+          "value": "TRUE"
+        },
+        {
+          "cell": "C6",
+          "value": "FALSE"
+        },
+        {
+          "cell": "C7",
+          "value": null
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "booleans"
+      ],
+      "id": "criteria_countif_5bcd560a0b3d"
+    },
+    {
+      "formula": "=COUNTIF(C1:C7,FALSE)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "C1",
+          "value": true
+        },
+        {
+          "cell": "C2",
+          "value": false
+        },
+        {
+          "cell": "C3",
+          "value": 1
+        },
+        {
+          "cell": "C4",
+          "value": 0
+        },
+        {
+          "cell": "C5",
+          "value": "TRUE"
+        },
+        {
+          "cell": "C6",
+          "value": "FALSE"
+        },
+        {
+          "cell": "C7",
+          "value": null
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "booleans"
+      ],
+      "id": "criteria_countif_b3ec4cbcc6f3"
+    },
+    {
+      "formula": "=COUNTIF(C1:C7,\"TRUE\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "C1",
+          "value": true
+        },
+        {
+          "cell": "C2",
+          "value": false
+        },
+        {
+          "cell": "C3",
+          "value": 1
+        },
+        {
+          "cell": "C4",
+          "value": 0
+        },
+        {
+          "cell": "C5",
+          "value": "TRUE"
+        },
+        {
+          "cell": "C6",
+          "value": "FALSE"
+        },
+        {
+          "cell": "C7",
+          "value": null
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "booleans"
+      ],
+      "id": "criteria_countif_8a80e8457c7f"
+    },
+    {
+      "formula": "=COUNTIF(C1:C7,\"FALSE\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "C1",
+          "value": true
+        },
+        {
+          "cell": "C2",
+          "value": false
+        },
+        {
+          "cell": "C3",
+          "value": 1
+        },
+        {
+          "cell": "C4",
+          "value": 0
+        },
+        {
+          "cell": "C5",
+          "value": "TRUE"
+        },
+        {
+          "cell": "C6",
+          "value": "FALSE"
+        },
+        {
+          "cell": "C7",
+          "value": null
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "booleans"
+      ],
+      "id": "criteria_countif_96f4359c5d5d"
+    },
+    {
+      "formula": "=COUNTIF(D1:D4,\">1/1/2020\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "D1",
+          "value": 43830
+        },
+        {
+          "cell": "D2",
+          "value": 43831
+        },
+        {
+          "cell": "D3",
+          "value": 43862
+        },
+        {
+          "cell": "D4",
+          "value": 44197
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "dates"
+      ],
+      "id": "criteria_countif_5e6eaa8ca234"
+    },
+    {
+      "formula": "=COUNTIF(D1:D4,\"<=1/1/2020\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "D1",
+          "value": 43830
+        },
+        {
+          "cell": "D2",
+          "value": 43831
+        },
+        {
+          "cell": "D3",
+          "value": 43862
+        },
+        {
+          "cell": "D4",
+          "value": 44197
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "dates"
+      ],
+      "id": "criteria_countif_a8cf16179373"
+    },
+    {
+      "formula": "=COUNTIF(D1:D4,\"1/1/2020\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "D1",
+          "value": 43830
+        },
+        {
+          "cell": "D2",
+          "value": 43831
+        },
+        {
+          "cell": "D3",
+          "value": 43862
+        },
+        {
+          "cell": "D4",
+          "value": 44197
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIF",
+        "dates"
+      ],
+      "id": "criteria_countif_be9ba1d13f12"
+    },
+    {
+      "formula": "=COUNTIFS(E1:E7,\"*x*\",F1:F7,\">=4\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIFS",
+        "wildcards"
+      ],
+      "id": "criteria_countifs_07e09af411ab"
+    },
+    {
+      "formula": "=COUNTIFS(E1:E7,\"~*\",F1:F7,\">=0\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIFS",
+        "escapes"
+      ],
+      "id": "criteria_countifs_1e18d0e9954b"
+    },
+    {
+      "formula": "=COUNTIFS(E1:E7,\"\",F1:F7,\">=0\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIFS",
+        "blanks"
+      ],
+      "id": "criteria_countifs_6510a40dcab9"
+    },
+    {
+      "formula": "=COUNTIFS(E1:E7,\"*x*\",F1:F7)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIFS",
+        "arg-count"
+      ],
+      "id": "criteria_countifs_0280625e4ad3"
+    },
+    {
+      "formula": "=COUNTIFS(E1:E6,\"*x*\",F1:F7,\">0\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "COUNTIFS",
+        "shape-mismatch"
+      ],
+      "id": "criteria_countifs_67928d5edb8a"
+    },
+    {
+      "formula": "=SUMIF(E1:E7,\"*x*\",G1:G7)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "SUMIF",
+        "wildcards"
+      ],
+      "id": "criteria_sumif_f43bc90397e9"
+    },
+    {
+      "formula": "=SUMIF(E1:E7,\"~*\",G1:G7)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "SUMIF",
+        "escapes"
+      ],
+      "id": "criteria_sumif_de2ea8f39ba9"
+    },
+    {
+      "formula": "=SUMIF(F1:F7,\">5\",G1:G7)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "SUMIF",
+        "operators"
+      ],
+      "id": "criteria_sumif_b73df588c9d3"
+    },
+    {
+      "formula": "=SUMIF(I1:I3,\">2\",J1:J3)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "I1",
+          "value": 1
+        },
+        {
+          "cell": "I2",
+          "value": 2
+        },
+        {
+          "cell": "I3",
+          "value": 3
+        },
+        {
+          "cell": "J1",
+          "value": 10
+        },
+        {
+          "cell": "J2",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "J3",
+          "value": 30
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "SUMIF",
+        "sum-range-errors"
+      ],
+      "id": "criteria_sumif_d1e8ff8bed59"
+    },
+    {
+      "formula": "=SUMIF(I1:I3,\">1\",J1:J3)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "I1",
+          "value": 1
+        },
+        {
+          "cell": "I2",
+          "value": 2
+        },
+        {
+          "cell": "I3",
+          "value": 3
+        },
+        {
+          "cell": "J1",
+          "value": 10
+        },
+        {
+          "cell": "J2",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "J3",
+          "value": 30
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "SUMIF",
+        "sum-range-errors"
+      ],
+      "id": "criteria_sumif_a8b48e3f1aab"
+    },
+    {
+      "formula": "=SUMIFS(G1:G7,E1:E7,\"*x*\",F1:F7,\">=4\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "SUMIFS",
+        "wildcards"
+      ],
+      "id": "criteria_sumifs_5ff2be403d28"
+    },
+    {
+      "formula": "=SUMIFS(G1:G7,E1:E7,\"*x*\",F1:F7)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "SUMIFS",
+        "arg-count"
+      ],
+      "id": "criteria_sumifs_0f0ecf071a67"
+    },
+    {
+      "formula": "=SUMIFS(G1:G7,E1:E6,\"*x*\",F1:F7,\">0\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "SUMIFS",
+        "shape-mismatch"
+      ],
+      "id": "criteria_sumifs_bced219d450e"
+    },
+    {
+      "formula": "=SUMIFS(M1:M4,K1:K4,\">=3\",L1:L4,\"y\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "K1",
+          "value": 1
+        },
+        {
+          "cell": "K2",
+          "value": 2
+        },
+        {
+          "cell": "K3",
+          "value": 3
+        },
+        {
+          "cell": "K4",
+          "value": 4
+        },
+        {
+          "cell": "L1",
+          "value": "x"
+        },
+        {
+          "cell": "L2",
+          "value": "x"
+        },
+        {
+          "cell": "L3",
+          "value": "y"
+        },
+        {
+          "cell": "L4",
+          "value": "y"
+        },
+        {
+          "cell": "M1",
+          "value": 10
+        },
+        {
+          "cell": "M2",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "M3",
+          "value": 30
+        },
+        {
+          "cell": "M4",
+          "value": 40
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "SUMIFS",
+        "sum-range-errors"
+      ],
+      "id": "criteria_sumifs_75dc1876f886"
+    },
+    {
+      "formula": "=SUMIFS(M1:M4,K1:K4,\">=2\",L1:L4,\"x\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "K1",
+          "value": 1
+        },
+        {
+          "cell": "K2",
+          "value": 2
+        },
+        {
+          "cell": "K3",
+          "value": 3
+        },
+        {
+          "cell": "K4",
+          "value": 4
+        },
+        {
+          "cell": "L1",
+          "value": "x"
+        },
+        {
+          "cell": "L2",
+          "value": "x"
+        },
+        {
+          "cell": "L3",
+          "value": "y"
+        },
+        {
+          "cell": "L4",
+          "value": "y"
+        },
+        {
+          "cell": "M1",
+          "value": 10
+        },
+        {
+          "cell": "M2",
+          "formula": "=1/0"
+        },
+        {
+          "cell": "M3",
+          "value": 30
+        },
+        {
+          "cell": "M4",
+          "value": 40
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "SUMIFS",
+        "sum-range-errors"
+      ],
+      "id": "criteria_sumifs_b4b8fb5f483a"
+    },
+    {
+      "formula": "=AVERAGEIF(E1:E7,\"*x*\",G1:G7)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "AVERAGEIF",
+        "wildcards"
+      ],
+      "id": "criteria_averageif_f05605f6c27e"
+    },
+    {
+      "formula": "=AVERAGEIF(F1:F7,\">5\",G1:G7)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "AVERAGEIF",
+        "operators"
+      ],
+      "id": "criteria_averageif_a594f9618068"
+    },
+    {
+      "formula": "=AVERAGEIF(N1:N3,\">0\",O1:O3)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "N1",
+          "value": 1
+        },
+        {
+          "cell": "N2",
+          "value": 2
+        },
+        {
+          "cell": "N3",
+          "value": 3
+        },
+        {
+          "cell": "O1",
+          "value": "a"
+        },
+        {
+          "cell": "O2",
+          "value": "b"
+        },
+        {
+          "cell": "O3",
+          "value": "c"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "AVERAGEIF",
+        "no-numeric"
+      ],
+      "id": "criteria_averageif_f97634e60418"
+    },
+    {
+      "formula": "=AVERAGEIF(N1:N3,\">10\",N1:N3)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "N1",
+          "value": 1
+        },
+        {
+          "cell": "N2",
+          "value": 2
+        },
+        {
+          "cell": "N3",
+          "value": 3
+        },
+        {
+          "cell": "O1",
+          "value": "a"
+        },
+        {
+          "cell": "O2",
+          "value": "b"
+        },
+        {
+          "cell": "O3",
+          "value": "c"
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "AVERAGEIF",
+        "no-numeric"
+      ],
+      "id": "criteria_averageif_6251cf7ab7fc"
+    },
+    {
+      "formula": "=AVERAGEIFS(G1:G7,E1:E7,\"*x*\",F1:F7,\">=4\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "AVERAGEIFS",
+        "wildcards"
+      ],
+      "id": "criteria_averageifs_2b217672628c"
+    },
+    {
+      "formula": "=AVERAGEIFS(G1:G7,E1:E7,\"*x*\",F1:F7)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "AVERAGEIFS",
+        "arg-count"
+      ],
+      "id": "criteria_averageifs_c855c35fc500"
+    },
+    {
+      "formula": "=AVERAGEIFS(G1:G7,E1:E6,\"*x*\",F1:F7,\">0\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "AVERAGEIFS",
+        "shape-mismatch"
+      ],
+      "id": "criteria_averageifs_1175aad69f8c"
+    },
+    {
+      "formula": "=AVERAGEIFS(G1:G7,E1:E7,\"no_match\",F1:F7,\">0\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "E1",
+          "value": "apple"
+        },
+        {
+          "cell": "E2",
+          "value": "apex"
+        },
+        {
+          "cell": "E3",
+          "value": "banana"
+        },
+        {
+          "cell": "E4",
+          "value": "fax"
+        },
+        {
+          "cell": "E5",
+          "value": "max"
+        },
+        {
+          "cell": "E6",
+          "value": "*"
+        },
+        {
+          "cell": "E7",
+          "value": null
+        },
+        {
+          "cell": "F1",
+          "value": 1
+        },
+        {
+          "cell": "F2",
+          "value": 2
+        },
+        {
+          "cell": "F3",
+          "value": 3
+        },
+        {
+          "cell": "F4",
+          "value": 4
+        },
+        {
+          "cell": "F5",
+          "value": 5
+        },
+        {
+          "cell": "F6",
+          "value": 6
+        },
+        {
+          "cell": "F7",
+          "value": 7
+        },
+        {
+          "cell": "G1",
+          "value": 10
+        },
+        {
+          "cell": "G2",
+          "value": 20
+        },
+        {
+          "cell": "G3",
+          "value": 30
+        },
+        {
+          "cell": "G4",
+          "value": 40
+        },
+        {
+          "cell": "G5",
+          "value": 50
+        },
+        {
+          "cell": "G6",
+          "value": 60
+        },
+        {
+          "cell": "G7",
+          "value": 70
+        }
+      ],
+      "tags": [
+        "agg",
+        "criteria",
+        "AVERAGEIFS",
+        "no-numeric"
+      ],
+      "id": "criteria_averageifs_24e89939805d"
+    },
+    {
       "formula": "=AND(A1,B1)",
       "outputCell": "C1",
       "inputs": [

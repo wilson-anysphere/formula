@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "manual-pinned",
+  "generatedAt": "2026-01-11T23:08:57.134237448Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -10,8 +10,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "e8bfcab0a0113829c840b2c9461b33dd33b996340a9b88a232c1405a7c77ddf7",
-    "count": 1092
+    "sha256": "03ef44c81febaa55f6b0736d5f5671a46a10038a9e76e07e9716d4f48931b50e",
+    "count": 1140
   },
   "results": [
     {
@@ -7835,6 +7835,486 @@
       "displayText": "4"
     },
     {
+      "caseId": "criteria_countif_83e2922e83a7",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 3.0
+      },
+      "address": "C1",
+      "displayText": "3"
+    },
+    {
+      "caseId": "criteria_countif_3e3a17990e85",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 4.0
+      },
+      "address": "C1",
+      "displayText": "4"
+    },
+    {
+      "caseId": "criteria_countif_43bfc659dacd",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "criteria_countif_1f45debe018d",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "criteria_countif_c8d8101870af",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "criteria_countif_248b6d65e70f",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "criteria_countif_ded05bee9b8b",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "criteria_countif_304ed4092e0d",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "criteria_countif_fcd0b4402910",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "criteria_countif_32ed7615cde0",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 11.0
+      },
+      "address": "C1",
+      "displayText": "11"
+    },
+    {
+      "caseId": "criteria_countif_d9d4945c3e0d",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "criteria_countif_0a8a01d2dac0",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "criteria_countif_a426f448aab3",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "criteria_countif_c506c73341e5",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 4.0
+      },
+      "address": "C1",
+      "displayText": "4"
+    },
+    {
+      "caseId": "criteria_countif_786f6d49b2ff",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 8.0
+      },
+      "address": "C1",
+      "displayText": "8"
+    },
+    {
+      "caseId": "criteria_countif_0efb8e1d4292",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "criteria_countif_800132fd8cf4",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "criteria_countif_7fd424c355e7",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "criteria_countif_5bcd560a0b3d",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "criteria_countif_b3ec4cbcc6f3",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "criteria_countif_8a80e8457c7f",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "criteria_countif_96f4359c5d5d",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "criteria_countif_5e6eaa8ca234",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "criteria_countif_a8cf16179373",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "criteria_countif_be9ba1d13f12",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "criteria_countifs_07e09af411ab",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "criteria_countifs_1e18d0e9954b",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "criteria_countifs_6510a40dcab9",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "criteria_countifs_0280625e4ad3",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#VALUE!"
+      },
+      "address": "C1",
+      "displayText": "#VALUE!"
+    },
+    {
+      "caseId": "criteria_countifs_67928d5edb8a",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#VALUE!"
+      },
+      "address": "C1",
+      "displayText": "#VALUE!"
+    },
+    {
+      "caseId": "criteria_sumif_f43bc90397e9",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 110.0
+      },
+      "address": "C1",
+      "displayText": "110"
+    },
+    {
+      "caseId": "criteria_sumif_de2ea8f39ba9",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 60.0
+      },
+      "address": "C1",
+      "displayText": "60"
+    },
+    {
+      "caseId": "criteria_sumif_b73df588c9d3",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 130.0
+      },
+      "address": "C1",
+      "displayText": "130"
+    },
+    {
+      "caseId": "criteria_sumif_d1e8ff8bed59",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 30.0
+      },
+      "address": "C1",
+      "displayText": "30"
+    },
+    {
+      "caseId": "criteria_sumif_a8b48e3f1aab",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#DIV/0!"
+      },
+      "address": "C1",
+      "displayText": "#DIV/0!"
+    },
+    {
+      "caseId": "criteria_sumifs_5ff2be403d28",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 90.0
+      },
+      "address": "C1",
+      "displayText": "90"
+    },
+    {
+      "caseId": "criteria_sumifs_0f0ecf071a67",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#VALUE!"
+      },
+      "address": "C1",
+      "displayText": "#VALUE!"
+    },
+    {
+      "caseId": "criteria_sumifs_bced219d450e",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#VALUE!"
+      },
+      "address": "C1",
+      "displayText": "#VALUE!"
+    },
+    {
+      "caseId": "criteria_sumifs_75dc1876f886",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 70.0
+      },
+      "address": "C1",
+      "displayText": "70"
+    },
+    {
+      "caseId": "criteria_sumifs_b4b8fb5f483a",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#DIV/0!"
+      },
+      "address": "C1",
+      "displayText": "#DIV/0!"
+    },
+    {
+      "caseId": "criteria_averageif_f05605f6c27e",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 36.666666666666664
+      },
+      "address": "C1",
+      "displayText": "36.666666666666664"
+    },
+    {
+      "caseId": "criteria_averageif_a594f9618068",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 65.0
+      },
+      "address": "C1",
+      "displayText": "65"
+    },
+    {
+      "caseId": "criteria_averageif_f97634e60418",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#DIV/0!"
+      },
+      "address": "C1",
+      "displayText": "#DIV/0!"
+    },
+    {
+      "caseId": "criteria_averageif_6251cf7ab7fc",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#DIV/0!"
+      },
+      "address": "C1",
+      "displayText": "#DIV/0!"
+    },
+    {
+      "caseId": "criteria_averageifs_2b217672628c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 45.0
+      },
+      "address": "C1",
+      "displayText": "45"
+    },
+    {
+      "caseId": "criteria_averageifs_c855c35fc500",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#VALUE!"
+      },
+      "address": "C1",
+      "displayText": "#VALUE!"
+    },
+    {
+      "caseId": "criteria_averageifs_1175aad69f8c",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#VALUE!"
+      },
+      "address": "C1",
+      "displayText": "#VALUE!"
+    },
+    {
+      "caseId": "criteria_averageifs_24e89939805d",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#DIV/0!"
+      },
+      "address": "C1",
+      "displayText": "#DIV/0!"
+    },
+    {
       "caseId": "and_95c1b28040be",
       "outputCell": "C1",
       "result": {
@@ -7948,11 +8428,11 @@
       "caseId": "not_2bbf1dab6143",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#VALUE!"
+        "t": "b",
+        "v": true
       },
       "address": "C1",
-      "displayText": "#VALUE!"
+      "displayText": "TRUE"
     },
     {
       "caseId": "not_2eeaa4d14bf3",
@@ -8018,11 +8498,11 @@
       "caseId": "if_0126a122f2ac",
       "outputCell": "D1",
       "result": {
-        "t": "e",
-        "v": "#VALUE!"
+        "t": "n",
+        "v": 20.0
       },
       "address": "D1",
-      "displayText": "#VALUE!"
+      "displayText": "20"
     },
     {
       "caseId": "if_8d4569c69e62",
