@@ -65,5 +65,28 @@ test.describe("grid scrolling + virtualization", () => {
     const scroll = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
     expect(scroll).toBeGreaterThan(0);
   });
-});
 
+  test("wheel scroll right reaches far columns and clicking selects correct cell", async ({ page }) => {
+    await page.goto("/");
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      app.getDocument().setCellValue(sheetId, { row: 0, col: 100 }, "FarX");
+      app.refresh();
+    });
+    await waitForIdle(page);
+
+    const grid = page.locator("#grid");
+    await grid.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(100 * 100, 0);
+
+    await expect.poll(async () => {
+      return await page.evaluate(() => (window as any).__formulaApp.getScroll().x);
+    }).toBeGreaterThan(0);
+
+    await grid.click({ position: { x: 60, y: 40 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("CW1");
+    await expect(page.getByTestId("active-value")).toHaveText("FarX");
+  });
+});
