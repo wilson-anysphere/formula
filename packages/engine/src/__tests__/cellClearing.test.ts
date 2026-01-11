@@ -196,6 +196,69 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("reports dynamic array spill outputs as recalc changes", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setCell("A1", "=SEQUENCE(1,2)");
+
+      const changes = await engine.recalculate();
+      expect(changes).toEqual([
+        { sheet: "Sheet1", address: "A1", value: 1 },
+        { sheet: "Sheet1", address: "B1", value: 2 }
+      ]);
+
+      expect((await engine.getCell("A1")).value).toBe(1);
+      const b1 = await engine.getCell("B1");
+      expect(b1.input).toBeNull();
+      expect(b1.value).toBe(2);
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("clears spill output cells when a spill cell is overwritten", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setCell("A1", "=SEQUENCE(1,3)");
+      await engine.recalculate();
+
+      // Overwrite a spill output cell with a literal. The spill origin should become #SPILL!,
+      // and any remaining spill outputs should be cleared back to blank (null).
+      await engine.setCell("B1", 5);
+      const changes = await engine.recalculate();
+
+      expect(changes).toEqual([
+        { sheet: "Sheet1", address: "A1", value: "#SPILL!" },
+        { sheet: "Sheet1", address: "C1", value: null }
+      ]);
+
+      const b1 = await engine.getCell("B1");
+      expect(b1.input).toBe(5);
+      expect(b1.value).toBe(5);
+      expect((await engine.getCell("C1")).value).toBeNull();
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("treats explicit null cells in JSON as absent and omits them on export", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
