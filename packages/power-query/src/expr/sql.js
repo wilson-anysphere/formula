@@ -103,6 +103,22 @@ export function compileExprToSql(expr, ctx) {
         }
       }
       case "binary": {
+        if (["==", "===", "!=", "!=="].includes(node.op)) {
+          const leftNull = node.left.type === "literal" && node.left.value == null;
+          const rightNull = node.right.type === "literal" && node.right.value == null;
+          if (leftNull && rightNull) {
+            // Match JS semantics: `null == null` is true, `null != null` is false.
+            const isNotEquals = node.op === "!=" || node.op === "!==";
+            return isNotEquals ? "(FALSE)" : "(TRUE)";
+          }
+          if (leftNull || rightNull) {
+            const other = leftNull ? node.right : node.left;
+            const otherSql = toSql(other);
+            const isNotEquals = node.op === "!=" || node.op === "!==";
+            return `(${otherSql} IS ${isNotEquals ? "NOT " : ""}NULL)`;
+          }
+        }
+
         const left = toSql(node.left);
         const right = toSql(node.right);
         const op = binaryOpToSql(node.op);

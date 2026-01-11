@@ -220,6 +220,26 @@ test("compile: folds addColumn ternary expressions", () => {
   });
 });
 
+test("compile: folds addColumn null equality to IS NULL (SQL semantics match local)", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_add_null_eq",
+    name: "Add null eq",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Sales"] } },
+      { id: "s2", name: "Add", operation: { type: "addColumn", name: "IsNull", formula: "=[Sales] == null ? 1 : 0" } },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT t.*, (CASE WHEN (t."Sales" IS NULL) THEN ? ELSE ? END) AS "IsNull" FROM (SELECT t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
+    params: [1, 0],
+  });
+});
+
 test("compile: folds addColumn string literals with escapes", () => {
   const folding = new QueryFoldingEngine();
   const payload = 'a"b\\c\n';
