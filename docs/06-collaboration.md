@@ -837,6 +837,16 @@ class DiffRenderer {
 
 ### Cell-Level Comments
 
+**Canonical schema:** `comments` is a `Y.Map` keyed by comment id (`Y.Map<string, Y.Map>`).
+
+> Compatibility note: older documents stored `comments` as a `Y.Array<Y.Map>` (one entry per
+> comment). Because Yjs root types are schema-defined by name, calling `doc.getMap("comments")`
+> on an Array-backed root can make the legacy array content inaccessible. When loading unknown
+> docs, detect the root kind first (or run a migration) before choosing a constructor
+> (e.g. `getCommentsRoot` / `migrateCommentsArrayToMap` in `@formula/collab-comments`; the
+> migration renames the legacy array root to `comments_legacy*` and creates the canonical map
+> under `comments`).
+
 ```typescript
 interface Comment {
   id: string;
@@ -858,10 +868,11 @@ interface Reply {
 }
 
 class CommentManager {
-  private comments: Y.Array<Y.Map<any>>;
+  // Keyed by comment id
+  private comments: Y.Map<Y.Map<any>>;
   
   constructor(doc: Y.Doc) {
-    this.comments = doc.getArray("comments");
+    this.comments = doc.getMap("comments");
   }
   
   addComment(cellRef: CellRef, content: string): Comment {
@@ -881,7 +892,7 @@ class CommentManager {
       yComment.set(key, value);
     });
     
-    this.comments.push([yComment]);
+    this.comments.set(comment.id, yComment);
     return comment;
   }
   
@@ -915,7 +926,7 @@ class CommentManager {
   }
   
   getCommentsForCell(cellRef: CellRef): Comment[] {
-    return this.comments.toArray()
+    return Array.from(this.comments.values())
       .filter(c => this.cellRefsEqual(c.get("cellRef"), cellRef))
       .map(c => this.yMapToComment(c));
   }

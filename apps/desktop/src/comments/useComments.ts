@@ -1,7 +1,7 @@
 import * as Y from "yjs";
 import { useEffect, useMemo, useState } from "react";
 
-import { CommentManager, getCommentsMap, yCommentToComment } from "@formula/collab-comments";
+import { CommentManager, getCommentsRoot } from "@formula/collab-comments";
 import type { Comment } from "@formula/collab-comments";
 
 export function useComments(doc: Y.Doc, cellRef: string | null): {
@@ -12,20 +12,26 @@ export function useComments(doc: Y.Doc, cellRef: string | null): {
   const [comments, setComments] = useState<Comment[]>([]);
 
   useEffect(() => {
-    const map = getCommentsMap(doc);
     const update = (): void => {
-      const all = Array.from(map.values()).map(yCommentToComment);
+      const all = manager.listAll();
       setComments(cellRef ? all.filter((comment) => comment.cellRef === cellRef) : []);
     };
 
     update();
 
-    map.observe(update);
+    const root = getCommentsRoot(doc);
+    if (root.kind === "map") {
+      root.map.observe(update);
+      return () => {
+        root.map.unobserve(update);
+      };
+    }
+
+    root.array.observe(update);
     return () => {
-      map.unobserve(update);
+      root.array.unobserve(update);
     };
-  }, [doc, cellRef]);
+  }, [doc, cellRef, manager]);
 
   return { manager, comments };
 }
-
