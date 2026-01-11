@@ -298,11 +298,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
       </div>
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         {tab === "chat" ? (
-          <AIChatPanel
-            client={client as any}
-            toolExecutor={{ tools: [], execute: async () => ({ ok: false, error: { message: "Tool executor not initialized" } }) } as any}
-            sendMessage={sendMessage}
-          />
+          <AIChatPanel sendMessage={sendMessage} />
         ) : (
           <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10, height: "100%", minHeight: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

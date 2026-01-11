@@ -12,14 +12,6 @@ function formatAttachmentsForPrompt(attachments: Attachment[]) {
     .join("\n");
 }
 
-export interface AIChatPanelProps {
-  client: LLMClient;
-  toolExecutor: ToolExecutor;
-  systemPrompt?: string;
-  onRequestToolApproval?: (call: ToolCall) => Promise<boolean>;
-  sendMessage?: AIChatPanelSendMessage;
-}
-
 export interface AIChatPanelSendMessageArgs {
   messages: LLMMessage[];
   userText: string;
@@ -29,6 +21,30 @@ export interface AIChatPanelSendMessageArgs {
 }
 
 export type AIChatPanelSendMessage = (args: AIChatPanelSendMessageArgs) => Promise<{ messages: LLMMessage[]; final: string }>;
+
+export type AIChatPanelProps =
+  | {
+      /**
+       * When `sendMessage` is provided, the panel becomes a pure UI shell and
+       * delegates orchestration (context, tools, audit, approvals) to the caller.
+       */
+      sendMessage: AIChatPanelSendMessage;
+      systemPrompt?: string;
+      onRequestToolApproval?: (call: ToolCall) => Promise<boolean>;
+      client?: LLMClient;
+      toolExecutor?: ToolExecutor;
+    }
+  | {
+      /**
+       * If `sendMessage` is omitted, the panel runs the provider-agnostic
+       * `runChatWithTools` loop directly (legacy/demo mode).
+       */
+      sendMessage?: undefined;
+      client: LLMClient;
+      toolExecutor: ToolExecutor;
+      systemPrompt?: string;
+      onRequestToolApproval?: (call: ToolCall) => Promise<boolean>;
+    };
 
 export function AIChatPanel(props: AIChatPanelProps) {
   const [input, setInput] = useState("");
@@ -129,17 +145,17 @@ export function AIChatPanel(props: AIChatPanelProps) {
         ]);
       };
 
-      const runner =
-        props.sendMessage ??
-        (async ({ messages, onToolCall, onToolResult }: AIChatPanelSendMessageArgs) =>
-          runChatWithTools({
-            client: props.client,
-            toolExecutor: props.toolExecutor,
-            messages,
-            onToolCall,
-            onToolResult,
-            requireApproval: props.onRequestToolApproval ?? (async () => true),
-          }));
+      const runner: AIChatPanelSendMessage = props.sendMessage
+        ? props.sendMessage
+        : async ({ messages, onToolCall, onToolResult }: AIChatPanelSendMessageArgs) =>
+            runChatWithTools({
+              client: props.client,
+              toolExecutor: props.toolExecutor,
+              messages,
+              onToolCall,
+              onToolResult,
+              requireApproval: props.onRequestToolApproval ?? (async () => true),
+            });
 
       const result = await runner({
         messages: requestMessages,
