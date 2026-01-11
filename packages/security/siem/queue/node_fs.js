@@ -13,6 +13,7 @@ import {
 import path from "node:path";
 
 import { redactAuditEvent } from "../redaction.js";
+import { assertAuditEvent } from "../../../audit-core/index.js";
 import {
   SEGMENT_STATES,
   createSegmentBaseName,
@@ -348,8 +349,10 @@ export class NodeFsOfflineAuditQueue {
   async enqueue(event) {
     if (!event || typeof event !== "object") throw new Error("audit event must be an object");
     assertUuid(event.id);
+    assertAuditEvent(event);
 
     const safeEvent = redactIfConfigured(event, { redact: this.redact, redactionOptions: this.redactionOptions });
+    assertAuditEvent(safeEvent);
     const line = JSON.stringify(safeEvent) + "\n";
     const lineBytes = Buffer.byteLength(line, "utf8");
 

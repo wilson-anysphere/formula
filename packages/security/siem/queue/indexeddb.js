@@ -1,4 +1,5 @@
 import { redactAuditEvent } from "../redaction.js";
+import { assertAuditEvent } from "../../../audit-core/index.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -199,8 +200,10 @@ export class IndexedDbOfflineAuditQueue {
   async enqueue(event) {
     if (!event || typeof event !== "object") throw new Error("audit event must be an object");
     assertUuid(event.id);
+    assertAuditEvent(event);
 
     const safeEvent = redactIfConfigured(event, { redact: this.redact, redactionOptions: this.redactionOptions });
+    assertAuditEvent(safeEvent);
     const payload = JSON.stringify(safeEvent);
     const bytes = utf8ByteLength(payload) + 1;
 

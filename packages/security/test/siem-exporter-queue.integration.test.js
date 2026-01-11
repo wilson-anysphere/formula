@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { createAuditEvent } from "../../audit-core/index.js";
 import { SiemExporter } from "../siem/exporter.js";
 import { NodeFsOfflineAuditQueue } from "../siem/queue/node_fs.js";
 
@@ -39,9 +40,33 @@ test("NodeFsOfflineAuditQueue flushes persisted events via SiemExporter (idempot
   });
 
   const events = [
-    { id: randomUUID(), timestamp: "2025-01-01T00:00:00.000Z", orgId: "org_1", eventType: "document.opened", details: { token: "secret1" } },
-    { id: randomUUID(), timestamp: "2025-01-01T00:00:01.000Z", orgId: "org_1", eventType: "document.modified", details: { token: "secret2" } },
-    { id: randomUUID(), timestamp: "2025-01-01T00:00:02.000Z", orgId: "org_1", eventType: "document.deleted", details: { token: "secret3" } },
+    createAuditEvent({
+      id: randomUUID(),
+      timestamp: "2025-01-01T00:00:00.000Z",
+      eventType: "document.opened",
+      actor: { type: "user", id: "user_1" },
+      context: { orgId: "org_1" },
+      success: true,
+      details: { token: "secret1" }
+    }),
+    createAuditEvent({
+      id: randomUUID(),
+      timestamp: "2025-01-01T00:00:01.000Z",
+      eventType: "document.modified",
+      actor: { type: "user", id: "user_1" },
+      context: { orgId: "org_1" },
+      success: true,
+      details: { token: "secret2" }
+    }),
+    createAuditEvent({
+      id: randomUUID(),
+      timestamp: "2025-01-01T00:00:02.000Z",
+      eventType: "document.deleted",
+      actor: { type: "user", id: "user_1" },
+      context: { orgId: "org_1" },
+      success: true,
+      details: { token: "secret3" }
+    })
   ];
 
   for (const event of events) await queue.enqueue(event);
@@ -65,4 +90,3 @@ test("NodeFsOfflineAuditQueue flushes persisted events via SiemExporter (idempot
   await new Promise((resolve) => server.close(resolve));
   await rm(dir, { recursive: true, force: true });
 });
-

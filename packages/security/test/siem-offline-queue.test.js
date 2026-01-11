@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { createAuditEvent } from "../../audit-core/index.js";
 import { NodeFsOfflineAuditQueue } from "../siem/queue/node_fs.js";
 import { IndexedDbOfflineAuditQueue } from "../siem/queue/indexeddb.js";
 import { OfflineAuditQueue } from "../siem/offlineQueue.js";
@@ -13,13 +14,15 @@ import { OfflineAuditQueue } from "../siem/offlineQueue.js";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 
 function makeEvent({ secret = "supersecret", eventType = "document.opened" } = {}) {
-  return {
+  return createAuditEvent({
     id: randomUUID(),
     timestamp: "2025-01-01T00:00:00.000Z",
-    orgId: "org_1",
     eventType,
-    details: { token: secret },
-  };
+    actor: { type: "user", id: "user_1" },
+    context: { orgId: "org_1" },
+    success: true,
+    details: { token: secret }
+  });
 }
 
 function sleep(ms) {
