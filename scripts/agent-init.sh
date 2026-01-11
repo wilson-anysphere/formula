@@ -27,7 +27,6 @@ export RUSTFLAGS="${RUSTFLAGS:--C codegen-units=4}"
 # Cargo defaults to using ~/.cargo for registry/index/git caches. With many agents
 # building in parallel this creates heavy lock contention under ~/.cargo and can
 # make builds flaky/slow. Default to a repo-local CARGO_HOME to isolate agents.
-#
 # Note: some agent runners pre-set `CARGO_HOME=$HOME/.cargo`. Treat that value as
 # "unset" for our purposes so we still get per-repo isolation by default.
 # In CI we respect `CARGO_HOME` even if it points at `$HOME/.cargo` so CI can use

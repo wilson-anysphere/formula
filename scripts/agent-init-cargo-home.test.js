@@ -54,6 +54,52 @@ test('agent-init defaults CARGO_HOME to a repo-local directory', { skip: !hasBas
   assert.equal(cargoHome, resolve(repoRoot, 'target', 'cargo-home'));
 });
 
+test('agent-init treats $HOME/.cargo as default and overrides it', { skip: !hasBash }, () => {
+  const cargoHome = runBash(
+    [
+      'unset CI',
+      'export CARGO_HOME="$HOME/.cargo"',
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'printf "%s" "$CARGO_HOME"',
+    ].join(' && '),
+  );
+
+  assert.equal(cargoHome, resolve(repoRoot, 'target', 'cargo-home'));
+});
+
+test('agent-init can preserve $HOME/.cargo when FORMULA_ALLOW_GLOBAL_CARGO_HOME=1', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'unset CI',
+      'export CARGO_HOME="$HOME/.cargo"',
+      'export FORMULA_ALLOW_GLOBAL_CARGO_HOME=1',
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'printf "%s\\n%s" "$HOME" "$CARGO_HOME"',
+    ].join(' && '),
+  );
+
+  const [home, cargoHome] = out.split('\n');
+  assert.equal(cargoHome, resolve(home, '.cargo'));
+});
+
+test('agent-init preserves $HOME/.cargo when running in CI', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'export CI=1',
+      'unset FORMULA_ALLOW_GLOBAL_CARGO_HOME',
+      'export CARGO_HOME="$HOME/.cargo"',
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'printf "%s\\n%s" "$HOME" "$CARGO_HOME"',
+    ].join(' && '),
+  );
+
+  const [home, cargoHome] = out.split('\n');
+  assert.equal(cargoHome, resolve(home, '.cargo'));
+});
+
 test('agent-init preserves an existing CARGO_HOME override', { skip: !hasBash }, () => {
   const override = mkdtempSync(resolve(tmpdir(), 'formula-cargo-home-'));
   const cargoHome = runBash(
@@ -72,6 +118,8 @@ test('agent-init prepends CARGO_HOME/bin to PATH', { skip: !hasBash }, () => {
   const out = runBash(
     [
       'unset CARGO_HOME',
+      // Stabilize PATH so the assertion isn't affected by login shell defaults.
+      'export PATH="/usr/bin:/bin"',
       'export DISPLAY=:99',
       'source scripts/agent-init.sh >/dev/null',
       'printf "%s\\n%s" "$CARGO_HOME" "$PATH"',
