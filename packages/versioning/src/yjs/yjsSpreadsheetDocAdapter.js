@@ -381,6 +381,21 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
         if (isExcludedRoot(name)) continue;
         const kind = rootKindFromValue(value);
         if (!kind) {
+          // Some root types can be present in the snapshot as an empty
+          // `AbstractType` placeholder (no map entries and no list items). In
+          // that case the placeholder doesn't provide enough structure to infer
+          // whether it was a Map/Array/Text. If the root is empty, skipping it is
+          // safe: there is no user-visible content to restore.
+          //
+          // This avoids restore failures for docs that eagerly instantiate empty
+          // roots (e.g. comments) and later snapshot/restore them.
+          if (isYAbstractType(value)) {
+            const mapSize = value._map instanceof Map ? value._map.size : 0;
+            const hasStart = value._start != null;
+            if (mapSize === 0 && !hasStart) {
+              continue;
+            }
+          }
           throw new Error(
             `Unsupported Yjs root type for "${name}" in snapshot: ${value?.constructor?.name ?? typeof value}`,
           );
