@@ -86,6 +86,7 @@ export class FilePersistence {
   private updateCounts = new Map<string, number>();
   private compactTimers = new Map<string, NodeJS.Timeout>();
   private readonly shouldPersist: (docName: string) => boolean;
+  private readonly disabledDocs = new Set<string>();
 
   constructor(
     private readonly dir: string,
@@ -127,6 +128,7 @@ export class FilePersistence {
     const timer = setTimeout(() => {
       this.compactTimers.delete(docName);
       if (!this.shouldPersist(docName)) return;
+      if (this.disabledDocs.has(docName)) return;
       void this.compactNow(docName, doc);
     }, 250);
 
@@ -135,31 +137,38 @@ export class FilePersistence {
 
   private async compactNow(docName: string, doc: YTypes.Doc): Promise<void> {
     if (!this.shouldPersist(docName)) return;
+    if (this.disabledDocs.has(docName)) return;
     await this.enqueue(docName, async () => {
-      await fs.mkdir(this.dir, { recursive: true });
+      if (this.disabledDocs.has(docName)) return;
+      try {
+        await fs.mkdir(this.dir, { recursive: true });
 
-      const docHash = this.docHashForDoc(docName);
-      const filePath = this.filePathForDocHash(docHash);
-      const aadContext = persistenceAadContextForDocHash(docHash);
-      const snapshot = Y.encodeStateAsUpdate(doc);
+        const docHash = this.docHashForDoc(docName);
+        const filePath = this.filePathForDocHash(docHash);
+        const aadContext = persistenceAadContextForDocHash(docHash);
+        const snapshot = Y.encodeStateAsUpdate(doc);
 
-      if (this.encryption.mode === "keyring") {
-        const header = encodeFileHeader(FILE_FLAG_ENCRYPTED);
-        const record = encodeEncryptedRecord(snapshot, {
-          keyRing: this.encryption.keyRing,
-          aadContext,
-        });
-        await atomicWriteFile(filePath, Buffer.concat([header, record]));
-      } else {
-        await atomicWriteFile(filePath, encodeLegacyRecord(snapshot));
+        if (this.encryption.mode === "keyring") {
+          const header = encodeFileHeader(FILE_FLAG_ENCRYPTED);
+          const record = encodeEncryptedRecord(snapshot, {
+            keyRing: this.encryption.keyRing,
+            aadContext,
+          });
+          await atomicWriteFile(filePath, Buffer.concat([header, record]));
+        } else {
+          await atomicWriteFile(filePath, encodeLegacyRecord(snapshot));
+        }
+
+        this.updateCounts.set(docName, 0);
+        this.logger.info({ docName }, "persistence_compacted");
+      } catch (err) {
+        this.disabledDocs.add(docName);
+        this.logger.error({ docName, err }, "persistence_compaction_failed");
       }
-
-      this.updateCounts.set(docName, 0);
-      this.logger.info({ docName }, "persistence_compacted");
     });
   }
 
-  async bindState(docName: string, doc: YTypes.Doc): Promise<void> {
+  bindState(docName: string, doc: YTypes.Doc): void {
     const docHash = this.docHashForDoc(docName);
     const filePath = this.filePathForDocHash(docHash);
     const aadContext = persistenceAadContextForDocHash(docHash);
@@ -167,24 +176,34 @@ export class FilePersistence {
     const updateHandler = (update: Uint8Array, origin: unknown) => {
       if (origin === persistenceOrigin) return;
       if (!this.shouldPersist(docName)) return;
+      if (this.disabledDocs.has(docName)) return;
       void this.enqueue(docName, async () => {
-        await fs.mkdir(this.dir, { recursive: true });
+        if (this.disabledDocs.has(docName)) return;
+        try {
+          await fs.mkdir(this.dir, { recursive: true });
 
-        if (this.encryption.mode === "keyring") {
-          const record = encodeEncryptedRecord(update, {
-            keyRing: this.encryption.keyRing,
-            aadContext,
-          });
-          await fs.appendFile(filePath, record);
-        } else {
-          await fs.appendFile(filePath, encodeLegacyRecord(update));
-        }
+          if (this.encryption.mode === "keyring") {
+            const record = encodeEncryptedRecord(update, {
+              keyRing: this.encryption.keyRing,
+              aadContext,
+            });
+            await fs.appendFile(filePath, record);
+          } else {
+            await fs.appendFile(filePath, encodeLegacyRecord(update));
+          }
 
-        const count = (this.updateCounts.get(docName) ?? 0) + 1;
-        this.updateCounts.set(docName, count);
+          const count = (this.updateCounts.get(docName) ?? 0) + 1;
+          this.updateCounts.set(docName, count);
 
-        if (count >= this.compactAfterUpdates) {
-          this.scheduleCompaction(docName, doc);
+          if (count >= this.compactAfterUpdates) {
+            this.scheduleCompaction(docName, doc);
+          }
+        } catch (err) {
+          this.disabledDocs.add(docName);
+          this.logger.error({ docName, err }, "persistence_write_failed");
+          const timer = this.compactTimers.get(docName);
+          if (timer) clearTimeout(timer);
+          this.compactTimers.delete(docName);
         }
       });
     };
@@ -197,6 +216,8 @@ export class FilePersistence {
       const timer = this.compactTimers.get(docName);
       if (timer) clearTimeout(timer);
       this.compactTimers.delete(docName);
+      this.disabledDocs.delete(docName);
+      this.updateCounts.delete(docName);
     });
 
     // `y-websocket` server utilities do not await `bindState()`. To ensure
@@ -205,113 +226,136 @@ export class FilePersistence {
     // plaintext persistence file synchronously when encryption is disabled.
     if (this.encryption.mode === "off") {
       if (!this.shouldPersist(docName)) return;
-      mkdirSync(this.dir, { recursive: true });
-
-      let data: Buffer | null = null;
       try {
-        data = readFileSync(filePath);
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code !== "ENOENT") throw err;
-        data = null;
-      }
+        mkdirSync(this.dir, { recursive: true });
 
-      if (!data) return;
-
-      if (hasFileHeader(data)) {
-        const { flags } = parseFileHeader(data);
-        if ((flags & FILE_FLAG_ENCRYPTED) === FILE_FLAG_ENCRYPTED) {
-          throw new Error(
-            "Encrypted persistence requires SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring"
-          );
-        }
-      }
-
-      const legacyScan = hasFileHeader(data)
-        ? scanLegacyRecords(data, FILE_HEADER_BYTES)
-        : scanLegacyRecords(data);
-      for (const update of legacyScan.updates) {
-        Y.applyUpdate(doc, update, persistenceOrigin);
-      }
-      if (legacyScan.lastGoodOffset < data.length) {
-        truncateSync(filePath, legacyScan.lastGoodOffset);
-        this.logger.warn({ docName }, "persistence_truncated_corrupt_tail");
-      }
-      this.logger.info({ docName }, "persistence_loaded");
-      return;
-    }
-
-    await this.enqueue(docName, async () => {
-      if (!this.shouldPersist(docName)) return;
-      await fs.mkdir(this.dir, { recursive: true });
-
-      let data: Buffer | null = null;
-      try {
-        data = await fs.readFile(filePath);
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code !== "ENOENT") throw err;
-        data = null;
-      }
-
-      if (!data) {
-        if (this.encryption.mode === "keyring") {
-          await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED));
-        }
-        return;
-      }
-
-      if (hasFileHeader(data)) {
-        const { flags } = parseFileHeader(data);
-        if ((flags & FILE_FLAG_ENCRYPTED) !== FILE_FLAG_ENCRYPTED) {
-          throw new Error(
-            "Unsupported persistence file flags; expected encrypted format"
-          );
-        }
-        if (this.encryption.mode !== "keyring") {
-          throw new Error(
-            "Encrypted persistence requires SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring"
-          );
+        let data: Buffer | null = null;
+        try {
+          data = readFileSync(filePath);
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT") throw err;
+          data = null;
         }
 
-        const { keyRing } = this.encryption;
-        const { updates, lastGoodOffset } = scanEncryptedRecords(data, { keyRing, aadContext });
-        for (const update of updates) {
+        if (!data) return;
+
+        if (hasFileHeader(data)) {
+          const { flags } = parseFileHeader(data);
+          if ((flags & FILE_FLAG_ENCRYPTED) === FILE_FLAG_ENCRYPTED) {
+            this.disabledDocs.add(docName);
+            this.logger.error(
+              { docName },
+              "persistence_encrypted_file_requires_keyring_encryption"
+            );
+            return;
+          }
+        }
+
+        const legacyScan = hasFileHeader(data)
+          ? scanLegacyRecords(data, FILE_HEADER_BYTES)
+          : scanLegacyRecords(data);
+        for (const update of legacyScan.updates) {
           Y.applyUpdate(doc, update, persistenceOrigin);
         }
-        if (lastGoodOffset < data.length) {
-          await fs.truncate(filePath, lastGoodOffset);
+        if (legacyScan.lastGoodOffset < data.length) {
+          truncateSync(filePath, legacyScan.lastGoodOffset);
           this.logger.warn({ docName }, "persistence_truncated_corrupt_tail");
         }
         this.logger.info({ docName }, "persistence_loaded");
-        return;
+      } catch (err) {
+        this.disabledDocs.add(docName);
+        this.logger.error({ docName, err }, "persistence_load_failed");
       }
+      return;
+    }
 
-      // Legacy plaintext file (no header). If encryption is enabled, upgrade it
-      // in-place (atomically) before applying updates.
-      const legacyUpdates = scanLegacyRecords(data).updates;
-      if (this.encryption.mode === "keyring") {
-        const { keyRing } = this.encryption;
-        const header = encodeFileHeader(FILE_FLAG_ENCRYPTED);
-        const records = legacyUpdates.map((update) =>
-          encodeEncryptedRecord(update, {
-            keyRing,
-            aadContext,
-          })
-        );
-        await atomicWriteFile(filePath, Buffer.concat([header, ...records]));
-      }
+    void this.enqueue(docName, async () => {
+      if (!this.shouldPersist(docName)) return;
+      if (this.disabledDocs.has(docName)) return;
+      try {
+        await fs.mkdir(this.dir, { recursive: true });
 
-      for (const update of legacyUpdates) {
-        Y.applyUpdate(doc, update, persistenceOrigin);
+        let data: Buffer | null = null;
+        try {
+          data = await fs.readFile(filePath);
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT") throw err;
+          data = null;
+        }
+
+        if (!data) {
+          if (this.encryption.mode === "keyring") {
+            await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED));
+          }
+          return;
+        }
+
+        if (hasFileHeader(data)) {
+          const { flags } = parseFileHeader(data);
+          if ((flags & FILE_FLAG_ENCRYPTED) !== FILE_FLAG_ENCRYPTED) {
+            throw new Error(
+              "Unsupported persistence file flags; expected encrypted format"
+            );
+          }
+          if (this.encryption.mode !== "keyring") {
+            throw new Error(
+              "Encrypted persistence requires SYNC_SERVER_PERSISTENCE_ENCRYPTION=keyring"
+            );
+          }
+
+          const { keyRing } = this.encryption;
+          const { updates, lastGoodOffset } = scanEncryptedRecords(data, { keyRing, aadContext });
+          for (const update of updates) {
+            Y.applyUpdate(doc, update, persistenceOrigin);
+          }
+          if (lastGoodOffset < data.length) {
+            await fs.truncate(filePath, lastGoodOffset);
+            this.logger.warn({ docName }, "persistence_truncated_corrupt_tail");
+          }
+          this.logger.info({ docName }, "persistence_loaded");
+          return;
+        }
+
+        // Legacy plaintext file (no header). If encryption is enabled, upgrade it
+        // in-place (atomically) before applying updates.
+        const legacyUpdates = scanLegacyRecords(data).updates;
+        if (this.encryption.mode === "keyring") {
+          const { keyRing } = this.encryption;
+          const header = encodeFileHeader(FILE_FLAG_ENCRYPTED);
+          const records = legacyUpdates.map((update) =>
+            encodeEncryptedRecord(update, {
+              keyRing,
+              aadContext,
+            })
+          );
+          await atomicWriteFile(filePath, Buffer.concat([header, ...records]));
+        }
+
+        for (const update of legacyUpdates) {
+          Y.applyUpdate(doc, update, persistenceOrigin);
+        }
+        this.logger.info({ docName }, "persistence_loaded");
+      } catch (err) {
+        this.disabledDocs.add(docName);
+        this.logger.error({ docName, err }, "persistence_load_failed");
+        const timer = this.compactTimers.get(docName);
+        if (timer) clearTimeout(timer);
+        this.compactTimers.delete(docName);
       }
-      this.logger.info({ docName }, "persistence_loaded");
     });
   }
 
   async writeState(docName: string, doc: YTypes.Doc): Promise<void> {
     if (!this.shouldPersist(docName)) return;
-    await this.compactNow(docName, doc);
+    if (this.disabledDocs.has(docName)) return;
+    try {
+      await this.compactNow(docName, doc);
+    } catch (err) {
+      this.disabledDocs.add(docName);
+      this.logger.error({ docName, err }, "persistence_write_failed");
+    }
   }
 
   async flush(): Promise<void> {
@@ -340,6 +384,7 @@ export class FilePersistence {
     // Reset per-document bookkeeping so future docs start from a clean slate.
     this.queues.delete(docName);
     this.updateCounts.delete(docName);
+    this.disabledDocs.delete(docName);
 
     const timerAfter = this.compactTimers.get(docName);
     if (timerAfter) clearTimeout(timerAfter);
