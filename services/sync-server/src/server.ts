@@ -282,7 +282,9 @@ export function createSyncServer(
           ydoc.on("update", (update: Uint8Array, origin: unknown) => {
             if (origin === persistenceOrigin) return;
             if (!shouldPersist(docName)) return;
-            void enqueue(docName, () => ldb.storeUpdate(docName, update));
+            void enqueue(docName, async () => {
+              await ldb.storeUpdate(docName, update);
+            });
             void retentionManager?.markSeen(docName);
           });
 
@@ -417,7 +419,9 @@ export function createSyncServer(
             ydoc.on("update", (update: Uint8Array, origin: unknown) => {
               if (origin === persistenceOrigin) return;
               if (!shouldPersist(docName)) return;
-              void enqueue(docName, () => ldb.storeUpdate(docName, update));
+              void enqueue(docName, async () => {
+                await ldb.storeUpdate(docName, update);
+              });
               void retentionManager?.markSeen(docName);
             });
 
