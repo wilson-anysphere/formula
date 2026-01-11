@@ -31,14 +31,14 @@ fn write_chart_fixture(path: &Path, chart_type: ChartType) {
     workbook.save(path).unwrap();
 }
 
-/// Generates small chart fixtures under `fixtures/xlsx/charts/`.
+/// Generates small chart fixtures under `fixtures/charts/xlsx/`.
 ///
 /// This test is ignored by default because it writes files to the repository.
 #[test]
 #[ignore]
 fn generate_chart_fixtures() {
     let root: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures/xlsx/charts");
+        .join("../../fixtures/charts/xlsx");
     std::fs::create_dir_all(&root).unwrap();
 
     write_chart_fixture(&root.join("bar.xlsx"), ChartType::Column);
@@ -46,4 +46,3 @@ fn generate_chart_fixtures() {
     write_chart_fixture(&root.join("pie.xlsx"), ChartType::Pie);
     write_chart_fixture(&root.join("scatter.xlsx"), ChartType::Scatter);
 }
-

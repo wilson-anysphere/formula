@@ -1,0 +1,61 @@
+# Chart fixture corpus
+
+This directory is the canonical home for chart regression fixtures used by:
+
+- XLSX chart parsing/model extraction tests (`crates/formula-xlsx/tests/chart_fixture_models_match.rs`)
+- Future deterministic chart rendering + visual regression tests (`docs/17-charts.md`)
+
+## Layout
+
+```
+fixtures/charts/
+  xlsx/                 # Source workbooks (one chart per workbook is preferred)
+  models/               # Generated JSON chart models (one JSON file per chart)
+  golden/
+    excel/              # Golden PNG exports from Excel (fixed pixel size)
+```
+
+## Fixture notes
+
+- The classic fixtures (`bar.xlsx`, `line.xlsx`, `pie.xlsx`, `scatter.xlsx`,
+  `basic-chart.xlsx`) are mirrored from `fixtures/xlsx/charts/` for backwards
+  compatibility with the broader XLSX round-trip corpus.
+- The ChartEx-named workbooks (`waterfall.xlsx`, `histogram.xlsx`, etc.) include
+  a `xl/charts/chartEx1.xml` part and a `xl/charts/_rels/chart1.xml.rels`
+  relationship so we have representative modern-chart OPC graphs in-repo even
+  before full ChartEx parsing/rendering lands.
+
+## Golden image size
+
+Golden PNGs under `fixtures/charts/golden/excel/` are expected to be exported at:
+
+- **800 × 600 px**
+
+## Updating / regenerating models
+
+The committed JSON under `fixtures/charts/models/` should always match what the
+current Rust parser produces for the corresponding workbook in
+`fixtures/charts/xlsx/`.
+
+To regenerate model JSON files:
+
+```bash
+# From repo root.
+cargo run -p formula-xlsx --bin dump_chart_models -- fixtures/charts/xlsx/bar.xlsx
+```
+
+By default the tool writes files under `fixtures/charts/models/<workbook-stem>/`.
+See `--help` for options.
+
+After regenerating, run:
+
+```bash
+cargo test -p formula-xlsx --test chart_fixture_models_match
+```
+
+## Updating / regenerating golden PNGs
+
+1. Open the workbook in desktop Excel (not Google Sheets).
+2. Select the chart.
+3. Export / copy as picture → **PNG** at **800 × 600 px**.
+4. Save to `fixtures/charts/golden/excel/<workbook-stem>.png`.

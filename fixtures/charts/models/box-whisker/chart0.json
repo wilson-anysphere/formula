@@ -1,0 +1,27 @@
+{
+  "chartIndex": 0,
+  "chart": {
+    "sheetName": "Sheet1",
+    "sheetPart": "xl/worksheets/sheet1.xml",
+    "drawingPart": "xl/drawings/drawing1.xml",
+    "chartPart": "xl/charts/chart1.xml",
+    "relId": "rId1",
+    "chartType": {
+      "kind": "unknown",
+      "name": "unparsed"
+    },
+    "title": null,
+    "series": [],
+    "anchor": {
+      "kind": "twoCell",
+      "from_col": 3,
+      "from_row": 1,
+      "from_col_off_emu": 0,
+      "from_row_off_emu": 0,
+      "to_col": 10,
+      "to_row": 15,
+      "to_col_off_emu": 304800,
+      "to_row_off_emu": 76200
+    }
+  }
+}
