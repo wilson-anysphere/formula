@@ -986,49 +986,40 @@ export function activate(context: formula.ExtensionContext) {
 
 ## Testing Extensions
 
-```typescript
-// Extension testing framework
-import { TestRunner, TestSuite } from "@formula/test";
+```js
+// Example: run an extension under the Node extension host harness.
+//
+// In this repo we use the built-in `node:test` runner and spin up an
+// `ExtensionHost` instance to load and exercise an extension end-to-end.
+//
+// Run with: `node --test`
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const os = require("node:os");
+const path = require("node:path");
+const fs = require("node:fs/promises");
 
-const suite: TestSuite = {
-  name: "My Extension Tests",
-  
-  beforeEach: async (ctx) => {
-    // Set up test workbook
-    ctx.workbook = await formula.workbook.createWorkbook();
-    ctx.sheet = ctx.workbook.sheets[0];
-  },
-  
-  afterEach: async (ctx) => {
-    ctx.workbook.close();
-  },
-  
-  tests: [
-    {
-      name: "custom function returns correct value",
-      test: async (ctx) => {
-        ctx.sheet.getCell(0, 0).value = 5;
-        ctx.sheet.getCell(0, 1).formula = "=MYFUNCTION(A1)";
-        
-        await formula.calculation.waitForRecalc();
-        
-        const result = ctx.sheet.getCell(0, 1).value;
-        expect(result).toBe(10);
-      }
-    },
-    
-    {
-      name: "panel displays correctly",
-      test: async (ctx) => {
-        await formula.commands.executeCommand("myExtension.openPanel");
-        
-        const panel = formula.ui.getPanel("myExtension.panel");
-        expect(panel).toBeDefined();
-        expect(panel.visible).toBe(true);
-      }
-    }
-  ]
-};
+const { ExtensionHost } = require("@formula/extension-host");
 
-TestRunner.run(suite);
+test("myExtension.run updates the workbook", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-test-"));
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(path.resolve("path/to/extension"));
+
+  host.spreadsheet.setCell(0, 0, 1);
+  await host.executeCommand("myExtension.run");
+
+  assert.equal(host.spreadsheet.getCell(0, 0), 2);
+});
 ```
