@@ -46,7 +46,7 @@ export interface CellStructuralConflict {
 export type CellStructuralConflictResolution = {
   choice: "ours" | "theirs" | "manual";
   to?: string;
-  cell?: { value?: unknown; formula?: string; format?: Record<string, unknown> | null } | null;
+  cell?: { value?: unknown; formula?: string; enc?: unknown; format?: Record<string, unknown> | null } | null;
 };
 
 export class CellStructuralConflictMonitor {

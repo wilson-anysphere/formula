@@ -5,6 +5,7 @@ import { cellRefFromKey, numberToCol } from "./cell-ref.js";
  * @typedef {object} NormalizedCell
  * @property {unknown} [value]
  * @property {string} [formula]
+ * @property {unknown} [enc]
  * @property {Record<string, unknown> | null} [format]
  */
  
@@ -439,10 +440,16 @@ export class CellStructuralConflictMonitor {
       return;
     }
  
-    if (normalized.formula != null) {
+    if (normalized.enc != null) {
+      cellMap.set("enc", normalized.enc);
+      cellMap.delete("value");
+      cellMap.delete("formula");
+    } else if (normalized.formula != null) {
+      cellMap.delete("enc");
       cellMap.set("formula", normalized.formula);
       cellMap.set("value", null);
     } else {
+      cellMap.delete("enc");
       cellMap.delete("formula");
       cellMap.set("value", normalized.value ?? null);
     }
@@ -582,14 +589,14 @@ export class CellStructuralConflictMonitor {
      const cellKey = path[0];
      if (typeof cellKey !== "string") continue;
  
-     const entry = touched.get(cellKey) ?? { propChanges: new Map() };
-     touched.set(cellKey, entry);
+      const entry = touched.get(cellKey) ?? { propChanges: new Map() };
+      touched.set(cellKey, entry);
  
-     for (const [prop, change] of event.changes.keys.entries()) {
-       if (prop !== "value" && prop !== "formula" && prop !== "format" && prop !== "style") continue;
-       entry.propChanges.set(prop, change);
-     }
-   }
+      for (const [prop, change] of event.changes.keys.entries()) {
+        if (prop !== "value" && prop !== "formula" && prop !== "enc" && prop !== "format" && prop !== "style") continue;
+        entry.propChanges.set(prop, change);
+      }
+    }
  
    if (touched.size === 0) return null;
  
@@ -607,15 +614,16 @@ export class CellStructuralConflictMonitor {
      } else if (entry.mapChange?.action === "delete" || entry.mapChange?.action === "update") {
        before = normalizeCell(entry.mapChange.oldValue);
      } else if (entry.propChanges.size > 0) {
-       const seed = after
-         ? { value: after.value ?? null, formula: after.formula ?? null, format: after.format ?? null }
-         : { value: null, formula: null, format: null };
+        const seed = after
+          ? { value: after.value ?? null, formula: after.formula ?? null, enc: after.enc ?? null, format: after.format ?? null }
+          : { value: null, formula: null, enc: null, format: null };
  
-       for (const [prop, change] of entry.propChanges.entries()) {
-         if (prop === "value") seed.value = change.oldValue ?? null;
-         if (prop === "formula") seed.formula = change.oldValue ?? null;
-         if (prop === "format" || prop === "style") seed.format = change.oldValue ?? null;
-       }
+        for (const [prop, change] of entry.propChanges.entries()) {
+          if (prop === "value") seed.value = change.oldValue ?? null;
+          if (prop === "formula") seed.formula = change.oldValue ?? null;
+          if (prop === "enc") seed.enc = change.oldValue ?? null;
+          if (prop === "format" || prop === "style") seed.format = change.oldValue ?? null;
+        }
  
        before = normalizeCell(seed);
      } else {
@@ -715,16 +723,20 @@ export class CellStructuralConflictMonitor {
    let value = null;
    /** @type {string | null} */
    let formula = null;
+   /** @type {any} */
+   let enc = null;
    /** @type {Record<string, unknown> | null} */
    let format = null;
  
    if (isYMap(cellData)) {
      value = cellData.get("value") ?? null;
      formula = cellData.get("formula") ?? null;
+     enc = cellData.get("enc") ?? null;
      format = cellData.get("format") ?? cellData.get("style") ?? null;
    } else if (typeof cellData === "object") {
      value = cellData.value ?? null;
      formula = cellData.formula ?? null;
+     enc = cellData.enc ?? null;
      format = cellData.format ?? cellData.style ?? null;
    } else {
      value = cellData;
@@ -742,19 +754,21 @@ export class CellStructuralConflictMonitor {
      format = null;
    }
  
+   const hasEnc = enc !== null && enc !== undefined;
    const hasValue = value !== null && value !== undefined && value !== "";
    const hasFormula = formula != null && formula !== "";
    const hasFormat = format != null;
  
-   if (!hasValue && !hasFormula && !hasFormat) return null;
+   if (!hasEnc && !hasValue && !hasFormula && !hasFormat) return null;
  
    /** @type {NormalizedCell} */
    const out = {};
-   if (hasFormula) out.formula = formula;
+   if (hasEnc) out.enc = enc;
+   else if (hasFormula) out.formula = formula;
    else if (hasValue) out.value = value;
    if (hasFormat) out.format = format;
    return out;
- }
+  }
 
  /**
   * Duck-type Y.Map detection to avoid `instanceof` pitfalls when multiple Yjs
@@ -778,16 +792,17 @@ export class CellStructuralConflictMonitor {
   * @param {NormalizedCell | null} cell
   * @returns {string | null}
   */
- function cellFingerprint(cell) {
-   const normalized = normalizeCell(cell);
-   if (normalized === null) return null;
+  function cellFingerprint(cell) {
+    const normalized = normalizeCell(cell);
+    if (normalized === null) return null;
  
-   return stableStringify({
-     value: normalized.value ?? null,
-     formula: normalizeFormula(normalized.formula) ?? null,
-     format: normalized.format ?? null
-   });
- }
+    return stableStringify({
+      value: normalized.value ?? null,
+      formula: normalizeFormula(normalized.formula) ?? null,
+      enc: normalized.enc ?? null,
+      format: normalized.format ?? null
+    });
+  }
  
  /**
   * @param {string | null | undefined} formula
@@ -831,14 +846,22 @@ export class CellStructuralConflictMonitor {
   * @param {NormalizedCell | null} a
   * @param {NormalizedCell | null} b
   */
- function didContentChange(a, b) {
-   const na = normalizeCell(a);
-   const nb = normalizeCell(b);
-   return (
-     stableStringify({ value: na?.value ?? null, formula: normalizeFormula(na?.formula) ?? null }) !==
-     stableStringify({ value: nb?.value ?? null, formula: normalizeFormula(nb?.formula) ?? null })
-   );
- }
+  function didContentChange(a, b) {
+    const na = normalizeCell(a);
+    const nb = normalizeCell(b);
+    return (
+      stableStringify({
+        value: na?.value ?? null,
+        formula: normalizeFormula(na?.formula) ?? null,
+        enc: na?.enc ?? null
+      }) !==
+      stableStringify({
+        value: nb?.value ?? null,
+        formula: normalizeFormula(nb?.formula) ?? null,
+        enc: nb?.enc ?? null
+      })
+    );
+  }
  
  /**
   * @param {NormalizedCell | null} a
