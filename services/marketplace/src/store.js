@@ -1155,7 +1155,7 @@ class MarketplaceStore {
     return this.getExtension(id, { includeHidden: true });
   }
 
-  async publishExtension({ publisher, packageBytes, signatureBase64 }) {
+  async publishExtension({ publisher, packageBytes, signatureBase64, ip = null }) {
     const publisherRecord = await this.getPublisher(publisher);
     if (!publisherRecord) throw new Error(`Unknown publisher: ${publisher}`);
     if (publisherRecord.revoked) {
@@ -1487,6 +1487,22 @@ class MarketplaceStore {
          VALUES (?, ?, ?, ?, NULL)`,
         [id, version, PACKAGE_SCAN_STATUS.PENDING, EMPTY_PACKAGE_SCAN_REPORT_JSON]
       );
+
+      const audit = db.prepare(
+        `INSERT INTO audit_log (id, actor, action, extension_id, version, ip, details_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      audit.run([
+        randomId(),
+        publisher,
+        "extension.publish",
+        id,
+        version,
+        ip,
+        safeJsonStringify({ publisher, sha256: pkgSha, formatVersion, signingKeyId, fileCount, unpackedSize }),
+        now,
+      ]);
+      audit.free();
     }).catch((err) => {
       if (String(err?.message || "").includes("UNIQUE constraint failed: extension_versions.extension_id, extension_versions.version")) {
         throw new Error("That extension version is already published");

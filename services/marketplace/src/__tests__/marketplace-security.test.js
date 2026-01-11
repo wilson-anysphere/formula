@@ -79,6 +79,13 @@ test("publishing triggers a package scan record", async (t) => {
     assert.ok(scan, "scan record should exist");
     assert.equal(scan.status, "passed");
     assert.ok(scan.scannedAt);
+
+    const auditEntries = await store.listAuditLog({ limit: 20 });
+    const publishAudit = auditEntries.find((entry) => entry.action === "extension.publish");
+    assert.ok(publishAudit, "publish should be recorded in audit log");
+    assert.equal(publishAudit.actor, publisher);
+    assert.equal(publishAudit.extensionId, published.id);
+    assert.equal(publishAudit.version, published.version);
   } finally {
     await fs.rm(tmpRoot, { recursive: true, force: true });
     await fs.rm(dir, { recursive: true, force: true });

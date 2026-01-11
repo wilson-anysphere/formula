@@ -510,6 +510,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           publisher: publisherRecord.publisher,
           packageBytes,
           signatureBase64,
+          ip,
         });
 
         statusCode = 200;
@@ -562,6 +563,7 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           publisher: publisherRecord.publisher,
           packageBytes,
           signatureBase64,
+          ip,
         });
 
         statusCode = 200;
