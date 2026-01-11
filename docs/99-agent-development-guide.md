@@ -472,3 +472,72 @@ kill <specific-pid>                   # Only YOUR process
 
 
 **Golden Rule**: When in doubt, use `-j4`. It's fast enough and won't cause problems.
+
+---
+
+## UI/UX Design Guidelines
+
+When implementing or modifying UI components, follow these guidelines strictly.
+
+### Reference Materials
+
+**ALWAYS check the mockups first:**
+
+```bash
+open mockups/spreadsheet-main.html    # Main app layout
+open mockups/command-palette.html     # Cmd+K palette
+open mockups/README.md                # Full design system
+```
+
+### Anti-"AI Slop" Rules
+
+| ❌ DON'T | ✅ DO |
+|----------|-------|
+| Purple gradients | Electric blue accent (#3b82f6) |
+| Inter, Roboto, system fonts | IBM Plex Sans/Mono |
+| Rounded everything (16px radius) | Sharp corners (4-6px radius) |
+| Excessive whitespace | Data-dense layouts |
+| Playful/bubbly aesthetic | Professional, Bloomberg-like |
+| Light gray backgrounds | Deep charcoal (#0f1114, #161a1e) |
+
+### Color Tokens (MUST USE)
+
+```css
+/* Never hardcode colors - use these variables */
+--bg-base: #0f1114;           /* App background */
+--bg-surface: #161a1e;        /* Panels */
+--bg-elevated: #1c2127;       /* Cards, inputs */
+--accent: #3b82f6;            /* Primary actions */
+--text-primary: #f1f3f5;      /* Main text */
+--text-secondary: #8b939e;    /* Labels */
+```
+
+### Typography
+
+```css
+/* Sans for UI */
+font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+
+/* Mono for data, code, formulas */
+font-family: 'IBM Plex Mono', 'SF Mono', monospace;
+```
+
+### Component Sizes
+
+| Component | Height | Padding |
+|-----------|--------|---------|
+| Input fields | 28px | 0 8px |
+| Buttons | 28px | 0 12px |
+| Grid cells | 24px | 0 8px |
+| Panel headers | 44px | 0 16px |
+
+### Implementation Checklist
+
+Before submitting UI changes:
+
+- [ ] Colors use CSS variables from design system
+- [ ] Typography matches mockups (IBM Plex, not Inter)
+- [ ] Spacing uses the scale (4, 8, 12, 16, 20, 24, 32px)
+- [ ] No purple gradients or overly rounded corners
+- [ ] Works in dark mode (light mode is future work)
+- [ ] Tested at 1x and 2x pixel density
