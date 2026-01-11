@@ -302,6 +302,22 @@ test("sort: never downcasts Float64Array even in fast mode", async () => {
   assert.equal(engine.diagnostics().lastKernelPrecision.sort, "f64");
 });
 
+test("excel mode: sort falls back to CPU when f64 GPU is unavailable (even for Float32Array inputs)", async () => {
+  const fakeGpu = new FakeGpuBackend(false);
+  const engine = new KernelEngine({
+    precision: "excel",
+    gpuBackend: fakeGpu,
+    thresholds: { sort: 0 }
+  });
+
+  const values = new Float32Array([3, 1, 2]);
+  const out = await engine.sort(values);
+  assert.deepEqual(Array.from(out), [1, 2, 3]);
+  assert.equal(fakeGpu.calls.sort, 0);
+  assert.equal(engine.lastKernelBackend().sort, "cpu");
+  assert.equal(engine.diagnostics().lastKernelPrecision.sort, "f64");
+});
+
 test("histogram: excel mode requires f64 GPU support even for Float32Array inputs", async () => {
   const fakeGpu = new FakeGpuBackend(false);
   const engine = new KernelEngine({
