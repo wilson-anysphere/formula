@@ -187,6 +187,53 @@ End Sub
 }
 
 #[test]
+fn selection_variable_tracks_last_select() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Range("A1:B2").Select
+    Range("C1") = Selection.Address
+    Range("C2") = Application.Selection.Address
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "C1").unwrap(),
+        VbaValue::from("$A$1:$B$2")
+    );
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "C2").unwrap(),
+        VbaValue::from("$A$1:$B$2")
+    );
+}
+
+#[test]
+fn application_cut_copy_mode_false_clears_clipboard() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Range("A1") = 1
+    Range("B1") = 5
+    Range("A1").Copy
+    Application.CutCopyMode = False
+    Range("B1").PasteSpecial Paste:=xlPasteValues
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+    assert_eq!(wb.get_value_a1("Sheet1", "B1").unwrap(), VbaValue::Double(5.0));
+}
+
+#[test]
 fn sandbox_step_limit_applies_to_range_copy() {
     let code = r#"
 Sub Test()

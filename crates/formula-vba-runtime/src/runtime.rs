@@ -358,6 +358,7 @@ struct Executor<'a> {
     err_obj: VbaObjectRef,
     with_stack: Vec<VbaObjectRef>,
     clipboard: Option<Clipboard>,
+    selection: Option<VbaRangeRef>,
     start: Instant,
     steps: u64,
 }
@@ -379,6 +380,7 @@ impl<'a> Executor<'a> {
             err_obj: VbaObjectRef::new(VbaObject::Err(VbaErrObject::default())),
             with_stack: Vec::new(),
             clipboard: None,
+            selection: None,
             start: Instant::now(),
             steps: 0,
         }
@@ -1144,6 +1146,19 @@ impl<'a> Executor<'a> {
                     "Unknown Range member `{member}`"
                 ))),
             },
+            VbaObject::Application => match member_lc.as_str() {
+                "cutcopymode" => {
+                    // Excel uses `Application.CutCopyMode = False` to clear the clipboard and
+                    // exit copy mode. We model this by clearing our internal clipboard.
+                    if !value.is_truthy() {
+                        self.clipboard = None;
+                    }
+                    Ok(())
+                }
+                _ => Err(VbaError::Runtime(format!(
+                    "Cannot assign to Application member `{member}`"
+                ))),
+            },
             VbaObject::Err(err) => match member_lc.as_str() {
                 "number" => {
                     err.number = value.to_f64().unwrap_or(0.0) as i32;
@@ -1238,6 +1253,19 @@ impl<'a> Executor<'a> {
                     end_col: c,
                 },
             ))));
+        }
+        if name_lc == "selection" {
+            let sel = self.selection.unwrap_or_else(|| {
+                let (r, c) = self.sheet.active_cell();
+                VbaRangeRef {
+                    sheet: self.sheet.active_sheet(),
+                    start_row: r,
+                    start_col: c,
+                    end_row: r,
+                    end_col: c,
+                }
+            });
+            return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(sel))));
         }
 
         // VBA allows calling some 0-argument functions without parentheses (e.g. `Now`, `Date`).
@@ -1754,6 +1782,7 @@ impl<'a> Executor<'a> {
                 }
                 "activate" => {
                     self.sheet.set_active_sheet(sheet)?;
+                    self.selection = None;
                     Ok(VbaValue::Empty)
                 }
                 _ => Err(VbaError::Runtime(format!(
@@ -1764,6 +1793,7 @@ impl<'a> Executor<'a> {
                 "select" => {
                     self.sheet.set_active_sheet(range.sheet)?;
                     self.sheet.set_active_cell(range.start_row, range.start_col)?;
+                    self.selection = Some(range);
                     Ok(VbaValue::Empty)
                 }
                 "copy" => {
@@ -2137,6 +2167,20 @@ impl<'a> Executor<'a> {
                         },
                     ))))
                 }
+                "selection" => {
+                    let sel = self.selection.unwrap_or_else(|| {
+                        let (r, c) = self.sheet.active_cell();
+                        VbaRangeRef {
+                            sheet: self.sheet.active_sheet(),
+                            start_row: r,
+                            start_col: c,
+                            end_row: r,
+                            end_col: c,
+                        }
+                    });
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(sel))))
+                }
+                "cutcopymode" => Ok(VbaValue::Boolean(self.clipboard.is_some())),
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Application member `{member}`"
                 ))),
