@@ -229,6 +229,31 @@ describe("EngineGridProvider", () => {
     expect(ranges).toContainEqual({ startRow: 0, endRow: 1, startCol: 2, endCol: 3 });
   });
 
+  it("falls back to a bounding-box invalidation for large change sets", async () => {
+    const engine = new FakeEngine(new Map()) as any;
+    const cache = new EngineCellCache(engine);
+    const provider = new EngineGridProvider({ cache, rowCount: 10_000, colCount: 10_000 });
+
+    const updates: CellProviderUpdate[] = [];
+    provider.subscribe((update) => updates.push(update));
+
+    const changes: CellChange[] = [];
+    for (let i = 0; i < 300; i++) {
+      const col0 = i * 2; // ensure gaps so the regular coalescer would keep many ranges
+      changes.push({ sheet: "Sheet1", address: toA1(0, col0), value: i });
+    }
+
+    provider.applyRecalcChanges(changes);
+    await flushMicrotasks();
+
+    expect(updates).toEqual([
+      {
+        type: "cells",
+        range: { startRow: 0, endRow: 1, startCol: 0, endCol: 599 }
+      }
+    ]);
+  });
+
   it("can recalculate via engine and update cache + subscribers", async () => {
     const changes: CellChange[] = [
       { sheet: "Sheet1", address: "A1", value: 1 },

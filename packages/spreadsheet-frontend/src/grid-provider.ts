@@ -113,12 +113,46 @@ export class EngineGridProvider implements CellProvider {
   applyRecalcChanges(changes: CellChange[]): void {
     this.cache.applyRecalcChanges(changes);
 
-    for (const change of changes) {
-      if (defaultSheetName(change.sheet) !== this.sheet) continue;
+    const relevant = changes.filter((change) => defaultSheetName(change.sheet) === this.sheet);
+    if (relevant.length === 0) return;
+
+    const offset = this.headers ? 1 : 0;
+
+    // For very large recalc batches, invalidate a single bounding box rather than
+    // enqueueing thousands of 1x1 ranges and running an O(n^2) coalescer.
+    if (relevant.length > 256) {
+      let minRow0 = Number.POSITIVE_INFINITY;
+      let maxRow0 = -1;
+      let minCol0 = Number.POSITIVE_INFINITY;
+      let maxCol0 = -1;
+
+      for (const change of relevant) {
+        const { row0, col0 } = fromA1(change.address);
+        minRow0 = Math.min(minRow0, row0);
+        maxRow0 = Math.max(maxRow0, row0);
+        minCol0 = Math.min(minCol0, col0);
+        maxCol0 = Math.max(maxCol0, col0);
+      }
+
+      if (minRow0 !== Number.POSITIVE_INFINITY && minCol0 !== Number.POSITIVE_INFINITY && maxRow0 >= 0 && maxCol0 >= 0) {
+        this.queueInvalidation({
+          startRow: minRow0 + offset,
+          endRow: maxRow0 + offset + 1,
+          startCol: minCol0 + offset,
+          endCol: maxCol0 + offset + 1
+        });
+      }
+      return;
+    }
+
+    for (const change of relevant) {
       const { row0, col0 } = fromA1(change.address);
-      const row = this.headers ? row0 + 1 : row0;
-      const col = this.headers ? col0 + 1 : col0;
-      this.queueInvalidation({ startRow: row, endRow: row + 1, startCol: col, endCol: col + 1 });
+      this.queueInvalidation({
+        startRow: row0 + offset,
+        endRow: row0 + offset + 1,
+        startCol: col0 + offset,
+        endCol: col0 + offset + 1
+      });
     }
   }
 
