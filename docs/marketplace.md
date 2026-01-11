@@ -35,7 +35,7 @@ Upload a raw extension package (no JSON/base64 wrapper).
 - `Authorization: Bearer <publisherToken>` (required)
 - `Content-Type: application/vnd.formula.extension-package` (required)
 - `X-Package-Signature: <base64>` (required for **v1** packages; optional for v2)
-- `X-Package-Sha256: <hex>` (optional; if present, the server rejects uploads whose bytes do not match)
+- `X-Package-Sha256: <hex>` (optional; if present, must be a 64-character hex sha256 and the server rejects uploads whose bytes do not match)
 
 **Body**
 
