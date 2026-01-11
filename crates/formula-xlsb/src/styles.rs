@@ -82,14 +82,28 @@ impl Styles {
                 let number_format = custom_fmts.get(&num_fmt_id).cloned().or_else(|| {
                     formula_format::builtin_format_code_with_locale(num_fmt_id, locale)
                         .map(|s| s.into_owned())
+                }).or_else(|| {
+                    // Excel reserves many built-in ids beyond 0–49. XLSB/XLSX files can reference
+                    // those ids without providing an explicit format code. Preserve the id for
+                    // round-trip even if we don't know the code yet.
+                    if num_fmt_id < 164 {
+                        Some(format!("__builtin_numFmtId:{num_fmt_id}"))
+                    } else {
+                        None
+                    }
                 });
 
                 // If we have a format string, run a light heuristic. If we don't, fall back
                 // to common built-in date/time ids (Excel reserves many date formats).
-                let is_date_time = number_format
-                    .as_deref()
-                    .map(looks_like_datetime)
-                    .unwrap_or_else(|| is_reserved_datetime_format_id(num_fmt_id));
+                let is_date_time = match number_format.as_deref() {
+                    // `__builtin_numFmtId:<id>` is an internal placeholder, not a real format code.
+                    // Use the numeric id range heuristic instead of scanning it as text.
+                    Some(fmt) if fmt.starts_with("__builtin_numFmtId:") => {
+                        is_reserved_datetime_format_id(num_fmt_id)
+                    }
+                    Some(fmt) => looks_like_datetime(fmt),
+                    None => is_reserved_datetime_format_id(num_fmt_id),
+                };
 
                 StyleInfo {
                     num_fmt_id,
