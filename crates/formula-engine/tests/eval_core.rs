@@ -332,7 +332,7 @@ fn exponentiation_operator_matches_excel_precedence_and_associativity() {
 }
 
 #[test]
-fn array_functions_are_recognized_but_spill_without_dynarrays() {
+fn array_functions_spill_and_respect_spill_blocking() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
     engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
@@ -350,8 +350,10 @@ fn array_functions_are_recognized_but_spill_without_dynarrays() {
         engine.get_cell_value("Sheet1", "D1"),
         Value::Error(ErrorKind::Spill)
     );
-    assert_eq!(
-        engine.get_cell_value("Sheet1", "D2"),
-        Value::Error(ErrorKind::Spill)
-    );
+
+    // SEQUENCE spills a 2x2 matrix starting at D2.
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(4.0));
 }

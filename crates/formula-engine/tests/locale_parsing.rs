@@ -1,4 +1,4 @@
-use formula_engine::{locale, Engine, Value};
+use formula_engine::{eval::parse_a1, locale, Engine, Value};
 
 #[test]
 fn canonicalize_and_localize_round_trip_for_de_de() {
@@ -130,4 +130,27 @@ fn engine_accepts_localized_formulas_and_persists_canonical() {
 
     let displayed = locale::localize_formula(engine.get_cell_formula("Sheet1", "A1").unwrap(), &locale::DE_DE).unwrap();
     assert_eq!(displayed, "=SUMME(1,5;2,5)");
+}
+
+#[test]
+fn engine_accepts_localized_spilling_formulas() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula_localized("Sheet1", "A1", "=SEQUENZ(2;2)", &locale::DE_DE)
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_formula("Sheet1", "A1"), Some("=SEQUENCE(2,2)"));
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(4.0));
+
+    assert_eq!(
+        engine.spill_range("Sheet1", "A1"),
+        Some((parse_a1("A1").unwrap(), parse_a1("B2").unwrap()))
+    );
+
+    let localized = locale::localize_formula(engine.get_cell_formula("Sheet1", "A1").unwrap(), &locale::DE_DE).unwrap();
+    assert_eq!(localized, "=SEQUENZ(2;2)");
 }
