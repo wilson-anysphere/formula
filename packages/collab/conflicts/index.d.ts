@@ -1,5 +1,7 @@
 import type * as Y from "yjs";
 
+export type CellContentChoice = { type: "formula"; formula: string; preview?: any } | { type: "value"; value: any };
+
 export type FormulaConflict =
   | {
       kind: "formula";
@@ -28,8 +30,8 @@ export type FormulaConflict =
       id: string;
       cell: { sheetId: string; row: number; col: number };
       cellKey: string;
-      local: { type: "formula"; formula: string; preview?: any } | { type: "value"; value: any };
-      remote: { type: "formula"; formula: string; preview?: any } | { type: "value"; value: any };
+      local: CellContentChoice;
+      remote: CellContentChoice;
       remoteUserId: string;
       detectedAt: number;
     };
@@ -68,7 +70,7 @@ export class FormulaConflictMonitor {
   listConflicts(): Array<FormulaConflict>;
   setLocalFormula(cellKey: string, formula: string): void;
   setLocalValue(cellKey: string, value: any): void;
-  resolveConflict(conflictId: string, chosen: any): boolean;
+  resolveConflict(conflictId: string, chosen: string | CellContentChoice | any): boolean;
 }
 
 export interface CellStructuralConflict {
