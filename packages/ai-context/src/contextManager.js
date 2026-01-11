@@ -267,6 +267,9 @@ export class ContextManager {
       return idx === -1 ? s : s.slice(0, idx);
     }
 
+    /** @type {Map<string, ReturnType<typeof classifyText>>} */
+    const heuristicByChunkId = new Map();
+
     const indexStats = await indexWorkbook({
       workbook: params.workbook,
       vectorStore,
@@ -276,6 +279,7 @@ export class ContextManager {
         ? (record) => {
             const rawText = record.text ?? "";
             const heuristic = classifyText(rawText);
+            heuristicByChunkId.set(record.id, heuristic);
             const heuristicClassification = heuristicToPolicyClassification(heuristic);
 
             // Fold in structured DLP classifications for the chunk's sheet + rect metadata.
@@ -313,16 +317,16 @@ export class ContextManager {
                 // the vector store cannot contain raw restricted data.
                 safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
               } else {
-              // If DLP redaction is required due to explicit document/sheet/range classification,
-              // redact the entire content; pattern-based redaction isn't sufficient in that case.
-              if (recordDecision.decision !== DLP_DECISION.ALLOW) {
-                safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
-              } else {
-                safeText = this.redactor(rawText);
-              }
-              if (!includeRestrictedContent && classifyText(safeText).level === "sensitive") {
-                safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
-              }
+                // If DLP redaction is required due to explicit document/sheet/range classification,
+                // redact the entire content; pattern-based redaction isn't sufficient in that case.
+                if (recordDecision.decision !== DLP_DECISION.ALLOW) {
+                  safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+                } else {
+                  safeText = this.redactor(rawText);
+                }
+                if (!includeRestrictedContent && classifyText(safeText).level === "sensitive") {
+                  safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+                }
               }
             }
 
@@ -370,7 +374,7 @@ export class ContextManager {
       const text = meta.text ?? "";
       const raw = `${header}\n${text}`;
 
-      const heuristic = meta.dlpHeuristic ?? classifyText(raw);
+      const heuristic = heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic ?? classifyText(raw);
       const heuristicClassification = heuristicToPolicyClassification(heuristic);
 
       // If the caller provided structured cell/range classifications, fold those in using the
@@ -506,7 +510,7 @@ export class ContextManager {
         score: hit.score,
         metadata: safeMeta,
         text: outText,
-        dlp: meta.dlpHeuristic ?? classifyText(outText),
+        dlp: heuristicByChunkId.get(hit.id) ?? meta.dlpHeuristic ?? classifyText(outText),
       };
     });
 

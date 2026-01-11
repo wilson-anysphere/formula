@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ContextManager } from "../src/contextManager.js";
-import { HashEmbedder, InMemoryVectorStore } from "../../ai-rag/src/index.js";
+import { HashEmbedder, InMemoryVectorStore, indexWorkbook } from "../../ai-rag/src/index.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import { DlpViolationError } from "../../security/dlp/src/errors.js";
 
@@ -433,4 +433,50 @@ test("buildWorkbookContextFromSpreadsheetApi: redacts sensitive workbook chunks 
   assert.equal(auditEvents.length, 1);
   assert.equal(auditEvents[0].type, "ai.workbook_context");
   assert.equal(auditEvents[0].decision.decision, "redact");
+});
+
+test("buildWorkbookContext: does not rely on persisted dlpHeuristic metadata for block decisions", async () => {
+  const workbook = makeSensitiveWorkbook();
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  function firstLine(text) {
+    const s = String(text ?? "");
+    const idx = s.indexOf("\n");
+    return idx === -1 ? s : s.slice(0, idx);
+  }
+
+  // Simulate a legacy / third-party index that stored only a redacted placeholder and
+  // did not persist `metadata.dlpHeuristic`. `buildWorkbookContext` should still block
+  // based on the current workbook content + policy.
+  await indexWorkbook({
+    workbook,
+    vectorStore,
+    embedder,
+    transform: (record) => {
+      const placeholder = `${firstLine(record.text)}\n[REDACTED]`;
+      return { text: placeholder, metadata: { ...(record.metadata ?? {}), text: placeholder } };
+    },
+  });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 500,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  await assert.rejects(
+    () =>
+      cm.buildWorkbookContext({
+        workbook,
+        query: "ContactsTable",
+        dlp: {
+          documentId: workbook.id,
+          policy: makePolicy({ redactDisallowed: false }),
+        },
+      }),
+    (err) => {
+      assert.ok(err instanceof DlpViolationError);
+      return true;
+    }
+  );
 });
