@@ -1239,11 +1239,31 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
                         } else {
                             format!("={formula}")
                         };
-                        XlsbCellEdit::with_formula_text(row_u32, col_u32, new_value, &normalized)
-                            .map_err(|e| anyhow::anyhow!(e.to_string()))
-                            .with_context(|| {
-                                format!("encode RGCE for formula cell at ({row}, {col})")
-                            })?
+                        // Prefer the context-aware encoder so we can emit BIFF12 `rgcb` bytes for
+                        // formulas that need them (e.g. array constants / PtgArray). Fall back to
+                        // the older `formula_biff` encoder for compatibility.
+                        let edit = XlsbCellEdit::with_formula_text_with_context(
+                            row_u32,
+                            col_u32,
+                            new_value.clone(),
+                            &normalized,
+                            xlsb.workbook_context(),
+                        );
+                        let edit: anyhow::Result<XlsbCellEdit> = match edit {
+                            Ok(edit) => Ok(edit),
+                            Err(ctx_err) => XlsbCellEdit::with_formula_text(
+                                row_u32,
+                                col_u32,
+                                new_value,
+                                &normalized,
+                            )
+                            .map_err(|biff_err| {
+                                anyhow::anyhow!(
+                                    "failed to encode formula ({ctx_err}); fallback encoder also failed ({biff_err})"
+                                )
+                            }),
+                        };
+                        edit.with_context(|| format!("encode RGCE for formula cell at ({row}, {col})"))?
                     }
                     None => XlsbCellEdit {
                         row: row_u32,

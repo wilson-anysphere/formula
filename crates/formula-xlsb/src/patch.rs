@@ -76,6 +76,28 @@ impl CellEdit {
             shared_string_index: None,
         })
     }
+
+    /// Replace `new_formula` + `new_rgcb` by encoding the provided formula text using workbook
+    /// context.
+    ///
+    /// This uses [`crate::rgce::encode_rgce_with_context`] which can produce both `rgce` and any
+    /// required trailing `rgcb` bytes.
+    ///
+    /// `formula` may include a leading `=`.
+    pub fn set_formula_text_with_context(
+        &mut self,
+        formula: &str,
+        ctx: &crate::workbook_context::WorkbookContext,
+    ) -> Result<(), crate::rgce::EncodeError> {
+        let encoded = crate::rgce::encode_rgce_with_context(
+            formula,
+            ctx,
+            crate::rgce::CellCoord::new(self.row, self.col),
+        )?;
+        self.new_formula = Some(encoded.rgce);
+        self.new_rgcb = Some(encoded.rgcb);
+        Ok(())
+    }
 }
 
 #[cfg(feature = "write")]
@@ -103,6 +125,8 @@ impl CellEdit {
     /// Replace `new_formula` by encoding the provided formula text.
     pub fn set_formula_text(&mut self, formula: &str) -> Result<(), formula_biff::EncodeRgceError> {
         self.new_formula = Some(formula_biff::encode_rgce(formula)?);
+        // `formula_biff` only encodes `rgce`, so drop any previously specified `rgcb` bytes.
+        self.new_rgcb = None;
         Ok(())
     }
 }
