@@ -1966,4 +1966,76 @@ mod tests {
 
         assert_no_critical_diffs(fixture_path, &out_path);
     }
+
+    #[test]
+    fn print_settings_update_is_applied() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/print-settings.xlsx"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read print-settings workbook");
+        assert_eq!(workbook.print_settings.sheets.len(), 1);
+
+        workbook.print_settings.sheets[0].page_setup.orientation = formula_xlsx::print::Orientation::Portrait;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("print-settings-updated.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read written bytes");
+        assert_ne!(
+            original_bytes, written_bytes,
+            "expected print settings change to rewrite the workbook"
+        );
+
+        let settings = read_workbook_print_settings(&written_bytes).expect("read workbook print settings");
+        assert_eq!(settings.sheets.len(), 1);
+        assert_eq!(
+            settings.sheets[0].page_setup.orientation,
+            formula_xlsx::print::Orientation::Portrait
+        );
+
+        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+        for part in ["[Content_Types].xml", "_rels/.rels", "xl/_rels/workbook.xml.rels"] {
+            assert_eq!(
+                original_pkg.part(part),
+                written_pkg.part(part),
+                "expected {part} to be preserved when updating print settings"
+            );
+        }
+
+        let workbook_xml = std::str::from_utf8(written_pkg.part("xl/workbook.xml").unwrap())
+            .expect("written workbook.xml utf8");
+        assert!(
+            workbook_xml.contains("_xlnm.Print_Area"),
+            "expected print area defined name to remain present"
+        );
+        assert!(
+            workbook_xml.contains("_xlnm.Print_Titles"),
+            "expected print titles defined name to remain present"
+        );
+    }
+
+    #[test]
+    fn print_settings_edit_then_revert_does_not_change_workbook() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/print-settings.xlsx"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read print-settings workbook");
+
+        workbook.print_settings.sheets[0].page_setup.orientation = formula_xlsx::print::Orientation::Portrait;
+        // Restore baseline to ensure we don't churn the workbook when the user reverts changes.
+        workbook.print_settings = workbook.original_print_settings.clone();
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("print-settings-reverted.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read written bytes");
+        assert_eq!(original_bytes, written_bytes);
+    }
 }
