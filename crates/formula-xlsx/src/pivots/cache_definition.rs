@@ -36,11 +36,17 @@ impl Default for PivotCacheSourceType {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PivotCacheField {
     pub name: String,
+    pub caption: Option<String>,
+    pub property_name: Option<String>,
     pub num_fmt_id: Option<u32>,
     pub database_field: Option<bool>,
+    pub server_field: Option<bool>,
+    pub unique_list: Option<bool>,
     pub formula: Option<String>,
     pub sql_type: Option<i32>,
     pub hierarchy: Option<u32>,
+    pub level: Option<u32>,
+    pub mapping_count: Option<u32>,
 }
 
 impl XlsxPackage {
@@ -207,16 +213,28 @@ fn handle_element(def: &mut PivotCacheDefinition, e: &BytesStart<'_>) -> Result<
             let value = attr.unescape_value()?;
             if key.eq_ignore_ascii_case(b"name") {
                 field.name = value.to_string();
+            } else if key.eq_ignore_ascii_case(b"caption") {
+                field.caption = Some(value.to_string());
+            } else if key.eq_ignore_ascii_case(b"propertyName") {
+                field.property_name = Some(value.to_string());
             } else if key.eq_ignore_ascii_case(b"numFmtId") {
                 field.num_fmt_id = value.parse::<u32>().ok();
             } else if key.eq_ignore_ascii_case(b"databaseField") {
                 field.database_field = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"serverField") {
+                field.server_field = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"uniqueList") {
+                field.unique_list = parse_bool(&value);
             } else if key.eq_ignore_ascii_case(b"formula") {
                 field.formula = Some(value.to_string());
             } else if key.eq_ignore_ascii_case(b"sqlType") {
                 field.sql_type = value.parse::<i32>().ok();
             } else if key.eq_ignore_ascii_case(b"hierarchy") {
                 field.hierarchy = value.parse::<u32>().ok();
+            } else if key.eq_ignore_ascii_case(b"level") {
+                field.level = value.parse::<u32>().ok();
+            } else if key.eq_ignore_ascii_case(b"mappingCount") {
+                field.mapping_count = value.parse::<u32>().ok();
             }
         }
         def.cache_fields.push(field);
@@ -317,5 +335,31 @@ mod tests {
         assert_eq!(def.worksheet_source_ref.as_deref(), Some("A1:B2"));
         assert_eq!(def.cache_fields.len(), 1);
         assert_eq!(def.cache_fields[0].name, "Field1");
+    }
+
+    #[test]
+    fn parses_cache_field_common_attributes() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheFields count="1">
+    <cacheField name="Field1" caption="Caption" propertyName="Prop" numFmtId="5" databaseField="1" serverField="0" uniqueList="1" formula="=A1" sqlType="4" hierarchy="2" level="3" mappingCount="7"/>
+  </cacheFields>
+</pivotCacheDefinition>"#;
+
+        let def = parse_pivot_cache_definition(xml).expect("parse");
+        assert_eq!(def.cache_fields.len(), 1);
+        let field = &def.cache_fields[0];
+        assert_eq!(field.name, "Field1");
+        assert_eq!(field.caption.as_deref(), Some("Caption"));
+        assert_eq!(field.property_name.as_deref(), Some("Prop"));
+        assert_eq!(field.num_fmt_id, Some(5));
+        assert_eq!(field.database_field, Some(true));
+        assert_eq!(field.server_field, Some(false));
+        assert_eq!(field.unique_list, Some(true));
+        assert_eq!(field.formula.as_deref(), Some("=A1"));
+        assert_eq!(field.sql_type, Some(4));
+        assert_eq!(field.hierarchy, Some(2));
+        assert_eq!(field.level, Some(3));
+        assert_eq!(field.mapping_count, Some(7));
     }
 }
