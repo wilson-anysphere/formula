@@ -554,7 +554,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       }
     }
 
-    const safePrompt = renderPromptArg(prompt, this.maxCellChars);
+    const safePrompt = renderPromptArg(prompt, { maxPromptChars: this.maxPromptChars, maxCellChars: this.maxCellChars });
     const safeInputs = renderInputs(inputs, this.maxCellChars);
     const inputsPreview =
       decision.decision === DLP_DECISION.BLOCK ? undefined : truncateText(stableJsonStringify(safeInputs), this.maxAuditPreviewChars);
@@ -641,12 +641,13 @@ function sheetIdFromCellRef(cellAddress?: string): string | null {
   return cellAddress.slice(0, bang);
 }
 
-function renderPromptArg(arg: ClassifiedArg, maxCellChars: number): string {
+function renderPromptArg(arg: ClassifiedArg, limits: { maxPromptChars: number; maxCellChars: number }): string {
   if (arg.kind === "range") {
-    const text = arg.items.map((item) => normalizeScalar(item.value, maxCellChars)).join(", ");
-    return arg.truncated ? `${text} …` : text;
+    const text = arg.items.map((item) => normalizeScalar(item.value, limits.maxCellChars)).join(", ");
+    const combined = arg.truncated ? `${text} …` : text;
+    return truncateText(combined, limits.maxPromptChars);
   }
-  return normalizeScalar(arg.items[0]?.value ?? null, maxCellChars);
+  return normalizeScalar(arg.items[0]?.value ?? null, limits.maxPromptChars);
 }
 
 function renderInputs(args: ClassifiedArg[], maxCellChars: number): unknown {
