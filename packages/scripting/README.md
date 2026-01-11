@@ -19,6 +19,9 @@ export default async function main(ctx: ScriptContext) {
 }
 ```
 
+> Note: runtime `import ... from "..."` is not supported yet. Prefer using the
+> global script types (via `FORMULA_API_DTS`) instead of importing.
+
 ### Legacy: script-body form (top-level await)
 
 Script bodies without `export default` are wrapped in an async function so they can use `await`:
@@ -55,4 +58,3 @@ Desktop can register it as an extra lib:
 ```js
 monaco.languages.typescript.typescriptDefaults.addExtraLib(FORMULA_API_DTS, "file:///formula.d.ts");
 ```
-

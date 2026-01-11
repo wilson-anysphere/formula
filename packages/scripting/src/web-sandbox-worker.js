@@ -261,7 +261,7 @@ async function runUserScript({ code, activeSheetName, selection, permissions }) 
         "clearTimeout",
         "setInterval",
         "clearInterval",
-        `"use strict";\nconst exports = {};\nconst module = { exports };\n${jsSource}\nconst __formulaMain = module.exports?.default ?? exports.default;\nif (typeof __formulaMain !== \"function\") { throw new Error(\"Script must export a default function\"); }\nreturn __formulaMain(ctx);`,
+        `"use strict";\nconst exports = {};\nconst module = { exports };\nconst require = (specifier) => { throw new Error(\`Imports are not supported in scripts (attempted to require \${String(specifier)})\`); };\n${jsSource}\nconst __formulaMain = module.exports?.default ?? exports.default;\nif (typeof __formulaMain !== \"function\") { throw new Error(\"Script must export a default function\"); }\nreturn __formulaMain(ctx);`,
       )
     : new Function(
         "ctx",

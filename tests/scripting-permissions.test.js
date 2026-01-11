@@ -52,3 +52,21 @@ export default async function main() {
   assert.ok(wsResult.error, "expected WebSocket to be blocked by allowlist");
   assert.match(wsResult.error.message, /example\.com/i);
 });
+
+test("scripting (node): module scripts cannot import other modules", async () => {
+  const workbook = new Workbook();
+  workbook.addSheet("Sheet1");
+  workbook.setActiveSheet("Sheet1");
+
+  const runtime = new ScriptRuntime(workbook);
+  const result = await runtime.run(`
+import { readFileSync } from "node:fs";
+export default async function main(ctx) {
+  ctx.ui.log(readFileSync);
+}
+`);
+
+  assert.ok(result.error, "expected imports to be rejected");
+  assert.match(result.error.message, /Imports are not supported/i);
+  assert.match(result.error.message, /node:fs/i);
+});

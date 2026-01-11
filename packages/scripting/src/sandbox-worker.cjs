@@ -254,6 +254,9 @@ async function runUserScript(tsSource) {
 
   const sandbox = {
     exports: {},
+    require: (specifier) => {
+      throw new Error(`Imports are not supported in scripts (attempted to require ${String(specifier)})`);
+    },
     ctx,
     console: safeConsole,
     setTimeout,
