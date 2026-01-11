@@ -782,8 +782,8 @@ fn pivot_row_scan(
     columns.extend(measures.iter().map(|m| m.name.clone()));
 
     let mut rows_out = Vec::with_capacity(groups.len());
+    let mut group_filter = filter.clone();
     for key in groups {
-        let mut group_filter = filter.clone();
         for (col, value) in group_by.iter().zip(key.iter()) {
             group_filter.set_column_equals(&col.table, &col.column, value.clone());
         }
