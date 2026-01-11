@@ -6,7 +6,7 @@ use crate::workbook::ChartExtractionError;
 pub mod charts;
 mod preserve;
 
-pub use preserve::{PreservedDrawingParts, SheetDrawingRelationship};
+pub use preserve::{PreservedDrawingParts, PreservedSheetDrawings, SheetDrawingRelationship};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrawingChartRef {

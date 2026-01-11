@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use roxmltree::Document;
 
-use crate::path::{rels_for_part, resolve_target};
+use crate::path::rels_for_part;
+use crate::preserve::sheet_match::{match_sheet_by_name_or_index, workbook_sheet_parts};
 use crate::relationships::parse_relationships;
 use crate::workbook::ChartExtractionError;
 use crate::XlsxPackage;
@@ -21,6 +22,13 @@ pub struct SheetDrawingRelationship {
     pub target: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreservedSheetDrawings {
+    pub sheet_index: usize,
+    pub sheet_id: Option<u32>,
+    pub drawings: Vec<SheetDrawingRelationship>,
+}
+
 /// A slice of an XLSX package that is required to preserve DrawingML objects
 /// (including charts) across a "read -> write" pipeline that doesn't otherwise
 /// round-trip the original package structure.
@@ -28,12 +36,12 @@ pub struct SheetDrawingRelationship {
 pub struct PreservedDrawingParts {
     pub content_types_xml: Vec<u8>,
     pub parts: BTreeMap<String, Vec<u8>>,
-    pub sheet_drawings: BTreeMap<String, Vec<SheetDrawingRelationship>>,
+    pub sheet_drawings: BTreeMap<String, PreservedSheetDrawings>,
 }
 
 impl PreservedDrawingParts {
     pub fn is_empty(&self) -> bool {
-        self.parts.is_empty() && self.sheet_drawings.values().all(|v| v.is_empty())
+        self.parts.is_empty() && self.sheet_drawings.values().all(|v| v.drawings.is_empty())
     }
 }
 
@@ -56,36 +64,47 @@ impl XlsxPackage {
             }
         }
 
-        let sheet_parts = sheet_name_to_part_map(self)?;
-        let mut sheet_drawings: BTreeMap<String, Vec<SheetDrawingRelationship>> = BTreeMap::new();
+        let sheets = workbook_sheet_parts(self)?;
+        let mut sheet_drawings: BTreeMap<String, PreservedSheetDrawings> = BTreeMap::new();
 
-        for (sheet_name, sheet_part) in sheet_parts {
-            let Some(sheet_xml) = self.part(&sheet_part) else {
+        for sheet in sheets {
+            let Some(sheet_xml) = self.part(&sheet.part_name) else {
                 continue;
             };
-            let drawing_rids = extract_sheet_drawing_rids(sheet_xml, &sheet_part)?;
+            let drawing_rids = extract_sheet_drawing_rids(sheet_xml, &sheet.part_name)?;
             if drawing_rids.is_empty() {
                 continue;
             }
 
-            let sheet_rels_part = rels_for_part(&sheet_part);
+            let sheet_rels_part = rels_for_part(&sheet.part_name);
             let Some(sheet_rels_xml) = self.part(&sheet_rels_part) else {
                 continue;
             };
             let rels = parse_relationships(sheet_rels_xml, &sheet_rels_part)?;
             let rel_map: HashMap<_, _> = rels.into_iter().map(|r| (r.id.clone(), r)).collect();
 
+            let mut drawings = Vec::new();
             for rid in drawing_rids {
                 if let Some(rel) = rel_map.get(&rid) {
-                    sheet_drawings
-                        .entry(sheet_name.clone())
-                        .or_default()
-                        .push(SheetDrawingRelationship {
-                            rel_id: rid.clone(),
-                            target: rel.target.clone(),
-                        });
+                    drawings.push(SheetDrawingRelationship {
+                        rel_id: rid.clone(),
+                        target: rel.target.clone(),
+                    });
                 }
             }
+
+            if drawings.is_empty() {
+                continue;
+            }
+
+            sheet_drawings.insert(
+                sheet.name,
+                PreservedSheetDrawings {
+                    sheet_index: sheet.index,
+                    sheet_id: sheet.sheet_id,
+                    drawings,
+                },
+            );
         }
 
         Ok(PreservedDrawingParts {
@@ -113,76 +132,34 @@ impl XlsxPackage {
 
         self.merge_content_types(&preserved.content_types_xml, preserved.parts.keys())?;
 
-        let sheet_parts = sheet_name_to_part_map(self)?;
-        for (sheet_name, drawings) in &preserved.sheet_drawings {
-            let Some(sheet_part) = sheet_parts.get(sheet_name) else {
+        let sheets = workbook_sheet_parts(self)?;
+        for (sheet_name, preserved_sheet) in &preserved.sheet_drawings {
+            let Some(sheet) = match_sheet_by_name_or_index(
+                &sheets,
+                sheet_name,
+                preserved_sheet.sheet_index,
+            ) else {
                 continue;
             };
 
-            let Some(sheet_xml) = self.part(sheet_part) else {
+            let Some(sheet_xml) = self.part(&sheet.part_name) else {
                 continue;
             };
             let updated_sheet_xml =
-                ensure_sheet_xml_has_drawings(sheet_xml, sheet_part, drawings)?;
-            self.set_part(sheet_part.clone(), updated_sheet_xml);
+                ensure_sheet_xml_has_drawings(sheet_xml, &sheet.part_name, &preserved_sheet.drawings)?;
+            self.set_part(sheet.part_name.clone(), updated_sheet_xml);
 
-            let sheet_rels_part = rels_for_part(sheet_part);
+            let sheet_rels_part = rels_for_part(&sheet.part_name);
             let updated_rels = ensure_sheet_rels_has_drawings(
                 self.part(&sheet_rels_part),
                 &sheet_rels_part,
-                drawings,
+                &preserved_sheet.drawings,
             )?;
             self.set_part(sheet_rels_part, updated_rels);
         }
 
         Ok(())
     }
-
-}
-
-fn sheet_name_to_part_map(pkg: &XlsxPackage) -> Result<HashMap<String, String>, ChartExtractionError> {
-    let workbook_part = "xl/workbook.xml";
-    let workbook_xml = pkg
-        .part(workbook_part)
-        .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?;
-    let workbook_xml = std::str::from_utf8(workbook_xml)
-        .map_err(|e| ChartExtractionError::XmlNonUtf8(workbook_part.to_string(), e))?;
-    let workbook_doc =
-        Document::parse(workbook_xml).map_err(|e| ChartExtractionError::XmlParse(workbook_part.to_string(), e))?;
-
-    let workbook_rels_part = "xl/_rels/workbook.xml.rels";
-    let workbook_rels_xml = pkg
-        .part(workbook_rels_part)
-        .ok_or_else(|| ChartExtractionError::MissingPart(workbook_rels_part.to_string()))?;
-    let workbook_rels = parse_relationships(workbook_rels_xml, workbook_rels_part)?;
-    let rel_map: HashMap<_, _> = workbook_rels.into_iter().map(|r| (r.id.clone(), r)).collect();
-
-    let mut out = HashMap::new();
-    for sheet_node in workbook_doc
-        .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name() == "sheet")
-    {
-        let sheet_name = match sheet_node.attribute("name") {
-            Some(name) => name.to_string(),
-            None => continue,
-        };
-        let sheet_rid = match sheet_node
-            .attribute((REL_NS, "id"))
-            .or_else(|| sheet_node.attribute("r:id"))
-            .or_else(|| sheet_node.attribute("id"))
-        {
-            Some(id) => id,
-            None => continue,
-        };
-
-        let target = match rel_map.get(sheet_rid) {
-            Some(rel) => resolve_target(workbook_part, &rel.target),
-            None => continue,
-        };
-        out.insert(sheet_name, target);
-    }
-
-    Ok(out)
 }
 
 fn extract_sheet_drawing_rids(

@@ -29,6 +29,7 @@ mod content_types;
 mod formula_text;
 mod model_package;
 mod openxml;
+mod preserve;
 mod xml;
 pub mod drawingml;
 pub mod drawings;

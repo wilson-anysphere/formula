@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use roxmltree::Document;
 
-use crate::path::{rels_for_part, resolve_target};
+use crate::path::rels_for_part;
+use crate::preserve::sheet_match::{match_sheet_by_name_or_index, workbook_sheet_parts};
 use crate::relationships::parse_relationships;
 use crate::workbook::ChartExtractionError;
 use crate::XlsxPackage;
@@ -20,6 +21,16 @@ pub struct RelationshipStub {
     pub target: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreservedSheetPivotTables {
+    pub sheet_index: usize,
+    pub sheet_id: Option<u32>,
+    /// The `<pivotTables>` subtree from the worksheet XML (outer XML).
+    pub pivot_tables_xml: Vec<u8>,
+    /// Relationships from the worksheet `.rels` required by `<pivotTables>`.
+    pub pivot_table_rels: Vec<RelationshipStub>,
+}
+
 /// A slice of an XLSX package required to preserve pivot-related parts across a
 /// "read -> write" pipeline.
 ///
@@ -29,8 +40,9 @@ pub struct RelationshipStub {
 /// re-apply the returned payload with
 /// [`XlsxPackage::apply_preserved_pivot_parts`] to retain pivot artifacts.
 ///
-/// The preserved data is keyed by worksheet name (not internal `sheetN.xml`
-/// numbering) so it can be re-attached after sheet reordering or regeneration.
+/// The preserved data is keyed by the original worksheet name *and* stores the
+/// worksheet's position in the workbook sheet list so attachments can be
+/// restored after in-app sheet renames (without reordering).
 #[derive(Debug, Clone)]
 pub struct PreservedPivotParts {
     /// Source `[Content_Types].xml` for merging required overrides.
@@ -41,10 +53,8 @@ pub struct PreservedPivotParts {
     pub workbook_pivot_caches: Option<Vec<u8>>,
     /// Relationships from `xl/_rels/workbook.xml.rels` required by `<pivotCaches>`.
     pub workbook_pivot_cache_rels: Vec<RelationshipStub>,
-    /// The `<pivotTables>` subtree from each worksheet XML, keyed by sheet name.
-    pub sheet_pivot_tables: BTreeMap<String, Vec<u8>>,
-    /// Relationships from each worksheet `.rels` required by `<pivotTables>`.
-    pub sheet_pivot_rels: BTreeMap<String, Vec<RelationshipStub>>,
+    /// Preserved `<pivotTables>` subtrees and `.rels` metadata per worksheet.
+    pub sheet_pivot_tables: BTreeMap<String, PreservedSheetPivotTables>,
 }
 
 impl PreservedPivotParts {
@@ -53,7 +63,6 @@ impl PreservedPivotParts {
             && self.workbook_pivot_caches.is_none()
             && self.sheet_pivot_tables.is_empty()
             && self.workbook_pivot_cache_rels.is_empty()
-            && self.sheet_pivot_rels.values().all(|v| v.is_empty())
     }
 }
 
@@ -91,7 +100,8 @@ impl XlsxPackage {
         let pivot_caches_node = workbook_doc
             .descendants()
             .find(|n| n.is_element() && n.tag_name().name() == "pivotCaches");
-        let workbook_pivot_caches = pivot_caches_node.map(|n| workbook_xml.as_bytes()[n.range()].to_vec());
+        let workbook_pivot_caches =
+            pivot_caches_node.map(|n| workbook_xml.as_bytes()[n.range()].to_vec());
 
         let mut workbook_pivot_cache_rids: HashSet<String> = HashSet::new();
         if let Some(node) = pivot_caches_node {
@@ -111,10 +121,12 @@ impl XlsxPackage {
         let workbook_rels_part = "xl/_rels/workbook.xml.rels";
         let rel_map: HashMap<String, crate::relationships::Relationship> =
             match self.part(workbook_rels_part) {
-                Some(workbook_rels_xml) => parse_relationships(workbook_rels_xml, workbook_rels_part)?
-                    .into_iter()
-                    .map(|r| (r.id.clone(), r))
-                    .collect(),
+                Some(workbook_rels_xml) => {
+                    parse_relationships(workbook_rels_xml, workbook_rels_part)?
+                        .into_iter()
+                        .map(|r| (r.id.clone(), r))
+                        .collect()
+                }
                 None => HashMap::new(),
             };
 
@@ -131,18 +143,17 @@ impl XlsxPackage {
             }
         }
 
-        let sheet_parts = sheet_name_to_part_map(self)?;
-        let mut sheet_pivot_tables: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-        let mut sheet_pivot_rels: BTreeMap<String, Vec<RelationshipStub>> = BTreeMap::new();
+        let sheets = workbook_sheet_parts(self)?;
+        let mut sheet_pivot_tables: BTreeMap<String, PreservedSheetPivotTables> = BTreeMap::new();
 
-        for (sheet_name, sheet_part) in sheet_parts {
-            let Some(sheet_xml) = self.part(&sheet_part) else {
+        for sheet in sheets {
+            let Some(sheet_xml) = self.part(&sheet.part_name) else {
                 continue;
             };
-            let sheet_xml = std::str::from_utf8(sheet_xml)
-                .map_err(|e| ChartExtractionError::XmlNonUtf8(sheet_part.clone(), e))?;
-            let sheet_doc = Document::parse(sheet_xml)
-                .map_err(|e| ChartExtractionError::XmlParse(sheet_part.clone(), e))?;
+            let sheet_xml_str = std::str::from_utf8(sheet_xml)
+                .map_err(|e| ChartExtractionError::XmlNonUtf8(sheet.part_name.clone(), e))?;
+            let sheet_doc = Document::parse(sheet_xml_str)
+                .map_err(|e| ChartExtractionError::XmlParse(sheet.part_name.clone(), e))?;
 
             let pivot_tables_node = sheet_doc
                 .descendants()
@@ -151,7 +162,7 @@ impl XlsxPackage {
                 continue;
             };
 
-            sheet_pivot_tables.insert(sheet_name.clone(), sheet_xml.as_bytes()[pivot_tables_node.range()].to_vec());
+            let pivot_tables_xml = sheet_xml_str.as_bytes()[pivot_tables_node.range()].to_vec();
 
             let pivot_table_rids: Vec<String> = pivot_tables_node
                 .descendants()
@@ -164,31 +175,37 @@ impl XlsxPackage {
                 .map(|s| s.to_string())
                 .collect();
 
-            if pivot_table_rids.is_empty() {
-                continue;
-            }
+            let mut pivot_table_rels = Vec::new();
+            if !pivot_table_rids.is_empty() {
+                let sheet_rels_part = rels_for_part(&sheet.part_name);
+                if let Some(sheet_rels_xml) = self.part(&sheet_rels_part) {
+                    let rels = parse_relationships(sheet_rels_xml, &sheet_rels_part)?;
+                    let rel_map: HashMap<_, _> =
+                        rels.into_iter().map(|r| (r.id.clone(), r)).collect();
 
-            let sheet_rels_part = rels_for_part(&sheet_part);
-            let Some(sheet_rels_xml) = self.part(&sheet_rels_part) else {
-                continue;
-            };
-            let rels = parse_relationships(sheet_rels_xml, &sheet_rels_part)?;
-            let rel_map: HashMap<_, _> = rels.into_iter().map(|r| (r.id.clone(), r)).collect();
-
-            for rid in pivot_table_rids {
-                if let Some(rel) = rel_map.get(&rid) {
-                    if rel.type_ != PIVOT_TABLE_REL_TYPE {
-                        continue;
+                    for rid in pivot_table_rids {
+                        if let Some(rel) = rel_map.get(&rid) {
+                            if rel.type_ != PIVOT_TABLE_REL_TYPE {
+                                continue;
+                            }
+                            pivot_table_rels.push(RelationshipStub {
+                                rel_id: rid.clone(),
+                                target: rel.target.clone(),
+                            });
+                        }
                     }
-                    sheet_pivot_rels
-                        .entry(sheet_name.clone())
-                        .or_default()
-                        .push(RelationshipStub {
-                            rel_id: rid.clone(),
-                            target: rel.target.clone(),
-                        });
                 }
             }
+
+            sheet_pivot_tables.insert(
+                sheet.name,
+                PreservedSheetPivotTables {
+                    sheet_index: sheet.index,
+                    sheet_id: sheet.sheet_id,
+                    pivot_tables_xml,
+                    pivot_table_rels,
+                },
+            );
         }
 
         Ok(PreservedPivotParts {
@@ -197,7 +214,6 @@ impl XlsxPackage {
             workbook_pivot_caches,
             workbook_pivot_cache_rels,
             sheet_pivot_tables,
-            sheet_pivot_rels,
         })
     }
 
@@ -220,7 +236,8 @@ impl XlsxPackage {
             let workbook_xml = self
                 .part(workbook_part)
                 .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?;
-            let updated = ensure_workbook_xml_has_pivot_caches(workbook_xml, workbook_part, pivot_caches)?;
+            let updated =
+                ensure_workbook_xml_has_pivot_caches(workbook_xml, workbook_part, pivot_caches)?;
             self.set_part(workbook_part, updated);
         }
 
@@ -235,31 +252,34 @@ impl XlsxPackage {
             self.set_part(workbook_rels_part, updated_workbook_rels);
         }
 
-        let sheet_parts = sheet_name_to_part_map(self)?;
-        for (sheet_name, pivot_tables_xml) in &preserved.sheet_pivot_tables {
-            let Some(sheet_part) = sheet_parts.get(sheet_name) else {
-                continue;
-            };
-            let Some(sheet_xml) = self.part(sheet_part) else {
+        let sheets = workbook_sheet_parts(self)?;
+        for (sheet_name, preserved_sheet) in &preserved.sheet_pivot_tables {
+            let Some(sheet) = match_sheet_by_name_or_index(
+                &sheets,
+                sheet_name,
+                preserved_sheet.sheet_index,
+            ) else {
                 continue;
             };
 
-            let updated_sheet_xml =
-                ensure_sheet_xml_has_pivot_tables(sheet_xml, sheet_part, pivot_tables_xml)?;
-            self.set_part(sheet_part.clone(), updated_sheet_xml);
+            let Some(sheet_xml) = self.part(&sheet.part_name) else {
+                continue;
+            };
 
-            let rels = preserved
-                .sheet_pivot_rels
-                .get(sheet_name)
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            if !rels.is_empty() {
-                let sheet_rels_part = rels_for_part(sheet_part);
+            let updated_sheet_xml = ensure_sheet_xml_has_pivot_tables(
+                sheet_xml,
+                &sheet.part_name,
+                &preserved_sheet.pivot_tables_xml,
+            )?;
+            self.set_part(sheet.part_name.clone(), updated_sheet_xml);
+
+            if !preserved_sheet.pivot_table_rels.is_empty() {
+                let sheet_rels_part = rels_for_part(&sheet.part_name);
                 let updated_sheet_rels = ensure_rels_has_relationships(
                     self.part(&sheet_rels_part),
                     &sheet_rels_part,
                     PIVOT_TABLE_REL_TYPE,
-                    rels,
+                    &preserved_sheet.pivot_table_rels,
                 )?;
                 self.set_part(sheet_rels_part, updated_sheet_rels);
             }
@@ -267,64 +287,6 @@ impl XlsxPackage {
 
         Ok(())
     }
-}
-
-fn sheet_name_to_part_map(pkg: &XlsxPackage) -> Result<HashMap<String, String>, ChartExtractionError> {
-    let workbook_part = "xl/workbook.xml";
-    let workbook_xml = pkg
-        .part(workbook_part)
-        .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?;
-    let workbook_xml = std::str::from_utf8(workbook_xml)
-        .map_err(|e| ChartExtractionError::XmlNonUtf8(workbook_part.to_string(), e))?;
-    let workbook_doc =
-        Document::parse(workbook_xml).map_err(|e| ChartExtractionError::XmlParse(workbook_part.to_string(), e))?;
-
-        let workbook_rels_part = "xl/_rels/workbook.xml.rels";
-        let rel_map: HashMap<String, crate::relationships::Relationship> =
-            match pkg.part(workbook_rels_part) {
-                Some(workbook_rels_xml) => parse_relationships(workbook_rels_xml, workbook_rels_part)?
-                    .into_iter()
-                    .map(|r| (r.id.clone(), r))
-                    .collect(),
-                None => HashMap::new(),
-            };
-
-    let mut out = HashMap::new();
-    for sheet_node in workbook_doc
-        .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name() == "sheet")
-    {
-        let sheet_name = match sheet_node.attribute("name") {
-            Some(name) => name.to_string(),
-            None => continue,
-        };
-        let sheet_rid = match sheet_node
-            .attribute((REL_NS, "id"))
-            .or_else(|| sheet_node.attribute("r:id"))
-            .or_else(|| sheet_node.attribute("id"))
-        {
-            Some(id) => id,
-            None => continue,
-        };
-
-        if let Some(rel) = rel_map.get(sheet_rid) {
-            out.insert(sheet_name, resolve_target(workbook_part, &rel.target));
-            continue;
-        }
-
-        // Fall back to the common `xl/worksheets/sheet{sheetId}.xml` naming used
-        // by many writers if the workbook `.rels` is missing.
-        if let Some(sheet_id) = sheet_node.attribute("sheetId") {
-            if let Ok(sheet_id) = sheet_id.parse::<u32>() {
-                let candidate = format!("xl/worksheets/sheet{sheet_id}.xml");
-                if pkg.part(&candidate).is_some() {
-                    out.insert(sheet_name, candidate);
-                }
-            }
-        }
-    }
-
-    Ok(out)
 }
 
 fn ensure_workbook_xml_has_pivot_caches(
@@ -349,9 +311,9 @@ fn ensure_workbook_xml_has_pivot_caches(
         let workbook_start = xml
             .find("<workbook")
             .ok_or_else(|| ChartExtractionError::XmlStructure(format!("{part_name}: missing <workbook")))?;
-        let tag_end = xml[workbook_start..]
-            .find('>')
-            .ok_or_else(|| ChartExtractionError::XmlStructure(format!("{part_name}: invalid <workbook> start tag")))?;
+        let tag_end = xml[workbook_start..].find('>').ok_or_else(|| {
+            ChartExtractionError::XmlStructure(format!("{part_name}: invalid <workbook> start tag"))
+        })?;
         let insert_pos = workbook_start + tag_end;
         xml.insert_str(insert_pos, &format!(" xmlns:r=\"{REL_NS}\""));
     }
@@ -385,9 +347,9 @@ fn ensure_sheet_xml_has_pivot_tables(
         let worksheet_start = xml
             .find("<worksheet")
             .ok_or_else(|| ChartExtractionError::XmlStructure(format!("{part_name}: missing <worksheet")))?;
-        let tag_end = xml[worksheet_start..]
-            .find('>')
-            .ok_or_else(|| ChartExtractionError::XmlStructure(format!("{part_name}: invalid <worksheet> start tag")))?;
+        let tag_end = xml[worksheet_start..].find('>').ok_or_else(|| {
+            ChartExtractionError::XmlStructure(format!("{part_name}: invalid <worksheet> start tag"))
+        })?;
         let insert_pos = worksheet_start + tag_end;
         xml.insert_str(insert_pos, &format!(" xmlns:r=\"{REL_NS}\""));
     }
@@ -450,9 +412,8 @@ mod tests {
     fn inserts_pivot_tables_before_ext_lst() {
         let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><extLst><ext/></extLst></worksheet>"#;
         let pivot_tables = br#"<pivotTables xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><pivotTable r:id="rId1"/></pivotTables>"#;
-        let updated =
-            ensure_sheet_xml_has_pivot_tables(xml, "xl/worksheets/sheet1.xml", pivot_tables)
-                .expect("patch sheet xml");
+        let updated = ensure_sheet_xml_has_pivot_tables(xml, "xl/worksheets/sheet1.xml", pivot_tables)
+            .expect("patch sheet xml");
         let updated_str = std::str::from_utf8(&updated).unwrap();
 
         let pivot_pos = updated_str.find("<pivotTables").unwrap();
