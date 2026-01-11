@@ -1,0 +1,39 @@
+use formula_model::charts::{ShapeStyle, SolidFill};
+use roxmltree::Node;
+
+use crate::drawingml::style::{parse_color, parse_ln};
+
+pub fn parse_sppr(node: Node<'_, '_>) -> Option<ShapeStyle> {
+    if node.tag_name().name() != "spPr" {
+        return None;
+    }
+
+    let fill = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "solidFill")
+        .and_then(parse_solid_fill);
+
+    let line = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "ln")
+        .and_then(parse_ln);
+
+    let style = ShapeStyle { fill, line };
+    if style.is_empty() {
+        None
+    } else {
+        Some(style)
+    }
+}
+
+pub fn parse_solid_fill(node: Node<'_, '_>) -> Option<SolidFill> {
+    if node.tag_name().name() != "solidFill" {
+        return None;
+    }
+
+    let color_node = node.children().find(|n| {
+        n.is_element() && (n.tag_name().name() == "srgbClr" || n.tag_name().name() == "schemeClr")
+    })?;
+    let color = parse_color(color_node)?;
+    Some(SolidFill { color })
+}

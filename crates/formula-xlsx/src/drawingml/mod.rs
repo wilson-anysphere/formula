@@ -5,6 +5,7 @@ use crate::workbook::ChartExtractionError;
 
 pub mod charts;
 mod preserve;
+pub mod style;
 
 pub use preserve::{PreservedDrawingParts, PreservedSheetDrawings, SheetDrawingRelationship};
 

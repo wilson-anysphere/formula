@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+mod formatting;
 mod model;
+pub use formatting::*;
 pub use model::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

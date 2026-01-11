@@ -2,10 +2,12 @@ use formula_model::charts::{
     AxisKind, AxisModel, AxisPosition, AxisScalingModel, BarChartModel, ChartDiagnostic,
     ChartDiagnosticLevel, ChartKind, ChartModel, LegendModel, LegendPosition, LineChartModel,
     NumberFormatModel, PieChartModel, PlotAreaModel, ScatterChartModel, SeriesData, SeriesModel,
-    SeriesNumberData, SeriesTextData, TextModel,
+    SeriesNumberData, SeriesPointStyle, SeriesTextData, TextModel,
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
+
+use crate::drawingml::style::{parse_marker, parse_sppr, parse_txpr};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChartSpaceParseError {
@@ -39,6 +41,12 @@ pub fn parse_chart_space(
     })?;
 
     let mut diagnostics = Vec::new();
+
+    let chart_space = doc.root_element();
+    let chart_area_style = chart_space
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .and_then(parse_sppr);
 
     if doc
         .descendants()
@@ -85,9 +93,16 @@ pub fn parse_chart_space(
             },
             axes: Vec::new(),
             series: Vec::new(),
+            chart_area_style,
+            plot_area_style: None,
             diagnostics,
         });
     };
+
+    let plot_area_style = plot_area_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .and_then(parse_sppr);
 
     let (chart_kind, plot_area, series) = parse_plot_area_chart(plot_area_node, &mut diagnostics);
     let axes = parse_axes(plot_area_node, &mut diagnostics);
@@ -99,6 +114,8 @@ pub fn parse_chart_space(
         plot_area,
         axes,
         series,
+        chart_area_style,
+        plot_area_style,
         diagnostics,
     })
 }
@@ -207,13 +224,56 @@ fn parse_series(series_node: Node<'_, '_>, diagnostics: &mut Vec<ChartDiagnostic
         .find(|n| n.is_element() && n.tag_name().name() == "yVal")
         .and_then(|y| parse_series_data(y, diagnostics, "series.yVal"));
 
+    let style = series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .and_then(parse_sppr);
+
+    let marker = series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "marker")
+        .and_then(parse_marker);
+
+    let points = series_node
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "dPt")
+        .filter_map(parse_series_point_style)
+        .collect();
+
     SeriesModel {
         name,
         categories,
         values,
         x_values,
         y_values,
+        style,
+        marker,
+        points,
     }
+}
+
+fn parse_series_point_style(dpt_node: Node<'_, '_>) -> Option<SeriesPointStyle> {
+    let idx = dpt_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "idx")
+        .and_then(|n| n.attribute("val"))
+        .and_then(|v| v.parse::<u32>().ok())?;
+
+    let style = dpt_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .and_then(parse_sppr);
+
+    let marker = dpt_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "marker")
+        .and_then(parse_marker);
+
+    if style.is_none() && marker.is_none() {
+        return None;
+    }
+
+    Some(SeriesPointStyle { idx, style, marker })
 }
 
 fn parse_axes(
@@ -293,6 +353,34 @@ fn parse_axis(
         .children()
         .any(|n| n.is_element() && n.tag_name().name() == "majorGridlines");
 
+    let axis_line_style = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "spPr")
+        .and_then(parse_sppr);
+
+    let major_gridlines_style = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "majorGridlines")
+        .and_then(|n| {
+            n.children()
+                .find(|c| c.is_element() && c.tag_name().name() == "spPr")
+        })
+        .and_then(parse_sppr);
+
+    let minor_gridlines_style = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "minorGridlines")
+        .and_then(|n| {
+            n.children()
+                .find(|c| c.is_element() && c.tag_name().name() == "spPr")
+        })
+        .and_then(parse_sppr);
+
+    let tick_label_text_style = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "txPr")
+        .and_then(parse_txpr);
+
     Some(AxisModel {
         id,
         kind,
@@ -301,6 +389,10 @@ fn parse_axis(
         num_fmt,
         tick_label_position,
         major_gridlines,
+        axis_line_style,
+        major_gridlines_style,
+        minor_gridlines_style,
+        tick_label_text_style,
     })
 }
 
@@ -396,7 +488,14 @@ fn parse_title(
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "tx");
 
-    let parsed = tx_node.and_then(|tx| parse_text_from_tx(tx, diagnostics, "title.tx"));
+    let mut parsed = tx_node.and_then(|tx| parse_text_from_tx(tx, diagnostics, "title.tx"));
+    let style = title_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "txPr")
+        .and_then(parse_txpr);
+    if let (Some(style), Some(text)) = (style, parsed.as_mut()) {
+        text.style = Some(style);
+    }
 
     if auto_deleted && parsed.is_none() {
         return None;
@@ -427,7 +526,16 @@ fn parse_legend(
         .map(parse_ooxml_bool)
         .unwrap_or(false);
 
-    Some(LegendModel { position, overlay })
+    let text_style = legend_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "txPr")
+        .and_then(parse_txpr);
+
+    Some(LegendModel {
+        position,
+        overlay,
+        text_style,
+    })
 }
 
 fn parse_legend_position(value: &str, diagnostics: &mut Vec<ChartDiagnostic>) -> LegendPosition {
@@ -460,6 +568,7 @@ fn parse_text_from_tx(
         return Some(TextModel {
             rich_text: RichText::new(text),
             formula: None,
+            style: None,
         });
     }
 
@@ -477,6 +586,7 @@ fn parse_text_from_tx(
         return Some(TextModel {
             rich_text: RichText::new(cached_value.unwrap_or_default()),
             formula,
+            style: None,
         });
     }
 
@@ -488,6 +598,7 @@ fn parse_text_from_tx(
         return Some(TextModel {
             rich_text: RichText::new(v),
             formula: None,
+            style: None,
         });
     }
 
