@@ -669,6 +669,7 @@ test("publish-bin rejects invalid manifests (matches client validation)", async 
     await copyDir(sampleExtensionSrc, extSource);
 
     const manifest = JSON.parse(await fs.readFile(path.join(extSource, "package.json"), "utf8"));
+    const baseManifest = JSON.parse(JSON.stringify(manifest));
 
     const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
       method: "POST",
