@@ -103,16 +103,36 @@ impl std::error::Error for DecodeError {}
 
 /// Decode an `rgce` token stream into best-effort Excel formula text (without leading `=`).
 pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeError> {
-    decode_rgce_impl(rgce, None)
+    decode_rgce_impl(rgce, None, None)
 }
 
 /// Decode an `rgce` token stream into best-effort Excel formula text (without leading `=`),
 /// using workbook context to resolve sheet indices (`ixti`) and defined names.
 pub fn decode_rgce_with_context(rgce: &[u8], ctx: &WorkbookContext) -> Result<String, DecodeError> {
-    decode_rgce_impl(rgce, Some(ctx))
+    decode_rgce_impl(rgce, Some(ctx), None)
 }
 
-fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String, DecodeError> {
+/// Decode an `rgce` token stream using the (0-indexed) origin cell for relative-reference tokens
+/// like `PtgRefN` / `PtgAreaN`.
+pub fn decode_rgce_with_base(rgce: &[u8], base: CellCoord) -> Result<String, DecodeError> {
+    decode_rgce_impl(rgce, None, Some(base))
+}
+
+/// Decode an `rgce` token stream using both workbook context (for 3D refs / names) and a base cell
+/// (for relative-reference tokens like `PtgRefN` / `PtgAreaN`).
+pub fn decode_rgce_with_context_and_base(
+    rgce: &[u8],
+    ctx: &WorkbookContext,
+    base: CellCoord,
+) -> Result<String, DecodeError> {
+    decode_rgce_impl(rgce, Some(ctx), Some(base))
+}
+
+fn decode_rgce_impl(
+    rgce: &[u8],
+    ctx: Option<&WorkbookContext>,
+    base: Option<CellCoord>,
+) -> Result<String, DecodeError> {
     if rgce.is_empty() {
         return Ok(String::new());
     }
@@ -377,12 +397,8 @@ fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String
                 }
                 stack.push(out);
             }
-            0x2C | 0x4C | 0x6C => {
-                // PtgRefN: [row: u32][col: u16]
-                //
-                // In BIFF, *N tokens are typically used for relative references in contexts like
-                // defined names and shared formulas. In BIFF12, Excel still stores row/col fields
-                // plus relative flags; for now we decode them the same way as `PtgRef`.
+            0x2A | 0x4A | 0x6A => {
+                // PtgRefErr: [row: u32][col: u16]
                 if rgce.len().saturating_sub(i) < 6 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -391,16 +407,12 @@ fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-
-                let row0 = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
-                let col_field = u16::from_le_bytes([rgce[i + 4], rgce[i + 5]]);
+                // Skip payload; Excel displays invalid refs as the `#REF!` error literal.
                 i += 6;
-                stack.push(format_cell_ref_from_field(row0, col_field));
+                stack.push("#REF!".to_string());
             }
-            0x2D | 0x4D | 0x6D => {
-                // PtgAreaN: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
-                //
-                // Same caveat as `PtgRefN` above; decode as absolute row/col with relative flags.
+            0x2B | 0x4B | 0x6B => {
+                // PtgAreaErr: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
                 if rgce.len().saturating_sub(i) < 12 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -409,37 +421,107 @@ fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
+                i += 12;
+                stack.push("#REF!".to_string());
+            }
+            0x2C | 0x4C | 0x6C => {
+                // PtgRefN: [row_off: i32][col_off: i16]
+                //
+                // These tokens encode row/col offsets relative to the cell containing the
+                // formula. To decode to A1 text we need the origin cell.
+                if rgce.len().saturating_sub(i) < 6 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 6,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                let Some(base) = base else {
+                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                };
 
-                let row_first0 =
-                    u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
-                let row_last0 = u32::from_le_bytes([
+                let row_off = i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
+                let col_off = i16::from_le_bytes([rgce[i + 4], rgce[i + 5]]) as i64;
+                i += 6;
+
+                const MAX_ROW: i64 = 1_048_575;
+                const MAX_COL: i64 = COL_INDEX_MASK as i64;
+                let abs_row = base.row as i64 + row_off;
+                let abs_col = base.col as i64 + col_off;
+                if abs_row < 0 || abs_row > MAX_ROW || abs_col < 0 || abs_col > MAX_COL {
+                    stack.push("#REF!".to_string());
+                } else {
+                    let col_field = encode_col_field(abs_col as u32, false, false);
+                    stack.push(format_cell_ref_from_field(abs_row as u32, col_field));
+                }
+            }
+            0x2D | 0x4D | 0x6D => {
+                // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
+                if rgce.len().saturating_sub(i) < 12 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 12,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                let Some(base) = base else {
+                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                };
+
+                let row_first_off =
+                    i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
+                let row_last_off = i32::from_le_bytes([
                     rgce[i + 4],
                     rgce[i + 5],
                     rgce[i + 6],
                     rgce[i + 7],
-                ]);
-                let col_first = u16::from_le_bytes([rgce[i + 8], rgce[i + 9]]);
-                let col_last = u16::from_le_bytes([rgce[i + 10], rgce[i + 11]]);
+                ]) as i64;
+                let col_first_off = i16::from_le_bytes([rgce[i + 8], rgce[i + 9]]) as i64;
+                let col_last_off = i16::from_le_bytes([rgce[i + 10], rgce[i + 11]]) as i64;
                 i += 12;
 
-                let a = format_cell_ref_from_field(row_first0, col_first);
-                let b = format_cell_ref_from_field(row_last0, col_last);
-                let is_single_cell = row_first0 == row_last0
-                    && (col_first & COL_INDEX_MASK) == (col_last & COL_INDEX_MASK);
-                let is_value_class = (ptg & 0x60) == 0x40;
+                const MAX_ROW: i64 = 1_048_575;
+                const MAX_COL: i64 = COL_INDEX_MASK as i64;
+                let abs_row_first = base.row as i64 + row_first_off;
+                let abs_row_last = base.row as i64 + row_last_off;
+                let abs_col_first = base.col as i64 + col_first_off;
+                let abs_col_last = base.col as i64 + col_last_off;
 
-                let mut out = String::new();
-                if is_value_class && !is_single_cell {
-                    out.push('@');
-                }
-                if is_single_cell {
-                    out.push_str(&a);
+                if abs_row_first < 0
+                    || abs_row_first > MAX_ROW
+                    || abs_row_last < 0
+                    || abs_row_last > MAX_ROW
+                    || abs_col_first < 0
+                    || abs_col_first > MAX_COL
+                    || abs_col_last < 0
+                    || abs_col_last > MAX_COL
+                {
+                    stack.push("#REF!".to_string());
                 } else {
-                    out.push_str(&a);
-                    out.push(':');
-                    out.push_str(&b);
+                    let col_first = encode_col_field(abs_col_first as u32, false, false);
+                    let col_last = encode_col_field(abs_col_last as u32, false, false);
+                    let a = format_cell_ref_from_field(abs_row_first as u32, col_first);
+                    let b = format_cell_ref_from_field(abs_row_last as u32, col_last);
+
+                    let is_single_cell =
+                        abs_row_first == abs_row_last && abs_col_first == abs_col_last;
+                    let is_value_class = (ptg & 0x60) == 0x40;
+
+                    let mut out = String::new();
+                    if is_value_class && !is_single_cell {
+                        out.push('@');
+                    }
+                    if is_single_cell {
+                        out.push_str(&a);
+                    } else {
+                        out.push_str(&a);
+                        out.push(':');
+                        out.push_str(&b);
+                    }
+                    stack.push(out);
                 }
-                stack.push(out);
             }
             0x3A | 0x5A | 0x7A => {
                 // PtgRef3d: [ixti: u16][row: u32][col: u16]
@@ -522,6 +604,32 @@ fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String
                     out.push_str(&b);
                 }
                 stack.push(out);
+            }
+            0x3C | 0x5C | 0x7C => {
+                // PtgRefErr3d: [ixti: u16][row: u32][col: u16]
+                if rgce.len().saturating_sub(i) < 8 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 8,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 8;
+                stack.push("#REF!".to_string());
+            }
+            0x3D | 0x5D | 0x7D => {
+                // PtgAreaErr3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+                if rgce.len().saturating_sub(i) < 14 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 14,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += 14;
+                stack.push("#REF!".to_string());
             }
             0x23 | 0x43 | 0x63 => {
                 // PtgName: [nameId: u32][reserved: u16]

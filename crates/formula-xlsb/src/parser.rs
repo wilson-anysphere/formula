@@ -629,7 +629,10 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
-                        let text = crate::rgce::decode_rgce_with_context(&rgce, ctx)
+                        let base = crate::rgce::CellCoord::new(row, col);
+                        let text = crate::rgce::decode_rgce_with_context_and_base(&rgce, ctx, base)
+                            .or_else(|_| crate::rgce::decode_rgce_with_base(&rgce, base))
+                            .or_else(|_| crate::rgce::decode_rgce_with_context(&rgce, ctx))
                             .or_else(|_| crate::rgce::decode_rgce(&rgce))
                             .ok();
                         let extra = rr.data[rr.offset..].to_vec();
@@ -654,7 +657,10 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
-                        let text = crate::rgce::decode_rgce_with_context(&rgce, ctx)
+                        let base = crate::rgce::CellCoord::new(row, col);
+                        let text = crate::rgce::decode_rgce_with_context_and_base(&rgce, ctx, base)
+                            .or_else(|_| crate::rgce::decode_rgce_with_base(&rgce, base))
+                            .or_else(|_| crate::rgce::decode_rgce_with_context(&rgce, ctx))
                             .or_else(|_| crate::rgce::decode_rgce(&rgce))
                             .ok();
                         let extra = rr.data[rr.offset..].to_vec();
@@ -679,7 +685,10 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
-                        let text = crate::rgce::decode_rgce_with_context(&rgce, ctx)
+                        let base = crate::rgce::CellCoord::new(row, col);
+                        let text = crate::rgce::decode_rgce_with_context_and_base(&rgce, ctx, base)
+                            .or_else(|_| crate::rgce::decode_rgce_with_base(&rgce, base))
+                            .or_else(|_| crate::rgce::decode_rgce_with_context(&rgce, ctx))
                             .or_else(|_| crate::rgce::decode_rgce(&rgce))
                             .ok();
                         let extra = rr.data[rr.offset..].to_vec();
@@ -704,7 +713,10 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         {
                             rgce = materialized;
                         }
-                        let text = crate::rgce::decode_rgce_with_context(&rgce, ctx)
+                        let base = crate::rgce::CellCoord::new(row, col);
+                        let text = crate::rgce::decode_rgce_with_context_and_base(&rgce, ctx, base)
+                            .or_else(|_| crate::rgce::decode_rgce_with_base(&rgce, base))
+                            .or_else(|_| crate::rgce::decode_rgce_with_context(&rgce, ctx))
                             .or_else(|_| crate::rgce::decode_rgce(&rgce))
                             .ok();
                         let extra = rr.data[rr.offset..].to_vec();

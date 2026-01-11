@@ -383,7 +383,28 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                 }
                 end.push_str(&row2.to_string());
 
-                stack.push(ExprFragment::new(format!("{start}:{end}")));
+                let is_single_cell = row1 == row2 && col1 == col2;
+                let is_value_class = (ptg & 0x60) == 0x40;
+
+                let mut text = String::new();
+                if is_value_class && !is_single_cell {
+                    // Preserve legacy implicit intersection semantics.
+                    text.push('@');
+                }
+                if is_single_cell {
+                    text.push_str(&start);
+                } else {
+                    text.push_str(&start);
+                    text.push(':');
+                    text.push_str(&end);
+                }
+
+                let mut frag = ExprFragment::new(text);
+                if is_value_class && !is_single_cell {
+                    // Unary `@` has the same precedence as unary +/- in our formula parser.
+                    frag.precedence = 70;
+                }
+                stack.push(frag);
             }
             _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
         }
@@ -570,6 +591,65 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                 BinaryOp::Range => 0x11,
             };
             out.push(ptg);
+        }
+        Expr::Unary(u) if u.op == UnaryOp::ImplicitIntersection => {
+            match &*u.expr {
+                Expr::CellRef(r) => {
+                    if r.workbook.is_some() || r.sheet.is_some() {
+                        return Err(EncodeRgceError::Unsupported(
+                            "3D/sheet-qualified references",
+                        ));
+                    }
+                    let (col, col_abs) = match &r.col {
+                        Coord::A1 { index, abs } => (*index, *abs),
+                        Coord::Offset(_) => return Err(EncodeRgceError::Unsupported("relative offsets")),
+                    };
+                    let (row, row_abs) = match &r.row {
+                        Coord::A1 { index, abs } => (*index, *abs),
+                        Coord::Offset(_) => return Err(EncodeRgceError::Unsupported("relative offsets")),
+                    };
+
+                    // Encode `@A1` by emitting a value-class reference token (PtgRefV). Excel
+                    // uses this representation for legacy implicit intersection.
+                    out.push(0x44); // PtgRefV
+                    out.extend_from_slice(&row.to_le_bytes());
+                    out.extend_from_slice(&encode_col_with_flags(col, col_abs, row_abs));
+                }
+                Expr::Binary(b) if b.op == BinaryOp::Range => {
+                    // Encode `@A1:A2` as PtgAreaV.
+                    if let (Expr::CellRef(a), Expr::CellRef(bref)) = (&*b.left, &*b.right) {
+                        if a.workbook.is_none()
+                            && a.sheet.is_none()
+                            && bref.workbook.is_none()
+                            && bref.sheet.is_none()
+                        {
+                            if let (Some((c1, c1_abs)), Some((r1, r1_abs))) =
+                                (coord_to_a1(&a.col), coord_to_a1(&a.row))
+                            {
+                                if let (Some((c2, c2_abs)), Some((r2, r2_abs))) =
+                                    (coord_to_a1(&bref.col), coord_to_a1(&bref.row))
+                                {
+                                    out.push(0x45); // PtgAreaV
+                                    out.extend_from_slice(&r1.to_le_bytes());
+                                    out.extend_from_slice(&r2.to_le_bytes());
+                                    out.extend_from_slice(&encode_col_with_flags(c1, c1_abs, r1_abs));
+                                    out.extend_from_slice(&encode_col_with_flags(c2, c2_abs, r2_abs));
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+
+                    return Err(EncodeRgceError::Unsupported(
+                        "implicit intersection (@) on non-area range",
+                    ));
+                }
+                _ => {
+                    return Err(EncodeRgceError::Unsupported(
+                        "implicit intersection (@) on non-reference",
+                    ))
+                }
+            }
         }
         Expr::Unary(u) => {
             encode_expr(&u.expr, out)?;

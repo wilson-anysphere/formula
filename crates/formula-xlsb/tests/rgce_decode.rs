@@ -1,5 +1,5 @@
 use formula_engine::parse_formula;
-use formula_xlsb::rgce::{decode_rgce, decode_rgce_with_context};
+use formula_xlsb::rgce::{decode_rgce, decode_rgce_with_base, decode_rgce_with_context, CellCoord};
 use formula_xlsb::workbook_context::WorkbookContext;
 use pretty_assertions::assert_eq;
 
@@ -22,6 +22,17 @@ fn rgce_ref(ptg: u8) -> Vec<u8> {
     let mut out = vec![ptg];
     out.extend_from_slice(&0u32.to_le_bytes()); // row = 0 (A1)
     out.extend_from_slice(&0xC000u16.to_le_bytes()); // col = A, relative row/col
+    out
+}
+
+fn rgce_area_n(ptg: u8) -> Vec<u8> {
+    // A1:A10 as a PtgAreaN* token, relative to the base cell A1:
+    // [ptg][r1_off: i32][r2_off: i32][c1_off: i16][c2_off: i16]
+    let mut out = vec![ptg];
+    out.extend_from_slice(&0i32.to_le_bytes()); // rowFirst offset
+    out.extend_from_slice(&9i32.to_le_bytes()); // rowLast offset
+    out.extend_from_slice(&0i16.to_le_bytes()); // colFirst offset
+    out.extend_from_slice(&0i16.to_le_bytes()); // colLast offset
     out
 }
 
@@ -73,5 +84,14 @@ fn does_not_emit_at_for_single_cell_ptg_refv() {
     let rgce = rgce_ref(0x44);
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "A1");
+    assert_parses_and_roundtrips(&text);
+}
+
+#[test]
+fn decodes_ptg_areanv_as_explicit_implicit_intersection() {
+    // PtgAreaNV (value class) should render as `@` when it denotes a multi-cell range.
+    let rgce = rgce_area_n(0x4D);
+    let text = decode_rgce_with_base(&rgce, CellCoord::new(0, 0)).expect("decode");
+    assert_eq!(text, "@A1:A10");
     assert_parses_and_roundtrips(&text);
 }
