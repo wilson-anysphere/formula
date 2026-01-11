@@ -125,12 +125,13 @@ struct WorkbookState {
     sheets: BTreeMap<String, BTreeMap<String, JsonValue>>,
     /// Case-insensitive mapping (Excel semantics) from sheet key -> display name.
     sheet_lookup: HashMap<String, String>,
-    /// All formula-bearing cells (sheet, A1) in deterministic order.
-    formula_cells: BTreeSet<FormulaCellKey>,
-    /// Last reported value for each formula cell.
+    /// Spill cells that were cleared by edits since the last recalc.
     ///
-    /// Used to compute deterministic `CellChange[]` results from `recalculate()`.
-    last_formula_values: BTreeMap<FormulaCellKey, JsonValue>,
+    /// `Engine::recalculate_with_value_changes` can only diff values across a recalc tick; when a
+    /// spill is cleared as part of `setCell`/`setRange` we stash the affected cells so the next
+    /// `recalculate()` call can return `CellChange[]` entries that blank out any now-stale spill
+    /// outputs in the JS cache.
+    pending_spill_clears: BTreeSet<FormulaCellKey>,
 }
 
 impl WorkbookState {
@@ -139,8 +140,7 @@ impl WorkbookState {
             engine: Engine::new(),
             sheets: BTreeMap::new(),
             sheet_lookup: HashMap::new(),
-            formula_cells: BTreeSet::new(),
-            last_formula_values: BTreeMap::new(),
+            pending_spill_clears: BTreeSet::new(),
         }
     }
 
@@ -195,6 +195,27 @@ impl WorkbookState {
         let cell_ref = Self::parse_address(address)?;
         let address = cell_ref.to_a1();
 
+        if let Some((origin, end)) = self.engine.spill_range(&sheet, &address) {
+            let edited_row = cell_ref.row;
+            let edited_col = cell_ref.col;
+            let edited_is_formula = is_formula_input(&input);
+            for row in origin.row..=end.row {
+                for col in origin.col..=end.col {
+                    // Skip the origin cell (top-left); we only need to clear spill outputs.
+                    if row == origin.row && col == origin.col {
+                        continue;
+                    }
+                    // If the user overwrote a spill output cell with a literal value, don't emit a
+                    // spill-clear change for that cell; the caller already knows its new input.
+                    if !edited_is_formula && row == edited_row && col == edited_col {
+                        continue;
+                    }
+                    self.pending_spill_clears
+                        .insert(FormulaCellKey::new(sheet.clone(), CellRef::new(row, col)));
+                }
+            }
+        }
+
         let sheet_cells = self
             .sheets
             .get_mut(&sheet)
@@ -208,10 +229,10 @@ impl WorkbookState {
                 .map_err(|err| js_err(err.to_string()))?;
 
             sheet_cells.remove(&address);
-
-            let key = FormulaCellKey::new(sheet.clone(), cell_ref);
-            self.formula_cells.remove(&key);
-            self.last_formula_values.remove(&key);
+            // If this cell was previously tracked as part of a spill-clear batch, drop it so we
+            // don't report direct input edits as recalc changes.
+            self.pending_spill_clears
+                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
             return Ok(());
         }
 
@@ -229,10 +250,6 @@ impl WorkbookState {
                 .map_err(|err| js_err(err.to_string()))?;
 
             sheet_cells.insert(address.clone(), JsonValue::String(canonical));
-
-            let key = FormulaCellKey::new(sheet.clone(), cell_ref);
-            self.formula_cells.insert(key.clone());
-            self.last_formula_values.insert(key, JsonValue::Null);
             return Ok(());
         }
 
@@ -242,10 +259,11 @@ impl WorkbookState {
             .map_err(|err| js_err(err.to_string()))?;
 
         sheet_cells.insert(address.clone(), input);
-
-        let key = FormulaCellKey::new(sheet.clone(), cell_ref);
-        self.formula_cells.remove(&key);
-        self.last_formula_values.remove(&key);
+        // If this cell was previously tracked as part of a spill-clear batch (e.g. a multi-cell
+        // paste over a spill range), drop it so we don't report direct input edits as recalc
+        // changes.
+        self.pending_spill_clears
+            .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
         Ok(())
     }
 
@@ -275,36 +293,68 @@ impl WorkbookState {
             self.require_sheet(sheet)?;
         }
 
-        self.engine.recalculate_single_threaded();
+        let sheet_filter = sheet
+            .and_then(|s| self.resolve_sheet(s))
+            .map(str::to_string);
 
-        let sheet_filter = sheet.and_then(|s| self.resolve_sheet(s)).map(str::to_string);
+        let recalc_changes = self.engine.recalculate_with_value_changes_single_threaded();
+        let mut by_cell: BTreeMap<FormulaCellKey, JsonValue> = BTreeMap::new();
 
-        let mut changes = Vec::new();
-        for key in &self.formula_cells {
-            let sheet_name = &key.sheet;
+        for change in recalc_changes {
             if let Some(filter) = &sheet_filter {
-                if sheet_name != filter {
+                if &change.sheet != filter {
                     continue;
                 }
             }
+            by_cell.insert(
+                FormulaCellKey {
+                    sheet: change.sheet,
+                    row: change.addr.row,
+                    col: change.addr.col,
+                },
+                engine_value_to_json(change.value),
+            );
+        }
 
-            let address = key.address();
-            let new_value = engine_value_to_json(self.engine.get_cell_value(sheet_name, &address));
-            let old_value = self
-                .last_formula_values
-                .get(key)
+        if let Some(filter) = &sheet_filter {
+            let keys: Vec<FormulaCellKey> = self
+                .pending_spill_clears
+                .iter()
+                .filter(|k| &k.sheet == filter)
                 .cloned()
-                .unwrap_or(JsonValue::Null);
-
-            if old_value != new_value {
-                changes.push(CellChange {
-                    sheet: sheet_name.clone(),
-                    address: address.clone(),
-                    value: new_value.clone(),
-                });
-                self.last_formula_values.insert(key.clone(), new_value);
+                .collect();
+            for key in keys {
+                self.pending_spill_clears.remove(&key);
+                if by_cell.contains_key(&key) {
+                    continue;
+                }
+                let address = key.address();
+                let value = engine_value_to_json(self.engine.get_cell_value(&key.sheet, &address));
+                by_cell.insert(key, value);
+            }
+        } else {
+            let pending = std::mem::take(&mut self.pending_spill_clears);
+            for key in pending {
+                if by_cell.contains_key(&key) {
+                    continue;
+                }
+                let address = key.address();
+                let value = engine_value_to_json(self.engine.get_cell_value(&key.sheet, &address));
+                by_cell.insert(key, value);
             }
         }
+
+        let changes = by_cell
+            .into_iter()
+            .map(|(key, value)| {
+                let address = key.address();
+                CellChange {
+                    sheet: key.sheet,
+                    address,
+                    value,
+                }
+            })
+            .collect();
 
         Ok(changes)
     }
@@ -314,10 +364,7 @@ fn json_scalar_to_js(value: &JsonValue) -> JsValue {
     match value {
         JsonValue::Null => JsValue::NULL,
         JsonValue::Bool(b) => JsValue::from_bool(*b),
-        JsonValue::Number(n) => n
-            .as_f64()
-            .map(JsValue::from_f64)
-            .unwrap_or(JsValue::NULL),
+        JsonValue::Number(n) => n.as_f64().map(JsValue::from_f64).unwrap_or(JsValue::NULL),
         JsonValue::String(s) => JsValue::from_str(s),
         // The engine protocol only supports scalars; fall back to `null` for any
         // unexpected values to avoid surfacing `undefined`.
@@ -492,10 +539,6 @@ impl WasmWorkbook {
                             .get_mut(&sheet_name)
                             .expect("sheet just ensured must exist");
                         sheet_cells.insert(address.clone(), JsonValue::String(display));
-
-                        let key = FormulaCellKey::new(sheet_name.clone(), cell_ref);
-                        wb.formula_cells.insert(key.clone());
-                        wb.last_formula_values.insert(key, cell_value_to_json(&cell.value));
                         continue;
                     }
                 }
@@ -562,7 +605,9 @@ impl WasmWorkbook {
     ) -> Result<(), JsValue> {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         if input.is_null() {
-            return self.inner.set_cell_internal(sheet, &address, JsonValue::Null);
+            return self
+                .inner
+                .set_cell_internal(sheet, &address, JsonValue::Null);
         }
         let input: JsonValue =
             serde_wasm_bindgen::from_value(input).map_err(|err| js_err(err.to_string()))?;
@@ -646,4 +691,88 @@ fn _assert_dto_serializable() {
     fn assert_serde<T: serde::Serialize + for<'de> serde::Deserialize<'de>>() {}
     assert_serde::<CellData>();
     assert_serde::<CellChange>();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn recalculate_includes_spill_output_cells() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=SEQUENCE(1,2)"))
+            .unwrap();
+
+        let changes = wb.recalculate_internal(None).unwrap();
+        assert_eq!(
+            changes,
+            vec![
+                CellChange {
+                    sheet: DEFAULT_SHEET.to_string(),
+                    address: "A1".to_string(),
+                    value: json!(1.0),
+                },
+                CellChange {
+                    sheet: DEFAULT_SHEET.to_string(),
+                    address: "B1".to_string(),
+                    value: json!(2.0),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn recalculate_reports_spill_clears_when_spill_origin_is_edited() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=SEQUENCE(1,2)"))
+            .unwrap();
+        let _ = wb.recalculate_internal(None).unwrap();
+
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=1"))
+            .unwrap();
+        let changes = wb.recalculate_internal(None).unwrap();
+        assert_eq!(
+            changes,
+            vec![
+                CellChange {
+                    sheet: DEFAULT_SHEET.to_string(),
+                    address: "A1".to_string(),
+                    value: json!(1.0),
+                },
+                CellChange {
+                    sheet: DEFAULT_SHEET.to_string(),
+                    address: "B1".to_string(),
+                    value: JsonValue::Null,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn recalculate_reports_spill_clears_when_spill_cell_is_overwritten() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=SEQUENCE(1,3)"))
+            .unwrap();
+        let _ = wb.recalculate_internal(None).unwrap();
+
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!(5.0))
+            .unwrap();
+        let changes = wb.recalculate_internal(None).unwrap();
+        assert_eq!(
+            changes,
+            vec![
+                CellChange {
+                    sheet: DEFAULT_SHEET.to_string(),
+                    address: "A1".to_string(),
+                    value: json!("#SPILL!"),
+                },
+                CellChange {
+                    sheet: DEFAULT_SHEET.to_string(),
+                    address: "C1".to_string(),
+                    value: JsonValue::Null,
+                },
+            ]
+        );
+    }
 }
