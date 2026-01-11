@@ -13,7 +13,7 @@ function hasWebGpu() {
 
 function nextPowerOfTwo(n) {
   let p = 1;
-  while (p < n) p <<= 1;
+  while (p < n) p *= 2;
   return p;
 }
 
@@ -650,6 +650,10 @@ export class WebGpuBackend {
     }
     if (aRows === 0 || bCols === 0) {
       return new Float64Array();
+    }
+    if (aCols === 0) {
+      // 0-column matrix multiplication produces a zero matrix output.
+      return new Float64Array(aRows * bCols);
     }
 
     const aDtype = dtypeOf(a);

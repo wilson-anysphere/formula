@@ -58,6 +58,17 @@ test("cpu: mmult", async () => {
   assert.deepEqual(Array.from(out), [58, 64, 139, 154]);
 });
 
+test("cpu: mmult with zero inner dimension produces zeros", async () => {
+  const cpu = new CpuBackend();
+  const aRows = 2;
+  const aCols = 0;
+  const bCols = 3;
+  const a = new Float64Array(0);
+  const b = new Float64Array(0);
+  const out = await cpu.mmult(a, b, aRows, aCols, bCols);
+  assert.deepEqual(Array.from(out), Array(aRows * bCols).fill(0));
+});
+
 test("cpu: sort", async () => {
   const cpu = new CpuBackend();
   const out = await cpu.sort(new Float64Array([3, 1, 2, -1]));
