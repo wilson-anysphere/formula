@@ -53,6 +53,6 @@ Critically: **Tauri `invoke` is not a substitute for the engine API.** The UI sh
 
 ## Current implementation pointers
 
-- Worker engine client boundary (web): `packages/engine/` (instantiated by `apps/web/`)
-- Reference Worker RPC + wasm module loader (desktop): `apps/desktop/src/engine/worker/`
+- Worker engine client boundary (web + desktop): `packages/engine/` (instantiated by `apps/web/`)
+- Worker RPC + wasm module loader: `packages/engine/src/worker/EngineWorker.ts` + `packages/engine/src/engine.worker.ts`
 - Rust/WASM engine crate (wasm-bindgen): `crates/formula-wasm/`

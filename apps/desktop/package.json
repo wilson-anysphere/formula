@@ -16,6 +16,7 @@
     "@formula/ai-completion": "workspace:*",
     "@formula/collab-comments": "workspace:*",
     "@formula/data-io": "workspace:*",
+    "@formula/engine": "workspace:*",
     "@formula/scripting": "workspace:*",
     "@formula/text-layout": "workspace:*",
     "react": "^18.2.0",

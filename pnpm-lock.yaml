@@ -45,6 +45,9 @@ importers:
       '@formula/data-io':
         specifier: workspace:*
         version: link:../../packages/data-io
+      '@formula/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
       '@formula/scripting':
         specifier: workspace:*
         version: link:../../packages/scripting
