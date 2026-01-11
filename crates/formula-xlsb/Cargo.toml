@@ -10,6 +10,7 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"
+calamine = "0.26"
 pretty_assertions = "1.4"
 proptest = "1"
 tempfile = "3.10"
