@@ -84,8 +84,13 @@ export class OpenAIClient {
    * }} [options]
    */
   constructor(options = {}) {
-    const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("OPENAI_API_KEY is required to use OpenAIClient");
+    const envKey = globalThis.process?.env?.OPENAI_API_KEY;
+    const apiKey = options.apiKey ?? envKey;
+    if (!apiKey) {
+      throw new Error(
+        "OpenAI API key is required. Pass `apiKey` to `new OpenAIClient({ apiKey })` or set the `OPENAI_API_KEY` environment variable in Node.js."
+      );
+    }
 
     this.apiKey = apiKey;
     this.model = options.model ?? "gpt-4o-mini";
