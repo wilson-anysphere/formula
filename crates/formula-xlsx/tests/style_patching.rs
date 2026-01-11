@@ -128,6 +128,62 @@ fn builtin_number_formats_use_builtin_num_fmt_ids_on_write() -> Result<(), Box<d
 }
 
 #[test]
+fn builtin_num_fmt_id_placeholders_roundtrip_to_xf_without_custom_num_fmt(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = load_fixture();
+
+    // Use the model loader to get a StyleTable that already contains the workbook's styles.
+    let doc = load_from_bytes(&bytes)?;
+    let mut style_table = doc.workbook.styles.clone();
+
+    // Style that forces a specific built-in numFmtId without providing a code string.
+    let style_id = style_table.intern(Style {
+        number_format: Some("__builtin_numFmtId:50".to_string()),
+        ..Default::default()
+    });
+
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let a1 = CellRef::from_a1("A1")?;
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        a1,
+        CellPatch::set_value(CellValue::Number(1.0)).with_style_id(style_id),
+    );
+
+    pkg.apply_cell_patches_with_styles(&patches, &style_table)?;
+
+    let styles_xml =
+        std::str::from_utf8(pkg.part("xl/styles.xml").expect("styles.xml exists"))?;
+    let doc = roxmltree::Document::parse(styles_xml).expect("valid styles.xml");
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+    // Should not introduce a custom <numFmt numFmtId="50" ...>.
+    let has_custom = doc.descendants().any(|n| {
+        n.has_tag_name((ns, "numFmt")) && n.attribute("numFmtId") == Some("50")
+    });
+    assert!(
+        !has_custom,
+        "expected no custom <numFmt numFmtId=\"50\"> entry:\n{styles_xml}"
+    );
+
+    // The appended XF should reference numFmtId 50.
+    let cell_xfs = doc
+        .descendants()
+        .find(|n| n.has_tag_name((ns, "cellXfs")))
+        .expect("cellXfs exists");
+    let xfs: Vec<_> = cell_xfs
+        .children()
+        .filter(|n| n.is_element() && n.has_tag_name((ns, "xf")))
+        .collect();
+    let last = xfs.last().expect("xf exists");
+    assert_eq!(last.attribute("numFmtId"), Some("50"));
+
+    Ok(())
+}
+
+#[test]
 fn patch_can_override_style_xf_index() -> Result<(), Box<dyn std::error::Error>> {
     let bytes = load_fixture();
     let a1 = CellRef::from_a1("A1")?;
