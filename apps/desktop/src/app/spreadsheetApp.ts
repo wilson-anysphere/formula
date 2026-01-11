@@ -897,7 +897,8 @@ export class SpreadsheetApp {
       this.limits
     );
     this.ensureActiveCellVisible();
-    const didScroll = this.scrollCellIntoView(this.selection.active);
+    const activeRange = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
+    const didScroll = activeRange ? this.scrollRangeIntoView(activeRange) : this.scrollCellIntoView(this.selection.active);
     this.renderSelection();
     this.updateStatus();
     if (sheetChanged) {
@@ -1985,6 +1986,51 @@ export class SpreadsheetApp {
       nextY = top - pad;
     } else if (bottom > nextY + viewportHeight - pad) {
       nextY = bottom - viewportHeight + pad;
+    }
+
+    return this.setScroll(nextX, nextY);
+  }
+
+  private scrollRangeIntoView(range: Range, paddingPx = 8): boolean {
+    const startRow = Math.max(0, Math.min(this.limits.maxRows - 1, range.startRow));
+    const endRow = Math.max(0, Math.min(this.limits.maxRows - 1, range.endRow));
+    const startCol = Math.max(0, Math.min(this.limits.maxCols - 1, range.startCol));
+    const endCol = Math.max(0, Math.min(this.limits.maxCols - 1, range.endCol));
+
+    const startVisualRow = this.visualIndexForRow(startRow);
+    const endVisualRow = this.visualIndexForRow(endRow);
+    const startVisualCol = this.visualIndexForCol(startCol);
+    const endVisualCol = this.visualIndexForCol(endCol);
+
+    const left = Math.min(startVisualCol, endVisualCol) * this.cellWidth;
+    const top = Math.min(startVisualRow, endVisualRow) * this.cellHeight;
+    const right = (Math.max(startVisualCol, endVisualCol) + 1) * this.cellWidth;
+    const bottom = (Math.max(startVisualRow, endVisualRow) + 1) * this.cellHeight;
+
+    const viewportWidth = this.viewportWidth();
+    const viewportHeight = this.viewportHeight();
+    if (viewportWidth <= 0 || viewportHeight <= 0) return false;
+
+    const pad = Math.max(0, paddingPx);
+    let nextX = this.scrollX;
+    let nextY = this.scrollY;
+
+    // Only attempt to fully fit the range when it fits within the viewport.
+    // Otherwise, fall back to keeping the active cell visible.
+    if (right - left <= viewportWidth - pad * 2) {
+      if (left < nextX + pad) {
+        nextX = left - pad;
+      } else if (right > nextX + viewportWidth - pad) {
+        nextX = right - viewportWidth + pad;
+      }
+    }
+
+    if (bottom - top <= viewportHeight - pad * 2) {
+      if (top < nextY + pad) {
+        nextY = top - pad;
+      } else if (bottom > nextY + viewportHeight - pad) {
+        nextY = bottom - viewportHeight + pad;
+      }
     }
 
     return this.setScroll(nextX, nextY);
