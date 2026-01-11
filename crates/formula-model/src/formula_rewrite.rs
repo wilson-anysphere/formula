@@ -728,9 +728,12 @@ fn bytes_eq_ignore_ascii_case(a: &[u8], b: &[u8]) -> bool {
 
 /// Rewrite table names in structured references inside a formula.
 ///
-/// This is intentionally conservative: it only rewrites occurrences that look like
-/// a structured reference token (`TableName[...]`) and it does not touch string
-/// literals.
+/// This is intentionally conservative:
+/// - It rewrites occurrences that look like a table token, either:
+///   - a structured reference (`TableName[...]`), or
+///   - a whole-table range reference (`TableName`).
+/// - It does not touch string literals.
+/// - It avoids rewriting sheet references (`Sheet1!A1`) and function calls (`Foo(...)`).
 pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)]) -> String {
     if renames.is_empty() {
         return formula.to_string();
@@ -767,7 +770,9 @@ pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)
             continue;
         }
 
-        // Structured reference token: `TableName[...]`
+        // Table token:
+        // - Structured reference: `TableName[...]`
+        // - Whole-table reference: `TableName`
         //
         // We treat `.` and `_` as identifier characters, and we require the match
         // to be token-boundary aligned to avoid rewriting substrings.
@@ -781,8 +786,14 @@ pub fn rewrite_table_names_in_formula(formula: &str, renames: &[(String, String)
                 if !bytes_eq_ignore_ascii_case(window, old_bytes) {
                     continue;
                 }
-                if bytes.get(i + old_bytes.len()) != Some(&b'[') {
-                    continue;
+                // Ensure the match ends at an identifier boundary.
+                match bytes.get(i + old_bytes.len()) {
+                    Some(next) if is_name_char(*next) => continue,
+                    // Avoid rewriting sheet references (`Sheet1!A1`).
+                    Some(b'!') => continue,
+                    // Avoid rewriting function calls (`Foo(...)`).
+                    Some(b'(') => continue,
+                    _ => {}
                 }
 
                 out.push_str(new);
@@ -939,6 +950,15 @@ mod tests {
     }
 
     #[test]
+    fn rewrite_table_name_token_without_brackets() {
+        let renames = vec![("Table1".to_string(), "Table1_1".to_string())];
+        assert_eq!(
+            rewrite_table_names_in_formula("=SUM(Table1)", &renames),
+            "=SUM(Table1_1)"
+        );
+    }
+
+    #[test]
     fn rewrite_structured_refs_avoids_string_literals() {
         let renames = vec![("Table1".to_string(), "Table1_1".to_string())];
         assert_eq!(
@@ -953,6 +973,24 @@ mod tests {
         assert_eq!(
             rewrite_table_names_in_formula("=SUM(MyTable1[Amount])", &renames),
             "=SUM(MyTable1[Amount])"
+        );
+    }
+
+    #[test]
+    fn rewrite_table_names_does_not_touch_sheet_references() {
+        let renames = vec![("Sheet1".to_string(), "Sheet1_1".to_string())];
+        assert_eq!(
+            rewrite_table_names_in_formula("=Sheet1!A1", &renames),
+            "=Sheet1!A1"
+        );
+    }
+
+    #[test]
+    fn rewrite_table_names_does_not_touch_function_calls() {
+        let renames = vec![("Table1".to_string(), "Table1_1".to_string())];
+        assert_eq!(
+            rewrite_table_names_in_formula("=Table1(A1)", &renames),
+            "=Table1(A1)"
         );
     }
 

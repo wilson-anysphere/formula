@@ -94,6 +94,9 @@ fn duplicate_sheet_renames_tables_and_updates_structured_refs() {
         sheet
             .set_formula_a1("C1", Some("=SUM(Table1[Col1])".to_string()))
             .unwrap();
+        sheet
+            .set_formula_a1("C2", Some("=SUM(Table1)".to_string()))
+            .unwrap();
     }
 
     let copied = wb.duplicate_sheet(sheet1, None).unwrap();
@@ -107,6 +110,10 @@ fn duplicate_sheet_renames_tables_and_updates_structured_refs() {
         copied_sheet.formula(CellRef::from_a1("C1").unwrap()),
         Some("SUM(Table1_1[Col1])")
     );
+    assert_eq!(
+        copied_sheet.formula(CellRef::from_a1("C2").unwrap()),
+        Some("SUM(Table1_1)")
+    );
 
     // The source sheet's table name and formula should be unchanged.
     let source_sheet = wb.sheet(sheet1).unwrap();
@@ -114,6 +121,10 @@ fn duplicate_sheet_renames_tables_and_updates_structured_refs() {
     assert_eq!(
         source_sheet.formula(CellRef::from_a1("C1").unwrap()),
         Some("SUM(Table1[Col1])")
+    );
+    assert_eq!(
+        source_sheet.formula(CellRef::from_a1("C2").unwrap()),
+        Some("SUM(Table1)")
     );
 }
 
