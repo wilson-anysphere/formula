@@ -41,6 +41,14 @@ export interface EngineClient {
     options?: RpcOptions
   ): Promise<void>;
   setRange(range: string, values: CellScalar[][], sheet?: string, options?: RpcOptions): Promise<void>;
+  /**
+   * Recalculate the workbook and return value-change deltas.
+   *
+   * Note: the `sheet` argument is accepted for API symmetry with other surfaces,
+   * but the web/WASM engine intentionally returns *all* value changes across the
+   * workbook even when a sheet is provided. Callers rely on this to keep
+   * cross-sheet caches coherent.
+   */
   recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]>;
   terminate(): void;
 }
