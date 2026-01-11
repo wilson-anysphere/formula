@@ -195,4 +195,93 @@ test.describe("BrowserExtensionHost", () => {
 
     expect(result.errorMessage).toContain("Permission denied");
   });
+
+  test("denied network permission blocks WebSocket connections in the browser worker", async ({ page }) => {
+    await page.goto("/");
+
+    const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
+    const extensionApiUrl = viteFsUrl(path.join(repoRoot, "packages/extension-api/index.mjs"));
+
+    const result = await page.evaluate(
+      async ({ hostModuleUrl, extensionApiUrl }) => {
+        const { BrowserExtensionHost } = await import(hostModuleUrl);
+
+        const commandId = "wsExt.connectDenied";
+        const manifest = {
+          name: "ws-ext",
+          version: "1.0.0",
+          publisher: "formula-test",
+          main: "./dist/extension.mjs",
+          engines: { formula: "^1.0.0" },
+          activationEvents: [`onCommand:${commandId}`],
+          contributes: { commands: [{ command: commandId, title: "WebSocket Denied" }] },
+          permissions: ["ui.commands", "network"]
+        };
+
+        const code = `
+          import * as formula from ${JSON.stringify(extensionApiUrl)};
+          export async function activate(context) {
+            context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+              commandId
+            )}, async () => {
+              return await new Promise((resolve) => {
+                const ws = new WebSocket("ws://example.invalid/");
+                const timer = setTimeout(() => resolve({ status: "timeout" }), 500);
+                ws.addEventListener("close", (e) => {
+                  clearTimeout(timer);
+                  resolve({ status: "closed", code: e.code, reason: e.reason, wasClean: e.wasClean });
+                });
+              });
+            }));
+          }
+          export default { activate };
+        `;
+
+        const blob = new Blob([code], { type: "text/javascript" });
+        const mainUrl = URL.createObjectURL(blob);
+
+        let sawNetworkPrompt = false;
+
+        const host = new BrowserExtensionHost({
+          engineVersion: "1.0.0",
+          spreadsheetApi: {
+            async getSelection() {
+              return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] };
+            },
+            async getCell() {
+              return null;
+            },
+            async setCell() {
+              // noop
+            }
+          },
+          permissionPrompt: async ({ permissions }: { permissions: string[] }) => {
+            if (permissions.includes("network")) {
+              sawNetworkPrompt = true;
+              return false;
+            }
+            return true;
+          }
+        });
+
+        await host.loadExtension({
+          extensionId: `${manifest.publisher}.${manifest.name}`,
+          extensionPath: "memory://ws-ext/",
+          manifest,
+          mainUrl
+        });
+
+        const wsResult = await host.executeCommand(commandId);
+        await host.dispose();
+        URL.revokeObjectURL(mainUrl);
+
+        return { sawNetworkPrompt, wsResult };
+      },
+      { hostModuleUrl, extensionApiUrl }
+    );
+
+    expect(result.sawNetworkPrompt).toBe(true);
+    expect(result.wsResult.status).toBe("closed");
+    expect(String(result.wsResult.reason ?? "")).toContain("Permission denied");
+  });
 });
