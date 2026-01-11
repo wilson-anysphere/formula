@@ -170,9 +170,11 @@ export async function introspectSyncToken(
     return { active: false, reason: "not_member", userId, orgId, role };
   }
 
-  if (roleRank(role) > roleRank(memberRole)) {
-    return { active: false, reason: "role_too_high", userId, orgId, role };
-  }
+  // Permissions may change after a sync token is minted (e.g. owner demotes an
+  // editor to viewer). Treat the token role as an upper bound and clamp it to
+  // the current DB role to prevent privilege escalation without requiring the
+  // client to refresh its sync token.
+  const effectiveRole = roleRank(role) > roleRank(memberRole) ? memberRole : role;
 
   if (!isClientIpAllowed(params.clientIp ?? null, row.ip_allowlist)) {
     return { active: false, reason: "ip_not_allowed", userId, orgId, role, sessionId: claims.sessionId };
@@ -182,7 +184,7 @@ export async function introspectSyncToken(
     active: true,
     userId,
     orgId,
-    role,
+    role: effectiveRole,
     sessionId: claims.sessionId
   };
 }
