@@ -108,6 +108,20 @@ fn recalculate_reports_dynamic_array_spills() {
     assert_eq!(changes[1].sheet, DEFAULT_SHEET);
     assert_eq!(changes[1].address, "B1");
     assert_json_number(&changes[1].value, 2.0);
+
+    // Spill outputs should not be treated as explicit inputs in the workbook JSON.
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert!(b1.input.is_null());
+    assert_json_number(&b1.value, 2.0);
+
+    let exported = wb.to_json().unwrap();
+    let parsed: JsonValue = serde_json::from_str(&exported).unwrap();
+    let cells = parsed["sheets"][DEFAULT_SHEET]["cells"]
+        .as_object()
+        .unwrap();
+    assert!(cells.contains_key("A1"));
+    assert!(!cells.contains_key("B1"));
 }
 
 #[wasm_bindgen_test]
