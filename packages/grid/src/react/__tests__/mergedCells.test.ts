@@ -267,4 +267,34 @@ describe("merged cells + overflow", () => {
     expect(after!.x).toBeGreaterThanOrEqual(0);
     expect(after!.x + after!.width).toBeLessThanOrEqual(40);
   });
+
+  it("scrollToCell reveals the scrollable portion of merged cells that cross frozen boundaries", () => {
+    const merged: CellRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 3 };
+    const provider = createMergedProvider({ rowCount: 5, colCount: 20, merged });
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    ctxByCanvas.set(gridCanvas, createMock2dContext({ canvas: gridCanvas }));
+    ctxByCanvas.set(contentCanvas, createMock2dContext({ canvas: contentCanvas }));
+    ctxByCanvas.set(selectionCanvas, createMock2dContext({ canvas: selectionCanvas }));
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 5, colCount: 20, defaultRowHeight: 10, defaultColWidth: 10 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(40, 40, 1);
+
+    // Freeze the first column so the merge crosses from frozen (col 0) into scrollable (col 1..2).
+    renderer.setFrozen(0, 1);
+
+    // Scroll far enough right that the scrollable portion of the merge is offscreen.
+    renderer.setScroll(100, 0);
+    expect(renderer.scroll.getScroll().x).toBe(100);
+
+    renderer.scrollToCell(0, 0, { align: "auto" });
+
+    // The renderer should bring the scrollable portion (cols 1..2) into view, which requires
+    // scrolling back to the leftmost position.
+    expect(renderer.scroll.getScroll().x).toBe(0);
+  });
 });

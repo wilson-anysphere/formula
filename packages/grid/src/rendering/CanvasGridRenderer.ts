@@ -660,10 +660,14 @@ export class CanvasGridRenderer {
     const crossesFrozenRows = merged ? merged.startRow < viewport.frozenRows && merged.endRow > viewport.frozenRows : false;
     const useMerged = merged != null && !crossesFrozenCols && !crossesFrozenRows;
 
-    const rowStart = useMerged ? merged.startRow : row;
-    const rowEndExclusive = useMerged ? merged.endRow : row + 1;
-    const colStart = useMerged ? merged.startCol : col;
-    const colEndExclusive = useMerged ? merged.endCol : col + 1;
+    // When a merged range crosses frozen boundaries, we can't represent its full bounds as a single
+    // viewport-space rect (frozen and scrollable quadrants use different coordinate spaces), but we
+    // *can* still scroll to ensure that the non-frozen portion of the merge becomes visible. Treat the
+    // scrollable portion of the merge as the target in those cases.
+    const rowStart = useMerged ? merged.startRow : crossesFrozenRows ? viewport.frozenRows : row;
+    const rowEndExclusive = useMerged ? merged.endRow : crossesFrozenRows ? merged!.endRow : row + 1;
+    const colStart = useMerged ? merged.startCol : crossesFrozenCols ? viewport.frozenCols : col;
+    const colEndExclusive = useMerged ? merged.endCol : crossesFrozenCols ? merged!.endCol : col + 1;
 
     const viewStartX = viewport.frozenWidth + padding;
     const viewEndX = Math.max(viewStartX, viewport.width - padding);
