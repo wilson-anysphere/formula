@@ -249,7 +249,7 @@ fn xmatch_linear(
                 if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, candidate) {
                     return Ok(idx);
                 }
-                if ord == Ordering::Less {
+                if ord == Ordering::Less || ord == Ordering::Equal {
                     best = match best {
                         None => Some(idx),
                         Some(best_idx) => {
@@ -276,7 +276,7 @@ fn xmatch_linear(
                 if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, candidate) {
                     return Ok(idx);
                 }
-                if ord == Ordering::Greater {
+                if ord == Ordering::Greater || ord == Ordering::Equal {
                     best = match best {
                         None => Some(idx),
                         Some(best_idx) => {
@@ -352,7 +352,7 @@ fn xmatch_linear_accessor(
                 if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, &candidate) {
                     return Ok(idx);
                 }
-                if ord == Ordering::Less {
+                if ord == Ordering::Less || ord == Ordering::Equal {
                     best = match best {
                         None => Some((idx, candidate)),
                         Some((best_idx, best_val)) => match lookup_cmp(&candidate, &best_val) {
@@ -379,7 +379,7 @@ fn xmatch_linear_accessor(
                 if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, &candidate) {
                     return Ok(idx);
                 }
-                if ord == Ordering::Greater {
+                if ord == Ordering::Greater || ord == Ordering::Equal {
                     best = match best {
                         None => Some((idx, candidate)),
                         Some((best_idx, best_val)) => match lookup_cmp(&candidate, &best_val) {

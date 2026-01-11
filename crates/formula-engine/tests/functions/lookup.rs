@@ -130,12 +130,16 @@ fn xmatch_approximate_modes_treat_blanks_like_zero_or_empty_string() {
     sheet.set("A3", 2.0);
     assert_eq!(sheet.eval("=XMATCH(0.5, A1:A3, -1)"), Value::Number(1.0));
     assert_eq!(sheet.eval("=XMATCH(0.5, A1:A3, -1, 2)"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=XMATCH(0, A1:A3, -1)"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=XMATCH(0, A1:A3, 1)"), Value::Number(1.0));
 
     // Text: blank behaves like empty string.
     sheet.set("B1", Value::Blank);
     sheet.set("B2", "B");
     sheet.set("B3", "C");
     assert_eq!(sheet.eval("=XMATCH(\"A\", B1:B3, -1)"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=XMATCH(\"\", B1:B3, -1)"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=XMATCH(\"\", B1:B3, 1)"), Value::Number(1.0));
 }
 
 #[test]
