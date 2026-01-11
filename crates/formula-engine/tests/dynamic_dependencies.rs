@@ -222,6 +222,94 @@ fn vlookup_updates_range_precedents_and_dependents_for_offset_table_array() {
 }
 
 #[test]
+fn hlookup_updates_range_precedents_and_dependents_for_offset_table_array() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A2", "A").unwrap();
+    engine.set_cell_value("Sheet1", "B2", "B").unwrap();
+    engine.set_cell_value("Sheet1", "C2", "C").unwrap();
+    engine.set_cell_value("Sheet1", "A3", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "C3", 30.0).unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D1",
+            "=HLOOKUP(\"B\", OFFSET(A1,1,0,2,3), 2, FALSE)",
+        )
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(20.0));
+
+    let precedents = engine.precedents("Sheet1", "D1").unwrap();
+    assert_eq!(
+        precedents,
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 0 }, // A1
+            },
+            PrecedentNode::Range {
+                sheet: 0,
+                start: CellAddr { row: 1, col: 0 }, // A2
+                end: CellAddr { row: 2, col: 2 },   // C3
+            },
+        ]
+    );
+
+    let dependents_b2 = engine.dependents("Sheet1", "B2").unwrap();
+    let dependents_b3 = engine.dependents("Sheet1", "B3").unwrap();
+    let expected = vec![PrecedentNode::Cell {
+        sheet: 0,
+        addr: CellAddr { row: 0, col: 3 }, // D1
+    }];
+    assert_eq!(dependents_b2, expected);
+    assert_eq!(dependents_b3, expected);
+}
+
+#[test]
+fn index_updates_range_precedents_and_dependents_for_offset_array() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 4.0).unwrap();
+    engine.set_cell_value("Sheet1", "A4", 5.0).unwrap();
+    engine.set_cell_value("Sheet1", "B4", 6.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=INDEX(OFFSET(A1,1,0,3,2), 2, 2)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(4.0));
+
+    let precedents = engine.precedents("Sheet1", "C1").unwrap();
+    assert_eq!(
+        precedents,
+        vec![
+            PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 0 }, // A1
+            },
+            PrecedentNode::Range {
+                sheet: 0,
+                start: CellAddr { row: 1, col: 0 }, // A2
+                end: CellAddr { row: 3, col: 1 },   // B4
+            },
+        ]
+    );
+
+    let dependents = engine.dependents("Sheet1", "B3").unwrap();
+    assert_eq!(
+        dependents,
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 2 } // C1
+        }]
+    );
+}
+
+#[test]
 fn indirect_establishes_dependencies_for_calc_order() {
     let mut engine = Engine::new();
     engine.set_cell_formula("Sheet1", "A1", "=1").unwrap();
