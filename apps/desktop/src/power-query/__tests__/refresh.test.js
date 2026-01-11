@@ -68,6 +68,44 @@ class OrderedEngine {
   }
 }
 
+function deferred() {
+  /** @type {(value: any) => void} */
+  let resolve;
+  /** @type {(reason?: any) => void} */
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+class ControlledEngine {
+  constructor() {
+    /** @type {{ queryId: string, deferred: ReturnType<typeof deferred>, signal?: AbortSignal }[]} */
+    this.calls = [];
+  }
+
+  createSession() {
+    return { credentialCache: new Map(), permissionCache: new Map() };
+  }
+
+  executeQueryWithMetaInSession(query, context, options) {
+    return this.executeQueryWithMeta(query, context, options);
+  }
+
+  executeQueryWithMeta(query, _context, options) {
+    const d = deferred();
+    this.calls.push({ queryId: query.id, deferred: d, signal: options?.signal });
+    options?.signal?.addEventListener("abort", () => {
+      const err = new Error("Aborted");
+      err.name = "AbortError";
+      d.reject(err);
+    });
+    return d.promise;
+  }
+}
+
 test("DesktopPowerQueryRefreshManager persists refresh state when a stateStore is provided", async () => {
   const table = DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true });
   const engine = new StaticEngine(table);
@@ -188,6 +226,22 @@ test("DesktopPowerQueryRefreshManager refreshAll shares credential prompts acros
   assert.equal(credentialRequests, 1);
 
   mgr.dispose();
+});
+
+test("DesktopPowerQueryRefreshManager dispose cancels in-flight refreshAll sessions", async () => {
+  const engine = new ControlledEngine();
+  const doc = new DocumentController({ engine: new MockEngine() });
+  const mgr = new DesktopPowerQueryRefreshManager({ engine, document: doc, concurrency: 1, batchSize: 1 });
+
+  mgr.registerQuery({ id: "q1", name: "Q1", source: { type: "range", range: { values: [["x"], [1]], hasHeaders: true } }, steps: [] });
+  mgr.registerQuery({ id: "q2", name: "Q2", source: { type: "range", range: { values: [["x"], [2]], hasHeaders: true } }, steps: [] });
+
+  const handle = mgr.refreshAll(["q1", "q2"]);
+  assert.equal(engine.calls.length, 1, "only one job should start with concurrency=1");
+
+  mgr.dispose();
+  await assert.rejects(handle.promise, (err) => err?.name === "AbortError");
+  assert.equal(engine.calls.length, 1, "dispose should cancel queued work before it starts");
 });
 
 test("DesktopPowerQueryRefreshManager applies completed refresh results into the destination", async () => {

@@ -103,6 +103,7 @@ export class DesktopPowerQueryRefreshManager {
   emitter = new Emitter<DesktopPowerQueryEvent>();
   queries = new Map<string, Query>();
   applyControllers = new Map<string, AbortController>();
+  activeRefreshAll = new Set<{ cancel: () => void; promise: Promise<any> }>();
 
   manager: RefreshManager;
   orchestrator: RefreshOrchestrator;
@@ -177,6 +178,9 @@ export class DesktopPowerQueryRefreshManager {
     const handle = this.orchestrator.refreshAll(queryIds, reason);
     const sessionPrefix = `${handle.sessionId}:`;
 
+    this.activeRefreshAll.add(handle);
+    handle.promise.finally(() => this.activeRefreshAll.delete(handle)).catch(() => {});
+
     return {
       ...handle,
       cancel: () => {
@@ -191,6 +195,8 @@ export class DesktopPowerQueryRefreshManager {
   dispose() {
     for (const controller of this.applyControllers.values()) controller.abort();
     this.applyControllers.clear();
+    for (const handle of this.activeRefreshAll) handle.cancel();
+    this.activeRefreshAll.clear();
     this.manager.dispose();
   }
 
