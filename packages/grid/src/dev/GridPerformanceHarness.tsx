@@ -25,6 +25,8 @@ export function GridPerformanceHarness(props?: {
     const api = apiRef.current;
     if (!api) return;
 
+    api.setPerfStatsEnabled(true);
+
     let remaining = frames;
     let last = performance.now();
     const samples: number[] = [];
@@ -41,8 +43,12 @@ export function GridPerformanceHarness(props?: {
       } else {
         const trimmed = samples.slice(1);
         const avg = trimmed.reduce((sum, value) => sum + value, 0) / Math.max(1, trimmed.length);
+        const stats = api.getPerfStats();
+        const statsSuffix = stats
+          ? ` cells=${stats.cellsPainted} fetches=${stats.cellFetches} dirty=${stats.dirtyRects.total} blit=${stats.blitUsed}`
+          : "";
         console.log(
-          `[grid-perf] frames=${trimmed.length} avgFrame=${avg.toFixed(2)}ms (~${(1000 / avg).toFixed(1)}fps)`
+          `[grid-perf] frames=${trimmed.length} avgFrame=${avg.toFixed(2)}ms (~${(1000 / avg).toFixed(1)}fps)${statsSuffix}`
         );
       }
     };

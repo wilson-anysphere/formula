@@ -1,7 +1,7 @@
 import React, { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "react";
 import type { CellProvider, CellRange } from "../model/CellProvider";
 import type { GridPresence } from "../presence/types";
-import { CanvasGridRenderer } from "../rendering/CanvasGridRenderer";
+import { CanvasGridRenderer, type GridPerfStats } from "../rendering/CanvasGridRenderer";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 
 export interface GridApi {
@@ -14,6 +14,8 @@ export interface GridApi {
   getSelectionRange(): CellRange | null;
   clearSelection(): void;
   getSelection(): { row: number; col: number } | null;
+  getPerfStats(): Readonly<GridPerfStats> | null;
+  setPerfStatsEnabled(enabled: boolean): void;
   /**
    * Set a transient range selection overlay.
    *
@@ -240,6 +242,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         if (prevRange) onSelectionRangeChangeRef.current?.(null);
       },
       getSelection: () => rendererRef.current?.getSelection() ?? null,
+      getPerfStats: () => rendererRef.current?.getPerfStats() ?? null,
+      setPerfStatsEnabled: (enabled) => rendererRef.current?.setPerfStatsEnabled(enabled),
       setRangeSelection: (range) => rendererRef.current?.setRangeSelection(range),
       setRemotePresences: (presences) => rendererRef.current?.setRemotePresences(presences),
       renderImmediately: () => rendererRef.current?.renderImmediately()

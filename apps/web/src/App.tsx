@@ -380,6 +380,10 @@ export function App() {
             frozenCols={frozenCols}
             apiRef={(api) => {
               gridApiRef.current = api;
+              const params = new URLSearchParams(window.location.search);
+              if (params.has("e2e") || params.has("perf")) {
+                (window as any).__gridApi = api;
+              }
             }}
             onSelectionChange={onSelectionChange}
             interactionMode={isFormulaEditing ? "rangeSelection" : "default"}

@@ -6,6 +6,8 @@ export { CanvasGrid } from "./react/CanvasGrid";
 
 export type { GridPresence, GridPresenceCursor, GridPresenceRange } from "./presence/types";
 
+export type { GridPerfStats } from "./rendering/CanvasGridRenderer";
+
 export { DirtyRegionTracker } from "./rendering/DirtyRegionTracker";
 export { LruCache } from "./utils/LruCache";
 

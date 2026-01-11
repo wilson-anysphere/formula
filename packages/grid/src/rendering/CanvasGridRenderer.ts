@@ -16,6 +16,30 @@ import {
 
 type Layer = "background" | "content" | "selection";
 
+export interface GridPerfStats {
+  /** Toggle instrumentation updates. When disabled, stats remain frozen at their last values. */
+  enabled: boolean;
+  /** Duration of the most recently rendered frame (ms). */
+  lastFrameMs: number;
+  /**
+   * Number of logical cells visited during the last frame's paint passes.
+   *
+   * This is counted per-cell (not per-layer) in the combined grid paint.
+   */
+  cellsPainted: number;
+  /** Number of `provider.getCell()` calls issued during the last frame. */
+  cellFetches: number;
+  /** Dirty rectangles drained for each layer at the start of the frame. */
+  dirtyRects: {
+    background: number;
+    content: number;
+    selection: number;
+    total: number;
+  };
+  /** Whether the renderer used blitting to reuse previous pixels for scroll. */
+  blitUsed: boolean;
+}
+
 interface Selection {
   row: number;
   col: number;
@@ -136,11 +160,19 @@ export class CanvasGridRenderer {
 
   private remotePresences: GridPresence[] = [];
 
-  private readonly formattedCache = new LruCache<string, string>(50_000);
   private readonly textWidthCache = new LruCache<string, number>(10_000);
   private textLayoutEngine?: TextLayoutEngine;
 
   private readonly presenceFont = "12px system-ui, sans-serif";
+
+  private readonly perfStats: GridPerfStats = {
+    enabled: false,
+    lastFrameMs: 0,
+    cellsPainted: 0,
+    cellFetches: 0,
+    dirtyRects: { background: 0, content: 0, selection: 0, total: 0 },
+    blitUsed: false
+  };
 
   constructor(options: {
     provider: CellProvider;
@@ -160,6 +192,21 @@ export class CanvasGridRenderer {
       defaultRowHeight: options.defaultRowHeight,
       defaultColWidth: options.defaultColWidth
     });
+
+    // Enable stats by default in dev builds where `import.meta.env.PROD` (Vite) is false.
+    // In production builds this stays disabled to minimize overhead.
+    const metaEnv = (import.meta as any)?.env as { PROD?: boolean } | undefined;
+    const nodeEnv = (globalThis as any)?.process?.env?.NODE_ENV as string | undefined;
+    const isProd = metaEnv?.PROD === true || nodeEnv === "production";
+    this.perfStats.enabled = !isProd;
+  }
+
+  getPerfStats(): Readonly<GridPerfStats> {
+    return this.perfStats;
+  }
+
+  setPerfStatsEnabled(enabled: boolean): void {
+    this.perfStats.enabled = enabled;
   }
 
   attach(canvases: {
@@ -391,6 +438,10 @@ export class CanvasGridRenderer {
   }
 
   private renderFrame(): void {
+    const perf = this.perfStats;
+    const perfEnabled = perf.enabled;
+    const frameStart = perfEnabled ? performance.now() : 0;
+
     const viewport = this.scroll.getViewportState();
 
     const scrollDeltaX = this.lastRendered.scrollX - viewport.scrollX;
@@ -411,18 +462,34 @@ export class CanvasGridRenderer {
     if (scrollDeltaX !== 0 || scrollDeltaY !== 0) {
       if (!this.forceFullRedraw && this.canBlitScroll(viewport, scrollDeltaX, scrollDeltaY)) {
         this.blitScroll(viewport, scrollDeltaX, scrollDeltaY);
+        if (perfEnabled) perf.blitUsed = true;
         this.markScrollDirtyRegions(viewport, scrollDeltaX, scrollDeltaY);
       } else {
+        if (perfEnabled) perf.blitUsed = false;
         this.markFullViewportDirty(viewport);
       }
 
       // Selection overlay moves relative to scroll.
       this.dirty.selection.markDirty({ x: 0, y: 0, width: viewport.width, height: viewport.height });
+    } else if (perfEnabled) {
+      perf.blitUsed = false;
     }
 
-    this.renderLayer("background", viewport, this.dirty.background.drain());
-    this.renderLayer("content", viewport, this.dirty.content.drain());
-    this.renderLayer("selection", viewport, this.dirty.selection.drain());
+    const backgroundRegions = this.dirty.background.drain();
+    const contentRegions = this.dirty.content.drain();
+    const selectionRegions = this.dirty.selection.drain();
+
+    if (perfEnabled) {
+      perf.dirtyRects.background = backgroundRegions.length;
+      perf.dirtyRects.content = contentRegions.length;
+      perf.dirtyRects.selection = selectionRegions.length;
+      perf.dirtyRects.total = backgroundRegions.length + contentRegions.length + selectionRegions.length;
+      perf.cellsPainted = 0;
+      perf.cellFetches = 0;
+    }
+
+    this.renderGridLayers(viewport, backgroundRegions, contentRegions, perfEnabled ? perf : null);
+    this.renderLayer("selection", viewport, selectionRegions);
 
     this.lastRendered = {
       width: viewport.width,
@@ -436,6 +503,10 @@ export class CanvasGridRenderer {
       devicePixelRatio: this.devicePixelRatio
     };
     this.forceFullRedraw = false;
+
+    if (perfEnabled) {
+      perf.lastFrameMs = performance.now() - frameStart;
+    }
   }
 
   private invalidateForScroll(): void {
@@ -803,6 +874,93 @@ export class CanvasGridRenderer {
     return rects;
   }
 
+  private renderGridLayers(
+    viewport: GridViewportState,
+    backgroundRegions: Rect[],
+    contentRegions: Rect[],
+    perf: GridPerfStats | null
+  ): void {
+    if (!this.gridCtx || !this.contentCtx) return;
+    if (viewport.width === 0 || viewport.height === 0) return;
+
+    const regions = CanvasGridRenderer.mergeDirtyRegions(backgroundRegions, contentRegions);
+    if (regions.length === 0) return;
+
+    const full = { x: 0, y: 0, width: viewport.width, height: viewport.height };
+    const shouldFullRender =
+      regions.length > 8 ||
+      regions.some((region) => region.x <= 0 && region.y <= 0 && region.width >= viewport.width && region.height >= viewport.height);
+    const toRender = shouldFullRender ? [full] : regions;
+
+    const gridCtx = this.gridCtx;
+    const contentCtx = this.contentCtx;
+
+    for (const region of toRender) {
+      gridCtx.save();
+      gridCtx.beginPath();
+      gridCtx.rect(region.x, region.y, region.width, region.height);
+      gridCtx.clip();
+      gridCtx.fillStyle = "#ffffff";
+      gridCtx.fillRect(region.x, region.y, region.width, region.height);
+
+      contentCtx.save();
+      contentCtx.beginPath();
+      contentCtx.rect(region.x, region.y, region.width, region.height);
+      contentCtx.clip();
+      contentCtx.clearRect(region.x, region.y, region.width, region.height);
+
+      this.renderGridQuadrants(viewport, region, perf);
+
+      contentCtx.restore();
+      gridCtx.restore();
+    }
+  }
+
+  private static rectsEqual(a: Rect, b: Rect): boolean {
+    return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+  }
+
+  private static mergeDirtyRegions(primary: Rect[], secondary: Rect[]): Rect[] {
+    if (primary.length === 0) return secondary;
+    if (secondary.length === 0) return primary;
+    if (primary.length === secondary.length) {
+      let equal = true;
+      for (let i = 0; i < primary.length; i++) {
+        if (!CanvasGridRenderer.rectsEqual(primary[i], secondary[i])) {
+          equal = false;
+          break;
+        }
+      }
+      if (equal) return primary;
+    }
+
+    // Merge secondary rects into primary, roughly matching DirtyRegionTracker's overlap merging.
+    for (const rect of secondary) {
+      let merged = rect;
+      for (let i = 0; i < primary.length; ) {
+        const existing = primary[i];
+        const overlaps =
+          existing.x < merged.x + merged.width &&
+          existing.x + existing.width > merged.x &&
+          existing.y < merged.y + merged.height &&
+          existing.y + existing.height > merged.y;
+        if (overlaps) {
+          const x1 = Math.min(existing.x, merged.x);
+          const y1 = Math.min(existing.y, merged.y);
+          const x2 = Math.max(existing.x + existing.width, merged.x + merged.width);
+          const y2 = Math.max(existing.y + existing.height, merged.y + merged.height);
+          merged = { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+          primary.splice(i, 1);
+          continue;
+        }
+        i++;
+      }
+      primary.push(merged);
+    }
+
+    return primary;
+  }
+
   private renderLayer(layer: Layer, viewport: GridViewportState, regions: Rect[]): void {
     const ctx =
       layer === "background"
@@ -837,16 +995,390 @@ export class CanvasGridRenderer {
 
       this.renderQuadrants(layer, viewport, region);
 
-      if (layer === "selection") {
-        this.renderRemotePresenceOverlays(ctx, viewport);
-      }
-
       ctx.restore();
     }
 
     if (layer === "selection") {
+      if (this.remotePresences.length > 0) {
+        // Remote presence overlays are expensive; draw them once per frame, clipped to the union
+        // of dirty regions instead of redrawing per dirty rect.
+        ctx.save();
+        ctx.beginPath();
+        for (const region of toRender) {
+          ctx.rect(region.x, region.y, region.width, region.height);
+        }
+        ctx.clip();
+        this.renderRemotePresenceOverlays(ctx, viewport);
+        ctx.restore();
+      }
       this.drawFreezeLines(ctx, viewport);
     }
+  }
+
+  private renderGridQuadrants(viewport: GridViewportState, region: Rect, perf: GridPerfStats | null): void {
+    if (!this.gridCtx || !this.contentCtx) return;
+
+    const { frozenCols, frozenRows, frozenWidth, frozenHeight, width, height } = viewport;
+    const rowCount = this.getRowCount();
+    const colCount = this.getColCount();
+
+    const absScrollX = frozenWidth + viewport.scrollX;
+    const absScrollY = frozenHeight + viewport.scrollY;
+
+    const quadrants = [
+      {
+        originX: 0,
+        originY: 0,
+        rect: { x: 0, y: 0, width: frozenWidth, height: frozenHeight },
+        minRow: 0,
+        maxRowExclusive: frozenRows,
+        minCol: 0,
+        maxColExclusive: frozenCols,
+        scrollBaseX: 0,
+        scrollBaseY: 0
+      },
+      {
+        originX: frozenWidth,
+        originY: 0,
+        rect: { x: frozenWidth, y: 0, width: width - frozenWidth, height: frozenHeight },
+        minRow: 0,
+        maxRowExclusive: frozenRows,
+        minCol: frozenCols,
+        maxColExclusive: colCount,
+        scrollBaseX: absScrollX,
+        scrollBaseY: 0
+      },
+      {
+        originX: 0,
+        originY: frozenHeight,
+        rect: { x: 0, y: frozenHeight, width: frozenWidth, height: height - frozenHeight },
+        minRow: frozenRows,
+        maxRowExclusive: rowCount,
+        minCol: 0,
+        maxColExclusive: frozenCols,
+        scrollBaseX: 0,
+        scrollBaseY: absScrollY
+      },
+      {
+        originX: frozenWidth,
+        originY: frozenHeight,
+        rect: { x: frozenWidth, y: frozenHeight, width: width - frozenWidth, height: height - frozenHeight },
+        minRow: frozenRows,
+        maxRowExclusive: rowCount,
+        minCol: frozenCols,
+        maxColExclusive: colCount,
+        scrollBaseX: absScrollX,
+        scrollBaseY: absScrollY
+      }
+    ];
+
+    const gridCtx = this.gridCtx;
+    const contentCtx = this.contentCtx;
+
+    for (const quadrant of quadrants) {
+      if (quadrant.rect.width <= 0 || quadrant.rect.height <= 0) continue;
+      if (quadrant.maxRowExclusive <= quadrant.minRow || quadrant.maxColExclusive <= quadrant.minCol) continue;
+
+      const intersection = intersectRect(region, quadrant.rect);
+      if (!intersection) continue;
+
+      const sheetX = quadrant.scrollBaseX + (intersection.x - quadrant.originX);
+      const sheetY = quadrant.scrollBaseY + (intersection.y - quadrant.originY);
+      const sheetXEnd = sheetX + intersection.width;
+      const sheetYEnd = sheetY + intersection.height;
+
+      const startRow = this.scroll.rows.indexAt(sheetY, {
+        min: quadrant.minRow,
+        maxInclusive: quadrant.maxRowExclusive - 1
+      });
+      const endRow = Math.min(
+        this.scroll.rows.indexAt(sheetYEnd, {
+          min: quadrant.minRow,
+          maxInclusive: quadrant.maxRowExclusive - 1
+        }) + 1,
+        quadrant.maxRowExclusive
+      );
+
+      const startCol = this.scroll.cols.indexAt(sheetX, {
+        min: quadrant.minCol,
+        maxInclusive: quadrant.maxColExclusive - 1
+      });
+      const endCol = Math.min(
+        this.scroll.cols.indexAt(sheetXEnd, {
+          min: quadrant.minCol,
+          maxInclusive: quadrant.maxColExclusive - 1
+        }) + 1,
+        quadrant.maxColExclusive
+      );
+
+      if (endRow <= startRow || endCol <= startCol) continue;
+
+      if (perf?.enabled) {
+        const cellCount = (endRow - startRow) * (endCol - startCol);
+        perf.cellsPainted += cellCount;
+        perf.cellFetches += cellCount;
+      }
+
+      // Clip to the quadrant intersection so partially-visible edge cells don't bleed into other quadrants.
+      gridCtx.save();
+      gridCtx.beginPath();
+      gridCtx.rect(intersection.x, intersection.y, intersection.width, intersection.height);
+      gridCtx.clip();
+
+      contentCtx.save();
+      contentCtx.beginPath();
+      contentCtx.rect(intersection.x, intersection.y, intersection.width, intersection.height);
+      contentCtx.clip();
+
+      this.renderGridQuadrant(quadrant, startRow, endRow, startCol, endCol);
+
+      contentCtx.restore();
+      gridCtx.restore();
+    }
+  }
+
+  private renderGridQuadrant(
+    quadrant: {
+      originX: number;
+      originY: number;
+      scrollBaseX: number;
+      scrollBaseY: number;
+    },
+    startRow: number,
+    endRow: number,
+    startCol: number,
+    endCol: number
+  ): void {
+    if (!this.gridCtx || !this.contentCtx) return;
+    const gridCtx = this.gridCtx;
+    const contentCtx = this.contentCtx;
+
+    // Content layer state.
+    const layoutEngine = this.textLayoutEngine;
+    contentCtx.textBaseline = "alphabetic";
+    contentCtx.textAlign = "left";
+
+    let currentTextFill = "";
+    let currentGridFill = "";
+
+    const paddingX = 4;
+    const paddingY = 2;
+
+    // Font specs are part of the text-layout cache key and are returned in layout runs.
+    // Avoid mutating a shared object after passing it to the layout engine.
+    let fontSpec = { family: "system-ui", sizePx: 12, weight: "400" };
+    let currentFontFamily = "";
+    let currentFontSize = -1;
+    let currentFontWeight = "";
+
+    let rowYSheet = this.scroll.rows.positionOf(startRow);
+    for (let row = startRow; row < endRow; row++) {
+      const rowHeight = this.scroll.rows.getSize(row);
+      const y = rowYSheet - quadrant.scrollBaseY + quadrant.originY;
+
+      let colXSheet = this.scroll.cols.positionOf(startCol);
+      for (let col = startCol; col < endCol; col++) {
+        const colWidth = this.scroll.cols.getSize(col);
+        const x = colXSheet - quadrant.scrollBaseX + quadrant.originX;
+
+        const cell = this.provider.getCell(row, col);
+        const style = cell?.style;
+
+        // Background fill (grid layer).
+        const fill = style?.fill;
+        if (fill) {
+          if (fill !== currentGridFill) {
+            gridCtx.fillStyle = fill;
+            currentGridFill = fill;
+          }
+          gridCtx.fillRect(x, y, colWidth, rowHeight);
+        }
+
+        // Content text + comment indicator.
+        if (cell && cell.value !== null) {
+          const fontSize = style?.fontSize ?? 12;
+          const fontFamily = style?.fontFamily ?? "system-ui";
+          const fontWeight = style?.fontWeight ?? "400";
+
+          if (currentFontSize !== fontSize || currentFontFamily !== fontFamily || currentFontWeight !== fontWeight) {
+            currentFontSize = fontSize;
+            currentFontFamily = fontFamily;
+            currentFontWeight = fontWeight;
+            fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
+            contentCtx.font = toCanvasFontString(fontSpec);
+          }
+
+          const fillStyle = resolveCellTextColor(cell.value, style?.color);
+          if (fillStyle !== currentTextFill) {
+            contentCtx.fillStyle = fillStyle;
+            currentTextFill = fillStyle;
+          }
+
+          const text = formatCellDisplayText(cell.value);
+
+          const wrapMode = style?.wrapMode ?? "none";
+          const direction = style?.direction ?? "auto";
+          const verticalAlign = style?.verticalAlign ?? "middle";
+          const rotationDeg = style?.rotationDeg ?? 0;
+
+          const availableWidth = Math.max(0, colWidth - paddingX * 2);
+          const availableHeight = Math.max(0, rowHeight - paddingY * 2);
+          const lineHeight = Math.ceil(fontSize * 1.2);
+          const maxLines = Math.max(1, Math.floor(availableHeight / lineHeight));
+
+          const align: CanvasTextAlign = style?.textAlign ?? (typeof cell.value === "number" ? "end" : "start");
+          const layoutAlign =
+            align === "left" || align === "right" || align === "center" || align === "start" || align === "end"
+              ? (align as "left" | "right" | "center" | "start" | "end")
+              : "start";
+
+          const hasExplicitNewline = /[\r\n]/.test(text);
+          const rotationRad = (rotationDeg * Math.PI) / 180;
+
+          if (wrapMode === "none" && !hasExplicitNewline && rotationDeg === 0) {
+            // Fast path for the common case: single-line text with clipping, using cached metrics.
+            const baseDirection = direction === "auto" ? detectBaseDirection(text) : direction;
+            const resolvedAlign =
+              layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
+                ? layoutAlign
+                : resolveAlign(layoutAlign, baseDirection);
+
+            const measurement = layoutEngine?.measure(text, fontSpec);
+            const textWidth = measurement?.width ?? contentCtx.measureText(text).width;
+            const ascent = measurement?.ascent ?? fontSize * 0.8;
+            const descent = measurement?.descent ?? fontSize * 0.2;
+
+            let textX = x + paddingX;
+            if (resolvedAlign === "center") {
+              textX = x + paddingX + (availableWidth - textWidth) / 2;
+            } else if (resolvedAlign === "right") {
+              textX = x + paddingX + (availableWidth - textWidth);
+            }
+
+            let baselineY = y + paddingY + ascent;
+            if (verticalAlign === "middle") {
+              baselineY = y + rowHeight / 2 + (ascent - descent) / 2;
+            } else if (verticalAlign === "bottom") {
+              baselineY = y + rowHeight - paddingY - descent;
+            }
+
+            const shouldClip = textWidth > availableWidth;
+            if (shouldClip) {
+              contentCtx.save();
+              contentCtx.beginPath();
+              contentCtx.rect(x, y, colWidth, rowHeight);
+              contentCtx.clip();
+              contentCtx.fillText(text, textX, baselineY);
+              contentCtx.restore();
+            } else {
+              contentCtx.fillText(text, textX, baselineY);
+            }
+          } else if (layoutEngine && availableWidth > 0) {
+            const layout = layoutEngine.layout({
+              text,
+              font: fontSpec,
+              maxWidth: availableWidth,
+              wrapMode,
+              align: layoutAlign,
+              direction,
+              lineHeightPx: lineHeight,
+              maxLines
+            });
+
+            let originY = y + paddingY;
+            if (verticalAlign === "middle") {
+              originY = y + paddingY + Math.max(0, (availableHeight - layout.height) / 2);
+            } else if (verticalAlign === "bottom") {
+              originY = y + rowHeight - paddingY - layout.height;
+            }
+
+            const originX = x + paddingX;
+            const shouldClip = layout.width > availableWidth || layout.height > availableHeight || rotationDeg !== 0;
+
+            if (shouldClip) {
+              contentCtx.save();
+              contentCtx.beginPath();
+              contentCtx.rect(x, y, colWidth, rowHeight);
+              contentCtx.clip();
+
+              if (rotationRad) {
+                const cx = x + colWidth / 2;
+                const cy = y + rowHeight / 2;
+                contentCtx.translate(cx, cy);
+                contentCtx.rotate(rotationRad);
+                contentCtx.translate(-cx, -cy);
+              }
+
+              drawTextLayout(contentCtx, layout, originX, originY);
+              contentCtx.restore();
+            } else {
+              drawTextLayout(contentCtx, layout, originX, originY);
+            }
+          } else {
+            // Fallback: no layout engine available (shouldn't happen in supported environments).
+            contentCtx.save();
+            contentCtx.beginPath();
+            contentCtx.rect(x, y, colWidth, rowHeight);
+            contentCtx.clip();
+            contentCtx.textBaseline = "middle";
+            contentCtx.fillText(text, x + paddingX, y + rowHeight / 2);
+            contentCtx.textBaseline = "alphabetic";
+            contentCtx.restore();
+          }
+        }
+
+        if (cell?.comment) {
+          const resolved = cell.comment.resolved ?? false;
+          const maxSize = Math.min(colWidth, rowHeight);
+          const size = Math.min(maxSize, Math.max(6, maxSize * 0.25));
+          if (size > 0) {
+            contentCtx.save();
+            contentCtx.beginPath();
+            contentCtx.moveTo(x + colWidth, y);
+            contentCtx.lineTo(x + colWidth - size, y);
+            contentCtx.lineTo(x + colWidth, y + size);
+            contentCtx.closePath();
+            contentCtx.fillStyle = resolved ? "#9ca3af" : "#f59e0b";
+            contentCtx.fill();
+            contentCtx.restore();
+          }
+        }
+
+        colXSheet += colWidth;
+      }
+
+      rowYSheet += rowHeight;
+    }
+
+    // Gridlines (grid layer), drawn after fills.
+    gridCtx.strokeStyle = "#e6e6e6";
+    gridCtx.lineWidth = 1;
+
+    const xStart = this.scroll.cols.positionOf(startCol) - quadrant.scrollBaseX + quadrant.originX;
+    const xEnd = this.scroll.cols.positionOf(endCol) - quadrant.scrollBaseX + quadrant.originX;
+    const yStart = this.scroll.rows.positionOf(startRow) - quadrant.scrollBaseY + quadrant.originY;
+    const yEnd = this.scroll.rows.positionOf(endRow) - quadrant.scrollBaseY + quadrant.originY;
+
+    gridCtx.beginPath();
+    let xSheet = this.scroll.cols.positionOf(startCol);
+    for (let col = startCol; col <= endCol; col++) {
+      const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
+      const cx = crispLine(x);
+      gridCtx.moveTo(cx, yStart);
+      gridCtx.lineTo(cx, yEnd);
+      if (col < endCol) xSheet += this.scroll.cols.getSize(col);
+    }
+
+    let ySheet = this.scroll.rows.positionOf(startRow);
+    for (let row = startRow; row <= endRow; row++) {
+      const yy = ySheet - quadrant.scrollBaseY + quadrant.originY;
+      const cy = crispLine(yy);
+      gridCtx.moveTo(xStart, cy);
+      gridCtx.lineTo(xEnd, cy);
+      if (row < endRow) ySheet += this.scroll.rows.getSize(row);
+    }
+
+    gridCtx.stroke();
   }
 
   private renderQuadrants(layer: Layer, viewport: GridViewportState, region: Rect): void {
@@ -1092,12 +1624,7 @@ export class CanvasGridRenderer {
             currentFillStyle = fillStyle;
           }
 
-          const formattedKey = formatCellDisplayText(cell.value);
-          let text = this.formattedCache.get(formattedKey);
-          if (text === undefined) {
-            text = formattedKey;
-            this.formattedCache.set(formattedKey, text);
-          }
+          const text = formatCellDisplayText(cell.value);
 
           const wrapMode = style?.wrapMode ?? "none";
           const direction = style?.direction ?? "auto";
