@@ -23,16 +23,17 @@ export function wheelDeltaToPixels(delta: number, deltaMode: number, options?: W
       return delta;
     // DOM_DELTA_LINE
     case 1: {
-      const lineHeight = options?.lineHeight ?? 16;
+      const rawLineHeight = options?.lineHeight;
+      const lineHeight = Number.isFinite(rawLineHeight) && rawLineHeight > 0 ? rawLineHeight : 16;
       return delta * lineHeight;
     }
     // DOM_DELTA_PAGE
     case 2: {
-      const pageSize = options?.pageSize ?? 800;
+      const rawPageSize = options?.pageSize;
+      const pageSize = Number.isFinite(rawPageSize) ? rawPageSize : 800;
       return delta * pageSize;
     }
     default:
       return delta;
   }
 }
-

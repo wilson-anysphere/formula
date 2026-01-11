@@ -17,9 +17,17 @@ describe("wheelDeltaToPixels", () => {
     expect(wheelDeltaToPixels(-0.5, 2, { pageSize: 800 })).toBe(-400);
   });
 
+  it("falls back for invalid lineHeight/pageSize options", () => {
+    expect(wheelDeltaToPixels(1, 1, { lineHeight: 0 })).toBe(16);
+    // eslint-disable-next-line unicorn/no-null
+    expect(wheelDeltaToPixels(1, 1, { lineHeight: Number.NaN })).toBe(16);
+    // eslint-disable-next-line unicorn/no-null
+    expect(wheelDeltaToPixels(1, 2, { pageSize: Number.NaN })).toBe(800);
+    expect(wheelDeltaToPixels(1, 2, { pageSize: 0 })).toBe(0);
+  });
+
   it("treats non-finite values as 0", () => {
     expect(wheelDeltaToPixels(Number.NaN, 0)).toBe(0);
     expect(wheelDeltaToPixels(Number.POSITIVE_INFINITY, 1, { lineHeight: 10 })).toBe(0);
   });
 });
-
