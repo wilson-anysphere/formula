@@ -155,7 +155,9 @@ async function ensureBuilt({ repoRoot, binPath }) {
           SCCACHE_DISABLE: "1",
           // Disable any rustc wrapper so Cargo can't end up invoking a flaky sccache daemon.
           RUSTC_WRAPPER: "",
+          RUSTC_WORKSPACE_WRAPPER: "",
           CARGO_BUILD_RUSTC_WRAPPER: "",
+          CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: "",
         };
         await execFileAsync("cargo", ["build", "-q", "-p", "formula-vba-oracle-cli"], { cwd: repoRoot, env: noSccacheEnv });
       }
