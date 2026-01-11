@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { QueryEngine } from "../src/engine.js";
+import { DataTable } from "../src/table.js";
 
 function collectBatches(batches) {
   const grid = [];
@@ -155,4 +156,34 @@ test("executeQueryStreaming(..., materialize:false) can stream CSV from readBina
   assert.equal(summary.rowCount, 1);
   assert.equal(summary.columnCount, 2);
   assert.deepEqual(collectBatches(batches), [["A", "B"], [1, 2]]);
+});
+
+test("executeQueryStreaming(..., materialize:false) resolves table sources via tableAdapter when context.tables is missing", async () => {
+  const engine = new QueryEngine({
+    tableAdapter: {
+      getTable: async () =>
+        DataTable.fromGrid(
+          [
+            ["A", "B"],
+            [1, 2],
+            [3, 4],
+          ],
+          { hasHeaders: true, inferTypes: true },
+        ),
+    },
+  });
+
+  const query = {
+    id: "q_table_adapter_stream",
+    name: "Table adapter stream",
+    source: { type: "table", table: "T" },
+    steps: [{ id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["B"] } }],
+  };
+
+  const batches = [];
+  await engine.executeQueryStreaming(query, {}, { batchSize: 10, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engine.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
 });

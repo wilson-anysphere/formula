@@ -2763,7 +2763,10 @@ export class QueryEngine {
     }
 
     if (source.type === "table") {
-      const table = context.tables?.[source.table];
+      let table = context.tables?.[source.table] ?? null;
+      if (!table && typeof this.tableAdapter?.getTable === "function") {
+        table = await this.tableAdapter.getTable(source.table, { signal: options.signal });
+      }
       if (!table) {
         throw new Error(`Unknown table '${source.table}'`);
       }
