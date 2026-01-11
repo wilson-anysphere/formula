@@ -314,6 +314,65 @@ test("QueryEngine: schema discovery enables folding merge without explicit proje
   assert.equal(schemaCalls, 2);
 });
 
+test("QueryEngine: schema discovery enables folding append without explicit projections", async () => {
+  /** @type {{ sql: string, params: unknown[] | undefined }[]} */
+  const calls = [];
+  let schemaCalls = 0;
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        getSchema: async (request) => {
+          schemaCalls += 1;
+          if (String(request.sql).includes(" a")) return { columns: ["Id", "Value"] };
+          if (String(request.sql).includes(" b")) return { columns: ["Id", "Value"] };
+          return { columns: [] };
+        },
+        querySql: async (_connection, sql, options) => {
+          calls.push({ sql, params: options?.params });
+          // Simulate the database applying the union.
+          return DataTable.fromGrid(
+            [
+              ["Id", "Value"],
+              [1, "a"],
+              [2, "b"],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          );
+        },
+      }),
+    },
+  });
+
+  const other = {
+    id: "q_other_schema",
+    name: "Other",
+    source: { type: "database", connection: { id: "db1" }, query: "SELECT * FROM b" },
+    steps: [],
+  };
+
+  const base = {
+    id: "q_base_schema",
+    name: "Base",
+    source: { type: "database", connection: { id: "db1" }, query: "SELECT * FROM a", dialect: "postgres" },
+    steps: [{ id: "s1", name: "Append", operation: { type: "append", queries: ["q_other_schema"] } }],
+  };
+
+  const first = await engine.executeQuery(base, { queries: { q_other_schema: other } }, {});
+  assert.equal(schemaCalls, 2, "expected schema discovery for both branches");
+  assert.equal(other.source.columns, undefined, "schema discovery should not mutate referenced queries");
+  assert.equal(calls.length, 1, "expected a single SQL roundtrip when append folds");
+  assert.match(calls[0].sql, /\bUNION ALL\b/);
+  assert.deepEqual(first.toGrid(), [
+    ["Id", "Value"],
+    [1, "a"],
+    [2, "b"],
+  ]);
+
+  await engine.executeQuery(base, { queries: { q_other_schema: other } }, {});
+  assert.equal(schemaCalls, 2);
+});
+
 test("QueryEngine: folds append into a single SQL query when schemas are compatible", async () => {
   /** @type {{ sql: string, params: unknown[] | undefined }[]} */
   const calls = [];
