@@ -191,8 +191,15 @@ export class YjsBranchStore {
    * @param {string} _docId
    * @param {string} name
    */
-  async setCurrentBranchName(_docId, name) {
+  async setCurrentBranchName(docId, name) {
     this.#ydoc.transact(() => {
+      const branchMap = getYMap(this.#branches.get(name));
+      if (!branchMap) {
+        throw new Error(`Branch not found: ${name}`);
+      }
+      if (String(branchMap.get("docId") ?? "") !== docId) {
+        throw new Error(`Branch not found: ${name}`);
+      }
       this.#meta.set("currentBranchName", name);
     });
   }

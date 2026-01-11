@@ -91,7 +91,11 @@ export class BranchService {
     const store = this.#store;
     if (store && typeof store.getCurrentBranchName === "function") {
       const name = await store.getCurrentBranchName(this.#docId);
-      if (typeof name === "string" && name.length > 0) return name;
+      if (typeof name === "string" && name.length > 0) {
+        // Keep the local cache in sync even when the store is authoritative.
+        this.#currentBranchName = name;
+        return name;
+      }
     }
     return this.#currentBranchName;
   }
@@ -103,6 +107,7 @@ export class BranchService {
     const store = this.#store;
     if (store && typeof store.setCurrentBranchName === "function") {
       await store.setCurrentBranchName(this.#docId, name);
+      this.#currentBranchName = name;
       return;
     }
     this.#currentBranchName = name;
