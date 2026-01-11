@@ -124,12 +124,12 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
   output.style.lineHeight = "16px";
   output.style.padding = "8px";
   output.style.boxSizing = "border-box";
-  output.style.background = "var(--surface-secondary, #fafafa)";
-  output.style.border = "1px solid var(--border, #d4d4d4)";
+  output.style.background = "var(--bg-secondary)";
+  output.style.border = "1px solid var(--border)";
   output.style.borderRadius = "6px";
 
   const editorWrap = document.createElement("div");
-  editorWrap.style.border = "1px solid var(--border, #d4d4d4)";
+  editorWrap.style.border = "1px solid var(--border)";
   editorWrap.style.borderRadius = "6px";
   editorWrap.style.overflow = "hidden";
   editorWrap.style.minHeight = "0";

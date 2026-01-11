@@ -121,8 +121,15 @@ async function filterTypeScriptImportTests(files) {
 async function filterExternalDependencyTests(files) {
   /** @type {Map<string, boolean>} */
   const dependencyCache = new Map();
-  /** @type {Map<string, string | null>} */
-  const packageNameCache = new Map();
+  /**
+   * Map an arbitrary directory to the nearest enclosing package.json (if any).
+   * The cache stores the *resolved* nearest package for that directory (not just
+   * whether that directory itself contains a package.json), so nested dirs inside a
+   * workspace package can still resolve package self-references.
+   *
+   * @type {Map<string, { rootDir: string, name: string | null, exports: any, main: string | null } | null>}
+   */
+  const packageInfoCache = new Map();
   /** @type {Set<string>} */
   const visiting = new Set();
   const builtins = new Set(builtinModules);
@@ -132,6 +139,11 @@ async function filterExternalDependencyTests(files) {
   const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
   const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
   const requireResolveRe = /\brequire\.resolve\(\s*["']([^"']+)["']\s*\)/g;
+  // Some modules are loaded indirectly via Worker thread entrypoints:
+  //   const WORKER_URL = new URL("./sandbox-worker.node.js", import.meta.url)
+  // These should be treated as dependencies when deciding which node:test files can run
+  // without `node_modules` installed.
+  const importMetaUrlRe = /\bnew\s+URL\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*\)/g;
 
   const candidateExtensions = [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"];
 
@@ -140,35 +152,118 @@ async function filterExternalDependencyTests(files) {
     return builtins.has(specifier);
   }
 
-  async function nearestPackageName(startDir) {
+  async function nearestPackageInfo(startDir) {
     let dir = startDir;
+    /** @type {string[]} */
+    const visited = [];
     while (true) {
-      const cached = packageNameCache.get(dir);
-      if (cached !== undefined) return cached;
+      const cached = packageInfoCache.get(dir);
+      if (cached !== undefined) {
+        for (const entry of visited) packageInfoCache.set(entry, cached);
+        return cached;
+      }
+
+      visited.push(dir);
 
       const candidate = path.join(dir, "package.json");
       try {
         const raw = await readFile(candidate, "utf8");
         const parsed = JSON.parse(raw);
-        const name = typeof parsed?.name === "string" ? parsed.name : null;
-        packageNameCache.set(dir, name);
-        return name;
+        const info = {
+          rootDir: dir,
+          name: typeof parsed?.name === "string" ? parsed.name : null,
+          exports: parsed?.exports ?? null,
+          main: typeof parsed?.main === "string" ? parsed.main : null,
+        };
+        for (const entry of visited) packageInfoCache.set(entry, info);
+        return info;
       } catch {
-        packageNameCache.set(dir, null);
+        // ignore; walk upward
       }
 
-      if (dir === repoRoot) return null;
+      if (dir === repoRoot) {
+        for (const entry of visited) packageInfoCache.set(entry, null);
+        return null;
+      }
       const parent = path.dirname(dir);
-      if (parent === dir) return null;
+      if (parent === dir) {
+        for (const entry of visited) packageInfoCache.set(entry, null);
+        return null;
+      }
       dir = parent;
     }
   }
 
-  async function allowsBareSpecifier(specifier, importingFile) {
-    if (isBuiltin(specifier)) return true;
-    const pkgName = await nearestPackageName(path.dirname(importingFile));
-    if (!pkgName) return false;
-    return specifier === pkgName || specifier.startsWith(`${pkgName}/`);
+  /**
+   * Resolve Node.js package self-references (e.g. `@formula/scripting/node`) to a
+   * concrete file path so we can analyze its transitive dependencies.
+   *
+   * Node supports these self-references even without `node_modules/` when the
+   * importing file is inside the package boundary.
+   *
+   * @param {string} specifier
+   * @param {string} importingFile
+   */
+  async function resolveSelfReference(specifier, importingFile) {
+    if (isBuiltin(specifier)) return null;
+
+    const pkgInfo = await nearestPackageInfo(path.dirname(importingFile));
+    if (!pkgInfo?.name || !pkgInfo.rootDir) return null;
+    if (specifier !== pkgInfo.name && !specifier.startsWith(`${pkgInfo.name}/`)) return null;
+
+    const exportKey =
+      specifier === pkgInfo.name ? "." : `./${specifier.slice(pkgInfo.name.length + 1)}`;
+
+    /**
+     * @param {any} entry
+     * @returns {string | null}
+     */
+    function pickExportPath(entry) {
+      if (typeof entry === "string") return entry;
+      if (Array.isArray(entry)) {
+        for (const item of entry) {
+          const picked = pickExportPath(item);
+          if (picked) return picked;
+        }
+        return null;
+      }
+      if (entry && typeof entry === "object") {
+        if (typeof entry.default === "string") return entry.default;
+        if (typeof entry.import === "string") return entry.import;
+        if (typeof entry.node === "string") return entry.node;
+        if (typeof entry.browser === "string") return entry.browser;
+
+        // Fall back to searching nested condition objects.
+        for (const value of Object.values(entry)) {
+          const picked = pickExportPath(value);
+          if (picked) return picked;
+        }
+      }
+      return null;
+    }
+
+    let target = null;
+    const exportsMap = pkgInfo.exports;
+
+    if (exportsMap) {
+      if (typeof exportsMap === "string") {
+        if (exportKey === ".") target = exportsMap;
+      } else if (exportsMap && typeof exportsMap === "object") {
+        target = pickExportPath(exportsMap?.[exportKey]);
+      }
+    }
+
+    if (!target && exportKey === "." && pkgInfo.main) target = pkgInfo.main;
+    if (!target) return null;
+
+    const resolved = path.resolve(pkgInfo.rootDir, target);
+    try {
+      const stats = await stat(resolved);
+      if (!stats.isFile()) return null;
+      return resolved;
+    } catch {
+      return null;
+    }
   }
 
   async function resolveRelativeModule(importingFile, specifier) {
@@ -241,6 +336,20 @@ async function filterExternalDependencyTests(files) {
     for (const match of text.matchAll(requireResolveRe)) {
       specifiers.push(match[1]);
     }
+    for (const match of text.matchAll(importMetaUrlRe)) {
+      const specifier = match[1];
+      if (!specifier) continue;
+      if (
+        !specifier.startsWith(".") &&
+        !specifier.startsWith("/") &&
+        !/^[a-zA-Z]+:/.test(specifier)
+      ) {
+        // `new URL("assets/foo", import.meta.url)` is still relative to the current module.
+        specifiers.push(`./${specifier}`);
+      } else {
+        specifiers.push(specifier);
+      }
+    }
 
     for (const specifier of specifiers) {
       if (!specifier) continue;
@@ -257,10 +366,20 @@ async function filterExternalDependencyTests(files) {
       // Ignore absolute paths and URL-style imports when running node tests.
       if (specifier.startsWith("/") || /^[a-zA-Z]+:/.test(specifier)) continue;
 
-      if (!(await allowsBareSpecifier(specifier, file))) {
-        hasExternal = true;
-        break;
+      if (isBuiltin(specifier)) continue;
+
+      const selfResolved = await resolveSelfReference(specifier, file);
+      if (selfResolved) {
+        if (await fileHasExternalDependencies(selfResolved)) {
+          hasExternal = true;
+          break;
+        }
+        continue;
       }
+
+      // Any other bare specifier requires external packages.
+      hasExternal = true;
+      break;
     }
 
     visiting.delete(file);
