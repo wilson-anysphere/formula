@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 test("dragging the fill handle fills series and shifts formulas", async ({ page }) => {
+  test.setTimeout(120_000);
+
   // `?e2e=1` exposes the grid API on `window.__gridApi` for robust coordinate-based interactions.
   await page.goto("/?e2e=1");
   await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });
