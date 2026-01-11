@@ -1,4 +1,4 @@
-import { rowColToA1 } from "./a1.js";
+import { a1ToRowCol, rowColToA1 } from "./a1.js";
 /**
  * This module is used in both Node (CLI/tests) and browser environments
  * (desktop/webview). Keep Node builtins behind dynamic imports so bundlers don't
@@ -157,14 +157,49 @@ function normalizeTypeScriptObjectModel(code) {
     const addr = rangeMatch?.groups?.addr ?? null;
     const isMultiCell = typeof addr === "string" ? addr.includes(":") : false;
 
+    const rangeDims = (address) => {
+      if (typeof address !== "string") return { rows: 1, cols: 1 };
+      const [startRaw, endRaw] = address.split(":");
+      const start = a1ToRowCol(startRaw);
+      const end = endRaw ? a1ToRowCol(endRaw) : start;
+      const rows = Math.abs(end.row - start.row) + 1;
+      const cols = Math.abs(end.col - start.col) + 1;
+      return { rows, cols };
+    };
+
+    const isScalarLiteral = (expr) => {
+      const trimmed = String(expr || "").trim();
+      if (!trimmed) return false;
+      if (trimmed.startsWith("[")) return false;
+      if (trimmed.startsWith("{")) return false;
+      if (trimmed.startsWith('"') || trimmed.startsWith("'")) return true;
+      if (/^(true|false|null|undefined)$/i.test(trimmed)) return true;
+      if (/^[+-]?\d+(?:\.\d+)?$/.test(trimmed)) return true;
+      return false;
+    };
+
+    const fillMatrixLiteral = (expr, { rows, cols }) => {
+      const row = Array.from({ length: cols }, () => expr).join(", ");
+      const matrix = Array.from({ length: rows }, () => `[${row}]`).join(", ");
+      return `[${matrix}]`;
+    };
+
+    const fillMatrixExpr = (expr, { rows, cols }) => {
+      if (String(expr || "").trim().startsWith("[")) return expr;
+      if (isScalarLiteral(expr)) return fillMatrixLiteral(expr, { rows, cols });
+      return `Array.from({ length: ${rows} }, () => Array(${cols}).fill(${expr}))`;
+    };
+
     if (prop === "value") {
       const method = isMultiCell ? "setValues" : "setValue";
-      return `${indent}await ${target}.${method}(${rhs});`;
+      const nextRhs = isMultiCell ? fillMatrixExpr(rhs, rangeDims(addr)) : rhs;
+      return `${indent}await ${target}.${method}(${nextRhs});`;
     }
 
     if (prop === "formula") {
       if (isMultiCell) {
-        return `${indent}await ${target}.setFormulas(${rhs});`;
+        const nextRhs = fillMatrixExpr(rhs, rangeDims(addr));
+        return `${indent}await ${target}.setFormulas(${nextRhs});`;
       }
       const rhsTrimmed = rhs.trim();
       if (rhsTrimmed.startsWith("[")) {

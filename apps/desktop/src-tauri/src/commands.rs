@@ -1881,48 +1881,13 @@ fn parse_typescript_call_args(input: &str) -> Result<(String, &str), String> {
 }
 
 #[cfg(any(feature = "desktop", test))]
-fn parse_typescript_singleton_matrix_formula(expr: &str) -> Result<Option<String>, String> {
-    let mut rest = expr.trim_start();
-    rest = rest
-        .strip_prefix('[')
-        .ok_or_else(|| "expected formulas matrix like [[\"=A1+A2\"]]".to_string())?;
-    rest = rest.trim_start();
-    rest = rest
-        .strip_prefix('[')
-        .ok_or_else(|| "expected formulas matrix like [[\"=A1+A2\"]]".to_string())?;
-    rest = rest.trim_start();
-
-    let (value, remainder) = if rest.starts_with('"') || rest.starts_with('\'') {
-        let (value, remainder) = parse_typescript_string_literal_prefix(rest)?;
-        (Some(value), remainder)
-    } else if rest.to_ascii_lowercase().starts_with("null") {
-        (None, &rest[4..])
-    } else if rest.to_ascii_lowercase().starts_with("undefined") {
-        (None, &rest[9..])
-    } else {
-        return Err(format!("unsupported formulas literal: {rest}"));
-    };
-
-    rest = remainder.trim_start();
-    rest = rest
-        .strip_prefix(']')
-        .ok_or_else(|| "expected closing ']' in formulas matrix".to_string())?;
-    rest = rest.trim_start();
-    rest = rest
-        .strip_prefix(']')
-        .ok_or_else(|| "expected closing ']]' in formulas matrix".to_string())?;
-
-    if !rest.trim().is_empty() {
-        return Err(format!(
-            "unexpected trailing tokens after formulas matrix: {rest}"
-        ));
-    }
-
-    Ok(value)
+fn parse_typescript_cell_selector(expr: &str) -> Result<(usize, usize), String> {
+    let (start_row, start_col, _end_row, _end_col) = parse_typescript_range_selector(expr)?;
+    Ok((start_row, start_col))
 }
 
 #[cfg(any(feature = "desktop", test))]
-fn parse_typescript_cell_selector(expr: &str) -> Result<(usize, usize), String> {
+fn parse_typescript_range_selector(expr: &str) -> Result<(usize, usize, usize, usize), String> {
     if let Some(idx) = expr.rfind(".getRange(") {
         let after = &expr[idx + ".getRange(".len()..];
         let (addr, remainder) = parse_typescript_string_literal_prefix(after)?;
@@ -1930,10 +1895,7 @@ fn parse_typescript_cell_selector(expr: &str) -> Result<(usize, usize), String> 
         if !remainder.starts_with(')') {
             return Err(format!("unsupported getRange expression: {expr}"));
         }
-        let addr = addr.split(':').next().unwrap_or("").trim();
-        let cell = formula_engine::eval::parse_a1(addr)
-            .map_err(|e| format!("invalid A1 address {addr:?}: {e}"))?;
-        return Ok((cell.row as usize, cell.col as usize));
+        return parse_typescript_a1_range(&addr);
     }
 
     if let Some(idx) = expr.rfind(".range(") {
@@ -1943,10 +1905,7 @@ fn parse_typescript_cell_selector(expr: &str) -> Result<(usize, usize), String> 
         if !remainder.starts_with(')') {
             return Err(format!("unsupported range expression: {expr}"));
         }
-        let addr = addr.split(':').next().unwrap_or("").trim();
-        let cell = formula_engine::eval::parse_a1(addr)
-            .map_err(|e| format!("invalid A1 address {addr:?}: {e}"))?;
-        return Ok((cell.row as usize, cell.col as usize));
+        return parse_typescript_a1_range(&addr);
     }
 
     if let Some(idx) = expr.rfind(".getCell(") {
@@ -1964,7 +1923,7 @@ fn parse_typescript_cell_selector(expr: &str) -> Result<(usize, usize), String> 
         let col = col_str
             .parse::<usize>()
             .map_err(|_| format!("invalid col in getCell(): {col_str:?}"))?;
-        return Ok((row, col));
+        return Ok((row, col, row, col));
     }
 
     if let Some(idx) = expr.rfind(".cell(") {
@@ -1984,10 +1943,190 @@ fn parse_typescript_cell_selector(expr: &str) -> Result<(usize, usize), String> 
             Ok(v) if v > 0 => v - 1,
             _ => return Err(format!("invalid col in cell(): {col_str:?}")),
         };
-        return Ok((row_1, col_1));
+        return Ok((row_1, col_1, row_1, col_1));
     }
 
     Err(format!("unsupported cell selector: {expr}"))
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn parse_typescript_a1_range(addr: &str) -> Result<(usize, usize, usize, usize), String> {
+    let addr = addr.trim();
+    let mut parts = addr.split(':');
+    let start_raw = parts.next().unwrap_or("").trim();
+    let end_raw = parts.next().unwrap_or("").trim();
+    if parts.next().is_some() {
+        return Err(format!("invalid A1 range: {addr:?}"));
+    }
+
+    let start = formula_engine::eval::parse_a1(start_raw)
+        .map_err(|e| format!("invalid A1 address {start_raw:?}: {e}"))?;
+    let end = if end_raw.is_empty() {
+        start
+    } else {
+        formula_engine::eval::parse_a1(end_raw)
+            .map_err(|e| format!("invalid A1 address {end_raw:?}: {e}"))?
+    };
+
+    let start_row = std::cmp::min(start.row, end.row) as usize;
+    let end_row = std::cmp::max(start.row, end.row) as usize;
+    let start_col = std::cmp::min(start.col, end.col) as usize;
+    let end_col = std::cmp::max(start.col, end.col) as usize;
+    Ok((start_row, start_col, end_row, end_col))
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn parse_typescript_value_prefix(input: &str) -> Result<(Option<JsonValue>, &str), String> {
+    let trimmed = input.trim_start();
+    if trimmed.is_empty() {
+        return Err("expected literal".to_string());
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    for (token, value) in [
+        ("null", None),
+        ("undefined", None),
+        ("true", Some(JsonValue::Bool(true))),
+        ("false", Some(JsonValue::Bool(false))),
+    ] {
+        if lower.starts_with(token) {
+            let remainder = &trimmed[token.len()..];
+            let next = remainder.chars().next();
+            if matches!(next, Some(ch) if ch.is_ascii_alphanumeric() || ch == '_') {
+                // e.g. "nullish" -> not a token.
+            } else {
+                return Ok((value, remainder));
+            }
+        }
+    }
+
+    if trimmed.starts_with('"') || trimmed.starts_with('\'') {
+        let (value, remainder) = parse_typescript_string_literal_prefix(trimmed)?;
+        return Ok((Some(JsonValue::String(value)), remainder));
+    }
+
+    // Parse a simple number literal (no exponent).
+    let bytes = trimmed.as_bytes();
+    let mut idx = 0usize;
+    if matches!(bytes.get(idx), Some(b'+' | b'-')) {
+        idx += 1;
+    }
+    let start_digits = idx;
+    while matches!(bytes.get(idx), Some(b) if b.is_ascii_digit()) {
+        idx += 1;
+    }
+    if idx == start_digits {
+        return Err(format!("unsupported TypeScript literal: {trimmed}"));
+    }
+    if matches!(bytes.get(idx), Some(b'.')) {
+        idx += 1;
+        let start_frac = idx;
+        while matches!(bytes.get(idx), Some(b) if b.is_ascii_digit()) {
+            idx += 1;
+        }
+        if idx == start_frac {
+            return Err(format!("invalid numeric literal: {trimmed}"));
+        }
+    }
+    let literal = &trimmed[..idx];
+    let remainder = &trimmed[idx..];
+    if literal.contains('.') {
+        let float_value = literal
+            .parse::<f64>()
+            .map_err(|_| format!("invalid numeric literal: {literal}"))?;
+        let num = serde_json::Number::from_f64(float_value)
+            .ok_or_else(|| format!("invalid numeric literal: {literal}"))?;
+        return Ok((Some(JsonValue::Number(num)), remainder));
+    }
+    let int_value = literal
+        .parse::<i64>()
+        .map_err(|_| format!("invalid numeric literal: {literal}"))?;
+    Ok((Some(JsonValue::from(int_value)), remainder))
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn parse_typescript_value_matrix(expr: &str) -> Result<Vec<Vec<Option<JsonValue>>>, String> {
+    let mut rest = expr.trim_start();
+    rest = rest
+        .strip_prefix('[')
+        .ok_or_else(|| "expected matrix literal like [[1,2],[3,4]]".to_string())?;
+
+    let mut rows: Vec<Vec<Option<JsonValue>>> = Vec::new();
+    loop {
+        rest = rest.trim_start();
+        if let Some(next) = rest.strip_prefix(']') {
+            rest = next;
+            break;
+        }
+        rest = rest
+            .strip_prefix('[')
+            .ok_or_else(|| "expected row literal like [1,2]".to_string())?;
+
+        let mut row: Vec<Option<JsonValue>> = Vec::new();
+        loop {
+            rest = rest.trim_start();
+            if let Some(next) = rest.strip_prefix(']') {
+                rest = next;
+                break;
+            }
+            let (value, remainder) = parse_typescript_value_prefix(rest)?;
+            row.push(value);
+            rest = remainder.trim_start();
+            if let Some(next) = rest.strip_prefix(',') {
+                rest = next;
+                continue;
+            }
+            if let Some(next) = rest.strip_prefix(']') {
+                rest = next;
+                break;
+            }
+            return Err(format!("expected ',' or ']' in row literal, got {rest:?}"));
+        }
+        rows.push(row);
+
+        rest = rest.trim_start();
+        if let Some(next) = rest.strip_prefix(',') {
+            rest = next;
+            continue;
+        }
+        if let Some(next) = rest.strip_prefix(']') {
+            rest = next;
+            break;
+        }
+        return Err(format!(
+            "expected ',' or ']' after row literal, got {rest:?}"
+        ));
+    }
+
+    if !rest.trim().trim_end_matches(';').trim().is_empty() {
+        return Err(format!(
+            "unexpected trailing tokens after matrix literal: {rest}"
+        ));
+    }
+
+    Ok(rows)
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn parse_typescript_formulas_matrix(expr: &str) -> Result<Vec<Vec<Option<String>>>, String> {
+    let matrix = parse_typescript_value_matrix(expr)?;
+    let mut out: Vec<Vec<Option<String>>> = Vec::new();
+    for row in matrix {
+        let mut row_out: Vec<Option<String>> = Vec::new();
+        for value in row {
+            match value {
+                None => row_out.push(None),
+                Some(JsonValue::String(s)) => row_out.push(Some(s)),
+                Some(other) => {
+                    return Err(format!(
+                        "expected formula string literal or null, got {other}"
+                    ))
+                }
+            }
+        }
+        out.push(row_out);
+    }
+    Ok(out)
 }
 
 #[cfg(any(feature = "desktop", test))]
@@ -2048,27 +2187,118 @@ fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScri
                         error = Some(format!("unsupported setValue call: {line}"));
                         break;
                     }
-                    match parse_typescript_cell_selector(target_expr) {
-                        Ok((row, col)) => match parse_typescript_value_expr(&args) {
-                            Ok(value) => {
-                                match state.set_cell(&active_sheet_id, row, col, value, None) {
-                                    Ok(mut changed) => updates.append(&mut changed),
-                                    Err(e) => {
-                                        error = Some(e.to_string());
-                                        break;
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                error = Some(e);
+                    match parse_typescript_range_selector(target_expr) {
+                        Ok((start_row, start_col, end_row, end_col)) => {
+                            if start_row != end_row || start_col != end_col {
+                                error = Some(format!(
+                                    "setValue is only valid for single cells (got range {start_row},{start_col}..{end_row},{end_col})"
+                                ));
                                 break;
                             }
-                        },
+                            match parse_typescript_value_expr(&args) {
+                                Ok(value) => {
+                                    match state.set_cell(
+                                        &active_sheet_id,
+                                        start_row,
+                                        start_col,
+                                        value,
+                                        None,
+                                    ) {
+                                        Ok(mut changed) => updates.append(&mut changed),
+                                        Err(e) => {
+                                            error = Some(e.to_string());
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error = Some(e);
+                                    break;
+                                }
+                            }
+                        }
                         Err(e) => {
                             error = Some(e);
                             break;
                         }
                     }
+                    continue;
+                }
+                Err(e) => {
+                    error = Some(e);
+                    break;
+                }
+            }
+        }
+
+        if let Some(idx) = line.find(".setValues(") {
+            let target_expr = line[..idx].trim();
+            let after = &line[idx + ".setValues(".len()..];
+            match parse_typescript_call_args(after) {
+                Ok((args, remainder)) => {
+                    if !remainder
+                        .trim_start()
+                        .trim_start_matches(';')
+                        .trim()
+                        .is_empty()
+                    {
+                        error = Some(format!("unsupported setValues call: {line}"));
+                        break;
+                    }
+
+                    let (start_row, start_col, end_row, end_col) =
+                        match parse_typescript_range_selector(target_expr) {
+                            Ok(coords) => coords,
+                            Err(e) => {
+                                error = Some(e);
+                                break;
+                            }
+                        };
+
+                    let matrix = match parse_typescript_value_matrix(&args) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            error = Some(e);
+                            break;
+                        }
+                    };
+
+                    let row_count = end_row - start_row + 1;
+                    let col_count = end_col - start_col + 1;
+                    if matrix.len() != row_count || matrix.iter().any(|row| row.len() != col_count)
+                    {
+                        error = Some(format!(
+                            "setValues expected {row_count}x{col_count} matrix for range ({start_row},{start_col})..({end_row},{end_col}), got {}x{}",
+                            matrix.len(),
+                            matrix.first().map(|row| row.len()).unwrap_or(0)
+                        ));
+                        break;
+                    }
+
+                    let mut payload: Vec<Vec<(Option<JsonValue>, Option<String>)>> = Vec::new();
+                    for row in matrix {
+                        payload.push(
+                            row.into_iter()
+                                .map(|value| (value, None))
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+
+                    match state.set_range(
+                        &active_sheet_id,
+                        start_row,
+                        start_col,
+                        end_row,
+                        end_col,
+                        payload,
+                    ) {
+                        Ok(mut changed) => updates.append(&mut changed),
+                        Err(e) => {
+                            error = Some(e.to_string());
+                            break;
+                        }
+                    }
+
                     continue;
                 }
                 Err(e) => {
@@ -2092,27 +2322,59 @@ fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScri
                         error = Some(format!("unsupported setFormulas call: {line}"));
                         break;
                     }
-                    match parse_typescript_cell_selector(target_expr) {
-                        Ok((row, col)) => match parse_typescript_singleton_matrix_formula(&args) {
-                            Ok(formula) => {
-                                match state.set_cell(&active_sheet_id, row, col, None, formula) {
-                                    Ok(mut changed) => updates.append(&mut changed),
-                                    Err(e) => {
-                                        error = Some(e.to_string());
-                                        break;
-                                    }
-                                }
-                            }
+                    let (start_row, start_col, end_row, end_col) =
+                        match parse_typescript_range_selector(target_expr) {
+                            Ok(coords) => coords,
                             Err(e) => {
                                 error = Some(e);
                                 break;
                             }
-                        },
+                        };
+
+                    let matrix = match parse_typescript_formulas_matrix(&args) {
+                        Ok(m) => m,
                         Err(e) => {
                             error = Some(e);
                             break;
                         }
+                    };
+
+                    let row_count = end_row - start_row + 1;
+                    let col_count = end_col - start_col + 1;
+                    if matrix.len() != row_count || matrix.iter().any(|row| row.len() != col_count)
+                    {
+                        error = Some(format!(
+                            "setFormulas expected {row_count}x{col_count} matrix for range ({start_row},{start_col})..({end_row},{end_col}), got {}x{}",
+                            matrix.len(),
+                            matrix.first().map(|row| row.len()).unwrap_or(0)
+                        ));
+                        break;
                     }
+
+                    let mut payload: Vec<Vec<(Option<JsonValue>, Option<String>)>> = Vec::new();
+                    for row in matrix {
+                        payload.push(
+                            row.into_iter()
+                                .map(|formula| (None, formula))
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+
+                    match state.set_range(
+                        &active_sheet_id,
+                        start_row,
+                        start_col,
+                        end_row,
+                        end_col,
+                        payload,
+                    ) {
+                        Ok(mut changed) => updates.append(&mut changed),
+                        Err(e) => {
+                            error = Some(e.to_string());
+                            break;
+                        }
+                    }
+
                     continue;
                 }
                 Err(e) => {
@@ -2632,8 +2894,8 @@ mod tests {
         let code = r#"
 export default async function main(ctx) {
   const sheet = ctx.activeSheet;
-  await sheet.getRange("A1").setValue(1);
-  await sheet.getRange("B1").setFormulas([["=A1+1"]]);
+  await sheet.getRange("A1:B1").setValues([[1, 2]]);
+  await sheet.getRange("C1").setFormulas([["=A1+B1"]]);
 }
 "#;
 
@@ -2644,7 +2906,10 @@ export default async function main(ctx) {
         assert_eq!(a1.value.display(), "1");
 
         let b1 = state.get_cell("Sheet1", 0, 1).expect("B1 exists");
-        assert_eq!(b1.formula.as_deref(), Some("=A1+1"));
         assert_eq!(b1.value.display(), "2");
+
+        let c1 = state.get_cell("Sheet1", 0, 2).expect("C1 exists");
+        assert_eq!(c1.formula.as_deref(), Some("=A1+B1"));
+        assert_eq!(c1.value.display(), "3");
     }
 }
