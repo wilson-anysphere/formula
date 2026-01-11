@@ -355,10 +355,16 @@ export class QueryEngine {
       query.source.type === "database" &&
       foldedDialect
     ) {
+      const sqlToRun =
+        foldedPlan.type === "sql" && options.limit != null
+          ? `SELECT * FROM (${foldedPlan.sql}) AS t LIMIT ?`
+          : foldedPlan.sql;
+      const paramsToRun =
+        foldedPlan.type === "sql" && options.limit != null ? [...foldedPlan.params, options.limit] : foldedPlan.params;
       const sourceResult = await this.loadDatabaseQueryWithMeta(
         query.source,
-        foldedPlan.sql,
-        foldedPlan.params,
+        sqlToRun,
+        paramsToRun,
         foldedDialect,
         callStack,
         options,

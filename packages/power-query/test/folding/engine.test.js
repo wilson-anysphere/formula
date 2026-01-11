@@ -50,6 +50,47 @@ test("QueryEngine: executes folded SQL when database dialect is provided", async
   ]);
 });
 
+test("QueryEngine: pushes ExecuteOptions.limit down when the plan fully folds to SQL", async () => {
+  /** @type {{ sql: string, params: unknown[] | undefined } | null} */
+  let observed = null;
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async (_connection, sql, options) => {
+          observed = { sql, params: options?.params };
+          // Pretend the database applied both the filter and limit.
+          return DataTable.fromGrid(
+            [
+              ["Region", "Sales"],
+              ["East", 100],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          );
+        },
+      }),
+    },
+  });
+
+  const query = {
+    id: "q_fold_limit",
+    name: "Fold + Limit",
+    source: { type: "database", connection: { id: "db1" }, query: "SELECT * FROM sales", dialect: "postgres" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } },
+      },
+    ],
+  };
+
+  await engine.executeQuery(query, { queries: {} }, { limit: 10 });
+  assert.ok(observed, "expected SQL connector to be invoked");
+  assert.match(observed.sql, /\bLIMIT\b/);
+  assert.deepEqual(observed.params, ["East", 10]);
+});
+
 test("QueryEngine: without a dialect, executes steps locally (no folding)", async () => {
   /** @type {{ sql: string, params: unknown[] | undefined } | null} */
   let observed = null;
