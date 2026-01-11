@@ -149,7 +149,8 @@ def _sanitize_inline_string(el: ET.Element, *, options: SanitizeOptions) -> None
 
 def _sanitize_worksheet(xml: bytes, *, options: SanitizeOptions) -> bytes:
     root = ET.fromstring(xml)
-    if root.tag != qn(NS_MAIN, "worksheet"):
+    local_root = root.tag.split("}")[-1]
+    if local_root not in {"worksheet", "dialogsheet"}:
         return xml
 
     for c in root.iter(qn(NS_MAIN, "c")):
@@ -1168,6 +1169,12 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
             removed_parts |= {n for n in names if n.startswith("xl/queryTables/")}
             removed_parts |= {n for n in names if n.startswith("customXml/")}
             removed_parts |= {n for n in names if n.startswith("xl/customXml/")}
+            removed_parts |= {n for n in names if n.startswith("xl/model/")}
+            removed_parts |= {n for n in names if n.startswith("xl/printerSettings/")}
+            removed_parts |= {n for n in names if n.startswith("xl/revisions/")}
+            removed_parts |= {n for n in names if n.startswith("xl/webExtensions/")}
+            removed_parts |= {n for n in names if n.startswith("xl/controls/")}
+            removed_parts |= {n for n in names if n.startswith("xl/ctrlProps/")}
             removed_parts |= {n for n in names if n.startswith("xl/media/")}
             removed_parts |= {n for n in names if n.startswith("xl/embeddings/")}
             removed_parts |= {n for n in names if n == "xl/vbaProject.bin"}
@@ -1284,7 +1291,11 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                         if new != raw:
                             rewritten.append(name)
                     elif (
-                        name.startswith("xl/worksheets/")
+                        (
+                            name.startswith("xl/worksheets/")
+                            or name.startswith("xl/macrosheets/")
+                            or name.startswith("xl/dialogsheets/")
+                        )
                         and name.endswith(".xml")
                         and (
                             options.redact_cell_values

@@ -54,6 +54,7 @@ The sanitization pipeline is implemented in `tools/corpus/sanitize.py` and suppo
   - formula **string literals** are also redacted/hardened to prevent secrets surviving in formulas
   - pivot cache records/items are cleared (pivot caches can otherwise retain full plaintext copies of source data)
   - conditional formatting + data validation formulas (and their string literals) are hardened as well
+  - dialog sheets/macrosheets are sanitized like normal worksheets (same cell redaction rules)
 - **Hash strings** (`--hash-strings --hash-salt ...`)
   - shared strings / inline strings are replaced with stable `H_<digest>` tokens
   - additional text surfaces are hashed too (comments, headers/footers, drawing text, table names, formula string literals)
@@ -65,6 +66,7 @@ The sanitization pipeline is implemented in `tools/corpus/sanitize.py` and suppo
 - **Remove secrets**
   - drops common secret-bearing parts like `xl/connections.xml`, `customXml/**`, and `xl/queryTables/**`
   - removes `xl/vbaProject.bin`/`xl/vbaProjectSignature.bin`, `customUI/**`, and embedded binaries like `xl/media/**`
+  - drops other binary/metadata-heavy parts commonly containing hostnames/usernames: `xl/printerSettings/**`, `xl/revisions/**`, `xl/webExtensions/**`, `xl/model/**`
   - removes preview images like `docProps/thumbnail.*`
   - removes `docProps/custom.xml` (custom document properties)
   - strips workbook/sheet protection password hashes and file sharing usernames from `xl/workbook.xml` / worksheets
