@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -33,6 +34,38 @@ async function writeJson(filePath, data) {
   await fs.writeFile(filePath, JSON.stringify(data, null, 2));
 }
 
+function sha256Hex(bytes) {
+  return crypto.createHash("sha256").update(bytes).digest("hex");
+}
+
+async function listFilesWithIntegrity(rootDir) {
+  /** @type {{ path: string, sha256: string, size: number }[]} */
+  const out = [];
+
+  async function visit(dir) {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const absPath = path.join(dir, entry.name);
+      const relPath = path.relative(rootDir, absPath).replace(/\\/g, "/");
+      if (relPath === "" || relPath.startsWith("..")) continue;
+
+      if (entry.isDirectory()) {
+        await visit(absPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+
+      // eslint-disable-next-line no-await-in-loop
+      const bytes = await fs.readFile(absPath);
+      out.push({ path: relPath, sha256: sha256Hex(bytes), size: bytes.length });
+    }
+  }
+
+  await visit(rootDir);
+  out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return out;
+}
+
 test("ExtensionHostManager.syncInstalledExtensions loads/reloads/unloads based on statePath", async (t) => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-desktop-ext-sync-"));
   const extensionsDir = path.join(tmpRoot, "installed-extensions");
@@ -44,10 +77,11 @@ test("ExtensionHostManager.syncInstalledExtensions loads/reloads/unloads based o
 
   const installedPath = path.join(extensionsDir, extensionId);
   await copyDir(sampleExtensionSrc, installedPath);
+  const filesV1 = await listFilesWithIntegrity(installedPath);
 
   await writeJson(statePath, {
     installed: {
-      [extensionId]: { id: extensionId, version: "1.0.0", installedAt: new Date().toISOString() },
+      [extensionId]: { id: extensionId, version: "1.0.0", installedAt: new Date().toISOString(), files: filesV1 },
     },
   });
 
@@ -82,21 +116,25 @@ test("ExtensionHostManager.syncInstalledExtensions loads/reloads/unloads based o
 
   const distPath = path.join(installedPath, "dist", "extension.js");
   const distText = await fs.readFile(distPath, "utf8");
-  const sumValuesIdx = distText.indexOf("function sumValues");
-  assert.ok(sumValuesIdx >= 0);
-  const sumValuesEnd = distText.indexOf("\n\nasync function getSelectionSum", sumValuesIdx);
-  assert.ok(sumValuesEnd >= 0);
-  const sumFn = distText.slice(sumValuesIdx, sumValuesEnd);
+  const commandMarker = 'registerCommand("sampleHello.sumSelection"';
+  const commandIdx = distText.indexOf(commandMarker);
+  assert.ok(commandIdx >= 0);
   const needle = "return sum;";
-  const lastReturnIdx = sumFn.lastIndexOf(needle);
-  assert.ok(lastReturnIdx >= 0);
-  const sumFnPatched = sumFn.slice(0, lastReturnIdx) + "return sum + 1;" + sumFn.slice(lastReturnIdx + needle.length);
-  assert.notEqual(sumFnPatched, sumFn);
-  await fs.writeFile(distPath, distText.slice(0, sumValuesIdx) + sumFnPatched + distText.slice(sumValuesEnd));
+  const returnIdx = distText.indexOf(needle, commandIdx);
+  assert.ok(returnIdx >= 0);
+  const patched =
+    distText.slice(0, returnIdx) + "return sum + 1;" + distText.slice(returnIdx + needle.length);
+  assert.notEqual(patched, distText);
+  await fs.writeFile(distPath, patched);
 
   await writeJson(statePath, {
     installed: {
-      [extensionId]: { id: extensionId, version: "1.1.0", installedAt: new Date().toISOString() },
+      [extensionId]: {
+        id: extensionId,
+        version: "1.1.0",
+        installedAt: new Date().toISOString(),
+        files: await listFilesWithIntegrity(installedPath),
+      },
     },
   });
 

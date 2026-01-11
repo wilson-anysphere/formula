@@ -692,6 +692,14 @@ class ExtensionHost {
       // ignore
     }
 
+    try {
+      for (const connector of extension.manifest.contributes.dataConnectors ?? []) {
+        if (this._dataConnectors.get(connector.id) === extension.id) this._dataConnectors.delete(connector.id);
+      }
+    } catch {
+      // ignore
+    }
+
     // Remove panels owned by this extension.
     for (const [panelId, panel] of this._panels.entries()) {
       if (panel?.extensionId === extension.id) this._panels.delete(panelId);

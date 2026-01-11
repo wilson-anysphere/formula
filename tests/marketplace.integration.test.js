@@ -144,17 +144,16 @@ test("desktop runtime: auto-load installed extensions + hot reload on update", a
 
     const distPath = path.join(extSourceV11, "dist", "extension.js");
     const distText = await fs.readFile(distPath, "utf8");
-    const sumValuesIdx = distText.indexOf("function sumValues");
-    assert.ok(sumValuesIdx >= 0);
-    const sumValuesEnd = distText.indexOf("\n\nasync function getSelectionSum", sumValuesIdx);
-    assert.ok(sumValuesEnd >= 0);
-    const sumFn = distText.slice(sumValuesIdx, sumValuesEnd);
+    const commandMarker = 'registerCommand("sampleHello.sumSelection"';
+    const commandIdx = distText.indexOf(commandMarker);
+    assert.ok(commandIdx >= 0);
     const needle = "return sum;";
-    const lastReturnIdx = sumFn.lastIndexOf(needle);
-    assert.ok(lastReturnIdx >= 0);
-    const sumFnPatched = sumFn.slice(0, lastReturnIdx) + "return sum + 1;" + sumFn.slice(lastReturnIdx + needle.length);
-    assert.notEqual(sumFnPatched, sumFn);
-    await fs.writeFile(distPath, distText.slice(0, sumValuesIdx) + sumFnPatched + distText.slice(sumValuesEnd));
+    const returnIdx = distText.indexOf(needle, commandIdx);
+    assert.ok(returnIdx >= 0);
+    const patched =
+      distText.slice(0, returnIdx) + "return sum + 1;" + distText.slice(returnIdx + needle.length);
+    assert.notEqual(patched, distText);
+    await fs.writeFile(distPath, patched);
 
     await publishExtension({
       extensionDir: extSourceV11,
