@@ -87,6 +87,9 @@ function safeJoin(baseDir, relPath) {
   if (parts.some((p) => p === "" || p === "." || p === "..")) {
     throw new Error(`Invalid path in extension package: ${relPath}`);
   }
+  if (parts.some((p) => p.includes(":"))) {
+    throw new Error(`Invalid path in extension package: ${relPath}`);
+  }
   const full = path.join(baseDir, normalized);
   const relative = path.relative(baseDir, full);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {

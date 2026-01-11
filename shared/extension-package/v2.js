@@ -49,6 +49,10 @@ function normalizePath(relPath) {
   if (parts.some((p) => p === "" || p === "." || p === "..")) {
     throw new Error(`Invalid path in extension package: ${relPath}`);
   }
+  // Disallow ':' to avoid Windows drive-relative / alternate stream paths (and keep packages portable).
+  if (parts.some((p) => p.includes(":"))) {
+    throw new Error(`Invalid path in extension package: ${relPath}`);
+  }
   return parts.join("/");
 }
 

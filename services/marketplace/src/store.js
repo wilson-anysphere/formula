@@ -238,6 +238,7 @@ function isAllowedFilePath(filePath) {
   if (normalized.includes("\0")) return false;
   const parts = normalized.split("/");
   if (parts.some((p) => p === "" || p === "." || p === "..")) return false;
+  if (parts.some((p) => p.includes(":"))) return false;
 
   const lower = normalized.toLowerCase();
   const ext = path.extname(lower);
