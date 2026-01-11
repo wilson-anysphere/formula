@@ -547,6 +547,30 @@ fn calculate_all_can_remove_column_filters() {
 }
 
 #[test]
+fn calculate_all_removes_row_context_filters_for_measures() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let orders = model.table("Orders").unwrap();
+    for row in 0..orders.row_count() {
+        let mut row_ctx = RowContext::default();
+        row_ctx.push("Orders", row);
+        let value = engine
+            .evaluate(
+                &model,
+                "CALCULATE([Total Sales], ALL(Orders))",
+                &FilterContext::empty(),
+                &row_ctx,
+            )
+            .unwrap();
+        assert_eq!(value, 43.0.into());
+    }
+}
+
+#[test]
 fn pivot_api_groups_and_evaluates_measures() {
     let mut model = build_model();
     model

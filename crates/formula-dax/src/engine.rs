@@ -81,6 +81,7 @@ pub struct FilterContext {
     column_filters: HashMap<(String, String), HashSet<Value>>,
     row_filters: HashMap<String, HashSet<usize>>,
     active_relationship_overrides: HashSet<usize>,
+    suppress_implicit_measure_context_transition: bool,
 }
 
 impl FilterContext {
@@ -206,7 +207,9 @@ impl DaxEngine {
                 if let Some(measure) = model.measures().get(&normalized) {
                     // In DAX, evaluating a measure inside a row context implicitly performs a
                     // context transition (equivalent to `CALCULATE([Measure])`).
-                    let eval_filter = if row_ctx.current_table().is_some() {
+                    let eval_filter = if row_ctx.current_table().is_some()
+                        && !filter.suppress_implicit_measure_context_transition
+                    {
                         self.apply_context_transition(model, filter, row_ctx)?
                     } else {
                         filter.clone()
@@ -868,7 +871,12 @@ impl DaxEngine {
     ) -> DaxResult<Value> {
         let (expr, filter_args) = args.split_first().expect("checked above");
         let new_filter = self.build_calculate_filter(model, filter, row_ctx, filter_args)?;
-        self.eval_scalar(model, expr, &new_filter, row_ctx)
+        let mut expr_filter = new_filter;
+        // `CALCULATE` already performs context transition before evaluating the expression, so
+        // measure references inside should not re-apply an implicit transition that would
+        // undo filter modifiers like `ALL(...)`.
+        expr_filter.suppress_implicit_measure_context_transition = true;
+        self.eval_scalar(model, expr, &expr_filter, row_ctx)
     }
 
     fn build_calculate_filter(
@@ -878,7 +886,9 @@ impl DaxEngine {
         row_ctx: &RowContext,
         filter_args: &[Expr],
     ) -> DaxResult<FilterContext> {
-        let mut new_filter = self.apply_context_transition(model, filter, row_ctx)?;
+        let mut base_filter = filter.clone();
+        base_filter.suppress_implicit_measure_context_transition = false;
+        let mut new_filter = self.apply_context_transition(model, &base_filter, row_ctx)?;
         self.apply_calculate_filter_args(model, &mut new_filter, row_ctx, filter_args)?;
         Ok(new_filter)
     }
@@ -1328,7 +1338,9 @@ impl DaxEngine {
                     let (table_expr, filter_args) = args.split_first().expect("checked above");
                     let new_filter =
                         self.build_calculate_filter(model, filter, row_ctx, filter_args)?;
-                    self.eval_table(model, table_expr, &new_filter, row_ctx)
+                    let mut table_filter = new_filter;
+                    table_filter.suppress_implicit_measure_context_transition = true;
+                    self.eval_table(model, table_expr, &table_filter, row_ctx)
                 }
                 "SUMMARIZE" => {
                     let (table_expr, group_exprs) = args.split_first().ok_or_else(|| {
