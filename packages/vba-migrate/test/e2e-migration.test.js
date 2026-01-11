@@ -4,6 +4,7 @@ import test from "node:test";
 import { Workbook } from "../src/workbook.js";
 import { VbaMigrator } from "../src/converter.js";
 import { validateMigration } from "../src/validator.js";
+import { RustCliOracle } from "../src/vba/oracle.js";
 
 class MockLlmClient {
   async complete({ prompt }) {
@@ -32,6 +33,7 @@ class MockLlmClient {
 test("end-to-end: convert + validate a simple macro fixture against resulting cell diffs", async () => {
   const workbook = new Workbook();
   workbook.addSheet("Sheet1", { makeActive: true });
+  const oracle = new RustCliOracle();
 
   const module = {
     name: "Module1",
@@ -47,12 +49,13 @@ End Sub
   const migrator = new VbaMigrator({ llm: new MockLlmClient() });
 
   const python = await migrator.convertModule(module, { target: "python" });
-  const pythonValidation = validateMigration({
+  const pythonValidation = await validateMigration({
     workbook,
     module,
     entryPoint: "Main",
     target: "python",
-    code: python.code
+    code: python.code,
+    oracle
   });
 
   assert.equal(pythonValidation.ok, true);
@@ -61,12 +64,13 @@ End Sub
   assert.equal(pythonValidation.scriptDiff.length, 3);
 
   const ts = await migrator.convertModule(module, { target: "typescript" });
-  const tsValidation = validateMigration({
+  const tsValidation = await validateMigration({
     workbook,
     module,
     entryPoint: "Main",
     target: "typescript",
-    code: ts.code
+    code: ts.code,
+    oracle
   });
 
   assert.equal(tsValidation.ok, true);

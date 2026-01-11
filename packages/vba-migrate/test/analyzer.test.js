@@ -26,8 +26,9 @@ End Sub
   assert.equal(report.objectModelUsage.Cells.length, 1);
   assert.equal(report.objectModelUsage.Worksheets.length, 1);
   assert.equal(report.externalReferences.length, 1);
+  assert.equal(report.unsafeConstructs.length, 0);
   assert.ok(report.warnings.some((w) => w.message.includes("error handling")));
   assert.ok(report.warnings.some((w) => w.message.includes("GoTo")));
   assert.ok(report.todos.length >= 1);
+  assert.ok(report.risk.score > 0);
 });
-

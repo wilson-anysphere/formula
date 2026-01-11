@@ -14,10 +14,24 @@ export function analyzeVbaModule(module) {
   const objectModelUsage = {
     Range: [],
     Cells: [],
-    Worksheets: []
+    Worksheets: [],
+    Workbook: [],
+    Application: [],
+    ActiveSheet: [],
+    ActiveCell: [],
+    Selection: []
+  };
+
+  const rangeShapes = {
+    singleCell: [],
+    multiCell: [],
+    rows: [],
+    columns: [],
+    other: []
   };
 
   const externalReferences = [];
+  const unsafeConstructs = [];
   const unsupportedConstructs = [];
   const warnings = [];
   const todos = [];
@@ -32,6 +46,21 @@ export function analyzeVbaModule(module) {
 
     if (/\bRange\s*\(/i.test(line) || /\.Range\s*\(/i.test(line)) {
       addFinding(objectModelUsage.Range, { line: lineNumber, text: rawLine, match: "Range" });
+      const rangeArg = /\bRange\s*\(\s*"(?<addr>[^"]+)"\s*\)/i.exec(rawLine)?.groups?.addr;
+      if (rangeArg) {
+        const addr = rangeArg.trim();
+        if (/^[A-Za-z]+\d+$/.test(addr)) {
+          addFinding(rangeShapes.singleCell, { line: lineNumber, text: rawLine, match: addr });
+        } else if (/^[A-Za-z]+\d+:[A-Za-z]+\d+$/.test(addr)) {
+          addFinding(rangeShapes.multiCell, { line: lineNumber, text: rawLine, match: addr });
+        } else if (/^\d+:\d+$/.test(addr)) {
+          addFinding(rangeShapes.rows, { line: lineNumber, text: rawLine, match: addr });
+        } else if (/^[A-Za-z]+:[A-Za-z]+$/.test(addr)) {
+          addFinding(rangeShapes.columns, { line: lineNumber, text: rawLine, match: addr });
+        } else {
+          addFinding(rangeShapes.other, { line: lineNumber, text: rawLine, match: addr });
+        }
+      }
     }
 
     if (/\bCells\s*\(/i.test(line) || /\.Cells\s*\(/i.test(line)) {
@@ -40,6 +69,26 @@ export function analyzeVbaModule(module) {
 
     if (/\bWorksheets\s*\(/i.test(line) || /\bSheets\s*\(/i.test(line)) {
       addFinding(objectModelUsage.Worksheets, { line: lineNumber, text: rawLine, match: "Worksheets" });
+    }
+
+    if (/\b(ThisWorkbook|ActiveWorkbook|Workbooks)\b/i.test(line)) {
+      addFinding(objectModelUsage.Workbook, { line: lineNumber, text: rawLine, match: "Workbook" });
+    }
+
+    if (/\bApplication\b/i.test(line)) {
+      addFinding(objectModelUsage.Application, { line: lineNumber, text: rawLine, match: "Application" });
+    }
+
+    if (/\bActiveSheet\b/i.test(line)) {
+      addFinding(objectModelUsage.ActiveSheet, { line: lineNumber, text: rawLine, match: "ActiveSheet" });
+    }
+
+    if (/\bActiveCell\b/i.test(line)) {
+      addFinding(objectModelUsage.ActiveCell, { line: lineNumber, text: rawLine, match: "ActiveCell" });
+    }
+
+    if (/\bSelection\b/i.test(line)) {
+      addFinding(objectModelUsage.Selection, { line: lineNumber, text: rawLine, match: "Selection" });
     }
 
     // External references: Windows API declares, COM automation, Shell calls, etc.
@@ -64,6 +113,40 @@ export function analyzeVbaModule(module) {
       todos.push({
         line: lineNumber,
         message: "Shell execution should be migrated to an explicit, permission-checked API (or removed)."
+      });
+    }
+
+    if (/\bFileSystemObject\b/i.test(line) || /\bScripting\.FileSystemObject\b/i.test(line)) {
+      addFinding(externalReferences, { line: lineNumber, text: rawLine, match: "FileSystemObject" });
+      todos.push({
+        line: lineNumber,
+        message: "File system access (FileSystemObject) must be migrated to a permission-checked API."
+      });
+    }
+
+    // Unsafe dynamic execution patterns.
+    if (/\bEvaluate\s*\(/i.test(line) || /\bApplication\.Evaluate\b/i.test(line)) {
+      addFinding(unsafeConstructs, { line: lineNumber, text: rawLine, match: "Evaluate" });
+      warnings.push({
+        line: lineNumber,
+        message: "Evaluate() executes formula strings dynamically; translated code should avoid eval-like behavior."
+      });
+    }
+
+    // VBA `Execute` executes a string as code.
+    if (/\bExecute\b/i.test(line)) {
+      addFinding(unsafeConstructs, { line: lineNumber, text: rawLine, match: "Execute" });
+      warnings.push({
+        line: lineNumber,
+        message: "Execute executes arbitrary VBA source; translated code must replace it with explicit logic."
+      });
+    }
+
+    if (/\bCallByName\b/i.test(line)) {
+      addFinding(unsafeConstructs, { line: lineNumber, text: rawLine, match: "CallByName" });
+      warnings.push({
+        line: lineNumber,
+        message: "CallByName performs dynamic dispatch; translated code should use direct calls and validate inputs."
       });
     }
 
@@ -115,13 +198,61 @@ export function analyzeVbaModule(module) {
     return out;
   };
 
+  const uniqRiskFactors = (items) => {
+    const seen = new Set();
+    const out = [];
+    for (const item of items) {
+      const key = `${item.code}:${item.line}:${item.message}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
+    }
+    return out;
+  };
+
+  const riskFactors = [];
+  for (const ref of externalReferences) {
+    riskFactors.push({
+      code: "external_dependency",
+      line: ref.line,
+      message: `External dependency detected (${ref.match}).`
+    });
+  }
+  for (const item of unsafeConstructs) {
+    riskFactors.push({
+      code: "unsafe_dynamic_execution",
+      line: item.line,
+      message: `Unsafe dynamic execution detected (${item.match}).`
+    });
+  }
+  for (const item of unsupportedConstructs) {
+    riskFactors.push({
+      code: "unsupported_construct",
+      line: item.line,
+      message: `Unsupported/risky construct detected (${item.match}).`
+    });
+  }
+
+  const riskScore = Math.min(
+    100,
+    externalReferences.length * 25 + unsafeConstructs.length * 30 + unsupportedConstructs.length * 10
+  );
+  const riskLevel = riskScore >= 70 ? "high" : riskScore >= 30 ? "medium" : "low";
+
   return {
     moduleName: name,
     objectModelUsage,
+    rangeShapes,
     externalReferences,
+    unsafeConstructs,
     unsupportedConstructs,
     warnings: uniq(warnings),
-    todos: uniq(todos)
+    todos: uniq(todos),
+    risk: {
+      score: riskScore,
+      level: riskLevel,
+      factors: uniqRiskFactors(riskFactors)
+    }
   };
 }
 
@@ -130,10 +261,20 @@ export function migrationReportToMarkdown(report) {
   const lines = [];
   lines.push(`# VBA Migration Report: ${report.moduleName}`);
   lines.push("");
+  if (report.risk) {
+    lines.push("## Risk score");
+    lines.push(`- Score: ${report.risk.score} (${report.risk.level})`);
+    lines.push("");
+  }
   lines.push("## Object model usage");
   lines.push(`- Range: ${usageCount(report.objectModelUsage?.Range)}`);
   lines.push(`- Cells: ${usageCount(report.objectModelUsage?.Cells)}`);
   lines.push(`- Worksheets/Sheets: ${usageCount(report.objectModelUsage?.Worksheets)}`);
+  lines.push(`- Workbook: ${usageCount(report.objectModelUsage?.Workbook)}`);
+  lines.push(`- Application: ${usageCount(report.objectModelUsage?.Application)}`);
+  lines.push(`- ActiveSheet: ${usageCount(report.objectModelUsage?.ActiveSheet)}`);
+  lines.push(`- ActiveCell: ${usageCount(report.objectModelUsage?.ActiveCell)}`);
+  lines.push(`- Selection: ${usageCount(report.objectModelUsage?.Selection)}`);
   lines.push("");
 
   if (report.externalReferences?.length) {
@@ -147,6 +288,14 @@ export function migrationReportToMarkdown(report) {
   if (report.unsupportedConstructs?.length) {
     lines.push("## Unsupported / risky constructs");
     for (const item of report.unsupportedConstructs) {
+      lines.push(`- L${item.line}: ${item.text.trim()}`);
+    }
+    lines.push("");
+  }
+
+  if (report.unsafeConstructs?.length) {
+    lines.push("## Unsafe dynamic execution");
+    for (const item of report.unsafeConstructs) {
       lines.push(`- L${item.line}: ${item.text.trim()}`);
     }
     lines.push("");
@@ -170,4 +319,3 @@ export function migrationReportToMarkdown(report) {
 
   return lines.join("\n");
 }
-

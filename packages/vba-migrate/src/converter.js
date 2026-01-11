@@ -27,7 +27,9 @@ function buildPrompt({ module, analysis, target }) {
   const analysisHints = [
     `Object model usage: Range=${analysis.objectModelUsage.Range.length}, Cells=${analysis.objectModelUsage.Cells.length}, Worksheets=${analysis.objectModelUsage.Worksheets.length}`,
     `External references: ${analysis.externalReferences.length}`,
-    `Unsupported constructs: ${analysis.unsupportedConstructs.length}`
+    `Unsafe constructs: ${analysis.unsafeConstructs?.length ?? 0}`,
+    `Unsupported constructs: ${analysis.unsupportedConstructs.length}`,
+    analysis.risk ? `Risk score: ${analysis.risk.score} (${analysis.risk.level})` : ""
   ].join("\n");
 
   return [

@@ -1,0 +1,15 @@
+[package]
+name = "formula-vba-oracle-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.31", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+zip = "2.2.3"
+quick-xml = "0.37.2"
+
+formula-vba = { path = "../formula-vba" }
+formula-vba-runtime = { path = "../formula-vba-runtime" }
+

@@ -1,0 +1,904 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+use formula_vba_runtime::{parse_program, row_col_to_a1, ExecutionResult, Spreadsheet, VbaError, VbaRuntime, VbaValue};
+use quick_xml::events::Event;
+use quick_xml::Reader as XmlReader;
+use serde::{Deserialize, Serialize};
+use zip::ZipArchive;
+
+#[derive(Debug, Parser)]
+#[command(name = "formula-vba-oracle-cli")]
+#[command(about = "Execute VBA macros via formula-vba-runtime and emit deterministic JSON diffs.")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Execute a macro and emit a deterministic JSON report.
+    Run(RunArgs),
+    /// Extract sheet names + VBA modules + procedure list from an XLSM / oracle workbook JSON payload.
+    Extract(ExtractArgs),
+}
+
+#[derive(Debug, Parser)]
+struct RunArgs {
+    /// Macro/procedure name to execute (e.g. `Main`).
+    #[arg(long = "macro")]
+    macro_name: String,
+
+    /// Optional input file path. If omitted, reads bytes from stdin.
+    #[arg(long)]
+    input: Option<PathBuf>,
+
+    /// Input format hint: `auto`, `json`, or `xlsm`.
+    #[arg(long, default_value = "auto")]
+    format: String,
+
+    /// Macro arguments as a JSON array (e.g. `[1, \"foo\"]`).
+    #[arg(long)]
+    args: Option<String>,
+}
+
+#[derive(Debug, Parser)]
+struct ExtractArgs {
+    /// Optional input file path. If omitted, reads bytes from stdin.
+    #[arg(long)]
+    input: Option<PathBuf>,
+
+    /// Input format hint: `auto`, `json`, or `xlsm`.
+    #[arg(long, default_value = "auto")]
+    format: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OracleWorkbook {
+    #[serde(default)]
+    schema_version: u32,
+    #[serde(default)]
+    active_sheet: Option<String>,
+    #[serde(default)]
+    sheets: Vec<OracleSheet>,
+    #[serde(default)]
+    vba_modules: Vec<VbaModule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OracleSheet {
+    name: String,
+    #[serde(default)]
+    cells: BTreeMap<String, OracleCell>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OracleCell {
+    #[serde(default)]
+    value: Option<serde_json::Value>,
+    #[serde(default)]
+    formula: Option<String>,
+    #[serde(default)]
+    format: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VbaModule {
+    name: String,
+    code: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OracleCellSnapshot {
+    value: Option<serde_json::Value>,
+    formula: Option<String>,
+    format: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OracleCellDiff {
+    before: OracleCellSnapshot,
+    after: OracleCellSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunReport {
+    ok: bool,
+    macro_name: String,
+    logs: Vec<String>,
+    warnings: Vec<String>,
+    error: Option<String>,
+    exit_status: i32,
+    /// Deterministic cell diffs, grouped by sheet name then A1 address.
+    cell_diffs: BTreeMap<String, BTreeMap<String, OracleCellDiff>>,
+    workbook_after: OracleWorkbook,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtractReport {
+    ok: bool,
+    error: Option<String>,
+    workbook: OracleWorkbook,
+    procedures: Vec<ProcedureSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProcedureSummary {
+    name: String,
+    kind: String,
+}
+
+#[derive(Debug, Clone)]
+struct CellState {
+    value: VbaValue,
+    formula: Option<String>,
+    format: Option<String>,
+}
+
+impl Default for CellState {
+    fn default() -> Self {
+        Self {
+            value: VbaValue::Empty,
+            formula: None,
+            format: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SheetState {
+    name: String,
+    cells: BTreeMap<(u32, u32), CellState>, // (row,col) 1-based
+}
+
+#[derive(Debug, Clone)]
+struct ExecutionWorkbook {
+    sheets: Vec<SheetState>,
+    active_sheet: usize,
+    active_cell: (u32, u32),
+    logs: Vec<String>,
+}
+
+impl ExecutionWorkbook {
+    fn from_oracle_workbook(wb: &OracleWorkbook) -> Result<Self, VbaError> {
+        let mut sheets = Vec::new();
+        for sheet in &wb.sheets {
+            let mut cells = BTreeMap::new();
+            for (addr, cell) in &sheet.cells {
+                let (row, col) = formula_vba_runtime::a1_to_row_col(addr)?;
+                let value = json_value_to_vba(cell.value.as_ref());
+                let state = CellState {
+                    value,
+                    formula: cell.formula.clone(),
+                    format: cell.format.clone(),
+                };
+                if !matches!(state.value, VbaValue::Empty) || state.formula.is_some() || state.format.is_some() {
+                    cells.insert((row, col), state);
+                }
+            }
+            sheets.push(SheetState {
+                name: sheet.name.clone(),
+                cells,
+            });
+        }
+
+        if sheets.is_empty() {
+            sheets.push(SheetState {
+                name: "Sheet1".to_string(),
+                cells: BTreeMap::new(),
+            });
+        }
+
+        let active_sheet = wb
+            .active_sheet
+            .as_deref()
+            .and_then(|name| sheets.iter().position(|s| s.name.eq_ignore_ascii_case(name)))
+            .unwrap_or(0);
+
+        Ok(Self {
+            sheets,
+            active_sheet,
+            active_cell: (1, 1),
+            logs: Vec::new(),
+        })
+    }
+
+    fn to_oracle_workbook(&self, vba_modules: Vec<VbaModule>) -> OracleWorkbook {
+        let active_sheet = self.sheets.get(self.active_sheet).map(|s| s.name.clone());
+        let mut sheets = Vec::new();
+        for sheet in &self.sheets {
+            let mut cells: BTreeMap<String, OracleCell> = BTreeMap::new();
+            for ((row, col), state) in &sheet.cells {
+                let addr = row_col_to_a1(*row, *col).unwrap_or_else(|_| format!("R{row}C{col}"));
+                let value = vba_value_to_json(&state.value);
+                cells.insert(
+                    addr,
+                    OracleCell {
+                        value,
+                        formula: state.formula.clone(),
+                        format: state.format.clone(),
+                    },
+                );
+            }
+            sheets.push(OracleSheet {
+                name: sheet.name.clone(),
+                cells,
+            });
+        }
+
+        OracleWorkbook {
+            schema_version: 1,
+            active_sheet,
+            sheets,
+            vba_modules,
+        }
+    }
+
+    fn snapshot(&self) -> BTreeMap<String, BTreeMap<String, OracleCellSnapshot>> {
+        let mut out = BTreeMap::new();
+        for sheet in &self.sheets {
+            let mut cells = BTreeMap::new();
+            for ((row, col), state) in &sheet.cells {
+                let addr = row_col_to_a1(*row, *col).unwrap_or_else(|_| format!("R{row}C{col}"));
+                cells.insert(
+                    addr,
+                    OracleCellSnapshot {
+                        value: vba_value_to_json(&state.value),
+                        formula: state.formula.clone(),
+                        format: state.format.clone(),
+                    },
+                );
+            }
+            out.insert(sheet.name.clone(), cells);
+        }
+        out
+    }
+}
+
+impl Spreadsheet for ExecutionWorkbook {
+    fn sheet_count(&self) -> usize {
+        self.sheets.len()
+    }
+
+    fn sheet_name(&self, sheet: usize) -> Option<&str> {
+        self.sheets.get(sheet).map(|s| s.name.as_str())
+    }
+
+    fn sheet_index(&self, name: &str) -> Option<usize> {
+        self.sheets
+            .iter()
+            .position(|s| s.name.eq_ignore_ascii_case(name))
+    }
+
+    fn active_sheet(&self) -> usize {
+        self.active_sheet
+    }
+
+    fn set_active_sheet(&mut self, sheet: usize) -> Result<(), VbaError> {
+        if sheet >= self.sheets.len() {
+            return Err(VbaError::Runtime(format!("Sheet index out of range: {sheet}")));
+        }
+        self.active_sheet = sheet;
+        Ok(())
+    }
+
+    fn active_cell(&self) -> (u32, u32) {
+        self.active_cell
+    }
+
+    fn set_active_cell(&mut self, row: u32, col: u32) -> Result<(), VbaError> {
+        if row == 0 || col == 0 {
+            return Err(VbaError::Runtime("ActiveCell is 1-based".to_string()));
+        }
+        self.active_cell = (row, col);
+        Ok(())
+    }
+
+    fn get_cell_value(&self, sheet: usize, row: u32, col: u32) -> Result<VbaValue, VbaError> {
+        let sh = self
+            .sheets
+            .get(sheet)
+            .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
+        Ok(sh
+            .cells
+            .get(&(row, col))
+            .map(|c| c.value.clone())
+            .unwrap_or(VbaValue::Empty))
+    }
+
+    fn set_cell_value(
+        &mut self,
+        sheet: usize,
+        row: u32,
+        col: u32,
+        value: VbaValue,
+    ) -> Result<(), VbaError> {
+        let sh = self
+            .sheets
+            .get_mut(sheet)
+            .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
+        let cell = sh.cells.entry((row, col)).or_default();
+        cell.value = value;
+        cell.formula = None;
+        Ok(())
+    }
+
+    fn get_cell_formula(&self, sheet: usize, row: u32, col: u32) -> Result<Option<String>, VbaError> {
+        let sh = self
+            .sheets
+            .get(sheet)
+            .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
+        Ok(sh.cells.get(&(row, col)).and_then(|c| c.formula.clone()))
+    }
+
+    fn set_cell_formula(
+        &mut self,
+        sheet: usize,
+        row: u32,
+        col: u32,
+        formula: String,
+    ) -> Result<(), VbaError> {
+        let sh = self
+            .sheets
+            .get_mut(sheet)
+            .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
+        let cell = sh.cells.entry((row, col)).or_default();
+        cell.value = VbaValue::Empty;
+        cell.formula = Some(formula);
+        Ok(())
+    }
+
+    fn clear_cell_contents(&mut self, sheet: usize, row: u32, col: u32) -> Result<(), VbaError> {
+        let sh = self
+            .sheets
+            .get_mut(sheet)
+            .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
+        if let Some(cell) = sh.cells.get_mut(&(row, col)) {
+            cell.value = VbaValue::Empty;
+            cell.formula = None;
+            if cell.format.is_none() {
+                sh.cells.remove(&(row, col));
+            }
+        }
+        Ok(())
+    }
+
+    fn log(&mut self, message: String) {
+        self.logs.push(message);
+    }
+}
+
+fn json_value_to_vba(value: Option<&serde_json::Value>) -> VbaValue {
+    match value {
+        None | Some(serde_json::Value::Null) => VbaValue::Empty,
+        Some(serde_json::Value::Bool(b)) => VbaValue::Boolean(*b),
+        Some(serde_json::Value::Number(n)) => VbaValue::Double(n.as_f64().unwrap_or(0.0)),
+        Some(serde_json::Value::String(s)) => VbaValue::String(s.clone()),
+        Some(other) => VbaValue::String(other.to_string()),
+    }
+}
+
+fn vba_value_to_json(value: &VbaValue) -> Option<serde_json::Value> {
+    match value {
+        VbaValue::Empty | VbaValue::Null => None,
+        VbaValue::Boolean(b) => Some(serde_json::Value::Bool(*b)),
+        VbaValue::Double(n) => Some(serde_json::Value::Number(
+            serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
+        )),
+        VbaValue::String(s) => Some(serde_json::Value::String(s.clone())),
+        other => Some(serde_json::Value::String(other.to_string_lossy())),
+    }
+}
+
+fn read_all_input(input: &Option<PathBuf>) -> Result<Vec<u8>, String> {
+    if let Some(path) = input {
+        std::fs::read(path).map_err(|e| format!("Failed to read {}: {e}", path.display()))
+    } else {
+        let mut buf = Vec::new();
+        std::io::stdin()
+            .read_to_end(&mut buf)
+            .map_err(|e| format!("Failed to read stdin: {e}"))?;
+        Ok(buf)
+    }
+}
+
+fn detect_format(bytes: &[u8], hint: &str) -> Result<InputFormat, String> {
+    match hint {
+        "auto" => {
+            if bytes.starts_with(b"PK") {
+                Ok(InputFormat::Xlsm)
+            } else {
+                Ok(InputFormat::Json)
+            }
+        }
+        "json" => Ok(InputFormat::Json),
+        "xlsm" => Ok(InputFormat::Xlsm),
+        other => Err(format!("Unknown format: {other} (expected auto|json|xlsm)")),
+    }
+}
+
+enum InputFormat {
+    Json,
+    Xlsm,
+}
+
+fn parse_oracle_workbook_json(bytes: &[u8]) -> Result<OracleWorkbook, String> {
+    serde_json::from_slice(bytes).map_err(|e| format!("Failed to parse oracle workbook JSON: {e}"))
+}
+
+fn extract_from_xlsm(bytes: &[u8]) -> Result<(OracleWorkbook, Vec<ProcedureSummary>), String> {
+    let cursor = std::io::Cursor::new(bytes);
+    let mut zip = ZipArchive::new(cursor).map_err(|e| format!("Invalid XLSM zip: {e}"))?;
+
+    let sheet_names = read_sheet_names_from_workbook_xml(&mut zip).unwrap_or_else(|| vec!["Sheet1".to_string()]);
+    let vba_modules = read_vba_modules_from_xlsm(&mut zip)?;
+
+    let workbook = OracleWorkbook {
+        schema_version: 1,
+        active_sheet: sheet_names.get(0).cloned(),
+        sheets: sheet_names
+            .into_iter()
+            .map(|name| OracleSheet {
+                name,
+                cells: BTreeMap::new(),
+            })
+            .collect(),
+        vba_modules: vba_modules.clone(),
+    };
+
+    let procedures = list_procedures(&vba_modules)?;
+    Ok((workbook, procedures))
+}
+
+fn read_vba_modules_from_xlsm(zip: &mut ZipArchive<std::io::Cursor<&[u8]>>) -> Result<Vec<VbaModule>, String> {
+    let mut vba_project_bin = zip
+        .by_name("xl/vbaProject.bin")
+        .map_err(|e| format!("Missing xl/vbaProject.bin: {e}"))?;
+    let mut buf = Vec::new();
+    vba_project_bin
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("Failed to read vbaProject.bin: {e}"))?;
+
+    let project = formula_vba::VBAProject::parse(&buf).map_err(|e| format!("Failed to parse vbaProject.bin: {e}"))?;
+    Ok(project
+        .modules
+        .into_iter()
+        .map(|m| VbaModule { name: m.name, code: m.code })
+        .collect())
+}
+
+fn read_sheet_names_from_workbook_xml(
+    zip: &mut ZipArchive<std::io::Cursor<&[u8]>>,
+) -> Option<Vec<String>> {
+    let mut workbook_xml = zip.by_name("xl/workbook.xml").ok()?;
+    let mut buf = Vec::new();
+    workbook_xml.read_to_end(&mut buf).ok()?;
+
+    let mut reader = XmlReader::from_reader(buf.as_slice());
+    reader.config_mut().trim_text(true);
+    let mut temp = Vec::new();
+
+    let mut names = Vec::new();
+    loop {
+        match reader.read_event_into(&mut temp).ok()? {
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"sheet" => {
+                for attr in e.attributes().flatten() {
+                    if attr.key.as_ref() == b"name" {
+                        if let Ok(val) = attr.unescape_value() {
+                            names.push(val.into_owned());
+                        }
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        temp.clear();
+    }
+
+    if names.is_empty() { None } else { Some(names) }
+}
+
+fn list_procedures(modules: &[VbaModule]) -> Result<Vec<ProcedureSummary>, String> {
+    let combined = modules
+        .iter()
+        .map(|m| m.code.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let program = parse_program(&combined).map_err(|e| e.to_string())?;
+    let mut procedures = program
+        .procedures
+        .values()
+        .map(|p| ProcedureSummary {
+            name: p.name.clone(),
+            kind: format!("{:?}", p.kind).to_ascii_lowercase(),
+        })
+        .collect::<Vec<_>>();
+    procedures.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(procedures)
+}
+
+fn parse_args_json(args: &Option<String>) -> Result<Vec<VbaValue>, String> {
+    let Some(raw) = args else {
+        return Ok(Vec::new());
+    };
+    let json: serde_json::Value = serde_json::from_str(raw).map_err(|e| format!("Invalid --args JSON: {e}"))?;
+    let arr = json.as_array().ok_or_else(|| "--args must be a JSON array".to_string())?;
+    Ok(arr.iter().map(|v| json_value_to_vba(Some(v))).collect())
+}
+
+fn run_macro(workbook: &OracleWorkbook, macro_name: &str, args: &[VbaValue]) -> RunReport {
+    let warnings = Vec::new();
+    let mut error = None;
+    let mut exit_status = 0;
+
+    let modules = workbook.vba_modules.clone();
+    let combined = modules
+        .iter()
+        .map(|m| m.code.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let program = match parse_program(&combined) {
+        Ok(p) => p,
+        Err(e) => {
+            error = Some(e.to_string());
+            exit_status = 1;
+            return RunReport {
+                ok: false,
+                macro_name: macro_name.to_string(),
+                logs: Vec::new(),
+                warnings,
+                error,
+                exit_status,
+                cell_diffs: BTreeMap::new(),
+                workbook_after: workbook.clone(),
+            };
+        }
+    };
+
+    let runtime = VbaRuntime::new(program);
+
+    let before_exec = match ExecutionWorkbook::from_oracle_workbook(workbook) {
+        Ok(w) => w,
+        Err(e) => {
+            error = Some(e.to_string());
+            exit_status = 1;
+            return RunReport {
+                ok: false,
+                macro_name: macro_name.to_string(),
+                logs: Vec::new(),
+                warnings,
+                error,
+                exit_status,
+                cell_diffs: BTreeMap::new(),
+                workbook_after: workbook.clone(),
+            };
+        }
+    };
+
+    let mut after_exec = before_exec.clone();
+    let exec_result: Result<ExecutionResult, VbaError> = runtime.execute(&mut after_exec, macro_name, args);
+    let logs = after_exec.logs.clone();
+
+    let ok = match exec_result {
+        Ok(_) => true,
+        Err(e) => {
+            error = Some(e.to_string());
+            exit_status = 1;
+            false
+        }
+    };
+
+    let cell_diffs = diff_execution_workbooks(&before_exec, &after_exec);
+    let workbook_after = after_exec.to_oracle_workbook(modules);
+
+    RunReport {
+        ok,
+        macro_name: macro_name.to_string(),
+        logs,
+        warnings,
+        error,
+        exit_status,
+        cell_diffs,
+        workbook_after,
+    }
+}
+
+fn diff_execution_workbooks(
+    before: &ExecutionWorkbook,
+    after: &ExecutionWorkbook,
+) -> BTreeMap<String, BTreeMap<String, OracleCellDiff>> {
+    let before_snap = before.snapshot();
+    let after_snap = after.snapshot();
+
+    let mut out = BTreeMap::new();
+    let sheet_names: BTreeSet<String> = before_snap
+        .keys()
+        .chain(after_snap.keys())
+        .cloned()
+        .collect();
+
+    for sheet_name in sheet_names {
+        let before_cells = before_snap.get(&sheet_name).cloned().unwrap_or_default();
+        let after_cells = after_snap.get(&sheet_name).cloned().unwrap_or_default();
+        let addr_set: BTreeSet<String> = before_cells
+            .keys()
+            .chain(after_cells.keys())
+            .cloned()
+            .collect();
+
+        let mut sheet_diffs: BTreeMap<String, OracleCellDiff> = BTreeMap::new();
+        for addr in addr_set {
+            let before_cell = before_cells.get(&addr).cloned().unwrap_or(OracleCellSnapshot {
+                value: None,
+                formula: None,
+                format: None,
+            });
+            let after_cell = after_cells.get(&addr).cloned().unwrap_or(OracleCellSnapshot {
+                value: None,
+                formula: None,
+                format: None,
+            });
+
+            if before_cell.value == after_cell.value
+                && before_cell.formula == after_cell.formula
+                && before_cell.format == after_cell.format
+            {
+                continue;
+            }
+
+            sheet_diffs.insert(
+                addr,
+                OracleCellDiff {
+                    before: before_cell,
+                    after: after_cell,
+                },
+            );
+        }
+
+        if !sheet_diffs.is_empty() {
+            out.insert(sheet_name, sheet_diffs);
+        }
+    }
+
+    out
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Command::Run(args) => {
+            let bytes = match read_all_input(&args.input) {
+                Ok(b) => b,
+                Err(e) => {
+                    let report = RunReport {
+                        ok: false,
+                        macro_name: args.macro_name,
+                        logs: Vec::new(),
+                        warnings: Vec::new(),
+                        error: Some(e),
+                        exit_status: 1,
+                        cell_diffs: BTreeMap::new(),
+                        workbook_after: OracleWorkbook {
+                            schema_version: 1,
+                            active_sheet: None,
+                            sheets: Vec::new(),
+                            vba_modules: Vec::new(),
+                        },
+                    };
+                    println!("{}", serde_json::to_string(&report).unwrap());
+                    std::process::exit(1);
+                }
+            };
+
+            let format = match detect_format(&bytes, &args.format) {
+                Ok(f) => f,
+                Err(e) => {
+                    let report = RunReport {
+                        ok: false,
+                        macro_name: args.macro_name,
+                        logs: Vec::new(),
+                        warnings: Vec::new(),
+                        error: Some(e),
+                        exit_status: 1,
+                        cell_diffs: BTreeMap::new(),
+                        workbook_after: OracleWorkbook {
+                            schema_version: 1,
+                            active_sheet: None,
+                            sheets: Vec::new(),
+                            vba_modules: Vec::new(),
+                        },
+                    };
+                    println!("{}", serde_json::to_string(&report).unwrap());
+                    std::process::exit(1);
+                }
+            };
+
+            let (workbook, procedures) = match format {
+                InputFormat::Json => match parse_oracle_workbook_json(&bytes) {
+                    Ok(wb) => {
+                        let procedures = list_procedures(&wb.vba_modules).unwrap_or_default();
+                        (wb, procedures)
+                    }
+                    Err(e) => {
+                        let report = RunReport {
+                            ok: false,
+                            macro_name: args.macro_name,
+                            logs: Vec::new(),
+                            warnings: Vec::new(),
+                            error: Some(e),
+                            exit_status: 1,
+                            cell_diffs: BTreeMap::new(),
+                            workbook_after: OracleWorkbook {
+                                schema_version: 1,
+                                active_sheet: None,
+                                sheets: Vec::new(),
+                                vba_modules: Vec::new(),
+                            },
+                        };
+                        println!("{}", serde_json::to_string(&report).unwrap());
+                        std::process::exit(1);
+                    }
+                },
+                InputFormat::Xlsm => match extract_from_xlsm(&bytes) {
+                    Ok((wb, procs)) => (wb, procs),
+                    Err(e) => {
+                        let report = RunReport {
+                            ok: false,
+                            macro_name: args.macro_name,
+                            logs: Vec::new(),
+                            warnings: Vec::new(),
+                            error: Some(e),
+                            exit_status: 1,
+                            cell_diffs: BTreeMap::new(),
+                            workbook_after: OracleWorkbook {
+                                schema_version: 1,
+                                active_sheet: None,
+                                sheets: Vec::new(),
+                                vba_modules: Vec::new(),
+                            },
+                        };
+                        println!("{}", serde_json::to_string(&report).unwrap());
+                        std::process::exit(1);
+                    }
+                },
+            };
+
+            let args_values = match parse_args_json(&args.args) {
+                Ok(v) => v,
+                Err(e) => {
+                    let report = RunReport {
+                        ok: false,
+                        macro_name: args.macro_name,
+                        logs: Vec::new(),
+                        warnings: Vec::new(),
+                        error: Some(e),
+                        exit_status: 1,
+                        cell_diffs: BTreeMap::new(),
+                        workbook_after: workbook,
+                    };
+                    println!("{}", serde_json::to_string(&report).unwrap());
+                    std::process::exit(1);
+                }
+            };
+
+            // Warn if macro isn't even in the parsed program; this helps humans, but we keep running
+            // so we still get a deterministic error from the runtime.
+            if !procedures.iter().any(|p| p.name.eq_ignore_ascii_case(&args.macro_name)) {
+                // Don't treat as hard error; VBA is case-insensitive and runtime error message is good enough.
+            }
+
+            let report = run_macro(&workbook, &args.macro_name, &args_values);
+            println!("{}", serde_json::to_string(&report).unwrap());
+            if !report.ok {
+                std::process::exit(report.exit_status);
+            }
+        }
+        Command::Extract(args) => {
+            let bytes = match read_all_input(&args.input) {
+                Ok(b) => b,
+                Err(e) => {
+                    let report = ExtractReport {
+                        ok: false,
+                        error: Some(e),
+                        workbook: OracleWorkbook {
+                            schema_version: 1,
+                            active_sheet: None,
+                            sheets: Vec::new(),
+                            vba_modules: Vec::new(),
+                        },
+                        procedures: Vec::new(),
+                    };
+                    println!("{}", serde_json::to_string(&report).unwrap());
+                    std::process::exit(1);
+                }
+            };
+
+            let format = match detect_format(&bytes, &args.format) {
+                Ok(f) => f,
+                Err(e) => {
+                    let report = ExtractReport {
+                        ok: false,
+                        error: Some(e),
+                        workbook: OracleWorkbook {
+                            schema_version: 1,
+                            active_sheet: None,
+                            sheets: Vec::new(),
+                            vba_modules: Vec::new(),
+                        },
+                        procedures: Vec::new(),
+                    };
+                    println!("{}", serde_json::to_string(&report).unwrap());
+                    std::process::exit(1);
+                }
+            };
+
+            let report = match format {
+                InputFormat::Json => match parse_oracle_workbook_json(&bytes) {
+                    Ok(workbook) => match list_procedures(&workbook.vba_modules) {
+                        Ok(procedures) => ExtractReport {
+                            ok: true,
+                            error: None,
+                            workbook,
+                            procedures,
+                        },
+                        Err(e) => ExtractReport {
+                            ok: false,
+                            error: Some(e),
+                            workbook,
+                            procedures: Vec::new(),
+                        },
+                    },
+                    Err(e) => ExtractReport {
+                        ok: false,
+                        error: Some(e),
+                        workbook: OracleWorkbook {
+                            schema_version: 1,
+                            active_sheet: None,
+                            sheets: Vec::new(),
+                            vba_modules: Vec::new(),
+                        },
+                        procedures: Vec::new(),
+                    },
+                },
+                InputFormat::Xlsm => match extract_from_xlsm(&bytes) {
+                    Ok((workbook, procedures)) => ExtractReport {
+                        ok: true,
+                        error: None,
+                        workbook,
+                        procedures,
+                    },
+                    Err(e) => ExtractReport {
+                        ok: false,
+                        error: Some(e),
+                        workbook: OracleWorkbook {
+                            schema_version: 1,
+                            active_sheet: None,
+                            sheets: Vec::new(),
+                            vba_modules: Vec::new(),
+                        },
+                        procedures: Vec::new(),
+                    },
+                },
+            };
+
+            println!("{}", serde_json::to_string(&report).unwrap());
+            if !report.ok {
+                std::process::exit(1);
+            }
+        }
+    }
+}

@@ -1,0 +1,217 @@
+import { execFile, spawn } from "node:child_process";
+import { access } from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+
+import { Workbook } from "../workbook.js";
+import { executeVbaModuleSub } from "./execute.js";
+
+const execFileAsync = promisify(execFile);
+
+function spawnWithInput(command, args, { cwd, input, maxBuffer = 10 * 1024 * 1024 } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const stdoutChunks = [];
+    const stderrChunks = [];
+    let stdoutLen = 0;
+    let stderrLen = 0;
+
+    child.stdout.on("data", (chunk) => {
+      stdoutChunks.push(chunk);
+      stdoutLen += chunk.length;
+      if (stdoutLen > maxBuffer) {
+        child.kill();
+        reject(new Error(`Process stdout exceeded maxBuffer (${maxBuffer})`));
+      }
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderrChunks.push(chunk);
+      stderrLen += chunk.length;
+      if (stderrLen > maxBuffer) {
+        child.kill();
+        reject(new Error(`Process stderr exceeded maxBuffer (${maxBuffer})`));
+      }
+    });
+
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({
+        code: code ?? 0,
+        stdout: Buffer.concat(stdoutChunks),
+        stderr: Buffer.concat(stderrChunks),
+      });
+    });
+
+    if (input !== undefined) {
+      child.stdin.end(input);
+    } else {
+      child.stdin.end();
+    }
+  });
+}
+
+function repoRootFromHere() {
+  // packages/vba-migrate/src/vba/oracle.js -> repo root
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, "../../../../");
+}
+
+/**
+ * @typedef {Object} VbaOracleRunRequest
+ * @property {Buffer|Uint8Array|string} workbookBytes
+ * @property {string} macroName
+ * @property {any[]} [inputs]
+ */
+
+/**
+ * @typedef {Object} VbaOracleRunResult
+ * @property {boolean} ok
+ * @property {Buffer} workbookAfter
+ * @property {string[]} logs
+ * @property {string[]} errors
+ * @property {any} [report] - Raw JSON report emitted by the oracle.
+ */
+
+/**
+ * Mock oracle for unit tests. It runs a *very* small JS VBA subset (same as the
+ * old validator did) so tests can be deterministic without requiring Rust.
+ */
+export class MockOracle {
+  /**
+   * @param {object} [options]
+   * @param {(req: VbaOracleRunRequest) => Promise<VbaOracleRunResult>|VbaOracleRunResult} [options.run]
+   */
+  constructor(options = {}) {
+    this.run = options.run ?? null;
+  }
+
+  /**
+   * @param {VbaOracleRunRequest} request
+   * @returns {Promise<VbaOracleRunResult>}
+   */
+  async runMacro({ workbookBytes, macroName }) {
+    if (this.run) {
+      return await this.run({ workbookBytes, macroName });
+    }
+
+    const workbook = Workbook.fromBytes(workbookBytes);
+    const payload = JSON.parse(Buffer.from(workbookBytes).toString("utf8"));
+    const module = payload?.vbaModules?.[0];
+    if (!module?.code) {
+      throw new Error("MockOracle requires workbookBytes to include vbaModules[0].code");
+    }
+
+    const before = workbook.clone();
+    executeVbaModuleSub({ workbook, module, entryPoint: macroName });
+
+    const workbookAfter = workbook.toBytes({ vbaModules: payload?.vbaModules ?? [] });
+    return {
+      ok: true,
+      workbookAfter,
+      logs: [],
+      errors: [],
+      report: {
+        ok: true,
+        macroName,
+        // Provide the same workbook schema as Rust oracle so validator can run.
+        workbookAfter: JSON.parse(workbookAfter.toString("utf8")),
+      },
+    };
+  }
+}
+
+let buildPromise = null;
+
+async function ensureBuilt({ repoRoot, binPath }) {
+  if (buildPromise) return buildPromise;
+  buildPromise = (async () => {
+    try {
+      await access(binPath);
+      return;
+    } catch {
+      // Build the oracle CLI once. Subsequent invocations will use the binary directly.
+      await execFileAsync("cargo", ["build", "-q", "-p", "formula-vba-oracle-cli"], { cwd: repoRoot });
+    }
+  })();
+  return buildPromise;
+}
+
+/**
+ * Oracle implementation that shells out to the Rust `formula-vba-oracle-cli`
+ * binary (built from the monorepo workspace).
+ */
+export class RustCliOracle {
+  /**
+   * @param {object} [options]
+   * @param {string} [options.binPath] - Path to an existing oracle binary. If omitted, the oracle is built via Cargo.
+   * @param {string} [options.repoRoot] - Cargo workspace root. Defaults to monorepo root.
+   */
+  constructor(options = {}) {
+    this.repoRoot = options.repoRoot ?? repoRootFromHere();
+    const defaultBin = path.join(
+      this.repoRoot,
+      "target",
+      "debug",
+      process.platform === "win32" ? "formula-vba-oracle-cli.exe" : "formula-vba-oracle-cli",
+    );
+    this.binPath = options.binPath ?? process.env.VBA_ORACLE_BIN ?? defaultBin;
+  }
+
+  /**
+   * @param {VbaOracleRunRequest} request
+   * @returns {Promise<VbaOracleRunResult>}
+   */
+  async runMacro({ workbookBytes, macroName, inputs }) {
+    const bytes = Buffer.isBuffer(workbookBytes) ? workbookBytes : Buffer.from(workbookBytes);
+    await ensureBuilt({ repoRoot: this.repoRoot, binPath: this.binPath });
+
+    const args = ["run", "--macro", macroName];
+    if (inputs && inputs.length) {
+      args.push("--args", JSON.stringify(inputs));
+    }
+
+    const result = await spawnWithInput(this.binPath, args, { cwd: this.repoRoot, input: bytes });
+    const stdout = result.stdout;
+    const stderr = result.stderr;
+
+    const text = stdout.toString("utf8").trim();
+    const report = JSON.parse(text || "{}");
+    const workbookAfter = Buffer.from(JSON.stringify(report.workbookAfter ?? report.workbook_after ?? {}), "utf8");
+
+    const ok = Boolean(report.ok);
+    const logs = Array.isArray(report.logs) ? report.logs : [];
+    const errors = report.error ? [String(report.error)] : [];
+    if (result.code !== 0 && errors.length === 0) {
+      errors.push(stderr.toString("utf8").trim() || `Rust CLI exited with code ${result.code}`);
+    }
+
+    return { ok, workbookAfter, logs, errors, report };
+  }
+
+  /**
+   * Extract macros + workbook snapshot from an `.xlsm` (or oracle JSON payload).
+   * @param {{workbookBytes: Buffer|Uint8Array|string}} request
+   * @returns {Promise<{ok: boolean, workbook: any, workbookBytes: Buffer, procedures: any[], error?: string, report: any}>}
+   */
+  async extract({ workbookBytes }) {
+    const bytes = Buffer.isBuffer(workbookBytes) ? workbookBytes : Buffer.from(workbookBytes);
+    await ensureBuilt({ repoRoot: this.repoRoot, binPath: this.binPath });
+
+    const result = await spawnWithInput(this.binPath, ["extract"], { cwd: this.repoRoot, input: bytes });
+    const stdout = result.stdout;
+
+    const text = stdout.toString("utf8").trim();
+    const report = JSON.parse(text || "{}");
+    const workbook = report.workbook ?? {};
+    return {
+      ok: Boolean(report.ok),
+      workbook,
+      workbookBytes: Buffer.from(JSON.stringify(workbook), "utf8"),
+      procedures: Array.isArray(report.procedures) ? report.procedures : [],
+      error: report.error ? String(report.error) : undefined,
+      report,
+    };
+  }
+}

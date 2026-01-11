@@ -5,9 +5,10 @@ AI-assisted VBA migration tooling (VBA → Python/TypeScript) with:
 - **Analyzer**: identifies object model usage (`Range`/`Cells`/`Worksheets`), external references, and risky/unsupported constructs.
 - **Converter**: uses an injected LLM client to produce Python (Formula Python API) and TypeScript (Formula scripting API) output.
 - **Deterministic post-processing**: strips markdown fences, normalizes common VBA-ish artifacts (`.Value`, `.Formula`, `sheet.Range(...)`), and runs a compile/syntax check.
-- **Validator**: executes a small supported subset of VBA and the converted script against the same in-memory workbook and reports cell diffs + mismatches.
+- **Validator**: runs the original macro via a **pluggable execution oracle** (default: Rust CLI powered by `crates/formula-vba-runtime`), runs the converted script, and reports actionable workbook diffs + mismatches.
+- **Batch CLI**: `vba-migrate --dir <path>` scans a directory of `.xlsm` (or JSON fixtures), converts, validates, and emits a summary report.
 
-This package is intentionally minimal: it is designed to be a testable pipeline that can later be wired into the real VBA parser/executor and scripting runtimes.
+This package is intentionally minimal: it is designed to be a testable pipeline that can later be wired into the full Excel object model and scripting runtimes.
 
 ## LLM integration
 

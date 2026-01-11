@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "activeSheet": "Sheet1",
+  "sheets": [
+    {
+      "name": "Sheet1",
+      "cells": {}
+    }
+  ],
+  "vbaModules": [
+    {
+      "name": "Module1",
+      "code": "Sub Main()\n  Range(\"A1\").Value = 1\n  Cells(1, 2).Value = 2\n  Range(\"A3\").Formula = \"=A1+B1\"\nEnd Sub\n"
+    }
+  ]
+}
+
