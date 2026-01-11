@@ -378,7 +378,10 @@ export function bindYjsToDocumentController(options) {
           : null;
       nextByKey.set(canonicalKey, next);
 
-      if (sameNormalizedCell(prev, next)) continue;
+      // When (re)binding, `cache` starts empty but the DocumentController may
+      // already have local state (e.g. a masked view before keys are granted).
+      // Only use the cache short-circuit when we have a cached previous value.
+      if (prev && sameNormalizedCell(prev, next)) continue;
 
       const after = { value: displayValue, formula: displayFormula, styleId };
       if (
@@ -529,8 +532,6 @@ export function bindYjsToDocumentController(options) {
       const rawKeys = yjsKeysByCell.get(canonicalKey);
       const targets = rawKeys && rawKeys.size > 0 ? Array.from(rawKeys) : [canonicalKey];
 
-      const hasContent = value != null || formula != null;
-
       // Once a cell is encrypted in Yjs, we must keep it encrypted to avoid leaking
       // new plaintext writes into the shared CRDT.
       let existingEnc = false;
@@ -552,7 +553,7 @@ export function bindYjsToDocumentController(options) {
           : key != null
         : false;
 
-      const wantsEncryption = hasContent && (existingEnc || shouldEncryptByConfig);
+      const wantsEncryption = existingEnc || shouldEncryptByConfig;
 
       let encryptedPayload = null;
       if (wantsEncryption) {
@@ -587,7 +588,7 @@ export function bindYjsToDocumentController(options) {
       for (const item of prepared) {
         const { canonicalKey, targets, value, formula, styleId, format, encryptedPayload, formatKey } = item;
 
-        if (value == null && formula == null && styleId === 0) {
+        if (value == null && formula == null && styleId === 0 && !encryptedPayload) {
           for (const rawKey of targets) {
             cells.delete(rawKey);
             untrackRawKey(canonicalKey, rawKey);

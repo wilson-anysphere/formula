@@ -111,5 +111,39 @@ test("Yjs↔DocumentController binder encrypts protected cell contents and masks
 
   await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value === "top-secret", 10_000);
   assert.equal(controllerB.getCell("Sheet1", "A1").value, "top-secret");
-});
 
+  // Clearing the cell should keep it encrypted so unauthorized clients can't
+  // infer whether the cell is empty.
+  controllerA.clearCell("Sheet1", "A1");
+
+  await waitForCondition(() => controllerA.getCell("Sheet1", "A1").value == null, 10_000);
+  assert.equal(controllerA.getCell("Sheet1", "A1").value, null);
+
+  await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value == null, 10_000);
+  assert.equal(controllerB.getCell("Sheet1", "A1").value, null);
+
+  // Rebind without a key: should still be masked (enc marker remains).
+  binderB.destroy();
+  binderB = bindYjsToDocumentController({
+    ydoc: docB,
+    documentController: controllerB,
+    defaultSheetId: "Sheet1",
+    userId: "u-b",
+  });
+
+  await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value === "###", 10_000);
+  assert.equal(controllerB.getCell("Sheet1", "A1").value, "###");
+
+  // Rebind with the key again: should decrypt back to an empty cell.
+  binderB.destroy();
+  binderB = bindYjsToDocumentController({
+    ydoc: docB,
+    documentController: controllerB,
+    defaultSheetId: "Sheet1",
+    userId: "u-b",
+    encryption: { keyForCell: keyForA1 },
+  });
+
+  await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value == null, 10_000);
+  assert.equal(controllerB.getCell("Sheet1", "A1").value, null);
+});
