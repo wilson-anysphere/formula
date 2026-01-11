@@ -5,7 +5,34 @@
  * keep the surface area small and deterministic for unit testing.
  */
 
-import { createAuditEvent } from "../../../audit-core/index.js";
+let auditEventSeq = 0;
+
+function createAuditEvent(input) {
+  auditEventSeq += 1;
+  const eventInput = input && typeof input === "object" ? input : {};
+  const id =
+    typeof eventInput.id === "string" && eventInput.id.length > 0 ? eventInput.id : `audit_${Date.now()}_${auditEventSeq}`;
+  const timestamp =
+    typeof eventInput.timestamp === "string" && eventInput.timestamp.length > 0
+      ? eventInput.timestamp
+      : new Date().toISOString();
+
+  // Keep the event shape compatible with `@formula/audit-core` without depending
+  // on Node-only modules (the desktop UI runs in a browser runtime for e2e).
+  return {
+    schemaVersion: 1,
+    id,
+    timestamp,
+    eventType: eventInput.eventType,
+    actor: eventInput.actor,
+    context: eventInput.context,
+    resource: eventInput.resource,
+    success: Boolean(eventInput.success),
+    error: eventInput.error,
+    details: eventInput.details ?? {},
+    correlation: eventInput.correlation
+  };
+}
 
 export class InMemoryAuditLogger {
   constructor() {

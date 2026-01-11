@@ -14,6 +14,7 @@ async function dragFromTo(page: import("@playwright/test").Page, from: { x: numb
 test.describe("grid autofill (fill handle)", () => {
   test("fills series + shifts formulas", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;
@@ -89,4 +90,3 @@ test.describe("grid autofill (fill handle)", () => {
     expect(b3Value).toBe("6");
   });
 });
-
