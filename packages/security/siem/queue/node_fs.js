@@ -7,6 +7,7 @@ import {
   rm,
   stat,
   unlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
@@ -61,10 +62,20 @@ async function syncDir(dirPath) {
 
 async function touchFile(filePath) {
   try {
-    // Overwrite contents to bump mtime. This is intentionally lightweight; the lock file is advisory.
-    await writeFile(filePath, JSON.stringify({ pid: process.pid, updatedAt: Date.now() }), "utf8");
+    const now = new Date();
+    await utimes(filePath, now, now);
   } catch (error) {
     if (error?.code === "ENOENT") return;
+    // If the filesystem does not support utimes, fall back to rewriting the file to bump mtime.
+    if (error?.code === "EINVAL" || error?.code === "EPERM" || error?.code === "EACCES") {
+      try {
+        await writeFile(filePath, JSON.stringify({ pid: process.pid, updatedAt: Date.now() }), "utf8");
+      } catch (fallbackError) {
+        if (fallbackError?.code === "ENOENT") return;
+        throw fallbackError;
+      }
+      return;
+    }
     throw error;
   }
 }
