@@ -17,6 +17,7 @@ use formula_model::{CellId, CellRef, Range, Table};
 use rayon::prelude::*;
 use std::cmp::max;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use thiserror::Error;
 
 pub type SheetId = usize;
@@ -208,6 +209,7 @@ struct SpillState {
 
 pub struct Engine {
     workbook: Workbook,
+    external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
     name_dependents: HashMap<String, HashSet<CellKey>>,
     cell_name_refs: HashMap<CellKey, HashSet<String>>,
     /// Optimized dependency graph used for incremental recalculation ordering.
@@ -231,6 +233,7 @@ impl Engine {
     pub fn new() -> Self {
         Self {
             workbook: Workbook::default(),
+            external_value_provider: None,
             name_dependents: HashMap::new(),
             cell_name_refs: HashMap::new(),
             calc_graph: CalcGraph::new(),
@@ -263,6 +266,10 @@ impl Engine {
 
     pub fn set_calc_settings(&mut self, settings: CalcSettings) {
         self.calc_settings = settings;
+    }
+
+    pub fn set_external_value_provider(&mut self, provider: Option<Arc<dyn ExternalValueProvider>>) {
+        self.external_value_provider = provider;
     }
 
     pub fn has_dirty_cells(&self) -> bool {
@@ -905,7 +912,11 @@ impl Engine {
 
             self.circular_references.clear();
 
-            let mut snapshot = Snapshot::from_workbook(&self.workbook, &self.spills);
+            let mut snapshot = Snapshot::from_workbook(
+                &self.workbook,
+                &self.spills,
+                self.external_value_provider.clone(),
+            );
             let mut spill_dirty_roots: Vec<CellId> = Vec::new();
 
             for level in levels {
@@ -1015,7 +1026,11 @@ impl Engine {
         let sccs = iterative::strongly_connected_components(&impacted, &edges);
         let order = iterative::topo_sort_sccs(&sccs, &edges);
 
-        let mut snapshot = Snapshot::from_workbook(&self.workbook, &self.spills);
+        let mut snapshot = Snapshot::from_workbook(
+            &self.workbook,
+            &self.spills,
+            self.external_value_provider.clone(),
+        );
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
 
         for scc_idx in order {
@@ -1552,7 +1567,11 @@ impl Engine {
             )));
         };
 
-        let snapshot = Snapshot::from_workbook(&self.workbook, &self.spills);
+        let snapshot = Snapshot::from_workbook(
+            &self.workbook,
+            &self.spills,
+            self.external_value_provider.clone(),
+        );
         let ctx = crate::eval::EvalContext {
             current_sheet: sheet_id,
             current_cell: addr,
@@ -2106,18 +2125,24 @@ fn collect_transitive(map: &HashMap<CellKey, HashSet<CellKey>>, start: CellKey) 
     out
 }
 
-#[derive(Debug)]
 struct Snapshot {
     sheets: HashSet<SheetId>,
+    sheet_names_by_id: Vec<String>,
     values: HashMap<CellKey, Value>,
     tables: Vec<Vec<Table>>,
     workbook_names: HashMap<String, crate::eval::ResolvedName>,
     sheet_names: Vec<HashMap<String, crate::eval::ResolvedName>>,
+    external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
 }
 
 impl Snapshot {
-    fn from_workbook(workbook: &Workbook, spills: &SpillState) -> Self {
+    fn from_workbook(
+        workbook: &Workbook,
+        spills: &SpillState,
+        external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
+    ) -> Self {
         let sheets: HashSet<SheetId> = (0..workbook.sheets.len()).collect();
+        let sheet_names_by_id = workbook.sheet_names.clone();
         let mut values = HashMap::new();
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
             for (addr, cell) in &sheet.cells {
@@ -2176,10 +2201,12 @@ impl Snapshot {
 
         Self {
             sheets,
+            sheet_names_by_id,
             values,
             tables,
             workbook_names,
             sheet_names,
+            external_value_provider,
         }
     }
 }
@@ -2190,10 +2217,19 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value {
-        self.values
-            .get(&CellKey { sheet: sheet_id, addr })
-            .cloned()
-            .unwrap_or(Value::Blank)
+        if let Some(v) = self.values.get(&CellKey { sheet: sheet_id, addr }) {
+            return v.clone();
+        }
+
+        if let Some(provider) = &self.external_value_provider {
+            if let Some(sheet_name) = self.sheet_names_by_id.get(sheet_id) {
+                if let Some(v) = provider.get(sheet_name, addr) {
+                    return v;
+                }
+            }
+        }
+
+        Value::Blank
     }
 
     fn resolve_structured_ref(
@@ -2225,6 +2261,10 @@ fn resolve_defined_name<'a>(
         .get(sheet_id)
         .and_then(|s| s.names.get(name_key))
         .or_else(|| workbook.names.get(name_key))
+}
+
+pub trait ExternalValueProvider: Send + Sync {
+    fn get(&self, sheet: &str, addr: CellAddr) -> Option<Value>;
 }
 
 fn analyze_expr(

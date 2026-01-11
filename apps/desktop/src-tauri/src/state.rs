@@ -1,5 +1,6 @@
 use crate::file_io::Workbook;
-use formula_engine::eval::parse_a1;
+use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
+use formula_engine::eval::{parse_a1, CellAddr};
 use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams, GoalSeekResult};
 use formula_engine::what_if::monte_carlo::{MonteCarloEngine, SimulationConfig, SimulationResult};
 use formula_engine::what_if::scenario_manager::{
@@ -8,11 +9,15 @@ use formula_engine::what_if::scenario_manager::{
 use formula_engine::what_if::{
     CellRef as WhatIfCellRef, CellValue as WhatIfCellValue, EngineWhatIfModel, WhatIfModel,
 };
-use formula_engine::{Engine as FormulaEngine, ErrorKind, RecalcMode, Value as EngineValue};
+use formula_engine::{
+    Engine as FormulaEngine, ErrorKind, ExternalValueProvider, RecalcMode, Value as EngineValue,
+};
 use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
 use serde_json::Value as JsonValue;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppStateError {
@@ -1039,6 +1044,13 @@ impl AppState {
             .as_ref()
             .ok_or(AppStateError::NoWorkbookLoaded)?;
         self.engine = FormulaEngine::new();
+        for sheet in &workbook.sheets {
+            self.engine.ensure_sheet(&sheet.name);
+        }
+        self.engine.set_external_value_provider(
+            ColumnarExternalValueProvider::from_workbook(workbook)
+                .map(|p| -> Arc<dyn ExternalValueProvider> { Arc::new(p) }),
+        );
 
         // Create all sheets up-front so cross-sheet formula references resolve
         // regardless of workbook sheet ordering.
@@ -1267,6 +1279,68 @@ fn apply_snapshot_to_engine(
     let _ = engine.set_cell_value(sheet_name, &addr, engine_value);
 }
 
+struct ColumnarExternalValueProvider {
+    tables: HashMap<String, Arc<ColumnarTable>>,
+}
+
+impl ColumnarExternalValueProvider {
+    fn from_workbook(workbook: &Workbook) -> Option<Self> {
+        let mut tables = HashMap::new();
+        for sheet in &workbook.sheets {
+            if let Some(table) = sheet.columnar.clone() {
+                tables.insert(sheet.name.clone(), table);
+            }
+        }
+        if tables.is_empty() {
+            None
+        } else {
+            Some(Self { tables })
+        }
+    }
+}
+
+impl ExternalValueProvider for ColumnarExternalValueProvider {
+    fn get(&self, sheet: &str, addr: CellAddr) -> Option<EngineValue> {
+        let table = self.tables.get(sheet)?;
+        let row = usize::try_from(addr.row).ok()?;
+        let col = usize::try_from(addr.col).ok()?;
+        if row >= table.row_count() || col >= table.column_count() {
+            return None;
+        }
+
+        let col_type = table
+            .schema()
+            .get(col)
+            .map(|c| c.column_type)
+            .unwrap_or(ColumnarType::String);
+        Some(columnar_to_engine_value(table.get_cell(row, col), col_type))
+    }
+}
+
+fn columnar_to_engine_value(value: ColumnarValue, column_type: ColumnarType) -> EngineValue {
+    match value {
+        ColumnarValue::Null => EngineValue::Blank,
+        ColumnarValue::Number(v) => EngineValue::Number(v),
+        ColumnarValue::Boolean(v) => EngineValue::Bool(v),
+        ColumnarValue::String(v) => EngineValue::Text(v.as_ref().to_string()),
+        ColumnarValue::DateTime(v) => EngineValue::Number(v as f64),
+        ColumnarValue::Currency(v) => match column_type {
+            ColumnarType::Currency { scale } => {
+                let denom = 10f64.powi(scale as i32);
+                EngineValue::Number(v as f64 / denom)
+            }
+            _ => EngineValue::Number(v as f64),
+        },
+        ColumnarValue::Percentage(v) => match column_type {
+            ColumnarType::Percentage { scale } => {
+                let denom = 10f64.powi(scale as i32);
+                EngineValue::Number(v as f64 / denom)
+            }
+            _ => EngineValue::Number(v as f64),
+        },
+    }
+}
+
 fn default_sheet_print_settings(sheet_name: String) -> SheetPrintSettings {
     SheetPrintSettings {
         sheet_name,
@@ -1295,6 +1369,7 @@ mod tests {
     use super::*;
     use crate::file_io::{read_xlsx_blocking, write_xlsx_blocking};
     use formula_engine::what_if::monte_carlo::{Distribution, InputDistribution};
+    use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
 
     #[test]
     fn set_cell_recalculates_dependents() {
@@ -1659,6 +1734,34 @@ mod tests {
 
         let mut state = AppState::new();
         state.load_workbook(workbook);
+        let b1 = state.get_cell(&sheet_id, 0, 1).unwrap();
+        assert_eq!(b1.value, CellScalar::Number(6.0));
+    }
+
+    #[test]
+    fn engine_can_evaluate_formulas_against_columnar_sheet_data() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let table = import_csv_to_columnar_table(
+            std::io::Cursor::new("value\n1\n2\n3\n"),
+            CsvOptions::default(),
+        )
+        .expect("import csv");
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_columnar_table(Arc::new(table));
+
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 1, Cell::from_formula("=SUM(A1:A3)".to_string()));
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
         let b1 = state.get_cell(&sheet_id, 0, 1).unwrap();
         assert_eq!(b1.value, CellScalar::Number(6.0));
     }
