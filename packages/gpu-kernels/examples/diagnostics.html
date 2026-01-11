@@ -30,6 +30,13 @@
         <input id="gpuToggle" type="checkbox" />
         Enable GPU acceleration (WebGPU)
       </label>
+      <label>
+        Precision:
+        <select id="precision">
+          <option value="excel">excel</option>
+          <option value="fast">fast</option>
+        </select>
+      </label>
       <button id="refresh">Refresh</button>
     </div>
     <pre id="output">Loading…</pre>
@@ -39,13 +46,15 @@
 
       const output = document.getElementById("output");
       const toggle = document.getElementById("gpuToggle");
+      const precision = document.getElementById("precision");
       const refresh = document.getElementById("refresh");
 
       async function render() {
         const settings = loadGpuAccelerationSettings();
         toggle.checked = settings.enabled;
+        precision.value = settings.precision ?? "excel";
 
-        const engine = await createKernelEngine({ gpu: { enabled: settings.enabled } });
+        const engine = await createKernelEngine({ precision: settings.precision ?? "excel", gpu: { enabled: settings.enabled } });
         output.textContent = JSON.stringify(engine.diagnostics(), null, 2);
         await engine.dispose();
       }
@@ -54,9 +63,12 @@
         saveGpuAccelerationSettings({ enabled: toggle.checked });
         render();
       });
+      precision.addEventListener("change", () => {
+        saveGpuAccelerationSettings({ precision: precision.value });
+        render();
+      });
       refresh.addEventListener("click", render);
       render();
     </script>
   </body>
 </html>
-
