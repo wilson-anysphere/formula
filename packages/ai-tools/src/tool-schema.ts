@@ -135,10 +135,56 @@ export const ApplyFormulaColumnParamsSchema = z.object({
 
 export type ApplyFormulaColumnParams = z.infer<typeof ApplyFormulaColumnParamsSchema>;
 
-const AggregationSchema = z.preprocess(
-  (value) => (typeof value === "string" ? value.toLowerCase() : value),
-  z.enum(["sum", "count", "average", "max", "min", "product", "countnumbers", "stddev", "stddevp", "var", "varp"])
-);
+/**
+ * Aggregation types for `create_pivot_table`.
+ *
+ * IMPORTANT: These values must stay aligned with the Rust pivot engine's
+ * `formula_pivot::AggregationType` serde representation
+ * (`#[serde(rename_all = "camelCase")]`).
+ */
+export const PivotAggregationValues = [
+  "sum",
+  "count",
+  "average",
+  "min",
+  "max",
+  "product",
+  "countNumbers",
+  "stdDev",
+  "stdDevP",
+  "var",
+  "varP"
+] as const;
+
+export type PivotAggregationType = (typeof PivotAggregationValues)[number];
+
+const PivotAggregationSchema = z.enum(PivotAggregationValues);
+
+const PivotAggregationNormalizationMap: Record<string, PivotAggregationType> = {
+  sum: "sum",
+  count: "count",
+  average: "average",
+  min: "min",
+  max: "max",
+  product: "product",
+  countnumbers: "countNumbers",
+  stddev: "stdDev",
+  stddevp: "stdDevP",
+  var: "var",
+  varp: "varP"
+};
+
+const AggregationSchema = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+
+  // Normalize common spellings/casing to the Rust/serde canonical values above.
+  // Examples:
+  //   "StdDevP" / "stddevp" -> "stdDevP"
+  //   "varp" / "VarP"       -> "varP"
+  //   "countnumbers"        -> "countNumbers"
+  const key = value.trim().replace(/[\s_-]/g, "").toLowerCase();
+  return PivotAggregationNormalizationMap[key] ?? value;
+}, PivotAggregationSchema);
 
 export const CreatePivotTableParamsSchema = z.object({
   source_range: A1RangeSchema,
@@ -360,10 +406,7 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
             type: "object",
             properties: {
               field: { type: "string" },
-              aggregation: {
-                type: "string",
-                enum: ["sum", "count", "average", "max", "min", "product", "countnumbers", "stddev", "stddevp", "var", "varp"]
-              }
+              aggregation: { type: "string", enum: PivotAggregationValues }
             },
             required: ["field", "aggregation"]
           }

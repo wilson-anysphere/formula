@@ -2,7 +2,7 @@ import { ZodError } from "zod";
 import { columnLabelToIndex, formatA1Cell, formatA1Range, parseA1Cell, parseA1Range } from "../spreadsheet/a1.js";
 import type { ChartType, CreateChartResult, CreateChartSpec, SpreadsheetApi } from "../spreadsheet/api.js";
 import type { CellData, CellScalar } from "../spreadsheet/types.js";
-import type { ToolCall, ToolName, UnknownToolCall } from "../tool-schema.js";
+import type { PivotAggregationType, ToolCall, ToolName, UnknownToolCall } from "../tool-schema.js";
 import { TOOL_REGISTRY, validateToolCall } from "../tool-schema.js";
 
 import { DLP_ACTION } from "../../../security/dlp/src/actions.js";
@@ -1201,18 +1201,7 @@ function rangesIntersect(
   return !(a.endRow < b.startRow || a.startRow > b.endRow || a.endCol < b.startCol || a.startCol > b.endCol);
 }
 
-type PivotAggregation =
-  | "sum"
-  | "count"
-  | "average"
-  | "min"
-  | "max"
-  | "product"
-  | "countnumbers"
-  | "stddev"
-  | "stddevp"
-  | "var"
-  | "varp";
+type PivotAggregation = PivotAggregationType;
 
 interface PivotValueSpec {
   field: string;
@@ -1299,7 +1288,7 @@ function finalizeAgg(state: AggState, agg: PivotAggregation): CellScalar {
   switch (agg) {
     case "count":
       return state.count;
-    case "countnumbers":
+    case "countNumbers":
       return state.countNumbers;
     case "sum":
       return state.countNumbers > 0 ? state.sum : null;
@@ -1313,13 +1302,13 @@ function finalizeAgg(state: AggState, agg: PivotAggregation): CellScalar {
       return state.countNumbers > 0 ? state.max : null;
     case "var":
       return state.countNumbers >= 2 ? state.m2 / (state.countNumbers - 1) : null;
-    case "varp":
+    case "varP":
       return state.countNumbers > 0 ? state.m2 / state.countNumbers : null;
-    case "stddev": {
+    case "stdDev": {
       const variance = state.countNumbers >= 2 ? state.m2 / (state.countNumbers - 1) : null;
       return variance == null ? null : Math.sqrt(variance);
     }
-    case "stddevp": {
+    case "stdDevP": {
       const variance = state.countNumbers > 0 ? state.m2 / state.countNumbers : null;
       return variance == null ? null : Math.sqrt(variance);
     }
@@ -1344,15 +1333,15 @@ function aggLabel(agg: PivotAggregation): string {
       return "Max";
     case "product":
       return "Product";
-    case "countnumbers":
+    case "countNumbers":
       return "CountNumbers";
-    case "stddev":
+    case "stdDev":
       return "StdDev";
-    case "stddevp":
+    case "stdDevP":
       return "StdDevP";
     case "var":
       return "Var";
-    case "varp":
+    case "varP":
       return "VarP";
     default: {
       const exhaustive: never = agg;

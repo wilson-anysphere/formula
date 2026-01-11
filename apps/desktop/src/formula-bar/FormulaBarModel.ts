@@ -21,11 +21,12 @@ export class FormulaBarModel {
   /**
    * Full text suggestion for the current draft (not just the "ghost text" tail).
    *
-   * `setAiSuggestion()` accepts either a full replacement string (e.g. "=SUM(A1:A10)")
-   * or a tail insertion (e.g. "M") and normalizes it into a full suggestion.
+   * Prefer setting this to the full suggested draft text (so we can derive a
+   * "ghost text" tail via `aiGhostText()` and apply it with a single replace).
    *
-   * Consumers should derive ghost text via `aiGhostText()` when rendering inline
-   * suggestions, and call `acceptAiSuggestion()` (typically on Tab) to apply.
+   * For compatibility, `setAiSuggestion()` also accepts just the ghost/insertion
+   * text to be inserted at the caret (e.g. "M"), and normalizes it into a full
+   * suggestion string.
    */
   #aiSuggestion: string | null = null;
 
