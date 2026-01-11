@@ -22,6 +22,65 @@ import { fileScopeExact, httpScope, sqlScope } from "./scopes.js";
  * }) => Promise<unknown | null | undefined>} CredentialPrompt
  */
 
+function normalizeOdbcKey(key) {
+  return String(key)
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+}
+
+/**
+ * Parse a simple ODBC connection string (`Key=Value;Key2={Value With ;};...`) into a
+ * case-insensitive key/value map.
+ *
+ * This is best-effort and intended for deriving credential scopes (not for executing
+ * database connections directly).
+ *
+ * @param {string} connectionString
+ * @returns {Record<string, string>}
+ */
+function parseOdbcConnectionString(connectionString) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  let current = "";
+  let inBraces = false;
+  const flush = () => {
+    const part = current.trim();
+    current = "";
+    if (!part) return;
+    const idx = part.indexOf("=");
+    if (idx === -1) return;
+    const rawKey = part.slice(0, idx);
+    let rawValue = part.slice(idx + 1).trim();
+    const key = normalizeOdbcKey(rawKey);
+    if (!key) return;
+    if (rawValue.startsWith("{") && rawValue.endsWith("}") && rawValue.length >= 2) {
+      rawValue = rawValue.slice(1, -1);
+    }
+    if (
+      (rawValue.startsWith('"') && rawValue.endsWith('"') && rawValue.length >= 2) ||
+      (rawValue.startsWith("'") && rawValue.endsWith("'") && rawValue.length >= 2)
+    ) {
+      rawValue = rawValue.slice(1, -1);
+    }
+    out[key] = rawValue;
+  };
+
+  for (let i = 0; i < connectionString.length; i++) {
+    const ch = connectionString[i];
+    if (ch === "{") inBraces = true;
+    if (ch === "}") inBraces = false;
+    if (ch === ";" && !inBraces) {
+      flush();
+      continue;
+    }
+    current += ch;
+  }
+  flush();
+
+  return out;
+}
+
 function parseSqlConnectionScope(connection) {
   if (typeof connection === "string") {
     try {
@@ -36,6 +95,48 @@ function parseSqlConnectionScope(connection) {
   }
 
   if (connection && typeof connection === "object" && !Array.isArray(connection)) {
+    // ODBC connection strings: attempt to recognize Postgres ODBC descriptors and derive
+    // a stable sqlScope({server, database, user}) without capturing secrets.
+    // @ts-ignore - runtime access
+    const kind = connection.kind;
+    if (kind === "odbc") {
+      // @ts-ignore - runtime access
+      const connectionString = connection.connectionString;
+      if (typeof connectionString === "string" && connectionString.length > 0) {
+        const props = parseOdbcConnectionString(connectionString);
+        const driver = props.driver ?? props.drv ?? "";
+        if (typeof driver === "string" && driver.toLowerCase().includes("postgres")) {
+          let server = props.server ?? props.host ?? props.hostname ?? props.servername ?? props.address ?? null;
+          if (typeof server === "string" && server) {
+            server = server.trim();
+            // If the server embeds a port (host:port or host,port) and no explicit port is
+            // provided, extract it so we can normalize to `host:port`.
+            let port = props.port ? Number(props.port) : null;
+            if (!Number.isFinite(port ?? NaN)) {
+              const match = server.match(/^(\[[^\]]+\]|[^:,]+)[,:](\d+)$/);
+              if (match) {
+                server = match[1];
+                port = Number(match[2]);
+              }
+            }
+            const database = props.database ?? props.db ?? props.dbname ?? null;
+            const user = props.uid ?? props.user ?? props.username ?? props.userid ?? null;
+            let serverWithPort = server;
+            if (typeof port === "number" && Number.isFinite(port) && port > 0) {
+              const needsBrackets = serverWithPort.includes(":") && !(serverWithPort.startsWith("[") && serverWithPort.endsWith("]"));
+              const host = needsBrackets ? `[${serverWithPort}]` : serverWithPort;
+              serverWithPort = `${host}:${port}`;
+            }
+            return sqlScope({
+              server: serverWithPort,
+              database: typeof database === "string" ? database : null,
+              user: typeof user === "string" ? user : null,
+            });
+          }
+        }
+      }
+    }
+
     // Some hosts pass a structured connection descriptor with an embedded URL.
     // Prefer parsing it to derive a stable {server, database, user} scope.
     // @ts-ignore - runtime access

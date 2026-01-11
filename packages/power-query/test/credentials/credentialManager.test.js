@@ -74,6 +74,21 @@ test("CredentialManager: resolves scopes and persists secrets via KeychainCreden
   assert.equal(sqlHandle3.credentialId, sqlHandle.credentialId);
   assert.equal(promptCalls, 3);
 
+  // ODBC connection descriptors should also resolve to the same SQL scope when they
+  // represent the same underlying Postgres connection.
+  const sqlHandle4 = await manager.onCredentialRequest("sql", {
+    request: {
+      connection: {
+        kind: "odbc",
+        connectionString: "Driver={PostgreSQL Unicode};Server=db.example.com;Port=5432;Database=analytics;Uid=alice;",
+      },
+      sql: "select 1",
+    },
+  });
+  assert.ok(sqlHandle4);
+  assert.equal(sqlHandle4.credentialId, sqlHandle.credentialId);
+  assert.equal(promptCalls, 3);
+
   // New manager instance should still read credentials from the shared keychain provider without prompting.
   let promptCalledAgain = false;
   const manager2 = new CredentialManager({

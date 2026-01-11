@@ -23,7 +23,7 @@ async fn sqlite_in_memory_query_returns_rows_and_columns() {
 #[tokio::test]
 async fn unsupported_connection_kind_returns_clear_error() {
     let err = sql::sql_query(
-        json!({ "kind": "odbc", "connectionString": "Driver={PostgreSQL};Server=localhost;" }),
+        json!({ "kind": "mysql", "url": "mysql://localhost" }),
         "SELECT 1".to_string(),
         Vec::new(),
         None,
@@ -33,6 +33,38 @@ async fn unsupported_connection_kind_returns_clear_error() {
 
     assert!(
         err.to_string().contains("Unsupported SQL connection kind"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn odbc_sqlite_in_memory_query_executes() {
+    let result = sql::sql_query(
+        json!({ "kind": "odbc", "connectionString": "Driver=SQLite3;Database=:memory:" }),
+        "SELECT CAST(1 AS INTEGER) AS one".to_string(),
+        Vec::new(),
+        None,
+    )
+    .await
+    .expect("odbc sqlite query should succeed");
+
+    assert_eq!(result.columns, vec!["one".to_string()]);
+    assert_eq!(result.rows, vec![vec![json!(1)]]);
+}
+
+#[tokio::test]
+async fn odbc_with_unsupported_driver_returns_clear_error() {
+    let err = sql::sql_query(
+        json!({ "kind": "odbc", "connectionString": "Driver={SQL Server};Server=localhost;Database=db;" }),
+        "SELECT 1".to_string(),
+        Vec::new(),
+        None,
+    )
+    .await
+    .expect_err("expected unsupported ODBC driver to error");
+
+    assert!(
+        err.to_string().contains("Unsupported ODBC driver"),
         "unexpected error: {err}"
     );
 }

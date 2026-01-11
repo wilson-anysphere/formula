@@ -732,6 +732,48 @@ test("database cache keys vary by connection identity and credentialId", async (
   assert.notEqual(key1, key3);
 });
 
+test("odbc postgres cache keys do not include passwords from connection strings", async () => {
+  const engine = createDesktopQueryEngine({
+    fileAdapter: { readText: async () => "", readBinary: async () => new Uint8Array() },
+  });
+
+  const base = {
+    id: "q_odbc_cache",
+    name: "ODBC Cache",
+    source: {
+      type: "database",
+      connection: {
+        kind: "odbc",
+        connectionString:
+          "Driver={PostgreSQL Unicode};Server=db.example.com;Port=5432;Database=analytics;Uid=alice;Pwd=secret1;",
+      },
+      query: "SELECT 1",
+    },
+    steps: [],
+  };
+
+  const key1 = await engine.getCacheKey(base, {}, {});
+  assert.ok(key1);
+
+  const key2 = await engine.getCacheKey(
+    {
+      ...base,
+      source: {
+        ...base.source,
+        connection: {
+          kind: "odbc",
+          connectionString:
+            "Driver={PostgreSQL Unicode};Server=db.example.com;Port=5432;Database=analytics;Uid=alice;Pwd=secret2;",
+        },
+      },
+    },
+    {},
+    {},
+  );
+
+  assert.equal(key1, key2);
+});
+
 test("sqlite connections with relative paths are treated as non-cacheable", async () => {
   const engine = createDesktopQueryEngine({
     fileAdapter: { readText: async () => "", readBinary: async () => new Uint8Array() },

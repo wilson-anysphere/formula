@@ -49,6 +49,12 @@ struct PostgresConnectionDescriptor {
     ssl: Option<bool>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OdbcConnectionDescriptor {
+    connection_string: String,
+}
+
 fn connection_kind(connection: &JsonValue) -> Result<String> {
     let kind = connection
         .get("kind")
@@ -80,6 +86,77 @@ fn credential_username(credentials: Option<&JsonValue>) -> Option<String> {
         .or_else(|| obj.get("username"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+fn normalize_odbc_key(input: &str) -> String {
+    input
+        .trim()
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && *ch != '_' && *ch != '-')
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect()
+}
+
+fn parse_odbc_connection_string(connection_string: &str) -> HashMap<String, String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_braces = false;
+
+    for ch in connection_string.chars() {
+        match ch {
+            '{' => {
+                in_braces = true;
+                current.push(ch);
+            }
+            '}' => {
+                in_braces = false;
+                current.push(ch);
+            }
+            ';' if !in_braces => {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    parts.push(trimmed.to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        parts.push(trimmed.to_string());
+    }
+
+    let mut out = HashMap::new();
+    for part in parts {
+        let Some((raw_key, raw_value)) = part.split_once('=') else {
+            continue;
+        };
+        let key = normalize_odbc_key(raw_key);
+        let mut value = raw_value.trim().to_string();
+        if value.starts_with('{') && value.ends_with('}') && value.len() >= 2 {
+            value = value[1..value.len() - 1].to_string();
+        }
+        if (value.starts_with('"') && value.ends_with('"')) || (value.starts_with('\'') && value.ends_with('\'')) {
+            value = value[1..value.len() - 1].to_string();
+        }
+        if !key.is_empty() {
+            out.insert(key, value);
+        }
+    }
+    out
+}
+
+fn odbc_first<'a>(props: &'a HashMap<String, String>, keys: &[&str]) -> Option<&'a str> {
+    for key in keys {
+        if let Some(value) = props.get(*key) {
+            if !value.trim().is_empty() {
+                return Some(value.as_str());
+            }
+        }
+    }
+    None
 }
 
 fn sqlite_type_to_data_type(type_name: &str) -> SqlDataType {
@@ -522,8 +599,70 @@ pub async fn sql_query(
 
             query_postgres(&opts, &sql, &params).await
         }
+        "odbc" => {
+            let descriptor: OdbcConnectionDescriptor =
+                serde_json::from_value(connection).context("invalid odbc connection descriptor")?;
+            let props = parse_odbc_connection_string(&descriptor.connection_string);
+            let driver = odbc_first(&props, &["driver", "drv"])
+                .map(|s| s.to_string())
+                .ok_or_else(|| anyhow!("odbc connection string requires a `Driver` field"))?;
+            let driver_lower = driver.to_ascii_lowercase();
+
+            if driver_lower.contains("sqlite") {
+                let path = odbc_first(&props, &["database", "dbq", "datasource"])
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| anyhow!("odbc sqlite connection string requires a `Database` (or `Data Source`) field"))?;
+                let in_memory = path.trim().eq_ignore_ascii_case(":memory:") || path.trim().eq_ignore_ascii_case("memory");
+                let mut opts = if in_memory {
+                    sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?
+                } else {
+                    sqlx::sqlite::SqliteConnectOptions::new().filename(path)
+                };
+                opts = opts.create_if_missing(false);
+                query_sqlite(&opts, &sql, &params).await
+            } else if driver_lower.contains("postgres") {
+                let host = odbc_first(&props, &["server", "host", "hostname", "servername", "address"])
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| anyhow!("odbc postgres connection string requires a `Server` (or `Host`) field"))?;
+                let database = odbc_first(&props, &["database", "db", "dbname"])
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| anyhow!("odbc postgres connection string requires a `Database` field"))?;
+                let port = odbc_first(&props, &["port"]).and_then(|s| s.trim().parse::<u16>().ok());
+                let user = credential_username(credentials.as_ref())
+                    .or_else(|| odbc_first(&props, &["uid", "user", "username", "userid"]).map(|s| s.to_string()));
+                let password = credential_password(credentials.as_ref()).or_else(|| {
+                    odbc_first(&props, &["pwd", "password", "passwd"]).map(|s| s.to_string())
+                });
+                let ssl_mode = odbc_first(&props, &["sslmode"]).map(|s| s.to_ascii_lowercase());
+
+                use sqlx::postgres::{PgConnectOptions, PgSslMode};
+                let mut opts = PgConnectOptions::new().host(&host).database(&database);
+                if let Some(port) = port {
+                    opts = opts.port(port);
+                }
+                if let Some(user) = user {
+                    opts = opts.username(&user);
+                }
+                if let Some(password) = password {
+                    opts = opts.password(&password);
+                }
+                if let Some(ssl_mode) = ssl_mode {
+                    if ssl_mode == "require" || ssl_mode == "verify-full" || ssl_mode == "verify-ca" {
+                        opts = opts.ssl_mode(PgSslMode::Require);
+                    } else if ssl_mode == "disable" {
+                        opts = opts.ssl_mode(PgSslMode::Disable);
+                    }
+                }
+
+                query_postgres(&opts, &sql, &params).await
+            } else {
+                Err(anyhow!(
+                    "Unsupported ODBC driver '{driver}' (supported: SQLite, PostgreSQL)"
+                ))
+            }
+        }
         other => Err(anyhow!(
-            "Unsupported SQL connection kind '{other}' (supported: sqlite, postgres)"
+            "Unsupported SQL connection kind '{other}' (supported: sqlite, postgres, odbc)"
         )),
     }
 }
@@ -599,8 +738,70 @@ pub async fn sql_get_schema(
 
             postgres_schema(&opts, &sql).await
         }
+        "odbc" => {
+            let descriptor: OdbcConnectionDescriptor =
+                serde_json::from_value(connection).context("invalid odbc connection descriptor")?;
+            let props = parse_odbc_connection_string(&descriptor.connection_string);
+            let driver = odbc_first(&props, &["driver", "drv"])
+                .map(|s| s.to_string())
+                .ok_or_else(|| anyhow!("odbc connection string requires a `Driver` field"))?;
+            let driver_lower = driver.to_ascii_lowercase();
+
+            if driver_lower.contains("sqlite") {
+                let path = odbc_first(&props, &["database", "dbq", "datasource"])
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| anyhow!("odbc sqlite connection string requires a `Database` (or `Data Source`) field"))?;
+                let in_memory = path.trim().eq_ignore_ascii_case(":memory:") || path.trim().eq_ignore_ascii_case("memory");
+                let mut opts = if in_memory {
+                    sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?
+                } else {
+                    sqlx::sqlite::SqliteConnectOptions::new().filename(path)
+                };
+                opts = opts.create_if_missing(false);
+                sqlite_schema(&opts, &sql).await
+            } else if driver_lower.contains("postgres") {
+                let host = odbc_first(&props, &["server", "host", "hostname", "servername", "address"])
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| anyhow!("odbc postgres connection string requires a `Server` (or `Host`) field"))?;
+                let database = odbc_first(&props, &["database", "db", "dbname"])
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| anyhow!("odbc postgres connection string requires a `Database` field"))?;
+                let port = odbc_first(&props, &["port"]).and_then(|s| s.trim().parse::<u16>().ok());
+                let user = credential_username(credentials.as_ref())
+                    .or_else(|| odbc_first(&props, &["uid", "user", "username", "userid"]).map(|s| s.to_string()));
+                let password = credential_password(credentials.as_ref()).or_else(|| {
+                    odbc_first(&props, &["pwd", "password", "passwd"]).map(|s| s.to_string())
+                });
+                let ssl_mode = odbc_first(&props, &["sslmode"]).map(|s| s.to_ascii_lowercase());
+
+                use sqlx::postgres::{PgConnectOptions, PgSslMode};
+                let mut opts = PgConnectOptions::new().host(&host).database(&database);
+                if let Some(port) = port {
+                    opts = opts.port(port);
+                }
+                if let Some(user) = user {
+                    opts = opts.username(&user);
+                }
+                if let Some(password) = password {
+                    opts = opts.password(&password);
+                }
+                if let Some(ssl_mode) = ssl_mode {
+                    if ssl_mode == "require" || ssl_mode == "verify-full" || ssl_mode == "verify-ca" {
+                        opts = opts.ssl_mode(PgSslMode::Require);
+                    } else if ssl_mode == "disable" {
+                        opts = opts.ssl_mode(PgSslMode::Disable);
+                    }
+                }
+
+                postgres_schema(&opts, &sql).await
+            } else {
+                Err(anyhow!(
+                    "Unsupported ODBC driver '{driver}' (supported: SQLite, PostgreSQL)"
+                ))
+            }
+        }
         other => Err(anyhow!(
-            "Unsupported SQL connection kind '{other}' (supported: sqlite, postgres)"
+            "Unsupported SQL connection kind '{other}' (supported: sqlite, postgres, odbc)"
         )),
     }
 }

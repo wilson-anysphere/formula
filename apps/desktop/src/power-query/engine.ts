@@ -583,6 +583,52 @@ function coerceSqlDataType(value: unknown): SqlDataType {
   }
 }
 
+function normalizeOdbcKey(key: string): string {
+  return key.trim().toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+function parseOdbcConnectionString(connectionString: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  let current = "";
+  let inBraces = false;
+
+  const flush = () => {
+    const part = current.trim();
+    current = "";
+    if (!part) return;
+    const idx = part.indexOf("=");
+    if (idx === -1) return;
+    const rawKey = part.slice(0, idx);
+    let rawValue = part.slice(idx + 1).trim();
+    const key = normalizeOdbcKey(rawKey);
+    if (!key) return;
+    if (rawValue.startsWith("{") && rawValue.endsWith("}") && rawValue.length >= 2) {
+      rawValue = rawValue.slice(1, -1);
+    }
+    if (
+      (rawValue.startsWith('"') && rawValue.endsWith('"') && rawValue.length >= 2) ||
+      (rawValue.startsWith("'") && rawValue.endsWith("'") && rawValue.length >= 2)
+    ) {
+      rawValue = rawValue.slice(1, -1);
+    }
+    out[key] = rawValue;
+  };
+
+  for (let i = 0; i < connectionString.length; i++) {
+    const ch = connectionString[i];
+    if (ch === "{") inBraces = true;
+    if (ch === "}") inBraces = false;
+    if (ch === ";" && !inBraces) {
+      flush();
+      continue;
+    }
+    current += ch;
+  }
+  flush();
+
+  return out;
+}
+
 function parseConnectionIdentity(connection: unknown): unknown {
   if (!connection || typeof connection !== "object" || Array.isArray(connection)) return null;
   const kind = (connection as any).kind;
@@ -633,6 +679,53 @@ function parseConnectionIdentity(connection: unknown): unknown {
 
     const base = `${hostWithBrackets}:${portNumber}/${dbName}`;
     return user ? `${user}@${base}` : base;
+  }
+
+  if (kind === "odbc") {
+    const connectionString = (connection as any).connectionString;
+    if (typeof connectionString !== "string" || connectionString.length === 0) return null;
+    const props = parseOdbcConnectionString(connectionString);
+    const driver = (props.driver ?? props.drv ?? "").toLowerCase();
+
+    if (driver.includes("sqlite")) {
+      const path = props.database ?? props.dbq ?? props.datasource ?? "";
+      if (!path) return null;
+      if (path.trim().toLowerCase() === ":memory:" || path.trim().toLowerCase() === "memory") return "sqlite::memory:";
+      const normalized = normalizeFilePath(path);
+      const isAbsolute = normalized.startsWith("/") || /^[a-z]:\//.test(normalized);
+      if (!isAbsolute) return null;
+      return normalized;
+    }
+
+    if (driver.includes("postgres")) {
+      let host = props.server ?? props.host ?? props.hostname ?? props.servername ?? props.address ?? "";
+      if (!host) return null;
+      host = host.trim();
+
+      let port = props.port ? Number(props.port) : null;
+      if (!Number.isFinite(port ?? NaN)) {
+        const match = host.match(/^(\[[^\]]+\]|[^:,]+)[,:](\d+)$/);
+        if (match) {
+          host = match[1];
+          port = Number(match[2]);
+        }
+      }
+
+      const database = props.database ?? props.db ?? props.dbname ?? "";
+      if (!database) return null;
+      const user = props.uid ?? props.user ?? props.username ?? props.userid ?? null;
+
+      const normalizedHost = host.toLowerCase();
+      const hostWithBrackets =
+        normalizedHost.includes(":") && !(normalizedHost.startsWith("[") && normalizedHost.endsWith("]"))
+          ? `[${normalizedHost}]`
+          : normalizedHost;
+      const portNumber = Number.isFinite(port ?? NaN) ? (port as number) : 5432;
+      const base = `${hostWithBrackets}:${portNumber}/${database}`;
+      return user ? `${user}@${base}` : base;
+    }
+
+    return null;
   }
 
   return null;
