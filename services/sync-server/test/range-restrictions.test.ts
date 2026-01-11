@@ -725,48 +725,53 @@ test("rangeRestrictions: legacy cell key formats cannot bypass protected ranges"
   await waitForProviderSync(seedProvider);
   setCellValue(seedDoc, "Sheet1:0:1", "initB");
 
-  const restrictedDoc = new Y.Doc();
-  const restrictedProvider = new WebsocketProvider(server.wsUrl, docName, restrictedDoc, {
-    WebSocketPolyfill: WebSocket,
-    disableBc: true,
-    params: { token: restrictedToken },
-  });
-
   let cleanedUp = false;
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
     seedProvider.destroy();
-    restrictedProvider.destroy();
     seedDoc.destroy();
-    restrictedDoc.destroy();
   };
   t.after(cleanup);
 
-  await waitForProviderSync(restrictedProvider);
-  await waitForCondition(() => getCellValue(restrictedDoc, "Sheet1:0:1") === "initB", 10_000);
+  const attemptLegacyWrite = async (cellKey: string) => {
+    const restrictedDoc = new Y.Doc();
+    const restrictedProvider = new WebsocketProvider(server.wsUrl, docName, restrictedDoc, {
+      WebSocketPolyfill: WebSocket,
+      disableBc: true,
+      params: { token: restrictedToken },
+    });
+    t.after(() => {
+      restrictedProvider.destroy();
+      restrictedDoc.destroy();
+    });
 
-  const ws = (restrictedProvider as any).ws as WebSocket | undefined;
-  assert.ok(ws, "expected restricted provider to have a ws");
-  const closePromise = waitForWsCloseWithTimeout(ws, 10_000);
+    await waitForProviderSync(restrictedProvider);
+    await waitForCondition(() => getCellValue(restrictedDoc, "Sheet1:0:1") === "initB", 10_000);
 
-  // Attempt to write B1 using a legacy key format (`r0c1`), which must normalize
-  // to Sheet1:0:1 and still be rejected.
-  setCellValue(restrictedDoc, "r0c1", "evilLegacy");
+    const ws = (restrictedProvider as any).ws as WebSocket | undefined;
+    assert.ok(ws, "expected restricted provider to have a ws");
+    const closePromise = waitForWsCloseWithTimeout(ws, 10_000);
 
-  assert.equal((await closePromise).code, 1008);
+    setCellValue(restrictedDoc, cellKey, "evilLegacy");
+    assert.equal((await closePromise).code, 1008);
 
-  await new Promise((r) => setTimeout(r, 250));
-  assert.equal(getCellValue(seedDoc, "Sheet1:0:1"), "initB");
+    await new Promise((r) => setTimeout(r, 250));
+    assert.equal(getCellValue(seedDoc, "Sheet1:0:1"), "initB");
+  };
 
-  cleanup();
+  // Attempt to write B1 using legacy key formats which must normalize to Sheet1:0:1
+  // and still be rejected.
+  await attemptLegacyWrite("r0c1");
+  await attemptLegacyWrite("Sheet1:0,1");
 
   await waitForCondition(async () => {
     try {
       const persisted = await loadPersistedDoc(dataDir, docName);
       const ok =
         getCellValue(persisted, "Sheet1:0:1") === "initB" &&
-        getCellsMap(persisted).has("r0c1") === false;
+        getCellsMap(persisted).has("r0c1") === false &&
+        getCellsMap(persisted).has("Sheet1:0,1") === false;
       persisted.destroy();
       return ok;
     } catch {
@@ -779,4 +784,5 @@ test("rangeRestrictions: legacy cell key formats cannot bypass protected ranges"
 
   assert.equal(getCellValue(persisted, "Sheet1:0:1"), "initB");
   assert.equal(getCellsMap(persisted).has("r0c1"), false);
+  assert.equal(getCellsMap(persisted).has("Sheet1:0,1"), false);
 });

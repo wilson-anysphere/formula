@@ -46,6 +46,29 @@ test("authenticateRequest accepts JWT rangeRestrictions claim", () => {
   assert.equal(ctx.rangeRestrictions.length, 1);
 });
 
+test("authenticateRequest accepts rangeRestrictions sheetName alias", () => {
+  const docId = "doc-1b";
+  const token = signJwt({
+    sub: "u1",
+    docId,
+    role: "editor",
+    rangeRestrictions: [
+      {
+        sheetName: "Sheet1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        editAllowlist: ["u1"],
+      },
+    ],
+  });
+
+  const ctx = authenticateRequest(auth, token, docId);
+  assert.ok(Array.isArray(ctx.rangeRestrictions));
+  assert.equal(ctx.rangeRestrictions.length, 1);
+});
+
 test("authenticateRequest rejects rangeRestrictions when it is not an array", () => {
   const docId = "doc-2";
   const token = signJwt({
@@ -83,4 +106,3 @@ test("authenticateRequest rejects invalid rangeRestrictions entries", () => {
     (err) => err instanceof AuthError && err.statusCode === 403
   );
 });
-
