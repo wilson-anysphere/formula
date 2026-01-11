@@ -195,6 +195,70 @@ describe("VBA event macros wiring", () => {
     wiring.dispose();
   });
 
+  it("captures Worksheet_SelectionChange changes that occur before macro security status resolves", async () => {
+    vi.useFakeTimers();
+
+    const calls: Array<{ cmd: string; args?: any }> = [];
+
+    let resolveStatus: ((value: any) => void) | null = null;
+    const statusPromise = new Promise<any>((resolve) => {
+      resolveStatus = resolve;
+    });
+
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_macro_security_status") {
+        return await statusPromise;
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_open") return { ok: true, output: [], updates: [] };
+      if (cmd === "fire_selection_change") return { ok: true, output: [], updates: [] };
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    const doc = new DocumentController();
+    const app = new FakeApp(doc);
+
+    const wiring = installVbaEventMacros({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    await flushMicrotasks();
+
+    // Initial selection is suppressed.
+    app.emitSelection([{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
+    app.emitSelection([{ startRow: 2, startCol: 3, endRow: 4, endCol: 5 }], { active: { row: 4, col: 5 } });
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(calls.some((c) => c.cmd === "fire_selection_change")).toBe(false);
+
+    resolveStatus?.({
+      has_macros: true,
+      origin_path: null,
+      workbook_fingerprint: null,
+      signature: null,
+      trust: "trusted_always",
+    });
+
+    await flushMicrotasks();
+
+    const selectionCalls = calls.filter((c) => c.cmd === "fire_selection_change");
+    expect(selectionCalls).toHaveLength(1);
+    expect(selectionCalls[0]?.args).toMatchObject({
+      sheet_id: "Sheet1",
+      start_row: 2,
+      start_col: 3,
+      end_row: 4,
+      end_col: 5,
+    });
+
+    wiring.dispose();
+  });
+
   it("ignores format-only deltas when firing Worksheet_Change", async () => {
     const calls: Array<{ cmd: string; args?: any }> = [];
 
