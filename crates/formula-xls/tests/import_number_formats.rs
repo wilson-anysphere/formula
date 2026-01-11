@@ -105,6 +105,29 @@ fn applies_formatted_blank_styles_to_merged_cell_anchors() {
 }
 
 #[test]
+fn prefers_anchor_xf_when_merged_cells_have_conflicting_formats() {
+    let bytes = xls_fixture_builder::build_merged_conflicting_blank_formats_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("MergedFmtConflict")
+        .expect("MergedFmtConflict missing");
+
+    // Formatting should follow the anchor cell (A1), not the non-anchor cell (B1).
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let a1_cell = sheet.cell(a1).expect("A1 missing");
+    assert!(matches!(a1_cell.value, CellValue::Empty));
+
+    let fmt = result
+        .workbook
+        .styles
+        .get(a1_cell.style_id)
+        .and_then(|s| s.number_format.as_deref());
+    assert_eq!(fmt, Some("0.00%"));
+}
+
+#[test]
 fn date_system_affects_rendered_dates() {
     fn render_a3(result: &formula_xls::XlsImportResult) -> String {
         let sheet = result
