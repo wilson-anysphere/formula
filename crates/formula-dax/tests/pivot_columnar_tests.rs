@@ -58,6 +58,8 @@ fn pivot_matches_between_vec_and_columnar_backends() {
     let measures = vec![
         PivotMeasure::new("Total", "[Total]").unwrap(),
         PivotMeasure::new("Rows", "COUNTROWS(Fact)").unwrap(),
+        PivotMeasure::new("Avg", "AVERAGE(Fact[Amount])").unwrap(),
+        PivotMeasure::new("Distinct Amount", "DISTINCTCOUNT(Fact[Amount])").unwrap(),
     ];
 
     let vec_result = pivot(
@@ -82,5 +84,9 @@ fn pivot_matches_between_vec_and_columnar_backends() {
     let vec_result = pivot(&vec_model, "Fact", &group_by, &measures, &a_filter).unwrap();
     let col_result = pivot(&col_model, "Fact", &group_by, &measures, &a_filter).unwrap();
     assert_eq!(vec_result, col_result);
-}
 
+    let amount_filter = FilterContext::empty().with_column_equals("Fact", "Amount", 42.0.into());
+    let vec_result = pivot(&vec_model, "Fact", &group_by, &measures, &amount_filter).unwrap();
+    let col_result = pivot(&col_model, "Fact", &group_by, &measures, &amount_filter).unwrap();
+    assert_eq!(vec_result, col_result);
+}
