@@ -205,6 +205,8 @@
  * @typedef {{ type: "renameColumn"; oldName: string; newName: string }} RenameColumnOp
  * @typedef {{ type: "changeType"; column: string; newType: DataType }} ChangeTypeOp
  * @typedef {{ type: "take"; count: number }} TakeOp
+ * @typedef {{ type: "skip"; count: number }} SkipOp
+ * @typedef {{ type: "removeRows"; offset: number; count: number }} RemoveRowsOp
  * @typedef {{ type: "pivot"; rowColumn: string; valueColumn: string; aggregation: Aggregation["op"] }} PivotOp
  * @typedef {{ type: "unpivot"; columns: string[]; nameColumn: string; valueColumn: string }} UnpivotOp
  * @typedef {{ type: "merge"; rightQuery: string; joinType: "inner" | "left" | "right" | "full"; leftKey: string; rightKey: string }} MergeOp
@@ -213,11 +215,19 @@
  * @typedef {{ type: "removeRowsWithErrors"; columns: string[] | null }} RemoveRowsWithErrorsOp
  * @typedef {{ column: string; formula: string; newType: DataType | null }} TransformColumnSpec
  * @typedef {{ type: "transformColumns"; transforms: TransformColumnSpec[] }} TransformColumnsOp
- * @typedef {{ type: "fillDown"; columns: string[] }} FillDownOp
- * @typedef {{ type: "replaceValues"; column: string; find: unknown; replace: unknown }} ReplaceValuesOp
- * @typedef {{ type: "splitColumn"; column: string; delimiter: string }} SplitColumnOp
+  * @typedef {{ type: "fillDown"; columns: string[] }} FillDownOp
+  * @typedef {{ type: "replaceValues"; column: string; find: unknown; replace: unknown }} ReplaceValuesOp
+ * @typedef {{ type: "splitColumn"; column: string; delimiter: string; newColumns?: string[] | null }} SplitColumnOp
+ * @typedef {{ type: "promoteHeaders" }} PromoteHeadersOp
+ * @typedef {{ type: "demoteHeaders" }} DemoteHeadersOp
+ * @typedef {{ type: "reorderColumns"; columns: string[]; missingField?: "error" | "ignore" | "useNull" }} ReorderColumnsOp
+ * @typedef {{ type: "addIndexColumn"; name: string; initialValue: number; increment: number }} AddIndexColumnOp
+ * @typedef {{ type: "combineColumns"; columns: string[]; delimiter: string; newColumnName: string }} CombineColumnsOp
+ * @typedef {{ type: "transformColumnNames"; transform: "upper" | "lower" | "trim" }} TransformColumnNamesOp
+ * @typedef {{ column: string; value: unknown }} ReplaceErrorValueSpec
+ * @typedef {{ type: "replaceErrorValues"; replacements: ReplaceErrorValueSpec[] }} ReplaceErrorValuesOp
  *
- * @typedef {SelectColumnsOp | RemoveColumnsOp | FilterRowsOp | SortRowsOp | GroupByOp | AddColumnOp | RenameColumnOp | ChangeTypeOp | TakeOp | PivotOp | UnpivotOp | MergeOp | AppendOp | DistinctRowsOp | RemoveRowsWithErrorsOp | TransformColumnsOp | FillDownOp | ReplaceValuesOp | SplitColumnOp} QueryOperation
+ * @typedef {SelectColumnsOp | RemoveColumnsOp | FilterRowsOp | SortRowsOp | GroupByOp | AddColumnOp | RenameColumnOp | ChangeTypeOp | TakeOp | SkipOp | RemoveRowsOp | PivotOp | UnpivotOp | MergeOp | AppendOp | DistinctRowsOp | RemoveRowsWithErrorsOp | TransformColumnsOp | FillDownOp | ReplaceValuesOp | SplitColumnOp | PromoteHeadersOp | DemoteHeadersOp | ReorderColumnsOp | AddIndexColumnOp | CombineColumnsOp | TransformColumnNamesOp | ReplaceErrorValuesOp} QueryOperation
  */
 
 /**

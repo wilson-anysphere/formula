@@ -28,6 +28,18 @@ const PRECEDENCE = new Map([
 const TERNARY_BP = 1;
 const UNARY_BP = 8;
 
+const ALLOWED_FUNCTIONS = new Set([
+  "date",
+  "date_from_text",
+  "date_add_days",
+  "text_upper",
+  "text_lower",
+  "text_trim",
+  "text_length",
+  "text_contains",
+  "number_round",
+]);
+
 /**
  * @param {string} message
  * @param {string} input
@@ -193,7 +205,7 @@ class Parser {
 
         if (this.match("operator", "(")) {
           // Only allow a small, explicitly whitelisted set of safe functions.
-          if (ident !== "date") {
+          if (!ALLOWED_FUNCTIONS.has(ident)) {
             parseError(`Unsupported function '${raw}'`, this.input, tok);
           }
           /** @type {ExprNode[]} */

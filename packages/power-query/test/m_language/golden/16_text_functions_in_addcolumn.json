@@ -1,0 +1,63 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "range",
+    "range": {
+      "values": [
+        ["Name", "Sales", "When"],
+        [" alice ", 12.345, "2020-01-01"],
+        ["Bob", 67.891, "2020-01-02"]
+      ],
+      "hasHeaders": true
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_addColumn",
+      "name": "Upper Trimmed",
+      "operation": {
+        "type": "addColumn",
+        "name": "NameUpper",
+        "formula": "text_upper(text_trim([Name]))"
+      }
+    },
+    {
+      "id": "s2_addColumn",
+      "name": "Name Length",
+      "operation": {
+        "type": "addColumn",
+        "name": "NameLen",
+        "formula": "text_length([Name])"
+      }
+    },
+    {
+      "id": "s3_addColumn",
+      "name": "Has A",
+      "operation": {
+        "type": "addColumn",
+        "name": "HasA",
+        "formula": "text_contains([Name], \"a\")"
+      }
+    },
+    {
+      "id": "s4_addColumn",
+      "name": "Rounded",
+      "operation": {
+        "type": "addColumn",
+        "name": "SalesRounded",
+        "formula": "number_round([Sales], 1)"
+      }
+    },
+    {
+      "id": "s5_addColumn",
+      "name": "Add Days",
+      "operation": {
+        "type": "addColumn",
+        "name": "WhenPlus",
+        "formula": "date_add_days(date_from_text([When]), 1)"
+      }
+    }
+  ]
+}
+

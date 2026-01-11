@@ -180,6 +180,42 @@ test("compile: folds addColumn for a safe subset of formula expressions", () => 
   });
 });
 
+test("compile: folds addColumn with whitelisted text_* functions", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_add_text_fn",
+    name: "Add text fn",
+    source: { type: "database", connection: {}, query: "SELECT * FROM people", columns: ["Name"] },
+    steps: [{ id: "s1", name: "Add", operation: { type: "addColumn", name: "Upper", formula: "text_upper(text_trim([Name]))" } }],
+  };
+
+  const plan = folding.compile(query);
+  assert.equal(plan.type, "sql");
+  assert.ok(plan.sql.includes("UPPER("));
+  assert.ok(plan.sql.includes("TRIM("));
+  assert.deepEqual(plan.params, []);
+});
+
+test("compile: folds addColumn with number_round + date_add_days", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_add_more_fn",
+    name: "Add more fn",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales", columns: ["Sales", "When"] },
+    steps: [
+      { id: "s1", name: "Round", operation: { type: "addColumn", name: "Rounded", formula: "number_round([Sales], 1)" } },
+      { id: "s2", name: "AddDays", operation: { type: "addColumn", name: "Plus", formula: "date_add_days(date_from_text([When]), 1)" } },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.equal(plan.type, "sql");
+  assert.ok(plan.sql.includes("ROUND("));
+  assert.ok(plan.sql.includes("INTERVAL"));
+  // Params are prepended step-by-step; both formula literals should be present.
+  assert.deepEqual(plan.params, [1, 1]);
+});
+
 test("compile: folds addColumn with dialect-specific quoting/casts (MySQL)", () => {
   const folding = new QueryFoldingEngine();
   const query = {
@@ -610,6 +646,19 @@ test("compile: folds take (LIMIT) into SQL", () => {
 
   const plan = folding.compile(query);
   assert.deepEqual(plan, { type: "sql", sql: "SELECT * FROM (SELECT * FROM sales) AS t LIMIT ?", params: [10] });
+});
+
+test("compile: folds skip (OFFSET) into SQL", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_skip",
+    name: "Skip",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [{ id: "s1", name: "Skip", operation: { type: "skip", count: 5 } }],
+  };
+
+  const plan = folding.compile(query);
+  assert.deepEqual(plan, { type: "sql", sql: "SELECT * FROM (SELECT * FROM sales) AS t OFFSET ?", params: [5] });
 });
 
 test("compile: folds distinctRows (full-row DISTINCT) when projection is known", () => {

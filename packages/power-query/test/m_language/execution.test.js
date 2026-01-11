@@ -269,6 +269,132 @@ in
   assert.deepEqual(result.toGrid(), [["Sales"], [150]]);
 });
 
+test("m_language execution: promote/demote headers", async () => {
+  const script = `
+let
+  Source = Range.FromValues(
+    {
+      {"Region", "Sales"},
+      {"East", 100},
+      {"West", 200}
+    },
+    [HasHeaders = false]
+  ),
+  #"Promoted Headers" = Table.PromoteHeaders(Source),
+  #"Demoted Headers" = Table.DemoteHeaders(#"Promoted Headers")
+in
+  #"Demoted Headers"
+`;
+
+  const query = compileMToQuery(script);
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(query, {}, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Column1", "Column2"],
+    ["Region", "Sales"],
+    ["East", 100],
+    ["West", 200],
+  ]);
+});
+
+test("m_language execution: addIndex/reorder/skip/firstN", async () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"Region", "Sales"},
+    {"East", 100},
+    {"West", 200},
+    {"South", 300}
+  }),
+  #"Added Index" = Table.AddIndexColumn(Source, "Index", 1, 1),
+  #"Reordered Columns" = Table.ReorderColumns(#"Added Index", {"Index", "Region", "Sales"}),
+  #"Removed Top Rows" = Table.Skip(#"Reordered Columns", 1),
+  #"Kept First Rows" = Table.FirstN(#"Removed Top Rows", 1)
+in
+  #"Kept First Rows"
+`;
+
+  const query = compileMToQuery(script);
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(query, {}, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Index", "Region", "Sales"],
+    [2, "West", 200],
+  ]);
+});
+
+test("m_language execution: whitelisted text/number/date functions in addColumn", async () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"Name", "Sales", "When"},
+    {" alice ", 12.345, "2020-01-01"},
+    {"Bob", 67.891, "2020-01-02"}
+  }),
+  #"Upper Trimmed" = Table.AddColumn(Source, "NameUpper", each Text.Upper(Text.Trim([Name]))),
+  #"Name Length" = Table.AddColumn(#"Upper Trimmed", "NameLen", each Text.Length([Name])),
+  #"Has A" = Table.AddColumn(#"Name Length", "HasA", each Text.Contains([Name], "a")),
+  #"Rounded" = Table.AddColumn(#"Has A", "SalesRounded", each Number.Round([Sales], 1)),
+  #"Add Days" = Table.AddColumn(#"Rounded", "WhenPlus", each Date.AddDays(Date.FromText([When]), 1))
+in
+  #"Add Days"
+`;
+
+  const query = compileMToQuery(script);
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(query, {}, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Name", "Sales", "When", "NameUpper", "NameLen", "HasA", "SalesRounded", "WhenPlus"],
+    [" alice ", 12.345, "2020-01-01", "ALICE", 7, true, 12.3, new Date(Date.UTC(2020, 0, 2))],
+    ["Bob", 67.891, "2020-01-02", "BOB", 3, false, 67.9, new Date(Date.UTC(2020, 0, 3))],
+  ]);
+});
+
+test("m_language execution: combineColumns + splitColumn (named)", async () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"First", "Last"},
+    {"A", "B"},
+    {"C", "D"}
+  }),
+  #"Merged Columns" = Table.CombineColumns(Source, {"First", "Last"}, Combiner.CombineTextByDelimiter("-", QuoteStyle.None), "Full"),
+  #"Split Column" = Table.SplitColumn(#"Merged Columns", "Full", "-", {"First2", "Last2"})
+in
+  #"Split Column"
+`;
+
+  const query = compileMToQuery(script);
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(query, {}, {});
+  assert.deepEqual(result.toGrid(), [
+    ["First2", "Last2"],
+    ["A", "B"],
+    ["C", "D"],
+  ]);
+});
+
+test("m_language execution: transformColumnNames", async () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"Name", "Region"},
+    {"A", "East"}
+  }),
+  #"Transformed Column Names" = Table.TransformColumnNames(Source, Text.Upper)
+in
+  #"Transformed Column Names"
+`;
+
+  const query = compileMToQuery(script);
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(query, {}, {});
+  assert.deepEqual(result.toGrid(), [
+    ["NAME", "REGION"],
+    ["A", "East"],
+  ]);
+});
+
 test("m_language execution: Table.Combine + Table.Distinct", async () => {
   const q1 = compileMToQuery(
     `

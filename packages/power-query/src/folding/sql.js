@@ -147,6 +147,7 @@ export class QueryFoldingEngine {
       "merge",
       "append",
       "take",
+      "skip",
     ]);
   }
 
@@ -775,6 +776,17 @@ export class QueryFoldingEngine {
           connection: state.connection,
         };
       }
+      case "skip": {
+        if (!Number.isFinite(operation.count) || operation.count < 0) return null;
+        params.push(operation.count);
+        const offsetSql = ctx.dialect.name === "postgres" ? "OFFSET ?" : ctx.dialect.name === "mysql" ? "LIMIT 18446744073709551615 OFFSET ?" : "LIMIT -1 OFFSET ?";
+        return {
+          fragment: { sql: `SELECT * FROM ${from} ${offsetSql}`, params },
+          columns: state.columns,
+          connectionId: state.connectionId,
+          connection: state.connection,
+        };
+      }
       case "merge": {
         if (!state.columns) return null;
         const rightQuery = ctx.queries?.[operation.rightQuery];
@@ -967,6 +979,10 @@ export class QueryFoldingEngine {
         return "unsupported_op";
       }
       case "take": {
+        if (!Number.isFinite(operation.count) || operation.count < 0) return "invalid_argument";
+        return "unsupported_op";
+      }
+      case "skip": {
         if (!Number.isFinite(operation.count) || operation.count < 0) return "invalid_argument";
         return "unsupported_op";
       }

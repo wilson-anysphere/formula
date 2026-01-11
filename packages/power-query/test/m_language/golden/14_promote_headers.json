@@ -1,0 +1,32 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "range",
+    "range": {
+      "values": [
+        ["Region", "Sales"],
+        ["East", 100],
+        ["West", 200]
+      ],
+      "hasHeaders": false
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_promoteHeaders",
+      "name": "Promoted Headers",
+      "operation": {
+        "type": "promoteHeaders"
+      }
+    },
+    {
+      "id": "s2_demoteHeaders",
+      "name": "Demoted Headers",
+      "operation": {
+        "type": "demoteHeaders"
+      }
+    }
+  ]
+}
+

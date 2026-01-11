@@ -213,6 +213,33 @@ function compileCall(ctx, expr, preferredStepName) {
   const name = calleeName(expr.callee);
   if (!name) ctx.error(expr, "Unsupported call target");
 
+  if (name === "Table.ColumnNames") {
+    const tableArg = expr.args[0];
+    if (!tableArg) ctx.error(expr, "Table.ColumnNames requires a table argument");
+    const input = compileExpression(ctx, tableArg);
+    if (input.kind !== "pipeline") ctx.error(tableArg, "Expected a table value");
+    const schema = input.pipeline.schema;
+    if (!schema) {
+      ctx.error(expr, "Table.ColumnNames requires a known schema in this subset");
+    }
+    return { kind: "value", value: schema.slice() };
+  }
+
+  if (name === "Table.RowCount") {
+    const tableArg = expr.args[0];
+    if (!tableArg) ctx.error(expr, "Table.RowCount requires a table argument");
+    const input = compileExpression(ctx, tableArg);
+    if (input.kind !== "pipeline") ctx.error(tableArg, "Expected a table value");
+    const pipeline = input.pipeline;
+    if (pipeline.steps.length > 0 || pipeline.source.type !== "range") {
+      ctx.error(expr, "Table.RowCount is only supported for Range.FromValues sources in this subset");
+    }
+    const values = pipeline.source.range.values;
+    const hasHeaders = pipeline.source.range.hasHeaders ?? true;
+    const count = Math.max(0, values.length - (hasHeaders ? 1 : 0));
+    return { kind: "value", value: count };
+  }
+
   if (name === "Table.Combine") {
     return { kind: "pipeline", pipeline: compileTableCombineCall(ctx, expr, preferredStepName) };
   }
@@ -640,13 +667,119 @@ function compileTableOperation(ctx, fnName, expr, schema) {
       const splitterExpr = expr.args[2];
       if (!splitterExpr) ctx.error(expr, "Table.SplitColumn expects (table, column, delimiter|Splitter...)");
       const delimiter = compileDelimiter(ctx, splitterExpr);
-      return { operations: [{ type: "splitColumn", column, delimiter }], schema: null };
+      const newColumnsExpr = expr.args[3] ?? null;
+      const newColumns = newColumnsExpr ? expectTextList(ctx, newColumnsExpr, "Table.SplitColumn") : null;
+      const operation = newColumns ? { type: "splitColumn", column, delimiter, newColumns } : { type: "splitColumn", column, delimiter };
+      return { operations: [operation], schema: newColumns ? schema : null };
     }
     case "Table.TransformColumns": {
       const specsExpr = expr.args[1];
       if (!specsExpr || !isList(specsExpr)) ctx.error(expr, "Table.TransformColumns expects a list of transforms");
       const transforms = specsExpr.elements.map((node) => compileTransformColumnSpec(ctx, node, schema));
       return { operations: [{ type: "transformColumns", transforms }], schema };
+    }
+    case "Table.PromoteHeaders": {
+      return { operations: [{ type: "promoteHeaders" }], schema: null };
+    }
+    case "Table.DemoteHeaders": {
+      return { operations: [{ type: "demoteHeaders" }], schema: null };
+    }
+    case "Table.ReorderColumns": {
+      const columns = expectTextList(ctx, expr.args[1], "Table.ReorderColumns");
+      if (new Set(columns).size !== columns.length) {
+        ctx.error(expr, "Table.ReorderColumns column order must not contain duplicates");
+      }
+      const missingExpr = expr.args[2] ?? null;
+      const raw = missingExpr ? evaluateConstant(ctx, missingExpr) : "error";
+      const missingField = raw === "ignore" || raw === "useNull" || raw === "error" ? raw : "error";
+      if (schema && missingField === "error") validateColumnsExist(ctx, expr, schema, columns);
+      return { operations: [{ type: "reorderColumns", columns, missingField }], schema };
+    }
+    case "Table.AddIndexColumn": {
+      const nameExpr = expr.args[1];
+      if (!nameExpr) ctx.error(expr, "Table.AddIndexColumn expects (table, newColumnName, initialValue?, increment?)");
+      const name = expectText(ctx, nameExpr);
+      const initialRaw = expr.args[2] ? evaluateConstant(ctx, expr.args[2]) : 0;
+      const incrementRaw = expr.args[3] ? evaluateConstant(ctx, expr.args[3]) : 1;
+      const initialValue = typeof initialRaw === "number" ? initialRaw : Number(initialRaw);
+      const increment = typeof incrementRaw === "number" ? incrementRaw : Number(incrementRaw);
+      if (!Number.isFinite(initialValue) || !Number.isFinite(increment)) {
+        ctx.error(expr, "Table.AddIndexColumn initialValue and increment must be numbers");
+      }
+      if (schema && schema.includes(name)) ctx.error(expr, `Column '${name}' already exists`);
+      return { operations: [{ type: "addIndexColumn", name, initialValue, increment }], schema };
+    }
+    case "Table.FirstN": {
+      const countExpr = expr.args[1];
+      if (!countExpr) ctx.error(expr, "Table.FirstN expects (table, count)");
+      const countRaw = evaluateConstant(ctx, countExpr);
+      const count = typeof countRaw === "number" ? countRaw : Number(countRaw);
+      if (!Number.isFinite(count) || count < 0) ctx.error(expr, "Table.FirstN requires a non-negative count");
+      return { operations: [{ type: "take", count }], schema };
+    }
+    case "Table.Skip": {
+      const countExpr = expr.args[1];
+      if (!countExpr) ctx.error(expr, "Table.Skip expects (table, count)");
+      const countRaw = evaluateConstant(ctx, countExpr);
+      const count = typeof countRaw === "number" ? countRaw : Number(countRaw);
+      if (!Number.isFinite(count) || count < 0) ctx.error(expr, "Table.Skip requires a non-negative count");
+      return { operations: [{ type: "skip", count }], schema };
+    }
+    case "Table.RemoveRows": {
+      const offsetExpr = expr.args[1];
+      if (!offsetExpr) ctx.error(expr, "Table.RemoveRows expects (table, offset, count?)");
+      const offsetRaw = evaluateConstant(ctx, offsetExpr);
+      const offset = typeof offsetRaw === "number" ? offsetRaw : Number(offsetRaw);
+      if (!Number.isFinite(offset) || offset < 0) ctx.error(expr, "Table.RemoveRows requires a non-negative offset");
+      const countExpr = expr.args[2] ?? null;
+      const countRaw = countExpr ? evaluateConstant(ctx, countExpr) : null;
+      if (countRaw == null) {
+        return { operations: [{ type: "take", count: offset }], schema };
+      }
+      const count = typeof countRaw === "number" ? countRaw : Number(countRaw);
+      if (!Number.isFinite(count) || count < 0) ctx.error(expr, "Table.RemoveRows requires a non-negative count");
+      if (offset === 0) {
+        return { operations: [{ type: "skip", count }], schema };
+      }
+      return { operations: [{ type: "removeRows", offset, count }], schema };
+    }
+    case "Table.CombineColumns": {
+      const columns = expectTextList(ctx, expr.args[1], "Table.CombineColumns");
+      validateColumnsExist(ctx, expr, schema, columns);
+      const combinerExpr = expr.args[2];
+      const newNameExpr = expr.args[3];
+      if (!combinerExpr || !newNameExpr) {
+        ctx.error(expr, "Table.CombineColumns expects (table, columns, combiner, newColumnName)");
+      }
+      const delimiter = compileCombinerDelimiter(ctx, combinerExpr);
+      const newColumnName = expectText(ctx, newNameExpr);
+      return { operations: [{ type: "combineColumns", columns, delimiter, newColumnName }], schema };
+    }
+    case "Table.TransformColumnNames": {
+      const fnExpr = expr.args[1];
+      if (!fnExpr) ctx.error(expr, "Table.TransformColumnNames expects (table, transformFn)");
+      if (fnExpr.type !== "Identifier") {
+        ctx.error(fnExpr, "Table.TransformColumnNames only supports built-in Text.* transforms in this subset");
+      }
+      const fn = identifierPartsToName(fnExpr.parts);
+      const transform =
+        fn === "Text.Upper" ? "upper" : fn === "Text.Lower" ? "lower" : fn === "Text.Trim" ? "trim" : null;
+      if (!transform) {
+        ctx.error(fnExpr, `Unsupported Table.TransformColumnNames function '${fn}'`);
+      }
+      return { operations: [{ type: "transformColumnNames", transform }], schema: null };
+    }
+    case "Table.ReplaceErrorValues": {
+      const specsExpr = expr.args[1];
+      if (!specsExpr || !isList(specsExpr)) ctx.error(expr, "Table.ReplaceErrorValues expects a list of {column, value} pairs");
+      const replacements = specsExpr.elements.map((spec) => {
+        if (!isList(spec) || spec.elements.length < 2) ctx.error(spec, "Replacement spec must be a list: {column, value}");
+        const column = expectText(ctx, spec.elements[0]);
+        validateColumnsExist(ctx, spec, schema, [column]);
+        const value = evaluateConstant(ctx, spec.elements[1]);
+        return { column, value };
+      });
+      return { operations: [{ type: "replaceErrorValues", replacements }], schema };
     }
     case "Table.Join":
     case "Table.NestedJoin": {
@@ -685,6 +818,47 @@ function applySchemaAfterOperation(ctx, node, schema, operation) {
       return schema ? schema.map((c) => (c === operation.oldName ? operation.newName : c)) : schema;
     case "addColumn":
       return schema ? [...schema, operation.name] : schema;
+    case "addIndexColumn":
+      return schema ? [...schema, operation.name] : schema;
+    case "reorderColumns": {
+      if (!schema) return schema;
+      const missingField = operation.missingField ?? "error";
+      const seen = new Set();
+      /** @type {string[]} */
+      const out = [];
+      for (const name of operation.columns) {
+        if (seen.has(name)) continue;
+        seen.add(name);
+        if (schema.includes(name)) out.push(name);
+        else if (missingField === "useNull") out.push(name);
+        else if (missingField === "ignore") continue;
+        else return null;
+      }
+      for (const name of schema) {
+        if (seen.has(name)) continue;
+        out.push(name);
+      }
+      return out;
+    }
+    case "combineColumns": {
+      if (!schema) return schema;
+      const remove = new Set(operation.columns);
+      /** @type {string[]} */
+      const out = [];
+      let inserted = false;
+      for (const name of schema) {
+        if (!remove.has(name)) {
+          out.push(name);
+          continue;
+        }
+        if (!inserted) {
+          out.push(operation.newColumnName);
+          inserted = true;
+        }
+      }
+      if (!inserted) out.push(operation.newColumnName);
+      return out;
+    }
     case "changeType":
     case "filterRows":
     case "sortRows":
@@ -693,12 +867,28 @@ function applySchemaAfterOperation(ctx, node, schema, operation) {
     case "transformColumns":
     case "fillDown":
     case "replaceValues":
+    case "replaceErrorValues":
+    case "take":
+    case "skip":
+    case "removeRows":
       return schema;
     case "groupBy":
       return [...operation.groupColumns, ...operation.aggregations.map((a) => a.as ?? `${a.op} of ${a.column}`)];
     case "pivot":
-    case "splitColumn":
+    case "promoteHeaders":
+    case "demoteHeaders":
+    case "transformColumnNames":
       return null;
+    case "splitColumn": {
+      if (!schema) return schema;
+      const names = operation.newColumns;
+      if (!names || names.length === 0) return null;
+      const idx = schema.indexOf(operation.column);
+      if (idx === -1) return null;
+      const next = schema.slice();
+      next.splice(idx, 1, ...names);
+      return next;
+    }
     case "unpivot":
       return schema ? [...schema.filter((c) => !operation.columns.includes(c)), operation.nameColumn, operation.valueColumn] : null;
     default:
@@ -917,6 +1107,23 @@ function compileDelimiter(ctx, expr) {
     }
   }
   ctx.error(expr, "Unsupported splitter; expected a delimiter string or Splitter.SplitTextByDelimiter(\";\")");
+}
+
+/**
+ * @param {CompilerContext} ctx
+ * @param {MExpression} expr
+ * @returns {string}
+ */
+function compileCombinerDelimiter(ctx, expr) {
+  if (expr.type === "Literal" && expr.literalType === "string") return expr.value;
+  if (expr.type === "CallExpression") {
+    const fn = calleeName(expr.callee);
+    if (fn === "Combiner.CombineTextByDelimiter") {
+      const delim = expr.args[0];
+      return expectText(ctx, delim);
+    }
+  }
+  ctx.error(expr, 'Unsupported combiner; expected a delimiter string or Combiner.CombineTextByDelimiter(";", QuoteStyle.None)');
 }
 
 /**
@@ -1266,8 +1473,52 @@ function mExpressionToJsFormula(ctx, expr) {
       const op = binaryOperatorToJs(expr.operator);
       return `((${left}) ${op} (${right}))`;
     }
+    case "CallExpression":
+      return mCallExpressionToJsFormula(ctx, expr, mExpressionToJsFormula);
     default:
       ctx.error(expr, "Unsupported expression in formula");
+  }
+}
+
+/**
+ * @param {CompilerContext} ctx
+ * @param {MCallExpression} expr
+ * @param {(ctx: CompilerContext, expr: MExpression) => string} compileArg
+ * @returns {string}
+ */
+function mCallExpressionToJsFormula(ctx, expr, compileArg) {
+  const name = calleeName(expr.callee);
+  if (!name) ctx.error(expr, "Unsupported call target");
+
+  const arg = (idx) => {
+    const node = expr.args[idx];
+    if (!node) ctx.error(expr, `Missing argument ${idx + 1} for ${name}`);
+    return compileArg(ctx, node);
+  };
+
+  switch (name) {
+    case "Text.Upper":
+      return `text_upper(${arg(0)})`;
+    case "Text.Lower":
+      return `text_lower(${arg(0)})`;
+    case "Text.Trim":
+      return `text_trim(${arg(0)})`;
+    case "Text.Length":
+      return `text_length(${arg(0)})`;
+    case "Text.Contains":
+      return `text_contains(${arg(0)}, ${arg(1)})`;
+    case "Number.Round": {
+      const first = arg(0);
+      const second = expr.args[1] ? `, ${arg(1)}` : "";
+      return `number_round(${first}${second})`;
+    }
+    case "Date.FromText":
+    case "Date.From":
+      return `date_from_text(${arg(0)})`;
+    case "Date.AddDays":
+      return `date_add_days(${arg(0)}, ${arg(1)})`;
+    default:
+      ctx.error(expr, `Unsupported function '${name}' in formula`);
   }
 }
 
@@ -1317,6 +1568,8 @@ function mExpressionToJsValueFormula(ctx, expr) {
       const op = binaryOperatorToJs(expr.operator);
       return `((${left}) ${op} (${right}))`;
     }
+    case "CallExpression":
+      return mCallExpressionToJsFormula(ctx, expr, mExpressionToJsValueFormula);
     case "FieldAccessExpression":
       ctx.error(expr, "Column references are not supported in Table.TransformColumns formulas (use _)");
     default:

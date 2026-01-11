@@ -30,3 +30,7 @@ test("expr security: treats 'constructor' as a column name when bracketed", () =
 test("expr security: rejects function calls (Function)", () => {
   assert.throws(() => parseFormula(`=Function("return 1")`), /Unsupported function 'Function'/);
 });
+
+test("expr security: rejects unknown whitelisted function names", () => {
+  assert.throws(() => parseFormula(`=text_reverse("x")`), /Unsupported function 'text_reverse'/);
+});

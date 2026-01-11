@@ -1,0 +1,54 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "range",
+    "range": {
+      "values": [
+        ["Region", "Sales"],
+        ["East", 100],
+        ["West", 200],
+        ["South", 300]
+      ],
+      "hasHeaders": true
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_addIndexColumn",
+      "name": "Added Index",
+      "operation": {
+        "type": "addIndexColumn",
+        "name": "Index",
+        "initialValue": 1,
+        "increment": 1
+      }
+    },
+    {
+      "id": "s2_reorderColumns",
+      "name": "Reordered Columns",
+      "operation": {
+        "type": "reorderColumns",
+        "columns": ["Index", "Region", "Sales"],
+        "missingField": "error"
+      }
+    },
+    {
+      "id": "s3_skip",
+      "name": "Removed Top Rows",
+      "operation": {
+        "type": "skip",
+        "count": 1
+      }
+    },
+    {
+      "id": "s4_take",
+      "name": "Kept First Rows",
+      "operation": {
+        "type": "take",
+        "count": 1
+      }
+    }
+  ]
+}
+

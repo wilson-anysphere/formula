@@ -65,3 +65,26 @@ in
   const query2 = compileMToQuery(printed);
   assert.deepEqual(toJson(query2), toJson(query));
 });
+
+test("m_language round-trip: prettyPrintQueryToM (whitelisted formula calls + new table ops)", () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"Name", "Sales", "When"},
+    {" alice ", 12.345, "2020-01-01"},
+    {"Bob", 67.891, "2020-01-02"}
+  }),
+  #"Upper Trimmed" = Table.AddColumn(Source, "NameUpper", each Text.Upper(Text.Trim([Name]))),
+  #"Rounded" = Table.AddColumn(#"Upper Trimmed", "SalesRounded", each Number.Round([Sales], 1)),
+  #"Add Days" = Table.AddColumn(#"Rounded", "WhenPlus", each Date.AddDays(Date.FromText([When]), 1)),
+  #"Added Index" = Table.AddIndexColumn(#"Add Days", "Index"),
+  #"Reordered Columns" = Table.ReorderColumns(#"Added Index", {"Index", "Name", "Sales", "When", "NameUpper", "SalesRounded", "WhenPlus"})
+in
+  #"Reordered Columns"
+`;
+
+  const query = compileMToQuery(script);
+  const printed = prettyPrintQueryToM(query);
+  const query2 = compileMToQuery(printed);
+  assert.deepEqual(toJson(query2), toJson(query));
+});

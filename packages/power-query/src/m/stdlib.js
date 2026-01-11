@@ -18,6 +18,13 @@ export const TABLE_FUNCTION_STEP_NAMES = {
   "Table.RenameColumns": "Renamed Columns",
   "Table.TransformColumnTypes": "Changed Type",
   "Table.TransformColumns": "Transformed Columns",
+  "Table.PromoteHeaders": "Promoted Headers",
+  "Table.DemoteHeaders": "Demoted Headers",
+  "Table.ReorderColumns": "Reordered Columns",
+  "Table.AddIndexColumn": "Added Index",
+  "Table.RemoveRows": "Removed Rows",
+  "Table.FirstN": "Kept First Rows",
+  "Table.Skip": "Removed Top Rows",
   "Table.Pivot": "Pivoted Column",
   "Table.Unpivot": "Unpivoted Columns",
   "Table.Join": "Merged Queries",
@@ -27,6 +34,9 @@ export const TABLE_FUNCTION_STEP_NAMES = {
   "Table.FillDown": "Filled Down",
   "Table.ReplaceValue": "Replaced Value",
   "Table.SplitColumn": "Split Column",
+  "Table.CombineColumns": "Merged Columns",
+  "Table.TransformColumnNames": "Transformed Column Names",
+  "Table.ReplaceErrorValues": "Replaced Errors",
 };
 
 export const TABLE_FUNCTIONS = new Set(Object.keys(TABLE_FUNCTION_STEP_NAMES));
@@ -103,6 +113,12 @@ export function constantIdentifierValue(name) {
       return "first";
     case "Nulls.Last":
       return "last";
+    case "MissingField.Error":
+      return "error";
+    case "MissingField.Ignore":
+      return "ignore";
+    case "MissingField.UseNull":
+      return "useNull";
     case "Comparer.Ordinal":
       return { comparer: "ordinal", caseSensitive: true };
     case "Comparer.OrdinalIgnoreCase":

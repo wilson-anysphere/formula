@@ -8,6 +8,8 @@
  * @typedef {import("../model.js").Aggregation} Aggregation
  */
 
+import { parseFormula } from "../expr/index.js";
+
 /**
  * @param {string} name
  * @returns {string}
@@ -241,136 +243,90 @@ function dataTypeToMTypeExpr(type) {
  * @returns {string}
  */
 function jsFormulaToM(formula) {
-  // Best-effort: convert the restricted JS-ish row/value formula subset back
-  // into the M-ish subset this parser understands.
-  let expr = formula.trim();
-  if (expr.startsWith("=")) expr = expr.slice(1).trim();
+  try {
+    const expr = parseFormula(formula);
 
-  /**
-   * @param {string} input
-   * @returns {string}
-   */
-  function stripOuterParens(input) {
-    let out = input.trim();
-    while (out.startsWith("(") && out.endsWith(")")) {
-      let depth = 0;
-      let inSingle = false;
-      let inDouble = false;
-      let wraps = true;
-      for (let i = 0; i < out.length; i++) {
-        const ch = out[i];
-        if (inSingle) {
-          if (ch === "'" && out[i - 1] !== "\\") inSingle = false;
-          continue;
+    /**
+     * @param {import("../expr/ast.js").ExprNode} node
+     * @returns {string}
+     */
+    function toM(node) {
+      switch (node.type) {
+        case "literal":
+          return valueToM(node.value);
+        case "column":
+          return `[${node.name}]`;
+        case "value":
+          return "_";
+        case "unary": {
+          const arg = toM(node.arg);
+          if (node.op === "!") return `not (${arg})`;
+          return `(${node.op}(${arg}))`;
         }
-        if (inDouble) {
-          if (ch === '"' && out[i - 1] !== "\\") inDouble = false;
-          continue;
+        case "binary": {
+          const left = toM(node.left);
+          const right = toM(node.right);
+          const op = (() => {
+            switch (node.op) {
+              case "&&":
+                return "and";
+              case "||":
+                return "or";
+              case "==":
+              case "===":
+                return "=";
+              case "!=":
+              case "!==":
+                return "<>";
+              default:
+                return node.op;
+            }
+          })();
+          return `(${left} ${op} ${right})`;
         }
-        if (ch === "'") {
-          inSingle = true;
-          continue;
+        case "ternary": {
+          const test = toM(node.test);
+          const consequent = toM(node.consequent);
+          const alternate = toM(node.alternate);
+          return `(if ${test} then ${consequent} else ${alternate})`;
         }
-        if (ch === '"') {
-          inDouble = true;
-          continue;
+        case "call": {
+          const callee = node.callee.toLowerCase();
+          const name =
+            callee === "text_upper"
+              ? "Text.Upper"
+              : callee === "text_lower"
+                ? "Text.Lower"
+                : callee === "text_trim"
+                  ? "Text.Trim"
+                  : callee === "text_length"
+                    ? "Text.Length"
+                    : callee === "text_contains"
+                      ? "Text.Contains"
+                      : callee === "number_round"
+                        ? "Number.Round"
+                        : callee === "date_add_days"
+                          ? "Date.AddDays"
+                          : callee === "date_from_text" || callee === "date"
+                            ? "Date.FromText"
+                            : node.callee;
+          return `${name}(${node.args.map(toM).join(", ")})`;
         }
-        if (ch === "(") depth += 1;
-        else if (ch === ")") {
-          depth -= 1;
-          if (depth === 0 && i < out.length - 1) {
-            wraps = false;
-            break;
-          }
+        default: {
+          /** @type {never} */
+          const exhausted = node;
+          throw new Error(`Unsupported node '${exhausted.type}'`);
         }
-      }
-      if (!wraps || depth !== 0) break;
-      out = out.slice(1, -1).trim();
-    }
-    return out;
-  }
-
-  /**
-   * @param {string} input
-   * @returns {{ q: number; colon: number } | null}
-   */
-  function findTopLevelTernary(input) {
-    let depth = 0;
-    let bracketDepth = 0;
-    let inSingle = false;
-    let inDouble = false;
-    let qIndex = -1;
-    let nested = 0;
-
-    for (let i = 0; i < input.length; i++) {
-      const ch = input[i];
-
-      if (inSingle) {
-        if (ch === "'" && input[i - 1] !== "\\") inSingle = false;
-        continue;
-      }
-      if (inDouble) {
-        if (ch === '"' && input[i - 1] !== "\\") inDouble = false;
-        continue;
-      }
-      if (ch === "'") {
-        inSingle = true;
-        continue;
-      }
-      if (ch === '"') {
-        inDouble = true;
-        continue;
-      }
-
-      if (ch === "(") depth += 1;
-      else if (ch === ")") depth -= 1;
-      else if (ch === "[") bracketDepth += 1;
-      else if (ch === "]") bracketDepth -= 1;
-
-      if (depth !== 0 || bracketDepth !== 0) continue;
-
-      if (ch === "?") {
-        if (qIndex === -1) qIndex = i;
-        else nested += 1;
-        continue;
-      }
-      if (ch === ":" && qIndex !== -1) {
-        if (nested === 0) return { q: qIndex, colon: i };
-        nested -= 1;
       }
     }
 
-    return null;
+    return toM(expr);
+  } catch {
+    // Fallback: return something parseable in our subset.
+    let expr = formula.trim();
+    if (expr.startsWith("=")) expr = expr.slice(1).trim();
+    return expr;
   }
-
-  /**
-   * @param {string} input
-   * @returns {string}
-   */
-  function ternaryToIf(input) {
-    const compact = stripOuterParens(input);
-    const match = findTopLevelTernary(compact);
-    if (!match) return compact.trim();
-
-    const test = ternaryToIf(compact.slice(0, match.q));
-    const consequent = ternaryToIf(compact.slice(match.q + 1, match.colon));
-    const alternate = ternaryToIf(compact.slice(match.colon + 1));
-    return `if ${test} then ${consequent} else ${alternate}`;
-  }
-
-  expr = ternaryToIf(expr);
-
-  return (
-    expr
-      .replaceAll("&&", " and ")
-      .replaceAll("||", " or ")
-      // Replace != before !
-      .replaceAll("!=", " <> ")
-      .replaceAll("==", " = ")
-      // Unary ! (best-effort; avoid touching " <> ")
-      .replaceAll(/(^|[^\w])!(?!=)/g, "$1not ")
-      .trim()
-  );
 }
 
 /**
@@ -433,7 +389,42 @@ function operationToM(operation, inputName) {
     case "replaceValues":
       return `Table.ReplaceValue(${inputName}, ${valueToM(operation.find)}, ${valueToM(operation.replace)}, Replacer.ReplaceValue, {${escapeMString(operation.column)}})`;
     case "splitColumn":
-      return `Table.SplitColumn(${inputName}, ${escapeMString(operation.column)}, ${escapeMString(operation.delimiter)})`;
+      return `Table.SplitColumn(${inputName}, ${escapeMString(operation.column)}, ${escapeMString(operation.delimiter)}${
+        operation.newColumns && operation.newColumns.length > 0 ? `, ${valueToM(operation.newColumns)}` : ""
+      })`;
+    case "promoteHeaders":
+      return `Table.PromoteHeaders(${inputName})`;
+    case "demoteHeaders":
+      return `Table.DemoteHeaders(${inputName})`;
+    case "reorderColumns": {
+      const missing =
+        operation.missingField && operation.missingField !== "error"
+          ? `, ${operation.missingField === "ignore" ? "MissingField.Ignore" : "MissingField.UseNull"}`
+          : "";
+      return `Table.ReorderColumns(${inputName}, ${valueToM(operation.columns)}${missing})`;
+    }
+    case "addIndexColumn": {
+      const initial = Number.isFinite(operation.initialValue) ? operation.initialValue : 0;
+      const increment = Number.isFinite(operation.increment) ? operation.increment : 1;
+      const optional = initial === 0 && increment === 1 ? "" : `, ${valueToM(initial)}, ${valueToM(increment)}`;
+      return `Table.AddIndexColumn(${inputName}, ${escapeMString(operation.name)}${optional})`;
+    }
+    case "take":
+      return `Table.FirstN(${inputName}, ${valueToM(operation.count)})`;
+    case "skip":
+      return `Table.Skip(${inputName}, ${valueToM(operation.count)})`;
+    case "removeRows":
+      return `Table.RemoveRows(${inputName}, ${valueToM(operation.offset)}, ${valueToM(operation.count)})`;
+    case "combineColumns":
+      return `Table.CombineColumns(${inputName}, ${valueToM(operation.columns)}, Combiner.CombineTextByDelimiter(${escapeMString(operation.delimiter)}, QuoteStyle.None), ${escapeMString(operation.newColumnName)})`;
+    case "transformColumnNames": {
+      const fn = operation.transform === "upper" ? "Text.Upper" : operation.transform === "lower" ? "Text.Lower" : "Text.Trim";
+      return `Table.TransformColumnNames(${inputName}, ${fn})`;
+    }
+    case "replaceErrorValues": {
+      const specs = operation.replacements.map((r) => `{${escapeMString(r.column)}, ${valueToM(r.value)}}`);
+      return `Table.ReplaceErrorValues(${inputName}, {${specs.join(", ")}})`;
+    }
     default: {
       /** @type {never} */
       const exhausted = operation;

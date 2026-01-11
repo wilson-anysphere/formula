@@ -163,15 +163,81 @@ export function evaluateExpr(expr, values, columnIndex = null, value = undefined
     case "call": {
       const callee = expr.callee.toLowerCase();
       switch (callee) {
-        case "date": {
+        case "date":
+        case "date_from_text": {
           if (expr.args.length !== 1) {
-            throw new Error("date() expects exactly 1 argument");
+            throw new Error(`${expr.callee}() expects exactly 1 argument`);
           }
           const arg = evaluateExpr(expr.args[0], values, columnIndex, value);
+          if (arg == null) return null;
+          if (arg instanceof Date && !Number.isNaN(arg.getTime())) return arg;
           if (typeof arg !== "string") {
-            throw new Error('date() expects a string like date("2020-01-01")');
+            throw new Error(`${expr.callee}() expects a string like ${expr.callee}("2020-01-01")`);
           }
           return parseDateLiteral(arg);
+        }
+        case "date_add_days": {
+          if (expr.args.length !== 2) {
+            throw new Error("date_add_days() expects exactly 2 arguments");
+          }
+          const dateVal = evaluateExpr(expr.args[0], values, columnIndex, value);
+          const daysVal = evaluateExpr(expr.args[1], values, columnIndex, value);
+          if (dateVal == null || daysVal == null) return null;
+          const base =
+            dateVal instanceof Date && !Number.isNaN(dateVal.getTime())
+              ? dateVal
+              : typeof dateVal === "string"
+                ? parseDateLiteral(dateVal)
+                : (() => {
+                    throw new Error("date_add_days() expects a date or YYYY-MM-DD string as its first argument");
+                  })();
+          const days = typeof daysVal === "number" ? daysVal : Number(daysVal);
+          if (!Number.isFinite(days)) {
+            throw new Error("date_add_days() expects a numeric day offset as its second argument");
+          }
+          const ms = base.getTime() + days * 86400000;
+          const out = new Date(ms);
+          return Number.isNaN(out.getTime()) ? null : out;
+        }
+        case "text_upper":
+        case "text_lower":
+        case "text_trim":
+        case "text_length": {
+          if (expr.args.length !== 1) {
+            throw new Error(`${expr.callee}() expects exactly 1 argument`);
+          }
+          const arg = evaluateExpr(expr.args[0], values, columnIndex, value);
+          if (arg == null) return null;
+          const text = String(arg);
+          if (callee === "text_upper") return text.toUpperCase();
+          if (callee === "text_lower") return text.toLowerCase();
+          if (callee === "text_trim") return text.trim();
+          return text.length;
+        }
+        case "text_contains": {
+          if (expr.args.length !== 2) {
+            throw new Error("text_contains() expects exactly 2 arguments");
+          }
+          const haystack = evaluateExpr(expr.args[0], values, columnIndex, value);
+          const needle = evaluateExpr(expr.args[1], values, columnIndex, value);
+          if (haystack == null || needle == null) return false;
+          return String(haystack).toLowerCase().includes(String(needle).toLowerCase());
+        }
+        case "number_round": {
+          if (expr.args.length !== 1 && expr.args.length !== 2) {
+            throw new Error("number_round() expects 1 or 2 arguments");
+          }
+          const val = evaluateExpr(expr.args[0], values, columnIndex, value);
+          if (val == null) return null;
+          const num = typeof val === "number" ? val : Number(val);
+          if (!Number.isFinite(num)) return null;
+          const digitsVal = expr.args[1] ? evaluateExpr(expr.args[1], values, columnIndex, value) : 0;
+          const digitsNum = digitsVal == null ? 0 : typeof digitsVal === "number" ? digitsVal : Number(digitsVal);
+          const digits = Number.isFinite(digitsNum) ? Math.trunc(digitsNum) : 0;
+          const factor = 10 ** Math.abs(digits);
+          if (!Number.isFinite(factor) || factor === 0) return Math.round(num);
+          if (digits >= 0) return Math.round(num * factor) / factor;
+          return Math.round(num / factor) * factor;
         }
         default:
           throw new Error(`Unsupported function '${expr.callee}'`);

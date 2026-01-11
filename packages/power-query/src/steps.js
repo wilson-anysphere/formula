@@ -973,8 +973,13 @@ function splitColumn(table, op) {
   const partsByRow = table.rows.map((row) => valueToString(row[idx]).split(op.delimiter));
   const maxParts = Math.max(...partsByRow.map((parts) => parts.length));
 
-  const baseNames = Array.from({ length: maxParts }, (_, i) => (i === 0 ? op.column : `${op.column}.${i + 1}`));
-  const unique = makeUniqueColumnNames(baseNames);
+  const requestedNames = Array.isArray(op.newColumns) && op.newColumns.length > 0 ? op.newColumns.slice() : null;
+  if (requestedNames && maxParts > requestedNames.length) {
+    throw new Error(`Split produced ${maxParts} columns but only ${requestedNames.length} names were provided`);
+  }
+
+  const baseNames = requestedNames ?? Array.from({ length: maxParts }, (_, i) => (i === 0 ? op.column : `${op.column}.${i + 1}`));
+  const unique = requestedNames ? baseNames : makeUniqueColumnNames(baseNames);
 
   const columns = table.columns
     .map((col, i) => (i === idx ? { ...col, name: unique[0], type: "string" } : col))
@@ -984,13 +989,204 @@ function splitColumn(table, op) {
     const next = row.slice();
     const parts = partsByRow[rIdx];
     next[idx] = parts[0] ?? "";
-    for (let i = 1; i < maxParts; i++) {
+    const expectedParts = requestedNames ? requestedNames.length : maxParts;
+    for (let i = 1; i < expectedParts; i++) {
       next.push(parts[i] ?? null);
     }
     return next;
   });
 
   return new DataTable(columns, rows);
+}
+
+/**
+ * @param {DataTable} table
+ * @returns {DataTable}
+ */
+function promoteHeaders(table) {
+  if (table.rows.length === 0) return table;
+
+  const width = table.columns.length;
+  const header = table.rows[0] ?? [];
+  const names = makeUniqueColumnNames(Array.from({ length: width }, (_, i) => header[i]));
+  const rows = table.rows.slice(1);
+  const columns = names.map((name, idx) => ({ name, type: inferColumnType(rows.map((row) => row[idx])) }));
+  return new DataTable(columns, rows);
+}
+
+/**
+ * @param {DataTable} table
+ * @returns {DataTable}
+ */
+function demoteHeaders(table) {
+  const width = table.columns.length;
+  const headerRow = table.columns.map((c) => c.name);
+  const columns = Array.from({ length: width }, (_v, i) => ({ name: `Column${i + 1}`, type: "any" }));
+  const rows = [headerRow, ...table.rows];
+  return new DataTable(columns, rows);
+}
+
+/**
+ * @param {ITable} table
+ * @param {import("./model.js").ReorderColumnsOp} op
+ * @returns {ITable}
+ */
+function reorderColumns(table, op) {
+  const missingField = op.missingField ?? "error";
+  const specified = op.columns;
+  const seen = new Set();
+  /** @type {(number | null)[]} */
+  const order = [];
+  /** @type {string[]} */
+  const missingNames = [];
+
+  for (const name of specified) {
+    if (seen.has(name)) {
+      throw new Error(`Duplicate column name '${name}' in reorder list`);
+    }
+    seen.add(name);
+    const idx = table.columns.findIndex((c) => c.name === name);
+    if (idx >= 0) {
+      order.push(idx);
+      continue;
+    }
+    if (missingField === "ignore") continue;
+    if (missingField === "useNull") {
+      order.push(null);
+      missingNames.push(name);
+      continue;
+    }
+    throw new Error(`Unknown column '${name}'`);
+  }
+
+  for (let idx = 0; idx < table.columns.length; idx++) {
+    const name = table.columns[idx].name;
+    if (seen.has(name)) continue;
+    order.push(idx);
+  }
+
+  // Fast path: Arrow-backed reorder without adding new null columns.
+  if (table instanceof ArrowTableAdapter && missingNames.length === 0) {
+    const indices = /** @type {number[]} */ (order);
+    const columns = indices.map((idx) => table.columns[idx]);
+    return new ArrowTableAdapter(table.table.selectAt(indices), columns);
+  }
+
+  const materialized = ensureDataTable(table);
+  const rows = materialized.rows.map((row) =>
+    order.map((idxOrNull) => (idxOrNull == null ? null : row[idxOrNull])),
+  );
+  const columns = [];
+  let missingIndex = 0;
+  for (const idxOrNull of order) {
+    if (idxOrNull == null) {
+      columns.push({ name: missingNames[missingIndex++] ?? "", type: "any" });
+    } else {
+      columns.push(materialized.columns[idxOrNull]);
+    }
+  }
+  return new DataTable(columns, rows);
+}
+
+/**
+ * @param {DataTable} table
+ * @param {import("./model.js").AddIndexColumnOp} op
+ * @returns {DataTable}
+ */
+function addIndexColumn(table, op) {
+  if (table.columnIndex.has(op.name)) {
+    throw new Error(`Column '${op.name}' already exists`);
+  }
+  const rows = table.rows.map((row, i) => [...row, op.initialValue + i * op.increment]);
+  const columns = [...table.columns, { name: op.name, type: "number" }];
+  return new DataTable(columns, rows);
+}
+
+/**
+ * @param {DataTable} table
+ * @param {import("./model.js").CombineColumnsOp} op
+ * @returns {DataTable}
+ */
+function combineColumns(table, op) {
+  const indices = indicesForColumns(table, op.columns);
+  const remove = new Set(indices);
+  const insertAt = Math.min(...indices);
+
+  if (table.columns.some((col, idx) => !remove.has(idx) && col.name === op.newColumnName)) {
+    throw new Error(`Column '${op.newColumnName}' already exists`);
+  }
+
+  const columns = [];
+  for (let i = 0; i < table.columns.length; i++) {
+    if (i === insertAt) {
+      columns.push({ name: op.newColumnName, type: "string" });
+    }
+    if (remove.has(i)) continue;
+    columns.push(table.columns[i]);
+  }
+
+  const rows = table.rows.map((row) => {
+    const combined = indices.map((idx) => valueToString(row[idx])).join(op.delimiter);
+    const next = [];
+    for (let i = 0; i < row.length; i++) {
+      if (i === insertAt) {
+        next.push(combined);
+      }
+      if (remove.has(i)) continue;
+      next.push(row[i]);
+    }
+    return next;
+  });
+
+  return new DataTable(columns, rows);
+}
+
+/**
+ * @param {ITable} table
+ * @param {import("./model.js").TransformColumnNamesOp} op
+ * @returns {ITable}
+ */
+function transformColumnNames(table, op) {
+  const rawNames = table.columns.map((col) => {
+    switch (op.transform) {
+      case "upper":
+        return col.name.toUpperCase();
+      case "lower":
+        return col.name.toLowerCase();
+      case "trim":
+        return col.name.trim();
+      default:
+        return col.name;
+    }
+  });
+  const names = makeUniqueColumnNames(rawNames);
+  const columns = table.columns.map((col, idx) => ({ ...col, name: names[idx] }));
+
+  if (table instanceof ArrowTableAdapter) {
+    return new ArrowTableAdapter(table.table, columns);
+  }
+  if (table instanceof DataTable) {
+    return new DataTable(columns, table.rows);
+  }
+  const materialized = ensureDataTable(table);
+  return new DataTable(columns, materialized.rows);
+}
+
+/**
+ * @param {DataTable} table
+ * @param {import("./model.js").ReplaceErrorValuesOp} op
+ * @returns {DataTable}
+ */
+function replaceErrorValues(table, op) {
+  const replacements = new Map(op.replacements.map((r) => [table.getColumnIndex(r.column), r.value]));
+  const rows = table.rows.map((row) => {
+    const next = row.slice();
+    for (const [idx, value] of replacements.entries()) {
+      if (next[idx] instanceof Error) next[idx] = value;
+    }
+    return next;
+  });
+  return new DataTable(table.columns, rows);
 }
 
 /**
@@ -1224,6 +1420,44 @@ export function compileStreamingPipeline(operations, inputColumns) {
 
 /**
  * @param {ITable} table
+ * @param {number} count
+ * @returns {ITable}
+ */
+function skip(table, count) {
+  if (!Number.isFinite(count) || count < 0) {
+    throw new Error(`Invalid skip count '${count}'`);
+  }
+
+  if (table instanceof ArrowTableAdapter) {
+    return new ArrowTableAdapter(table.table.slice(count), table.columns);
+  }
+
+  if (table instanceof DataTable) {
+    return new DataTable(table.columns, table.rows.slice(count));
+  }
+
+  const materialized = ensureDataTable(table);
+  return new DataTable(materialized.columns, materialized.rows.slice(count));
+}
+
+/**
+ * @param {ITable} table
+ * @param {import("./model.js").RemoveRowsOp} op
+ * @returns {ITable}
+ */
+function removeRows(table, op) {
+  if (!Number.isFinite(op.offset) || op.offset < 0 || !Number.isFinite(op.count) || op.count < 0) {
+    throw new Error(`Invalid removeRows range (${op.offset}, ${op.count})`);
+  }
+  const materialized = ensureDataTable(table);
+  const start = Math.floor(op.offset);
+  const end = start + Math.floor(op.count);
+  const rows = materialized.rows.filter((_row, idx) => idx < start || idx >= end);
+  return new DataTable(materialized.columns, rows);
+}
+
+/**
+ * @param {ITable} table
  * @returns {DataTable}
  */
 function ensureDataTable(table) {
@@ -1272,6 +1506,10 @@ export function applyOperation(table, operation) {
       return transformColumns(ensureDataTable(table), operation);
     case "take":
       return take(table, operation.count);
+    case "skip":
+      return skip(table, operation.count);
+    case "removeRows":
+      return removeRows(table, operation);
     case "pivot":
       return pivot(ensureDataTable(table), operation);
     case "unpivot":
@@ -1282,6 +1520,20 @@ export function applyOperation(table, operation) {
       return replaceValues(ensureDataTable(table), operation);
     case "splitColumn":
       return splitColumn(ensureDataTable(table), operation);
+    case "promoteHeaders":
+      return promoteHeaders(ensureDataTable(table));
+    case "demoteHeaders":
+      return demoteHeaders(ensureDataTable(table));
+    case "reorderColumns":
+      return reorderColumns(table, operation);
+    case "addIndexColumn":
+      return addIndexColumn(ensureDataTable(table), operation);
+    case "combineColumns":
+      return combineColumns(ensureDataTable(table), operation);
+    case "transformColumnNames":
+      return transformColumnNames(table, operation);
+    case "replaceErrorValues":
+      return replaceErrorValues(ensureDataTable(table), operation);
     case "merge":
     case "append":
       throw new Error(`Operation '${operation.type}' requires QueryEngine context`);

@@ -198,22 +198,172 @@ export function compileExprToSql(expr, ctx) {
         return `(CASE WHEN ${test} THEN ${cons} ELSE ${alt} END)`;
       }
       case "call":
-        if (node.callee.toLowerCase() === "date") {
-          if (node.args.length !== 1) {
-            throw new Error("date() expects exactly 1 argument");
-          }
-          const arg0 = node.args[0];
-          if (arg0.type !== "literal" || typeof arg0.value !== "string") {
-            throw new Error('date() expects a string literal like date("2020-01-01")');
-          }
-          return castParam(param(parseDateLiteral(arg0.value)), types.date);
-        }
-        throw new Error(`Unsupported function '${node.callee}'`);
+        return callToSql(node);
       default: {
         /** @type {never} */
         const exhausted = node;
         throw new Error(`Unsupported node '${exhausted.type}'`);
       }
+    }
+  }
+
+  /**
+   * @param {import("./ast.js").CallExpr} node
+   * @returns {string}
+   */
+  function callToSql(node) {
+    const callee = node.callee.toLowerCase();
+
+    /**
+     * Compile an argument as a scalar (value) SQL expression.
+     *
+     * @param {ExprNode} arg
+     * @param {boolean} [castString]
+     * @returns {string}
+     */
+    const argToSql = (arg, castString = false) => {
+      return isSqlServer ? toSqlServerValue(arg, castString) : toSqlLegacy(arg, castString);
+    };
+
+    switch (callee) {
+      case "date": {
+        if (node.args.length !== 1) {
+          throw new Error("date() expects exactly 1 argument");
+        }
+        const arg0 = node.args[0];
+        if (arg0.type !== "literal" || typeof arg0.value !== "string") {
+          throw new Error('date() expects a string literal like date("2020-01-01")');
+        }
+        return castParam(param(parseDateLiteral(arg0.value)), types.date);
+      }
+      case "date_from_text": {
+        if (node.args.length !== 1) {
+          throw new Error("date_from_text() expects exactly 1 argument");
+        }
+        const arg0 = node.args[0];
+        if (arg0.type === "literal" && typeof arg0.value === "string") {
+          return castParam(param(parseDateLiteral(arg0.value)), types.date);
+        }
+
+        const rawSql = argToSql(arg0);
+        const textSql = ctx.dialect.castText(rawSql);
+        switch (ctx.dialect.name) {
+          case "sqlite":
+            return `DATE(${textSql})`;
+          default:
+            return `CAST(${textSql} AS ${types.date})`;
+        }
+      }
+      case "date_add_days": {
+        if (node.args.length !== 2) {
+          throw new Error("date_add_days() expects exactly 2 arguments");
+        }
+        const dateArg = node.args[0];
+        const daysArg = node.args[1];
+
+        const dateSql =
+          dateArg.type === "literal" && typeof dateArg.value === "string"
+            ? castParam(param(parseDateLiteral(dateArg.value)), types.date)
+            : argToSql(dateArg, true);
+        const daysSql = argToSql(daysArg);
+        const intType =
+          ctx.dialect.name === "mysql" ? "SIGNED" : ctx.dialect.name === "sqlserver" ? "INT" : "INTEGER";
+        const daysCast = `CAST(${daysSql} AS ${intType})`;
+
+        /** @type {string} */
+        let expr;
+        switch (ctx.dialect.name) {
+          case "postgres":
+            expr = `(${dateSql} + (${daysCast} * INTERVAL '1 day'))`;
+            break;
+          case "mysql":
+            expr = `DATE_ADD(${dateSql}, INTERVAL ${daysCast} DAY)`;
+            break;
+          case "sqlite":
+            expr = `DATETIME(${dateSql}, printf('%+d days', ${daysCast}))`;
+            break;
+          case "sqlserver":
+            expr = `DATEADD(day, ${daysCast}, ${dateSql})`;
+            break;
+          default:
+            throw new Error(`Unsupported dialect '${ctx.dialect.name}'`);
+        }
+
+        return `(CASE WHEN (${dateSql} IS NULL OR ${daysSql} IS NULL) THEN NULL ELSE ${expr} END)`;
+      }
+      case "text_upper":
+      case "text_lower":
+      case "text_trim":
+      case "text_length": {
+        if (node.args.length !== 1) {
+          throw new Error(`${node.callee}() expects exactly 1 argument`);
+        }
+        const textSql = ctx.dialect.castText(argToSql(node.args[0]));
+        if (callee === "text_upper") return `UPPER(${textSql})`;
+        if (callee === "text_lower") return `LOWER(${textSql})`;
+        if (callee === "text_trim") {
+          if (ctx.dialect.name === "sqlserver") return `LTRIM(RTRIM(${textSql}))`;
+          return `TRIM(${textSql})`;
+        }
+        if (ctx.dialect.name === "sqlserver") return `LEN(${textSql})`;
+        if (ctx.dialect.name === "mysql") return `CHAR_LENGTH(${textSql})`;
+        return `LENGTH(${textSql})`;
+      }
+      case "text_contains": {
+        if (node.args.length !== 2) {
+          throw new Error("text_contains() expects exactly 2 arguments");
+        }
+        const haystackSql = argToSql(node.args[0]);
+        const needleSql = argToSql(node.args[1]);
+        const hayText = `LOWER(${ctx.dialect.castText(haystackSql)})`;
+        const needleText = `LOWER(${ctx.dialect.castText(needleSql)})`;
+
+        /** @type {string} */
+        let search;
+        switch (ctx.dialect.name) {
+          case "postgres":
+            search = `POSITION(${needleText} IN ${hayText})`;
+            break;
+          case "sqlserver":
+            search = `CHARINDEX(${needleText}, ${hayText})`;
+            break;
+          default:
+            search = `INSTR(${hayText}, ${needleText})`;
+            break;
+        }
+
+        const predicate = `(${haystackSql} IS NOT NULL AND ${needleSql} IS NOT NULL AND (${search} > 0))`;
+        return ctx.dialect.name === "sqlserver" ? sqlServerBoolToBit(predicate) : predicate;
+      }
+      case "number_round": {
+        if (node.args.length !== 1 && node.args.length !== 2) {
+          throw new Error("number_round() expects 1 or 2 arguments");
+        }
+        const valueSql = argToSql(node.args[0]);
+
+        if (node.args.length === 1) {
+          if (ctx.dialect.name === "postgres") {
+            return `ROUND(CAST(${valueSql} AS NUMERIC))`;
+          }
+          if (ctx.dialect.name === "sqlserver") {
+            return `ROUND(${valueSql}, 0)`;
+          }
+          return `ROUND(${valueSql})`;
+        }
+
+        const digitsSql = argToSql(node.args[1]);
+        const intType =
+          ctx.dialect.name === "mysql" ? "SIGNED" : ctx.dialect.name === "sqlserver" ? "INT" : "INTEGER";
+        const digitsCast = `CAST(${digitsSql} AS ${intType})`;
+        const safeDigits = `COALESCE(${digitsCast}, 0)`;
+
+        if (ctx.dialect.name === "postgres") {
+          return `ROUND(CAST(${valueSql} AS NUMERIC), ${safeDigits})`;
+        }
+        return `ROUND(${valueSql}, ${safeDigits})`;
+      }
+      default:
+        throw new Error(`Unsupported function '${node.callee}'`);
     }
   }
 
@@ -290,8 +440,13 @@ export function compileExprToSql(expr, ctx) {
         // Searched CASE yields a scalar, not a predicate.
         throw new Error("Ternary expressions are not supported in SQL Server predicate context");
       }
-      case "call":
+      case "call": {
+        const callee = node.callee.toLowerCase();
+        if (callee === "text_contains") {
+          return `(${callToSql(node)} = 1)`;
+        }
         throw new Error(`Unsupported function '${node.callee}' in SQL Server predicate context`);
+      }
       default: {
         /** @type {never} */
         const exhausted = node;

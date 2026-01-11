@@ -64,3 +64,28 @@ test("expr evaluate: date() rejects invalid formats", () => {
   const expr = parseFormula('date("2020-02-30")');
   assert.throws(() => evaluateExpr(expr, []), /Invalid date literal/);
 });
+
+test("expr evaluate: text_* functions", () => {
+  assert.equal(evalWithColumns('text_upper([A])', ["a"], { A: 0 }), "A");
+  assert.equal(evalWithColumns('text_lower([A])', ["A"], { A: 0 }), "a");
+  assert.equal(evalWithColumns('text_trim([A])', ["  a  "], { A: 0 }), "a");
+  assert.equal(evalWithColumns('text_length([A])', ["abcd"], { A: 0 }), 4);
+});
+
+test("expr evaluate: text_contains is case-insensitive", () => {
+  assert.equal(evalWithColumns('text_contains([A], "bar")', ["FooBar"], { A: 0 }), true);
+  assert.equal(evalWithColumns('text_contains([A], "baz")', ["FooBar"], { A: 0 }), false);
+});
+
+test("expr evaluate: number_round()", () => {
+  assert.equal(evaluateExpr(parseFormula("number_round(12.345, 1)"), []), 12.3);
+  assert.equal(evaluateExpr(parseFormula("number_round(12.345)"), []), 12);
+  assert.equal(evaluateExpr(parseFormula("number_round(1234, -2)"), []), 1200);
+});
+
+test("expr evaluate: date_from_text() + date_add_days()", () => {
+  const expr = parseFormula('date_add_days(date_from_text("2020-01-01"), 2)');
+  const value = evaluateExpr(expr, []);
+  assert.ok(value instanceof Date);
+  assert.equal(value.toISOString(), "2020-01-03T00:00:00.000Z");
+});

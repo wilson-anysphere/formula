@@ -34,6 +34,21 @@ test("explain: marks unsafe addColumn formulas as local with unsafe_formula reas
   assert.equal(result.steps[0].reason, "unsafe_formula");
 });
 
+test("explain: unsupported table ops stop folding with unsupported_op", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_explain_unsupported",
+    name: "Explain unsupported",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales", dialect: "postgres" },
+    steps: [{ id: "s1", name: "Promote", operation: { type: "promoteHeaders" } }],
+  };
+
+  const result = folding.explain(query, { dialect: "postgres" });
+  assert.equal(result.plan.type, "hybrid");
+  assert.equal(result.steps[0].status, "local");
+  assert.equal(result.steps[0].reason, "unsupported_op");
+});
+
 test("explain: merge blocked by privacy levels marks step local with privacy_firewall", () => {
   const folding = new QueryFoldingEngine();
   const sharedConnection = { id: "db1" };
