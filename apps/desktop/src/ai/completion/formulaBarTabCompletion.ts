@@ -118,6 +118,7 @@ export class FormulaBarTabCompletionController {
       })
       .then((suggestions) => {
         if (requestId !== this.#completionRequest) return;
+        if (this.#getSheetId() !== sheetId) return;
         if (!model.isEditing) return;
         if (model.cursorStart !== model.cursorEnd) return;
         if (model.draft !== draft) return;
@@ -167,4 +168,3 @@ function bestPureInsertionSuggestion({
 
   return null;
 }
-
