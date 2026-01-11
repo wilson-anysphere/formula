@@ -192,6 +192,25 @@ describe("engine sync helpers", () => {
     expect(changes).toEqual(expected);
   });
 
+  it("engineApplyDeltas propagates clears (null) via setCell and returns recalc changes", async () => {
+    const expected: CellChange[] = [{ sheet: "Sheet1", address: "B1", value: 0 }];
+    const engine = new FakeEngine(expected);
+
+    const changes = await engineApplyDeltas(engine, [
+      {
+        sheetId: "Sheet1",
+        row: 0,
+        col: 0,
+        before: { value: 1, formula: null, styleId: 0 },
+        after: { value: null, formula: null, styleId: 0 },
+      },
+    ]);
+
+    expect(engine.setCalls).toEqual([{ address: "A1", value: null, sheet: "Sheet1" }]);
+    expect(engine.recalcCalls).toEqual([undefined]);
+    expect(changes).toEqual(expected);
+  });
+
   it("engineApplyDeltas normalizes formulas to start with '='", async () => {
     const engine = new FakeEngine([]);
 
