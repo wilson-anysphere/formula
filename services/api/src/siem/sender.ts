@@ -7,6 +7,7 @@ import type {
   MaybeEncryptedSecret
 } from "./types";
 import { serializeBatch } from "./format";
+import { fetchWithOrgTls, type OrgTlsPolicy } from "../http/tls";
 
 type RetriableError = Error & { retriable?: boolean; status?: number; responseBody?: string };
 
@@ -114,16 +115,21 @@ async function postBatch(options: {
   contentType: string;
   headers: Record<string, string>;
   timeoutMs: number;
+  tls?: OrgTlsPolicy;
 }): Promise<void> {
-  const res = await fetch(options.endpointUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": options.contentType,
-      ...options.headers
+  const res = await fetchWithOrgTls(
+    options.endpointUrl,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": options.contentType,
+        ...options.headers
+      },
+      body: options.body.toString("utf8"),
+      signal: AbortSignal.timeout(options.timeoutMs)
     },
-    body: options.body.toString("utf8"),
-    signal: AbortSignal.timeout(options.timeoutMs)
-  });
+    { tls: options.tls }
+  );
 
   if (res.ok) return;
 
@@ -135,7 +141,11 @@ async function postBatch(options: {
   throw error;
 }
 
-export async function sendSiemBatch(config: SiemEndpointConfig, events: CanonicalAuditEvent[]): Promise<void> {
+export async function sendSiemBatch(
+  config: SiemEndpointConfig,
+  events: CanonicalAuditEvent[],
+  options: { tls?: OrgTlsPolicy } = {}
+): Promise<void> {
   if (!events || events.length === 0) return;
 
   const { body, contentType } = serializeBatch(events, {
@@ -163,7 +173,8 @@ export async function sendSiemBatch(config: SiemEndpointConfig, events: Canonica
           body,
           contentType,
           headers,
-          timeoutMs
+          timeoutMs,
+          tls: options.tls
         });
       } catch (err) {
         const error: RetriableError =

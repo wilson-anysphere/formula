@@ -5,6 +5,22 @@ import { fetchNextAuditEvents, type AuditCursor } from "./auditSource";
 import { sendSiemBatch } from "./sender";
 import { OrgSiemExportStateStore } from "./stateStore";
 import type { EnabledSiemOrg, SiemConfigProvider } from "./configProvider";
+import type { OrgTlsPolicy } from "../http/tls";
+
+async function loadOrgTlsPolicy(db: Pool, orgId: string): Promise<OrgTlsPolicy> {
+  const res = await db.query<{ certificate_pinning_enabled: boolean; certificate_pins: unknown }>(
+    "SELECT certificate_pinning_enabled, certificate_pins FROM org_settings WHERE org_id = $1",
+    [orgId]
+  );
+  if (res.rowCount !== 1) {
+    throw new Error(`Missing org_settings row for org ${orgId}`);
+  }
+
+  return {
+    certificatePinningEnabled: Boolean(res.rows[0].certificate_pinning_enabled),
+    certificatePins: res.rows[0].certificate_pins
+  };
+}
 
 export interface SiemExportWorkerOptions {
   db: Pool;
@@ -109,6 +125,7 @@ export class SiemExportWorker {
       async (span) => {
         const now = new Date();
         try {
+          const tlsPolicy = await loadOrgTlsPolicy(this.options.db, org.orgId);
           const state = await this.stateStore.getOrCreate(org.orgId);
           if (state.disabledUntil && state.disabledUntil.getTime() > now.getTime()) {
             this.options.metrics.siemBatchesTotal.inc({ status: "disabled" });
@@ -158,7 +175,7 @@ export class SiemExportWorker {
               async (sendSpan) => {
                 try {
                   const payload = events.map(({ createdAt: _createdAt, ...event }) => event);
-                  await sendSiemBatch(org.config, payload);
+                  await sendSiemBatch(org.config, payload, { tls: tlsPolicy });
                   sendSpan.setStatus({ code: SpanStatusCode.OK });
                 } catch (err) {
                   sendSpan.recordException(err as Error);
