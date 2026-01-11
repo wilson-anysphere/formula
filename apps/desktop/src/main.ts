@@ -409,6 +409,32 @@ if (
     getActiveSheetId: () => app.getCurrentSheetId(),
     workbookId,
     getWorkbookId: () => activePanelWorkbookId,
+    invoke:
+      typeof (globalThis as any).__TAURI__?.core?.invoke === "function"
+        ? (cmd, args) => {
+            const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+            const invokeFn = queuedInvoke ?? baseInvoke;
+            if (!invokeFn) {
+              return Promise.reject(new Error("Tauri invoke API not available"));
+            }
+            return invokeFn(cmd, args);
+          }
+        : undefined,
+    drainBackendSync,
+    getMacroUiContext: () => {
+      const selection = currentSelectionRect();
+      return {
+        sheetId: selection.sheetId,
+        activeRow: selection.activeRow ?? selection.startRow,
+        activeCol: selection.activeCol ?? selection.startCol,
+        selection: {
+          startRow: selection.startRow,
+          startCol: selection.startCol,
+          endRow: selection.endRow,
+          endCol: selection.endCol,
+        },
+      };
+    },
     createChart: (spec) => app.addChart(spec),
     renderMacrosPanel: (body) => {
       body.textContent = "Loading macros…";

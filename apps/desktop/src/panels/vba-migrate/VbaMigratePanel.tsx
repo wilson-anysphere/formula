@@ -7,6 +7,15 @@ import { VbaMigrator } from "../../../../../packages/vba-migrate/src/converter.j
 import { getVbaProject, type VbaModuleSummary, type VbaProjectSummary } from "../../macros/vba_project.js";
 import { loadDesktopLLMConfig, saveDesktopLLMConfig, type DesktopLLMConfig } from "../../ai/llm/settings.js";
 
+type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
+
+type MacroUiContext = {
+  sheetId: string;
+  activeRow: number;
+  activeCol: number;
+  selection?: { startRow: number; startCol: number; endRow: number; endCol: number } | null;
+};
+
 function moduleDisplayName(project: VbaProjectSummary, module: VbaModuleSummary) {
   const suffix = module.moduleType ? ` (${module.moduleType})` : "";
   const name = module.name || "Unnamed module";
@@ -229,6 +238,20 @@ export interface VbaMigratePanelProps {
    * Optional test hook to inject a migrator without requiring an API key.
    */
   createMigrator?: () => VbaMigrator;
+  /**
+   * Optional invoke wrapper (e.g. the queued invoke used by the desktop shell).
+   */
+  invoke?: TauriInvoke;
+  /**
+   * Optional hook to flush pending backend workbook sync operations before running
+   * expensive validation commands.
+   */
+  drainBackendSync?: () => Promise<void>;
+  /**
+   * Optional callback returning the current macro UI context so validation runs
+   * under the same `ActiveSheet` / `ActiveCell` / `Selection` the user sees.
+   */
+  getMacroUiContext?: () => MacroUiContext;
 }
 
 export function VbaMigratePanel(props: VbaMigratePanelProps) {
@@ -442,11 +465,46 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
     setValidationError(null);
     setValidationReport(null);
     try {
-      const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
+      const invoke =
+        props.invoke ??
+        ((globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined);
       if (!invoke) {
         throw new Error("Tauri invoke API not available");
       }
+
+      // Mirror the macro runner behavior: allow microtask-batched workbook edits to enqueue
+      // first, then drain the queue so validation sees the latest workbook state.
+      if (props.drainBackendSync) {
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+        await props.drainBackendSync();
+      }
+
       const workbookId = props.workbookId ?? "local-workbook";
+
+      // Ensure VBA validation runs under the same UI context as real macro execution.
+      // This is best-effort: older backends (or tests) may not implement the command.
+      if (props.getMacroUiContext) {
+        const ctx = props.getMacroUiContext();
+        try {
+          await invoke("set_macro_ui_context", {
+            workbook_id: workbookId,
+            sheet_id: ctx.sheetId,
+            active_row: ctx.activeRow,
+            active_col: ctx.activeCol,
+            selection: ctx.selection
+              ? {
+                  start_row: ctx.selection.startRow,
+                  start_col: ctx.selection.startCol,
+                  end_row: ctx.selection.endRow,
+                  end_col: ctx.selection.endCol,
+                }
+              : null,
+          });
+        } catch {
+          // Ignore context sync failures; validation can still run with the last known context.
+        }
+      }
+
       const report = await invoke("validate_vba_migration", {
         workbook_id: workbookId,
         macro_id: entryPoint.trim() || "Main",
@@ -459,7 +517,15 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
       setValidationStatus("error");
       setValidationError(err instanceof Error ? err.message : String(err));
     }
-  }, [conversionOutput, conversionTarget, entryPoint, props.workbookId]);
+  }, [
+    conversionOutput,
+    conversionTarget,
+    entryPoint,
+    props.workbookId,
+    props.invoke,
+    props.drainBackendSync,
+    props.getMacroUiContext,
+  ]);
 
   async function copyToClipboard(text: string) {
     const clipboard = (globalThis.navigator as any)?.clipboard;

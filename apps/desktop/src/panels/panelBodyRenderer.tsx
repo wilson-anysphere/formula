@@ -14,6 +14,30 @@ export interface PanelBodyRendererOptions {
   getActiveSheetId?: () => string;
   workbookId?: string;
   /**
+   * Optional invoke wrapper (typically a queued/serialized Tauri invoke).
+   *
+   * When provided, panels that call into the backend (e.g. VBA migration
+   * validation) should prefer it so commands run after any pending workbook
+   * sync operations.
+   */
+  invoke?: (cmd: string, args?: any) => Promise<any>;
+  /**
+   * Optional hook to drain pending backend sync operations (e.g. microtask-batched
+   * `set_cell` / `set_range` calls) before running a long-running command like
+   * macro validation.
+   */
+  drainBackendSync?: () => Promise<void>;
+  /**
+   * Optional callback returning the current macro UI context (active sheet/cell +
+   * selection). Used by panels that need to run VBA in a UI-consistent context.
+   */
+  getMacroUiContext?: () => {
+    sheetId: string;
+    activeRow: number;
+    activeCol: number;
+    selection?: { startRow: number; startCol: number; endRow: number; endCol: number } | null;
+  };
+  /**
    * Optional dynamic workbook id accessor.
    *
    * Some desktop flows (open workbook / new workbook) swap the active document
@@ -160,7 +184,17 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
 
     if (panelId === PanelIds.VBA_MIGRATE) {
       makeBodyFillAvailableHeight(body);
-      renderReactPanel(panelId, body, <VbaMigratePanel key={workbookId ?? "default"} workbookId={workbookId} />);
+      renderReactPanel(
+        panelId,
+        body,
+        <VbaMigratePanel
+          key={workbookId ?? "default"}
+          workbookId={workbookId}
+          invoke={options.invoke}
+          drainBackendSync={options.drainBackendSync}
+          getMacroUiContext={options.getMacroUiContext}
+        />,
+      );
       return;
     }
 

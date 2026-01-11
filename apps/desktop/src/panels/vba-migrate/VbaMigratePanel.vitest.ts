@@ -273,4 +273,134 @@ describe("VbaMigratePanel", () => {
     },
     15_000,
   );
+
+  it(
+    "syncs the macro UI context before validating when helpers are provided",
+    async () => {
+      const tauriInvoke = vi.fn(async (cmd: string) => {
+        if (cmd === "get_vba_project") {
+          return {
+            name: "ContextProject",
+            constants: null,
+            references: [],
+            modules: [
+              {
+                name: "Module1",
+                module_type: "Standard",
+                code: ['Sub Main()', '  Range("A1").Value = 1', "End Sub"].join("\n"),
+              },
+            ],
+          };
+        }
+        if (cmd === "list_macros") {
+          return [{ id: "Main", name: "Main", language: "vba", module: "Module1" }];
+        }
+        throw new Error(`Unexpected command: ${cmd}`);
+      });
+
+      installTauriInvoke(tauriInvoke);
+
+      const queuedInvoke = vi.fn(async (cmd: string, args?: any) => {
+        if (cmd === "set_macro_ui_context") return null;
+        if (cmd === "validate_vba_migration") {
+          return {
+            ok: true,
+            macroId: args?.macro_id,
+            target: args?.target,
+            mismatches: [],
+            error: null,
+          };
+        }
+        throw new Error(`Unexpected queued command: ${cmd}`);
+      });
+
+      const drainBackendSync = vi.fn(async () => {});
+
+      const llmComplete = vi.fn(async () => {
+        return ["sheet = formula.active_sheet", 'sheet["A1"] = 1'].join("\n");
+      });
+      const createMigrator = () => new VbaMigrator({ llm: { complete: llmComplete } as any });
+
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const root = createRoot(host);
+
+      await act(async () => {
+        root.render(
+          React.createElement(VbaMigratePanel, {
+            workbookId: "workbook-context",
+            createMigrator,
+            invoke: queuedInvoke,
+            drainBackendSync,
+            getMacroUiContext: () => ({
+              sheetId: "Sheet1",
+              activeRow: 3,
+              activeCol: 4,
+              selection: { startRow: 1, startCol: 2, endRow: 3, endCol: 4 },
+            }),
+          }),
+        );
+      });
+
+      await act(async () => {
+        await flushPromises();
+      });
+
+      const convertBtn = host.querySelector('[data-testid="vba-convert-python"]') as HTMLButtonElement | null;
+      expect(convertBtn).toBeInstanceOf(HTMLButtonElement);
+
+      await act(async () => {
+        convertBtn?.click();
+      });
+
+      const started = Date.now();
+      while (Date.now() - started < 5_000) {
+        const output = host.querySelector('[data-testid="vba-converted-code"]') as HTMLTextAreaElement | null;
+        if (output?.value) break;
+        await act(async () => {
+          await flushPromises();
+        });
+      }
+
+      const validateBtn = host.querySelector('[data-testid="vba-validate"]') as HTMLButtonElement | null;
+      expect(validateBtn).toBeInstanceOf(HTMLButtonElement);
+
+      await act(async () => {
+        validateBtn?.click();
+      });
+
+      const startedValidate = Date.now();
+      while (Date.now() - startedValidate < 5_000) {
+        if (host.querySelector('[data-testid="vba-validation-report"]')) break;
+        await act(async () => {
+          await flushPromises();
+        });
+      }
+
+      expect(drainBackendSync).toHaveBeenCalled();
+      expect(queuedInvoke).toHaveBeenCalledWith(
+        "set_macro_ui_context",
+        expect.objectContaining({
+          workbook_id: "workbook-context",
+          sheet_id: "Sheet1",
+          active_row: 3,
+          active_col: 4,
+          selection: { start_row: 1, start_col: 2, end_row: 3, end_col: 4 },
+        }),
+      );
+      expect(queuedInvoke).toHaveBeenCalledWith(
+        "validate_vba_migration",
+        expect.objectContaining({ workbook_id: "workbook-context" }),
+      );
+
+      const commands = queuedInvoke.mock.calls.map(([cmd]) => cmd);
+      expect(commands.indexOf("set_macro_ui_context")).toBeGreaterThanOrEqual(0);
+      expect(commands.indexOf("validate_vba_migration")).toBeGreaterThanOrEqual(0);
+      expect(commands.indexOf("set_macro_ui_context")).toBeLessThan(commands.indexOf("validate_vba_migration"));
+
+      // Ensure the validation command used the injected invoke wrapper (not the global Tauri invoke).
+      expect(tauriInvoke.mock.calls.map(([cmd]) => cmd)).not.toContain("validate_vba_migration");
+    },
+    15_000,
+  );
 });
