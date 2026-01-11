@@ -281,6 +281,15 @@ docker run --rm -p 1234:1234 \
   formula-sync-server
 ```
 
+Persist data (recommended for `leveldb`):
+
+```bash
+docker run --rm -p 1234:1234 \
+  -e SYNC_SERVER_AUTH_TOKEN=dev-token \
+  -v sync-server-data:/app/services/sync-server/.sync-server-data \
+  formula-sync-server
+```
+
 ## License
 
 Licensed under the Apache License 2.0. See [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE).
