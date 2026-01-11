@@ -65,7 +65,19 @@ export class YjsBranchStore {
    */
   async ensureDocument(docId, actor, initialState) {
     const existingRoot = this.#meta.get("rootCommitId");
-    if (typeof existingRoot === "string" && existingRoot.length > 0) return;
+    if (typeof existingRoot === "string" && existingRoot.length > 0) {
+      // Backwards-compatible migration: older docs may have been created before
+      // we started persisting the global checked-out branch name.
+      const existingBranch = this.#meta.get("currentBranchName");
+      if (typeof existingBranch !== "string" || existingBranch.length === 0) {
+        this.#ydoc.transact(() => {
+          const current = this.#meta.get("currentBranchName");
+          if (typeof current === "string" && current.length > 0) return;
+          this.#meta.set("currentBranchName", "main");
+        });
+      }
+      return;
+    }
 
     const now = Date.now();
     const rootCommitId = randomUUID();
@@ -151,6 +163,7 @@ export class YjsBranchStore {
       if (branch.docId !== docId) return;
       out.push(branch);
     });
+    out.sort((a, b) => (a.createdAt - b.createdAt === 0 ? a.name.localeCompare(b.name) : a.createdAt - b.createdAt));
     return structuredClone(out);
   }
 

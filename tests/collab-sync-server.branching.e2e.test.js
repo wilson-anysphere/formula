@@ -259,6 +259,7 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   assert.ok(branches.has("main"));
   assert.ok(branches.has("feature"));
   assert.ok(typeof meta.get("rootCommitId") === "string");
+  assert.equal(meta.get("currentBranchName"), "main");
   assert.ok(commits.size >= 6);
 
   // Validate persisted metadata via store API too.
