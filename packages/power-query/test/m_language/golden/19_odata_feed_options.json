@@ -1,0 +1,20 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "odata",
+    "url": "https://example.com/odata/Products",
+    "headers": {
+      "Authorization": "Bearer token",
+      "Accept": "application/json"
+    },
+    "auth": {
+      "type": "oauth2",
+      "providerId": "example-provider",
+      "scopes": ["scope1", "scope2"]
+    },
+    "rowsPath": "data.items"
+  },
+  "steps": []
+}
+

@@ -187,6 +187,23 @@ test("ODataConnector: tolerates payloads that are a single object (no value wrap
   ]);
 });
 
+test("ODataConnector: supports rowsPath/jsonPath overrides for custom payload envelopes", async () => {
+  const connector = new ODataConnector({
+    fetch: async () =>
+      makeJsonResponse({
+        data: {
+          items: [{ Id: 1 }, { Id: 2 }],
+        },
+      }),
+  });
+
+  const result = await connector.execute({ url: "https://example.com/odata/Products", rowsPath: "data.items" });
+  assert.deepEqual(result.table.toGrid(), [["Id"], [1], [2]]);
+
+  const resultViaAlias = await connector.execute({ url: "https://example.com/odata/Products", jsonPath: "data.items" });
+  assert.deepEqual(resultViaAlias.table.toGrid(), [["Id"], [1], [2]]);
+});
+
 test("ODataConnector: supports legacy d.results payload shape", async () => {
   const connector = new ODataConnector({
     fetch: async () =>
