@@ -95,6 +95,14 @@ const PACKAGE_SCAN_STATUS = {
   FAILED: "failed",
 };
 
+const EMPTY_PACKAGE_SCAN_REPORT = {
+  formatVersion: null,
+  fileCount: null,
+  unpackedSize: null,
+  findings: [],
+};
+const EMPTY_PACKAGE_SCAN_REPORT_JSON = JSON.stringify(EMPTY_PACKAGE_SCAN_REPORT);
+
 const DEFAULT_JS_HEURISTIC_RULES = [
   {
     id: "js.child_process",
@@ -424,6 +432,7 @@ class MarketplaceStore {
   async init() {
     await this.db.getDb();
     await this._maybeMigrateLegacyStore();
+    await this._backfillPackageScans();
   }
 
   async _maybeMigrateLegacyStore() {
@@ -609,6 +618,32 @@ class MarketplaceStore {
     } catch {
       // ignore
     }
+  }
+
+  async _backfillPackageScans() {
+    const needsBackfill = await this.db.withRead((db) => {
+      const stmt = db.prepare(
+        `SELECT 1
+         FROM extension_versions v
+         LEFT JOIN package_scans s ON s.extension_id = v.extension_id AND s.version = v.version
+         WHERE s.extension_id IS NULL
+         LIMIT 1`
+      );
+      const missing = stmt.step();
+      stmt.free();
+      return missing;
+    });
+    if (!needsBackfill) return;
+
+    await this.db.withTransaction((db) => {
+      db.run(
+        `INSERT OR IGNORE INTO package_scans
+           (extension_id, version, status, findings_json, scanned_at)
+         SELECT extension_id, version, ?, ?, NULL
+           FROM extension_versions`,
+        [PACKAGE_SCAN_STATUS.PENDING, EMPTY_PACKAGE_SCAN_REPORT_JSON]
+      );
+    });
   }
 
   async registerPublisher({ publisher, tokenSha256, publicKeyPem, verified = false }) {
@@ -1449,8 +1484,8 @@ class MarketplaceStore {
       db.run(
         `INSERT OR IGNORE INTO package_scans
           (extension_id, version, status, findings_json, scanned_at)
-         VALUES (?, ?, ?, '[]', NULL)`,
-        [id, version, PACKAGE_SCAN_STATUS.PENDING]
+         VALUES (?, ?, ?, ?, NULL)`,
+        [id, version, PACKAGE_SCAN_STATUS.PENDING, EMPTY_PACKAGE_SCAN_REPORT_JSON]
       );
     }).catch((err) => {
       if (String(err?.message || "").includes("UNIQUE constraint failed: extension_versions.extension_id, extension_versions.version")) {
@@ -1483,11 +1518,31 @@ class MarketplaceStore {
       const row = stmt.getAsObject();
       stmt.free();
 
+      /** @type {any} */
       let findings = null;
       try {
         findings = JSON.parse(String(row.findings_json || "[]"));
       } catch {
-        findings = [];
+        findings = null;
+      }
+      if (Array.isArray(findings)) {
+        findings = {
+          formatVersion: null,
+          fileCount: null,
+          unpackedSize: null,
+          findings,
+        };
+      }
+      if (!findings || typeof findings !== "object") {
+        findings = {
+          formatVersion: null,
+          fileCount: null,
+          unpackedSize: null,
+          findings: [],
+        };
+      }
+      if (!Array.isArray(findings.findings)) {
+        findings.findings = [];
       }
 
       return {
@@ -1517,14 +1572,14 @@ class MarketplaceStore {
       db.run(
         `INSERT OR IGNORE INTO package_scans
           (extension_id, version, status, findings_json, scanned_at)
-         VALUES (?, ?, ?, '[]', NULL)`,
-        [extensionId, version, PACKAGE_SCAN_STATUS.PENDING]
+         VALUES (?, ?, ?, ?, NULL)`,
+        [extensionId, version, PACKAGE_SCAN_STATUS.PENDING, EMPTY_PACKAGE_SCAN_REPORT_JSON]
       );
       db.run(
         `UPDATE package_scans
-         SET status = ?, findings_json = '[]', scanned_at = NULL
+         SET status = ?, findings_json = ?, scanned_at = NULL
          WHERE extension_id = ? AND version = ?`,
-        [PACKAGE_SCAN_STATUS.PENDING, extensionId, version]
+        [PACKAGE_SCAN_STATUS.PENDING, EMPTY_PACKAGE_SCAN_REPORT_JSON, extensionId, version]
       );
 
       const audit = db.prepare(
