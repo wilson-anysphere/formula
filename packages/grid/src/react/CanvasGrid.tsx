@@ -14,9 +14,18 @@ export interface GridApi {
   getSelectionRange(): CellRange | null;
   clearSelection(): void;
   getSelection(): { row: number; col: number } | null;
+  /**
+   * Set a transient range selection overlay.
+   *
+   * This does not affect the primary grid selection; it's intended for
+   * formula-bar range picking UX.
+   */
+  setRangeSelection(range: CellRange | null): void;
   setRemotePresences(presences: GridPresence[] | null): void;
   renderImmediately(): void;
 }
+
+export type GridInteractionMode = "default" | "rangeSelection";
 
 export interface CanvasGridProps {
   provider: CellProvider;
@@ -44,6 +53,10 @@ export interface CanvasGridProps {
   apiRef?: React.Ref<GridApi>;
   onSelectionChange?: (cell: { row: number; col: number } | null) => void;
   onSelectionRangeChange?: (range: CellRange | null) => void;
+  interactionMode?: GridInteractionMode;
+  onRangeSelectionStart?: (range: CellRange) => void;
+  onRangeSelectionChange?: (range: CellRange) => void;
+  onRangeSelectionEnd?: (range: CellRange) => void;
   style?: React.CSSProperties;
 }
 
@@ -61,15 +74,27 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const rendererRef = useRef<CanvasGridRenderer | null>(null);
   const onSelectionChangeRef = useRef(props.onSelectionChange);
   const onSelectionRangeChangeRef = useRef(props.onSelectionRangeChange);
+  const onRangeSelectionStartRef = useRef(props.onRangeSelectionStart);
+  const onRangeSelectionChangeRef = useRef(props.onRangeSelectionChange);
+  const onRangeSelectionEndRef = useRef(props.onRangeSelectionEnd);
+
   onSelectionChangeRef.current = props.onSelectionChange;
   onSelectionRangeChangeRef.current = props.onSelectionRangeChange;
+  onRangeSelectionStartRef.current = props.onRangeSelectionStart;
+  onRangeSelectionChangeRef.current = props.onRangeSelectionChange;
+  onRangeSelectionEndRef.current = props.onRangeSelectionEnd;
+
   const selectionAnchorRef = useRef<{ row: number; col: number } | null>(null);
   const selectionPointerIdRef = useRef<number | null>(null);
+  const transientRangeRef = useRef<CellRange | null>(null);
 
   const frozenRows = props.frozenRows ?? 0;
   const frozenCols = props.frozenCols ?? 0;
   const prefetchOverscanRows = props.prefetchOverscanRows ?? 10;
   const prefetchOverscanCols = props.prefetchOverscanCols ?? 5;
+  const interactionMode = props.interactionMode ?? "default";
+  const interactionModeRef = useRef<GridInteractionMode>(interactionMode);
+  interactionModeRef.current = interactionMode;
 
   const rendererFactory = useMemo(
     () =>
@@ -163,10 +188,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         const prevSelection = renderer?.getSelection() ?? null;
         const prevRange = renderer?.getSelectionRange() ?? null;
         renderer?.setSelectionRange(null);
+        renderer?.setRangeSelection(null);
         if (prevSelection) onSelectionChangeRef.current?.(null);
         if (prevRange) onSelectionRangeChangeRef.current?.(null);
       },
       getSelection: () => rendererRef.current?.getSelection() ?? null,
+      setRangeSelection: (range) => rendererRef.current?.setRangeSelection(range),
       setRemotePresences: (presences) => rendererRef.current?.setRemotePresences(presences),
       renderImmediately: () => rendererRef.current?.renderImmediately()
     }),
@@ -249,6 +276,23 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       selectionPointerIdRef.current = event.pointerId;
       selectionCanvas.setPointerCapture?.(event.pointerId);
 
+      if (interactionModeRef.current === "rangeSelection") {
+        const range: CellRange = {
+          startRow: picked.row,
+          endRow: picked.row + 1,
+          startCol: picked.col,
+          endCol: picked.col + 1
+        };
+
+        transientRangeRef.current = range;
+        renderer.setRangeSelection(range);
+        onRangeSelectionStartRef.current?.(range);
+        return;
+      }
+
+      transientRangeRef.current = null;
+      renderer.setRangeSelection(null);
+
       const prevSelection = renderer.getSelection();
       const prevRange = renderer.getSelectionRange();
 
@@ -296,6 +340,24 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         endCol: Math.max(anchor.col, picked.col) + 1
       };
 
+      if (interactionModeRef.current === "rangeSelection") {
+        const prevRange = transientRangeRef.current;
+        if (
+          prevRange &&
+          prevRange.startRow === range.startRow &&
+          prevRange.endRow === range.endRow &&
+          prevRange.startCol === range.startCol &&
+          prevRange.endCol === range.endCol
+        ) {
+          return;
+        }
+
+        transientRangeRef.current = range;
+        renderer.setRangeSelection(range);
+        onRangeSelectionChangeRef.current?.(range);
+        return;
+      }
+
       const prevRange = renderer.getSelectionRange();
       if (
         prevRange &&
@@ -317,6 +379,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       selectionPointerIdRef.current = null;
       selectionAnchorRef.current = null;
+
+      if (interactionModeRef.current === "rangeSelection") {
+        const range = transientRangeRef.current;
+        if (range) onRangeSelectionEndRef.current?.(range);
+      }
+
       try {
         selectionCanvas.releasePointerCapture?.(event.pointerId);
       } catch {
@@ -340,6 +408,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   useEffect(() => {
     rendererRef.current?.setRemotePresences(props.remotePresences ?? null);
   }, [props.remotePresences]);
+
+  useEffect(() => {
+    if (interactionMode !== "rangeSelection") {
+      rendererRef.current?.setRangeSelection(null);
+      transientRangeRef.current = null;
+    }
+  }, [interactionMode]);
 
   useEffect(() => {
     const vThumb = vThumbRef.current;

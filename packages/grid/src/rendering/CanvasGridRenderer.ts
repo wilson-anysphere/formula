@@ -21,6 +21,12 @@ interface Selection {
   col: number;
 }
 
+function isSameCellRange(a: CellRange | null, b: CellRange | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.startRow === b.startRow && a.endRow === b.endRow && a.startCol === b.startCol && a.endCol === b.endCol;
+}
+
 function intersectRect(a: Rect, b: Rect): Rect | null {
   const x1 = Math.max(a.x, b.x);
   const y1 = Math.max(a.y, b.y);
@@ -126,6 +132,7 @@ export class CanvasGridRenderer {
 
   private selection: Selection | null = null;
   private selectionRange: CellRange | null = null;
+  private rangeSelection: CellRange | null = null;
 
   private remotePresences: GridPresence[] = [];
 
@@ -293,6 +300,14 @@ export class CanvasGridRenderer {
 
   getSelection(): Selection | null {
     return this.selection ? { ...this.selection } : null;
+  }
+
+  setRangeSelection(range: CellRange | null): void {
+    const previousRange = this.rangeSelection;
+    const normalized = range ? this.normalizeSelectionRange(range) : null;
+    if (isSameCellRange(previousRange, normalized)) return;
+    this.rangeSelection = normalized;
+    this.invalidateSelection(previousRange, normalized);
   }
 
   setRemotePresences(presences: GridPresence[] | null): void {
@@ -1156,7 +1171,28 @@ export class CanvasGridRenderer {
     intersection: Rect,
     viewport: GridViewportState
   ): void {
-    if (!this.selectionCtx) return;
+    const ctx = this.selectionCtx;
+    if (!ctx) return;
+
+    const transientRange = this.rangeSelection;
+    if (transientRange) {
+      const rects = this.rangeToViewportRects(transientRange, viewport);
+
+      ctx.fillStyle = "rgba(14, 101, 235, 0.12)";
+      for (const rect of rects) {
+        const clipped = intersectRect(rect, intersection);
+        if (!clipped) continue;
+        ctx.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
+      }
+
+      ctx.strokeStyle = "#0e65eb";
+      ctx.lineWidth = 2;
+      for (const rect of rects) {
+        if (!intersectRect(rect, intersection)) continue;
+        if (rect.width <= 2 || rect.height <= 2) continue;
+        ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+      }
+    }
 
     const range = this.selectionRange;
     if (!range) return;
@@ -1164,7 +1200,6 @@ export class CanvasGridRenderer {
     const rects = this.rangeToViewportRects(range, viewport);
     if (rects.length === 0) return;
 
-    const ctx = this.selectionCtx;
     ctx.fillStyle = "rgba(14, 101, 235, 0.12)";
     for (const rect of rects) {
       const clipped = intersectRect(rect, intersection);
