@@ -71,6 +71,16 @@ test("CollabSession E2E cell encryption: encrypted in Yjs, decrypted with key, m
   assert.equal(masked?.formula, null);
   assert.equal(masked?.encrypted, true);
 
+  // Permission-like helpers should reflect that encrypted cells are unreadable/uneditable
+  // without the relevant encryption key.
+  assert.equal(sessionB.canReadCell({ sheetId: "Sheet1", row: 0, col: 0 }), false);
+  assert.equal(sessionB.canEditCell({ sheetId: "Sheet1", row: 0, col: 0 }), false);
+
+  // safeSet* APIs should fail gracefully (return false) rather than throwing when
+  // the cell is encrypted but the key is unavailable.
+  assert.equal(await sessionB.safeSetCellValue("Sheet1:0:0", "hacked"), false);
+  assert.equal(await sessionB.safeSetCellFormula("Sheet1:0:0", "=HACK()"), false);
+
   // Now "grant" the key by recreating the session with a resolver.
   sessionB.destroy();
   const sessionBWithKey = createCollabSession({ doc: docB, encryption: { keyForCell: keyForA1 } });
@@ -82,4 +92,3 @@ test("CollabSession E2E cell encryption: encrypted in Yjs, decrypted with key, m
   docA.destroy();
   docB.destroy();
 });
-
