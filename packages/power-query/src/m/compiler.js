@@ -1170,8 +1170,8 @@ function compilePredicateCall(ctx, expr, schema) {
 }
 
 /**
- * Convert a subset of M expressions to a JS expression string compatible with
- * `compileRowFormula`.
+ * Convert a subset of M expressions to a Power Query formula string compatible
+ * with `compileRowFormula` (the sandboxed expression engine).
  *
  * @param {CompilerContext} ctx
  * @param {MExpression} expr
@@ -1226,8 +1226,8 @@ function mExpressionToJsFormula(ctx, expr) {
 }
 
 /**
- * Convert a subset of M expressions into a JS expression string that will be
- * evaluated against a single value (bound as `_`).
+ * Convert a subset of M expressions into a Power Query formula string that will
+ * be evaluated against a single value (bound as `_`).
  *
  * This is used for `Table.TransformColumns`.
  *

@@ -626,7 +626,9 @@ function changeType(table, column, newType) {
 
 /**
  * Compile an `addColumn` formula into a row function.
- * This is intentionally limited to simple JS expressions that reference columns
+ *
+ * The supported surface area is intentionally small and is parsed/evaluated by
+ * the sandboxed expression engine in `src/expr/*`. Columns can be referenced
  * via `[Column Name]`.
  *
  * @param {DataTable} table
