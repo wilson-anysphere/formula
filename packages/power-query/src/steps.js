@@ -2,6 +2,19 @@ import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable, inferColumnType, makeUniqueColumnNames } from "./table.js";
 import { compilePredicate } from "./predicate.js";
 
+/** @type {((columns: Record<string, any[] | ArrayLike<any>>) => any) | null} */
+let arrowTableFromColumns = null;
+try {
+  ({ arrowTableFromColumns } = await import("../../data-io/src/index.js"));
+} catch (err) {
+  // Arrow-backed execution is optional; most of Power Query (including SQL folding)
+  // can run without Arrow/Parquet dependencies installed.
+  if (!(err && typeof err === "object" && "code" in err && err.code === "ERR_MODULE_NOT_FOUND")) {
+    throw err;
+  }
+  arrowTableFromColumns = null;
+}
+
 /**
  * @typedef {import("./model.js").QueryOperation} QueryOperation
  * @typedef {import("./model.js").SortSpec} SortSpec
@@ -132,6 +145,15 @@ function filterRows(table, predicate) {
   const fn = compilePredicate(table, predicate);
 
   if (table instanceof ArrowTableAdapter) {
+    if (!arrowTableFromColumns) {
+      // Fall back to a row-backed table when Arrow helpers aren't available.
+      const outRows = [];
+      for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
+        if (fn(rowIndex)) outRows.push(table.getRow(rowIndex));
+      }
+      return new DataTable(table.columns, outRows);
+    }
+
     /** @type {unknown[][]} */
     const outColumns = table.columns.map(() => []);
     const vectors = table.columns.map((_c, idx) => table.getColumnVector(idx));
@@ -173,6 +195,20 @@ function sortRows(table, sortBy) {
   }));
 
   if (table instanceof ArrowTableAdapter) {
+    if (!arrowTableFromColumns) {
+      // Fall back to a row-backed table when Arrow helpers aren't available.
+      const vectors = table.columns.map((_c, idx) => table.getColumnVector(idx));
+      const indices = Array.from({ length: table.rowCount }, (_, i) => i);
+      indices.sort((a, b) => {
+        for (const spec of specs) {
+          const cmp = compareValues(vectors[spec.idx].get(a), vectors[spec.idx].get(b), spec);
+          if (cmp !== 0) return cmp;
+        }
+        return a - b;
+      });
+      return new DataTable(table.columns, indices.map((rowIdx) => table.getRow(rowIdx)));
+    }
+
     const vectors = table.columns.map((_c, idx) => table.getColumnVector(idx));
 
     const indices = Array.from({ length: table.rowCount }, (_, i) => i);
@@ -384,6 +420,9 @@ function groupBy(table, groupColumns, aggregations) {
   }
 
   if (table instanceof ArrowTableAdapter) {
+    if (!arrowTableFromColumns) {
+      return new DataTable(resultColumns, resultRows);
+    }
     const out = Object.fromEntries(resultColumns.map((col, idx) => [col.name, resultRows.map((r) => r[idx])]));
     return new ArrowTableAdapter(arrowTableFromColumns(out), resultColumns);
   }
@@ -446,6 +485,19 @@ function changeType(table, column, newType) {
   const columns = table.columns.map((col, i) => (i === idx ? { ...col, type: newType } : col));
 
   if (table instanceof ArrowTableAdapter) {
+    if (!arrowTableFromColumns) {
+      const vectors = table.columns.map((_c, i) => table.getColumnVector(i));
+      const outRows = new Array(table.rowCount);
+      for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
+        const row = new Array(columns.length);
+        for (let colIndex = 0; colIndex < vectors.length; colIndex++) {
+          row[colIndex] = colIndex === idx ? coerceType(newType, vectors[idx].get(rowIndex)) : vectors[colIndex].get(rowIndex);
+        }
+        outRows[rowIndex] = row;
+      }
+      return new DataTable(columns, outRows);
+    }
+
     const vectors = table.columns.map((_c, i) => table.getColumnVector(i));
     const outColumns = vectors.map((_v, i) => (i === idx ? new Array(table.rowCount) : null));
 

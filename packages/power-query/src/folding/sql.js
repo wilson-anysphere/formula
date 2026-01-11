@@ -35,6 +35,23 @@ import { POSTGRES_DIALECT, getSqlDialect } from "./dialect.js";
 
 /**
  * @typedef {{
+ *   stepId: string;
+ *   opType: QueryOperation["type"];
+ *   status: "folded" | "local";
+ *   sqlFragment?: string;
+ *   reason?: string;
+ * }} FoldingExplainStep
+ */
+
+/**
+ * @typedef {{
+ *   plan: CompiledQueryPlan;
+ *   steps: FoldingExplainStep[];
+ * }} FoldingExplainResult
+ */
+
+/**
+ * @typedef {{
  *   sql: string;
  *   params: unknown[];
  * }} SqlFragment
@@ -78,6 +95,8 @@ export class QueryFoldingEngine {
   constructor(options = {}) {
     /** @type {SqlDialect} */
     this.dialect = resolveDialect(options.dialect);
+    /** @type {boolean} */
+    this.dialectExplicit = options.dialect != null;
     /** @type {Record<string, Query> | null} */
     this.queries = options.queries ?? null;
 
@@ -141,6 +160,120 @@ export class QueryFoldingEngine {
       return { type: "sql", sql: current.fragment.sql, params: current.fragment.params };
     }
     return { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps };
+  }
+
+  /**
+   * Explain folding decisions for a query.
+   *
+   * The folding engine only attempts to generate SQL when a dialect is known.
+   * `compile()` defaults to Postgres for backwards compatibility, but `explain()`
+   * is intentionally conservative and returns `missing_dialect` when the dialect
+   * isn't explicitly provided.
+   *
+   * @param {Query} query
+   * @param {CompileOptions} [options]
+   * @returns {FoldingExplainResult}
+   */
+  explain(query, options = {}) {
+    const queries = options.queries ?? this.queries;
+
+    const dialectInput =
+      options.dialect ??
+      (query.source.type === "database" ? query.source.dialect : undefined) ??
+      (this.dialectExplicit ? this.dialect : undefined);
+
+    if (!dialectInput) {
+      return {
+        plan: { type: "local", steps: query.steps },
+        steps: query.steps.map((step) => ({
+          stepId: step.id,
+          opType: step.operation.type,
+          status: "local",
+          reason: "missing_dialect",
+        })),
+      };
+    }
+
+    const dialect = resolveDialect(dialectInput);
+    const ctx = { dialect, queries };
+
+    const callStack = new Set([query.id]);
+    const initial = this.compileSourceToSqlState(query.source, ctx, callStack);
+    if (!initial) {
+      const reason = explainSourceFailure(query.source, { queries, callStack });
+      return {
+        plan: { type: "local", steps: query.steps },
+        steps: query.steps.map((step) => ({
+          stepId: step.id,
+          opType: step.operation.type,
+          status: "local",
+          reason,
+        })),
+      };
+    }
+
+    /** @type {SqlState} */
+    let current = initial;
+    /** @type {QueryStep[]} */
+    const localSteps = [];
+    let foldingBroken = false;
+    /** @type {string | undefined} */
+    let stopReason;
+    /** @type {FoldingExplainStep[]} */
+    const steps = [];
+
+    for (const step of query.steps) {
+      if (foldingBroken) {
+        localSteps.push(step);
+        steps.push({
+          stepId: step.id,
+          opType: step.operation.type,
+          status: "local",
+          reason: "folding_stopped",
+        });
+        continue;
+      }
+
+      if (!this.foldable.has(step.operation.type)) {
+        foldingBroken = true;
+        stopReason = "unsupported_op";
+        localSteps.push(step);
+        steps.push({
+          stepId: step.id,
+          opType: step.operation.type,
+          status: "local",
+          reason: stopReason,
+        });
+        continue;
+      }
+
+      const next = this.applySqlStep(current, step.operation, ctx, callStack);
+      if (!next) {
+        foldingBroken = true;
+        stopReason = this.explainSqlStepFailure(current, step.operation, ctx, callStack);
+        localSteps.push(step);
+        steps.push({
+          stepId: step.id,
+          opType: step.operation.type,
+          status: "local",
+          reason: stopReason,
+        });
+        continue;
+      }
+
+      current = next;
+      steps.push({
+        stepId: step.id,
+        opType: step.operation.type,
+        status: "folded",
+        sqlFragment: current.fragment.sql,
+      });
+    }
+
+    if (localSteps.length === 0) {
+      return { plan: { type: "sql", sql: current.fragment.sql, params: current.fragment.params }, steps };
+    }
+    return { plan: { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps }, steps };
   }
 
   /**
@@ -455,6 +588,127 @@ export class QueryFoldingEngine {
       default:
         return null;
     }
+  }
+
+  /**
+   * @private
+   * @param {SqlState} state
+   * @param {QueryOperation} operation
+   * @param {{ dialect: SqlDialect, queries?: Record<string, Query> | null }} ctx
+   * @param {Set<string>} callStack
+   * @returns {string}
+   */
+  explainSqlStepFailure(state, operation, ctx, callStack) {
+    switch (operation.type) {
+      case "selectColumns": {
+        if (operation.columns.length === 0) return "invalid_projection";
+        if (hasDuplicateStrings(operation.columns)) return "invalid_projection";
+        return "unsupported_op";
+      }
+      case "removeColumns": {
+        if (!state.columns) return "unknown_projection";
+        for (const name of operation.columns) {
+          if (!state.columns.includes(name)) return "unknown_projection";
+        }
+        const remaining = state.columns.filter((name) => !operation.columns.includes(name));
+        if (remaining.length === 0) return "invalid_projection";
+        return "unsupported_op";
+      }
+      case "filterRows":
+      case "sortRows":
+        return "unsupported_op";
+      case "groupBy": {
+        if (operation.groupColumns.length === 0 && operation.aggregations.length === 0) return "unsupported_op";
+        if (hasDuplicateStrings(operation.groupColumns)) return "invalid_projection";
+        if (
+          hasDuplicateStrings([
+            ...operation.groupColumns,
+            ...operation.aggregations.map((agg) => agg.as ?? `${agg.op} of ${agg.column}`),
+          ])
+        ) {
+          return "invalid_projection";
+        }
+        return "unsupported_op";
+      }
+      case "renameColumn": {
+        if (!state.columns) return "unknown_projection";
+        const idx = state.columns.indexOf(operation.oldName);
+        if (idx === -1) return "unknown_projection";
+        if (state.columns.includes(operation.newName) && operation.newName !== operation.oldName) return "invalid_projection";
+        return "unsupported_op";
+      }
+      case "changeType": {
+        if (operation.newType === "any") return "unsupported_op";
+        if (!state.columns) return "unknown_projection";
+        if (!state.columns.includes(operation.column)) return "unknown_projection";
+        const expr = changeTypeToSqlExpr(ctx.dialect, `t.${ctx.dialect.quoteIdentifier(operation.column)}`, operation.newType);
+        if (!expr) return "unsupported_type";
+        return "unsupported_op";
+      }
+      case "addColumn": {
+        if (state.columns && state.columns.includes(operation.name)) return "invalid_projection";
+        const exprSql = compileFormulaToSql(operation.formula, {
+          alias: "t",
+          quoteIdentifier: ctx.dialect.quoteIdentifier,
+          params: state.fragment.params.slice(),
+          dialect: ctx.dialect,
+          knownColumns: state.columns,
+        });
+        if (!exprSql) return "unsafe_formula";
+        return "unsupported_op";
+      }
+      case "take": {
+        if (!Number.isFinite(operation.count) || operation.count < 0) return "invalid_argument";
+        return "unsupported_op";
+      }
+      case "merge": {
+        if (!state.columns) return "unknown_projection";
+        const rightQuery = ctx.queries?.[operation.rightQuery];
+        if (!rightQuery) return "missing_query";
+        const rightState = this.compileQueryToSqlState(rightQuery, ctx, callStack);
+        if (!rightState?.columns) return "unsupported_query";
+        if (state.connection !== rightState.connection) return "different_connection";
+        const join = joinTypeToSql(ctx.dialect, operation.joinType);
+        if (!join) return "unsupported_join_type";
+        return "unsupported_op";
+      }
+      case "append": {
+        if (!state.columns) return "unknown_projection";
+        if (!ctx.queries) return "missing_queries";
+        for (const id of operation.queries) {
+          const q = ctx.queries[id];
+          if (!q) return "missing_query";
+          const compiled = this.compileQueryToSqlState(q, ctx, callStack);
+          if (!compiled?.columns) return "unsupported_query";
+          if (state.connection !== compiled.connection) return "different_connection";
+          if (!columnsCompatible(state.columns, compiled.columns)) return "incompatible_schema";
+        }
+        return "unsupported_op";
+      }
+      default:
+        return "unsupported_op";
+    }
+  }
+}
+
+/**
+ * @param {import("../model.js").QuerySource} source
+ * @param {{ queries: Record<string, Query> | null | undefined, callStack: Set<string> }} ctx
+ * @returns {string}
+ */
+function explainSourceFailure(source, ctx) {
+  switch (source.type) {
+    case "query": {
+      if (!ctx.queries) return "missing_queries";
+      const target = ctx.queries[source.queryId];
+      if (!target) return "missing_query";
+      if (ctx.callStack.has(target.id)) return "query_cycle";
+      return "unsupported_query";
+    }
+    case "database":
+      return "unsupported_source";
+    default:
+      return "unsupported_source";
   }
 }
 

@@ -105,6 +105,16 @@ async function loadDataIoModule() {
  * @property {SchemaInfo} outputSchema
  * @property {number} outputRowCount
  * @property {{ key: string; hit: boolean } | undefined} [cache]
+ * @property {{
+ *   dialect?: import("./folding/dialect.js").SqlDialectName;
+ *   planType: "local" | "sql" | "hybrid";
+ *   sql: string;
+ *   params: unknown[];
+ *   steps: import("./folding/sql.js").FoldingExplainStep[];
+ *   // Index within the executed step list where local execution begins.
+ *   // Only present for hybrid plans.
+ *   localStepOffset?: number;
+ * } | undefined} [folding]
  */
 
 /**
@@ -195,6 +205,7 @@ function serializeQueryMeta(meta) {
     sources: meta.sources.map(serializeConnectorMeta),
     outputSchema: meta.outputSchema,
     outputRowCount: meta.outputRowCount,
+    folding: meta.folding,
   };
 }
 
@@ -215,6 +226,7 @@ function deserializeQueryMeta(data, startedAt, completedAt, cache) {
     outputSchema: data.outputSchema,
     outputRowCount: data.outputRowCount,
     cache,
+    folding: data.folding,
   };
 }
 
@@ -397,16 +409,32 @@ export class QueryEngine {
     const maxStepIndex = options.maxStepIndex ?? query.steps.length - 1;
     const steps = query.steps.slice(0, maxStepIndex + 1);
 
+    /** @type {import("./folding/sql.js").FoldingExplainResult | null} */
+    let foldingExplain = null;
     /** @type {import("./folding/sql.js").CompiledQueryPlan | null} */
     let foldedPlan = null;
     /** @type {import("./folding/dialect.js").SqlDialectName | import("./folding/dialect.js").SqlDialect | null} */
     let foldedDialect = null;
     if (this.sqlFoldingEnabled && query.source.type === "database") {
       const dialect = query.source.dialect ?? this.sqlFoldingDialect;
-      if (dialect) {
-        foldedPlan = this.foldingEngine.compile({ ...query, steps }, { dialect, queries: context.queries ?? undefined });
-        foldedDialect = dialect;
-      }
+      foldedDialect = dialect ?? null;
+      foldingExplain = this.foldingEngine.explain(
+        { ...query, steps },
+        { dialect: dialect ?? undefined, queries: context.queries ?? undefined },
+      );
+      foldedPlan = foldingExplain.plan;
+    }
+
+    /** @type {string | null} */
+    let executedSql = null;
+    /** @type {unknown[] | null} */
+    let executedParams = null;
+    /** @type {number | undefined} */
+    let localStepOffset = undefined;
+
+    if (query.source.type === "database") {
+      executedSql = query.source.query;
+      executedParams = [];
     }
 
     /** @type {ITable} */
@@ -424,6 +452,10 @@ export class QueryEngine {
           : foldedPlan.sql;
       const paramsToRun =
         foldedPlan.type === "sql" && options.limit != null ? [...foldedPlan.params, options.limit] : foldedPlan.params;
+
+      const dialectName = typeof foldedDialect === "string" ? foldedDialect : foldedDialect.name;
+      executedSql = dialectName === "postgres" ? normalizePostgresPlaceholders(sqlToRun, paramsToRun.length) : sqlToRun;
+      executedParams = paramsToRun;
       const sourceResult = await this.loadDatabaseQueryWithMeta(
         query.source,
         sqlToRun,
@@ -438,6 +470,7 @@ export class QueryEngine {
 
       if (foldedPlan.type === "hybrid" && foldedPlan.localSteps.length > 0) {
         const offset = steps.indexOf(foldedPlan.localSteps[0]);
+        localStepOffset = offset >= 0 ? offset : 0;
         table = await this.executeSteps(
           table,
           foldedPlan.localSteps,
@@ -446,7 +479,7 @@ export class QueryEngine {
           state,
           callStack,
           sources,
-          offset >= 0 ? offset : 0,
+          localStepOffset,
         );
       }
     } else {
@@ -496,6 +529,17 @@ export class QueryEngine {
       outputSchema,
       outputRowCount: table.rowCount,
       cache: cacheKey ? { key: cacheKey, hit: false } : undefined,
+      folding:
+        foldingExplain && query.source.type === "database" && executedSql && executedParams
+          ? {
+              dialect: foldedDialect ? (typeof foldedDialect === "string" ? foldedDialect : foldedDialect.name) : undefined,
+              planType: foldingExplain.plan.type,
+              sql: executedSql,
+              params: executedParams,
+              steps: foldingExplain.steps,
+              localStepOffset: foldingExplain.plan.type === "hybrid" ? localStepOffset : undefined,
+            }
+          : undefined,
     };
 
     if (this.cache && cacheKey && cacheMode !== "bypass" && (table instanceof DataTable || table instanceof ArrowTableAdapter)) {

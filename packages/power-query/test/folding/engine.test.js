@@ -177,10 +177,19 @@ test("QueryEngine: executes hybrid folded SQL then runs remaining steps locally"
     ],
   };
 
-  const result = await engine.executeQuery(query, { queries: {} }, {});
+  const { table: result, meta } = await engine.executeQueryWithMeta(query, { queries: {} }, {});
   assert.ok(observed, "expected SQL connector to be invoked");
   assert.match(observed.sql, /WHERE/);
   assert.deepEqual(observed.params, [0]);
+  assert.ok(meta.folding, "expected folding metadata");
+  assert.equal(meta.folding.planType, "hybrid");
+  assert.equal(meta.folding.dialect, "postgres");
+  assert.deepEqual(
+    meta.folding.steps.map((s) => s.status),
+    ["folded", "local"],
+  );
+  assert.equal(meta.folding.steps[1].reason, "unsupported_op");
+  assert.equal(meta.folding.localStepOffset, 1);
 
   // fillDown should run locally after the SQL query.
   assert.deepEqual(result.toGrid(), [

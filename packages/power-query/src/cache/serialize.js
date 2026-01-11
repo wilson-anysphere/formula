@@ -1,4 +1,19 @@
-import { arrowTableFromIPC, arrowTableToIPC } from "../../../data-io/src/index.js";
+/** @type {((table: any) => Uint8Array) | null} */
+let arrowTableToIPC = null;
+/** @type {((bytes: Uint8Array | ArrayBuffer) => any) | null} */
+let arrowTableFromIPC = null;
+
+try {
+  ({ arrowTableFromIPC, arrowTableToIPC } = await import("../../../data-io/src/index.js"));
+} catch (err) {
+  // Arrow IPC caching is optional; allow Power Query to run without Arrow
+  // dependencies installed (e.g. lightweight environments that only use SQL/CSV).
+  if (!(err && typeof err === "object" && "code" in err && err.code === "ERR_MODULE_NOT_FOUND")) {
+    throw err;
+  }
+  arrowTableFromIPC = null;
+  arrowTableToIPC = null;
+}
 
 import { ArrowTableAdapter } from "../arrowTable.js";
 import { DataTable } from "../table.js";
@@ -93,6 +108,10 @@ export function deserializeTable(data) {
  */
 export function serializeAnyTable(table) {
   if (table instanceof ArrowTableAdapter) {
+    if (!arrowTableToIPC) {
+      const materialized = new DataTable(table.columns, Array.from(table.iterRows()));
+      return { kind: "data", data: serializeTable(materialized) };
+    }
     return {
       kind: "arrow",
       format: "ipc",
@@ -115,6 +134,9 @@ export function deserializeAnyTable(payload) {
   }
 
   if (payload.kind === "arrow") {
+    if (!arrowTableFromIPC) {
+      throw new Error("Cached Arrow table requires Arrow IPC support (install @formula/data-io dependencies)");
+    }
     const bytes = payload.bytes instanceof Uint8Array ? payload.bytes : new Uint8Array(payload.bytes);
     const table = arrowTableFromIPC(bytes);
     return new ArrowTableAdapter(table, payload.columns);
