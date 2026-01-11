@@ -936,6 +936,31 @@ mod tests {
         );
     }
 
+    fn assert_non_worksheet_parts_preserved(original: &[u8], written: &[u8]) {
+        let original_pkg = XlsxPackage::from_bytes(original).expect("parse original package");
+        let written_pkg = XlsxPackage::from_bytes(written).expect("parse written package");
+
+        let original_names: HashSet<String> = original_pkg.part_names().map(str::to_owned).collect();
+        let written_names: HashSet<String> = written_pkg.part_names().map(str::to_owned).collect();
+        assert_eq!(
+            original_names, written_names,
+            "expected no parts to be added/removed when patching worksheets"
+        );
+
+        for (name, bytes) in original_pkg.parts() {
+            let is_worksheet_xml =
+                name.starts_with("xl/worksheets/") && !name.starts_with("xl/worksheets/_rels/");
+            if is_worksheet_xml {
+                continue;
+            }
+            assert_eq!(
+                Some(bytes),
+                written_pkg.part(name),
+                "expected part {name} to be preserved byte-for-byte"
+            );
+        }
+    }
+
     #[test]
     fn reads_xlsb_fixture() {
         let fixture_path = Path::new(concat!(
@@ -1338,6 +1363,145 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(unexpected.is_empty(), "unexpected diffs: {unexpected:?}");
+    }
+
+    #[test]
+    fn cell_edit_preserves_image_parts() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/image.xlsx"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read image fixture workbook");
+
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(1, 1, Cell::from_literal(Some(CellScalar::Number(42.0))));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("edited.xlsx");
+        let _ = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read edited bytes");
+        assert_ne!(
+            original_bytes, written_bytes,
+            "expected worksheet patching to produce a different file"
+        );
+
+        assert_non_worksheet_parts_preserved(&original_bytes, &written_bytes);
+
+        let written = read_xlsx_blocking(&out_path).expect("read edited workbook");
+        assert_eq!(
+            written.sheets[0].get_cell(1, 1).computed_value,
+            CellScalar::Number(42.0)
+        );
+    }
+
+    #[test]
+    fn cell_edit_preserves_hyperlink_relationships() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/hyperlinks/hyperlinks.xlsx"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let mut workbook =
+            read_xlsx_blocking(fixture_path).expect("read hyperlinks fixture workbook");
+
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 1, Cell::from_literal(Some(CellScalar::Number(7.0))));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("edited.xlsx");
+        let _ = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read edited bytes");
+        assert_ne!(
+            original_bytes, written_bytes,
+            "expected worksheet patching to produce a different file"
+        );
+
+        assert_non_worksheet_parts_preserved(&original_bytes, &written_bytes);
+
+        let written = read_xlsx_blocking(&out_path).expect("read edited workbook");
+        assert_eq!(
+            written.sheets[0].get_cell(0, 1).computed_value,
+            CellScalar::Number(7.0)
+        );
+    }
+
+    #[test]
+    fn cell_edit_preserves_defined_names() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/metadata/defined-names.xlsx"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let mut workbook =
+            read_xlsx_blocking(fixture_path).expect("read defined-names fixture workbook");
+
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 2, Cell::from_literal(Some(CellScalar::Number(99.0))));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("edited.xlsx");
+        let _ = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read edited bytes");
+        assert_ne!(
+            original_bytes, written_bytes,
+            "expected worksheet patching to produce a different file"
+        );
+
+        assert_non_worksheet_parts_preserved(&original_bytes, &written_bytes);
+
+        let written = read_xlsx_blocking(&out_path).expect("read edited workbook");
+        assert_eq!(
+            written.sheets[0].get_cell(0, 2).computed_value,
+            CellScalar::Number(99.0)
+        );
+    }
+
+    #[test]
+    fn cell_edit_preserves_external_link_parts() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/metadata/external-link.xlsx"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let mut workbook =
+            read_xlsx_blocking(fixture_path).expect("read external-link fixture workbook");
+
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 1, Cell::from_literal(Some(CellScalar::Number(5.0))));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("edited.xlsx");
+        let _ = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read edited bytes");
+        assert_ne!(
+            original_bytes, written_bytes,
+            "expected worksheet patching to produce a different file"
+        );
+
+        assert_non_worksheet_parts_preserved(&original_bytes, &written_bytes);
+
+        let written = read_xlsx_blocking(&out_path).expect("read edited workbook");
+        assert_eq!(
+            written.sheets[0].get_cell(0, 1).computed_value,
+            CellScalar::Number(5.0)
+        );
     }
 
     #[test]
