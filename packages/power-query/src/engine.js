@@ -2411,29 +2411,140 @@ export class QueryEngine {
       stepId: stepContext?.stepId,
     });
 
-    const leftKeyIdx = left.getColumnIndex(op.leftKey);
-    const rightKeyIdx = right.getColumnIndex(op.rightKey);
+    const joinMode = op.joinMode ?? "flat";
+    const leftKeys =
+      Array.isArray(op.leftKeys) && op.leftKeys.length > 0
+        ? op.leftKeys
+        : typeof op.leftKey === "string" && op.leftKey
+          ? [op.leftKey]
+          : [];
+    const rightKeys =
+      Array.isArray(op.rightKeys) && op.rightKeys.length > 0
+        ? op.rightKeys
+        : typeof op.rightKey === "string" && op.rightKey
+          ? [op.rightKey]
+          : [];
+
+    if (leftKeys.length === 0 || rightKeys.length === 0) {
+      throw new Error("merge requires join key columns");
+    }
+    if (leftKeys.length !== rightKeys.length) {
+      throw new Error(`merge requires leftKeys/rightKeys to have the same length (got ${leftKeys.length} and ${rightKeys.length})`);
+    }
+
+    const leftKeyIdx = leftKeys.map((key) => left.getColumnIndex(key));
+    const rightKeyIdx = rightKeys.map((key) => right.getColumnIndex(key));
+
+    /**
+     * @param {ITable} table
+     * @param {number} rowIndex
+     * @param {number[]} keyIndices
+     */
+    const compositeKeyForRow = (table, rowIndex, keyIndices) => {
+      const parts = keyIndices.map((idx) => valueKey(table.getCell(rowIndex, idx)));
+      return JSON.stringify(parts);
+    };
 
     /** @type {Map<string, number[]>} */
     const rightIndex = new Map();
     for (let rowIndex = 0; rowIndex < right.rowCount; rowIndex++) {
-      const key = valueKey(right.getCell(rowIndex, rightKeyIdx));
+      const key = compositeKeyForRow(right, rowIndex, rightKeyIdx);
       const bucket = rightIndex.get(key);
       if (bucket) bucket.push(rowIndex);
       else rightIndex.set(key, [rowIndex]);
     }
 
+    if (joinMode === "nested") {
+      if (typeof op.newColumnName !== "string" || op.newColumnName.length === 0) {
+        throw new Error("merge joinMode 'nested' requires newColumnName");
+      }
+      if (left.columns.some((c) => c.name === op.newColumnName)) {
+        throw new Error(`Column '${op.newColumnName}' already exists`);
+      }
+
+      const nestedRightNames = Array.isArray(op.rightColumns) ? op.rightColumns : right.columns.map((c) => c.name);
+      const nestedRightIdx = nestedRightNames.map((name) => right.getColumnIndex(name));
+      const nestedColumns = nestedRightNames.map((name, idx) => ({ name, type: right.columns[nestedRightIdx[idx]]?.type ?? "any" }));
+
+      const outColumns = [...left.columns, { name: op.newColumnName, type: "any" }];
+      /** @type {unknown[][]} */
+      const outRows = [];
+
+      /**
+       * @param {number | null} leftRowIndex
+       * @param {DataTable} nestedTable
+       */
+      const emitNested = (leftRowIndex, nestedTable) => {
+        const row = new Array(outColumns.length);
+        let offset = 0;
+
+        if (leftRowIndex == null) {
+          for (let i = 0; i < left.columns.length; i++) row[offset++] = null;
+        } else {
+          for (let i = 0; i < left.columns.length; i++) row[offset++] = left.getCell(leftRowIndex, i);
+        }
+
+        row[offset++] = nestedTable;
+        outRows.push(row);
+      };
+
+      /**
+       * @param {number[]} rightRowIndices
+       */
+      const makeNestedTable = (rightRowIndices) => {
+        const nestedRows = rightRowIndices.map((rIdx) => nestedRightIdx.map((cIdx) => right.getCell(rIdx, cIdx)));
+        return new DataTable(nestedColumns, nestedRows);
+      };
+
+      /** @type {Set<number> | null} */
+      const matchedRight = op.joinType === "right" || op.joinType === "full" ? new Set() : null;
+
+      for (let leftRowIndex = 0; leftRowIndex < left.rowCount; leftRowIndex++) {
+        const key = compositeKeyForRow(left, leftRowIndex, leftKeyIdx);
+        const matchIndices = rightIndex.get(key) ?? [];
+        if (matchIndices.length === 0 && (op.joinType === "inner" || op.joinType === "right")) {
+          continue;
+        }
+
+        if (matchIndices.length === 0) {
+          emitNested(leftRowIndex, makeNestedTable([]));
+          continue;
+        }
+
+        if (matchedRight) {
+          for (const rIdx of matchIndices) matchedRight.add(rIdx);
+        }
+        emitNested(leftRowIndex, makeNestedTable(matchIndices));
+      }
+
+      if (matchedRight) {
+        for (let rightRowIndex = 0; rightRowIndex < right.rowCount; rightRowIndex++) {
+          if (matchedRight.has(rightRowIndex)) continue;
+          emitNested(null, makeNestedTable([rightRowIndex]));
+        }
+      }
+
+      const out = new DataTable(outColumns, outRows);
+      this.setTableSourceIds(out, combinedSourceIds);
+      return out;
+    }
+
+    // Flat (Table.Join) semantics.
+    const excludeRightKeys = new Set();
+    for (let i = 0; i < leftKeys.length; i++) {
+      if (leftKeys[i] === rightKeys[i]) excludeRightKeys.add(rightKeys[i]);
+    }
+
     const rightColumnsToInclude = right.columns
       .map((col, idx) => ({ col, idx }))
-      .filter(({ col }) => col.name !== op.rightKey || op.rightKey !== op.leftKey);
+      .filter(({ col }) => !excludeRightKeys.has(col.name));
 
-    const leftNames = new Set(left.columns.map((c) => c.name));
-    const rightColumns = rightColumnsToInclude.map(({ col }) => {
-      if (!leftNames.has(col.name)) return col;
-      return { ...col, name: `${col.name}.right` };
-    });
-
-    const outColumns = [...left.columns, ...rightColumns];
+    const rawOutNames = [...left.columns.map((c) => c.name), ...rightColumnsToInclude.map(({ col }) => col.name)];
+    const uniqueOutNames = makeUniqueColumnNames(rawOutNames);
+    const outColumns = [
+      ...left.columns.map((col, idx) => ({ ...col, name: uniqueOutNames[idx] })),
+      ...rightColumnsToInclude.map(({ col }, idx) => ({ ...col, name: uniqueOutNames[left.columns.length + idx] })),
+    ];
 
     /** @type {unknown[][]} */
     const outRows = [];
@@ -2464,7 +2575,8 @@ export class QueryEngine {
       const matchedRight = new Set();
 
       for (let leftRowIndex = 0; leftRowIndex < left.rowCount; leftRowIndex++) {
-        const matchIndices = rightIndex.get(valueKey(left.getCell(leftRowIndex, leftKeyIdx))) ?? [];
+        const key = compositeKeyForRow(left, leftRowIndex, leftKeyIdx);
+        const matchIndices = rightIndex.get(key) ?? [];
         if (matchIndices.length === 0) {
           if (op.joinType !== "inner") emit(leftRowIndex, null);
           continue;
@@ -2493,14 +2605,15 @@ export class QueryEngine {
       /** @type {Map<string, number[]>} */
       const leftIndex = new Map();
       for (let rowIndex = 0; rowIndex < left.rowCount; rowIndex++) {
-        const key = valueKey(left.getCell(rowIndex, leftKeyIdx));
+        const key = compositeKeyForRow(left, rowIndex, leftKeyIdx);
         const bucket = leftIndex.get(key);
         if (bucket) bucket.push(rowIndex);
         else leftIndex.set(key, [rowIndex]);
       }
 
       for (let rightRowIndex = 0; rightRowIndex < right.rowCount; rightRowIndex++) {
-        const matchIndices = leftIndex.get(valueKey(right.getCell(rightRowIndex, rightKeyIdx))) ?? [];
+        const key = compositeKeyForRow(right, rightRowIndex, rightKeyIdx);
+        const matchIndices = leftIndex.get(key) ?? [];
         if (matchIndices.length === 0) {
           emit(null, rightRowIndex);
           continue;

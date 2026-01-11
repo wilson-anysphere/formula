@@ -88,3 +88,20 @@ in
   const query2 = compileMToQuery(printed);
   assert.deepEqual(toJson(query2), toJson(query));
 });
+
+test("m_language round-trip: prettyPrintQueryToM (nested join + expand)", () => {
+  const script = `
+let
+  Left = Query.Reference("q_left"),
+  Right = Query.Reference("q_right"),
+  #"Merged Queries" = Table.NestedJoin(Left, {"Id"}, Right, {"Id"}, "Matches", JoinKind.LeftOuter),
+  #"Expanded Matches" = Table.ExpandTableColumn(#"Merged Queries", "Matches", {"Target"})
+in
+  #"Expanded Matches"
+`;
+
+  const query = compileMToQuery(script);
+  const printed = prettyPrintQueryToM(query);
+  const query2 = compileMToQuery(printed);
+  assert.deepEqual(toJson(query2), toJson(query));
+});

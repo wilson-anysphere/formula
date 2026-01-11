@@ -1,0 +1,33 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "query",
+    "queryId": "q_left"
+  },
+  "steps": [
+    {
+      "id": "s1_merge",
+      "name": "Merged Queries",
+      "operation": {
+        "type": "merge",
+        "rightQuery": "q_right",
+        "joinType": "left",
+        "leftKeys": ["Id"],
+        "rightKeys": ["Id"],
+        "joinMode": "nested",
+        "newColumnName": "Matches"
+      }
+    },
+    {
+      "id": "s2_expandTableColumn",
+      "name": "Expanded Matches",
+      "operation": {
+        "type": "expandTableColumn",
+        "column": "Matches",
+        "columns": ["Target"],
+        "newColumnNames": null
+      }
+    }
+  ]
+}

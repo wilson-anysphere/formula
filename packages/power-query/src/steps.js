@@ -42,26 +42,27 @@ function isNullish(value) {
 }
 
 /**
- * Normalize values for distinct comparisons.
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function normalizeMissing(value) {
+  return value === undefined ? null : value;
+}
+
+/**
+ * Compute a deterministic key for distinctness comparisons.
  *
- * Mirrors the materialized `distinctRows` implementation:
- * - treat `undefined` as `null`
- * - keep `Date` values distinct by timestamp
- * - for other objects, `valueKey` provides stable equality semantics
+ * Power Query's `Table.Distinct` is value-based (not referential) for composite
+ * values like Dates and records. Reuse the shared `valueKey` helper so local
+ * execution matches merge/grouping semantics.
+ *
+ * Note: `undefined` and `null` compare equal in Power Query tables.
  *
  * @param {unknown} value
  * @returns {string}
  */
 function distinctKey(value) {
   return valueKey(normalizeMissing(value));
-}
-
-/**
- * @param {unknown} value
- * @returns {unknown}
- */
-function normalizeMissing(value) {
-  return value === undefined ? null : value;
 }
 
 /**
@@ -168,7 +169,7 @@ function distinctRows(table, columns) {
     const outColumns = table.columns.map(() => []);
 
     for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
-      const keyValues = indices.map((idx) => valueKey(normalizeMissing(vectors[idx].get(rowIndex))));
+      const keyValues = indices.map((idx) => distinctKey(vectors[idx].get(rowIndex)));
       const key = JSON.stringify(keyValues);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -185,7 +186,7 @@ function distinctRows(table, columns) {
   const rows = materialized.rows;
   const outRows = [];
   for (const row of rows) {
-    const keyValues = indices.map((idx) => valueKey(normalizeMissing(row[idx])));
+    const keyValues = indices.map((idx) => distinctKey(row[idx]));
     const key = JSON.stringify(keyValues);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1807,6 +1808,127 @@ function ensureDataTable(table) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {value is ITable}
+ */
+function isITable(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  // @ts-ignore - runtime duck-typing
+  if (!("columns" in value) || !Array.isArray(value.columns)) return false;
+  // @ts-ignore - runtime duck-typing
+  return typeof value.getColumnIndex === "function" && typeof value.getCell === "function" && typeof value.rowCount === "number";
+}
+
+/**
+ * @param {DataTable} table
+ * @param {import("./model.js").ExpandTableColumnOp} op
+ * @returns {DataTable}
+ */
+function expandTableColumn(table, op) {
+  const columnIdx = table.getColumnIndex(op.column);
+
+  let columns = op.columns ?? null;
+  if (columns == null) {
+    // Best-effort: infer columns from the first non-null nested table.
+    for (const row of table.rows) {
+      const nested = row[columnIdx];
+      if (isITable(nested)) {
+        columns = nested.columns.map((c) => c.name);
+        break;
+      }
+    }
+    if (columns == null) columns = [];
+  }
+
+  const newColumnNames = op.newColumnNames ?? null;
+  if (newColumnNames && newColumnNames.length !== columns.length) {
+    throw new Error(
+      `expandTableColumn expected newColumnNames to have the same length as columns (${columns.length}), got ${newColumnNames.length}`,
+    );
+  }
+
+  // Power Query expands the nested table column by inserting new columns at the position
+  // of the nested column and repeating the outer row for every nested row. When the
+  // nested table is empty or null, the result keeps the outer row and fills expanded
+  // columns with nulls.
+  const prefixColumns = table.columns.slice(0, columnIdx);
+  const suffixColumns = table.columns.slice(columnIdx + 1);
+
+  // Expand uses either the provided new column names or the nested column names.
+  const rawExpandedNames = newColumnNames ?? columns;
+
+  // Ensure we never rename existing columns; only the newly expanded columns should be uniqued.
+  const reserved = new Set([...prefixColumns.map((c) => c.name), ...suffixColumns.map((c) => c.name)]);
+  const baseExpanded = makeUniqueColumnNames(rawExpandedNames);
+  const expandedNames = baseExpanded.map((base) => {
+    if (!reserved.has(base)) {
+      reserved.add(base);
+      return base;
+    }
+    let i = 1;
+    while (reserved.has(`${base}.${i}`)) i += 1;
+    const unique = `${base}.${i}`;
+    reserved.add(unique);
+    return unique;
+  });
+
+  /** @type {ITable | null} */
+  let sampleNested = null;
+  for (const row of table.rows) {
+    const nested = row[columnIdx];
+    if (isITable(nested)) {
+      sampleNested = nested;
+      break;
+    }
+  }
+
+  const expandedTypes = columns.map((name) => {
+    if (!sampleNested) return "any";
+    const idx = sampleNested.columns.findIndex((c) => c.name === name);
+    return idx === -1 ? "any" : sampleNested.columns[idx]?.type ?? "any";
+  });
+
+  const outColumns = [
+    ...prefixColumns,
+    ...expandedNames.map((name, idx) => ({ name, type: expandedTypes[idx] ?? "any" })),
+    ...suffixColumns,
+  ];
+
+  /** @type {unknown[][]} */
+  const outRows = [];
+
+  for (const row of table.rows) {
+    const nestedValue = row[columnIdx];
+    const prefix = row.slice(0, columnIdx);
+    const suffix = row.slice(columnIdx + 1);
+
+    if (nestedValue == null) {
+      outRows.push([...prefix, ...columns.map(() => null), ...suffix]);
+      continue;
+    }
+
+    if (!isITable(nestedValue)) {
+      throw new Error(`expandTableColumn expected '${op.column}' to contain nested tables or null`);
+    }
+
+    const nested = nestedValue;
+    const nestedIndices = columns.map((c) => nested.getColumnIndex(c));
+
+    if (nested.rowCount === 0) {
+      outRows.push([...prefix, ...columns.map(() => null), ...suffix]);
+      continue;
+    }
+
+    for (let nestedRow = 0; nestedRow < nested.rowCount; nestedRow++) {
+      const expanded = nestedIndices.map((idx) => nested.getCell(nestedRow, idx));
+      outRows.push([...prefix, ...expanded, ...suffix]);
+    }
+  }
+
+  return new DataTable(outColumns, outRows);
+}
+
+/**
  * Apply a query operation locally.
  *
  * Operations that require external state (`merge`, `append`) are handled by the
@@ -1856,6 +1978,8 @@ export function applyOperation(table, operation) {
       return replaceValues(ensureDataTable(table), operation);
     case "splitColumn":
       return splitColumn(ensureDataTable(table), operation);
+    case "expandTableColumn":
+      return expandTableColumn(ensureDataTable(table), operation);
     case "promoteHeaders":
       return promoteHeaders(ensureDataTable(table));
     case "demoteHeaders":

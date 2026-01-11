@@ -21,8 +21,9 @@
         "type": "merge",
         "rightQuery": "q_targets",
         "joinType": "left",
-        "leftKey": "Id",
-        "rightKey": "Id"
+        "leftKeys": ["Id"],
+        "rightKeys": ["Id"],
+        "joinMode": "flat"
       }
     }
   ]

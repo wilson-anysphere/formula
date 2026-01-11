@@ -239,6 +239,25 @@ function dataTypeToMTypeExpr(type) {
 }
 
 /**
+ * @param {"inner" | "left" | "right" | "full"} joinType
+ * @returns {string}
+ */
+function joinTypeToM(joinType) {
+  switch (joinType) {
+    case "inner":
+      return "JoinKind.Inner";
+    case "left":
+      return "JoinKind.LeftOuter";
+    case "right":
+      return "JoinKind.RightOuter";
+    case "full":
+      return "JoinKind.FullOuter";
+    default:
+      return "JoinKind.Inner";
+  }
+}
+
+/**
  * @param {string} formula
  * @returns {string}
  */
@@ -424,6 +443,39 @@ function operationToM(operation, inputName) {
     case "replaceErrorValues": {
       const specs = operation.replacements.map((r) => `{${escapeMString(r.column)}, ${valueToM(r.value)}}`);
       return `Table.ReplaceErrorValues(${inputName}, {${specs.join(", ")}})`;
+    }
+    case "append": {
+      const others = operation.queries.map((id) => `Query.Reference(${escapeMString(id)})`);
+      return `Table.Combine({${[inputName, ...others].join(", ")}})`;
+    }
+    case "merge": {
+      const leftKeys =
+        Array.isArray(operation.leftKeys) && operation.leftKeys.length > 0
+          ? operation.leftKeys
+          : typeof operation.leftKey === "string" && operation.leftKey
+            ? [operation.leftKey]
+            : [];
+      const rightKeys =
+        Array.isArray(operation.rightKeys) && operation.rightKeys.length > 0
+          ? operation.rightKeys
+          : typeof operation.rightKey === "string" && operation.rightKey
+            ? [operation.rightKey]
+            : [];
+      const joinMode = operation.joinMode ?? "flat";
+      const joinKind = joinTypeToM(operation.joinType);
+      const right = `Query.Reference(${escapeMString(operation.rightQuery)})`;
+      if (joinMode === "nested") {
+        if (typeof operation.newColumnName !== "string") {
+          throw new Error("Nested join requires newColumnName");
+        }
+        return `Table.NestedJoin(${inputName}, ${valueToM(leftKeys)}, ${right}, ${valueToM(rightKeys)}, ${escapeMString(operation.newColumnName)}, ${joinKind})`;
+      }
+      return `Table.Join(${inputName}, ${valueToM(leftKeys)}, ${right}, ${valueToM(rightKeys)}, ${joinKind})`;
+    }
+    case "expandTableColumn": {
+      const cols = operation.columns == null ? "null" : valueToM(operation.columns);
+      const names = operation.newColumnNames == null ? "" : `, ${valueToM(operation.newColumnNames)}`;
+      return `Table.ExpandTableColumn(${inputName}, ${escapeMString(operation.column)}, ${cols}${names})`;
     }
     default: {
       /** @type {never} */

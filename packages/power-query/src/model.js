@@ -209,7 +209,47 @@
  * @typedef {{ type: "removeRows"; offset: number; count: number }} RemoveRowsOp
  * @typedef {{ type: "pivot"; rowColumn: string; valueColumn: string; aggregation: Aggregation["op"] }} PivotOp
  * @typedef {{ type: "unpivot"; columns: string[]; nameColumn: string; valueColumn: string }} UnpivotOp
- * @typedef {{ type: "merge"; rightQuery: string; joinType: "inner" | "left" | "right" | "full"; leftKey: string; rightKey: string }} MergeOp
+ * @typedef {{
+ *   type: "merge";
+ *   rightQuery: string;
+ *   joinType: "inner" | "left" | "right" | "full";
+ *   /**
+ *    * Join key columns on the left-hand input.
+ *    *
+ *    * Must be the same length as `rightKeys` and contain at least one entry.
+ *    */
+ *   leftKeys?: string[];
+ *   /**
+ *    * Join key columns on the right-hand input.
+ *    *
+ *    * Must be the same length as `leftKeys` and contain at least one entry.
+ *    */
+ *   rightKeys?: string[];
+ *   /**
+ *    * Output mode:
+ *    * - `"flat"`: Power Query `Table.Join` semantics (flattened join output).
+ *    * - `"nested"`: Power Query `Table.NestedJoin` semantics (adds a column containing nested tables).
+ *    *
+ *    * Defaults to `"flat"` when omitted.
+    */
+ *   joinMode?: "flat" | "nested";
+ *   /**
+ *    * Name of the nested table column produced when `joinMode === "nested"`.
+ *    */
+ *   newColumnName?: string;
+ *   /**
+ *    * Optional projection for the nested table schema when `joinMode === "nested"`.
+ *    * When omitted, all columns from the right table are included.
+ *    */
+ *   rightColumns?: string[] | null;
+ *   /**
+ *    * Legacy single-key fields. These are kept for backwards compatibility with older
+ *    * serialized queries.
+ *    */
+ *   leftKey?: string;
+ *   rightKey?: string;
+ * }} MergeOp
+ * @typedef {{ type: "expandTableColumn"; column: string; columns?: string[] | null; newColumnNames?: string[] | null }} ExpandTableColumnOp
  * @typedef {{ type: "append"; queries: string[] }} AppendOp
  * @typedef {{ type: "distinctRows"; columns: string[] | null }} DistinctRowsOp
  * @typedef {{ type: "removeRowsWithErrors"; columns: string[] | null }} RemoveRowsWithErrorsOp
@@ -227,7 +267,7 @@
  * @typedef {{ column: string; value: unknown }} ReplaceErrorValueSpec
  * @typedef {{ type: "replaceErrorValues"; replacements: ReplaceErrorValueSpec[] }} ReplaceErrorValuesOp
  *
- * @typedef {SelectColumnsOp | RemoveColumnsOp | FilterRowsOp | SortRowsOp | GroupByOp | AddColumnOp | RenameColumnOp | ChangeTypeOp | TakeOp | SkipOp | RemoveRowsOp | PivotOp | UnpivotOp | MergeOp | AppendOp | DistinctRowsOp | RemoveRowsWithErrorsOp | TransformColumnsOp | FillDownOp | ReplaceValuesOp | SplitColumnOp | PromoteHeadersOp | DemoteHeadersOp | ReorderColumnsOp | AddIndexColumnOp | CombineColumnsOp | TransformColumnNamesOp | ReplaceErrorValuesOp} QueryOperation
+ * @typedef {SelectColumnsOp | RemoveColumnsOp | FilterRowsOp | SortRowsOp | GroupByOp | AddColumnOp | RenameColumnOp | ChangeTypeOp | TakeOp | SkipOp | RemoveRowsOp | PivotOp | UnpivotOp | MergeOp | ExpandTableColumnOp | AppendOp | DistinctRowsOp | RemoveRowsWithErrorsOp | TransformColumnsOp | FillDownOp | ReplaceValuesOp | SplitColumnOp | PromoteHeadersOp | DemoteHeadersOp | ReorderColumnsOp | AddIndexColumnOp | CombineColumnsOp | TransformColumnNamesOp | ReplaceErrorValuesOp} QueryOperation
  */
 
 /**

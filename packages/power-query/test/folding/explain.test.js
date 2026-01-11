@@ -68,7 +68,11 @@ test("explain: merge blocked by privacy levels marks step local with privacy_fir
     source: { type: "database", connectionId: "connA", connection: sharedConnection, query: "SELECT * FROM sales", dialect: "postgres" },
     steps: [
       { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id"] } },
-      { id: "l2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+      {
+        id: "l2",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKeys: ["Id"], rightKeys: ["Id"], joinMode: "flat" },
+      },
     ],
   };
 
@@ -87,4 +91,49 @@ test("explain: merge blocked by privacy levels marks step local with privacy_fir
   assert.equal(explained.steps[1].status, "local");
   assert.equal(explained.steps[1].reason, "privacy_firewall");
   assert.ok(Array.isArray(explained.plan.diagnostics) && explained.plan.diagnostics.length > 0);
+});
+
+test("explain: nested join is not folded (unsupported_join_mode)", () => {
+  const folding = new QueryFoldingEngine();
+  const connection = { id: "db1" };
+
+  const right = {
+    id: "q_right_nested",
+    name: "Targets",
+    source: { type: "database", connection, query: "SELECT * FROM targets", dialect: "postgres" },
+    steps: [{ id: "r1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left_nested",
+    name: "Sales",
+    source: { type: "database", connection, query: "SELECT * FROM sales", dialect: "postgres" },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id"] } },
+      {
+        id: "l2",
+        name: "Nested Join",
+        operation: {
+          type: "merge",
+          rightQuery: "q_right_nested",
+          joinType: "left",
+          leftKeys: ["Id"],
+          rightKeys: ["Id"],
+          joinMode: "nested",
+          newColumnName: "Matches",
+        },
+      },
+    ],
+  };
+
+  const explained = folding.explain(left, { dialect: "postgres", queries: { q_right_nested: right } });
+  assert.equal(explained.plan.type, "hybrid");
+  assert.deepEqual(
+    explained.steps.map((s) => [s.opType, s.status]),
+    [
+      ["selectColumns", "folded"],
+      ["merge", "local"],
+    ],
+  );
+  assert.equal(explained.steps[1].reason, "unsupported_join_mode");
 });

@@ -434,7 +434,11 @@ test("compile: folds merge (join) when both sides fully fold to SQL", () => {
     source: { type: "database", connection, query: "SELECT * FROM sales" },
     steps: [
       { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region", "Sales"] } },
-      { id: "s2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+      {
+        id: "s2",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKeys: ["Id"], rightKeys: ["Id"], joinMode: "flat" },
+      },
     ],
   };
 
@@ -442,6 +446,46 @@ test("compile: folds merge (join) when both sides fully fold to SQL", () => {
   assert.deepEqual(plan, {
     type: "sql",
     sql: 'SELECT l."Id" AS "Id", l."Region" AS "Region", l."Sales" AS "Sales", r."Target" AS "Target" FROM (SELECT t."Id", t."Region", t."Sales" FROM (SELECT * FROM sales) AS t) AS l LEFT JOIN (SELECT t."Id", t."Target" FROM (SELECT * FROM targets) AS t) AS r ON l."Id" IS NOT DISTINCT FROM r."Id"',
+    params: [],
+  });
+});
+
+test("compile: folds merge with multi-key join conditions", () => {
+  const folding = new QueryFoldingEngine();
+  const connection = {};
+
+  const right = {
+    id: "q_right_multi",
+    name: "Targets",
+    source: { type: "database", connection, query: "SELECT * FROM targets" },
+    steps: [{ id: "r1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left_multi",
+    name: "Sales",
+    source: { type: "database", connection, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region", "Sales"] } },
+      {
+        id: "s2",
+        name: "Merge",
+        operation: {
+          type: "merge",
+          rightQuery: "q_right_multi",
+          joinType: "left",
+          leftKeys: ["Id", "Region"],
+          rightKeys: ["Id", "Region"],
+          joinMode: "flat",
+        },
+      },
+    ],
+  };
+
+  const plan = folding.compile(left, { queries: { q_right_multi: right } });
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT l."Id" AS "Id", l."Region" AS "Region", l."Sales" AS "Sales", r."Target" AS "Target" FROM (SELECT t."Id", t."Region", t."Sales" FROM (SELECT * FROM sales) AS t) AS l LEFT JOIN (SELECT t."Id", t."Region", t."Target" FROM (SELECT * FROM targets) AS t) AS r ON l."Id" IS NOT DISTINCT FROM r."Id" AND l."Region" IS NOT DISTINCT FROM r."Region"',
     params: [],
   });
 });
@@ -464,7 +508,11 @@ test("compile: folds merge when connections are deep-equal but not referentially
     source: { type: "database", connection: leftConn, query: "SELECT * FROM sales" },
     steps: [
       { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region", "Sales"] } },
-      { id: "s2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+      {
+        id: "s2",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKeys: ["Id"], rightKeys: ["Id"], joinMode: "flat" },
+      },
     ],
   };
 
@@ -491,7 +539,11 @@ test("compile: folds merge when both connections share an id without getConnecti
     source: { type: "database", connection: leftConn, query: "SELECT * FROM sales" },
     steps: [
       { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region", "Sales"] } },
-      { id: "s2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+      {
+        id: "s2",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKeys: ["Id"], rightKeys: ["Id"], joinMode: "flat" },
+      },
     ],
   };
 
@@ -516,7 +568,11 @@ test("compile: merge across different database connections breaks folding", () =
     source: { type: "database", connection: { name: "db1" }, query: "SELECT * FROM sales" },
     steps: [
       { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Sales"] } },
-      { id: "s2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+      {
+        id: "s2",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKeys: ["Id"], rightKeys: ["Id"], joinMode: "flat" },
+      },
     ],
   };
 

@@ -839,16 +839,63 @@ function compileTableOperation(ctx, fnName, expr, schema) {
     }
     case "Table.Join":
     case "Table.NestedJoin": {
-      const leftKey = expectJoinKey(ctx, expr.args[1], fnName);
-      validateColumnsExist(ctx, expr, schema, [leftKey]);
+      const leftKeys = expectJoinKeys(ctx, expr.args[1], fnName);
+      validateColumnsExist(ctx, expr, schema, leftKeys);
       const rightTableExpr = expr.args[2];
       if (!rightTableExpr) ctx.error(expr, `${fnName} requires a right table argument`);
-      const rightKey = expectJoinKey(ctx, expr.args[3], fnName);
+      const rightKeys = expectJoinKeys(ctx, expr.args[3], fnName);
+      if (leftKeys.length !== rightKeys.length) {
+        ctx.error(expr, `${fnName} requires left and right join key lists to have the same length`);
+      }
+      const newColumnName = fnName === "Table.NestedJoin" ? expectText(ctx, expr.args[4]) : null;
       const joinKindExpr = fnName === "Table.Join" ? expr.args[4] ?? null : expr.args[5] ?? null;
       const joinType = compileJoinKind(ctx, joinKindExpr);
       const rightQuery = expectQueryReferenceId(ctx, rightTableExpr, fnName);
       return {
-        operations: [{ type: "merge", rightQuery, joinType, leftKey, rightKey }],
+        operations: [
+          {
+            type: "merge",
+            rightQuery,
+            joinType,
+            leftKeys,
+            rightKeys,
+            joinMode: fnName === "Table.NestedJoin" ? "nested" : "flat",
+            ...(newColumnName != null ? { newColumnName } : null),
+          },
+        ],
+        schema: null,
+      };
+    }
+    case "Table.ExpandTableColumn": {
+      const column = expectText(ctx, expr.args[1]);
+      validateColumnsExist(ctx, expr, schema, [column]);
+
+      const columnsExpr = expr.args[2] ?? null;
+      /** @type {string[] | null} */
+      let columns = null;
+      if (columnsExpr) {
+        const raw = evaluateConstant(ctx, columnsExpr);
+        if (raw != null) {
+          columns = expectTextList(ctx, columnsExpr, "Table.ExpandTableColumn");
+        }
+      }
+
+      const newNamesExpr = expr.args[3] ?? null;
+      /** @type {string[] | null} */
+      let newColumnNames = null;
+      if (newNamesExpr) {
+        const raw = evaluateConstant(ctx, newNamesExpr);
+        if (raw != null) {
+          newColumnNames = expectTextList(ctx, newNamesExpr, "Table.ExpandTableColumn");
+        }
+      }
+
+      if (newColumnNames && columns && newColumnNames.length !== columns.length) {
+        ctx.error(expr, "Table.ExpandTableColumn new column names must match the expanded column list length");
+      }
+
+      return {
+        operations: [{ type: "expandTableColumn", column, columns, newColumnNames }],
         schema: null,
       };
     }
@@ -1186,18 +1233,16 @@ function compileCombinerDelimiter(ctx, expr) {
  * @param {CompilerContext} ctx
  * @param {MExpression | undefined | null} expr
  * @param {string} fnName
- * @returns {string}
+ * @returns {string[]}
  */
-function expectJoinKey(ctx, expr, fnName) {
+function expectJoinKeys(ctx, expr, fnName) {
   if (!expr) ctx.error(exprSpanStart(), `${fnName} requires join key columns`);
   const value = evaluateConstant(ctx, expr);
-  if (typeof value === "string") return value;
-  if (Array.isArray(value) && value.length === 1) {
-    const first = value[0];
-    if (typeof first === "string") return first;
-    return String(first);
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value) && value.length > 0) {
+    return value.map((v) => (typeof v === "string" ? v : String(v)));
   }
-  ctx.error(expr, `${fnName} join keys must be a column name or a single-item list of column names`);
+  ctx.error(expr, `${fnName} join keys must be a column name or a non-empty list of column names`);
 }
 
 /**

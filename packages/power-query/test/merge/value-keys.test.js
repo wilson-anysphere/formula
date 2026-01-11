@@ -59,7 +59,14 @@ async function runMerge({ left, right, leftKey, rightKey }) {
       {
         id: "s_merge",
         name: "Merge",
-        operation: { type: "merge", rightQuery: "q_right", joinType: "inner", leftKey, rightKey },
+        operation: {
+          type: "merge",
+          rightQuery: "q_right",
+          joinType: "inner",
+          leftKeys: [leftKey],
+          rightKeys: [rightKey],
+          joinMode: "flat",
+        },
       },
     ],
   };

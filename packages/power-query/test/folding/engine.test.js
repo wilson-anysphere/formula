@@ -367,7 +367,11 @@ test("QueryEngine: folds merge into a single SQL query when both sides are folda
     source: { type: "database", connection, query: "SELECT * FROM sales", dialect: "postgres" },
     steps: [
       { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region"] } },
-      { id: "l2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+      {
+        id: "l2",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKeys: ["Id"], rightKeys: ["Id"], joinMode: "flat" },
+      },
     ],
   };
 
@@ -482,7 +486,18 @@ test("QueryEngine: schema discovery enables folding merge without explicit proje
     name: "Sales",
     source: { type: "database", connection: { id: "db1" }, query: "SELECT * FROM sales", dialect: "postgres" },
     steps: [
-      { id: "l1", name: "Merge", operation: { type: "merge", rightQuery: "q_right_schema", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+      {
+        id: "l1",
+        name: "Merge",
+        operation: {
+          type: "merge",
+          rightQuery: "q_right_schema",
+          joinType: "left",
+          leftKeys: ["Id"],
+          rightKeys: ["Id"],
+          joinMode: "flat",
+        },
+      },
     ],
   };
 

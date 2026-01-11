@@ -1,0 +1,22 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "query",
+    "queryId": "q_left"
+  },
+  "steps": [
+    {
+      "id": "s1_merge",
+      "name": "Merged Queries",
+      "operation": {
+        "type": "merge",
+        "rightQuery": "q_right",
+        "joinType": "inner",
+        "leftKeys": ["Id", "Region"],
+        "rightKeys": ["Id", "Region"],
+        "joinMode": "flat"
+      }
+    }
+  ]
+}

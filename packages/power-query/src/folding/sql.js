@@ -1,5 +1,6 @@
 import { predicateToSql } from "../predicate.js";
 import { hashValue } from "../cache/key.js";
+import { makeUniqueColumnNames } from "../table.js";
 import { POSTGRES_DIALECT, getSqlDialect } from "./dialect.js";
 import { compileExprToSql, parseFormula } from "../expr/index.js";
 import { collectSourcePrivacy, distinctPrivacyLevels } from "../privacy/firewall.js";
@@ -834,37 +835,61 @@ export class QueryFoldingEngine {
           }
         }
 
-        if (!state.columns.includes(operation.leftKey)) return null;
-        if (!rightState.columns.includes(operation.rightKey)) return null;
+        const joinMode = operation.joinMode ?? "flat";
+        if (joinMode !== "flat") return null;
+
+        const leftKeys =
+          Array.isArray(operation.leftKeys) && operation.leftKeys.length > 0
+            ? operation.leftKeys
+            : typeof operation.leftKey === "string" && operation.leftKey
+              ? [operation.leftKey]
+              : [];
+        const rightKeys =
+          Array.isArray(operation.rightKeys) && operation.rightKeys.length > 0
+            ? operation.rightKeys
+            : typeof operation.rightKey === "string" && operation.rightKey
+              ? [operation.rightKey]
+              : [];
+
+        if (leftKeys.length === 0 || rightKeys.length === 0) return null;
+        if (leftKeys.length !== rightKeys.length) return null;
+
+        for (const key of leftKeys) {
+          if (!state.columns.includes(key)) return null;
+        }
+        for (const key of rightKeys) {
+          if (!rightState.columns.includes(key)) return null;
+        }
 
         const join = joinTypeToSql(dialect, operation.joinType);
         if (!join) return null;
 
         const leftCols = state.columns;
-        const rightColsToInclude = rightState.columns.filter(
-          (c) => c !== operation.rightKey || operation.rightKey !== operation.leftKey,
-        );
+        const excludeRightKeys = new Set();
+        for (let i = 0; i < leftKeys.length; i++) {
+          if (leftKeys[i] === rightKeys[i]) excludeRightKeys.add(rightKeys[i]);
+        }
 
-        const leftNames = new Set(leftCols);
-        const rightOut = rightColsToInclude.map((name) => ({
-          source: name,
-          out: leftNames.has(name) ? `${name}.right` : name,
-        }));
+        const rightColsToInclude = rightState.columns.filter((c) => !excludeRightKeys.has(c));
+
+        const outNames = makeUniqueColumnNames([...leftCols, ...rightColsToInclude]);
+        const leftOutNames = outNames.slice(0, leftCols.length);
+        const rightOutNames = outNames.slice(leftCols.length);
 
         const selectList = [
-          ...leftCols.map((name) => `l.${quoteIdentifier(name)} AS ${quoteIdentifier(name)}`),
-          ...rightOut.map(({ source, out }) => `r.${quoteIdentifier(source)} AS ${quoteIdentifier(out)}`),
+          ...leftCols.map((name, idx) => `l.${quoteIdentifier(name)} AS ${quoteIdentifier(leftOutNames[idx])}`),
+          ...rightColsToInclude.map((name, idx) => `r.${quoteIdentifier(name)} AS ${quoteIdentifier(rightOutNames[idx])}`),
         ].join(", ");
 
-        const on = nullSafeEqualsSql(
-          dialect,
-          `l.${quoteIdentifier(operation.leftKey)}`,
-          `r.${quoteIdentifier(operation.rightKey)}`,
-        );
+        const on = leftKeys
+          .map((leftKey, idx) =>
+            nullSafeEqualsSql(dialect, `l.${quoteIdentifier(leftKey)}`, `r.${quoteIdentifier(rightKeys[idx])}`),
+          )
+          .join(" AND ");
         const mergedSql = `SELECT ${selectList} FROM (${state.fragment.sql}) AS l ${join} (${rightState.fragment.sql}) AS r ON ${on}`;
         return {
           fragment: { sql: mergedSql, params: [...state.fragment.params, ...rightState.fragment.params] },
-          columns: [...leftCols, ...rightOut.map((c) => c.out)],
+          columns: [...leftOutNames, ...rightOutNames],
           sortBy: null,
           sortInFragment: false,
           connectionId: state.connectionId,
@@ -1029,6 +1054,32 @@ export class QueryFoldingEngine {
         if (ctx.privacyMode && ctx.privacyMode !== "ignore") {
           if (leftLevel && rightLevel && leftLevel !== rightLevel) return "privacy_firewall";
         }
+
+        const joinMode = operation.joinMode ?? "flat";
+        if (joinMode !== "flat") return "unsupported_join_mode";
+
+        const leftKeys =
+          Array.isArray(operation.leftKeys) && operation.leftKeys.length > 0
+            ? operation.leftKeys
+            : typeof operation.leftKey === "string" && operation.leftKey
+              ? [operation.leftKey]
+              : [];
+        const rightKeys =
+          Array.isArray(operation.rightKeys) && operation.rightKeys.length > 0
+            ? operation.rightKeys
+            : typeof operation.rightKey === "string" && operation.rightKey
+              ? [operation.rightKey]
+              : [];
+
+        if (leftKeys.length === 0 || rightKeys.length === 0) return "invalid_argument";
+        if (leftKeys.length !== rightKeys.length) return "invalid_argument";
+        for (const key of leftKeys) {
+          if (!state.columns.includes(key)) return "unknown_projection";
+        }
+        for (const key of rightKeys) {
+          if (!rightState.columns.includes(key)) return "unknown_projection";
+        }
+
         const join = joinTypeToSql(ctx.dialect, operation.joinType);
         if (!join) return "unsupported_join_type";
         return "unsupported_op";

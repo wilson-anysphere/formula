@@ -529,6 +529,10 @@ in
   );
 
   assert.equal(joinQuery.steps[0]?.operation.type, "merge");
+  // Table.Join compiles to a flat merge.
+  assert.deepEqual(joinQuery.steps[0]?.operation.leftKeys, ["Id"]);
+  assert.deepEqual(joinQuery.steps[0]?.operation.rightKeys, ["Id"]);
+  assert.equal(joinQuery.steps[0]?.operation.joinMode, "flat");
 
   const engine = new QueryEngine();
   const result = await engine.executeQuery(joinQuery, { queries: { q_sales: sales, q_targets: targets } }, {});
@@ -536,5 +540,184 @@ in
     ["Id", "Sales", "Target"],
     [1, 100, null],
     [2, 200, "B"],
+  ]);
+});
+
+test("m_language execution: Table.Join supports multi-key joins (nulls compare equal)", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Region", "Sales"},
+    {1, "East", 100},
+    {1, "West", 200},
+    {2, "East", 300},
+    {3, null, 400}
+  })
+in
+  Source
+`,
+    { id: "q_left", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Region", "Target"},
+    {1, "East", "A"},
+    {1, "West", "B"},
+    {3, null, "C"}
+  })
+in
+  Source
+`,
+    { id: "q_right", name: "Right" },
+  );
+
+  const joinQuery = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left"),
+  Right = Query.Reference("q_right"),
+  #"Merged Queries" = Table.Join(Left, {"Id", "Region"}, Right, {"Id", "Region"}, JoinKind.LeftOuter)
+in
+  #"Merged Queries"
+`,
+    { id: "q_join_multi", name: "Join Multi" },
+  );
+
+  assert.equal(joinQuery.steps[0]?.operation.type, "merge");
+  assert.deepEqual(joinQuery.steps[0]?.operation.leftKeys, ["Id", "Region"]);
+  assert.deepEqual(joinQuery.steps[0]?.operation.rightKeys, ["Id", "Region"]);
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(joinQuery, { queries: { q_left: left, q_right: right } }, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Region", "Sales", "Target"],
+    [1, "East", 100, "A"],
+    [1, "West", 200, "B"],
+    [2, "East", 300, null],
+    [3, null, 400, "C"],
+  ]);
+});
+
+test("m_language execution: Table.NestedJoin produces nested table columns", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Sales"},
+    {1, 100},
+    {2, 200},
+    {3, 300}
+  })
+in
+  Source
+`,
+    { id: "q_left_nested", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Target"},
+    {2, "B"},
+    {2, "C"}
+  })
+in
+  Source
+`,
+    { id: "q_right_nested", name: "Right" },
+  );
+
+  const nestedJoin = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_nested"),
+  Right = Query.Reference("q_right_nested"),
+  #"Merged Queries" = Table.NestedJoin(Left, {"Id"}, Right, {"Id"}, "Matches", JoinKind.LeftOuter)
+in
+  #"Merged Queries"
+`,
+    { id: "q_nested_join", name: "Nested join" },
+  );
+
+  assert.equal(nestedJoin.steps[0]?.operation.type, "merge");
+  assert.equal(nestedJoin.steps[0]?.operation.joinMode, "nested");
+  assert.equal(nestedJoin.steps[0]?.operation.newColumnName, "Matches");
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(nestedJoin, { queries: { q_left_nested: left, q_right_nested: right } }, {});
+
+  const matchesIdx = result.getColumnIndex("Matches");
+
+  const row0 = result.getCell(0, matchesIdx);
+  assert.ok(row0 instanceof DataTable);
+  assert.deepEqual(row0.toGrid(), [["Id", "Target"]]);
+
+  const row1 = result.getCell(1, matchesIdx);
+  assert.ok(row1 instanceof DataTable);
+  assert.deepEqual(row1.toGrid(), [
+    ["Id", "Target"],
+    [2, "B"],
+    [2, "C"],
+  ]);
+});
+
+test("m_language execution: Table.ExpandTableColumn expands nested joins (empty nested tables keep the row)", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Target", "Sales"},
+    {1, "L1", 100},
+    {2, "L2", 200},
+    {3, "L3", 300}
+  })
+in
+  Source
+`,
+    { id: "q_left_expand", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Target"},
+    {2, "R2"},
+    {2, "R2b"}
+  })
+in
+  Source
+`,
+    { id: "q_right_expand", name: "Right" },
+  );
+
+  const query = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_expand"),
+  Right = Query.Reference("q_right_expand"),
+  #"Merged Queries" = Table.NestedJoin(Left, {"Id"}, Right, {"Id"}, "Matches", JoinKind.LeftOuter),
+  #"Expanded Matches" = Table.ExpandTableColumn(#"Merged Queries", "Matches", {"Target"})
+in
+  #"Expanded Matches"
+`,
+    { id: "q_expand", name: "Expand" },
+  );
+
+  assert.deepEqual(query.steps.map((s) => s.operation.type), ["merge", "expandTableColumn"]);
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(query, { queries: { q_left_expand: left, q_right_expand: right } }, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Target", "Sales", "Target.1"],
+    [1, "L1", 100, null],
+    [2, "L2", 200, "R2"],
+    [2, "L2", 200, "R2b"],
+    [3, "L3", 300, null],
   ]);
 });
