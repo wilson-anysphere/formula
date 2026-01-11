@@ -441,6 +441,7 @@ test("installed extension tampering is detected, quarantines execution, and repa
     await copyDir(sampleExtensionSrc, extSource);
 
     const manifest = JSON.parse(await fs.readFile(path.join(extSource, "package.json"), "utf8"));
+    const baseManifest = JSON.parse(JSON.stringify(manifest));
     const extensionId = `${manifest.publisher}.${manifest.name}`;
 
     const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
@@ -652,7 +653,10 @@ test("publish-bin rejects invalid manifests (matches client validation)", async 
     // Patch the on-disk manifest to be invalid and bypass the extension-publisher's local
     // validation by building v2 packages directly.
     async function publishInvalidManifest(patch, expectedErrorRe) {
-      await patchManifest(extSource, patch);
+      await fs.writeFile(
+        path.join(extSource, "package.json"),
+        JSON.stringify({ ...baseManifest, ...patch }, null, 2),
+      );
       const packageBytes = await createExtensionPackageV2(extSource, { privateKeyPem });
 
       const publishRes = await fetch(`${baseUrl}/api/publish-bin`, {
@@ -673,7 +677,7 @@ test("publish-bin rejects invalid manifests (matches client validation)", async 
 
     await publishInvalidManifest(
       {
-        permissions: manifest.permissions ?? [],
+        permissions: baseManifest.permissions ?? [],
         activationEvents: ["onView:missing.panel"],
         contributes: { panels: [] },
       },
@@ -682,7 +686,7 @@ test("publish-bin rejects invalid manifests (matches client validation)", async 
 
     await publishInvalidManifest(
       {
-        permissions: manifest.permissions ?? [],
+        permissions: baseManifest.permissions ?? [],
         activationEvents: ["onCustomFunction:missing.func"],
         contributes: { customFunctions: [] },
       },
@@ -691,7 +695,16 @@ test("publish-bin rejects invalid manifests (matches client validation)", async 
 
     await publishInvalidManifest(
       {
-        permissions: manifest.permissions ?? [],
+        permissions: baseManifest.permissions ?? [],
+        activationEvents: ["onDataConnector:missing.connector"],
+        contributes: { dataConnectors: [] },
+      },
+      /unknown data connector/i
+    );
+
+    await publishInvalidManifest(
+      {
+        permissions: baseManifest.permissions ?? [],
         activationEvents: [],
         contributes: { commands: [] },
         browser: "./dist/missing-browser.mjs",
@@ -701,7 +714,7 @@ test("publish-bin rejects invalid manifests (matches client validation)", async 
 
     await publishInvalidManifest(
       {
-        permissions: manifest.permissions ?? [],
+        permissions: baseManifest.permissions ?? [],
         activationEvents: [],
         contributes: { commands: [] },
         module: "./dist/missing-module.mjs",
