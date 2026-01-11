@@ -3,7 +3,9 @@
 //! This importer is intentionally best-effort: BIFF contains many features that
 //! aren't representable in [`formula_model`]. We load sheets, cell values,
 //! formulas (as text), merged-cell regions, and basic row/column size/visibility
-//! metadata where available. Anything else is preserved as metadata/warnings.
+//! metadata where available. We also extract workbook-global styles needed to
+//! preserve Excel number format codes and the workbook date system (1900 vs 1904)
+//! when possible. Anything else is preserved as metadata/warnings.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -59,7 +61,8 @@ impl DateTimeStyleIds {
 
         // Calamine tells us the cell should be interpreted as a date/time (as
         // opposed to a raw number) but does not preserve the exact number format
-        // string. Use a best-effort heuristic to pick a reasonable default.
+        // string. We attempt to recover the precise format code via BIFF parsing,
+        // but fall back to a best-effort heuristic when it isn't available.
         let serial = dt.as_f64();
         let frac = serial.abs().fract();
 
