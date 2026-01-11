@@ -791,6 +791,29 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         out.sheets.push(sheet);
     }
 
+    out.defined_names = wb
+        .defined_names()
+        .iter()
+        .filter_map(|dn| {
+            let formula = dn.formula.as_ref()?;
+            let refers_to = formula.text.as_ref()?;
+            if refers_to.trim().is_empty() {
+                return None;
+            }
+            let sheet_id = dn.scope_sheet.and_then(|idx| {
+                wb.sheet_metas()
+                    .get(idx as usize)
+                    .map(|meta| meta.name.clone())
+            });
+            Some(DefinedName {
+                name: dn.name.clone(),
+                refers_to: refers_to.clone(),
+                sheet_id,
+                hidden: dn.hidden,
+            })
+        })
+        .collect();
+
     if !missing_formulas.is_empty() {
         // Best-effort: if Calamine can't open the workbook (or doesn't expose formulas), fall back
         // to the cached values only, matching the previous behavior.
