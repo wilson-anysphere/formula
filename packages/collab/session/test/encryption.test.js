@@ -40,8 +40,8 @@ test("CollabSession E2E cell encryption: encrypted in Yjs, decrypted with key, m
   const disconnect = connectDocs(docA, docB);
 
   const keyBytes = new Uint8Array(32).fill(7);
-  const keyForA1 = (cell) => {
-    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+  const keyForProtected = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && (cell.col === 0 || cell.col === 1)) {
       return { keyId: "k-range-1", keyBytes };
     }
     return null;
@@ -49,7 +49,7 @@ test("CollabSession E2E cell encryption: encrypted in Yjs, decrypted with key, m
 
   const sessionA = createCollabSession({
     doc: docA,
-    encryption: { keyForCell: keyForA1 },
+    encryption: { keyForCell: keyForProtected },
   });
   const sessionB = createCollabSession({ doc: docB });
 
@@ -81,10 +81,21 @@ test("CollabSession E2E cell encryption: encrypted in Yjs, decrypted with key, m
   assert.equal(await sessionB.safeSetCellValue("Sheet1:0:0", "hacked"), false);
   assert.equal(await sessionB.safeSetCellFormula("Sheet1:0:0", "=HACK()"), false);
 
+  // Legacy key encodings should still be treated as encrypted for read/edit gating.
+  await sessionA.setCellValue("Sheet1:0,1", "legacy-secret");
+  const maskedLegacy = await sessionB.getCell("Sheet1:0,1");
+  assert.equal(maskedLegacy?.value, "###");
+  assert.equal(maskedLegacy?.encrypted, true);
+  assert.equal(sessionB.canReadCell({ sheetId: "Sheet1", row: 0, col: 1 }), false);
+  assert.equal(sessionB.canEditCell({ sheetId: "Sheet1", row: 0, col: 1 }), false);
+  assert.equal(await sessionB.safeSetCellValue("Sheet1:0:1", "hacked-legacy"), false);
+  assert.equal(sessionB.cells.has("Sheet1:0:1"), false);
+
   // Now "grant" the key by recreating the session with a resolver.
   sessionB.destroy();
-  const sessionBWithKey = createCollabSession({ doc: docB, encryption: { keyForCell: keyForA1 } });
+  const sessionBWithKey = createCollabSession({ doc: docB, encryption: { keyForCell: keyForProtected } });
   assert.equal((await sessionBWithKey.getCell("Sheet1:0:0"))?.value, "top-secret");
+  assert.equal((await sessionBWithKey.getCell("Sheet1:0,1"))?.value, "legacy-secret");
 
   sessionA.destroy();
   sessionBWithKey.destroy();

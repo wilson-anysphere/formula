@@ -347,6 +347,26 @@ export class CollabSession {
   private readonly formulaConflictsIncludeValueConflicts: boolean;
   private isDestroyed = false;
 
+  private getEncryptedPayloadForCell(cell: CellAddress): unknown | undefined {
+    // Cells may exist under historical key encodings (`${sheetId}:${row},${col}`) or
+    // the unit-test convenience form (`r{row}c{col}`). Treat any `enc` marker under
+    // those aliases as authoritative so we don't accidentally allow plaintext reads/writes.
+    const keys: string[] = [makeCellKey(cell), `${cell.sheetId}:${cell.row},${cell.col}`];
+    if (cell.sheetId === this.defaultSheetId) {
+      keys.push(`r${cell.row}c${cell.col}`);
+    }
+
+    for (const key of keys) {
+      const cellData = this.cells.get(key);
+      const ycell = getYMapCell(cellData);
+      if (!ycell) continue;
+      const encRaw = ycell.get("enc");
+      if (encRaw !== undefined) return encRaw;
+    }
+
+    return undefined;
+  }
+
   constructor(options: CollabSessionOptions = {}) {
     // When connecting to a sync provider, use the provider document id as the
     // Y.Doc guid to make encryption AAD stable across clients by default.
@@ -721,10 +741,7 @@ export class CollabSession {
 
     // If the cell is already encrypted in Yjs, only allow edits when a key is available
     // so we can preserve encryption invariants (never write plaintext into an encrypted cell).
-    const cellKey = makeCellKey(cell);
-    const cellData = this.cells.get(cellKey);
-    const ycell = getYMapCell(cellData);
-    const encRaw = ycell?.get("enc");
+    const encRaw = this.getEncryptedPayloadForCell(cell);
     if (encRaw !== undefined) {
       const key = this.encryption?.keyForCell(cell) ?? null;
       return Boolean(key);
@@ -754,10 +771,7 @@ export class CollabSession {
     if (!canReadByPermissions) return false;
 
     // Encrypted cells require an encryption key to read. Treat malformed payloads as unreadable.
-    const cellKey = makeCellKey(cell);
-    const cellData = this.cells.get(cellKey);
-    const ycell = getYMapCell(cellData);
-    const encRaw = ycell?.get("enc");
+    const encRaw = this.getEncryptedPayloadForCell(cell);
     if (encRaw !== undefined) {
       const key = this.encryption?.keyForCell(cell) ?? null;
       if (!key) return false;
