@@ -400,6 +400,35 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("returns recalc changes in row-major order within a sheet", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setCell("A1", 1);
+      await engine.setCell("B1", "=A1+1");
+      await engine.setCell("A2", "=A1*2");
+
+      await engine.recalculate();
+
+      await engine.setCell("A1", 2);
+      const changes = await engine.recalculate();
+      expect(changes).toEqual([
+        { sheet: "Sheet1", address: "B1", value: 3 },
+        { sheet: "Sheet1", address: "A2", value: 4 }
+      ]);
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("rejects sheet-scoped recalculate calls for missing sheets", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);

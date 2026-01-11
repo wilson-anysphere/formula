@@ -219,6 +219,31 @@ fn recalculate_orders_changes_by_sheet_row_col() {
 }
 
 #[wasm_bindgen_test]
+fn recalculate_orders_changes_by_row_col_within_sheet() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
+        .unwrap();
+    wb.set_cell("B1".to_string(), JsValue::from_str("=A1+1"), None)
+        .unwrap();
+    wb.set_cell("A2".to_string(), JsValue::from_str("=A1*2"), None)
+        .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    wb.set_cell("A1".to_string(), JsValue::from_f64(2.0), None)
+        .unwrap();
+
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert_eq!(changes.len(), 2);
+    // Row-major: B1 (row 0, col 1) comes before A2 (row 1, col 0).
+    assert_eq!(changes[0].address, "B1");
+    assert_eq!(changes[0].value.as_f64(), Some(3.0));
+    assert_eq!(changes[1].address, "A2");
+    assert_eq!(changes[1].value.as_f64(), Some(4.0));
+}
+
+#[wasm_bindgen_test]
 fn sheet_scoped_recalculate_still_updates_cross_sheet_dependents() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
