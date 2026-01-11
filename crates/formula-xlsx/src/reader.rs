@@ -140,10 +140,13 @@ fn read_error_to_xlsx_error(err: crate::read::ReadError) -> XlsxError {
         crate::read::ReadError::InvalidSheetName(err) => {
             XlsxError::Invalid(format!("invalid worksheet name: {err}"))
         }
+        crate::read::ReadError::Xlsx(err) => err,
         crate::read::ReadError::MissingPart(part) => XlsxError::MissingPart(part.to_string()),
         crate::read::ReadError::InvalidCellRef(a1) => {
             XlsxError::Invalid(format!("invalid cell reference: {a1}"))
         }
+        crate::read::ReadError::InvalidRangeRef(range) => {
+            XlsxError::Invalid(format!("invalid range reference: {range}"))
+        }
     }
 }
-
