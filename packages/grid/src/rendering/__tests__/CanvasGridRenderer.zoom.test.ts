@@ -166,6 +166,32 @@ describe("CanvasGridRenderer zoom", () => {
     expect(handleRects[0]!.height).toBeCloseTo(16, 5);
   });
 
+  it("hides the fill handle when the selection corner is offscreen", () => {
+    const provider: CellProvider = { getCell: () => null };
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 50, colCount: 50, defaultRowHeight: 10, defaultColWidth: 100 });
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(150, 150, 1);
+
+    // With scrollX=0, col=1 spans x=[100,200) and its bottom-right corner is
+    // outside the viewport (x=150). The fill handle should not be exposed.
+    renderer.setSelection({ row: 0, col: 1 });
+    expect(renderer.getFillHandleRect()).toBeNull();
+
+    // Scroll so the corner is at the viewport edge; the handle becomes visible
+    // (potentially clipped) and should report a viewport-contained rect.
+    renderer.setScroll(50, 0);
+    const handle = renderer.getFillHandleRect();
+    expect(handle).not.toBeNull();
+    expect(handle!.x).toBeGreaterThanOrEqual(0);
+    expect(handle!.y).toBeGreaterThanOrEqual(0);
+    expect(handle!.x + handle!.width).toBeLessThanOrEqual(150);
+    expect(handle!.y + handle!.height).toBeLessThanOrEqual(150);
+  });
+
   it("scales remote presence badge geometry with zoom", () => {
     const provider: CellProvider = { getCell: () => null };
 

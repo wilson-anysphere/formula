@@ -610,6 +610,8 @@ export class CanvasGridRenderer {
   /**
    * Returns the fill-handle rectangle for the current selection range, in viewport
    * coordinates (relative to the grid canvases).
+   *
+   * The returned rectangle is clipped to the current viewport.
    */
   getFillHandleRect(): Rect | null {
     if (this.selectionRanges.length === 0) return null;
@@ -3042,7 +3044,7 @@ export class CanvasGridRenderer {
       const handleSize = 8 * this.zoom;
       const handleRow = activeRange.endRow - 1;
       const handleCol = activeRange.endCol - 1;
-      const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport);
+      const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport, { clampToViewport: false });
       if (handleCellRect && handleCellRect.width >= handleSize && handleCellRect.height >= handleSize) {
         const handleRect: Rect = {
           x: handleCellRect.x + handleCellRect.width - handleSize / 2,
@@ -3330,16 +3332,18 @@ export class CanvasGridRenderer {
     const handleSize = 8 * this.zoom;
     const handleRow = range.endRow - 1;
     const handleCol = range.endCol - 1;
-    const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport);
+    const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport, { clampToViewport: false });
     if (!handleCellRect) return null;
     if (handleCellRect.width < handleSize || handleCellRect.height < handleSize) return null;
 
-    return {
+    const handleRect: Rect = {
       x: handleCellRect.x + handleCellRect.width - handleSize / 2,
       y: handleCellRect.y + handleCellRect.height - handleSize / 2,
       width: handleSize,
       height: handleSize
     };
+    const viewportRect: Rect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
+    return intersectRect(handleRect, viewportRect);
   }
 
   private markAllDirtyForThemeChange(): void {
