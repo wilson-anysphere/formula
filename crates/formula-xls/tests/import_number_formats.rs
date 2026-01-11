@@ -143,6 +143,32 @@ fn warns_on_out_of_range_xf_indices() {
 }
 
 #[test]
+fn chooses_deterministic_style_when_merged_anchor_is_missing() {
+    let bytes = xls_fixture_builder::build_merged_non_anchor_conflicting_blank_formats_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("MergedFmtNonAnchorConflict")
+        .expect("MergedFmtNonAnchorConflict missing");
+
+    // With no anchor record, the importer should pick a stable style for the merged region.
+    // Our current policy is to choose the first cell (row/col order) within the merged region,
+    // which is B1 in this fixture.
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let a1_cell = sheet.cell(a1).expect("A1 missing");
+    assert!(matches!(a1_cell.value, CellValue::Empty));
+    assert_ne!(a1_cell.style_id, 0);
+
+    let fmt = result
+        .workbook
+        .styles
+        .get(a1_cell.style_id)
+        .and_then(|s| s.number_format.as_deref());
+    assert_eq!(fmt, Some("0.00%"));
+}
+
+#[test]
 fn date_system_affects_rendered_dates() {
     fn render_a3(result: &formula_xls::XlsImportResult) -> String {
         let sheet = result

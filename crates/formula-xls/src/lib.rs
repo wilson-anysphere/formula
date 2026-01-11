@@ -421,6 +421,11 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         // the sheet even when the value is empty so those cells round-trip.
         if let (Some(xf_style_ids), Some(sheet_cell_xfs)) = (xf_style_ids.as_deref(), sheet_cell_xfs)
         {
+            // We potentially see XF indices for multiple cells that resolve to the same merged-cell
+            // anchor. When that happens, prefer the anchor cell’s own resolvable style; otherwise
+            // choose the first cell (row/col order) within the merged region to keep this pass
+            // deterministic (independent of HashMap iteration order).
+            let mut best_style_for_anchor: HashMap<CellRef, (u32, CellRef, bool)> = HashMap::new();
             let mut out_of_range_xf_count: usize = 0;
             for (&cell_ref, &xf_idx) in sheet_cell_xfs {
                 if cell_ref.row >= EXCEL_MAX_ROWS || cell_ref.col >= EXCEL_MAX_COLS {
@@ -438,16 +443,29 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 let Some(style_id) = style_id else {
                     continue;
                 };
-
-                // If the anchor cell has its own (resolvable) XF entry, prefer it over any
-                // conflicting XF indices from other cells within the merged region.
-                if anchor != cell_ref {
-                    if let Some(&anchor_xf_idx) = sheet_cell_xfs.get(&anchor) {
-                        if let Some(Some(_)) = xf_style_ids.get(anchor_xf_idx as usize).copied() {
-                            continue;
+                let source_is_anchor = cell_ref == anchor;
+                best_style_for_anchor
+                    .entry(anchor)
+                    .and_modify(|(existing_style_id, existing_source, existing_is_anchor)| {
+                        if *existing_is_anchor {
+                            // Anchor-derived styles always win.
+                            return;
                         }
-                    }
-                }
+                        if source_is_anchor {
+                            *existing_style_id = style_id;
+                            *existing_source = cell_ref;
+                            *existing_is_anchor = true;
+                            return;
+                        }
+                        if (cell_ref.row, cell_ref.col) < (existing_source.row, existing_source.col) {
+                            *existing_style_id = style_id;
+                            *existing_source = cell_ref;
+                        }
+                    })
+                    .or_insert((style_id, cell_ref, source_is_anchor));
+            }
+
+            for (anchor, (style_id, _, _)) in best_style_for_anchor {
                 sheet.set_style_id(anchor, style_id);
             }
 
