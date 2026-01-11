@@ -27,6 +27,16 @@ fn ifs_spills_and_ignores_unselected_branch_errors_per_element() {
 }
 
 #[test]
+fn ifs_returns_value_error_for_incompatible_branch_shapes() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=IFS({TRUE,FALSE}, {10,20}, {FALSE,TRUE}, {30;40})");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 10.0);
+    assert_eq!(sheet.get("B1"), Value::Error(ErrorKind::Value));
+}
+
+#[test]
 fn switch_short_circuits_in_scalar_mode_and_supports_default() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=SWITCH(1, 1, 1, 2, 1/0)"), 1.0);
@@ -46,6 +56,26 @@ fn switch_spills_and_returns_na_for_unmatched_elements() {
 
     assert_number(&sheet.get("A1"), 10.0);
     assert_eq!(sheet.get("B1"), Value::Error(ErrorKind::NA));
+}
+
+#[test]
+fn switch_spills_and_ignores_unselected_result_errors_per_element() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=SWITCH({1,2}, 1, 10, 2, 1/0)");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 10.0);
+    assert_eq!(sheet.get("B1"), Value::Error(ErrorKind::Div0));
+}
+
+#[test]
+fn switch_returns_value_error_for_incompatible_result_shapes() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=SWITCH({1,2}, 1, {10,20}, 2, {30;40})");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 10.0);
+    assert_eq!(sheet.get("B1"), Value::Error(ErrorKind::Value));
 }
 
 #[test]
