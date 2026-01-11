@@ -537,3 +537,50 @@ test("QueryEngine: database permission/credentials are requested once per execut
   assert.equal(permissionCount, 1);
   assert.equal(credentialCount, 1);
 });
+
+test("QueryEngine: source-state cache validation respects explicit database connectionId", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store, now: () => 0 });
+
+  let queryCalls = 0;
+  const sql = new SqlConnector({
+    querySql: async () => {
+      queryCalls += 1;
+      return DataTable.fromGrid(
+        [
+          ["Value"],
+          [1],
+        ],
+        { hasHeaders: true, inferTypes: true },
+      );
+    },
+  });
+
+  // Pretend the host can validate DB state (e.g. via a schema version query).
+  // This forces the engine to use `collectSourceStateTargetsFromSource`.
+  // @ts-ignore - runtime augmentation
+  sql.getSourceState = async () => ({ etag: "v1" });
+
+  const engine = new QueryEngine({ cache, connectors: { sql } });
+
+  const query = {
+    id: "q_db_state_validation",
+    name: "DB state validation",
+    source: {
+      type: "database",
+      // Explicit connectionId differs from what the connector could derive from `connection`.
+      connectionId: "explicit-connection",
+      connection: { id: "db1" },
+      query: "SELECT 1",
+    },
+    steps: [],
+  };
+
+  const first = await engine.executeQueryWithMeta(query, { queries: {} }, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(queryCalls, 1);
+
+  const second = await engine.executeQueryWithMeta(query, { queries: {} }, {});
+  assert.equal(second.meta.cache?.hit, true);
+  assert.equal(queryCalls, 1, "cache hit should not re-execute the DB query");
+});

@@ -1035,7 +1035,8 @@ export class QueryEngine {
     if (source.type === "database") {
       const connector = this.connectors.get("sql");
       if (!connector || typeof connector.getSourceState !== "function") return;
-      const request = { connection: source.connection, sql: source.query };
+      const connectionId = resolveDatabaseConnectionId(source, connector);
+      const request = { connectionId: connectionId ?? undefined, connection: source.connection, sql: source.query };
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("sql", request, state);
       const sourceKey = buildConnectorSourceKey(connector, request);
