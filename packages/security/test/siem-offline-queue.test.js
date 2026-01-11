@@ -317,3 +317,29 @@ test("IndexedDbOfflineAuditQueue prevents concurrent flushers from duplicating s
   assert.deepEqual(sentA.sort(), events.map((evt) => evt.id).sort());
   assert.deepEqual(sentB, []);
 });
+
+test("IndexedDbOfflineAuditQueue reclaims inflight records after a crash", async () => {
+  globalThis.indexedDB = indexedDB;
+  globalThis.IDBKeyRange = IDBKeyRange;
+
+  const dbName = `siem-idb-crash-${randomUUID()}`;
+  const queue = new IndexedDbOfflineAuditQueue({ dbName, flushBatchSize: 2 });
+  const events = [makeEvent({ secret: "c1" }), makeEvent({ secret: "c2" }), makeEvent({ secret: "c3" })];
+  for (const event of events) await queue.enqueue(event);
+
+  // Simulate a crash after claiming a batch (records are now inflight), before send/ack.
+  await queue._claimBatch();
+
+  const restarted = new IndexedDbOfflineAuditQueue({ dbName, flushBatchSize: 2 });
+  const sentIds = [];
+  const exporter = {
+    async sendBatch(batch) {
+      sentIds.push(...batch.map((evt) => evt.id));
+    },
+  };
+
+  const result = await restarted.flushToExporter(exporter);
+  assert.equal(result.sent, 3);
+  assert.deepEqual(sentIds.sort(), events.map((evt) => evt.id).sort());
+  assert.deepEqual(await restarted.readAll(), []);
+});
