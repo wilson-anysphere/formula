@@ -28,6 +28,22 @@ if (!semverRange) {
 
 const { isValidSemver, satisfies } = semverRange;
 
+function pathExtname(p) {
+  const raw = String(p ?? "");
+  const lastSlash = Math.max(raw.lastIndexOf("/"), raw.lastIndexOf("\\"));
+  const lastDot = raw.lastIndexOf(".");
+  if (lastDot === -1 || lastDot < lastSlash) return "";
+  return raw.slice(lastDot).toLowerCase();
+}
+
+function assertEntrypointExtension(filePath, label, allowedExts) {
+  const ext = pathExtname(String(filePath).trim());
+  if (!allowedExts.has(ext)) {
+    const expected = [...allowedExts].sort().join(", ");
+    throw new ManifestError(`${label} entrypoint must end with one of: ${expected} (got ${filePath})`);
+  }
+}
+
 const VALID_PERMISSIONS = new Set([
   "cells.read",
   "cells.write",
@@ -40,6 +56,9 @@ const VALID_PERMISSIONS = new Set([
   "ui.commands",
   "ui.menus",
 ]);
+
+const MAIN_ENTRYPOINT_EXTS = new Set([".cjs", ".js"]);
+const ESM_ENTRYPOINT_EXTS = new Set([".js", ".mjs"]);
 
 class ManifestError extends Error {
   constructor(message) {
@@ -283,6 +302,14 @@ function validateExtensionManifest(manifest, options = {}) {
   assertString(obj.main, "main");
   assertOptionalString(obj.module, "module");
   assertOptionalString(obj.browser, "browser");
+
+  assertEntrypointExtension(obj.main, "main", MAIN_ENTRYPOINT_EXTS);
+  if (typeof obj.module === "string" && obj.module.trim().length > 0) {
+    assertEntrypointExtension(obj.module, "module", ESM_ENTRYPOINT_EXTS);
+  }
+  if (typeof obj.browser === "string" && obj.browser.trim().length > 0) {
+    assertEntrypointExtension(obj.browser, "browser", ESM_ENTRYPOINT_EXTS);
+  }
 
   if (!isValidSemver(obj.version.trim())) {
     throw new ManifestError(`Invalid version: ${obj.version}`);

@@ -224,3 +224,20 @@ test("manifest validation: module/browser entrypoints must be strings when prese
     /browser must be a string/
   );
 });
+
+test("manifest validation: main entrypoint must be CommonJS (.js/.cjs)", () => {
+  assert.throws(
+    () =>
+      validateExtensionManifest(
+        {
+          name: "x",
+          version: "1.0.0",
+          publisher: "p",
+          main: "./dist/extension.mjs",
+          engines: { formula: "^1.0.0" }
+        },
+        { engineVersion: "1.0.0", enforceEngine: true }
+      ),
+    /main entrypoint must end with/i
+  );
+});

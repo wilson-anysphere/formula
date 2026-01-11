@@ -510,6 +510,52 @@ test("marketplace store rejects packages with missing manifest.main entrypoint",
   }
 });
 
+test("marketplace store rejects packages whose manifest.main is not a CommonJS entrypoint (.js/.cjs)", async (t) => {
+  try {
+    requireFromHere.resolve("sql.js");
+  } catch {
+    t.skip("sql.js dependency not installed in this environment");
+    return;
+  }
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-invalid-main-ext-"));
+  const dataDir = path.join(tmpRoot, "data");
+  const { dir, manifest } = await createTempExtensionDir();
+
+  try {
+    const keys = generateEd25519KeyPair();
+
+    const packageJsonPath = path.join(dir, "package.json");
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+    packageJson.main = "./README.md";
+    await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+
+    const store = new MarketplaceStore({ dataDir });
+    await store.init();
+    await store.registerPublisher({
+      publisher: manifest.publisher,
+      tokenSha256: "ignored-for-unit-test",
+      publicKeyPem: keys.publicKeyPem,
+      verified: true,
+    });
+
+    const pkgBytes = await createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+
+    await assert.rejects(
+      () =>
+        store.publishExtension({
+          publisher: manifest.publisher,
+          packageBytes: pkgBytes,
+          signatureBase64: null,
+        }),
+      /main entrypoint must end with/i
+    );
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("marketplace store rejects manifests with invalid permission strings", async (t) => {
   try {
     requireFromHere.resolve("sql.js");

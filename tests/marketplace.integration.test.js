@@ -711,6 +711,8 @@ test("publish-bin rejects invalid manifests (matches client validation)", async 
 
     await publishInvalidManifest({ permissions: ["totally.not.real"] }, /invalid permission/i);
 
+    await publishInvalidManifest({ main: "./dist/extension.mjs" }, /main entrypoint must end with/i);
+
     await publishInvalidManifest(
       {
         permissions: baseManifest.permissions ?? [],
