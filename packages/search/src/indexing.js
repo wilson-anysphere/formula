@@ -197,15 +197,17 @@ export class WorkbookSearchIndex {
   }
 
   getSheetModeIndex(sheetName, modeKey) {
-    const sheetMap = this._sheetIndexes.get(sheetName);
+    const canonicalSheetName = getSheetByName(this.workbook, sheetName).name;
+    const sheetMap = this._sheetIndexes.get(canonicalSheetName);
     return sheetMap?.get(modeKey) ?? null;
   }
 
   _getOrCreateSheetModeIndex(sheetName, modeKey) {
-    let sheetMap = this._sheetIndexes.get(sheetName);
+    const canonicalSheetName = getSheetByName(this.workbook, sheetName).name;
+    let sheetMap = this._sheetIndexes.get(canonicalSheetName);
     if (!sheetMap) {
       sheetMap = new Map();
-      this._sheetIndexes.set(sheetName, sheetMap);
+      this._sheetIndexes.set(canonicalSheetName, sheetMap);
     }
 
     let idx = sheetMap.get(modeKey);
@@ -275,7 +277,8 @@ export class WorkbookSearchIndex {
     { signal, timeBudgetMs = 10, scheduler, checkEvery } = {},
   ) {
     const sheet = getSheetByName(this.workbook, sheetName);
-    const idx = this._getOrCreateSheetModeIndex(sheetName, modeKey);
+    const canonicalSheetName = sheet.name;
+    const idx = this._getOrCreateSheetModeIndex(canonicalSheetName, modeKey);
     if (idx.built) return idx;
     if (idx.building) return idx.building;
 
@@ -286,13 +289,13 @@ export class WorkbookSearchIndex {
     idx.stats.yields = 0;
 
     const range = getUsedRange(sheet);
-    if (!range) {
-      idx.built = true;
-      return idx;
-    }
+      if (!range) {
+        idx.built = true;
+        return idx;
+      }
 
-    idx.building = (async () => {
-      try {
+      idx.building = (async () => {
+        try {
         const slicer = createTimeSlicer({ signal, timeBudgetMs, scheduler, checkEvery });
         const gramLength = idx.gramLength;
 
@@ -335,7 +338,9 @@ export class WorkbookSearchIndex {
             }
           }
         } else {
-          throw new Error(`Sheet ${sheetName} does not provide iterateCells(range) or getCell(row,col)`);
+          throw new Error(
+            `Sheet ${canonicalSheetName} does not provide iterateCells(range) or getCell(row,col)`,
+          );
         }
 
         idx.built = true;
@@ -346,12 +351,13 @@ export class WorkbookSearchIndex {
       }
     })();
 
-    return idx.building;
+      return idx.building;
   }
 
   queryCandidates(sheetName, query, options = {}) {
     const modeKey = toModeKey(options);
-    const sheetMap = this._sheetIndexes.get(sheetName);
+    const canonicalSheetName = getSheetByName(this.workbook, sheetName).name;
+    const sheetMap = this._sheetIndexes.get(canonicalSheetName);
     const idx = sheetMap?.get(modeKey);
     if (!idx || !idx.built) return null;
     return idx.queryCandidates(query, { useWildcards: options.useWildcards ?? true });
@@ -365,6 +371,7 @@ export class WorkbookSearchIndex {
    */
   updateCell(sheetName, row, col, { oldCell, newCell }) {
     const sheet = getSheetByName(this.workbook, sheetName);
+    sheetName = sheet.name;
     const master = getMergedMasterCell(sheet, row, col);
     if (master) {
       row = master.row;

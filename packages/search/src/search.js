@@ -160,8 +160,8 @@ export async function findNext(workbook, query, options = {}, from) {
     if (!from || from.sheetName == null || from.row == null || from.col == null) return null;
     const sheet = getSheetByName(workbook, from.sheetName);
     const master = getMergedMasterCell(sheet, from.row, from.col);
-    if (!master) return from;
-    return { ...from, row: master.row, col: master.col };
+    if (!master) return { ...from, sheetName: sheet.name };
+    return { ...from, sheetName: sheet.name, row: master.row, col: master.col };
   })();
 
   const hasFrom = normalizedFrom && normalizedFrom.sheetName != null;
@@ -246,8 +246,8 @@ export async function findPrev(workbook, query, options = {}, from) {
     if (!from || from.sheetName == null || from.row == null || from.col == null) return null;
     const sheet = getSheetByName(workbook, from.sheetName);
     const master = getMergedMasterCell(sheet, from.row, from.col);
-    if (!master) return from;
-    return { ...from, row: master.row, col: master.col };
+    if (!master) return { ...from, sheetName: sheet.name };
+    return { ...from, sheetName: sheet.name, row: master.row, col: master.col };
   })();
 
   const hasFrom = normalizedFrom && normalizedFrom.sheetName != null;

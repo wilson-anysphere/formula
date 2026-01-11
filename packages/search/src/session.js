@@ -33,8 +33,8 @@ function normalizeCursorToMergeMaster(workbook, cursor) {
   if (!cursor?.sheetName || cursor.row == null || cursor.col == null) return cursor;
   const sheet = getSheetByName(workbook, cursor.sheetName);
   const master = getMergedMasterCell(sheet, cursor.row, cursor.col);
-  if (!master) return cursor;
-  return { sheetName: cursor.sheetName, row: master.row, col: master.col };
+  if (!master) return { sheetName: sheet.name, row: cursor.row, col: cursor.col };
+  return { sheetName: sheet.name, row: master.row, col: master.col };
 }
 
 function matchToResult(sheetName, row, col, text, { wrapped = false } = {}) {

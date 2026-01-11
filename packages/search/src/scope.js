@@ -84,7 +84,14 @@ export function buildScopeSegments(workbook, { scope, currentSheetName, selectio
     const sheets = workbook.sheets ?? [];
     let ordered = sheets;
     if (currentSheetName) {
-      const start = sheets.findIndex((s) => s.name === currentSheetName);
+      let canonical = currentSheetName;
+      try {
+        canonical = getSheetByName(workbook, currentSheetName).name;
+      } catch {
+        // Ignore invalid currentSheetName for workbook scope; fall back to workbook order.
+      }
+
+      const start = sheets.findIndex((s) => s.name === canonical);
       if (start > 0) {
         ordered = sheets.slice(start).concat(sheets.slice(0, start));
       }
@@ -98,8 +105,9 @@ export function buildScopeSegments(workbook, { scope, currentSheetName, selectio
     return segments;
   }
 
-  const sheetName = currentSheetName;
-  if (!sheetName) throw new Error("Search scope requires currentSheetName");
+  if (!currentSheetName) throw new Error("Search scope requires currentSheetName");
+  const sheet = getSheetByName(workbook, currentSheetName);
+  const sheetName = sheet.name;
 
   if (scope === "selection") {
     const ranges = selectionRanges ?? [];
@@ -107,7 +115,7 @@ export function buildScopeSegments(workbook, { scope, currentSheetName, selectio
   }
 
   // sheet (default)
-  const range = getUsedRange(getSheetByName(workbook, sheetName));
+  const range = getUsedRange(sheet);
   if (!range) return [];
   return [{ sheetName, ranges: [range] }];
 }

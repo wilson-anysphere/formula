@@ -78,6 +78,18 @@ test("search scopes: workbook starts from current sheet (Excel semantics)", asyn
   assert.deepEqual(matches.map((m) => m.address), ["Sheet2!A1", "Sheet3!A1", "Sheet1!A1"]);
 });
 
+test("sheet names are canonicalized when workbook.getSheet is case-insensitive", async () => {
+  const wb = new InMemoryWorkbook();
+  const sheet = wb.addSheet("Sheet1");
+  sheet.setValue(0, 0, "foo");
+
+  const matches = await findAll(wb, "foo", { scope: "sheet", currentSheetName: "sheet1" });
+  assert.deepEqual(matches.map((m) => m.address), ["Sheet1!A1"]);
+
+  const workbookMatches = await findAll(wb, "foo", { scope: "workbook", currentSheetName: "sheet1" });
+  assert.deepEqual(workbookMatches.map((m) => m.address), ["Sheet1!A1"]);
+});
+
 test("search order: by rows vs by columns", async () => {
   const wb = new InMemoryWorkbook();
   const sheet = wb.addSheet("Sheet1");
