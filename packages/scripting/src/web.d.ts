@@ -1,4 +1,4 @@
-import type { Workbook } from "./index";
+import type { WorkbookLike } from "./index";
 
 export interface ScriptPermissions {
   network?: "none" | "allowlist" | "full";
@@ -22,9 +22,8 @@ export interface ScriptRunResult {
 }
 
 export class ScriptRuntime {
-  constructor(workbook: Workbook);
+  constructor(workbook: WorkbookLike);
   run(code: string, options?: { permissions?: ScriptPermissions; timeoutMs?: number }): Promise<ScriptRunResult>;
 }
 
 export * from "./index";
-

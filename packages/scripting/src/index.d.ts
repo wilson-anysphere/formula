@@ -14,13 +14,28 @@ export type RangeCoords = {
   endCol: number;
 };
 
+export interface RangeLike {
+  readonly address: string;
+  getValues(): CellValue[][];
+  setValues(values: CellValue[][]): void;
+  getValue(): CellValue;
+  setValue(value: CellValue): void;
+  setFormat(format: Partial<CellFormat> | null): void;
+  getFormat(): CellFormat;
+}
+
+export interface SheetLike {
+  readonly name: string;
+  getRange(address: string): RangeLike;
+}
+
 export class TypedEventEmitter {
   on(event: string, listener: (payload: any) => void): () => void;
   off(event: string, listener: (payload: any) => void): void;
   emit(event: string, payload: any): void;
 }
 
-export class Range {
+export class Range implements RangeLike {
   readonly sheet: Sheet;
   readonly coords: RangeCoords;
 
@@ -36,7 +51,7 @@ export class Range {
   getFormat(): CellFormat;
 }
 
-export class Sheet {
+export class Sheet implements SheetLike {
   readonly workbook: Workbook;
   readonly name: string;
 
@@ -51,7 +66,14 @@ export class Sheet {
 
 export type Selection = { sheetName: string; address: string };
 
-export class Workbook {
+export interface WorkbookLike {
+  getSheet(name: string): SheetLike;
+  getActiveSheet(): SheetLike;
+  getSelection(): Selection;
+  setSelection(sheetName: string, address: string): void;
+}
+
+export class Workbook implements WorkbookLike {
   readonly events: TypedEventEmitter;
 
   addSheet(name: string): Sheet;
@@ -74,4 +96,3 @@ export function parseRangeAddress(a1: string): RangeCoords;
 export function formatRangeAddress(range: RangeCoords): string;
 
 export const FORMULA_API_DTS: string;
-
