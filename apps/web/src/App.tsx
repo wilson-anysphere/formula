@@ -377,6 +377,7 @@ function EngineDemoApp() {
   };
 
   const handleGridCopy = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (editingCell) return;
     if (!provider) return;
     const range = getCopyRange();
     if (!range) return;
@@ -396,6 +397,7 @@ function EngineDemoApp() {
   };
 
   const handleGridPaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (editingCell) return;
     const clipboardPlain = event.clipboardData?.getData("text/plain") ?? "";
     const clipboardHtml = event.clipboardData?.getData("text/html") ?? "";
     const internal = internalClipboardRef.current;
@@ -472,6 +474,7 @@ function EngineDemoApp() {
   };
 
   const handleGridCut = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (editingCell) return;
     const range = getCopyRange();
     if (!range) return;
     handleGridCopy(event);
@@ -645,11 +648,6 @@ function EngineDemoApp() {
       <div
         ref={gridContainerRef}
         data-testid="grid"
-        tabIndex={0}
-        onPointerDownCapture={() => {
-          if (isFormulaEditing) return;
-          gridContainerRef.current?.focus({ preventScroll: true });
-        }}
         onCopy={handleGridCopy}
         onCut={handleGridCut}
         onPaste={handleGridPaste}
