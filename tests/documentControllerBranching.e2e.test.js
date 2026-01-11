@@ -133,3 +133,39 @@ test("DocumentController + BranchService: delete-vs-edit conflicts clear cells w
   assert.equal(doc.getCell("Sheet1", "A1").value, null);
   assert.equal(doc.getCell("Sheet1", "A1").formula, null);
 });
+
+test("DocumentController + BranchService: masked cells do not overwrite encrypted branch state", async () => {
+  const actor = { userId: "u1", role: "owner" };
+
+  const doc = new DocumentController();
+
+  const store = new InMemoryBranchStore();
+  const branchService = new BranchService({ docId: "doc-encrypted", store });
+
+  const enc = {
+    v: 1,
+    alg: "AES-256-GCM",
+    keyId: "k1",
+    ivBase64: "iv",
+    tagBase64: "tag",
+    ciphertextBase64: "ct",
+  };
+
+  await branchService.init(actor, {
+    schemaVersion: 1,
+    sheets: { order: ["Sheet1"], metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } } },
+    cells: { Sheet1: { A1: { enc } } },
+    namedRanges: {},
+    comments: {},
+  });
+
+  const workflow = new DocumentBranchingWorkflow({ doc, branchService });
+  await workflow.checkoutIntoDoc(actor, "main");
+
+  assert.equal(doc.getCell("Sheet1", "A1").value, "###");
+  assert.equal(doc.getCell("Sheet1", "A1").formula, null);
+
+  await workflow.commitCurrentState(actor, "commit masked snapshot");
+  const state = await branchService.getCurrentState();
+  assert.deepEqual(state.cells.Sheet1.A1, { enc });
+});

@@ -10,6 +10,11 @@ import { normalizeDocumentState } from "../../../../../packages/versioning/branc
 const structuredCloneFn =
   typeof globalThis.structuredClone === "function" ? globalThis.structuredClone : null;
 
+// Collab masking (permissions/encryption) renders unreadable cells as a constant
+// placeholder. Branching should treat these as "unknown" rather than persisting
+// the placeholder as real content.
+const MASKED_CELL_VALUE = "###";
+
 /**
  * @template T
  * @param {T} value
@@ -123,8 +128,9 @@ export function applyBranchStateToDocumentController(doc, state) {
         continue;
       }
 
-      const formula = typeof cell.formula === "string" ? cell.formula : null;
-      const value = formula !== null ? null : cell.value ?? null;
+      const hasEnc = cell.enc !== undefined && cell.enc !== null;
+      const formula = !hasEnc && typeof cell.formula === "string" ? cell.formula : null;
+      const value = hasEnc ? MASKED_CELL_VALUE : (formula !== null ? null : cell.value ?? null);
       const format = cell.format ?? null;
 
       if (formula === null && value === null && format === null) continue;

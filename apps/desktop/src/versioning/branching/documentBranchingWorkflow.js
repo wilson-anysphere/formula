@@ -79,8 +79,33 @@ export class DocumentBranchingWorkflow {
     /** @type {import("../../../../../packages/versioning/branches/src/types.js").DocumentState} */
     const merged = structuredClone(baseState);
 
-    for (const [sheetId, cellMap] of Object.entries(nextState.cells)) {
-      merged.cells[sheetId] = cellMap;
+    const MASKED_CELL_VALUE = "###";
+
+    // DocumentController snapshot is authoritative for cell contents *except*
+    // for masked/unreadable cells ("###"). Preserve those cells from the branch
+    // head so permissions/encryption don't get committed as literal placeholders.
+    for (const [sheetId, nextSheet] of Object.entries(nextState.cells)) {
+      const baseSheet = merged.cells[sheetId] ?? {};
+      /** @type {Record<string, any>} */
+      const mergedSheet = {};
+
+      for (const [addr, cell] of Object.entries(nextSheet ?? {})) {
+        const isMasked =
+          cell &&
+          typeof cell === "object" &&
+          cell.enc == null &&
+          cell.formula == null &&
+          cell.value === MASKED_CELL_VALUE;
+
+        if (isMasked && baseSheet[addr] !== undefined) {
+          mergedSheet[addr] = baseSheet[addr];
+        } else {
+          mergedSheet[addr] = cell;
+        }
+      }
+
+      merged.cells[sheetId] = mergedSheet;
+
       if (!merged.sheets.metaById[sheetId]) {
         merged.sheets.metaById[sheetId] = { id: sheetId, name: sheetId };
       }
