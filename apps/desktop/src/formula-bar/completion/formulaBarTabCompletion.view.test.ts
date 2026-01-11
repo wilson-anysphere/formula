@@ -95,6 +95,82 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
+  it("preserves the typed prefix case for named range suggestions", async () => {
+    const doc = new DocumentController();
+    for (let row = 0; row < 10; row += 1) {
+      doc.setCellValue("Sheet1", { row, col: 0 }, row + 1);
+    }
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      schemaProvider: {
+        getNamedRanges: () => [{ name: "SalesData", range: "Sheet1!A1:A10" }],
+        getTables: () => [],
+        getSheetNames: () => ["Sheet1"],
+        getCacheKey: () => "namedRanges:SalesData",
+      },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=SUM(sal";
+    view.textarea.setSelectionRange(8, 8);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe("=SUM(salesData)");
+    expect(view.model.aiGhostText()).toBe("esData)");
+    expect(view.model.aiSuggestionPreview()).toBe(55);
+
+    completion.destroy();
+    host.remove();
+  });
+
+  it("suggests structured references and marks preview as unavailable", async () => {
+    const doc = new DocumentController();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      schemaProvider: {
+        getNamedRanges: () => [],
+        getSheetNames: () => ["Sheet1"],
+        getTables: () => [{ name: "Table1", columns: ["Amount"] }],
+        getCacheKey: () => "tables:Table1",
+      },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=SUM(tab";
+    view.textarea.setSelectionRange(8, 8);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe("=SUM(table1[Amount])");
+    expect(view.model.aiGhostText()).toBe("le1[Amount])");
+    expect(view.model.aiSuggestionPreview()).toBe("(preview unavailable)");
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("does not create phantom sheets when suggesting sheet-qualified ranges", async () => {
     const doc = new DocumentController();
 
