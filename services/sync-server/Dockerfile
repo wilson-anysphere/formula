@@ -47,11 +47,17 @@ COPY packages/collab/permissions/package.json ./packages/collab/permissions/pack
 COPY packages/collab/permissions/index.js ./packages/collab/permissions/index.js
 COPY packages/collab/permissions/index.d.ts ./packages/collab/permissions/index.d.ts
 
+# Shared persistence record framing helpers.
+# Note: we copy package.json so Node treats src/file-format.js as ESM.
+COPY packages/collab/persistence/package.json ./packages/collab/persistence/package.json
+COPY packages/collab/persistence/src/file-format.js ./packages/collab/persistence/src/file-format.js
+COPY packages/collab/persistence/src/file-format.d.ts ./packages/collab/persistence/src/file-format.d.ts
+
 WORKDIR /app/services/sync-server
 
 # This image only copies the sync-server sources plus a small subset of monorepo modules.
 # Avoid importing other monorepo packages unless you also copy them here.
-RUN node -e "const fs=require('fs');const path=require('path');const bad=[];const allow=/packages\\/(?:security\\/crypto|collab\\/permissions)(?:\\/|$)/;const importRe=/^\\s*(?:import|export)\\s+[^\\n;]*?\\sfrom\\s+[\"']([^\"']+)[\"']/gm;const requireRe=/\\brequire\\s*\\(\\s*[\"']([^\"']+)[\"']\\s*\\)/g;const dynamicImportRe=/\\bimport\\s*\\(\\s*[\"']([^\"']+)[\"']\\s*\\)/g;function checkFile(p){const t=fs.readFileSync(p,'utf8');const specs=[];let m;importRe.lastIndex=0;while((m=importRe.exec(t)))specs.push(m[1]);requireRe.lastIndex=0;while((m=requireRe.exec(t)))specs.push(m[1]);dynamicImportRe.lastIndex=0;while((m=dynamicImportRe.exec(t)))specs.push(m[1]);for(const s of specs){if(s.includes('@formula/')){bad.push(p+': '+s);continue;}if(s.includes('packages/')&&!allow.test(s)){bad.push(p+': '+s);}}}function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(e.isFile()&&p.endsWith('.ts'))checkFile(p);}}walk('src');if(bad.length){console.error('sync-server Docker build only includes services/sync-server and packages/security/crypto. Offending imports:',bad);process.exit(1);}"
+RUN node -e "const fs=require('fs');const path=require('path');const bad=[];const allow=/packages\\/(?:security\\/crypto|collab\\/(?:permissions|persistence))(?:\\/|$)/;const importRe=/^\\s*(?:import|export)\\s+[^\\n;]*?\\sfrom\\s+[\"']([^\"']+)[\"']/gm;const requireRe=/\\brequire\\s*\\(\\s*[\"']([^\"']+)[\"']\\s*\\)/g;const dynamicImportRe=/\\bimport\\s*\\(\\s*[\"']([^\"']+)[\"']\\s*\\)/g;function checkFile(p){const t=fs.readFileSync(p,'utf8');const specs=[];let m;importRe.lastIndex=0;while((m=importRe.exec(t)))specs.push(m[1]);requireRe.lastIndex=0;while((m=requireRe.exec(t)))specs.push(m[1]);dynamicImportRe.lastIndex=0;while((m=dynamicImportRe.exec(t)))specs.push(m[1]);for(const s of specs){if(s.includes('@formula/')){bad.push(p+': '+s);continue;}if(s.includes('packages/')&&!allow.test(s)){bad.push(p+': '+s);}}}function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(e.isFile()&&p.endsWith('.ts'))checkFile(p);}}walk('src');if(bad.length){console.error('sync-server Docker build only includes services/sync-server and a small subset of monorepo modules. Offending imports:',bad);process.exit(1);}"
 
 RUN npm run build
 RUN npm prune --omit=dev
@@ -81,6 +87,10 @@ COPY --from=build /app/packages/security/crypto /app/packages/security/crypto
 COPY --from=build /app/packages/collab/permissions/package.json /app/packages/collab/permissions/package.json
 COPY --from=build /app/packages/collab/permissions/index.js /app/packages/collab/permissions/index.js
 COPY --from=build /app/packages/collab/permissions/index.d.ts /app/packages/collab/permissions/index.d.ts
+
+COPY --from=build /app/packages/collab/persistence/package.json /app/packages/collab/persistence/package.json
+COPY --from=build /app/packages/collab/persistence/src/file-format.js /app/packages/collab/persistence/src/file-format.js
+COPY --from=build /app/packages/collab/persistence/src/file-format.d.ts /app/packages/collab/persistence/src/file-format.d.ts
 
 # Default `SYNC_SERVER_DATA_DIR` resolves under this workdir.
 RUN mkdir -p /app/services/sync-server/.sync-server-data \
