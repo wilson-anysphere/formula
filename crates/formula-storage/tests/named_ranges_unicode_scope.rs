@@ -1,3 +1,4 @@
+use formula_model::rewrite_sheet_names_in_formula;
 use formula_storage::{NamedRange, Storage};
 use rusqlite::{Connection, OpenFlags};
 
@@ -60,4 +61,54 @@ fn named_ranges_sheet_scopes_are_unicode_case_insensitive() {
     assert_eq!(fetched.scope, "äbc");
     // Non-ASCII sheet names are emitted as quoted sheet references in formulas.
     assert_eq!(fetched.reference, "'äbc'!$B$2");
+}
+
+#[test]
+fn rename_sheet_deduplicates_unicode_case_scoped_named_ranges() {
+    let uri = "file:named_ranges_unicode_scope_dedup?mode=memory&cache=shared";
+    let storage = Storage::open_uri(uri).expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Äbc", 0, None)
+        .expect("create sheet");
+
+    let flags =
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_URI;
+    let conn = Connection::open_with_flags(uri, flags).expect("open raw connection");
+
+    conn.execute(
+        "INSERT INTO named_ranges (workbook_id, name, scope, reference) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![workbook.id.to_string(), "Local", "Äbc", "Äbc!$A$1"],
+    )
+    .expect("insert named range A1");
+    conn.execute(
+        "INSERT INTO named_ranges (workbook_id, name, scope, reference) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![workbook.id.to_string(), "Local", "äbc", "Äbc!$B$2"],
+    )
+    .expect("insert named range B2");
+
+    storage
+        .rename_sheet(sheet.id, "Renamed")
+        .expect("rename sheet");
+
+    let fetched = storage
+        .get_named_range(workbook.id, "LOCAL", "renamed")
+        .expect("get named range")
+        .expect("named range exists");
+    assert_eq!(fetched.scope, "Renamed");
+    assert_eq!(
+        fetched.reference,
+        rewrite_sheet_names_in_formula("Äbc!$B$2", "Äbc", "Renamed")
+    );
+
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM named_ranges WHERE workbook_id = ?1 AND name = ?2",
+            rusqlite::params![workbook.id.to_string(), "Local"],
+            |r| r.get(0),
+        )
+        .expect("count named ranges");
+    assert_eq!(count, 1);
 }

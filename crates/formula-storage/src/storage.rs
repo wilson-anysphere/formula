@@ -1464,17 +1464,18 @@ impl Storage {
         let wants_workbook_scope = scope.eq_ignore_ascii_case("workbook");
         let mut stmt = conn.prepare(
             r#"
-            SELECT workbook_id, name, scope, reference
+            SELECT rowid, workbook_id, name, scope, reference
             FROM named_ranges
             WHERE workbook_id = ?1
               AND name = ?2 COLLATE NOCASE
+            ORDER BY rowid DESC
             "#,
         )?;
         let mut rows = stmt.query(params![workbook_id.to_string(), name])?;
 
         while let Some(row) = rows.next()? {
-            let raw_workbook_id: String = row.get(0)?;
-            let scope_value: String = row.get(2)?;
+            let raw_workbook_id: String = row.get(1)?;
+            let scope_value: String = row.get(3)?;
 
             let scope_matches = if wants_workbook_scope {
                 scope_value.eq_ignore_ascii_case("workbook")
@@ -1489,9 +1490,9 @@ impl Storage {
             return Ok(Some(NamedRange {
                 workbook_id: Uuid::parse_str(&raw_workbook_id)
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                name: row.get(1)?,
+                name: row.get(2)?,
                 scope: scope_value,
-                reference: row.get(3)?,
+                reference: row.get(4)?,
             }));
         }
 
@@ -1503,20 +1504,22 @@ impl Storage {
         let tx = conn.transaction()?;
 
         let wants_workbook_scope = range.scope.eq_ignore_ascii_case("workbook");
-        let mut existing: Option<(String, String)> = None;
+        let mut existing_rowid: Option<i64> = None;
+        let mut duplicate_rowids: Vec<i64> = Vec::new();
         {
             let mut stmt = tx.prepare(
                 r#"
-                SELECT name, scope
+                SELECT rowid, name, scope
                 FROM named_ranges
                 WHERE workbook_id = ?1
                   AND name = ?2 COLLATE NOCASE
+                ORDER BY rowid DESC
                 "#,
             )?;
             let mut rows = stmt.query(params![range.workbook_id.to_string(), &range.name])?;
             while let Some(row) = rows.next()? {
-                let name: String = row.get(0)?;
-                let scope: String = row.get(1)?;
+                let rowid: i64 = row.get(0)?;
+                let scope: String = row.get(2)?;
                 let scope_matches = if wants_workbook_scope {
                     scope.eq_ignore_ascii_case("workbook")
                 } else {
@@ -1524,22 +1527,32 @@ impl Storage {
                         && sheet_name_eq_case_insensitive(&scope, &range.scope)
                 };
                 if scope_matches {
-                    existing = Some((name, scope));
-                    break;
+                    if existing_rowid.is_none() {
+                        existing_rowid = Some(rowid);
+                    } else {
+                        duplicate_rowids.push(rowid);
+                    }
                 }
             }
         }
 
-        match existing {
-            Some((name, scope)) => {
+        match existing_rowid {
+            Some(rowid) => {
                 tx.execute(
                     r#"
                     UPDATE named_ranges
                     SET reference = ?1
-                    WHERE workbook_id = ?2 AND name = ?3 AND scope = ?4
+                    WHERE rowid = ?2
                     "#,
-                    params![&range.reference, range.workbook_id.to_string(), name, scope],
+                    params![&range.reference, rowid],
                 )?;
+                if !duplicate_rowids.is_empty() {
+                    let mut delete_stmt =
+                        tx.prepare("DELETE FROM named_ranges WHERE rowid = ?1")?;
+                    for duplicate in duplicate_rowids {
+                        delete_stmt.execute(params![duplicate])?;
+                    }
+                }
             }
             None => {
                 tx.execute(
@@ -2197,18 +2210,26 @@ fn update_named_range_scopes_for_sheet_rename_tx(
     let workbook_id_str = workbook_id.to_string();
     let old_key = canonical_sheet_name_key(old_name);
 
-    let mut stmt = tx.prepare("SELECT name, scope FROM named_ranges WHERE workbook_id = ?1")?;
+    let mut stmt = tx.prepare(
+        r#"
+        SELECT rowid, name, scope
+        FROM named_ranges
+        WHERE workbook_id = ?1
+        ORDER BY rowid DESC
+        "#,
+    )?;
     let mut rows = stmt.query(params![&workbook_id_str])?;
 
-    let mut to_update: Vec<(String, String)> = Vec::new();
+    let mut to_update: Vec<(i64, String)> = Vec::new();
     while let Some(row) = rows.next()? {
-        let name: String = row.get(0)?;
-        let scope: String = row.get(1)?;
+        let rowid: i64 = row.get(0)?;
+        let name: String = row.get(1)?;
+        let scope: String = row.get(2)?;
         if scope.eq_ignore_ascii_case("workbook") {
             continue;
         }
         if canonical_sheet_name_key(&scope) == old_key {
-            to_update.push((name, scope));
+            to_update.push((rowid, name));
         }
     }
 
@@ -2216,12 +2237,40 @@ fn update_named_range_scopes_for_sheet_rename_tx(
         return Ok(());
     }
 
-    let mut update_stmt = tx.prepare(
-        "UPDATE named_ranges SET scope = ?1 WHERE workbook_id = ?2 AND name = ?3 AND scope = ?4",
+    let mut update_stmt = tx.prepare("UPDATE named_ranges SET scope = ?1 WHERE rowid = ?2")?;
+    let mut delete_stmt = tx.prepare("DELETE FROM named_ranges WHERE rowid = ?1")?;
+    let mut conflict_stmt = tx.prepare(
+        r#"
+        SELECT rowid
+        FROM named_ranges
+        WHERE workbook_id = ?1
+          AND name = ?2
+          AND scope = ?3
+        LIMIT 1
+        "#,
     )?;
 
-    for (name, scope) in to_update {
-        update_stmt.execute(params![new_name, &workbook_id_str, name, scope])?;
+    for (rowid, name) in to_update {
+        let update_result = update_stmt.execute(params![new_name, rowid]);
+        match update_result {
+            Ok(_) => {}
+            Err(rusqlite::Error::SqliteFailure(err, _))
+                if err.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                let conflict_rowid: i64 = conflict_stmt.query_row(
+                    params![&workbook_id_str, &name, new_name],
+                    |r| r.get(0),
+                )?;
+
+                if conflict_rowid > rowid {
+                    delete_stmt.execute(params![rowid])?;
+                } else {
+                    delete_stmt.execute(params![conflict_rowid])?;
+                    update_stmt.execute(params![new_name, rowid])?;
+                }
+            }
+            Err(err) => return Err(err.into()),
+        }
     }
 
     Ok(())
