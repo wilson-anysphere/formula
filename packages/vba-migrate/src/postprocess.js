@@ -50,7 +50,11 @@ function stripMarkdownCodeFences(text) {
 function ensurePythonWrapper(code) {
   const cleaned = String(code || "").trim();
   const hasMain = /\bdef\s+main\s*\(/.test(cleaned);
-  if (hasMain) return cleaned;
+  if (hasMain) {
+    const hasEntrypoint = /if\s+__name__\s*==\s*(['"])__main__\1\s*:/.test(cleaned);
+    if (hasEntrypoint) return cleaned;
+    return `${cleaned}\n\nif __name__ == "__main__":\n    main()`;
+  }
 
   // Wrap "loose" script bodies in a main() to make execution consistent.
   const bodyLines = cleaned.split(/\r?\n/);

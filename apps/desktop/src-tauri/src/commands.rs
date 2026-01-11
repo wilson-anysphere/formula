@@ -246,7 +246,9 @@ use crate::persistence::{
     autosave_db_path_for_new_workbook, autosave_db_path_for_workbook, WorkbookPersistenceLocation,
 };
 #[cfg(feature = "desktop")]
-use crate::state::{AppState, AppStateError, CellUpdateData, SharedAppState};
+use crate::state::SharedAppState;
+#[cfg(any(feature = "desktop", test))]
+use crate::state::{AppState, AppStateError, CellUpdateData};
 #[cfg(feature = "desktop")]
 use crate::{
     file_io::Workbook,
@@ -294,7 +296,7 @@ fn cell_value_from_state(
     })
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 fn cell_update_from_state(update: CellUpdateData) -> CellUpdate {
     CellUpdate {
         sheet_id: update.sheet_id,
@@ -478,7 +480,9 @@ pub async fn read_binary_file_range(path: String, offset: u64, length: u64) -> R
 /// Power Query: retrieve a persisted credential entry by scope key.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn power_query_credential_get(scope_key: String) -> Result<Option<PowerQueryCredentialEntry>, String> {
+pub async fn power_query_credential_get(
+    scope_key: String,
+) -> Result<Option<PowerQueryCredentialEntry>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
         store.get(&scope_key).map_err(|e| e.to_string())
@@ -562,7 +566,9 @@ pub fn get_workbook_theme_palette(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub fn list_defined_names(state: State<'_, SharedAppState>) -> Result<Vec<DefinedNameInfo>, String> {
+pub fn list_defined_names(
+    state: State<'_, SharedAppState>,
+) -> Result<Vec<DefinedNameInfo>, String> {
     let state = state.inner().lock().unwrap();
     let workbook = state.get_workbook().map_err(app_error)?;
 
@@ -653,8 +659,7 @@ pub async fn save_workbook(
         // Fall back to the storage->model export path for non-XLSX origins (csv/xls/xlsb) and
         // for new workbooks without an `origin_xlsx_bytes` baseline.
         if workbook.origin_xlsx_bytes.is_some() {
-            crate::file_io::write_xlsx_blocking(path, &workbook)
-                .map_err(|e| e.to_string())
+            crate::file_io::write_xlsx_blocking(path, &workbook).map_err(|e| e.to_string())
         } else {
             crate::persistence::write_xlsx_from_storage(&storage, workbook_id, &workbook, path)
                 .map_err(|e| e.to_string())
@@ -1339,6 +1344,15 @@ pub struct PythonRunResult {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TypeScriptRunResult {
+    pub ok: bool,
+    pub updates: Vec<CellUpdate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MacroSelectionRect {
     pub start_row: usize,
     pub start_col: usize,
@@ -1372,6 +1386,7 @@ pub struct MigrationValidationReport {
     pub mismatches: Vec<MigrationValidationMismatch>,
     pub vba: MacroRunResult,
     pub python: Option<PythonRunResult>,
+    pub typescript: Option<TypeScriptRunResult>,
     pub error: Option<String>,
 }
 
@@ -1421,7 +1436,9 @@ fn build_macro_security_status(
     let signature = if let Some(vba_bin) = workbook.vba_project_bin.as_deref() {
         // Signature parsing is best-effort: failures should not prevent macro listing or
         // execution (trust decisions are still enforced by the fingerprint).
-        let parsed = formula_vba::verify_vba_digital_signature(vba_bin).ok().flatten();
+        let parsed = formula_vba::verify_vba_digital_signature(vba_bin)
+            .ok()
+            .flatten();
         Some(match parsed {
             Some(sig) => MacroSignatureInfo {
                 status: match sig.verification {
@@ -1719,6 +1736,251 @@ pub async fn run_python_script(
     .map_err(|e| e.to_string())?
 }
 
+#[cfg(any(feature = "desktop", test))]
+fn parse_typescript_string_literal_prefix(input: &str) -> Result<(String, &str), String> {
+    let trimmed = input.trim_start();
+    let mut chars = trimmed.char_indices();
+    let Some((_, quote)) = chars.next() else {
+        return Err("expected string literal".to_string());
+    };
+    if quote != '"' && quote != '\'' {
+        return Err("expected string literal".to_string());
+    }
+
+    let mut out = String::new();
+    let mut escape = false;
+    for (idx, ch) in chars {
+        if escape {
+            let translated = match ch {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '\\' => '\\',
+                '"' => '"',
+                '\'' => '\'',
+                other => other,
+            };
+            out.push(translated);
+            escape = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            escape = true;
+            continue;
+        }
+
+        if ch == quote {
+            let remainder = &trimmed[idx + ch.len_utf8()..];
+            return Ok((out, remainder));
+        }
+
+        out.push(ch);
+    }
+
+    Err("unterminated string literal".to_string())
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn parse_typescript_string_literal(expr: &str) -> Result<String, String> {
+    let trimmed = expr.trim().trim_end_matches(';').trim();
+    let (value, remainder) = parse_typescript_string_literal_prefix(trimmed)?;
+    if !remainder.trim().is_empty() {
+        return Err(format!(
+            "unexpected trailing tokens after string literal: {remainder}"
+        ));
+    }
+    Ok(value)
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn parse_typescript_value_expr(expr: &str) -> Result<Option<JsonValue>, String> {
+    let trimmed = expr.trim().trim_end_matches(';').trim();
+    if trimmed.eq_ignore_ascii_case("null") || trimmed.eq_ignore_ascii_case("undefined") {
+        return Ok(None);
+    }
+    if trimmed.eq_ignore_ascii_case("true") {
+        return Ok(Some(JsonValue::Bool(true)));
+    }
+    if trimmed.eq_ignore_ascii_case("false") {
+        return Ok(Some(JsonValue::Bool(false)));
+    }
+
+    if trimmed.starts_with('"') || trimmed.starts_with('\'') {
+        let value = parse_typescript_string_literal(trimmed)?;
+        return Ok(Some(JsonValue::String(value)));
+    }
+
+    if let Ok(int_value) = trimmed.parse::<i64>() {
+        return Ok(Some(JsonValue::from(int_value)));
+    }
+
+    if let Ok(float_value) = trimmed.parse::<f64>() {
+        let num = serde_json::Number::from_f64(float_value)
+            .ok_or_else(|| format!("invalid numeric literal: {trimmed}"))?;
+        return Ok(Some(JsonValue::Number(num)));
+    }
+
+    Err(format!("unsupported TypeScript literal: {trimmed}"))
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn run_typescript_migration_script(state: &mut AppState, code: &str) -> TypeScriptRunResult {
+    use std::collections::HashMap;
+
+    let active_sheet_id = match state.get_workbook() {
+        Ok(workbook) => workbook
+            .sheets
+            .first()
+            .map(|s| s.id.clone())
+            .unwrap_or_else(|| "Sheet1".to_string()),
+        Err(err) => {
+            return TypeScriptRunResult {
+                ok: false,
+                updates: Vec::new(),
+                error: Some(err.to_string()),
+            }
+        }
+    };
+
+    let mut updates = Vec::<CellUpdateData>::new();
+    let mut error: Option<String> = None;
+
+    for raw_line in code.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with("//") {
+            continue;
+        }
+        if line.starts_with("export ") || line.starts_with("import ") {
+            continue;
+        }
+        if line == "{" || line == "}" {
+            continue;
+        }
+        if line.starts_with("const ") || line.starts_with("let ") || line.starts_with("var ") {
+            continue;
+        }
+
+        let Some((lhs_raw, rhs_raw)) = line.split_once('=') else {
+            // Ignore non-assignment statements (loops, conditionals, etc.).
+            continue;
+        };
+        let lhs_raw = lhs_raw.trim();
+        let rhs_raw = rhs_raw.trim();
+
+        let (assign_kind, lhs_target) = if let Some(prefix) = lhs_raw.strip_suffix(".value") {
+            ("value", prefix.trim())
+        } else if let Some(prefix) = lhs_raw.strip_suffix(".formula") {
+            ("formula", prefix.trim())
+        } else {
+            continue;
+        };
+
+        let (row, col) = if let Some(idx) = lhs_target.rfind(".range(") {
+            let after = &lhs_target[idx + ".range(".len()..];
+            match parse_typescript_string_literal_prefix(after) {
+                Ok((addr, rest)) => {
+                    let rest = rest.trim_start();
+                    if !rest.starts_with(')') || !rest[1..].trim().is_empty() {
+                        error = Some(format!("unsupported range expression: {lhs_target}"));
+                        break;
+                    }
+                    match formula_engine::eval::parse_a1(&addr) {
+                        Ok(cell) => (cell.row as usize, cell.col as usize),
+                        Err(e) => {
+                            error = Some(format!("invalid A1 address {addr:?}: {e}"));
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    error = Some(format!(
+                        "failed to parse range address in {lhs_target:?}: {e}"
+                    ));
+                    break;
+                }
+            }
+        } else if let Some(idx) = lhs_target.rfind(".cell(") {
+            let after = &lhs_target[idx + ".cell(".len()..];
+            let Some(close_idx) = after.find(')') else {
+                error = Some(format!("unsupported cell expression: {lhs_target}"));
+                break;
+            };
+            if !after[close_idx + 1..].trim().is_empty() {
+                error = Some(format!("unsupported cell expression: {lhs_target}"));
+                break;
+            }
+            let inside = after[..close_idx].trim();
+            let mut parts = inside.split(',');
+            let row_str = parts.next().unwrap_or("").trim();
+            let col_str = parts.next().unwrap_or("").trim();
+            if parts.next().is_some() {
+                error = Some(format!("unsupported cell expression: {lhs_target}"));
+                break;
+            }
+            let row_1 = match row_str.parse::<usize>() {
+                Ok(v) if v > 0 => v - 1,
+                _ => {
+                    error = Some(format!("invalid row in cell(): {row_str:?}"));
+                    break;
+                }
+            };
+            let col_1 = match col_str.parse::<usize>() {
+                Ok(v) if v > 0 => v - 1,
+                _ => {
+                    error = Some(format!("invalid col in cell(): {col_str:?}"));
+                    break;
+                }
+            };
+            (row_1, col_1)
+        } else {
+            continue;
+        };
+
+        let result = match assign_kind {
+            "value" => match parse_typescript_value_expr(rhs_raw) {
+                Ok(value) => state.set_cell(&active_sheet_id, row, col, value, None),
+                Err(e) => Err(AppStateError::WhatIf(e)),
+            },
+            "formula" => match parse_typescript_string_literal(rhs_raw) {
+                Ok(formula) => state.set_cell(&active_sheet_id, row, col, None, Some(formula)),
+                Err(e) => Err(AppStateError::WhatIf(e)),
+            },
+            _ => continue,
+        };
+
+        match result {
+            Ok(mut changed) => updates.append(&mut changed),
+            Err(e) => {
+                error = Some(e.to_string());
+                break;
+            }
+        }
+    }
+
+    // De-dupe updates by last write (keep report stable).
+    let mut out: Vec<CellUpdateData> = Vec::new();
+    let mut idx_by_key: HashMap<(String, usize, usize), usize> = HashMap::new();
+    for update in updates {
+        let key = (update.sheet_id.clone(), update.row, update.col);
+        if let Some(idx) = idx_by_key.get(&key).copied() {
+            out[idx] = update;
+        } else {
+            idx_by_key.insert(key, out.len());
+            out.push(update);
+        }
+    }
+
+    TypeScriptRunResult {
+        ok: error.is_none(),
+        updates: out.into_iter().map(cell_update_from_state).collect(),
+        error,
+    }
+}
+
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn validate_vba_migration(
@@ -1776,60 +2038,101 @@ pub async fn validate_vba_migration(
             }
         };
 
-        let python = match target {
-            MigrationTarget::Python => Some(
-                crate::python::run_python_script(
-                    &mut script_state,
-                    &code,
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-                .map_err(|e| e.to_string())?,
-            ),
-            MigrationTarget::TypeScript => None,
+        let mut python = None;
+        let mut typescript = None;
+
+        match target {
+            MigrationTarget::Python => {
+                python = Some(
+                    crate::python::run_python_script(
+                        &mut script_state,
+                        &code,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .map_err(|e| e.to_string())?,
+                );
+            }
+            MigrationTarget::TypeScript => {
+                typescript = Some(run_typescript_migration_script(&mut script_state, &code));
+            }
         };
 
         let mut mismatches = Vec::new();
 
+        let mut touched = BTreeSet::<(String, usize, usize)>::new();
+        for update in &vba.updates {
+            touched.insert((update.sheet_id.clone(), update.row, update.col));
+        }
         if let Some(python_run) = python.as_ref() {
-            let mut touched = BTreeSet::<(String, usize, usize)>::new();
-            for update in &vba.updates {
-                touched.insert((update.sheet_id.clone(), update.row, update.col));
-            }
             for update in &python_run.updates {
                 touched.insert((update.sheet_id.clone(), update.row, update.col));
             }
-
-            for (sheet_id, row, col) in touched {
-                let vba_cell = cell_value_from_state(&vba_state, &sheet_id, row, col)?;
-                let script_cell = cell_value_from_state(&script_state, &sheet_id, row, col)?;
-                if vba_cell != script_cell {
-                    mismatches.push(MigrationValidationMismatch {
-                        sheet_id,
-                        row,
-                        col,
-                        vba: vba_cell,
-                        script: script_cell,
-                    });
-                }
+        }
+        if let Some(ts_run) = typescript.as_ref() {
+            for update in &ts_run.updates {
+                touched.insert((update.sheet_id.clone(), update.row, update.col));
             }
         }
 
-        let error = match target {
-            MigrationTarget::TypeScript => Some(
-                "TypeScript validation is not supported in the desktop backend yet (Python only)."
-                    .to_string(),
-            ),
-            MigrationTarget::Python if python.is_none() => Some("Python validation failed.".to_string()),
-            _ => None,
+        for (sheet_id, row, col) in touched {
+            let vba_cell = cell_value_from_state(&vba_state, &sheet_id, row, col)?;
+            let script_cell = cell_value_from_state(&script_state, &sheet_id, row, col)?;
+            if vba_cell != script_cell {
+                mismatches.push(MigrationValidationMismatch {
+                    sheet_id,
+                    row,
+                    col,
+                    vba: vba_cell,
+                    script: script_cell,
+                });
+            }
+        }
+
+        let script_ok = match target {
+            MigrationTarget::Python => python.as_ref().map(|r| r.ok).unwrap_or(false),
+            MigrationTarget::TypeScript => typescript.as_ref().map(|r| r.ok).unwrap_or(false),
         };
 
-        let ok = error.is_none()
-            && python.as_ref().map(|r| r.ok).unwrap_or(false)
-            && vba.ok
-            && mismatches.is_empty();
+        let mut error_messages: Vec<String> = Vec::new();
+        if !vba.ok {
+            if let Some(err) = vba.error.as_ref() {
+                error_messages.push(err.message.clone());
+            } else {
+                error_messages.push("VBA macro failed".to_string());
+            }
+        }
+        if !script_ok {
+            match target {
+                MigrationTarget::Python => {
+                    if let Some(run) = python.as_ref() {
+                        if let Some(err) = run.error.as_ref() {
+                            error_messages.push(err.message.clone());
+                        } else {
+                            error_messages.push("Python script failed".to_string());
+                        }
+                    }
+                }
+                MigrationTarget::TypeScript => {
+                    if let Some(run) = typescript.as_ref() {
+                        if let Some(err) = run.error.as_ref() {
+                            error_messages.push(err.clone());
+                        } else {
+                            error_messages.push("TypeScript migration failed".to_string());
+                        }
+                    }
+                }
+            }
+        }
+        let error = if error_messages.is_empty() {
+            None
+        } else {
+            Some(error_messages.join(" | "))
+        };
+
+        let ok = vba.ok && script_ok && mismatches.is_empty();
 
         Ok(MigrationValidationReport {
             ok,
@@ -1838,6 +2141,7 @@ pub async fn validate_vba_migration(
             mismatches,
             vba,
             python,
+            typescript,
             error,
         })
     })
@@ -2058,5 +2362,32 @@ mod tests {
                 "expected hex color like '#RRGGBB', got {value}"
             );
         }
+    }
+
+    #[test]
+    fn typescript_migration_interpreter_applies_basic_range_and_cell_assignments() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        let mut state = crate::state::AppState::new();
+        state.load_workbook(workbook);
+
+        let code = r#"
+export default async function main(ctx) {
+  const sheet = ctx.activeSheet;
+  sheet.range("A1").value = 1;
+  sheet.cell(1, 2).formula = "=A1+1";
+}
+"#;
+
+        let result = run_typescript_migration_script(&mut state, code);
+        assert!(result.ok, "expected ok, got {:?}", result.error);
+
+        let a1 = state.get_cell("Sheet1", 0, 0).expect("A1 exists");
+        assert_eq!(a1.value.display(), "1");
+
+        let b1 = state.get_cell("Sheet1", 0, 1).expect("B1 exists");
+        assert_eq!(b1.formula.as_deref(), Some("=A1+1"));
+        assert_eq!(b1.value.display(), "2");
     }
 }
