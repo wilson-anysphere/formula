@@ -236,6 +236,7 @@ type EvalContext = {
 const DEFAULT_CONTEXT: EvalContext = { preserveReferenceProvenance: false, sampleRangeReferences: false, maxRangeCells: 0 };
 
 const DEFAULT_AI_RANGE_SAMPLE_LIMIT = 200;
+const DEFAULT_AI_RANGE_SAMPLE_PREFIX = 30;
 
 function clampInt(value: number, opts: { min: number; max: number }): number {
   const n = Number.isFinite(value) ? Math.trunc(value) : opts.min;
@@ -359,20 +360,80 @@ function readReference(
   const maxCells = context.sampleRangeReferences ? Math.min(totalCells, Math.max(1, context.maxRangeCells)) : totalCells;
 
   const values: ProvenanceCellValue[] = [];
-  outer: for (let r = range.start.row; r <= range.end.row; r += 1) {
-    for (let c = range.start.col; c <= range.end.col; c += 1) {
-      if (values.length >= maxCells) break outer;
-      const addr = toA1({ row: r, col: c });
-      const cellRef = provenanceSheet ? `${provenanceSheet}!${addr}` : addr;
-      values.push({ __cellRef: cellRef, value: readCell(addr) });
-    }
-  }
   const start = toA1(range.start);
   const end = toA1(range.end);
   const rangeRef = start === end ? start : `${start}:${end}`;
-  (values as any).__rangeRef = provenanceSheet ? `${provenanceSheet}!${rangeRef}` : rangeRef;
+  const fullRangeRef = provenanceSheet ? `${provenanceSheet}!${rangeRef}` : rangeRef;
+
+  const cols = range.end.col - range.start.col + 1;
+  const addCellAtIndex = (index: number): void => {
+    const rowOffset = Math.floor(index / cols);
+    const colOffset = index % cols;
+    const addr = toA1({ row: range.start.row + rowOffset, col: range.start.col + colOffset });
+    const cellRef = provenanceSheet ? `${provenanceSheet}!${addr}` : addr;
+    values.push({ __cellRef: cellRef, value: readCell(addr) });
+  };
+
+  // When sampling, include a prefix of the range (deterministic "top rows") plus a
+  // deterministic random sample from the remainder. This avoids always sending only
+  // the top of large ranges to the model.
+  if (context.sampleRangeReferences && totalCells > maxCells) {
+    const prefixCount = Math.min(maxCells, DEFAULT_AI_RANGE_SAMPLE_PREFIX);
+    for (let i = 0; i < prefixCount; i += 1) addCellAtIndex(i);
+
+    const remaining = maxCells - prefixCount;
+    if (remaining > 0) {
+      const seed = hashText(`${fullRangeRef}:${totalCells}:${maxCells}`);
+      const rand = mulberry32(seed);
+      const sample = pickSampleIndices({ total: totalCells - prefixCount, count: remaining, rand }).map((i) => i + prefixCount);
+      for (const idx of sample) addCellAtIndex(idx);
+    }
+  } else {
+    for (let i = 0; i < maxCells; i += 1) addCellAtIndex(i);
+  }
+
+  (values as any).__rangeRef = fullRangeRef;
   (values as any).__totalCells = totalCells;
   return values;
+}
+
+function hashText(text: string): number {
+  // FNV-1a 32-bit for deterministic, dependency-free hashing.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function mulberry32(seed: number): () => number {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let x = Math.imul(t ^ (t >>> 15), 1 | t);
+    x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function pickSampleIndices(params: { total: number; count: number; rand: () => number }): number[] {
+  const count = Math.max(0, Math.min(params.count, params.total));
+  if (count === 0) return [];
+  const out = new Set<number>();
+  const maxAttempts = Math.max(100, count * 20);
+  let attempts = 0;
+
+  while (out.size < count && attempts < maxAttempts) {
+    attempts += 1;
+    const idx = Math.floor(params.rand() * params.total);
+    out.add(idx);
+  }
+
+  // Fall back to deterministic fill if collisions prevented reaching the target count.
+  for (let i = 0; out.size < count && i < params.total; i += 1) out.add(i);
+
+  return Array.from(out).sort((a, b) => a - b);
 }
 
 function toA1(addr: { row: number; col: number }): string {
