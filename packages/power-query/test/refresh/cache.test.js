@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -718,6 +718,37 @@ test("FileSystemCacheStore: DataTable cache preserves Uint8Array values", async 
     await rm(cacheDir, { recursive: true, force: true });
   }
 });
+
+test(
+  "FileSystemCacheStore: rejects Arrow blob markers that don't match the cache key (no path traversal)",
+  { skip: !arrowAvailable },
+  async () => {
+    const cacheDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-marker-"));
+
+    try {
+      const store = new FileSystemCacheStore({ directory: cacheDir });
+      const cache = new CacheManager({ store });
+
+      const arrow = arrowTableFromColumns({ id: [1] });
+      const bytes = arrowTableToIPC(arrow);
+
+      await cache.set("marker-key", {
+        version: 2,
+        table: { kind: "arrow", format: "ipc", columns: [{ name: "id", type: "number" }], bytes },
+        meta: null,
+      });
+
+      const { jsonPath } = await store.pathsForKey("marker-key");
+      const parsed = JSON.parse(await readFile(jsonPath, "utf8"));
+      parsed.entry.value.table.bytes.__pq_cache_binary = "../evil.bin";
+      await writeFile(jsonPath, JSON.stringify(parsed), "utf8");
+
+      assert.equal(await cache.get("marker-key"), null);
+    } finally {
+      await rm(cacheDir, { recursive: true, force: true });
+    }
+  },
+);
 
 test(
   "IndexedDBCacheStore: caches Arrow-backed Parquet results without re-reading the source",

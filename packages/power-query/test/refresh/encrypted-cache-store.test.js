@@ -200,6 +200,44 @@ test(
 );
 
 test(
+  "EncryptedFileSystemCacheStore: rejects Arrow blob markers that don't match the cache key (no path traversal)",
+  { skip: !arrowAvailable },
+  async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pq-encrypted-cache-marker-"));
+    try {
+      const keychainProvider = new InMemoryKeychainProvider();
+
+      const adapter = new ArrowTableAdapter(
+        arrowTableFromColumns({
+          id: new Int32Array([1, 2]),
+          name: ["Alice", "Bob"],
+        }),
+      );
+      const cacheValue = { version: 2, table: serializeAnyTable(adapter), meta: null };
+
+      /** @type {import("../../src/cache/cache.js").CacheEntry} */
+      const entry = { value: cacheValue, createdAtMs: 1, expiresAtMs: null };
+      const key = "cache-key-arrow-marker";
+
+      const store = new EncryptedFileSystemCacheStore({
+        directory: dir,
+        encryption: { enabled: false, keychainProvider },
+      });
+      await store.set(key, entry);
+
+      const jsonPath = path.join(dir, `${fnv1a64(key)}.json`);
+      const parsed = JSON.parse((await fs.readFile(jsonPath)).toString("utf8"));
+      parsed.entry.value.table.bytes.__pq_cache_binary = "../evil.bin";
+      await fs.writeFile(jsonPath, JSON.stringify(parsed));
+
+      assert.equal(await store.get(key), null);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "QueryEngine: caches Arrow-backed Parquet results using EncryptedFileSystemCacheStore",
   { skip: !parquetAvailable },
   async () => {
