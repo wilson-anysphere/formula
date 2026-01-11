@@ -1576,6 +1576,27 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const dataStartRow = headerRowsRef.current >= rowCount ? 0 : headerRowsRef.current;
     const dataStartCol = headerColsRef.current >= colCount ? 0 : headerColsRef.current;
 
+    const getMergedRangeAtCell = (row: number, col: number): CellRange | null => {
+      const provider = providerRef.current;
+      const direct = provider.getMergedRangeAt?.(row, col) ?? null;
+      if (direct) {
+        if (direct.endRow - direct.startRow <= 1 && direct.endCol - direct.startCol <= 1) return null;
+        return direct;
+      }
+
+      if (provider.getMergedRangesInRange) {
+        const candidates = provider.getMergedRangesInRange({ startRow: row, endRow: row + 1, startCol: col, endCol: col + 1 });
+        for (const candidate of candidates) {
+          if (row < candidate.startRow || row >= candidate.endRow) continue;
+          if (col < candidate.startCol || col >= candidate.endCol) continue;
+          if (candidate.endRow - candidate.startRow <= 1 && candidate.endCol - candidate.startCol <= 1) continue;
+          return candidate;
+        }
+      }
+
+      return null;
+    };
+
     const applySelectionRange = (range: CellRange) => {
       keyboardAnchorRef.current = null;
 
@@ -1671,7 +1692,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     const prevSelection = renderer.getSelection();
     const prevRange = renderer.getSelectionRange();
-    const mergedAtActive = providerRef.current.getMergedRangeAt?.(active.row, active.col) ?? null;
+    const mergedAtActive = getMergedRangeAtCell(active.row, active.col);
 
     const rangeArea = (range: CellRange) =>
       Math.max(0, range.endRow - range.startRow) * Math.max(0, range.endCol - range.startCol);
@@ -1684,7 +1705,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const activeRow = clamp(current.row, prevRange.startRow, prevRange.endRow - 1);
       const activeCol = clamp(current.col, prevRange.startCol, prevRange.endCol - 1);
 
-      const mergedAtCell = providerRef.current.getMergedRangeAt?.(activeRow, activeCol) ?? null;
+      const mergedAtCell = getMergedRangeAtCell(activeRow, activeCol);
       const isSingleMergedSelection =
         mergedAtCell != null &&
         mergedAtCell.startRow === prevRange.startRow &&
@@ -1700,7 +1721,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
         // When selection ranges include merged cells, treat merged ranges as a *single* tab stop
         // (the anchor cell) and skip over interior merged cells.
-        const getMergedRangeAt = (row: number, col: number) => providerRef.current.getMergedRangeAt?.(row, col) ?? null;
+        const getMergedRangeAt = (row: number, col: number) => getMergedRangeAtCell(row, col);
 
         const nextCellInRange = (): { row: number; col: number } => {
           let nextRow = activeRow;

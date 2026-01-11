@@ -530,6 +530,67 @@ describe("CanvasGrid keyboard navigation", () => {
     host.remove();
   });
 
+  it("supports merged navigation when only getMergedRangesInRange is provided", async () => {
+    const merged = { startRow: 0, endRow: 2, startCol: 0, endCol: 2 };
+    const provider = {
+      getCell: (row: number, col: number) => ({ row, col, value: `${row},${col}` }),
+      getMergedRangesInRange: (range: { startRow: number; endRow: number; startCol: number; endCol: number }) =>
+        range.startRow < merged.endRow && range.endRow > merged.startRow && range.startCol < merged.endCol && range.endCol > merged.startCol
+          ? [merged]
+          : []
+    };
+
+    const apiRef = React.createRef<GridApi>();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<CanvasGrid provider={provider} rowCount={10} colCount={10} apiRef={apiRef} />);
+    });
+
+    const container = host.querySelector('[data-testid="canvas-grid"]') as HTMLDivElement;
+    container.focus();
+
+    await act(async () => {
+      apiRef.current?.setSelection(0, 0);
+    });
+
+    await act(async () => {
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    });
+
+    // ArrowRight should skip to the first cell after the merged range.
+    expect(apiRef.current?.getSelection()).toEqual({ row: 0, col: 2 });
+
+    await act(async () => {
+      apiRef.current?.setSelection(0, 0);
+    });
+
+    await act(async () => {
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    });
+    expect(apiRef.current?.getSelection()).toEqual({ row: 0, col: 2 });
+
+    await act(async () => {
+      apiRef.current?.setSelection(0, 0);
+      apiRef.current?.setSelectionRange({ startRow: 0, endRow: 2, startCol: 0, endCol: 3 });
+    });
+
+    await act(async () => {
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    });
+
+    // Within selection-range navigation, Tab should also skip merged interiors.
+    expect(apiRef.current?.getSelection()).toEqual({ row: 0, col: 2 });
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
   it("treats frozen header rows/cols as the navigation origin", async () => {
     const apiRef = React.createRef<GridApi>();
     const onSelectionChange = vi.fn();
