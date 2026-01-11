@@ -5,6 +5,12 @@ export interface AppConfig {
   sessionTtlSeconds: number;
   cookieSecure: boolean;
   /**
+   * Whether to trust reverse proxy headers (e.g. `X-Forwarded-For`) when deriving
+   * `request.ip`. Keep this disabled unless the API is behind a trusted proxy
+   * that strips spoofed forwarding headers.
+   */
+  trustProxy?: boolean;
+  /**
    * Comma-separated allowlist of allowed CORS origins.
    *
    * - In production, defaults to no allowed origins unless explicitly configured.
@@ -111,6 +117,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const sessionCookieName = readStringEnv(env.SESSION_COOKIE_NAME, "formula_session");
   const sessionTtlSeconds = parseIntEnv(env.SESSION_TTL_SECONDS, 60 * 60 * 24);
   const cookieSecure = env.COOKIE_SECURE === "true";
+  const trustProxy = env.TRUST_PROXY === "true";
   const corsAllowedOrigins = parseCorsAllowedOrigins(env.CORS_ALLOWED_ORIGINS, nodeEnv);
   const syncTokenSecret = readStringEnv(env.SYNC_TOKEN_SECRET, DEV_SYNC_TOKEN_SECRET);
   const syncTokenTtlSeconds = parseIntEnv(env.SYNC_TOKEN_TTL_SECONDS, 60 * 5);
@@ -132,6 +139,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sessionCookieName,
     sessionTtlSeconds,
     cookieSecure,
+    trustProxy,
     corsAllowedOrigins,
     syncTokenSecret,
     syncTokenTtlSeconds,

@@ -29,7 +29,8 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   const app = Fastify({
     loggerInstance: (options.logger ?? createLogger()) as FastifyBaseLogger,
     genReqId: genRequestId,
-    requestIdLogLabel: "requestId"
+    requestIdLogLabel: "requestId",
+    trustProxy: options.config.trustProxy ?? false
   });
 
   app.decorate("db", options.db);
