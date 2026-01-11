@@ -123,6 +123,10 @@ class ExtensionHost {
     // Set to null/0 to disable.
     this._memoryMb = Number.isFinite(memoryMb) ? Math.max(0, memoryMb) : 0;
     this._extensionStoragePath = extensionStoragePath;
+    this._extensionDataRoot = path.join(
+      path.dirname(path.resolve(extensionStoragePath)),
+      "extension-data"
+    );
     this._spreadsheet = spreadsheet;
     this._workbook = { name: "MockWorkbook", path: null };
 
@@ -161,6 +165,12 @@ class ExtensionHost {
     const extensionId = `${manifest.publisher}.${manifest.name}`;
 
     const extensionRoot = path.resolve(extensionPath);
+    const globalStoragePath = path.join(this._extensionDataRoot, extensionId, "globalStorage");
+    const workspaceStoragePath = path.join(this._extensionDataRoot, extensionId, "workspaceStorage");
+    await fs.mkdir(globalStoragePath, { recursive: true });
+    await fs.mkdir(workspaceStoragePath, { recursive: true });
+    const extensionUri = pathToFileURL(extensionRoot).href;
+
     const mainPath = path.resolve(extensionRoot, manifest.main);
     if (!mainPath.startsWith(extensionRoot + path.sep)) {
       throw new Error(
@@ -190,7 +200,10 @@ class ExtensionHost {
         extensionId,
         extensionPath,
         mainPath,
-        apiModulePath: this._apiModulePath
+        apiModulePath: this._apiModulePath,
+        extensionUri,
+        globalStoragePath,
+        workspaceStoragePath
       }
     };
 

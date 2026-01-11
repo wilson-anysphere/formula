@@ -7,6 +7,9 @@ export interface Disposable {
 export interface ExtensionContext {
   readonly extensionId: string;
   readonly extensionPath: string;
+  readonly extensionUri: string;
+  readonly globalStoragePath: string;
+  readonly workspaceStoragePath: string;
   readonly subscriptions: Disposable[];
 }
 
@@ -178,6 +181,9 @@ export namespace events {
 export namespace context {
   const extensionId: string;
   const extensionPath: string;
+  const extensionUri: string;
+  const globalStoragePath: string;
+  const workspaceStoragePath: string;
 }
 
 /**
@@ -185,5 +191,11 @@ export namespace context {
  * These are not part of the public extension authoring surface.
  */
 export function __setTransport(transport: { postMessage(message: any): void }): void;
-export function __setContext(ctx: { extensionId: string; extensionPath: string }): void;
+export function __setContext(ctx: {
+  extensionId: string;
+  extensionPath: string;
+  extensionUri?: string;
+  globalStoragePath?: string;
+  workspaceStoragePath?: string;
+}): void;
 export function __handleMessage(message: any): void;

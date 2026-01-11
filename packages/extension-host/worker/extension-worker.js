@@ -119,6 +119,25 @@ const hostClearTimeout = hardenHostFunction((id) => {
   clearTimeout(handle);
 });
 
+const hostSetImmediate = hardenHostFunction((callback, ...args) => {
+  const id = nextImmediateId++;
+  const handle = setImmediate(() => {
+    immediates.delete(id);
+    // Intentionally do not catch errors: unhandled exceptions should crash the worker
+    // so the ExtensionHost can restart it.
+    callback(...args);
+  });
+  immediates.set(id, handle);
+  return id;
+});
+
+const hostClearImmediate = hardenHostFunction((id) => {
+  const handle = immediates.get(id);
+  if (!handle) return;
+  immediates.delete(id);
+  clearImmediate(handle);
+});
+
 const hostSetInterval = hardenHostFunction((callback, delay, ...args) => {
   const id = nextIntervalId++;
   const handle = setInterval(() => {
@@ -133,23 +152,6 @@ const hostClearInterval = hardenHostFunction((id) => {
   if (!handle) return;
   intervals.delete(id);
   clearInterval(handle);
-});
-
-const hostSetImmediate = hardenHostFunction((callback, ...args) => {
-  const id = nextImmediateId++;
-  const handle = setImmediate(() => {
-    immediates.delete(id);
-    callback(...args);
-  });
-  immediates.set(id, handle);
-  return id;
-});
-
-const hostClearImmediate = hardenHostFunction((id) => {
-  const handle = immediates.get(id);
-  if (!handle) return;
-  immediates.delete(id);
-  clearImmediate(handle);
 });
 
 const installSandboxTimers = vm.runInContext(
@@ -178,10 +180,10 @@ const sandboxTimers = installSandboxTimers(
 );
 sandboxGlobal.setTimeout = sandboxTimers.setTimeout;
 sandboxGlobal.clearTimeout = sandboxTimers.clearTimeout;
-sandboxGlobal.setInterval = sandboxTimers.setInterval;
-sandboxGlobal.clearInterval = sandboxTimers.clearInterval;
 sandboxGlobal.setImmediate = sandboxTimers.setImmediate;
 sandboxGlobal.clearImmediate = sandboxTimers.clearImmediate;
+sandboxGlobal.setInterval = sandboxTimers.setInterval;
+sandboxGlobal.clearInterval = sandboxTimers.clearInterval;
 
 function normalizeBuiltinRequest(request) {
   return request.startsWith("node:") ? request.slice("node:".length) : request;
@@ -700,12 +702,26 @@ const createTransport = vm.runInContext(
   sandboxContext
 );
 const createContextObject = vm.runInContext(
-  "(extensionId, extensionPath) => ({ extensionId: String(extensionId), extensionPath: String(extensionPath) })",
+  `(extensionId, extensionPath, extensionUri, globalStoragePath, workspaceStoragePath) => ({
+    extensionId: String(extensionId),
+    extensionPath: String(extensionPath),
+    extensionUri: extensionUri == null ? undefined : String(extensionUri),
+    globalStoragePath: globalStoragePath == null ? undefined : String(globalStoragePath),
+    workspaceStoragePath: workspaceStoragePath == null ? undefined : String(workspaceStoragePath)
+  })`,
   sandboxContext
 );
 
 formulaApi.__setTransport(createTransport(hostPostMessage));
-formulaApi.__setContext(createContextObject(workerData.extensionId, workerData.extensionPath));
+formulaApi.__setContext(
+  createContextObject(
+    workerData.extensionId,
+    workerData.extensionPath,
+    workerData.extensionUri,
+    workerData.globalStoragePath,
+    workerData.workspaceStoragePath
+  )
+);
 
 vm.runInContext(
   "(formulaApi) => { globalThis.fetch = (input, init) => formulaApi.network.fetch(String(input), init); }",
@@ -1034,6 +1050,10 @@ async function activateExtension() {
     const context = new SandboxObject();
     context.extensionId = String(workerData.extensionId);
     context.extensionPath = String(workerData.extensionPath);
+    if (workerData.extensionUri != null) context.extensionUri = String(workerData.extensionUri);
+    if (workerData.globalStoragePath != null) context.globalStoragePath = String(workerData.globalStoragePath);
+    if (workerData.workspaceStoragePath != null)
+      context.workspaceStoragePath = String(workerData.workspaceStoragePath);
     context.subscriptions = new SandboxArray();
 
     await activateFn(context);

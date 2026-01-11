@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const { pathToFileURL } = require("node:url");
 
 const { ExtensionHost } = require("../src");
 
@@ -976,4 +977,82 @@ test("permissions: ui.registerContextMenu requires ui.menus", async (t) => {
 
   await host.loadExtension(extDir);
   await assert.rejects(() => host.executeCommand(commandId), /Permission denied: ui\.menus/);
+});
+
+test("api surface: formula.context and activation context expose storage paths", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-context-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "contextExt.read";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "context-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Context Read" }] },
+      permissions: ["ui.commands"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      let ctx = null;
+
+      exports.activate = async (context) => {
+        ctx = {
+          extensionId: context.extensionId,
+          extensionPath: context.extensionPath,
+          extensionUri: context.extensionUri,
+          globalStoragePath: context.globalStoragePath,
+          workspaceStoragePath: context.workspaceStoragePath
+        };
+
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          return {
+            ctx,
+            api: {
+              extensionId: formula.context.extensionId,
+              extensionPath: formula.context.extensionPath,
+              extensionUri: formula.context.extensionUri,
+              globalStoragePath: formula.context.globalStoragePath,
+              workspaceStoragePath: formula.context.workspaceStoragePath
+            }
+          };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = await host.loadExtension(extDir);
+
+  const expected = {
+    extensionId,
+    extensionPath: extDir,
+    extensionUri: pathToFileURL(extDir).href,
+    globalStoragePath: path.join(dir, "extension-data", extensionId, "globalStorage"),
+    workspaceStoragePath: path.join(dir, "extension-data", extensionId, "workspaceStorage")
+  };
+
+  const result = await host.executeCommand(commandId);
+  assert.deepEqual(result.ctx, expected);
+  assert.deepEqual(result.api, expected);
+
+  await assert.doesNotReject(() => fs.stat(expected.globalStoragePath));
+  await assert.doesNotReject(() => fs.stat(expected.workspaceStoragePath));
 });
