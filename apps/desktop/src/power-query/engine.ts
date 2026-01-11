@@ -1,4 +1,5 @@
 import { CacheManager } from "../../../../packages/power-query/src/cache/cache.js";
+import { hashValue } from "../../../../packages/power-query/src/cache/key.js";
 import { IndexedDBCacheStore } from "../../../../packages/power-query/src/cache/indexeddb.js";
 import { MemoryCacheStore } from "../../../../packages/power-query/src/cache/memory.js";
 import { HttpConnector } from "../../../../packages/power-query/src/connectors/http.js";
@@ -160,6 +161,10 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
       ? new HttpConnector({ fetch: options.fetch, oauth2Manager: options.oauth2Manager })
       : undefined;
 
+  // Cache permission prompts across executions so previewing the same query
+  // doesn't repeatedly ask the user.
+  const permissionPromptCache = new Map<string, Promise<boolean>>();
+
   return new QueryEngine({
     cache,
     defaultCacheTtlMs: options.defaultCacheTtlMs,
@@ -181,11 +186,18 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
         });
       }
 
-      if (options.onPermissionPrompt) {
-        return await options.onPermissionPrompt(kind, details);
-      }
+      const cacheKey = `${kind}:${hashValue(details)}`;
+      const existing = permissionPromptCache.get(cacheKey);
+      if (existing) return await existing;
 
-      return defaultPermissionPrompt(kind, details);
+      const decisionPromise = Promise.resolve().then(async () => {
+        if (options.onPermissionPrompt) {
+          return await options.onPermissionPrompt(kind, details);
+        }
+        return defaultPermissionPrompt(kind, details);
+      });
+      permissionPromptCache.set(cacheKey, decisionPromise);
+      return await decisionPromise;
     },
   });
 }

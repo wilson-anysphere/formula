@@ -84,6 +84,32 @@ test("createDesktopQueryEngine enforces DLP policy on external connector permiss
   await assert.rejects(engine.executeQuery(query, {}, {}), (err) => err?.name === "DlpViolationError");
 });
 
+test("createDesktopQueryEngine caches permission prompts across executions", async () => {
+  let promptCount = 0;
+  const engine = createDesktopQueryEngine({
+    fileAdapter: {
+      readText: async () => ["A,B", "1,2"].join("\n"),
+      readBinary: async () => new Uint8Array([1, 2, 3]),
+    },
+    onPermissionPrompt: async () => {
+      promptCount += 1;
+      return true;
+    },
+  });
+
+  const query = {
+    id: "q_csv_perm",
+    name: "CSV",
+    source: { type: "csv", path: "/tmp/test.csv", options: { hasHeaders: true } },
+    steps: [],
+  };
+
+  await engine.executeQuery(query, {}, {});
+  await engine.executeQuery(query, {}, {});
+
+  assert.equal(promptCount, 1);
+});
+
 test("createDesktopQueryEngine wires oauth2Manager into HttpConnector", async () => {
   /** @type {any[]} */
   const oauthCalls = [];
@@ -119,7 +145,7 @@ test("createDesktopQueryEngine wires oauth2Manager into HttpConnector", async ()
     steps: [],
   };
 
-  const table = await engine.executeQuery(query, {}, {});
+  const table = await engine.executeQuery(query, {}, { cache: { validation: "none" } });
   assert.deepEqual(table.toGrid(), [["id"], [1]]);
   assert.equal(oauthCalls.length, 1);
   assert.equal(oauthCalls[0].providerId, "example");
