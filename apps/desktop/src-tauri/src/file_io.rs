@@ -1134,6 +1134,56 @@ mod tests {
     }
 
     #[test]
+    fn cell_edit_preserves_comment_parts() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/comments.xlsx"
+        ));
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read comments fixture workbook");
+
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("edited.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let report = xlsx_diff::diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
+        assert!(
+            !report.differences.iter().any(|d| d.kind == "missing_part"),
+            "unexpected missing parts: {:?}",
+            report
+                .differences
+                .iter()
+                .filter(|d| d.kind == "missing_part")
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !report.differences.iter().any(|d| d.kind == "extra_part"),
+            "unexpected extra parts: {:?}",
+            report
+                .differences
+                .iter()
+                .filter(|d| d.kind == "extra_part")
+                .collect::<Vec<_>>()
+        );
+
+        let unexpected = report
+            .differences
+            .iter()
+            .filter(|d| {
+                d.severity != Severity::Info
+                    && !d.part.starts_with("xl/worksheets/")
+                    && d.part != "xl/sharedStrings.xml"
+            })
+            .collect::<Vec<_>>();
+        assert!(unexpected.is_empty(), "unexpected diffs: {unexpected:?}");
+    }
+
+    #[test]
     fn cell_edit_only_changes_worksheet_parts() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
