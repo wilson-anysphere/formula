@@ -79,8 +79,8 @@ pub use pivots::{
         TimelineDefinition, TimelineSelectionState,
     },
     PivotCacheDefinition, PivotCacheDefinitionPart, PivotCacheField, PivotCacheRecordsPart,
-    PivotCacheSourceType, PivotTableDataField, PivotTableDefinition, PivotTableField,
-    PivotTablePart, PreservedPivotParts, RelationshipStub, XlsxPivots,
+    PivotCacheSourceType, PivotTableDataField, PivotTableDefinition, PivotTableField, PivotTablePart,
+    PivotTableStyleInfo, PreservedPivotParts, RelationshipStub, XlsxPivots,
 };
 pub use recalc_policy::RecalcPolicy;
 pub use read::{load_from_bytes, load_from_path, read_workbook_model_from_bytes};

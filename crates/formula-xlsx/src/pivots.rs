@@ -17,7 +17,9 @@ pub mod table_definition;
 pub use cache_definition::{PivotCacheDefinition, PivotCacheField, PivotCacheSourceType};
 pub use graph::{PivotTableInstance, XlsxPivotGraph};
 pub use preserve::{PreservedPivotParts, RelationshipStub};
-pub use table_definition::{PivotTableDataField, PivotTableDefinition, PivotTableField};
+pub use table_definition::{
+    PivotTableDataField, PivotTableDefinition, PivotTableField, PivotTableStyleInfo,
+};
 
 pub type PivotTablePart = PivotTableDefinition;
 

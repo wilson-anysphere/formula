@@ -18,6 +18,8 @@ pub struct PivotTableDefinition {
     pub path: String,
     pub name: Option<String>,
     pub cache_id: Option<u32>,
+    /// Styling hints from `<pivotTableStyleInfo>`.
+    pub style_info: Option<PivotTableStyleInfo>,
     /// Output range on the destination worksheet (A1-style range).
     pub location_ref: Option<String>,
     pub first_header_row: Option<u32>,
@@ -57,6 +59,7 @@ impl PivotTableDefinition {
             path: path.to_string(),
             name: None,
             cache_id: None,
+            style_info: None,
             location_ref: None,
             first_header_row: None,
             first_data_row: None,
@@ -147,6 +150,17 @@ pub struct PivotTableField {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PivotTableStyleInfo {
+    pub name: Option<String>,
+    pub show_row_headers: Option<bool>,
+    pub show_col_headers: Option<bool>,
+    pub show_row_stripes: Option<bool>,
+    pub show_col_stripes: Option<bool>,
+    pub show_last_column: Option<bool>,
+    pub show_first_column: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PivotTableDataField {
     pub fld: Option<u32>,
     pub name: Option<String>,
@@ -219,6 +233,33 @@ fn handle_start_element(
             }
         }
         def.pivot_fields.push(field);
+        return Ok(());
+    }
+
+    if tag.eq_ignore_ascii_case(b"pivotTableStyleInfo") {
+        let mut style = PivotTableStyleInfo::default();
+        for attr in start.attributes().with_checks(false) {
+            let attr = attr?;
+            let key = local_name(attr.key.as_ref());
+            let value = attr.unescape_value()?.into_owned();
+
+            if key.eq_ignore_ascii_case(b"name") {
+                style.name = Some(value);
+            } else if key.eq_ignore_ascii_case(b"showRowHeaders") {
+                style.show_row_headers = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"showColHeaders") {
+                style.show_col_headers = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"showRowStripes") {
+                style.show_row_stripes = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"showColStripes") {
+                style.show_col_stripes = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"showLastColumn") {
+                style.show_last_column = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"showFirstColumn") {
+                style.show_first_column = parse_bool(&value);
+            }
+        }
+        def.style_info = Some(style);
         return Ok(());
     }
 
@@ -396,5 +437,49 @@ mod tests {
         assert_eq!(parsed.outline, Some(true));
         assert_eq!(parsed.compact, Some(false));
         assert_eq!(parsed.compact_data, Some(true));
+    }
+
+    #[test]
+    fn parses_pivot_table_style_info_empty_element() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:pivotTableDefinition xmlns:p="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  name="PivotTable1"
+  cacheId="1">
+  <p:pivotTableStyleInfo name="PivotStyleMedium9"
+    showRowHeaders="1"
+    showColHeaders="0"
+    showRowStripes="1"
+    showColStripes="0"
+    showLastColumn="1"/>
+</p:pivotTableDefinition>"#;
+
+        let parsed = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml)
+            .expect("parse pivotTableDefinition");
+        let style = parsed.style_info.expect("style info parsed");
+
+        assert_eq!(style.name.as_deref(), Some("PivotStyleMedium9"));
+        assert_eq!(style.show_row_headers, Some(true));
+        assert_eq!(style.show_col_headers, Some(false));
+        assert_eq!(style.show_row_stripes, Some(true));
+        assert_eq!(style.show_col_stripes, Some(false));
+        assert_eq!(style.show_last_column, Some(true));
+    }
+
+    #[test]
+    fn parses_pivot_table_style_info_start_end_element_with_prefixes() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:pivotTableDefinition xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  name="PivotTable1"
+  cacheId="1">
+  <x:pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="true" showColHeaders="false"></x:pivotTableStyleInfo>
+</x:pivotTableDefinition>"#;
+
+        let parsed = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml)
+            .expect("parse pivotTableDefinition");
+        let style = parsed.style_info.expect("style info parsed");
+
+        assert_eq!(style.name.as_deref(), Some("PivotStyleLight16"));
+        assert_eq!(style.show_row_headers, Some(true));
+        assert_eq!(style.show_col_headers, Some(false));
     }
 }
