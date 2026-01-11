@@ -10,6 +10,8 @@
 /**
  * @typedef {Object} CacheEntry
  * @property {unknown} value
+ *   The cached payload. Cache stores should be able to persist structured-cloneable
+ *   values (objects, arrays, typed arrays like `Uint8Array`, etc).
  * @property {number} createdAtMs
  * @property {number | null} expiresAtMs
  */
@@ -84,4 +86,3 @@ export class CacheManager {
     if (this.store.clear) await this.store.clear();
   }
 }
-
