@@ -114,6 +114,40 @@ function legacyListCommentsFromMapRoot(mapType) {
 }
 
 /**
+ * Delete any legacy list items (sequence entries with `parentSub === null`) from
+ * an instantiated map root.
+ *
+ * @param {any} transaction
+ * @param {any} mapType
+ */
+function deleteLegacyListItemsFromMapRoot(transaction, mapType) {
+  let item = mapType?._start ?? null;
+  while (item) {
+    if (!item.deleted && item.parentSub === null) {
+      item.delete(transaction);
+    }
+    item = item.right;
+  }
+}
+
+/**
+ * Delete any map entries (keyed items) from an instantiated array root.
+ *
+ * This can happen if a map schema was instantiated as an Array: map entries are
+ * stored in `type._map` and are invisible to `array.toArray()`.
+ *
+ * @param {any} transaction
+ * @param {any} arrayType
+ */
+function deleteMapEntriesFromArrayRoot(transaction, arrayType) {
+  const map = arrayType?._map;
+  if (!(map instanceof Map)) return;
+  for (const item of map.values()) {
+    if (!item?.deleted) item.delete(transaction);
+  }
+}
+
+/**
  * Parse a spreadsheet cell key. Supports:
  * - `${sheetId}:${row}:${col}`
  * - `${sheetId}:${row},${col}`
@@ -388,7 +422,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
   }
 
   doc.transact(
-    () => {
+    (transaction) => {
       // --- Sheets ---
       const sheetsArray = doc.getArray("sheets");
       if (sheetsArray.length > 0) sheetsArray.delete(0, sheetsArray.length);
@@ -449,6 +483,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
 
       if (commentsKind === "array") {
         const commentsArray = doc.getArray("comments");
+        deleteMapEntriesFromArrayRoot(transaction, commentsArray);
         if (commentsArray.length > 0) commentsArray.delete(0, commentsArray.length);
 
         const ids = Object.keys(normalized.comments ?? {}).sort();
@@ -461,6 +496,7 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
       } else {
         const commentsMap = doc.getMap("comments");
         for (const key of Array.from(commentsMap.keys())) commentsMap.delete(key);
+        deleteLegacyListItemsFromMapRoot(transaction, commentsMap);
         for (const [id, value] of Object.entries(normalized.comments ?? {})) {
           const obj = isRecord(value) ? structuredClone(value) : { value: structuredClone(value) };
           if (isRecord(obj) && !("id" in obj)) obj.id = id;
