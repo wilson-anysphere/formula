@@ -26,6 +26,12 @@ pub(crate) enum BiffVersion {
     Biff8,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BoundSheetInfo {
+    pub(crate) name: String,
+    pub(crate) offset: usize,
+}
+
 /// Read the workbook stream bytes from a compound file.
 pub(crate) fn read_workbook_stream_from_xls(path: &Path) -> Result<Vec<u8>, String> {
     let mut comp = cfb::open(path).map_err(|err| err.to_string())?;
@@ -322,7 +328,7 @@ fn parse_biff_format_record(
 pub(crate) fn parse_biff_bound_sheets(
     workbook_stream: &[u8],
     biff: BiffVersion,
-) -> Result<Vec<(String, usize)>, String> {
+) -> Result<Vec<BoundSheetInfo>, String> {
     let encoding = encoding_for_codepage(biff_codepage(workbook_stream));
 
     let mut offset = 0usize;
@@ -353,8 +359,10 @@ pub(crate) fn parse_biff_bound_sheets(
                 let Ok((name, _)) = parse_biff_short_string(&data[6..], biff, encoding) else {
                     continue;
                 };
-                let name = name.replace('\0', "");
-                out.push((name, sheet_offset));
+                out.push(BoundSheetInfo {
+                    name,
+                    offset: sheet_offset,
+                });
             }
             // EOF terminates the workbook global substream.
             0x000A => break,
@@ -980,7 +988,13 @@ mod tests {
 
         let stream = [r_codepage, r_bs, record(0x000A, &[])].concat();
         let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
-        assert_eq!(sheets, vec![("Ђ".to_string(), 0x1234)]);
+        assert_eq!(
+            sheets,
+            vec![BoundSheetInfo {
+                name: "Ђ".to_string(),
+                offset: 0x1234
+            }]
+        );
     }
 
     #[test]
@@ -1003,7 +1017,13 @@ mod tests {
         // No EOF record; should still stop at the worksheet BOF.
         let stream = [r_codepage, r_bs, r_sheet_bof].concat();
         let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
-        assert_eq!(sheets, vec![("Ђ".to_string(), 0x1234)]);
+        assert_eq!(
+            sheets,
+            vec![BoundSheetInfo {
+                name: "Ђ".to_string(),
+                offset: 0x1234
+            }]
+        );
     }
 
     #[test]

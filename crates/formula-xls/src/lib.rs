@@ -159,7 +159,6 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     let mut out = Workbook::new();
     let mut warnings = Vec::new();
     let mut merged_ranges = Vec::new();
-
     let workbook_stream = match biff::read_workbook_stream_from_xls(path) {
         Ok(bytes) => Some(bytes),
         Err(err) => {
@@ -172,8 +171,9 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
     let mut xf_style_ids: Option<Vec<Option<u32>>> = None;
     let mut xf_has_number_format: Option<Vec<bool>> = None;
-    let mut sheet_offsets: Option<Vec<(String, usize)>> = None;
-    let mut cell_xf_indices: Option<HashMap<String, HashMap<CellRef, u16>>> = None;
+    let mut biff_sheets: Option<Vec<biff::BoundSheetInfo>> = None;
+    let mut row_col_props: Option<Vec<biff::SheetRowColProperties>> = None;
+    let mut cell_xf_indices: Option<Vec<HashMap<CellRef, u16>>> = None;
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
         let biff_version = biff::detect_biff_version(workbook_stream);
@@ -217,44 +217,75 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         }
 
         match biff::parse_biff_bound_sheets(workbook_stream, biff_version) {
-            Ok(offsets) => sheet_offsets = Some(offsets),
+            Ok(sheets) => biff_sheets = Some(sheets),
             Err(err) => warnings.push(ImportWarning::new(format!(
                 "failed to import `.xls` sheet metadata: {err}"
             ))),
         }
 
-        if let (Some(sheet_offsets), Some(mask)) =
-            (sheet_offsets.as_ref(), xf_has_number_format.as_deref())
-        {
-            if mask.iter().any(|v| *v) {
-                let mut out_map = HashMap::new();
-
-                for (sheet_name, offset) in sheet_offsets {
-                    if *offset >= workbook_stream.len() {
-                        warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` cell styles for sheet `{sheet_name}`: out-of-bounds stream offset {offset}"
-                        )));
-                        continue;
-                    }
-
-                    match biff::parse_biff_sheet_cell_xf_indices_filtered(
-                        workbook_stream,
-                        *offset,
-                        Some(mask),
-                    ) {
-                        Ok(xfs) => {
-                            if !xfs.is_empty() {
-                                out_map.insert(sheet_name.clone(), xfs);
-                            }
-                        }
-                        Err(parse_err) => warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` cell styles for sheet `{sheet_name}`: {parse_err}"
-                        ))),
-                    }
+        if let Some(sheets) = biff_sheets.as_ref() {
+            let mut props_by_sheet = Vec::with_capacity(sheets.len());
+            for sheet in sheets {
+                if sheet.offset >= workbook_stream.len() {
+                    warnings.push(ImportWarning::new(format!(
+                        "failed to import `.xls` row/column properties for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
+                        props_by_sheet.len(),
+                        sheet.name,
+                        sheet.offset
+                    )));
+                    props_by_sheet.push(biff::SheetRowColProperties::default());
+                    continue;
                 }
 
-                if !out_map.is_empty() {
-                    cell_xf_indices = Some(out_map);
+                match biff::parse_biff_sheet_row_col_properties(workbook_stream, sheet.offset) {
+                    Ok(props) => props_by_sheet.push(props),
+                    Err(parse_err) => {
+                        warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` row/column properties for BIFF sheet index {} (`{}`): {parse_err}",
+                            props_by_sheet.len(),
+                            sheet.name
+                        )));
+                        props_by_sheet.push(biff::SheetRowColProperties::default());
+                    }
+                }
+            }
+            row_col_props = Some(props_by_sheet);
+
+            if let Some(mask) = xf_has_number_format.as_deref() {
+                if mask.iter().any(|v| *v) {
+                    let mut cell_xfs_by_sheet = Vec::with_capacity(sheets.len());
+                    for sheet in sheets {
+                        if sheet.offset >= workbook_stream.len() {
+                            warnings.push(ImportWarning::new(format!(
+                                "failed to import `.xls` cell styles for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
+                                cell_xfs_by_sheet.len(),
+                                sheet.name,
+                                sheet.offset
+                            )));
+                            cell_xfs_by_sheet.push(HashMap::new());
+                            continue;
+                        }
+
+                        match biff::parse_biff_sheet_cell_xf_indices_filtered(
+                            workbook_stream,
+                            sheet.offset,
+                            Some(mask),
+                        ) {
+                            Ok(xfs) => cell_xfs_by_sheet.push(xfs),
+                            Err(parse_err) => {
+                                warnings.push(ImportWarning::new(format!(
+                                    "failed to import `.xls` cell styles for BIFF sheet index {} (`{}`): {parse_err}",
+                                    cell_xfs_by_sheet.len(),
+                                    sheet.name
+                                )));
+                                cell_xfs_by_sheet.push(HashMap::new());
+                            }
+                        }
+                    }
+
+                    if cell_xfs_by_sheet.iter().any(|m| !m.is_empty()) {
+                        cell_xf_indices = Some(cell_xfs_by_sheet);
+                    }
                 }
             }
         }
@@ -262,36 +293,13 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
     let date_time_styles = DateTimeStyleIds::new(&mut out);
 
-    let row_col_props =
-        if let (Some(workbook_stream), Some(sheet_offsets)) =
-            (workbook_stream.as_deref(), sheet_offsets.as_ref())
-        {
-            let mut out_map = HashMap::new();
-            for (sheet_name, offset) in sheet_offsets {
-                if *offset >= workbook_stream.len() {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to import `.xls` row/column properties for sheet `{sheet_name}`: out-of-bounds stream offset {offset}"
-                    )));
-                    continue;
-                }
+    let (sheet_mapping, mapping_warning) =
+        reconcile_biff_sheet_mapping(&sheets, biff_sheets.as_deref());
+    if let Some(message) = mapping_warning {
+        warnings.push(ImportWarning::new(message));
+    }
 
-                match biff::parse_biff_sheet_row_col_properties(workbook_stream, *offset) {
-                    Ok(props) => {
-                        if !props.rows.is_empty() || !props.cols.is_empty() {
-                            out_map.insert(sheet_name.clone(), props);
-                        }
-                    }
-                    Err(parse_err) => warnings.push(ImportWarning::new(format!(
-                        "failed to import `.xls` row/column properties for sheet `{sheet_name}`: {parse_err}"
-                    ))),
-                }
-            }
-            out_map
-        } else {
-            HashMap::new()
-        };
-
-    for sheet_meta in sheets {
+    for (sheet_idx, sheet_meta) in sheets.iter().enumerate() {
         let sheet_name = sheet_meta.name.clone();
         let sheet_id = out.add_sheet(sheet_name.clone())?;
         let sheet = out
@@ -307,8 +315,15 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             )));
         }
 
-        if let Some(props) = row_col_props.get(&sheet_name) {
-            apply_row_col_properties(sheet, props);
+        let biff_idx = sheet_mapping.get(sheet_idx).copied().flatten();
+
+        if let Some(biff_idx) = biff_idx {
+            if let Some(props) = row_col_props
+                .as_ref()
+                .and_then(|props_by_sheet| props_by_sheet.get(biff_idx))
+            {
+                apply_row_col_properties(sheet, props);
+            }
         }
 
         if let Some(merge_cells) = workbook.worksheet_merge_cells(&sheet_name) {
@@ -333,9 +348,9 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             }
         }
 
-        let sheet_cell_xfs = cell_xf_indices
-            .as_ref()
-            .and_then(|map| map.get(&sheet_name));
+        let sheet_cell_xfs = biff_idx
+            .and_then(|biff_idx| cell_xf_indices.as_ref().and_then(|v| v.get(biff_idx)))
+            .filter(|map| !map.is_empty());
 
         match workbook.worksheet_range(&sheet_name) {
             Ok(range) => {
@@ -546,29 +561,149 @@ fn apply_row_col_properties(
     }
 }
 
+fn normalize_sheet_name_for_match(name: &str) -> String {
+    name.replace('\0', "").trim().to_lowercase()
+}
+
+fn reconcile_biff_sheet_mapping(
+    calamine_sheets: &[Sheet],
+    biff_sheets: Option<&[biff::BoundSheetInfo]>,
+) -> (Vec<Option<usize>>, Option<String>) {
+    let Some(biff_sheets) = biff_sheets else {
+        return (vec![None; calamine_sheets.len()], None);
+    };
+    if biff_sheets.is_empty() {
+        return (vec![None; calamine_sheets.len()], None);
+    }
+
+    let calamine_count = calamine_sheets.len();
+    let biff_count = biff_sheets.len();
+
+    // Primary mapping: BIFF BoundSheet order (workbook order) should align with calamine.
+    let mut index_mapping = vec![None; calamine_count];
+    let mut index_used_biff = vec![false; biff_count];
+    for idx in 0..calamine_count.min(biff_count) {
+        index_mapping[idx] = Some(idx);
+        index_used_biff[idx] = true;
+    }
+
+    // Secondary mapping: normalized, case-insensitive name match.
+    let mut name_mapping = vec![None; calamine_count];
+    let mut name_used_biff = vec![false; biff_count];
+
+    let mut biff_by_name: HashMap<String, Vec<usize>> = HashMap::new();
+    for (idx, sheet) in biff_sheets.iter().enumerate() {
+        biff_by_name
+            .entry(normalize_sheet_name_for_match(&sheet.name))
+            .or_default()
+            .push(idx);
+    }
+
+    for (cal_idx, sheet) in calamine_sheets.iter().enumerate() {
+        let key = normalize_sheet_name_for_match(&sheet.name);
+        let Some(candidates) = biff_by_name.get(&key) else {
+            continue;
+        };
+
+        if let Some(&biff_idx) = candidates.iter().find(|&&idx| !name_used_biff[idx]) {
+            name_mapping[cal_idx] = Some(biff_idx);
+            name_used_biff[biff_idx] = true;
+        }
+    }
+
+    let index_mapped = index_mapping.iter().filter(|m| m.is_some()).count();
+    let name_mapped = name_mapping.iter().filter(|m| m.is_some()).count();
+    let index_score = index_mapping
+        .iter()
+        .enumerate()
+        .filter_map(|(cal_idx, mapped)| {
+            let biff_idx = (*mapped)?;
+            let cal_name = normalize_sheet_name_for_match(&calamine_sheets[cal_idx].name);
+            let biff_name = normalize_sheet_name_for_match(&biff_sheets[biff_idx].name);
+            (cal_name == biff_name).then_some(())
+        })
+        .count();
+    let name_score = name_mapping
+        .iter()
+        .enumerate()
+        .filter_map(|(cal_idx, mapped)| {
+            let biff_idx = (*mapped)?;
+            let cal_name = normalize_sheet_name_for_match(&calamine_sheets[cal_idx].name);
+            let biff_name = normalize_sheet_name_for_match(&biff_sheets[biff_idx].name);
+            (cal_name == biff_name).then_some(())
+        })
+        .count();
+
+    let (mapping, used_biff, strategy) = match name_mapped.cmp(&index_mapped) {
+        std::cmp::Ordering::Greater => (name_mapping, name_used_biff, "name"),
+        std::cmp::Ordering::Less => (index_mapping, index_used_biff, "index"),
+        std::cmp::Ordering::Equal => {
+            if name_score > index_score {
+                (name_mapping, name_used_biff, "name")
+            } else {
+                (index_mapping, index_used_biff, "index")
+            }
+        }
+    };
+
+    let mapped_pairs: Vec<(usize, usize)> = mapping
+        .iter()
+        .enumerate()
+        .filter_map(|(cal_idx, &biff_idx)| biff_idx.map(|biff_idx| (cal_idx, biff_idx)))
+        .collect();
+    let unmapped_calamine: Vec<usize> = mapping
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, mapped)| mapped.is_none().then_some(idx))
+        .collect();
+    let unmapped_biff: Vec<usize> = used_biff
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, used)| (!*used).then_some(idx))
+        .collect();
+
+    let calamine_names: Vec<&str> = calamine_sheets.iter().map(|s| s.name.as_str()).collect();
+    let biff_names: Vec<&str> = biff_sheets.iter().map(|s| s.name.as_str()).collect();
+
+    let should_warn = calamine_count != biff_count
+        || strategy != "index"
+        || !unmapped_calamine.is_empty()
+        || !unmapped_biff.is_empty();
+
+    let warning = should_warn.then(|| {
+        format!(
+            "failed to reconcile `.xls` sheet metadata (strategy={strategy}): calamine sheets ({calamine_count}) {calamine_names:?}; BIFF BoundSheet records ({biff_count}) {biff_names:?}; mapped indices (calamine->BIFF) {mapped_pairs:?}; unmapped calamine indices {unmapped_calamine:?}; unmapped BIFF indices {unmapped_biff:?}"
+        )
+    });
+
+    (mapping, warning)
+}
+
 /// Read the BIFF per-cell XF indices for every worksheet substream in a legacy `.xls` workbook.
 ///
-/// The returned map is keyed by sheet name (as stored in the workbook global stream) and then by
-/// absolute 0-based `(row, col)` coordinates.
+/// The returned vector is aligned with BIFF `BoundSheet` order (workbook order). Each entry maps
+/// absolute 0-based `(row, col)` coordinates to the XF index (`ixfe`) referenced by the last BIFF
+/// cell record encountered for that cell.
 ///
 /// This is intentionally style-only: it does *not* attempt to parse cell values or formulas.
 pub fn read_cell_xfs_from_xls(
     path: impl AsRef<Path>,
-) -> Result<HashMap<String, HashMap<(u32, u32), u16>>, String> {
+) -> Result<Vec<HashMap<(u32, u32), u16>>, String> {
     let workbook_stream = biff::read_workbook_stream_from_xls(path.as_ref())?;
     let biff_version = biff::detect_biff_version(&workbook_stream);
     let sheets = biff::parse_biff_bound_sheets(&workbook_stream, biff_version)?;
 
-    let mut out = HashMap::new();
-    for (sheet_name, offset) in sheets {
-        if offset >= workbook_stream.len() {
+    let mut out = Vec::with_capacity(sheets.len());
+    for (sheet_idx, sheet) in sheets.iter().enumerate() {
+        if sheet.offset >= workbook_stream.len() {
             return Err(format!(
-                "sheet `{sheet_name}` has out-of-bounds stream offset {offset}"
+                "sheet index {sheet_idx} (`{}`) has out-of-bounds stream offset {}",
+                sheet.name, sheet.offset
             ));
         }
 
-        let xfs = parse_biff_sheet_cell_xfs(&workbook_stream, offset)?;
-        out.insert(sheet_name, xfs);
+        let xfs = parse_biff_sheet_cell_xfs(&workbook_stream, sheet.offset)?;
+        out.push(xfs);
     }
 
     Ok(out)
