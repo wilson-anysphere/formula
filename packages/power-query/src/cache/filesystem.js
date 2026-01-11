@@ -21,72 +21,53 @@ function isBinaryMarker(value) {
 }
 
 /**
- * @param {unknown} value
- * @returns {boolean}
- */
-function containsBinaryMarker(value) {
-  if (isBinaryMarker(value)) return true;
-  if (Array.isArray(value)) return value.some((item) => containsBinaryMarker(item));
-  if (value && typeof value === "object") {
-    for (const v of Object.values(value)) {
-      if (containsBinaryMarker(v)) return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Replace all Uint8Array values in an object graph with marker objects that
- * reference a sibling `.bin` file.
+ * JSON.stringify replacer that extracts Uint8Array payloads into a sibling `.bin`
+ * file and replaces them with marker objects.
  *
- * @param {unknown} value
+ * @param {{ key: string, entry: CacheEntry }} payload
  * @param {string} binFileName
- * @returns {{ value: unknown, segments: Array<{ offset: number, length: number, bytes: Uint8Array }> }}
+ * @returns {{ jsonText: string, segments: Array<{ offset: number, length: number, bytes: Uint8Array }>, totalBytes: number }}
  */
-function extractBinarySegments(value, binFileName) {
+function jsonWithBinarySegments(payload, binFileName) {
   /** @type {Array<{ offset: number, length: number, bytes: Uint8Array }>} */
   const segments = [];
   let offset = 0;
 
-  /**
-   * @param {unknown} current
-   * @returns {unknown}
-   */
-  function visit(current) {
-    if (current instanceof Uint8Array) {
+  const jsonText = JSON.stringify(payload, (_key, value) => {
+    if (value instanceof Uint8Array) {
       const segmentOffset = offset;
-      const length = current.byteLength;
+      const length = value.byteLength;
       offset += length;
-      segments.push({ offset: segmentOffset, length, bytes: current });
+      segments.push({ offset: segmentOffset, length, bytes: value });
       return { [BINARY_MARKER_KEY]: binFileName, offset: segmentOffset, length };
     }
 
-    if (Array.isArray(current)) {
-      return current.map((item) => visit(item));
-    }
-
-    if (current && typeof current === "object") {
-      // Respect `toJSON()` for non-plain objects (e.g. Date, URL) so we don't
-      // accidentally serialize them as `{}` when extracting binary segments.
-      // (Buffers are handled above via the Uint8Array branch.)
+    // Node Buffers define a `toJSON()` hook that runs before replacers, so we may
+    // see the `{ type: "Buffer", data: number[] }` shape here instead of the
+    // original `Uint8Array`. Treat it as binary to avoid JSON bloat.
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
       // @ts-ignore - runtime inspection
-      if (typeof current.toJSON === "function" && current.constructor && current.constructor !== Object) {
-        // @ts-ignore - runtime
-        return visit(current.toJSON());
-      }
-
-      const out = {};
-      for (const [k, v] of Object.entries(current)) {
-        // @ts-ignore - runtime indexing
-        out[k] = visit(v);
-      }
-      return out;
+      value.type === "Buffer" &&
+      // @ts-ignore - runtime inspection
+      Array.isArray(value.data)
+    ) {
+      // @ts-ignore - runtime inspection
+      const data = value.data;
+      const segmentOffset = offset;
+      const bytes = Uint8Array.from(data);
+      const length = bytes.byteLength;
+      offset += length;
+      segments.push({ offset: segmentOffset, length, bytes });
+      return { [BINARY_MARKER_KEY]: binFileName, offset: segmentOffset, length };
     }
 
-    return current;
-  }
+    return value;
+  });
 
-  return { value: visit(value), segments };
+  return { jsonText, segments, totalBytes: offset };
 }
 
 /**
@@ -253,13 +234,14 @@ export class FileSystemCacheStore {
     try {
       const { fs } = await this.deps();
       const text = await fs.readFile(jsonPath, "utf8");
+      const hasBinaryMarkers = text.includes(`"${BINARY_MARKER_KEY}":`);
       const parsed = JSON.parse(text);
       if (!parsed || parsed.key !== key) return null;
 
       const entry = parsed.entry ?? null;
       const value = entry?.value;
 
-      if (containsBinaryMarker(value)) {
+      if (hasBinaryMarkers) {
         const bytes = await fs.readFile(binPath);
         const restored = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
         entry.value = hydrateBinarySegments(value, restored, binFileName);
@@ -280,23 +262,21 @@ export class FileSystemCacheStore {
     const { fs } = await this.deps();
     const { jsonPath, binPath, binFileName } = await this.pathsForKey(key);
 
-    const extracted = extractBinarySegments(entry?.value, binFileName);
+    const serialized = jsonWithBinarySegments({ key, entry }, binFileName);
 
-    if (extracted.segments.length > 0) {
-      const total = extracted.segments.reduce((sum, seg) => sum + seg.length, 0);
-      const combined = new Uint8Array(total);
-      for (const seg of extracted.segments) {
+    if (serialized.segments.length > 0) {
+      const combined = new Uint8Array(serialized.totalBytes);
+      for (const seg of serialized.segments) {
         combined.set(seg.bytes, seg.offset);
       }
-
       await this.writeFileAtomic(binPath, combined);
-      await this.writeFileAtomic(jsonPath, JSON.stringify({ key, entry: { ...entry, value: extracted.value } }), "utf8");
+      await this.writeFileAtomic(jsonPath, serialized.jsonText, "utf8");
       return;
     }
 
     // If we are writing a JSON-only entry, clean up any previous binary blob.
     await fs.rm(binPath, { force: true });
-    await this.writeFileAtomic(jsonPath, JSON.stringify({ key, entry }), "utf8");
+    await this.writeFileAtomic(jsonPath, serialized.jsonText, "utf8");
   }
 
   /**
@@ -312,5 +292,46 @@ export class FileSystemCacheStore {
   async clear() {
     const { fs } = await this.deps();
     await fs.rm(this.directory, { recursive: true, force: true });
+  }
+
+  /**
+   * Best-effort TTL pruning by scanning cache files on disk.
+   *
+   * @param {number} [nowMs]
+   */
+  async pruneExpired(nowMs = Date.now()) {
+    await this.ensureDir();
+    const { fs, path } = await this.deps();
+
+    /** @type {import("node:fs").Dirent[]} */
+    let entries = [];
+    try {
+      entries = await fs.readdir(this.directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".json")) continue;
+      const jsonPath = path.join(this.directory, entry.name);
+      const binPath = path.join(this.directory, `${entry.name.slice(0, -".json".length)}.bin`);
+
+      try {
+        const text = await fs.readFile(jsonPath, "utf8");
+        const parsed = JSON.parse(text);
+        const expiresAtMs =
+          parsed && typeof parsed === "object" && parsed.entry && typeof parsed.entry === "object" ? parsed.entry.expiresAtMs : null;
+        if (typeof expiresAtMs === "number" && expiresAtMs <= nowMs) {
+          await fs.rm(jsonPath, { force: true });
+          await fs.rm(binPath, { force: true });
+        }
+      } catch {
+        // Corrupted or unreadable cache entries are treated as misses; remove them
+        // so they don't linger indefinitely.
+        await fs.rm(jsonPath, { force: true }).catch(() => {});
+        await fs.rm(binPath, { force: true }).catch(() => {});
+      }
+    }
   }
 }
