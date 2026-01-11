@@ -196,6 +196,30 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("returns no recalc changes when nothing is dirty", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await Promise.all([engine.setCell("A1", 1), engine.setCell("A2", "=A1*2")]);
+
+      const changes = await engine.recalculate();
+      expect(changes).toEqual([{ sheet: "Sheet1", address: "A2", value: 2 }]);
+
+      const changes2 = await engine.recalculate();
+      expect(changes2).toEqual([]);
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("reports dynamic array spill outputs as recalc changes", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
