@@ -6,6 +6,7 @@
 //! The encoder is intentionally small-scope: it supports enough of Excel's formula language to
 //! round-trip common patterns while we build out full compatibility.
 
+use crate::errors::xlsb_error_literal;
 use crate::format::push_column_label;
 use crate::formula_text::escape_excel_string_literal;
 use crate::workbook_context::{NameScope, WorkbookContext};
@@ -101,21 +102,75 @@ impl std::fmt::Display for DecodeError {
 
 impl std::error::Error for DecodeError {}
 
+/// A non-fatal issue encountered while decoding an rgce token stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecodeWarning {
+    /// Encountered an unknown/extended error code in a `PtgErr` token.
+    ///
+    /// The decoder will emit `#UNKNOWN!` in the output formula text and continue.
+    UnknownErrorCode { code: u8, offset: usize },
+}
+
+/// Result of decoding an rgce token stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedFormula {
+    /// Best-effort decoded Excel formula text (without the leading `=`).
+    pub text: Option<String>,
+    /// Any non-fatal decode warnings.
+    pub warnings: Vec<DecodeWarning>,
+}
+
+/// Best-effort decode of an XLSB `rgce` token stream to Excel formula text.
+pub fn decode_formula_rgce(rgce: &[u8]) -> DecodedFormula {
+    decode_formula_rgce_impl(rgce, None, None)
+}
+
+/// Best-effort decode of an XLSB `rgce` token stream, using workbook context.
+pub fn decode_formula_rgce_with_context(rgce: &[u8], ctx: &WorkbookContext) -> DecodedFormula {
+    decode_formula_rgce_impl(rgce, Some(ctx), None)
+}
+
+/// Best-effort decode of an `rgce` token stream using the (0-indexed) origin cell for
+/// relative-reference tokens like `PtgRefN` / `PtgAreaN`.
+pub fn decode_formula_rgce_with_base(rgce: &[u8], base: CellCoord) -> DecodedFormula {
+    decode_formula_rgce_impl(rgce, None, Some(base))
+}
+
+/// Best-effort decode of an `rgce` token stream using both workbook context (for 3D refs / names)
+/// and a base cell (for relative-reference tokens like `PtgRefN` / `PtgAreaN`).
+pub fn decode_formula_rgce_with_context_and_base(
+    rgce: &[u8],
+    ctx: &WorkbookContext,
+    base: CellCoord,
+) -> DecodedFormula {
+    decode_formula_rgce_impl(rgce, Some(ctx), Some(base))
+}
+
+fn decode_formula_rgce_impl(
+    rgce: &[u8],
+    ctx: Option<&WorkbookContext>,
+    base: Option<CellCoord>,
+) -> DecodedFormula {
+    let mut warnings = Vec::new();
+    let text = decode_rgce_impl(rgce, ctx, base, Some(&mut warnings)).ok();
+    DecodedFormula { text, warnings }
+}
+
 /// Decode an `rgce` token stream into best-effort Excel formula text (without leading `=`).
 pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeError> {
-    decode_rgce_impl(rgce, None, None)
+    decode_rgce_impl(rgce, None, None, None)
 }
 
 /// Decode an `rgce` token stream into best-effort Excel formula text (without leading `=`),
 /// using workbook context to resolve sheet indices (`ixti`) and defined names.
 pub fn decode_rgce_with_context(rgce: &[u8], ctx: &WorkbookContext) -> Result<String, DecodeError> {
-    decode_rgce_impl(rgce, Some(ctx), None)
+    decode_rgce_impl(rgce, Some(ctx), None, None)
 }
 
 /// Decode an `rgce` token stream using the (0-indexed) origin cell for relative-reference tokens
 /// like `PtgRefN` / `PtgAreaN`.
 pub fn decode_rgce_with_base(rgce: &[u8], base: CellCoord) -> Result<String, DecodeError> {
-    decode_rgce_impl(rgce, None, Some(base))
+    decode_rgce_impl(rgce, None, Some(base), None)
 }
 
 /// Decode an `rgce` token stream using both workbook context (for 3D refs / names) and a base cell
@@ -125,13 +180,14 @@ pub fn decode_rgce_with_context_and_base(
     ctx: &WorkbookContext,
     base: CellCoord,
 ) -> Result<String, DecodeError> {
-    decode_rgce_impl(rgce, Some(ctx), Some(base))
+    decode_rgce_impl(rgce, Some(ctx), Some(base), None)
 }
 
 fn decode_rgce_impl(
     rgce: &[u8],
     ctx: Option<&WorkbookContext>,
     base: Option<CellCoord>,
+    mut warnings: Option<&mut Vec<DecodeWarning>>,
 ) -> Result<String, DecodeError> {
     if rgce.is_empty() {
         return Ok(String::new());
@@ -277,24 +333,22 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
+                let code_offset = i;
                 let err = rgce[i];
                 i += 1;
 
-                let text = match err {
-                    0x00 => "#NULL!",
-                    0x07 => "#DIV/0!",
-                    0x0F => "#VALUE!",
-                    0x17 => "#REF!",
-                    0x1D => "#NAME?",
-                    0x24 => "#NUM!",
-                    0x2A => "#N/A",
-                    0x2B => "#GETTING_DATA",
-                    _ => {
-                        return Err(DecodeError::InvalidConstant {
-                            offset: ptg_offset,
-                            ptg,
-                            value: err,
-                        });
+                let text = match xlsb_error_literal(err) {
+                    Some(lit) => lit,
+                    None => {
+                        if let Some(warnings) = warnings.as_deref_mut() {
+                            warnings.push(DecodeWarning::UnknownErrorCode {
+                                code: err,
+                                offset: code_offset,
+                            });
+                        }
+                        // `formula-engine` can parse `#UNKNOWN!`, which lets us preserve the full
+                        // formula string even when Excel introduces new internal error ids.
+                        "#UNKNOWN!"
                     }
                 };
                 stack.push(text.to_string());

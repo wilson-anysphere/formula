@@ -707,19 +707,9 @@ fn apply_xlsb_formula_fallback(
 }
 
 fn xlsb_error_display(code: u8) -> String {
-    // Codes match Excel's internal error ids used by XLSB. Keep the string form compatible with
-    // what calamine uses for `Data::Error` so UI/engine layers behave consistently.
-    match code {
-        0x00 => "#NULL!".to_string(),
-        0x07 => "#DIV/0!".to_string(),
-        0x0F => "#VALUE!".to_string(),
-        0x17 => "#REF!".to_string(),
-        0x1D => "#NAME?".to_string(),
-        0x24 => "#NUM!".to_string(),
-        0x2A => "#N/A".to_string(),
-        0x2B => "#GETTING_DATA".to_string(),
-        other => format!("#ERR({other:#04x})"),
-    }
+    // Keep the string form compatible with what calamine uses for `Data::Error` so UI/engine
+    // layers behave consistently.
+    formula_xlsb::errors::xlsb_error_display(code)
 }
 
 #[cfg(feature = "desktop")]

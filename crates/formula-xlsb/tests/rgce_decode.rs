@@ -1,5 +1,8 @@
 use formula_engine::parse_formula;
-use formula_xlsb::rgce::{decode_rgce, decode_rgce_with_base, decode_rgce_with_context, CellCoord};
+use formula_xlsb::rgce::{
+    decode_formula_rgce, decode_rgce, decode_rgce_with_base, decode_rgce_with_context, CellCoord,
+    DecodeWarning,
+};
 use formula_xlsb::workbook_context::WorkbookContext;
 use pretty_assertions::assert_eq;
 
@@ -94,4 +97,26 @@ fn decodes_ptg_areanv_as_explicit_implicit_intersection() {
     let text = decode_rgce_with_base(&rgce, CellCoord::new(0, 0)).expect("decode");
     assert_eq!(text, "@A1:A10");
     assert_parses_and_roundtrips(&text);
+}
+
+#[test]
+fn decodes_ptgerr_known_code() {
+    let rgce = [0x1C, 0x07]; // PtgErr #DIV/0!
+    let decoded = decode_formula_rgce(&rgce);
+    assert_eq!(decoded.text.as_deref(), Some("#DIV/0!"));
+    assert!(decoded.warnings.is_empty());
+}
+
+#[test]
+fn decodes_ptgerr_unknown_code_without_aborting() {
+    let rgce = [0x1C, 0xFF]; // PtgErr unknown/extended code
+    let decoded = decode_formula_rgce(&rgce);
+    assert_eq!(decoded.text.as_deref(), Some("#UNKNOWN!"));
+    assert_eq!(
+        decoded.warnings,
+        vec![DecodeWarning::UnknownErrorCode {
+            code: 0xFF,
+            offset: 1
+        }]
+    );
 }
