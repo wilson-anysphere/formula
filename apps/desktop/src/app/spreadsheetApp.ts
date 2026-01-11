@@ -198,8 +198,6 @@ export class SpreadsheetApp {
     this.editor = new CellEditorOverlay(this.root, {
       onCommit: (commit) => {
         this.applyEdit(commit.cell, commit.value);
-        this.renderGrid();
-        this.renderCharts();
 
         const next = navigateSelectionByKey(
           this.selection,
@@ -210,8 +208,7 @@ export class SpreadsheetApp {
         );
 
         if (next) this.selection = next;
-        this.renderSelection();
-        this.updateStatus();
+        this.refresh();
         this.focus();
       },
       onCancel: () => {
@@ -233,8 +230,7 @@ export class SpreadsheetApp {
 
     this.commentsDoc.on("update", () => {
       this.reindexCommentCells();
-      this.renderGrid();
-      this.renderCommentsPanel();
+      this.refresh();
     });
 
     if (typeof window !== "undefined") {
@@ -1266,10 +1262,7 @@ export class SpreadsheetApp {
     if (e.key === "Delete") {
       e.preventDefault();
       this.clearSelectionContents();
-      this.renderGrid();
-      this.renderCharts();
-      this.renderSelection();
-      this.updateStatus();
+      this.refresh();
       return;
     }
 
@@ -1446,15 +1439,11 @@ export class SpreadsheetApp {
   private commitFormulaBar(text: string): void {
     const target = this.formulaEditCell ?? this.selection.active;
     this.applyEdit(target, text);
-    this.renderGrid();
-    this.renderCharts();
 
     this.selection = setActiveCell(this.selection, target, this.limits);
     this.formulaEditCell = null;
     this.referencePreview = null;
-    this.renderReferencePreview();
-    this.renderSelection();
-    this.updateStatus();
+    this.refresh();
     this.focus();
   }
 
