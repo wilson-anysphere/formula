@@ -137,3 +137,25 @@ test("changeType coerces values", () => {
   const result = applyOperation(table, { type: "changeType", column: "Value", newType: "number" });
   assert.deepEqual(result.toGrid(), [["Value"], [1], [2.5], [null], [null]]);
 });
+
+test("replaceValues matches Date values by timestamp (not identity)", () => {
+  const ms1 = Date.parse("2024-01-01T00:00:00.000Z");
+  const ms2 = Date.parse("2024-02-01T00:00:00.000Z");
+  const table = DataTable.fromGrid(
+    [
+      ["When"],
+      [new Date(ms1)],
+      [new Date(ms2)],
+    ],
+    { hasHeaders: true, inferTypes: true },
+  );
+
+  const result = applyOperation(table, {
+    type: "replaceValues",
+    column: "When",
+    find: new Date(ms1),
+    replace: new Date(ms2),
+  });
+
+  assert.deepEqual(result.toGrid(), [["When"], [new Date(ms2)], [new Date(ms2)]]);
+});

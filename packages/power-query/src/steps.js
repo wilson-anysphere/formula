@@ -925,9 +925,10 @@ function fillDown(table, op) {
  */
 function replaceValues(table, op) {
   const idx = table.getColumnIndex(op.column);
+  const findKey = valueKey(op.find);
   const rows = table.rows.map((row) => {
     const next = row.slice();
-    if (Object.is(next[idx], op.find)) next[idx] = op.replace;
+    if (valueKey(next[idx]) === findKey) next[idx] = op.replace;
     return next;
   });
   return new DataTable(table.columns, rows);
