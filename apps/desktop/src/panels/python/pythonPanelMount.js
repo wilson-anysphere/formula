@@ -1,5 +1,6 @@
 import { PyodideRuntime } from "@formula/python-runtime";
 import { DocumentControllerBridge } from "@formula/python-runtime/document-controller";
+import { normalizeFormulaTextOpt } from "@formula/engine";
 const PYODIDE_INDEX_URL = globalThis.__pyodideIndexURL || "/pyodide/v0.25.1/full/";
 const DEFAULT_NATIVE_PERMISSIONS = { filesystem: "none", network: "none" };
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -22,9 +23,7 @@ function inputEquals(before, after) {
 
 function normalizeFormulaText(formula) {
   if (typeof formula !== "string") return null;
-  const trimmed = formula.trimStart();
-  if (trimmed === "") return null;
-  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+  return normalizeFormulaTextOpt(formula);
 }
 
 /**
