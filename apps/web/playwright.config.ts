@@ -1,5 +1,12 @@
 import { defineConfig, firefox } from "@playwright/test";
 import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, "..", "..");
+const cargoHome = path.join(repoRoot, "target", "cargo-home-playwright");
 
 const port = (() => {
   const raw = process.env.PLAYWRIGHT_WEB_PORT;
@@ -23,6 +30,12 @@ export default defineConfig({
     command: `pnpm build && pnpm preview --port ${port} --strictPort`,
     port,
     timeout: 1_800_000,
-    reuseExistingServer: !process.env.CI
+    reuseExistingServer: !process.env.CI,
+    env: {
+      ...process.env,
+      // Use a repo-local cargo home to avoid cross-agent contention on ~/.cargo
+      // (and to avoid picking up any global cargo config such as rustc-wrapper).
+      CARGO_HOME: cargoHome
+    }
   }
 });
