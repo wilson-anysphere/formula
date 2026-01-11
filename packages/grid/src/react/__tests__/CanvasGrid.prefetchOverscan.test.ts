@@ -1,6 +1,4 @@
-/**
- * @vitest-environment jsdom
- */
+// @vitest-environment jsdom
 
 import React from "react";
 import { createRoot } from "react-dom/client";
@@ -11,6 +9,7 @@ import { CanvasGrid } from "../CanvasGrid";
 
 describe("CanvasGrid prefetch overscan", () => {
   it("prefetches beyond the visible viewport by the configured overscan", async () => {
+    const previousActEnvironment = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
     const prefetch = vi.fn<(range: CellRange) => void>();
@@ -18,7 +17,6 @@ describe("CanvasGrid prefetch overscan", () => {
     vi.stubGlobal(
       "ResizeObserver",
       class ResizeObserver {
-        constructor(_cb: ResizeObserverCallback) {}
         observe(_target: Element): void {}
         unobserve(_target: Element): void {}
         disconnect(): void {}
@@ -26,7 +24,7 @@ describe("CanvasGrid prefetch overscan", () => {
     );
 
     // We don't need to render a frame for this test; avoid executing the full canvas renderer.
-    vi.stubGlobal("requestAnimationFrame", vi.fn());
+    vi.stubGlobal("requestAnimationFrame", vi.fn((_cb: FrameRequestCallback) => 0));
 
     const viewportWidth = 50;
     const viewportHeight = 40;
@@ -118,5 +116,6 @@ describe("CanvasGrid prefetch overscan", () => {
     boundingRect.mockRestore();
     getContext.mockRestore();
     vi.unstubAllGlobals();
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
   });
 });
