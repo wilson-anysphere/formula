@@ -20,12 +20,13 @@ function stablePortFromString(input: string, { base = 4173, range = 1000 } = {})
 
 const defaultPort = 4173;
 const port = (() => {
-  const raw = process.env.PLAYWRIGHT_WEB_PORT ?? process.env.PLAYWRIGHT_PORT;
+  const raw = process.env.PW_WEB_PORT ?? process.env.PLAYWRIGHT_WEB_PORT ?? process.env.PLAYWRIGHT_PORT;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   if (Number.isFinite(parsed) && parsed > 0) return parsed;
   if (process.env.CI) return defaultPort;
   return stablePortFromString(repoRoot, { base: defaultPort, range: 1000 });
 })();
+const baseURL = process.env.PW_BASE_URL ?? `http://localhost:${port}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -36,7 +37,7 @@ export default defineConfig({
     ...(existsSync(firefox.executablePath()) ? [{ name: "firefox", use: { browserName: "firefox" } }] : [])
   ],
   use: {
-    baseURL: `http://localhost:${port}`,
+    baseURL,
     headless: true
   },
   webServer: {

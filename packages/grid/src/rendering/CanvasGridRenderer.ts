@@ -209,6 +209,7 @@ export class CanvasGridRenderer {
   private selectionRanges: CellRange[] = [];
   private activeSelectionIndex = 0;
   private rangeSelection: CellRange | null = null;
+  private fillPreviewRange: CellRange | null = null;
 
   private remotePresences: GridPresence[] = [];
   private remotePresenceDirtyPadding = 1;
@@ -468,6 +469,17 @@ export class CanvasGridRenderer {
     this.markSelectionDirty();
   }
 
+  /**
+   * Returns the fill-handle rectangle for the current selection range, in viewport
+   * coordinates (relative to the grid canvases).
+   */
+  getFillHandleRect(): Rect | null {
+    if (this.selectionRanges.length === 0) return null;
+    const range = this.selectionRanges[this.activeSelectionIndex];
+    const viewport = this.scroll.getViewportState();
+    return this.fillHandleRectInViewport(range, viewport);
+  }
+
   getSelection(): Selection | null {
     return this.selection ? { ...this.selection } : null;
   }
@@ -626,6 +638,27 @@ export class CanvasGridRenderer {
 
   getViewportState(): GridViewportState {
     return this.scroll.getViewportState();
+  }
+
+  setFillPreviewRange(range: CellRange | null): void {
+    const previousRange = this.fillPreviewRange;
+    const normalized = range ? this.normalizeSelectionRange(range) : null;
+    if (isSameCellRange(previousRange, normalized)) return;
+    this.fillPreviewRange = normalized;
+
+    const viewport = this.scroll.getViewportState();
+    const padding = 4;
+    const dirtyRects = [
+      ...this.fillPreviewOverlayRects(previousRange, viewport),
+      ...this.fillPreviewOverlayRects(normalized, viewport)
+    ];
+    if (dirtyRects.length === 0) return;
+
+    for (const rect of dirtyRects) {
+      this.dirty.selection.markDirty(padRect(rect, padding));
+    }
+
+    this.requestRender();
   }
 
   setRemotePresences(presences: GridPresence[] | null): void {
@@ -2710,6 +2743,35 @@ export class CanvasGridRenderer {
       }
     }
 
+    const fillPreview = this.fillPreviewRange;
+    if (fillPreview) {
+      const rects = this.rangeToViewportRects(fillPreview, viewport);
+
+      if (rects.length > 0) {
+        ctx.save();
+
+        ctx.fillStyle = this.theme.selectionFill;
+        ctx.globalAlpha = 0.6;
+        for (const rect of rects) {
+          const clipped = intersectRect(rect, intersection);
+          if (!clipped) continue;
+          ctx.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
+        }
+
+        ctx.strokeStyle = this.theme.selectionBorder;
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 4]);
+        for (const rect of rects) {
+          if (!intersectRect(rect, intersection)) continue;
+          if (rect.width <= 2 || rect.height <= 2) continue;
+          ctx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+        }
+
+        ctx.restore();
+      }
+    }
+
     if (this.selectionRanges.length === 0) return;
 
     const selectionRanges = this.selectionRanges;
@@ -2974,6 +3036,27 @@ export class CanvasGridRenderer {
     const viewport = this.scroll.getViewportState();
     this.dirty.selection.markDirty({ x: 0, y: 0, width: viewport.width, height: viewport.height });
     this.requestRender();
+  }
+
+  private fillPreviewOverlayRects(range: CellRange | null, viewport: GridViewportState): Rect[] {
+    if (!range) return [];
+    return this.rangeToViewportRects(range, viewport);
+  }
+
+  private fillHandleRectInViewport(range: CellRange, viewport: GridViewportState): Rect | null {
+    const handleSize = 8;
+    const handleRow = range.endRow - 1;
+    const handleCol = range.endCol - 1;
+    const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport);
+    if (!handleCellRect) return null;
+    if (handleCellRect.width < handleSize || handleCellRect.height < handleSize) return null;
+
+    return {
+      x: handleCellRect.x + handleCellRect.width - handleSize / 2,
+      y: handleCellRect.y + handleCellRect.height - handleSize / 2,
+      width: handleSize,
+      height: handleSize
+    };
   }
 
   private markAllDirtyForThemeChange(): void {

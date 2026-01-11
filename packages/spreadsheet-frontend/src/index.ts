@@ -9,3 +9,5 @@ export type { EngineCellCacheOptions } from "./cache";
 
 export type { EngineGridProviderOptions } from "./grid-provider";
 export { EngineGridProvider } from "./grid-provider";
+
+export { shiftA1References } from "./formula/shiftA1References";

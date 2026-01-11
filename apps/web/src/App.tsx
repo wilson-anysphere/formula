@@ -7,7 +7,9 @@ import {
   range0ToA1,
   serializeGridToHtmlTable,
   serializeGridToTsv,
-  toA1
+  shiftA1References,
+  toA1,
+  type Range0
 } from "@formula/spreadsheet-frontend";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 
@@ -46,6 +48,7 @@ function EngineDemoApp() {
   const cellSyncTokenRef = useRef(0);
 
   const isFormulaEditing = formulaFocused && draft.trim().startsWith("=");
+  const isFormulaEditingRef = useRef(isFormulaEditing);
   const headerRowOffset = frozenRows > 0 ? 1 : 0;
   const headerColOffset = frozenCols > 0 ? 1 : 0;
 
@@ -53,22 +56,32 @@ function EngineDemoApp() {
   const gridContainerRef = useRef<HTMLDivElement | null>(null);
   const internalClipboardRef = useRef<{ tsv: string; html: string } | null>(null);
   const [activeCell, setActiveCell] = useState<{ row: number; col: number } | null>(null);
+  const activeCellRef = useRef<{ row: number; col: number } | null>(null);
   const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
   const editingCellOriginalDraftRef = useRef("");
+  const editingCellRef = useRef<{ row: number; col: number } | null>(null);
+  activeCellRef.current = activeCell;
+  editingCellRef.current = editingCell;
 
-  const activeAddress = (() => {
-    if (!activeCell) return null;
-    const row0 = activeCell.row - headerRowOffset;
-    const col0 = activeCell.col - headerColOffset;
+  const gridCellToA1Address = (cell: { row: number; col: number } | null): string | null => {
+    if (!cell) return null;
+    const row0 = cell.row - headerRowOffset;
+    const col0 = cell.col - headerColOffset;
     if (row0 < 0 || col0 < 0) return null;
     return toA1(row0, col0);
-  })();
+  };
+
+  const activeAddress = gridCellToA1Address(activeCell);
 
   const [activeValue, setActiveValue] = useState<CellScalar>(null);
 
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
+
+  useEffect(() => {
+    isFormulaEditingRef.current = isFormulaEditing;
+  }, [isFormulaEditing]);
 
   const syncCursorFromInput = () => {
     const input = inputRef.current;
@@ -93,6 +106,82 @@ function EngineDemoApp() {
       endRow0Exclusive,
       endCol0Exclusive
     });
+  };
+
+  const cellRangeToRange0 = (range: CellRange): Range0 | null => {
+    const startRow0 = range.startRow - headerRowOffset;
+    const startCol0 = range.startCol - headerColOffset;
+    const endRow0Exclusive = range.endRow - headerRowOffset;
+    const endCol0Exclusive = range.endCol - headerColOffset;
+
+    if (startRow0 < 0 || startCol0 < 0) return null;
+    if (endRow0Exclusive <= startRow0 || endCol0Exclusive <= startCol0) return null;
+
+    return { startRow0, startCol0, endRow0Exclusive, endCol0Exclusive };
+  };
+
+  const fillDeltaRange0 = (source: Range0, target: Range0): Range0 | null => {
+    // Fill down.
+    if (
+      target.startRow0 === source.startRow0 &&
+      target.endRow0Exclusive > source.endRow0Exclusive &&
+      target.startCol0 === source.startCol0 &&
+      target.endCol0Exclusive === source.endCol0Exclusive
+    ) {
+      return {
+        startRow0: source.endRow0Exclusive,
+        endRow0Exclusive: target.endRow0Exclusive,
+        startCol0: source.startCol0,
+        endCol0Exclusive: source.endCol0Exclusive
+      };
+    }
+
+    // Fill up.
+    if (
+      target.endRow0Exclusive === source.endRow0Exclusive &&
+      target.startRow0 < source.startRow0 &&
+      target.startCol0 === source.startCol0 &&
+      target.endCol0Exclusive === source.endCol0Exclusive
+    ) {
+      return {
+        startRow0: target.startRow0,
+        endRow0Exclusive: source.startRow0,
+        startCol0: source.startCol0,
+        endCol0Exclusive: source.endCol0Exclusive
+      };
+    }
+
+    // Fill right.
+    if (
+      target.startRow0 === source.startRow0 &&
+      target.endRow0Exclusive === source.endRow0Exclusive &&
+      target.startCol0 === source.startCol0 &&
+      target.endCol0Exclusive > source.endCol0Exclusive
+    ) {
+      return {
+        startRow0: source.startRow0,
+        endRow0Exclusive: source.endRow0Exclusive,
+        startCol0: source.endCol0Exclusive,
+        endCol0Exclusive: target.endCol0Exclusive
+      };
+    }
+
+    // Fill left.
+    if (
+      target.startRow0 === source.startRow0 &&
+      target.endRow0Exclusive === source.endRow0Exclusive &&
+      target.endCol0Exclusive === source.endCol0Exclusive &&
+      target.startCol0 < source.startCol0
+    ) {
+      return {
+        startRow0: source.startRow0,
+        endRow0Exclusive: source.endRow0Exclusive,
+        startCol0: target.startCol0,
+        endCol0Exclusive: source.startCol0
+      };
+    }
+
+    return null;
   };
 
   const insertOrReplaceRange = (rangeText: string, isBegin: boolean) => {
@@ -280,9 +369,11 @@ function EngineDemoApp() {
 
     // Ensure React state matches the cell the grid intends to edit, even if the
     // selection hasn't changed (e.g., F2 or type-to-edit).
+    activeCellRef.current = { row: request.row, col: request.col };
     setActiveCell({ row: request.row, col: request.col });
     gridApiRef.current?.scrollToCell(request.row, request.col, { align: "auto", padding: 8 });
 
+    editingCellRef.current = { row: request.row, col: request.col };
     editingCellOriginalDraftRef.current = draftRef.current;
     cellSyncTokenRef.current++;
     rangeInsertionRef.current = null;
@@ -297,6 +388,7 @@ function EngineDemoApp() {
 
   const cancelCellEdit = () => {
     const original = editingCellOriginalDraftRef.current;
+    editingCellRef.current = null;
     setEditingCell(null);
     draftRef.current = original;
     setDraft(original);
@@ -307,6 +399,7 @@ function EngineDemoApp() {
     if (!editingCell) return;
     const from = editingCell;
     await commitDraft();
+    editingCellRef.current = null;
     setEditingCell(null);
 
     const nextRow = Math.max(0, Math.min(rowCount - 1, from.row + nav.deltaRow));
@@ -320,6 +413,7 @@ function EngineDemoApp() {
 
   const onSelectionChange = (cell: { row: number; col: number } | null) => {
     if (isFormulaEditing || editingCell) return;
+    activeCellRef.current = cell;
     setActiveCell(cell);
   };
 
@@ -379,6 +473,60 @@ function EngineDemoApp() {
     } catch {
       // Ignore selection reads while the engine is initializing/tearing down.
     }
+  };
+
+  const onFillHandleCommit = async ({ source, target }: { source: CellRange; target: CellRange }) => {
+    const engine = engineRef.current;
+    if (!engine || !provider) return;
+
+    const source0 = cellRangeToRange0(source);
+    const target0 = cellRangeToRange0(target);
+    if (!source0 || !target0) return;
+
+    const fillArea0 = fillDeltaRange0(source0, target0);
+    if (!fillArea0) return;
+
+    const sourceCells = await engine.getRange(range0ToA1(source0), activeSheet);
+    const sourceHeight = source0.endRow0Exclusive - source0.startRow0;
+    const sourceWidth = source0.endCol0Exclusive - source0.startCol0;
+
+    const mod = (value: number, modulo: number) => ((value % modulo) + modulo) % modulo;
+
+    const updates: Array<{ address: string; value: CellScalar; sheet: string }> = [];
+    for (let row0 = fillArea0.startRow0; row0 < fillArea0.endRow0Exclusive; row0++) {
+      for (let col0 = fillArea0.startCol0; col0 < fillArea0.endCol0Exclusive; col0++) {
+        const sourceRowOffset = mod(row0 - source0.startRow0, sourceHeight);
+        const sourceColOffset = mod(col0 - source0.startCol0, sourceWidth);
+        const sourceRow0 = source0.startRow0 + sourceRowOffset;
+        const sourceCol0 = source0.startCol0 + sourceColOffset;
+        const sourceCell = sourceCells[sourceRowOffset]?.[sourceColOffset];
+
+        const sourceInput = (sourceCell?.input ?? null) as CellScalar;
+        const value = isFormulaInput(sourceInput)
+          ? shiftA1References(sourceInput, row0 - sourceRow0, col0 - sourceCol0)
+          : sourceInput;
+
+        updates.push({ address: toA1(row0, col0), value, sheet: activeSheet });
+      }
+    }
+
+    if (updates.length === 0) return;
+
+    await engine.setCells(updates);
+    const changes = await engine.recalculate(activeSheet);
+
+    const directChanges: CellChange[] = updates
+      .filter((update) => !isFormulaInput(update.value))
+      .map((update) => ({ sheet: update.sheet, address: update.address, value: update.value }));
+
+    provider.applyRecalcChanges(directChanges.length > 0 ? [...changes, ...directChanges] : changes);
+
+    // If the user clicks a new cell while the fill operation is still
+    // fetching/applying changes, the first read can race and show stale data.
+    // Refresh the currently active cell after the commit completes.
+    const currentActiveAddress = gridCellToA1Address(activeCellRef.current ?? activeCell);
+    if (!currentActiveAddress || isFormulaEditingRef.current || editingCellRef.current) return;
+    await syncFormulaBar(currentActiveAddress);
   };
 
   const handleGridCopy = (event: ClipboardEvent<HTMLDivElement>) => {
@@ -714,6 +862,7 @@ function EngineDemoApp() {
               onRangeSelectionStart={beginRangeSelection}
               onRangeSelectionChange={updateRangeSelection}
               onRangeSelectionEnd={endRangeSelection}
+              onFillHandleCommit={onFillHandleCommit}
             />
             <CellEditorOverlay
               gridApi={gridApiRef.current}
