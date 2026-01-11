@@ -176,3 +176,52 @@ test("FileCollabPersistence (encrypted) truncates partial tail records on load",
     await persistence.flush(docId);
   }
 });
+
+test("FileCollabPersistence does not write plaintext into an encrypted log when KeyRing is missing", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "collab-file-persistence-encrypted-mismatch-"));
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const docId = `doc-${randomUUID()}`;
+  const keyRing = KeyRing.create();
+
+  let filePath = "";
+
+  // Create an encrypted persistence file.
+  {
+    const persistence = new FileCollabPersistence(dir, { compactAfterUpdates: 1_000, keyRing });
+    const session = createCollabSession({ docId, persistence, schema: { autoInit: false } });
+    await session.whenLocalPersistenceLoaded();
+    await session.setCellValue("Sheet1:0:0", "secret");
+    await session.flushLocalPersistence();
+
+    session.destroy();
+    session.doc.destroy();
+    await persistence.flush(docId);
+  }
+
+  const yjsFiles = (await readdir(dir)).filter((name) => name.endsWith(".yjs"));
+  assert.equal(yjsFiles.length, 1);
+  filePath = path.join(dir, yjsFiles[0]);
+  const sizeBefore = (await stat(filePath)).size;
+
+  // Restart with *no* keyring. Persistence should refuse to write anything and,
+  // critically, must not overwrite/append plaintext records to the encrypted file.
+  {
+    const persistence = new FileCollabPersistence(dir, { compactAfterUpdates: 1_000 });
+    const session = createCollabSession({ docId, persistence, schema: { autoInit: false } });
+
+    await assert.rejects(session.whenLocalPersistenceLoaded());
+
+    await session.setCellValue("Sheet1:0:1", "should-not-persist");
+    await session.flushLocalPersistence();
+
+    session.destroy();
+    session.doc.destroy();
+    await persistence.flush(docId);
+  }
+
+  const sizeAfter = (await stat(filePath)).size;
+  assert.equal(sizeAfter, sizeBefore);
+});

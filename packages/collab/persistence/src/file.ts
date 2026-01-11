@@ -9,6 +9,7 @@ import type { KeyRing } from "../../../security/crypto/keyring.js";
 import type { CollabPersistence, CollabPersistenceBinding } from "./index.js";
 import {
   FILE_FLAG_ENCRYPTED,
+  FILE_HEADER_BYTES,
   atomicWriteFile,
   encodeEncryptedRecord,
   encodeFileHeader,
@@ -190,30 +191,86 @@ export class FileCollabPersistence implements CollabPersistence {
   }
 
   bind(docId: string, doc: Y.Doc): CollabPersistenceBinding {
-    // Initialize the persistence file (header when encryption is enabled) before
-    // any update events are queued.
-    void this.enqueue(docId, async () => {
-      await fs.mkdir(this.dir, { recursive: true });
-      if (this.encryption.mode !== "keyring") return;
+    const filePath = this.filePathForDocId(docId);
+    const docHash = this.docHashForDocId(docId);
+    const aadContext = persistenceAadContextForDocHash(docHash);
 
-      const filePath = this.filePathForDocId(docId);
+    // If file encryption settings don't match what's on disk, we must not
+    // append new records (or compact) since that can corrupt the log or
+    // accidentally downgrade encrypted persistence to plaintext.
+    let persistenceEnabled = true;
+
+    // Initialize (and validate) the persistence file before any update events are
+    // queued. Update writes are serialized behind this task via `enqueue()`.
+    void this.enqueue(docId, async () => {
       try {
-        await fs.access(filePath);
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code !== "ENOENT") throw err;
-        await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED));
+        await fs.mkdir(this.dir, { recursive: true });
+
+        let st: Awaited<ReturnType<typeof fs.stat>> | null = null;
+        try {
+          st = await fs.stat(filePath);
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT") throw err;
+          st = null;
+        }
+
+        // New file: create an encrypted header when encryption is enabled.
+        if (!st) {
+          if (this.encryption.mode === "keyring") {
+            await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED));
+          }
+          return;
+        }
+
+        if (st.size === 0) {
+          if (this.encryption.mode === "keyring") {
+            await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED));
+          }
+          return;
+        }
+
+        // Validate format by peeking the header bytes.
+        const fd = await fs.open(filePath, "r");
+        try {
+          const header = Buffer.alloc(FILE_HEADER_BYTES);
+          const { bytesRead } = await fd.read(header, 0, FILE_HEADER_BYTES, 0);
+          const hasHeader = bytesRead === FILE_HEADER_BYTES && hasFileHeader(header);
+          if (hasHeader) {
+            const { flags } = parseFileHeader(header);
+            const isEncrypted = (flags & FILE_FLAG_ENCRYPTED) === FILE_FLAG_ENCRYPTED;
+            if (!isEncrypted) {
+              persistenceEnabled = false;
+              return;
+            }
+            if (this.encryption.mode !== "keyring") {
+              persistenceEnabled = false;
+              return;
+            }
+            return;
+          }
+
+          // No header -> legacy plaintext format. When encryption is enabled, we
+          // require `load()` to upgrade the file before binding to avoid mixing
+          // encrypted + plaintext records.
+          if (this.encryption.mode === "keyring") {
+            persistenceEnabled = false;
+          }
+        } finally {
+          await fd.close();
+        }
+      } catch {
+        // Keep the doc usable even if persistence setup fails (e.g. permissions).
+        // We disable persistence to avoid corrupting on-disk state.
+        persistenceEnabled = false;
       }
     });
-
-    const docHash = this.docHashForDocId(docId);
-    const filePath = this.filePathForDocId(docId);
-    const aadContext = persistenceAadContextForDocHash(docHash);
 
     const updateHandler = (update: Uint8Array, origin: unknown) => {
       if (origin === persistenceOrigin) return;
 
       void this.enqueue(docId, async () => {
+        if (!persistenceEnabled) return;
         await fs.mkdir(this.dir, { recursive: true });
 
         if (this.encryption.mode === "keyring") {
@@ -243,6 +300,11 @@ export class FileCollabPersistence implements CollabPersistence {
       const timer = this.compactTimers.get(docId);
       if (timer) clearTimeout(timer);
       this.compactTimers.delete(docId);
+
+      // Ensure the initialization/validation task (and any pending writes) has
+      // completed before deciding whether we can safely compact.
+      await this.flush(docId);
+      if (!persistenceEnabled) return;
 
       const snapshot = Y.encodeStateAsUpdate(doc);
       await this.compactSnapshot(docId, snapshot);
