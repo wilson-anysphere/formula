@@ -122,6 +122,7 @@ export class HttpConnector {
    * @returns {Promise<import("./types.js").SourceState>}
    */
   async getSourceState(request, options = {}) {
+    const now = options.now ?? (() => Date.now());
     const signal = options.signal;
     if (signal?.aborted) {
       const err = new Error("Aborted");
@@ -134,20 +135,82 @@ export class HttpConnector {
     /** @type {Record<string, string>} */
     const headers = { ...(request.headers ?? {}) };
 
-    const credentials = options.credentials;
+    let credentials = options.credentials;
+    if (
+      credentials &&
+      typeof credentials === "object" &&
+      !Array.isArray(credentials) &&
+      // @ts-ignore - runtime access
+      typeof credentials.getSecret === "function"
+    ) {
+      // Credential handle convention: hosts can return an object with a stable
+      // credentialId plus a `getSecret()` method. This keeps secret retrieval
+      // inside the connector execution path (and out of cache key hashing).
+      // @ts-ignore - runtime call
+      credentials = await credentials.getSecret();
+    }
+
+    /** @type {{ providerId: string; scopes?: string[] } | null} */
+    let credentialOAuth2 = null;
     if (credentials && typeof credentials === "object" && !Array.isArray(credentials)) {
       // @ts-ignore - runtime merge
       const extraHeaders = credentials.headers;
       if (extraHeaders && typeof extraHeaders === "object") {
         Object.assign(headers, extraHeaders);
       }
+
+      // @ts-ignore - runtime access
+      const oauth2 = credentials.oauth2;
+      if (oauth2 && typeof oauth2 === "object") {
+        // @ts-ignore - runtime access
+        const providerId = oauth2.providerId;
+        // @ts-ignore - runtime access
+        const scopes = oauth2.scopes;
+        if (typeof providerId === "string" && providerId) {
+          credentialOAuth2 = { providerId, scopes: Array.isArray(scopes) ? scopes : undefined };
+        }
+      }
     }
+
+    /** @type {{ type: "oauth2"; providerId: string; scopes?: string[] } | null} */
+    let oauth2Auth = null;
+    if (request.auth?.type === "oauth2") {
+      oauth2Auth = request.auth;
+    } else if (credentialOAuth2) {
+      oauth2Auth = { type: "oauth2", ...credentialOAuth2 };
+    }
+
+    const applyOAuthHeader = async (forceRefresh = false) => {
+      if (!oauth2Auth) return;
+      if (!this.oauth2Manager) {
+        throw new Error("HTTP OAuth2 requests require configuring HttpConnector with an OAuth2Manager");
+      }
+      const token = await this.oauth2Manager.getAccessToken({
+        providerId: oauth2Auth.providerId,
+        scopes: oauth2Auth.scopes,
+        signal,
+        now,
+        forceRefresh,
+      });
+      headers.Authorization = `Bearer ${token.accessToken}`;
+    };
+
+    await applyOAuthHeader(false);
 
     let response;
     try {
       response = await this.fetchFn(request.url, { method: "HEAD", headers, signal });
     } catch {
       return {};
+    }
+
+    if (!response.ok && oauth2Auth && this.oauth2RetryStatusCodes.includes(response.status)) {
+      await applyOAuthHeader(true);
+      try {
+        response = await this.fetchFn(request.url, { method: "HEAD", headers, signal });
+      } catch {
+        return {};
+      }
     }
 
     if (!response.ok) return {};

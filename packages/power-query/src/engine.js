@@ -797,7 +797,7 @@ export class QueryEngine {
     if (source.type === "api") {
       const connector = this.connectors.get("http");
       if (!connector || typeof connector.getSourceState !== "function") return;
-      const request = { url: source.url, method: source.method, headers: source.headers ?? {}, responseType: "auto" };
+      const request = { url: source.url, method: source.method, headers: source.headers ?? {}, auth: source.auth, responseType: "auto" };
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("http", request, state);
       const sourceKey = buildConnectorSourceKey(connector, request);
