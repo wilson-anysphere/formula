@@ -125,6 +125,40 @@ test("sqlserver: Date params are normalized to ISO strings without timezone suff
   assert.deepEqual(plan.params, ["2020-01-02T03:04:05.678"]);
 });
 
+test("sqlserver: addColumn supports boolean columns in ternary predicates", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_sqlserver_bool_ternary",
+    name: "SQL Server bool ternary",
+    source: { type: "database", connection: {}, query: "SELECT * FROM users", columns: ["IsActive"] },
+    steps: [{ id: "s1", name: "Add", operation: { type: "addColumn", name: "ActiveFlag", formula: "=[IsActive] ? 1 : 0" } }],
+  };
+
+  const plan = folding.compile(query, { dialect: "sqlserver" });
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: "SELECT t.*, (CASE WHEN (t.[IsActive] = 1) THEN CAST(? AS FLOAT) ELSE CAST(? AS FLOAT) END) AS [ActiveFlag] FROM (SELECT * FROM users) AS t",
+    params: [1, 0],
+  });
+});
+
+test("sqlserver: addColumn comparisons return BIT values (not predicates)", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_sqlserver_bool_value",
+    name: "SQL Server bool value",
+    source: { type: "database", connection: {}, query: "SELECT * FROM users", columns: ["Sales"] },
+    steps: [{ id: "s1", name: "Add", operation: { type: "addColumn", name: "IsBig", formula: "=[Sales] > 100" } }],
+  };
+
+  const plan = folding.compile(query, { dialect: "sqlserver" });
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: "SELECT t.*, (CASE WHEN (t.[Sales] > CAST(? AS FLOAT)) THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END) AS [IsBig] FROM (SELECT * FROM users) AS t",
+    params: [100],
+  });
+});
+
 test("sqlserver: folding explain + QueryEngine execution normalize placeholders + preserve explain steps", async () => {
   /** @type {{ sql: string, params: unknown[] | undefined } | null} */
   let observed = null;
