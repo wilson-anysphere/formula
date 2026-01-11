@@ -914,23 +914,24 @@ impl Storage {
 
         validate_sheet_name(name).map_err(map_sheet_name_error)?;
 
-        let conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
         let workbook_id_str = workbook_id.to_string();
+
+        let mut sheets = self.list_sheets_tx(&tx, workbook_id)?;
+        if sheets
+            .iter()
+            .any(|existing| sheet_name_eq_case_insensitive(&existing.name, name))
         {
-            let mut stmt = conn.prepare("SELECT name FROM sheets WHERE workbook_id = ?1")?;
-            let mut rows = stmt.query(params![&workbook_id_str])?;
-            while let Some(row) = rows.next()? {
-                let existing: String = row.get(0)?;
-                if sheet_name_eq_case_insensitive(&existing, name) {
-                    return Err(StorageError::DuplicateSheetName(name.to_string()));
-                }
-            }
+            return Err(StorageError::DuplicateSheetName(name.to_string()));
         }
+
+        let clamped = position.max(0).min(sheets.len() as i64) as usize;
 
         let mut used_sheet_ids: HashSet<u32> = HashSet::new();
         let mut max_sheet_id: u32 = 0;
         {
-            let mut stmt = conn.prepare(
+            let mut stmt = tx.prepare(
                 "SELECT model_sheet_id FROM sheets WHERE workbook_id = ?1 AND model_sheet_id IS NOT NULL",
             )?;
             let ids = stmt.query_map(params![&workbook_id_str], |row| row.get::<_, i64>(0))?;
@@ -951,7 +952,7 @@ impl Storage {
             id: Uuid::new_v4(),
             workbook_id,
             name: name.to_string(),
-            position,
+            position: clamped as i64,
             visibility: SheetVisibility::Visible,
             tab_color: None,
             xlsx_sheet_id: None,
@@ -962,7 +963,7 @@ impl Storage {
             metadata,
         };
 
-        conn.execute(
+        tx.execute(
             r#"
             INSERT INTO sheets (
               id,
@@ -997,11 +998,16 @@ impl Storage {
             ],
         )?;
 
-        // A new sheet changes workbook metadata.
-        conn.execute(
-            "UPDATE workbooks SET modified_at = CURRENT_TIMESTAMP WHERE id = ?1",
-            params![sheet.workbook_id.to_string()],
-        )?;
+        sheets.insert(clamped, sheet.clone());
+        for (idx, sheet) in sheets.iter().enumerate() {
+            tx.execute(
+                "UPDATE sheets SET position = ?1 WHERE id = ?2",
+                params![idx as i64, sheet.id.to_string()],
+            )?;
+        }
+
+        touch_workbook_modified_at_by_workbook_id(&tx, workbook_id)?;
+        tx.commit()?;
 
         Ok(sheet)
     }

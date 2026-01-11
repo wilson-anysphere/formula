@@ -644,6 +644,38 @@ fn sheet_reorder_and_delete_renormalize_positions() {
 }
 
 #[test]
+fn create_sheet_inserts_at_position_and_renormalizes_positions() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    storage
+        .create_sheet(workbook.id, "SheetA", 0, None)
+        .expect("create sheet A");
+    storage
+        .create_sheet(workbook.id, "SheetB", 1, None)
+        .expect("create sheet B");
+    storage
+        .create_sheet(workbook.id, "SheetC", 2, None)
+        .expect("create sheet C");
+
+    let inserted = storage
+        .create_sheet(workbook.id, "Inserted", 1, None)
+        .expect("create inserted sheet");
+    assert_eq!(inserted.position, 1);
+
+    let sheets = storage.list_sheets(workbook.id).expect("list sheets");
+    assert_eq!(
+        sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+        vec!["SheetA", "Inserted", "SheetB", "SheetC"]
+    );
+    assert_eq!(
+        sheets.iter().map(|s| s.position).collect::<Vec<_>>(),
+        vec![0, 1, 2, 3]
+    );
+}
+
+#[test]
 fn sheet_names_are_unique_case_insensitive() {
     let storage = Storage::open_in_memory().expect("open storage");
     let workbook = storage
