@@ -440,3 +440,52 @@ test("QueryEngine: SqlConnector.getConnectionIdentity can override connection.id
   assert.ok(keyB);
   assert.notEqual(keyA, keyB);
 });
+
+test("QueryEngine: database permission/credentials are requested once per execution when folding runs", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store, now: () => 0 });
+
+  let permissionCount = 0;
+  let credentialCount = 0;
+
+  const engine = new QueryEngine({
+    cache,
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async () =>
+          DataTable.fromGrid(
+            [
+              ["Region", "Sales"],
+              ["East", 100],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          ),
+      }),
+    },
+    onPermissionRequest: async () => {
+      permissionCount += 1;
+      return true;
+    },
+    onCredentialRequest: async () => {
+      credentialCount += 1;
+      return { credentialId: "cred-1" };
+    },
+  });
+
+  const query = {
+    id: "q_db_fold_credential_cache",
+    name: "DB Fold Credential Cache",
+    source: { type: "database", connection: { id: "db1" }, query: "SELECT * FROM sales", dialect: "postgres" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } },
+      },
+    ],
+  };
+
+  await engine.executeQueryWithMeta(query, { queries: {} }, {});
+  assert.equal(permissionCount, 1);
+  assert.equal(credentialCount, 1);
+});

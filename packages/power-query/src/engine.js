@@ -1593,8 +1593,11 @@ export class QueryEngine {
     const connectionId = resolveDatabaseConnectionId(source, connector);
     const request = { connectionId: connectionId ?? undefined, connection: source.connection, sql: normalizedSql, params };
     const signatureRequest = { connectionId: connectionId ?? undefined, connection: source.connection, sql: source.query };
-    await this.assertPermission(connector.permissionKind, { source, request }, state);
-    const credentials = await this.getCredentials("sql", request, state);
+    // Important: permission/credential prompts should be consistent regardless of
+    // whether SQL folding runs. Use the source-signature request (connection +
+    // base SQL) instead of the derived folded SQL statement.
+    await this.assertPermission(connector.permissionKind, { source, request: signatureRequest }, state);
+    const credentials = await this.getCredentials("sql", signatureRequest, state);
 
     const sourceKey = buildConnectorSourceKey(connector, signatureRequest);
 
