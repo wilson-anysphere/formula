@@ -50,10 +50,27 @@ function jsonPathSelect(input, path) {
 
 /**
  * @param {unknown[]} rows
+ * @param {string[] | null} [preferredColumns]
  * @returns {DataTable}
  */
-function tableFromRows(rows) {
+function tableFromRows(rows, preferredColumns = null) {
+  const preferred =
+    Array.isArray(preferredColumns) && preferredColumns.length > 0
+      ? Array.from(
+          preferredColumns.reduce((set, col) => {
+            if (typeof col === "string" && col.length > 0) set.add(col);
+            return set;
+          }, new Set()),
+        )
+      : null;
+
   if (!Array.isArray(rows) || rows.length === 0) {
+    if (preferred) {
+      return new DataTable(
+        preferred.map((name) => ({ name, type: "any" })),
+        [],
+      );
+    }
     return new DataTable([], []);
   }
 
@@ -62,6 +79,18 @@ function tableFromRows(rows) {
   }
 
   if (rows[0] && typeof rows[0] === "object" && !Array.isArray(rows[0])) {
+    if (preferred) {
+      const grid = [
+        preferred,
+        ...rows.map((row) => {
+          if (!row || typeof row !== "object" || Array.isArray(row)) return preferred.map(() => null);
+          // @ts-ignore - runtime access
+          return preferred.map((k) => row[k] ?? null);
+        }),
+      ];
+      return DataTable.fromGrid(grid, { hasHeaders: true, inferTypes: true });
+    }
+
     /** @type {Set<string>} */
     const keySet = new Set();
     for (const row of rows) {
@@ -428,21 +457,36 @@ export class ODataConnector {
     // rows have been collected, even when server-driven paging omits `$top` from
     // the nextLink URL.
     const limitRaw = typeof request.limit === "number" && Number.isFinite(request.limit) ? Math.max(0, Math.trunc(request.limit)) : null;
+    /** @type {string[] | null} */
+    let selectFromUrl = null;
     let topFromUrl = null;
     try {
       const parsed = new URL(initialUrl);
       for (const [k, v] of parsed.searchParams.entries()) {
-        if (k.toLowerCase() !== "$top") continue;
-        const raw = typeof v === "string" ? v.trim() : "";
-        if (raw === "") continue;
-        const parsedTop = Number.parseInt(raw, 10);
-        if (Number.isFinite(parsedTop)) topFromUrl = Math.max(0, parsedTop);
+        const key = k.toLowerCase();
+        if (key === "$select") {
+          const raw = typeof v === "string" ? v.trim() : "";
+          if (raw !== "") {
+            selectFromUrl = raw
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+          }
+        } else if (key === "$top") {
+          const raw = typeof v === "string" ? v.trim() : "";
+          if (raw === "") continue;
+          const parsedTop = Number.parseInt(raw, 10);
+          if (Number.isFinite(parsedTop)) topFromUrl = Math.max(0, parsedTop);
+        }
       }
     } catch {
+      selectFromUrl = null;
       topFromUrl = null;
     }
 
     const limit = limitRaw == null ? topFromUrl : topFromUrl == null ? limitRaw : Math.min(limitRaw, topFromUrl);
+    const selectColumns =
+      Array.isArray(request.query?.select) && request.query.select.length > 0 ? request.query.select : selectFromUrl;
 
     /** @type {unknown[]} */
     const allRows = [];
@@ -490,7 +534,7 @@ export class ODataConnector {
       nextUrl = new URL(parsed.nextLink, nextUrl).toString();
     }
 
-    const table = tableFromRows(allRows);
+    const table = tableFromRows(allRows, selectColumns);
     return {
       table,
       meta: {

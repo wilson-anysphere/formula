@@ -124,6 +124,38 @@ test("ODataConnector: respects $top embedded in the URL for pagination short-cir
   assert.deepEqual(result.table.toGrid(), [["Id"], [1], [2], [3], [4], [5]]);
 });
 
+test("ODataConnector: preserves $select column order and schema (even when empty)", async () => {
+  /** @type {string[]} */
+  const urls = [];
+
+  const connector = new ODataConnector({
+    fetch: async (url) => {
+      urls.push(String(url));
+      return makeJsonResponse({ value: [] });
+    },
+  });
+
+  const result = await connector.execute({
+    url: "https://example.com/odata/Products",
+    query: { select: ["Name", "Id"] },
+  });
+
+  assert.equal(urls[0], "https://example.com/odata/Products?$select=Name,Id");
+  assert.deepEqual(result.table.toGrid(), [["Name", "Id"]]);
+});
+
+test("ODataConnector: preserves $select embedded in the URL for schema inference", async () => {
+  const connector = new ODataConnector({
+    fetch: async () => makeJsonResponse({ value: [] }),
+  });
+
+  const result = await connector.execute({
+    url: "https://example.com/odata/Products?$select=Name,Id",
+  });
+
+  assert.deepEqual(result.table.toGrid(), [["Name", "Id"]]);
+});
+
 test("ODataConnector: tolerates payloads that are a single object (no value wrapper)", async () => {
   const connector = new ODataConnector({
     fetch: async () => makeJsonResponse({ Id: 1, Name: "A" }),
