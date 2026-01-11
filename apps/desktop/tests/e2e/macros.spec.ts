@@ -74,6 +74,8 @@ test.describe("macros panel", () => {
     });
 
     await page.goto("/");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
 
     await page.getByTestId("open-macros-panel").click();
     const panel = page.getByTestId("dock-right").getByTestId("panel-macros");
