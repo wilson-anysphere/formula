@@ -125,6 +125,7 @@ struct Inner {
     next_change_seq: u64,
     stats: MemoryManagerStats,
     needs_persist: bool,
+    dirty_pages: HashSet<PageKey>,
 }
 
 /// In-memory page cache with LRU eviction.
@@ -159,6 +160,7 @@ impl MemoryManager {
             next_change_seq: 0,
             stats: MemoryManagerStats::default(),
             needs_persist: false,
+            dirty_pages: HashSet::new(),
         };
         Self {
             storage,
@@ -370,6 +372,7 @@ impl MemoryManager {
             .expect("page present after insert");
 
         let before_page_bytes = page.bytes;
+        let was_clean = page.pending_changes.is_empty();
         // Update cached snapshot.
         if let Some(existing) = page.cells.get(&(change.row, change.col)) {
             page.bytes = page
@@ -398,6 +401,9 @@ impl MemoryManager {
 
         page.bytes = page.bytes.saturating_add(estimate_cell_change_bytes(&change));
         page.pending_changes.push(SequencedCellChange { seq, change });
+        if was_clean {
+            inner.dirty_pages.insert(key);
+        }
 
         inner.bytes = inner
             .bytes
@@ -536,7 +542,8 @@ impl MemoryManager {
                 break;
             }
 
-            if let Some((_key, page)) = inner.pages.pop_lru() {
+            if let Some((key, page)) = inner.pages.pop_lru() {
+                inner.dirty_pages.remove(&key);
                 inner.stats.pages_evicted = inner.stats.pages_evicted.saturating_add(1);
                 inner.bytes = inner.bytes.saturating_sub(page.bytes);
             }
@@ -561,7 +568,8 @@ impl MemoryManager {
             self.flush_pending_changes_upto_seq_locked(inner, max_seq)?;
         }
 
-        if let Some((_key, page)) = inner.pages.pop_lru() {
+        if let Some((key, page)) = inner.pages.pop_lru() {
+            inner.dirty_pages.remove(&key);
             inner.stats.pages_evicted = inner.stats.pages_evicted.saturating_add(1);
             inner.bytes = inner.bytes.saturating_sub(page.bytes);
         }
@@ -576,8 +584,15 @@ impl MemoryManager {
         let mut flushed: Vec<(u64, CellChange)> = Vec::new();
         let mut pages_flushed = 0u64;
 
-        for (_key, page) in inner.pages.iter_mut() {
+        let dirty_keys: Vec<PageKey> = inner.dirty_pages.iter().copied().collect();
+        for key in dirty_keys {
+            let Some(page) = inner.pages.peek_mut(&key) else {
+                inner.dirty_pages.remove(&key);
+                continue;
+            };
+
             if page.pending_changes.is_empty() {
+                inner.dirty_pages.remove(&key);
                 continue;
             }
 
@@ -599,6 +614,9 @@ impl MemoryManager {
                 }
             }
             page.pending_changes = keep;
+            if page.pending_changes.is_empty() {
+                inner.dirty_pages.remove(&key);
+            }
             if flushed_any {
                 pages_flushed += 1;
             }
@@ -670,6 +688,7 @@ impl MemoryManager {
                         }
                         restored.extend(std::mem::take(&mut page.pending_changes));
                         page.pending_changes = restored;
+                        inner.dirty_pages.insert(*key);
                     }
                 }
                 Err(err)
