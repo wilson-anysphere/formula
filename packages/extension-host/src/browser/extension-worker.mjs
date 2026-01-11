@@ -974,6 +974,12 @@ async function validateModuleGraph(entryUrl, extensionRootUrl, limits = IMPORT_P
     if (!requestedUrl) continue;
     if (visited.has(requestedUrl)) continue;
 
+    if (visited.size >= limits.maxModules) {
+      throw new Error(
+        `Extension module graph exceeded limit of ${limits.maxModules} modules (starting from ${entryUrl})`
+      );
+    }
+
     const { source, size, url } = await fetchModuleSource(requestedUrl, root);
     if (visited.has(url)) continue;
     if (visited.size >= limits.maxModules) {
@@ -1020,8 +1026,14 @@ async function activateExtension() {
   activationPromise = (async () => {
     if (!extensionModule) {
       if (workerData.sandbox?.strictImports) {
-        importPreflightPromise ??= validateModuleGraph(workerData.mainUrl, workerData.extensionPath);
-        await importPreflightPromise;
+        try {
+          importPreflightPromise ??= validateModuleGraph(workerData.mainUrl, workerData.extensionPath);
+          await importPreflightPromise;
+        } catch (error) {
+          // Allow retries on transient preflight failures by clearing the cached promise.
+          importPreflightPromise = null;
+          throw error;
+        }
       }
       extensionModule = await import(workerData.mainUrl);
     }
