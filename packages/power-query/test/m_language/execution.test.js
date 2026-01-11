@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { DataTable } from "../../src/table.js";
 import { QueryEngine } from "../../src/engine.js";
+import { ODataConnector } from "../../src/connectors/odata.js";
 import { compileMToQuery } from "../../src/m/compiler.js";
 
 test("m_language execution: range -> filter/group/sort", async () => {
@@ -151,6 +152,46 @@ in
   });
   const result = await engine.executeQuery(query, {}, {});
   assert.deepEqual(result.toGrid(), [["Value"], [1]]);
+});
+
+test("m_language execution: OData.Feed + Table.SelectRows + Table.SelectColumns (folded)", async () => {
+  /** @type {string[]} */
+  const urls = [];
+  const connector = new ODataConnector({
+    fetch: async (url) => {
+      urls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: () => "application/json",
+        },
+        async json() {
+          return { value: [{ Id: 1, Name: "A" }] };
+        },
+      };
+    },
+  });
+
+  const script = `
+let
+  Source = OData.Feed("https://example.com/odata/Products"),
+  #"Filtered Rows" = Table.SelectRows(Source, each [Price] > 20),
+  #"Selected Columns" = Table.SelectColumns(#"Filtered Rows", {"Id", "Name"})
+in
+  #"Selected Columns"
+`;
+
+  const query = compileMToQuery(script);
+  const engine = new QueryEngine({ connectors: { odata: connector } });
+  const result = await engine.executeQuery(query, {}, {});
+
+  assert.equal(urls.length, 1);
+  assert.equal(urls[0], "https://example.com/odata/Products?$select=Id,Name&$filter=Price%20gt%2020");
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Name"],
+    [1, "A"],
+  ]);
 });
 
 test("m_language execution: Odbc.Query + Table.SelectColumns", async () => {
