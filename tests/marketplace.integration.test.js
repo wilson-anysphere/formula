@@ -11,6 +11,7 @@ import publisherPkg from "../tools/extension-publisher/src/publisher.js";
 import extensionHostPkg from "../packages/extension-host/src/index.js";
 import { MarketplaceClient } from "../apps/desktop/src/marketplace/client.js";
 import { ExtensionManager } from "../apps/desktop/src/marketplace/extensionManager.js";
+import { ExtensionHostManager } from "../apps/desktop/src/extensions/ExtensionHostManager.js";
 import extensionPackagePkg from "../shared/extension-package/index.js";
 import signingPkg from "../shared/crypto/signing.js";
 
@@ -53,6 +54,134 @@ async function patchManifest(extensionDir, patch) {
   Object.assign(manifest, patch);
   await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
 }
+
+test("desktop runtime: auto-load installed extensions + hot reload on update", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-desktop-ext-runtime-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+  const extensionsDir = path.join(tmpRoot, "installed-extensions");
+  const statePath = path.join(tmpRoot, "extensions-state.json");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSourceV1 = path.join(tmpRoot, "ext-v1");
+    await copyDir(sampleExtensionSrc, extSourceV1);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSourceV1, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({
+      extensionDir: extSourceV1,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    const marketplaceClient = new MarketplaceClient({ baseUrl });
+    const manager = new ExtensionManager({ marketplaceClient, extensionsDir, statePath });
+    await manager.install(extensionId);
+
+    const runtime = new ExtensionHostManager({
+      extensionsDir,
+      statePath,
+      engineVersion: "1.0.0",
+      permissionsStoragePath: path.join(tmpRoot, "permissions.json"),
+      extensionStoragePath: path.join(tmpRoot, "storage.json"),
+      permissionPrompt: async () => true,
+    });
+    await runtime.startup();
+
+    runtime.spreadsheet.setCell(0, 0, 1);
+    runtime.spreadsheet.setCell(0, 1, 2);
+    runtime.spreadsheet.setCell(1, 0, 3);
+    runtime.spreadsheet.setCell(1, 1, 4);
+    runtime.spreadsheet.setSelection({ startRow: 0, startCol: 0, endRow: 1, endCol: 1 });
+
+    const resultV1 = await runtime.executeCommand("sampleHello.sumSelection");
+    assert.equal(resultV1, 10);
+
+    const extSourceV11 = path.join(tmpRoot, "ext-v1.1.0");
+    await copyDir(sampleExtensionSrc, extSourceV11);
+    await writeManifestVersion(extSourceV11, "1.1.0");
+
+    // Change a contribution and behavior so the test can prove we reloaded both the manifest
+    // and the runtime worker after updating the installed files.
+    const manifestV11Path = path.join(extSourceV11, "package.json");
+    const manifestV11 = JSON.parse(await fs.readFile(manifestV11Path, "utf8"));
+    const sumCommand = (manifestV11.contributes?.commands ?? []).find((cmd) => cmd.command === "sampleHello.sumSelection");
+    assert.ok(sumCommand);
+    sumCommand.title = "Sum Selection v1.1.0";
+    await fs.writeFile(manifestV11Path, JSON.stringify(manifestV11, null, 2));
+
+    const distPath = path.join(extSourceV11, "dist", "extension.js");
+    const distText = await fs.readFile(distPath, "utf8");
+    const sumValuesIdx = distText.indexOf("function sumValues");
+    assert.ok(sumValuesIdx >= 0);
+    const distBefore = distText.slice(0, sumValuesIdx);
+    const distAfter = distText.slice(sumValuesIdx);
+    const distAfterPatched = distAfter.replace("return sum;", "return sum + 1;");
+    assert.notEqual(distAfterPatched, distAfter);
+    await fs.writeFile(distPath, distBefore + distAfterPatched);
+
+    await publishExtension({
+      extensionDir: extSourceV11,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    await manager.update(extensionId);
+    await runtime.reloadExtension(extensionId);
+
+    const contributions = runtime.listContributions();
+    const cmdV11 = contributions.commands.find((cmd) => cmd.command === "sampleHello.sumSelection");
+    assert.ok(cmdV11);
+    assert.equal(cmdV11.title, "Sum Selection v1.1.0");
+
+    runtime.spreadsheet.setCell(0, 0, 1);
+    runtime.spreadsheet.setCell(0, 1, 2);
+    runtime.spreadsheet.setCell(1, 0, 3);
+    runtime.spreadsheet.setCell(1, 1, 4);
+    runtime.spreadsheet.setSelection({ startRow: 0, startCol: 0, endRow: 1, endCol: 1 });
+
+    const resultV11 = await runtime.executeCommand("sampleHello.sumSelection");
+    assert.equal(resultV11, 11);
+
+    await runtime.dispose();
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
 
 test("marketplace publish → discover → install → verify signature → run command → update", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-"));

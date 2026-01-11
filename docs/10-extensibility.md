@@ -30,6 +30,24 @@ A vibrant extension ecosystem is critical for long-term success. We follow VS Co
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Desktop runtime flow (current implementation)
+
+The desktop app wires marketplace installs into the Node extension host runtime:
+
+1. **Install/update/uninstall** via the marketplace UI (`apps/desktop/src/panels/marketplace/MarketplacePanel.js`)
+2. **Filesystem + state** via `ExtensionManager`
+   - Packages are extracted to `extensionsDir/<publisher>.<name>/`
+   - The installed set is tracked in `ExtensionManager.statePath` (JSON)
+3. **Runtime loading** via `ExtensionHostManager` (`apps/desktop/src/extensions/ExtensionHostManager.js`)
+   - Reads `statePath` and calls `ExtensionHost.loadExtension(...)` for each installed extension
+   - Exposes `executeCommand`, `invokeCustomFunction`, and `listContributions` for the app to route UI actions
+4. **Execution + contributions** via `ExtensionHost` (`packages/extension-host`)
+   - Spawns an isolated worker per extension
+   - Registers contributions (commands, panels, menus, keybindings, custom functions, data connectors)
+5. **Hot reload on change**
+   - Install/update calls `ExtensionHostManager.reloadExtension(id)`
+   - Uninstall calls `ExtensionHostManager.unloadExtension(id)` (removes contributions and terminates worker)
+
 ---
 
 ## Extension Manifest

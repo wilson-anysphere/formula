@@ -16,7 +16,7 @@ function el(tag, attrs = {}, children = []) {
   return node;
 }
 
-async function renderSearchResults({ container, marketplaceClient, extensionManager, query }) {
+async function renderSearchResults({ container, marketplaceClient, extensionManager, extensionHostManager, query }) {
   container.textContent = "Searching…";
   const results = await marketplaceClient.search({ q: query, limit: 25, offset: 0 });
 
@@ -36,6 +36,9 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
           onClick: async () => {
             actions.textContent = "Installing…";
             await extensionManager.install(item.id);
+            if (extensionHostManager) {
+              await extensionHostManager.reloadExtension(item.id);
+            }
             actions.textContent = "Installed";
           },
         }, [document.createTextNode("Install")]),
@@ -45,6 +48,9 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
         el("button", {
           onClick: async () => {
             actions.textContent = "Uninstalling…";
+            if (extensionHostManager) {
+              await extensionHostManager.unloadExtension(item.id);
+            }
             await extensionManager.uninstall(item.id);
             actions.textContent = "Uninstalled";
           },
@@ -63,6 +69,9 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
             }
             actions.textContent = `Updating to ${update.latestVersion}…`;
             await extensionManager.update(item.id);
+            if (extensionHostManager) {
+              await extensionHostManager.reloadExtension(item.id);
+            }
             actions.textContent = "Updated";
           },
         }, [document.createTextNode("Update")]),
@@ -77,7 +86,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
   container.append(list);
 }
 
-export function createMarketplacePanel({ container, marketplaceClient, extensionManager }) {
+export function createMarketplacePanel({ container, marketplaceClient, extensionManager, extensionHostManager }) {
   const queryInput = el("input", { type: "search", placeholder: "Search extensions…" });
   const resultsContainer = el("div", { className: "results" });
 
@@ -89,6 +98,7 @@ export function createMarketplacePanel({ container, marketplaceClient, extension
           container: resultsContainer,
           marketplaceClient,
           extensionManager,
+          extensionHostManager,
           query: queryInput.value,
         });
       },
