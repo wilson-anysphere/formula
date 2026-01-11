@@ -30,12 +30,53 @@ const DEFAULT_RETENTION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 const storePromiseByKey = new Map<string, Promise<AIAuditStore>>();
 
+function isNodeRuntime(): boolean {
+  return typeof process !== "undefined" && typeof process.versions === "object" && typeof process.versions.node === "string";
+}
+
+function coerceViteUrlToNodeFileUrl(href: string): string {
+  if (!href) return href;
+  if (href.startsWith("file://")) return href;
+  if (!isNodeRuntime()) return href;
+
+  // Vite asset URLs are typically root-relative (`/node_modules/...` or `/assets/...`).
+  // In Node, sql.js uses `fs.readFileSync` for wasm loading, so convert these to a
+  // file:// URL rooted at the repository cwd.
+  if (href.startsWith("/")) {
+    const cwd = typeof process.cwd === "function" ? process.cwd() : "";
+    if (cwd) return `file://${cwd}${href}`;
+  }
+
+  return href;
+}
+
 async function createSqliteBackedStore(params: { storageKey: string; retentionMaxEntries: number; retentionMaxAgeMs: number }) {
   const { SqliteAIAuditStore } = await import("@formula/ai-audit/sqlite");
   return SqliteAIAuditStore.create({
     storage: new LocalStorageBinaryStorage(params.storageKey),
     // Ensure the sql.js WASM file is bundled by Vite and can be fetched at runtime.
-    locateFile: (file: string) => (file.endsWith(".wasm") ? sqlWasmUrl : file),
+    locateFile: (file: string, prefix: string = "") => {
+      if (file.endsWith(".wasm")) {
+        // In Node-based test runners (Vitest), Vite's `?url` import resolves to a
+        // root-relative URL (e.g. `/node_modules/.../sql-wasm.wasm`). sql.js detects
+        // Node and tries to load wasm via `fs.readFileSync`, so we must provide a
+        // file:// URL instead of a server path.
+        let resolved: string | null = null;
+        try {
+          if (typeof import.meta.resolve === "function") {
+            resolved = import.meta.resolve(`sql.js/dist/${file}`);
+          }
+        } catch {
+          // ignore
+        }
+
+        const candidate = resolved || sqlWasmUrl;
+        return coerceViteUrlToNodeFileUrl(candidate);
+      }
+
+      // Preserve Emscripten's default locateFile behaviour.
+      return prefix ? `${prefix}${file}` : file;
+    },
     retention: { max_entries: params.retentionMaxEntries, max_age_ms: params.retentionMaxAgeMs },
   });
 }
