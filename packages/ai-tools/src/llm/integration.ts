@@ -121,8 +121,12 @@ export class SpreadsheetLLMToolExecutor {
   private readonly executor: ToolExecutor;
   private readonly toolPolicy?: ToolPolicy;
   private readonly isAllowedTool: (name: ToolName) => boolean;
+  private readonly spreadsheet: SpreadsheetApi;
+  private readonly options: SpreadsheetLLMToolExecutorOptions;
 
   constructor(spreadsheet: SpreadsheetApi, options: SpreadsheetLLMToolExecutorOptions = {}) {
+    this.spreadsheet = spreadsheet;
+    this.options = options;
     this.executor = new ToolExecutor(spreadsheet, options);
     this.toolPolicy = options.toolPolicy;
     this.isAllowedTool = createAllowedToolPredicate(options.allowed_tools);
@@ -131,7 +135,8 @@ export class SpreadsheetLLMToolExecutor {
       require_approval_for_mutations: options.require_approval_for_mutations,
       toolPolicy: options.toolPolicy
     });
-    this.tools = options.allowed_tools ? allTools.filter((tool) => this.isAllowedTool(tool.name)) : allTools;
+    const supported = allTools.filter((tool) => isToolSupported(tool.name, spreadsheet, options));
+    this.tools = options.allowed_tools ? supported.filter((tool) => this.isAllowedTool(tool.name)) : supported;
   }
 
   async execute(call: LLMToolCall): Promise<ToolExecutionResult> {
@@ -148,6 +153,17 @@ export class SpreadsheetLLMToolExecutor {
     }
 
     const name = nameParse.data;
+
+    const supportError = toolSupportError(name, this.spreadsheet, this.options);
+    if (supportError) {
+      return {
+        tool: name,
+        ok: false,
+        timing: { started_at_ms: startedAt, duration_ms: nowMs() - startedAt },
+        error: supportError
+      } as ToolExecutionResult;
+    }
+
     if (!isToolAllowedByPolicy(name, this.toolPolicy)) {
       return {
         tool: name,
@@ -186,3 +202,30 @@ function nowMs(): number {
   return Date.now();
 }
 
+function isToolSupported(
+  name: ToolName,
+  spreadsheet: SpreadsheetApi,
+  options: SpreadsheetLLMToolExecutorOptions
+): boolean {
+  return toolSupportError(name, spreadsheet, options) == null;
+}
+
+function toolSupportError(
+  name: ToolName,
+  spreadsheet: SpreadsheetApi,
+  options: SpreadsheetLLMToolExecutorOptions
+): ToolExecutionResult["error"] | null {
+  if (name === "create_chart") {
+    if (typeof (spreadsheet as any).createChart !== "function") {
+      return { code: "not_implemented", message: "create_chart requires chart support in SpreadsheetApi" };
+    }
+  }
+
+  if (name === "fetch_external_data") {
+    if (!options.allow_external_data) {
+      return { code: "permission_denied", message: "fetch_external_data is disabled by host configuration." };
+    }
+  }
+
+  return null;
+}

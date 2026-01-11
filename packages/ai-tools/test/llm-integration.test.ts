@@ -73,6 +73,19 @@ describe("llm integration helpers", () => {
     expect(workbook.getCell(parseA1Cell("Sheet1!A1")).value).toBe(42);
   });
 
+  it("does not expose fetch_external_data when host external fetch is disabled", () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new SpreadsheetLLMToolExecutor(workbook);
+    expect(executor.tools.map((t) => t.name)).not.toContain("fetch_external_data");
+  });
+
+  it("does not expose create_chart when SpreadsheetApi lacks chart support", () => {
+    const workbook: any = new InMemoryWorkbook(["Sheet1"]);
+    workbook.createChart = undefined;
+    const executor = new SpreadsheetLLMToolExecutor(workbook);
+    expect(executor.tools.map((t) => t.name)).not.toContain("create_chart");
+  });
+
   it("denies disallowed tool calls without executing them", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const setCellSpy = vi.spyOn(workbook, "setCell");
