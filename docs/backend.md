@@ -86,7 +86,11 @@ Roles: `owner | admin | editor | commenter | viewer`
 ### Audit logging
 
 - `GET /orgs/:orgId/audit` (org admin) → query audit events
-- `GET /orgs/:orgId/audit/export` (org admin) → NDJSON export
+- `GET /orgs/:orgId/audit/export` (org admin) → export audit events (`format=json|cef|leef`, default: `json`)
+
+### SIEM integration
+
+For SIEM configuration APIs and details on the background export worker, see [`docs/siem.md`](./siem.md).
 
 ### Retention / residency scaffolding
 
