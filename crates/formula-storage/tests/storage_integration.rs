@@ -560,6 +560,19 @@ fn opens_and_migrates_legacy_schema() {
         cols.iter().any(|c| c == "value_json"),
         "value_json column missing after migration"
     );
+
+    let mut stmt = conn.prepare("PRAGMA table_info(sheets)").expect("pragma sheets");
+    let sheet_cols = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("query pragma sheets")
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .expect("collect pragma sheets");
+    for required in ["model_sheet_id", "tab_color_json", "model_sheet_json"] {
+        assert!(
+            sheet_cols.iter().any(|c| c == required),
+            "{required} column missing after migration"
+        );
+    }
 }
 
 #[test]
