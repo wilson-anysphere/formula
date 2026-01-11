@@ -589,6 +589,22 @@ class ExtensionHost {
 }
 ```
 
+### Execution Guardrails
+
+Extensions are treated as untrusted code. The host applies **best-effort** guardrails so a single
+misbehaving extension cannot hang or OOM the main app:
+
+- **Activation timeout**: extension activation is bounded (default: 5s). If activation exceeds the
+  limit, the worker is terminated and the activation promise rejects with a timeout error.
+- **Command/custom function timeouts**: command handlers and custom function invocations are also
+  bounded (default: 5s). Timeouts terminate the worker and reject any other in-flight requests for
+  that worker to avoid leaks.
+- **Memory caps (best-effort)**: extension workers are started with `worker_threads` `resourceLimits`
+  based on a per-host `memoryMb` setting (default: 256MB). This caps the V8 heap, but does not cover
+  all native/external allocations.
+- **Crash/restart**: on crash/timeout, the extension is marked inactive and the next activation will
+  spawn a fresh worker. Hosts can also explicitly recycle an extension via `reloadExtension(id)`.
+
 ### Permission System
 
 ```typescript
