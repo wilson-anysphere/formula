@@ -1,9 +1,10 @@
 use formula_storage::encryption::is_encrypted_container;
 use formula_storage::{
-    CellChange, CellData, CellRange, CellValue, InMemoryKeyProvider, KeyProvider, MemoryManager,
-    MemoryManagerConfig, Storage,
+    CellChange, CellData, CellRange, CellValue, ImportModelWorkbookOptions, InMemoryKeyProvider,
+    KeyProvider, MemoryManager, MemoryManagerConfig, Storage,
 };
 use formula_storage::{AutoSaveConfig, AutoSaveManager, EncryptionError, storage::StorageError};
+use formula_model::{Cell as ModelCell, CellRef, CellValue as ModelCellValue, Workbook as ModelWorkbook};
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::tempdir;
@@ -353,4 +354,56 @@ fn rotate_encryption_key_api_reencrypts_file() {
     assert_eq!(cells.len(), 1);
     assert_eq!(cells[0].0, (0, 0));
     assert_eq!(cells[0].1.value, CellValue::Number(99.0));
+}
+
+#[test]
+fn encrypted_model_workbook_round_trip() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("model.formula");
+    let key_provider = Arc::new(InMemoryKeyProvider::default());
+
+    let mut model = ModelWorkbook::new();
+    model.id = 123;
+    model.schema_version = formula_model::SCHEMA_VERSION;
+    let sheet_id = model.add_sheet("Sheet1").expect("add sheet");
+    {
+        let sheet = model.sheet_mut(sheet_id).expect("sheet");
+        sheet.set_cell(
+            CellRef::new(0, 0),
+            ModelCell {
+                value: ModelCellValue::Number(7.0),
+                formula: None,
+                style_id: 0,
+            },
+        );
+        sheet.set_cell(
+            CellRef::new(0, 1),
+            ModelCell {
+                value: ModelCellValue::Empty,
+                formula: Some("SUM(A1)".to_string()),
+                style_id: 0,
+            },
+        );
+    }
+
+    let storage = Storage::open_encrypted_path(&path, key_provider.clone()).expect("open encrypted");
+    let meta = storage
+        .import_model_workbook(&model, ImportModelWorkbookOptions::new("Book"))
+        .expect("import model workbook");
+    storage.persist().expect("persist encrypted");
+    drop(storage);
+
+    let reopened = Storage::open_encrypted_path(&path, key_provider).expect("reopen encrypted");
+    let exported = reopened
+        .export_model_workbook(meta.id)
+        .expect("export model workbook");
+
+    assert_eq!(exported.id, model.id);
+    assert_eq!(exported.schema_version, model.schema_version);
+    assert_eq!(exported.sheets.len(), 1);
+    let sheet = exported.sheet_by_name("Sheet1").expect("sheet exists");
+    let cell_a1 = sheet.cell(CellRef::new(0, 0)).expect("A1");
+    assert_eq!(cell_a1.value, ModelCellValue::Number(7.0));
+    let cell_b1 = sheet.cell(CellRef::new(0, 1)).expect("B1");
+    assert_eq!(cell_b1.formula.as_deref(), Some("SUM(A1)"));
 }
