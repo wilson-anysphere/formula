@@ -318,6 +318,15 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 in_sheet_data = false;
                 writer.write_event(Event::End(e.to_owned()))?;
             }
+            Event::End(ref e) if e.name().as_ref() == b"worksheet" => {
+                if !saw_sheet_data && !patches_by_row.is_empty() {
+                    saw_sheet_data = true;
+                    writer.write_event(Event::Start(BytesStart::new("sheetData")))?;
+                    write_pending_rows(&mut writer, &mut patches_by_row)?;
+                    writer.write_event(Event::End(BytesEnd::new("sheetData")))?;
+                }
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
 
             Event::Start(ref e) if e.name().as_ref() == b"dimension" => {
                 if !patched_dimension {

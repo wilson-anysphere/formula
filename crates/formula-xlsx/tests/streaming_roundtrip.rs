@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 use formula_model::{CellRef, CellValue};
@@ -305,6 +305,70 @@ fn streaming_patch_preserves_unknown_cell_types() -> Result<(), Box<dyn std::err
         .and_then(|n| n.text())
         .unwrap_or_default();
     assert_eq!(v, "2028-05-06T00:00:00Z");
+
+    Ok(())
+}
+
+#[test]
+fn streaming_patch_inserts_sheet_data_when_missing() -> Result<(), Box<dyn std::error::Error>> {
+    use zip::write::FileOptions;
+    use zip::{CompressionMethod, ZipWriter};
+
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    // Worksheet XML intentionally omits `<sheetData>` to ensure the streaming patcher inserts it.
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></worksheet>"#;
+
+    let mut input = Cursor::new(Vec::new());
+    {
+        let mut zip = ZipWriter::new(&mut input);
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+        zip.start_file("xl/workbook.xml", options)?;
+        zip.write_all(workbook_xml.as_bytes())?;
+        zip.start_file("xl/_rels/workbook.xml.rels", options)?;
+        zip.write_all(workbook_rels.as_bytes())?;
+        zip.start_file("xl/worksheets/sheet1.xml", options)?;
+        zip.write_all(worksheet_xml.as_bytes())?;
+        zip.finish()?;
+    }
+    input.set_position(0);
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("A1")?,
+        CellValue::Number(1.0),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(input, &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.into_inner()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+
+    assert!(
+        sheet_xml.contains("<sheetData>"),
+        "patched worksheet should include inserted <sheetData>"
+    );
+    assert!(
+        sheet_xml.contains(r#"<c r=\"A1\""#) || sheet_xml.contains(r#"<c r="A1""#),
+        "patched worksheet should include the new cell"
+    );
 
     Ok(())
 }
