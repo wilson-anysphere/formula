@@ -59,6 +59,10 @@ Upload a raw extension package (no JSON/base64 wrapper).
 
 Backward compatible endpoint for older clients.
 
+**Caching**
+
+Authenticated/mutation endpoints are served with `Cache-Control: no-store`.
+
 **Body**
 
 ```json
