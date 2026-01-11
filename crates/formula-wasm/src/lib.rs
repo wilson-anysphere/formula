@@ -320,7 +320,24 @@ impl WorkbookState {
 
         if is_formula_input(&input) {
             let raw = input.as_str().expect("formula input must be string");
-            let canonical = raw.trim_start().to_string();
+            // Match `formula-model`'s display semantics so the worker protocol doesn't
+            // drift from other layers (trim both ends, strip a single leading '=', and
+            // treat bare '=' as empty).
+            let canonical = display_formula_text(raw);
+            if canonical.is_empty() {
+                // This should be unreachable because `is_formula_input` requires
+                // non-whitespace content after '=', but keep a defensive fallback so
+                // we never store a literal "=" formula.
+                self.engine
+                    .clear_cell(&sheet, &address)
+                    .map_err(|err| js_err(err.to_string()))?;
+                sheet_cells.remove(&address);
+                self.pending_spill_clears
+                    .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+                self.pending_formula_baselines
+                    .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+                return Ok(());
+            }
 
             let key = FormulaCellKey::new(sheet.clone(), cell_ref);
             self.pending_formula_baselines

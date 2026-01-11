@@ -172,6 +172,27 @@ class WasmBackedWorker implements WorkerLike {
 }
 
 describe("EngineWorker null clear semantics", () => {
+  it("normalizes formula input text using formula-model display semantics", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+
+      await engine.setCell("A1", "  =  SUM(A1:A2)  ");
+      const cell = await engine.getCell("A1");
+      expect(cell.input).toBe("=SUM(A1:A2)");
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("treats setCell(..., null) as clearing the cell (sparse semantics)", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
