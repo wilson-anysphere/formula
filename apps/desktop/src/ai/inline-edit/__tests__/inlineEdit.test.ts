@@ -196,6 +196,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
     expect(Array.isArray(auditEntries)).toBe(true);
     expect(auditEntries.length).toBeGreaterThan(0);
     expect(auditEntries[0].mode).toBe("inline_edit");
+    expect(auditEntries[0].input?.workbookId).toBe("local-workbook");
     expect(auditEntries[0].tool_calls?.[0]?.name).toBe("set_range");
     expect(auditEntries[0].tool_calls?.[0]?.approved).toBe(true);
   });

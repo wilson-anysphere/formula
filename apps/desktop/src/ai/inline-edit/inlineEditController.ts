@@ -22,6 +22,11 @@ export interface InlineEditLLMClient {
 export interface InlineEditControllerOptions {
   container: HTMLElement;
   document: DocumentController;
+  /**
+   * Identifier for the active workbook. Used to correlate audit entries with the
+   * audit log viewer (which defaults to filtering by workbook id).
+   */
+  workbookId?: string;
   getSheetId: () => string;
   getSelectionRange: () => Range | null;
   onApplied?: () => void;
@@ -114,6 +119,7 @@ export class InlineEditController {
 
       const auditStore = this.options.auditStore ?? new LocalStorageAIAuditStore();
       const sessionId = createSessionId();
+      const workbookId = this.options.workbookId ?? "local-workbook";
 
       this.options.document.beginBatch({ label: "AI Inline Edit" });
 
@@ -123,13 +129,13 @@ export class InlineEditController {
           client,
           tool_executor: toolExecutor as any,
           messages,
-          audit: {
-            audit_store: auditStore,
-            session_id: sessionId,
-            mode: "inline_edit",
-            input: { prompt: params.prompt, selection: selectionRef },
-            model
-          },
+           audit: {
+             audit_store: auditStore,
+             session_id: sessionId,
+             mode: "inline_edit",
+             input: { prompt: params.prompt, selection: selectionRef, workbookId, sheetId: params.sheetId },
+             model
+           },
           require_approval: async (call) => {
             this.overlay.setRunning("Generating preview…");
             const preview = await this.previewEngine.generatePreview(

@@ -41,7 +41,8 @@ if (!openComments) {
   throw new Error("Missing comments panel toggle button");
 }
 
-const app = new SpreadsheetApp(gridRoot, { activeCell, selectionRange, activeValue }, { formulaBar: formulaBarRoot });
+const workbookId = "local-workbook";
+const app = new SpreadsheetApp(gridRoot, { activeCell, selectionRange, activeValue }, { formulaBar: formulaBarRoot, workbookId });
 // Treat the seeded demo workbook as an initial "saved" baseline so web reloads
 // and Playwright tests aren't blocked by unsaved-changes prompts.
 app.getDocument().markSaved();
@@ -131,7 +132,6 @@ if (
   splitHorizontal &&
   splitNone
 ) {
-  const workbookId = "local-workbook";
   const workspaceManager = new LayoutWorkspaceManager({ storage: localStorage, panelRegistry: PANEL_REGISTRY });
   const layoutController = new LayoutController({
     workbookId,

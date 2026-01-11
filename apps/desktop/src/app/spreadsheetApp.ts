@@ -300,6 +300,7 @@ export class SpreadsheetApp {
     private root: HTMLElement,
     private status: SpreadsheetAppStatusElements,
     opts: {
+      workbookId?: string;
       limits?: GridLimits;
       formulaBar?: HTMLElement;
       inlineEdit?: {
@@ -425,6 +426,7 @@ export class SpreadsheetApp {
     this.inlineEditController = new InlineEditController({
       container: this.root,
       document: this.document,
+      workbookId: opts.workbookId,
       getSheetId: () => this.sheetId,
       getSelectionRange: () => this.getInlineEditSelectionRange(),
       onApplied: () => {
