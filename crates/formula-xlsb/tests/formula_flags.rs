@@ -338,3 +338,29 @@ fn patcher_updates_cached_string_without_changing_flags() {
     assert_eq!(formula.flags, flags);
     assert_eq!(formula.extra, extra.to_vec());
 }
+
+#[test]
+fn patcher_updates_cached_string_with_reserved_flags_and_4byte_extra() {
+    let flags = 0x2222;
+    let extra = [0xAA, 0xBB, 0xCC, 0xDD];
+    let sheet_bin = synthetic_sheet_brt_fmla_string(flags, "Hello", &extra);
+
+    let edit = CellEdit {
+        row: 0,
+        col: 0,
+        new_value: CellValue::Text("World".to_string()),
+        new_formula: None,
+    };
+    let patched_sheet = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet");
+
+    let tmp = write_fixture_like_xlsb(&patched_sheet);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open patched xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+
+    assert_eq!(sheet.cells.len(), 1);
+    let cell = &sheet.cells[0];
+    assert_eq!(cell.value, CellValue::Text("World".to_string()));
+    let formula = cell.formula.as_ref().expect("formula expected");
+    assert_eq!(formula.flags, flags);
+    assert_eq!(formula.extra, extra.to_vec());
+}

@@ -1429,16 +1429,11 @@ fn patch_fmla_string<W: io::Write>(
 fn parse_fmla_string_cached_value_offsets(payload: &[u8]) -> Result<WideStringOffsets, Error> {
     // BrtFmlaString cached values are encoded using `XLWideString` with u16 flags, but some
     // producers appear to set reserved bits that overlap with the rich/phonetic indicators
-    // without actually emitting those payload blocks. Be lenient: if parsing the optional
-    // blocks would leave us without enough bytes to read the formula fields (`cce`, `rgce`,
-    // trailing bytes), fall back to treating the cached string as having no rich/phonetic
-    // payload.
-    let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U16)?;
-    if ws.end.checked_add(4).filter(|&o| o <= payload.len()).is_some() {
-        return Ok(ws);
-    }
+    // without actually emitting those payload blocks. Be lenient and fall back to the "simple"
+    // wide-string layout (no rich/phonetic blocks) when interpreting those bits would shift the
+    // subsequent formula fields (`cce`, `rgce`, trailing bytes) out of bounds.
 
-    // Fallback to the simple layout: [cch:u32][flags:u16][utf16 chars...]
+    // Simple layout: [cch:u32][flags:u16][utf16 chars...]
     let cch = read_u32(payload, 8)? as usize;
     let flags = read_u16(payload, 12)?;
     let utf16_start = 14usize;
@@ -1448,13 +1443,65 @@ fn parse_fmla_string_cached_value_offsets(payload: &[u8]) -> Result<WideStringOf
         .ok_or(Error::UnexpectedEof)?;
     payload.get(utf16_start..utf16_end).ok_or(Error::UnexpectedEof)?;
 
-    Ok(WideStringOffsets {
+    let simple = WideStringOffsets {
         cch,
         flags,
         utf16_start,
         utf16_end,
         end: utf16_end,
-    })
+    };
+
+    let validate_following_formula_fields = |end: usize| -> bool {
+        let Ok(cce) = read_u32(payload, end).map(|v| v as usize) else {
+            return false;
+        };
+        let Some(rgce_offset) = end.checked_add(4) else {
+            return false;
+        };
+        let Some(rgce_end) = rgce_offset.checked_add(cce) else {
+            return false;
+        };
+        rgce_end <= payload.len()
+    };
+
+    let full = parse_wide_string_offsets(payload, 8, FlagsWidth::U16).ok();
+    let full_valid = full
+        .as_ref()
+        .is_some_and(|ws| validate_following_formula_fields(ws.end));
+    let simple_valid = validate_following_formula_fields(simple.end);
+
+    match (full_valid, simple_valid) {
+        (true, false) => Ok(full.expect("full offsets present")),
+        (false, true) => Ok(simple),
+        (true, true) => {
+            // If the flags contain only the rich/phonetic indicators, trust the full parse.
+            if flags & !(FLAG_RICH | FLAG_PHONETIC) == 0 {
+                return Ok(full.expect("full offsets present"));
+            }
+
+            // When reserved bits are set, prefer the "simple" layout if the rich/phonetic bits
+            // only contributed zero-length blocks (i.e. the parser suggests the cached string is
+            // followed solely by `[cRun=0]` / `[cb=0]` fields). This avoids misinterpreting the
+            // formula fields as string extras.
+            let mut expected_delta = 0usize;
+            if flags & FLAG_RICH != 0 {
+                expected_delta = expected_delta.saturating_add(4);
+            }
+            if flags & FLAG_PHONETIC != 0 {
+                expected_delta = expected_delta.saturating_add(4);
+            }
+            if let Some(full) = full {
+                if full.end == simple.end.saturating_add(expected_delta) {
+                    Ok(simple)
+                } else {
+                    Ok(full)
+                }
+            } else {
+                Ok(simple)
+            }
+        }
+        (false, false) => Err(Error::UnexpectedEof),
+    }
 }
 
 fn read_u16(data: &[u8], offset: usize) -> Result<u16, Error> {
