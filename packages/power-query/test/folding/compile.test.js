@@ -375,8 +375,8 @@ test("compile: folds merge (join) when both sides fully fold to SQL", () => {
 
 test("compile: folds merge when connections are deep-equal but not referentially equal", () => {
   const folding = new QueryFoldingEngine();
-  const leftConn = { host: "localhost", id: "db1" };
-  const rightConn = { host: "localhost", id: "db1" };
+  const leftConn = { host: "localhost", database: "db1" };
+  const rightConn = { host: "localhost", database: "db1" };
 
   const right = {
     id: "q_right",
@@ -396,6 +396,33 @@ test("compile: folds merge when connections are deep-equal but not referentially
   };
 
   const plan = folding.compile(left, { queries: { q_right: right }, getConnectionIdentity: (connection) => connection });
+  assert.equal(plan.type, "sql");
+  assert.match(plan.sql, /\bJOIN\b/);
+});
+
+test("compile: folds merge when both connections share an id without getConnectionIdentity", () => {
+  const folding = new QueryFoldingEngine();
+  const leftConn = { id: "db1", host: "localhost" };
+  const rightConn = { id: "db1", host: "localhost" };
+
+  const right = {
+    id: "q_right",
+    name: "Targets",
+    source: { type: "database", connection: rightConn, query: "SELECT * FROM targets" },
+    steps: [{ id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left",
+    name: "Sales",
+    source: { type: "database", connection: leftConn, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region", "Sales"] } },
+      { id: "s2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+    ],
+  };
+
+  const plan = folding.compile(left, { queries: { q_right: right } });
   assert.equal(plan.type, "sql");
   assert.match(plan.sql, /\bJOIN\b/);
 });
@@ -458,8 +485,8 @@ test("compile: folds append (UNION ALL) when schemas are compatible", () => {
 
 test("compile: folds append when connections are deep-equal but not referentially equal", () => {
   const folding = new QueryFoldingEngine();
-  const baseConn = { host: "localhost", id: "db1" };
-  const otherConn = { host: "localhost", id: "db1" };
+  const baseConn = { host: "localhost", database: "db1" };
+  const otherConn = { host: "localhost", database: "db1" };
 
   const other = {
     id: "q_other",
@@ -479,6 +506,33 @@ test("compile: folds append when connections are deep-equal but not referentiall
   };
 
   const plan = folding.compile(base, { queries: { q_other: other }, getConnectionIdentity: (connection) => connection });
+  assert.equal(plan.type, "sql");
+  assert.match(plan.sql, /\bUNION ALL\b/);
+});
+
+test("compile: folds append when both connections share an id without getConnectionIdentity", () => {
+  const folding = new QueryFoldingEngine();
+  const baseConn = { id: "db1", host: "localhost" };
+  const otherConn = { id: "db1", host: "localhost" };
+
+  const other = {
+    id: "q_other",
+    name: "Other",
+    source: { type: "database", connection: otherConn, query: "SELECT * FROM b" },
+    steps: [{ id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Value", "Id"] } }],
+  };
+
+  const base = {
+    id: "q_base",
+    name: "Base",
+    source: { type: "database", connection: baseConn, query: "SELECT * FROM a" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Value"] } },
+      { id: "s2", name: "Append", operation: { type: "append", queries: ["q_other"] } },
+    ],
+  };
+
+  const plan = folding.compile(base, { queries: { q_other: other } });
   assert.equal(plan.type, "sql");
   assert.match(plan.sql, /\bUNION ALL\b/);
 });

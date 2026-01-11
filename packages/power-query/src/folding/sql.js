@@ -822,15 +822,34 @@ function resolveConnectionId(source, getConnectionIdentity) {
   if (typeof source.connectionId === "string" && source.connectionId) {
     return source.connectionId;
   }
-  if (!getConnectionIdentity) return null;
-  try {
-    const identity = getConnectionIdentity(source.connection);
-    if (identity == null) return null;
-    if (typeof identity === "string") return identity;
-    return hashValue(identity);
-  } catch {
-    return null;
+
+  const connection = source.connection;
+
+  // Prefer a host-provided identity hook when available.
+  if (getConnectionIdentity) {
+    try {
+      const identity = getConnectionIdentity(connection);
+      if (identity != null) {
+        if (typeof identity === "string") return identity;
+        return hashValue(identity);
+      }
+    } catch {
+      // Fall through to conservative fallback below.
+    }
   }
+
+  // Conservative fallback: treat primitives as identities, and treat `{ id: string }` as a stable identity.
+  if (connection == null) return null;
+  const type = typeof connection;
+  if (type === "string" && connection) return connection;
+  if (type === "number" || type === "boolean") return hashValue(connection);
+
+  if (type === "object" && !Array.isArray(connection)) {
+    // @ts-ignore - runtime inspection
+    if (typeof connection.id === "string" && connection.id) return connection.id;
+  }
+
+  return null;
 }
 
 /**
