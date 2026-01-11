@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const net = require("node:net");
 
 const { ExtensionHost } = require("../src");
 
@@ -125,3 +126,76 @@ test("sandbox: blocks dynamic import('node:http2')", async (t) => {
   );
 });
 
+test("sandbox: WebSocket events cannot be used as a vm escape hatch", async (t) => {
+  const server = net.createServer((socket) => {
+    socket.destroy();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : null;
+  if (!port) throw new Error("Failed to allocate test port");
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sandbox-ws-escape-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  const commandId = "formula-test.wsEscape.attempt";
+  const manifest = {
+    name: "ws-escape",
+    displayName: "WebSocket Escape Attempt",
+    version: "1.0.0",
+    publisher: "formula-test",
+    main: "./extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: [`onCommand:${commandId}`],
+    contributes: { commands: [{ command: commandId, title: "WebSocket Escape Attempt" }] },
+    permissions: ["ui.commands", "network"]
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2), "utf8");
+  await fs.writeFile(
+    path.join(extDir, "extension.js"),
+    `
+      const formula = require("@formula/extension-api");
+
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async (port) => {
+          return await new Promise((resolve) => {
+            const ws = new WebSocket(\`ws://127.0.0.1:\${Number(port)}/\`);
+            ws._handleHostClose = (evt) => {
+              try {
+                const proc = evt?.constructor?.constructor?.("return process")();
+                resolve({ escaped: true, pid: proc?.pid ?? null });
+              } catch (error) {
+                resolve({ escaped: false, error: String(error?.message ?? error) });
+              }
+            };
+            setTimeout(() => resolve({ escaped: false, error: "timeout" }), 500);
+          });
+        }));
+      };
+    `,
+    "utf8"
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const result = await host.executeCommand(commandId, port);
+  assert.equal(result.escaped, false);
+  assert.match(String(result.error ?? ""), /Code generation from strings disallowed|not allowed|disallowed/);
+});

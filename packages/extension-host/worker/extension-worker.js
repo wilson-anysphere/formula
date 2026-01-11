@@ -753,11 +753,14 @@ if (typeof globalThis.WebSocket === "function") {
       ws.addEventListener("close", (event) => {
         nativeWebSockets.delete(wrapper);
         try {
-          wrapper._handleHostClose({
-            code: Number(event?.code ?? 1006),
-            reason: String(event?.reason ?? ""),
-            wasClean: Boolean(event?.wasClean)
-          });
+          // Never pass host objects into the VM realm. Any host object (even a plain
+          // `{}`) exposes the host's `Object`/`Function` constructors via
+          // `obj.constructor.constructor(...)`, which is a full sandbox escape.
+          wrapper._handleHostClose(
+            Number(event?.code ?? 1006),
+            String(event?.reason ?? ""),
+            Boolean(event?.wasClean)
+          );
         } catch {
           // ignore
         }
@@ -930,14 +933,13 @@ if (typeof globalThis.WebSocket === "function") {
       this._emit("error", { type: "error", target: this });
     }
 
-    _handleHostClose(event) {
-      const e = event && typeof event === "object" ? event : {};
+    _handleHostClose(code, reason, wasClean) {
       this._readyState = PermissionedWebSocket.CLOSED;
       this._emit("close", {
         type: "close",
-        code: Number(e.code ?? 1006),
-        reason: String(e.reason ?? ""),
-        wasClean: Boolean(e.wasClean),
+        code: Number(code ?? 1006),
+        reason: String(reason ?? ""),
+        wasClean: Boolean(wasClean),
         target: this
       });
     }
