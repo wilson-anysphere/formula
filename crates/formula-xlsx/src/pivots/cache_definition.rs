@@ -4,6 +4,7 @@ use std::io::Cursor;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 
+use crate::openxml::resolve_relationship_target;
 use crate::{XlsxDocument, XlsxError, XlsxPackage};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -73,6 +74,40 @@ impl XlsxPackage {
             out.push((path, parse_pivot_cache_definition(bytes)?));
         }
         Ok(out)
+    }
+
+    /// Resolve and parse the pivot cache definition for a given `cacheId`.
+    ///
+    /// Excel typically stores cache definitions as `xl/pivotCache/pivotCacheDefinitionN.xml`, but
+    /// the `N` in the filename does not always match the `cacheId`. When present, the authoritative
+    /// mapping is the workbook-level `<pivotCaches>` list and `xl/_rels/workbook.xml.rels`.
+    pub fn pivot_cache_definition_for_cache_id(
+        &self,
+        cache_id: u32,
+    ) -> Result<Option<(String, PivotCacheDefinition)>, XlsxError> {
+        let guess = format!("xl/pivotCache/pivotCacheDefinition{cache_id}.xml");
+        if let Some(bytes) = self.part(&guess) {
+            return Ok(Some((guess, parse_pivot_cache_definition(bytes)?)));
+        }
+
+        let workbook_xml = match self.part("xl/workbook.xml") {
+            Some(bytes) => bytes,
+            None => return Ok(None),
+        };
+
+        let rel_id = match workbook_pivot_cache_rel_id(workbook_xml, cache_id)? {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+
+        let Some(part_name) = resolve_relationship_target(self, "xl/workbook.xml", &rel_id)? else {
+            return Ok(None);
+        };
+        let Some(bytes) = self.part(&part_name) else {
+            return Ok(None);
+        };
+
+        Ok(Some((part_name, parse_pivot_cache_definition(bytes)?)))
     }
 
     /// Parse a single pivot cache definition part.
@@ -146,6 +181,46 @@ fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, Xlsx
     }
 
     Ok(def)
+}
+
+fn workbook_pivot_cache_rel_id(xml: &[u8], cache_id: u32) -> Result<Option<String>, XlsxError> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Start(e) | Event::Empty(e) => {
+                if e.local_name().as_ref().eq_ignore_ascii_case(b"pivotCache") {
+                    let mut found_cache_id = None;
+                    let mut rel_id = None;
+
+                    for attr in e.attributes().with_checks(false) {
+                        let attr = attr.map_err(quick_xml::Error::from)?;
+                        let key = attr.key.local_name();
+                        let key = key.as_ref();
+                        let value = attr.unescape_value()?.into_owned();
+
+                        if key.eq_ignore_ascii_case(b"cacheId") {
+                            found_cache_id = value.parse::<u32>().ok();
+                        } else if key.eq_ignore_ascii_case(b"id") {
+                            rel_id = Some(value);
+                        }
+                    }
+
+                    if found_cache_id == Some(cache_id) {
+                        return Ok(rel_id);
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(None)
 }
 
 fn handle_element(def: &mut PivotCacheDefinition, e: &BytesStart<'_>) -> Result<(), XlsxError> {
