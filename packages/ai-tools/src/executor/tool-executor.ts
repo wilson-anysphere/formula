@@ -618,6 +618,20 @@ export class ToolExecutor {
         redirect: "manual"
       });
 
+      // In browser environments, `redirect: "manual"` produces an opaque redirect response
+      // that does not expose redirect location details. Fall back to automatic redirects and
+      // validate the final resolved URL.
+      if (response.type === "opaqueredirect") {
+        response = await fetch(currentUrl.toString(), {
+          headers: params.headers ?? undefined,
+          redirect: "follow"
+        });
+        const resolved = response.url ? new URL(response.url) : currentUrl;
+        ensureExternalUrlAllowed(resolved, this.options.allowed_external_hosts);
+        currentUrl = resolved;
+        break;
+      }
+
       if (!isRedirectStatus(response.status)) break;
 
       const location = response.headers.get("location");
