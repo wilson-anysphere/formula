@@ -74,6 +74,55 @@ export function parseCsv(text, options = {}) {
 }
 
 /**
+ * Decode a stream of binary chunks (Uint8Array) into UTF-8 text chunks.
+ *
+ * @param {AsyncIterable<Uint8Array>} chunks
+ * @param {{ signal?: AbortSignal; encoding?: string }} [options]
+ * @returns {AsyncGenerator<string>}
+ */
+export async function* decodeBinaryTextStream(chunks, options = {}) {
+  const signal = options.signal;
+  const encoding = options.encoding ?? "utf-8";
+
+  if (typeof TextDecoder !== "undefined") {
+    const decoder = new TextDecoder(encoding);
+    for await (const chunk of chunks) {
+      if (signal?.aborted) {
+        const err = new Error("Aborted");
+        err.name = "AbortError";
+        throw err;
+      }
+      const text = decoder.decode(chunk, { stream: true });
+      if (text) yield text;
+    }
+    if (signal?.aborted) {
+      const err = new Error("Aborted");
+      err.name = "AbortError";
+      throw err;
+    }
+    const tail = decoder.decode();
+    if (tail) yield tail;
+    return;
+  }
+
+  if (typeof Buffer !== "undefined") {
+    for await (const chunk of chunks) {
+      if (signal?.aborted) {
+        const err = new Error("Aborted");
+        err.name = "AbortError";
+        throw err;
+      }
+      // eslint-disable-next-line no-undef
+      const text = Buffer.from(chunk).toString(encoding);
+      if (text) yield text;
+    }
+    return;
+  }
+
+  throw new Error("TextDecoder is not available in this environment");
+}
+
+/**
  * Incrementally parse CSV rows from an async iterable of text chunks.
  *
  * This is used by streaming query execution to avoid materializing a full CSV
@@ -469,7 +518,19 @@ export class FileConnector {
       return this.readText(path);
     }
     if (!this.readTextStream) {
-      throw new Error("File source requires a FileConnector readText or readTextStream adapter");
+      if (!this.readBinaryStream) {
+        throw new Error("File source requires a FileConnector readText, readTextStream, or readBinaryStream adapter");
+      }
+      const chunks = [];
+      for await (const chunk of decodeBinaryTextStream(this.readBinaryStream(path, { signal }), { signal })) {
+        if (signal?.aborted) {
+          const err = new Error("Aborted");
+          err.name = "AbortError";
+          throw err;
+        }
+        chunks.push(chunk ?? "");
+      }
+      return chunks.join("");
     }
     /** @type {string[]} */
     const chunks = [];

@@ -128,3 +128,31 @@ test("executeQueryStreaming(..., materialize:false) succeeds with a stream-only 
   assert.deepEqual(collectBatches(batches), [["Y"], [2]]);
 });
 
+test("executeQueryStreaming(..., materialize:false) can stream CSV from readBinaryStream", async () => {
+  const encoder = new TextEncoder();
+
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        throw new Error("full text reads are not supported");
+      },
+      readBinaryStream: async function* () {
+        yield encoder.encode("A,B\n");
+        yield encoder.encode("1,2\n");
+      },
+    },
+  });
+
+  const query = {
+    id: "q_binary_stream_csv",
+    name: "Binary stream CSV",
+    source: { type: "csv", path: "/tmp/binary.csv", options: { hasHeaders: true } },
+    steps: [],
+  };
+
+  const batches = [];
+  const summary = await engine.executeQueryStreaming(query, {}, { batchSize: 5, materialize: false, onBatch: (b) => batches.push(b) });
+  assert.equal(summary.rowCount, 1);
+  assert.equal(summary.columnCount, 2);
+  assert.deepEqual(collectBatches(batches), [["A", "B"], [1, 2]]);
+});

@@ -5,7 +5,7 @@ import { DataTable, makeUniqueColumnNames } from "./table.js";
 import { hashValue } from "./cache/key.js";
 import { valueKey } from "./valueKey.js";
 import { deserializeAnyTable, deserializeTable, serializeAnyTable } from "./cache/serialize.js";
-import { FileConnector, parseCsvCell, parseCsvStream } from "./connectors/file.js";
+import { FileConnector, decodeBinaryTextStream, parseCsvCell, parseCsvStream } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
 import { ODataConnector } from "./connectors/odata.js";
 import { SqlConnector } from "./connectors/sql.js";
@@ -2556,7 +2556,7 @@ export class QueryEngine {
     const canStreamSource =
       query.source.type === "range" ||
       query.source.type === "table" ||
-      (query.source.type === "csv" && Boolean(fileConnector?.readTextStream || fileConnector?.readText)) ||
+      (query.source.type === "csv" && Boolean(fileConnector?.readTextStream || fileConnector?.readBinaryStream || fileConnector?.readText)) ||
       (query.source.type === "parquet" && Boolean(fileConnector?.openFile));
 
     if (!canStreamSteps || !canStreamSource) {
@@ -2775,6 +2775,8 @@ export class QueryEngine {
       /** @type {AsyncIterable<string>} */
       const chunks = connector.readTextStream
         ? connector.readTextStream(source.path, { signal: options.signal })
+        : connector.readBinaryStream
+          ? decodeBinaryTextStream(connector.readBinaryStream(source.path, { signal: options.signal }), { signal: options.signal })
         : connector.readText
           ? (async function* () {
               yield await connector.readText(source.path);
