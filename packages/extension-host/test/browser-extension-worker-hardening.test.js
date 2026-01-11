@@ -150,9 +150,21 @@ parentPort.postMessage({ type: "__ready__" });
     "utf8"
   );
 
+  const allowedFlags =
+    process.allowedNodeEnvironmentFlags && typeof process.allowedNodeEnvironmentFlags.has === "function"
+      ? process.allowedNodeEnvironmentFlags
+      : new Set();
+  const loaderFlag = allowedFlags.has("--loader") ? "--loader" : "--experimental-loader";
+  const execArgv = [loaderFlag, pathToFileURL(loaderPath).href];
+  if (allowedFlags.has("--disable-warning")) {
+    execArgv.unshift("--disable-warning=ExperimentalWarning");
+  } else if (allowedFlags.has("--no-warnings")) {
+    execArgv.unshift("--no-warnings");
+  }
+
   const worker = new Worker(pathToFileURL(wrapperPath), {
     type: "module",
-    execArgv: ["--disable-warning=ExperimentalWarning", "--loader", pathToFileURL(loaderPath).href]
+    execArgv
   });
   const activationId = "activate-1";
 
