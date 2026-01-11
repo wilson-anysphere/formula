@@ -53,6 +53,27 @@ test("CredentialManager: resolves scopes and persists secrets via KeychainCreden
   assert.ok(sqlHandle);
   assert.deepEqual(await sqlHandle.getSecret(), { password: "pw-1" });
 
+  // SQL scope also supports structured connection descriptors (url/host/port fields).
+  const sqlHandle2 = await manager.onCredentialRequest("sql", {
+    request: {
+      connection: { kind: "postgres", url: "postgres://alice:pw-ignored@db.example.com:5432/analytics" },
+      sql: "select 1",
+    },
+  });
+  assert.ok(sqlHandle2);
+  assert.equal(sqlHandle2.credentialId, sqlHandle.credentialId);
+  assert.equal(promptCalls, 3);
+
+  const sqlHandle3 = await manager.onCredentialRequest("sql", {
+    request: {
+      connection: { kind: "postgres", host: "db.example.com", port: 5432, database: "analytics", user: "alice" },
+      sql: "select 1",
+    },
+  });
+  assert.ok(sqlHandle3);
+  assert.equal(sqlHandle3.credentialId, sqlHandle.credentialId);
+  assert.equal(promptCalls, 3);
+
   // New manager instance should still read credentials from the shared keychain provider without prompting.
   let promptCalledAgain = false;
   const manager2 = new CredentialManager({
@@ -67,4 +88,3 @@ test("CredentialManager: resolves scopes and persists secrets via KeychainCreden
   assert.equal(httpHandle3.credentialId, httpHandle1.credentialId);
   assert.equal(promptCalledAgain, false);
 });
-

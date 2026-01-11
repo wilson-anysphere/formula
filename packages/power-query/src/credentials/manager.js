@@ -36,15 +36,41 @@ function parseSqlConnectionScope(connection) {
   }
 
   if (connection && typeof connection === "object" && !Array.isArray(connection)) {
+    // Some hosts pass a structured connection descriptor with an embedded URL.
+    // Prefer parsing it to derive a stable {server, database, user} scope.
+    // @ts-ignore - runtime access
+    const urlValue = connection.url;
+    if (typeof urlValue === "string" && urlValue.length > 0) {
+      try {
+        const url = new URL(urlValue);
+        const server = url.host;
+        const database = url.pathname ? url.pathname.replace(/^\//, "") : null;
+        const user = url.username || null;
+        return sqlScope({ server, database, user });
+      } catch {
+        // ignore
+      }
+    }
+
     // @ts-ignore - runtime access
     const server = connection.server ?? connection.host ?? connection.hostname ?? null;
     if (typeof server === "string" && server.length > 0) {
       // @ts-ignore - runtime access
+      const port = connection.port ?? null;
+      // @ts-ignore - runtime access
       const database = connection.database ?? connection.db ?? null;
       // @ts-ignore - runtime access
       const user = connection.user ?? connection.username ?? null;
+      let serverWithPort = server;
+      if (typeof port === "number" && Number.isFinite(port) && port > 0) {
+        // Best-effort: append port if provided separately (common for Postgres).
+        // Avoid trying to interpret whether `server` already contains a port.
+        const needsBrackets = server.includes(":") && !(server.startsWith("[") && server.endsWith("]"));
+        const host = needsBrackets ? `[${server}]` : server;
+        serverWithPort = `${host}:${port}`;
+      }
       return sqlScope({
-        server,
+        server: serverWithPort,
         database: typeof database === "string" ? database : null,
         user: typeof user === "string" ? user : null,
       });
