@@ -143,6 +143,12 @@ test("RefreshOrchestrator: cancellation stops remaining queued jobs", async () =
   orchestrator.registerQuery(makeQuery("q1", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
   orchestrator.registerQuery(makeQuery("q2", { type: "range", range: { values: [["Value"], [2]], hasHeaders: true } }));
 
+  /** @type {string[]} */
+  const cancelled = [];
+  orchestrator.onEvent((evt) => {
+    if (evt.type === "cancelled") cancelled.push(evt.job.queryId);
+  });
+
   const handle = orchestrator.refreshAll(["q1", "q2"]);
 
   assert.equal(engine.calls.length, 1);
@@ -151,4 +157,5 @@ test("RefreshOrchestrator: cancellation stops remaining queued jobs", async () =
   handle.cancel();
   await assert.rejects(handle.promise, (err) => err?.name === "AbortError");
   assert.equal(engine.calls.length, 1, "cancelled session should not start queued jobs");
+  assert.deepEqual(new Set(cancelled), new Set(["q1", "q2"]), "cancellation should emit per-job cancelled events");
 });

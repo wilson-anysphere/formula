@@ -397,6 +397,8 @@ export class RefreshOrchestrator {
 
     let done = false;
     let aborted = false;
+    /** @type {unknown | null} */
+    let terminalError = null;
 
     /** @type {(value: Record<string, QueryExecutionResult>) => void} */
     let resolve;
@@ -408,6 +410,21 @@ export class RefreshOrchestrator {
     });
 
     let remainingJobs = closure.size;
+
+    const finalize = () => {
+      if (done) return;
+      if (remainingJobs !== 0) return;
+      done = true;
+      unsubscribe();
+      manager.dispose();
+      if (terminalError) {
+        reject(terminalError);
+      } else if (aborted) {
+        reject(abortError("Aborted"));
+      } else {
+        resolve(targetResults);
+      }
+    };
 
     const schedule = (id) => {
       if (aborted || done) return;
@@ -439,34 +456,27 @@ export class RefreshOrchestrator {
           if ((remainingDeps.get(dependent) ?? 0) === 0) schedule(dependent);
         }
 
-        if (!done && remainingJobs === 0) {
-          done = true;
-          unsubscribe();
-          manager.dispose();
-          resolve(targetResults);
-        }
+        finalize();
         return;
       }
 
       if (evt.type === "error") {
-        if (done) return;
-        done = true;
+        if (!terminalError) terminalError = evt.error;
         aborted = true;
+        remainingJobs -= 1;
         manager.dispose();
-        unsubscribe();
-        reject(evt.error);
+        finalize();
         return;
       }
 
       if (evt.type === "cancelled") {
-        if (done) return;
-        // If the orchestrator initiated cancellation, treat the whole session as cancelled.
-        if (aborted) {
-          done = true;
-          unsubscribe();
+        if (!terminalError) {
+          aborted = true;
+          terminalError = abortError("Aborted");
           manager.dispose();
-          reject(abortError("Aborted"));
         }
+        remainingJobs -= 1;
+        finalize();
       }
     });
 
@@ -489,6 +499,7 @@ export class RefreshOrchestrator {
       cancel: () => {
         if (done) return;
         aborted = true;
+        terminalError = abortError("Aborted");
         // Disposing the underlying manager will abort in-flight queries and remove queued ones.
         manager.dispose();
       },
