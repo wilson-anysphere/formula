@@ -135,7 +135,7 @@ function parseCsvSet(value) {
   return new Set(
     String(value)
       .split(",")
-      .map((v) => v.trim())
+      .map((v) => v.trim().toLowerCase())
       .filter(Boolean)
   );
 }
