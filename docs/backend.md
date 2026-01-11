@@ -61,7 +61,8 @@ SYNC_TOKEN_SECRET=my-local-sync-secret docker compose up --build
 The docker-compose stack configures the sync server with:
 
 - `SYNC_SERVER_PERSISTENCE_BACKEND=file`
-- persistence stored in the `sync_server_data` named volume (mounted at the sync server’s default data dir)
+- `SYNC_SERVER_DATA_DIR=/data`
+- persistence stored in the `sync_server_data` named volume (mounted at `/data`)
 
 To wipe local sync persistence, run `docker compose down -v`.
 

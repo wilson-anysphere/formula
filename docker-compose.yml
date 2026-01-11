@@ -33,6 +33,10 @@ services:
     build:
       context: .
       dockerfile: services/sync-server/Dockerfile
+    # The sync server image runs as the non-root `node` user, but Docker named
+    # volumes are created as root-owned directories. Run as root in local
+    # docker-compose so the server can write its persistence files.
+    user: "0:0"
     environment:
       SYNC_SERVER_HOST: 0.0.0.0
       SYNC_SERVER_PORT: "1234"
@@ -41,15 +45,12 @@ services:
       SYNC_SERVER_JWT_AUDIENCE: formula-sync
 
       # Persistence
-      # `y-leveldb` is optional and not installed in the Docker image; use the
-      # built-in file persistence backend for local docker-compose.
       SYNC_SERVER_PERSISTENCE_BACKEND: file
+      SYNC_SERVER_DATA_DIR: /data
     ports:
       - "${SYNC_WS_PORT:-1234}:1234"
     volumes:
-      # Mount at the default data dir inside the image (owned by the `node` user)
-      # so file persistence works without permission issues.
-      - sync_server_data:/app/services/sync-server/.sync-server-data
+      - sync_server_data:/data
     depends_on:
       - api
 
