@@ -246,7 +246,14 @@ export class OllamaChatClient {
           if (args) yield { type: "tool_call_delta", id: call.id, delta: args };
           yield { type: "tool_call_end", id: call.id };
         }
-        yield { type: "done" };
+        const usage = full.usage
+          ? {
+              promptTokens: full.usage.promptTokens,
+              completionTokens: full.usage.completionTokens,
+              totalTokens: full.usage.totalTokens,
+            }
+          : undefined;
+        yield usage ? { type: "done", usage } : { type: "done" };
         return;
       }
 
