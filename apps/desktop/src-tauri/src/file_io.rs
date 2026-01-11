@@ -14,11 +14,11 @@ use formula_xlsx::print::{
 };
 use formula_xlsx::{
     load_from_bytes, CellPatch as XlsxCellPatch, PreservedPivotParts, WorkbookCellPatches,
-    XlsxPackage,
+    patch_xlsx_streaming_workbook_cell_patches, XlsxPackage,
 };
 use rust_xlsxwriter::{Workbook as XlsxWorkbook, XlsxError};
 use std::collections::{HashMap, HashSet};
-use std::io::BufReader;
+use std::io::{BufReader, Cursor};
 use std::path::Path;
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
@@ -769,8 +769,6 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
     if let Some(origin_bytes) = workbook.origin_xlsx_bytes.as_deref() {
         let print_settings_changed = workbook.print_settings != workbook.original_print_settings;
 
-        let mut pkg =
-            XlsxPackage::from_bytes(origin_bytes).context("parse original workbook package")?;
         let mut patches = WorkbookCellPatches::default();
         for sheet in &workbook.sheets {
             for (row, col) in &sheet.dirty_cells {
@@ -813,7 +811,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
 
         let wants_drop_vba =
-            matches!(extension.as_deref(), Some("xlsx")) && pkg.vba_project_bin().is_some();
+            matches!(extension.as_deref(), Some("xlsx")) && workbook.vba_project_bin.is_some();
 
         if patches.is_empty() && !print_settings_changed && !wants_drop_vba {
             std::fs::write(path, origin_bytes)
@@ -824,6 +822,35 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 .expect("origin_xlsx_bytes should be Some when origin_bytes is Some")
                 .clone());
         }
+
+        if patches.is_empty() && print_settings_changed && !wants_drop_vba {
+            let bytes = write_workbook_print_settings(origin_bytes, &workbook.print_settings)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+            let bytes = Arc::<[u8]>::from(bytes);
+            std::fs::write(path, bytes.as_ref())
+                .with_context(|| format!("write workbook {:?}", path))?;
+            return Ok(bytes);
+        }
+
+        if !patches.is_empty() && !wants_drop_vba {
+            let mut cursor = Cursor::new(Vec::new());
+            patch_xlsx_streaming_workbook_cell_patches(Cursor::new(origin_bytes), &mut cursor, &patches)
+                .context("apply worksheet cell patches (streaming)")?;
+            let mut bytes = cursor.into_inner();
+            if print_settings_changed {
+                bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            }
+
+            let bytes = Arc::<[u8]>::from(bytes);
+            std::fs::write(path, bytes.as_ref())
+                .with_context(|| format!("write workbook {:?}", path))?;
+            return Ok(bytes);
+        }
+
+        let mut pkg =
+            XlsxPackage::from_bytes(origin_bytes).context("parse original workbook package")?;
         if !patches.is_empty() {
             pkg.apply_cell_patches(&patches)
                 .context("apply worksheet cell patches")?;
@@ -844,7 +871,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             .write_to_bytes()
             .context("write patched workbook package")?;
 
-        if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) && print_settings_changed {
+        if print_settings_changed {
             bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
