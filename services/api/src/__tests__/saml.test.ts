@@ -891,6 +891,12 @@ describe("SAML SSO", () => {
           payload: new URLSearchParams({ SAMLResponse: samlResponse, RelayState: relayState }).toString()
         });
         expect(callback.statusCode).toBe(200);
+
+        // Org-level require_mfa enforcement should treat upstream SAML MFA as satisfying
+        // the MFA requirement (even when the user has no local TOTP enrolled).
+        const cookie = extractCookie(callback.headers["set-cookie"], config.sessionCookieName);
+        const orgRes = await app.inject({ method: "GET", url: `/orgs/${orgId}`, headers: { cookie } });
+        expect(orgRes.statusCode).toBe(200);
       }
     } finally {
       await app.close();
