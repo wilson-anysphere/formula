@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act } from "react-dom/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createPanelBodyRenderer } from "../panelBodyRenderer.js";

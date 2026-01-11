@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import React, { act } from "react";
+import React from "react";
+import { act } from "react-dom/test-utils";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
 
