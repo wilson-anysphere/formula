@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 test.describe("comments", () => {
   test("add comment, reply, resolve", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     // Focus + select A1 (top-left).
     await page.click("#grid", { position: { x: 5, y: 5 } });
@@ -27,4 +28,3 @@ test.describe("comments", () => {
     await expect(thread).toHaveAttribute("data-resolved", "true");
   });
 });
-

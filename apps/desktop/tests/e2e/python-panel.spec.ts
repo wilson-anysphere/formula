@@ -17,6 +17,7 @@ print("Hello from Python")
     // the navigation completes.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await page.goto("/");
+      await page.waitForFunction(() => (window as any).__formulaApp != null);
       try {
         const isolation = await page.evaluate(() => ({
           crossOriginIsolated: globalThis.crossOriginIsolated,

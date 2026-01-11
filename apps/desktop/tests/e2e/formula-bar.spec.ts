@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 test.describe("formula bar editing + range insertion", () => {
   test("type formula, drag range, commit stores formula in the active cell", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     // Seed numeric inputs in A1 and A2 (so SUM has a visible result).
     // Click within the first grid cell (accounting for row/column headers).
@@ -49,6 +50,7 @@ test.describe("formula bar editing + range insertion", () => {
 
   test("shows friendly error explanation for #DIV/0!", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     // Seed A1 = 0.
     await page.click("#grid", { position: { x: 53, y: 29 } });

@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 test.describe("formula reference colors", () => {
   test("colors each reference in the formula bar and renders matching grid overlays", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     // Select C1 (avoid overlapping the referenced cells).
     await page.click("#grid", { position: { x: 260, y: 40 } });

@@ -82,8 +82,10 @@ test.describe("macros panel", () => {
     });
 
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
     await page.evaluate(() => localStorage.clear());
     await page.reload();
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     await page.getByTestId("open-macros-panel").click();
     const panel = page.getByTestId("dock-right").getByTestId("panel-macros");
@@ -120,6 +122,7 @@ test.describe("macros panel", () => {
     page.on("dialog", (dialog) => dialog.accept());
 
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     await page.getByTestId("open-macros-panel").click();
 

@@ -74,6 +74,7 @@ test.describe("tauri workbook integration", () => {
     });
 
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
     await page.evaluate(() => {

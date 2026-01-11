@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 test.describe("outline grouping", () => {
   test("collapse and expand a row group", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     // The demo sheet seeds an outline group for rows 2-4 with a summary row at 5.
     const toggle = page.getByTestId("outline-toggle-row-5");

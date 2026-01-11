@@ -14,6 +14,7 @@ async function toggleShowFormulas(page: import("@playwright/test").Page): Promis
 test.describe("show formulas", () => {
   test("renders computed values by default and toggles formula text via Ctrl/Cmd+`", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     // Seed A1=1 and A2=2.
     await page.click("#grid", { position: { x: 53, y: 29 } });
@@ -54,6 +55,7 @@ test.describe("show formulas", () => {
 
   test("selection renderer keeps drawing ranges when endpoints are offscreen", async ({ page }) => {
     await page.goto("/");
+    await page.waitForFunction(() => (window as any).__formulaApp != null);
 
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;
@@ -74,4 +76,3 @@ test.describe("show formulas", () => {
     expect(drawn.ranges[0].rect.height).toBeGreaterThan(0);
   });
 });
-
