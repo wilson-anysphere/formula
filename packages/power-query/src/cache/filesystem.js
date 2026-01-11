@@ -4,11 +4,15 @@ import { fnv1a64 } from "./key.js";
  * @typedef {import("./cache.js").CacheEntry} CacheEntry
  */
 
+const BINARY_MARKER_KEY = "__pq_cache_binary";
+
 /**
  * Very small filesystem cache store for Node environments.
  *
- * It stores one JSON file per key. Keys are hashed to filenames to avoid
- * filesystem character issues.
+ * It stores one JSON file per key, plus an optional `.bin` blob when the cached
+ * value includes Arrow IPC bytes.
+ *
+ * Keys are hashed to filenames to avoid filesystem character issues.
  */
 export class FileSystemCacheStore {
   /**
@@ -33,12 +37,28 @@ export class FileSystemCacheStore {
 
   /**
    * @param {string} key
+   * @returns {Promise<{ jsonPath: string, binPath: string, binFileName: string }>}
+   */
+  async pathsForKey(key) {
+    const hashed = fnv1a64(key);
+    const { path } = await this.deps();
+    return {
+      jsonPath: path.join(this.directory, `${hashed}.json`),
+      binPath: path.join(this.directory, `${hashed}.bin`),
+      binFileName: `${hashed}.bin`,
+    };
+  }
+
+  /**
+   * Backwards-compatible helper for callers that relied on the original JSON-only
+   * cache implementation.
+   *
+   * @param {string} key
    * @returns {Promise<string>}
    */
   async filePathForKey(key) {
-    const hashed = fnv1a64(key);
-    const { path } = await this.deps();
-    return path.join(this.directory, `${hashed}.json`);
+    const { jsonPath } = await this.pathsForKey(key);
+    return jsonPath;
   }
 
   async ensureDir() {
@@ -52,13 +72,31 @@ export class FileSystemCacheStore {
    */
   async get(key) {
     await this.ensureDir();
-    const filePath = await this.filePathForKey(key);
+    const { jsonPath, binPath, binFileName } = await this.pathsForKey(key);
     try {
       const { fs } = await this.deps();
-      const text = await fs.readFile(filePath, "utf8");
+      const text = await fs.readFile(jsonPath, "utf8");
       const parsed = JSON.parse(text);
       if (!parsed || parsed.key !== key) return null;
-      return parsed.entry ?? null;
+
+      const entry = parsed.entry ?? null;
+      const value = entry?.value;
+      const bytesMarker = value?.version === 2 && value?.table?.kind === "arrow" ? value?.table?.bytes : null;
+      if (
+        bytesMarker &&
+        typeof bytesMarker === "object" &&
+        !Array.isArray(bytesMarker) &&
+        typeof bytesMarker[BINARY_MARKER_KEY] === "string"
+      ) {
+        const markerFileName = bytesMarker[BINARY_MARKER_KEY];
+        // Only allow loading from within the cache directory.
+        if (markerFileName !== binFileName) return null;
+        const bytes = await fs.readFile(binPath);
+        const restored = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        entry.value = { ...value, table: { ...value.table, bytes: restored } };
+      }
+
+      return entry;
     } catch {
       return null;
     }
@@ -71,8 +109,30 @@ export class FileSystemCacheStore {
   async set(key, entry) {
     await this.ensureDir();
     const { fs } = await this.deps();
-    const filePath = await this.filePathForKey(key);
-    await fs.writeFile(filePath, JSON.stringify({ key, entry }), "utf8");
+    const { jsonPath, binPath, binFileName } = await this.pathsForKey(key);
+
+    const value = entry?.value;
+    const arrowBytes =
+      value?.version === 2 && value?.table?.kind === "arrow" && value?.table?.bytes instanceof Uint8Array
+        ? value.table.bytes
+        : null;
+
+    if (arrowBytes) {
+      await fs.writeFile(binPath, arrowBytes);
+      const patchedValue = {
+        ...value,
+        table: {
+          ...value.table,
+          bytes: { [BINARY_MARKER_KEY]: binFileName },
+        },
+      };
+      await fs.writeFile(jsonPath, JSON.stringify({ key, entry: { ...entry, value: patchedValue } }), "utf8");
+      return;
+    }
+
+    // If we are writing a JSON-only entry, clean up any previous binary blob.
+    await fs.rm(binPath, { force: true });
+    await fs.writeFile(jsonPath, JSON.stringify({ key, entry }), "utf8");
   }
 
   /**
@@ -80,8 +140,9 @@ export class FileSystemCacheStore {
    */
   async delete(key) {
     const { fs } = await this.deps();
-    const filePath = await this.filePathForKey(key);
-    await fs.rm(filePath, { force: true });
+    const { jsonPath, binPath } = await this.pathsForKey(key);
+    await fs.rm(jsonPath, { force: true });
+    await fs.rm(binPath, { force: true });
   }
 
   async clear() {

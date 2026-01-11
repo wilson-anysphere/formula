@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { arrowTableFromColumns, arrowTableToParquet } from "../../../data-io/src/index.js";
 
 import { CacheManager } from "../../src/cache/cache.js";
 import { MemoryCacheStore } from "../../src/cache/memory.js";
+import { ArrowTableAdapter } from "../../src/arrowTable.js";
 import { QueryEngine } from "../../src/engine.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test("CacheManager: hit/miss, TTL, manual invalidation", async () => {
   let now = 0;
@@ -80,3 +88,77 @@ test("QueryEngine: caches by source + query + credentials hash and still checks 
   assert.equal(readCount, 3, "manual invalidation should force a refresh");
 });
 
+test("QueryEngine: caches Arrow-backed Parquet results and avoids re-reading the source", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store });
+
+  const parquetPath = path.join(__dirname, "..", "..", "..", "data-io", "test", "fixtures", "simple.parquet");
+
+  let readCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readBinary: async (p) => {
+        readCount += 1;
+        return new Uint8Array(await readFile(p));
+      },
+    },
+  });
+
+  const query = { id: "q_parquet_cache", name: "Parquet cache", source: { type: "parquet", path: parquetPath }, steps: [] };
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(readCount, 1);
+  assert.ok(first.table instanceof ArrowTableAdapter);
+  const firstGrid = first.table.toGrid();
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, true);
+  assert.equal(readCount, 1, "cache hit should not re-read the Parquet bytes");
+  assert.ok(second.table instanceof ArrowTableAdapter);
+  assert.deepEqual(second.table.toGrid(), firstGrid);
+});
+
+test("QueryEngine: Arrow cache roundtrip preserves date columns", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store });
+
+  const inputTable = arrowTableFromColumns({
+    id: new Int32Array([1, 2, 3]),
+    occurredAt: [new Date("2024-01-01T00:00:00.000Z"), null, new Date("2024-01-03T12:34:56.000Z")],
+    value: new Float64Array([1.25, 2.5, 3.75]),
+  });
+  const parquetBytes = await arrowTableToParquet(inputTable);
+
+  let readCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readBinary: async () => {
+        readCount += 1;
+        return parquetBytes;
+      },
+    },
+  });
+
+  const query = {
+    id: "q_parquet_date_cache",
+    name: "Parquet date cache",
+    source: { type: "parquet", path: "/tmp/date-cache.parquet" },
+    steps: [],
+  };
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(readCount, 1);
+  assert.ok(first.table instanceof ArrowTableAdapter);
+  const firstGrid = first.table.toGrid();
+  assert.ok(firstGrid[1][1] instanceof Date, "date column should materialize as a Date");
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, true);
+  assert.equal(readCount, 1, "cache hit should not re-read the Parquet bytes");
+  assert.ok(second.table instanceof ArrowTableAdapter);
+  assert.deepEqual(second.table.toGrid(), firstGrid);
+});

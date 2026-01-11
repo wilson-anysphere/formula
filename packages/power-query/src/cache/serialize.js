@@ -1,7 +1,11 @@
+import { arrowTableFromIPC, arrowTableToIPC } from "../../../data-io/src/index.js";
+
+import { ArrowTableAdapter } from "../arrowTable.js";
 import { DataTable } from "../table.js";
 
 /**
  * @typedef {import("../table.js").Column} Column
+ * @typedef {import("../table.js").ITable} ITable
  */
 
 const TYPE_KEY = "__pq_type";
@@ -60,3 +64,67 @@ export function deserializeTable(data) {
   );
 }
 
+/**
+ * @typedef {{
+ *   kind: "data";
+ *   data: SerializedTable;
+ * }} SerializedAnyDataTable
+ *
+ * @typedef {{
+ *   kind: "arrow";
+ *   format: "ipc";
+ *   columns: Column[];
+ *   bytes: Uint8Array;
+ * }} SerializedAnyArrowTable
+ *
+ * @typedef {SerializedAnyDataTable | SerializedAnyArrowTable} SerializedAnyTable
+ */
+
+/**
+ * Serialize a Power Query `ITable` into a versioned payload that can be stored
+ * in the cache.
+ *
+ * v2 supports:
+ * - DataTable (row arrays; JSON-friendly, date-tagged)
+ * - ArrowTableAdapter (columnar; Arrow IPC bytes)
+ *
+ * @param {ITable} table
+ * @returns {SerializedAnyTable}
+ */
+export function serializeAnyTable(table) {
+  if (table instanceof ArrowTableAdapter) {
+    return {
+      kind: "arrow",
+      format: "ipc",
+      columns: table.columns.map((c) => ({ name: c.name, type: c.type })),
+      bytes: arrowTableToIPC(table.table),
+    };
+  }
+
+  const materialized = table instanceof DataTable ? table : new DataTable(table.columns, Array.from(table.iterRows()));
+  return { kind: "data", data: serializeTable(materialized) };
+}
+
+/**
+ * @param {SerializedAnyTable} payload
+ * @returns {DataTable | ArrowTableAdapter}
+ */
+export function deserializeAnyTable(payload) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Invalid cached table payload");
+  }
+
+  if (payload.kind === "arrow") {
+    const bytes = payload.bytes instanceof Uint8Array ? payload.bytes : new Uint8Array(payload.bytes);
+    const table = arrowTableFromIPC(bytes);
+    return new ArrowTableAdapter(table, payload.columns);
+  }
+
+  if (payload.kind === "data") {
+    return deserializeTable(payload.data);
+  }
+
+  /** @type {never} */
+  const exhausted = payload;
+  throw new Error(`Unsupported cached table kind '${exhausted.kind}'`);
+}

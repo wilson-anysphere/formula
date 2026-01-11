@@ -211,6 +211,30 @@ export async function arrowTableToParquet(table, options = {}) {
 }
 
 /**
+ * Serialize an Arrow JS Table into an Arrow IPC stream.
+ *
+ * This is useful for caching/interchange when you want to preserve Arrow's full
+ * type information (timestamps, decimals, dictionary encoding, etc) without
+ * going through Parquet.
+ *
+ * @param {arrow.Table} table
+ * @returns {Uint8Array}
+ */
+export function arrowTableToIPC(table) {
+  return arrow.tableToIPC(table, 'stream');
+}
+
+/**
+ * Deserialize an Arrow IPC stream into an Arrow JS Table.
+ *
+ * @param {Uint8Array | ArrayBuffer} bytes
+ * @returns {arrow.Table}
+ */
+export function arrowTableFromIPC(bytes) {
+  return arrow.tableFromIPC(bytes);
+}
+
+/**
  * Construct an Arrow JS Table from column arrays.
  *
  * This is a small wrapper around Arrow JS's `tableFromArrays` to avoid consumers needing to depend

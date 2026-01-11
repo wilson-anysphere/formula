@@ -4,7 +4,7 @@ import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable } from "./table.js";
 
 import { hashValue } from "./cache/key.js";
-import { deserializeTable, serializeTable } from "./cache/serialize.js";
+import { deserializeAnyTable, deserializeTable, serializeAnyTable } from "./cache/serialize.js";
 import { FileConnector } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
 import { SqlConnector } from "./connectors/sql.js";
@@ -316,13 +316,15 @@ export class QueryEngine {
           options.onProgress?.({ type: "cache:hit", queryId: query.id, cacheKey });
           const completedAt = new Date(state.now());
           const payload = /** @type {any} */ (cached.value);
-          const table = deserializeTable(payload.table);
-          const meta = deserializeQueryMeta(
-            payload.meta,
-            startedAt,
-            completedAt,
-            { key: cacheKey, hit: true },
-          );
+          const table =
+            payload?.version === 2
+              ? deserializeAnyTable(payload.table)
+              : payload?.version === 1
+                ? deserializeTable(payload.table)
+                : payload?.table?.kind
+                  ? deserializeAnyTable(payload.table)
+                  : deserializeTable(payload.table);
+          const meta = deserializeQueryMeta(payload.meta, startedAt, completedAt, { key: cacheKey, hit: true });
           return { table, meta };
         }
         options.onProgress?.({ type: "cache:miss", queryId: query.id, cacheKey });
@@ -436,10 +438,10 @@ export class QueryEngine {
       cache: cacheKey ? { key: cacheKey, hit: false } : undefined,
     };
 
-    if (this.cache && cacheKey && cacheMode !== "bypass" && table instanceof DataTable) {
+    if (this.cache && cacheKey && cacheMode !== "bypass" && (table instanceof DataTable || table instanceof ArrowTableAdapter)) {
       await this.cache.set(
         cacheKey,
-        { version: 1, table: serializeTable(table), meta: serializeQueryMeta(meta) },
+        { version: 2, table: serializeAnyTable(table), meta: serializeQueryMeta(meta) },
         { ttlMs: cacheTtlMs },
       );
       options.onProgress?.({ type: "cache:set", queryId: query.id, cacheKey });
