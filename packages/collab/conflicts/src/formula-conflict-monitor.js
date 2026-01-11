@@ -44,6 +44,10 @@ import { tryEvaluateFormula } from "./formula-eval.js";
  * Concurrency detection is causal and based on Yjs Item `origin` ids. If the
  * overwriting entry has an origin that points at our local entry id, then the
  * overwriter had integrated our write (sequential overwrite, not a conflict).
+ *
+ * Note: To detect delete-vs-overwrite conflicts deterministically, local formula
+ * clears are written as `cell.set("formula", null)` (not `cell.delete("formula")`)
+ * so Yjs creates an Item that later overwrites can reference via `origin`.
  */
 export class FormulaConflictMonitor {
   /**
@@ -98,6 +102,9 @@ export class FormulaConflictMonitor {
 
   /**
    * Apply a formula edit for the local user (this is the API we'd call from UI).
+   *
+   * Writes `value=null` alongside the formula since formula cells don't sync a
+   * computed value; this marks the cell dirty for local recalculation.
    *
    * @param {string} cellKey
    * @param {string} formula
