@@ -656,6 +656,10 @@ export class CollabSession {
     }).canRead;
   }
 
+  getEncryptionConfig(): CollabSessionOptions["encryption"] | null {
+    return this.encryption;
+  }
+
   maskValueIfUnreadable<T>({
     sheetId,
     row,
@@ -976,6 +980,7 @@ export async function bindCollabSessionToDocumentController(options: {
     undoService: undoService ?? null,
     defaultSheetId,
     userId,
+    encryption: session.getEncryptionConfig(),
     canReadCell: (cell) => session.canReadCell(cell),
     canEditCell: (cell) => session.canEditCell(cell),
     // Use the standard enterprise mask. The binder also uses this hook for
