@@ -48,6 +48,7 @@ function EngineDemoApp() {
   const rangeInsertionRef = useRef<{ start: number; end: number } | null>(null);
   const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
   const referenceColorByTextRef = useRef<Map<string, string>>(new Map());
+  const selectedReferenceIndexRef = useRef<number | null>(null);
   const cellSyncTokenRef = useRef(0);
 
   const isFormulaEditing = formulaFocused && draft.trim().startsWith("=");
@@ -92,6 +93,16 @@ function EngineDemoApp() {
     const start = input.selectionStart ?? input.value.length;
     const end = input.selectionEnd ?? input.value.length;
     cursorRef.current = { start, end };
+
+    // Track when the user has explicitly selected a full reference token so we
+    // can toggle click-to-select behavior (Excel UX) without getting stuck.
+    if (start === end || !draftRef.current.trim().startsWith("=")) {
+      selectedReferenceIndexRef.current = null;
+      return;
+    }
+    const { references } = extractFormulaReferences(draftRef.current, start, end);
+    const selected = references.find((ref) => ref.start === start && ref.end === end);
+    selectedReferenceIndexRef.current = selected ? selected.index : null;
   };
 
   const cellRangeToA1 = (range: CellRange): string | null => {
@@ -894,6 +905,7 @@ function EngineDemoApp() {
             onFocus={(event) => {
               setFormulaFocused(true);
               cellSyncTokenRef.current++;
+              selectedReferenceIndexRef.current = null;
               const input = event.currentTarget;
               queueMicrotask(() => {
                 input.select();
@@ -903,6 +915,7 @@ function EngineDemoApp() {
             onBlur={() => {
               setFormulaFocused(false);
               rangeInsertionRef.current = null;
+              selectedReferenceIndexRef.current = null;
             }}
             onChange={(event) => {
               const value = event.currentTarget.value;
@@ -910,6 +923,7 @@ function EngineDemoApp() {
               draftRef.current = value;
               cellSyncTokenRef.current++;
               rangeInsertionRef.current = null;
+              selectedReferenceIndexRef.current = null;
               cursorRef.current = {
                 start: event.currentTarget.selectionStart ?? value.length,
                 end: event.currentTarget.selectionEnd ?? value.length
@@ -920,7 +934,33 @@ function EngineDemoApp() {
               event.preventDefault();
               void commitDraft();
             }}
-            onClick={syncCursorFromInput}
+            onClick={(event) => {
+              const input = event.currentTarget;
+              const prevSelectedReference = selectedReferenceIndexRef.current;
+              syncCursorFromInput();
+
+              if (!isFormulaEditingRef.current) return;
+
+              const start = input.selectionStart ?? input.value.length;
+              const end = input.selectionEnd ?? input.value.length;
+              if (start !== end) return;
+
+              const { references, activeIndex } = extractFormulaReferences(draftRef.current, start, end);
+              const active = activeIndex == null ? null : references[activeIndex] ?? null;
+              if (!active) return;
+
+              // Excel UX: click selects the whole reference token for easy range replacement.
+              // Clicking again inside the same token toggles back to a caret so users can
+              // manually edit within the reference.
+              if (prevSelectedReference === activeIndex) {
+                selectedReferenceIndexRef.current = null;
+                return;
+              }
+
+              input.setSelectionRange(active.start, active.end);
+              cursorRef.current = { start: active.start, end: active.end };
+              selectedReferenceIndexRef.current = activeIndex;
+            }}
             onKeyUp={syncCursorFromInput}
             onSelect={syncCursorFromInput}
             disabled={!provider || !activeAddress}
