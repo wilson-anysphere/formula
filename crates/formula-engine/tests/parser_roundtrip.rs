@@ -36,6 +36,20 @@ fn roundtrip_with_quoted_external_ref() {
 }
 
 #[test]
+fn roundtrip_with_unquoted_external_ref_with_spaces_in_workbook_name() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    roundtrip("=[Work Book-1.xlsx]Sheet1!A1+1", opts, ser);
+}
+
+#[test]
+fn roundtrip_with_unquoted_external_ref_with_apostrophe_in_workbook_name() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    roundtrip("=[Bob's.xlsx]Sheet1!A1+1", opts, ser);
+}
+
+#[test]
 fn roundtrip_preserves_sheet_quoting_for_names_that_cannot_be_unquoted() {
     let opts = ParseOptions::default();
     let ser = SerializeOptions::default();
