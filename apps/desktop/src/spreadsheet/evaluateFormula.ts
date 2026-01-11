@@ -63,11 +63,15 @@ export interface EvaluateFormulaOptions {
 // sentinel values like `#DLP!` for blocked AI calls). We intentionally *do not* treat
 // arbitrary `#`-prefixed strings as errors (e.g. `#hashtag`), because those are common
 // as plain text.
-const ERROR_CODE_REGEX =
+export const SPREADSHEET_ERROR_CODE_REGEX =
   /^#(?:DIV\/0!|N\/A|NAME\?|NULL!|NUM!|REF!|SPILL!|VALUE!|CALC!|GETTING_DATA|FIELD!|CONNECT!|BLOCKED!|UNKNOWN!|DLP!|AI!)$/;
 
+export function isSpreadsheetErrorCode(value: unknown): value is string {
+  return typeof value === "string" && SPREADSHEET_ERROR_CODE_REGEX.test(value);
+}
+
 function isErrorCode(value: unknown): value is string {
-  return typeof value === "string" && ERROR_CODE_REGEX.test(value);
+  return isSpreadsheetErrorCode(value);
 }
 
 function isProvenanceCellValue(value: unknown): value is ProvenanceCellValue {

@@ -16,6 +16,7 @@ import {
   type AiFunctionEvaluator,
   type CellValue,
   type ProvenanceCellValue,
+  isSpreadsheetErrorCode,
   type SpreadsheetValue,
 } from "./evaluateFormula.js";
 
@@ -36,10 +37,6 @@ const MAX_RANGE_HEADER_VALUES = 20;
 const MAX_RANGE_PREVIEW_VALUES = 30;
 const MAX_RANGE_SAMPLE_VALUES = 30;
 const MAX_USER_MESSAGE_CHARS = 16_000;
-
-// Match Excel-style error codes plus a couple of app-specific sentinels (see `evaluateFormula.ts`).
-const ERROR_CODE_REGEX =
-  /^#(?:DIV\/0!|N\/A|NAME\?|NULL!|NUM!|REF!|SPILL!|VALUE!|CALC!|GETTING_DATA|FIELD!|CONNECT!|BLOCKED!|UNKNOWN!|DLP!|AI!)$/;
 
 export interface AiCellFunctionEngineOptions {
   llmClient?: LLMClient;
@@ -1130,7 +1127,7 @@ function firstErrorCodeInValue(value: CellValue): string | null {
 }
 
 function isErrorCode(value: unknown): value is string {
-  return typeof value === "string" && ERROR_CODE_REGEX.test(value);
+  return isSpreadsheetErrorCode(value);
 }
 
 function isProvenanceCellValue(value: unknown): value is ProvenanceCellValue {
