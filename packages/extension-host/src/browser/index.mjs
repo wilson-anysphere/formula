@@ -17,6 +17,7 @@ const API_PERMISSIONS = {
   "cells.setRange": ["cells.write"],
 
   "sheets.getSheet": ["sheets.manage"],
+  "sheets.activateSheet": ["sheets.manage"],
   "sheets.createSheet": ["sheets.manage"],
   "sheets.renameSheet": ["sheets.manage"],
   "sheets.deleteSheet": ["sheets.manage"],
@@ -29,6 +30,10 @@ const API_PERMISSIONS = {
   "ui.setPanelHtml": ["ui.panels"],
   "ui.postMessageToPanel": ["ui.panels"],
   "ui.disposePanel": ["ui.panels"],
+  "ui.registerContextMenu": ["ui.menus"],
+  "ui.unregisterContextMenu": ["ui.menus"],
+  "ui.showInputBox": [],
+  "ui.showQuickPick": [],
 
   "functions.register": [],
   "functions.unregister": [],
@@ -91,6 +96,7 @@ class BrowserExtensionHost {
     this._extensions = new Map();
     this._commands = new Map();
     this._panels = new Map();
+    this._contextMenus = new Map();
     this._customFunctions = new Map();
     this._messages = [];
     this._pendingWorkerRequests = new Map();
@@ -485,6 +491,11 @@ class BrowserExtensionHost {
           return this._spreadsheet.getSheet(args[0]);
         }
         return this._defaultGetSheet(args[0]);
+      case "sheets.activateSheet":
+        if (typeof this._spreadsheet.activateSheet === "function") {
+          return this._spreadsheet.activateSheet(args[0]);
+        }
+        return this._defaultActivateSheet(args[0]);
       case "sheets.createSheet":
         if (typeof this._spreadsheet.createSheet === "function") {
           return this._spreadsheet.createSheet(args[0]);
@@ -524,6 +535,57 @@ class BrowserExtensionHost {
       case "ui.showMessage":
         this._messages.push({ message: args[0], type: args[1] });
         return null;
+
+      case "ui.showInputBox": {
+        // Placeholder implementation until the desktop UI wires actual input prompts.
+        const options = args[0] ?? {};
+        const value = options && typeof options === "object" ? options.value : undefined;
+        return typeof value === "string" ? value : null;
+      }
+
+      case "ui.showQuickPick": {
+        // Placeholder implementation: choose the first entry.
+        const items = Array.isArray(args[0]) ? args[0] : [];
+        if (items.length === 0) return null;
+        const first = items[0];
+        if (first && typeof first === "object" && Object.prototype.hasOwnProperty.call(first, "value")) {
+          return first.value;
+        }
+        return first;
+      }
+
+      case "ui.registerContextMenu": {
+        const menuId = String(args[0]);
+        const items = Array.isArray(args[1]) ? args[1] : [];
+        if (menuId.trim().length === 0) throw new Error("Menu id must be a non-empty string");
+
+        const normalized = [];
+        for (const [idx, item] of items.entries()) {
+          if (!item || typeof item !== "object") {
+            throw new Error(`Menu item at index ${idx} must be an object`);
+          }
+          const command = String(item.command ?? "");
+          if (command.trim().length === 0) {
+            throw new Error(`Menu item at index ${idx} must include a non-empty command`);
+          }
+          const when = item.when === undefined ? null : item.when === null ? null : String(item.when);
+          const group = item.group === undefined ? null : item.group === null ? null : String(item.group);
+          normalized.push({ command, when, group });
+        }
+
+        const id = createRequestId();
+        this._contextMenus.set(id, { id, extensionId: extension.id, menuId, items: normalized });
+        return { id };
+      }
+
+      case "ui.unregisterContextMenu": {
+        const id = String(args[0]);
+        const record = this._contextMenus.get(id);
+        if (record && record.extensionId === extension.id) {
+          this._contextMenus.delete(id);
+        }
+        return null;
+      }
 
       case "ui.createPanel": {
         const panelId = String(args[0]);
@@ -765,6 +827,18 @@ class BrowserExtensionHost {
     const sheet = this._sheets.find((s) => s.name === from);
     if (!sheet) throw new Error(`Unknown sheet: ${from}`);
     sheet.name = to;
+  }
+
+  _defaultActivateSheet(name) {
+    const sheetName = String(name);
+    const sheet = this._sheets.find((s) => s.name === sheetName);
+    if (!sheet) throw new Error(`Unknown sheet: ${sheetName}`);
+    if (sheet.id === this._activeSheetId) {
+      return { id: sheet.id, name: sheet.name };
+    }
+    this._activeSheetId = sheet.id;
+    this._broadcastEvent("sheetActivated", { sheet: { id: sheet.id, name: sheet.name } });
+    return { id: sheet.id, name: sheet.name };
   }
 
   _defaultDeleteSheet(name) {

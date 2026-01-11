@@ -298,6 +298,10 @@ const sheets = {
     return rpcCall("sheets", "getSheet", [String(name)]);
   },
 
+  async activateSheet(name) {
+    return rpcCall("sheets", "activateSheet", [String(name)]);
+  },
+
   async createSheet(name) {
     return rpcCall("sheets", "createSheet", [String(name)]);
   },
@@ -363,6 +367,37 @@ const functions = {
 const ui = {
   async showMessage(message, type = "info") {
     await rpcCall("ui", "showMessage", [String(message), String(type)]);
+  },
+
+  async showInputBox(options) {
+    const result = await rpcCall("ui", "showInputBox", [options ?? {}]);
+    if (result === null || result === undefined) return undefined;
+    return String(result);
+  },
+
+  async showQuickPick(items, options) {
+    const result = await rpcCall("ui", "showQuickPick", [
+      Array.isArray(items) ? items : [],
+      options ?? {}
+    ]);
+    if (result === null || result === undefined) return undefined;
+    return result;
+  },
+
+  async registerContextMenu(menuId, items) {
+    const id = String(menuId);
+    if (id.trim().length === 0) throw new Error("Menu id must be a non-empty string");
+    if (!Array.isArray(items)) throw new Error("Menu items must be an array");
+
+    const result = await rpcCall("ui", "registerContextMenu", [id, items]);
+    const registrationId = String(result?.id ?? "");
+    if (registrationId.trim().length === 0) {
+      throw new Error("Failed to register context menu: missing registration id");
+    }
+
+    return new DisposableImpl(() => {
+      rpcCall("ui", "unregisterContextMenu", [registrationId]).catch(notifyError);
+    });
   },
 
   async createPanel(id, options) {
@@ -432,6 +467,9 @@ const network = {
   async fetch(url, init) {
     const result = await rpcCall("network", "fetch", [String(url), init]);
     return createFetchResponse(result);
+  },
+  async openWebSocket(url) {
+    await rpcCall("network", "openWebSocket", [String(url)]);
   }
 };
 

@@ -93,6 +93,8 @@ let nextTimeoutId = 1;
 const timeouts = new Map(); // id -> NodeJS.Timeout
 let nextIntervalId = 1;
 const intervals = new Map(); // id -> NodeJS.Timeout
+let nextImmediateId = 1;
+const immediates = new Map(); // id -> NodeJS.Immediate
 
 function normalizeDelay(value) {
   const num = Number(value);
@@ -104,11 +106,7 @@ const hostSetTimeout = hardenHostFunction((callback, delay, ...args) => {
   const id = nextTimeoutId++;
   const handle = setTimeout(() => {
     timeouts.delete(id);
-    try {
-      callback(...args);
-    } catch {
-      // ignore
-    }
+    callback(...args);
   }, normalizeDelay(delay));
   timeouts.set(id, handle);
   return id;
@@ -124,11 +122,7 @@ const hostClearTimeout = hardenHostFunction((id) => {
 const hostSetInterval = hardenHostFunction((callback, delay, ...args) => {
   const id = nextIntervalId++;
   const handle = setInterval(() => {
-    try {
-      callback(...args);
-    } catch {
-      // ignore
-    }
+    callback(...args);
   }, normalizeDelay(delay));
   intervals.set(id, handle);
   return id;
@@ -141,14 +135,33 @@ const hostClearInterval = hardenHostFunction((id) => {
   clearInterval(handle);
 });
 
+const hostSetImmediate = hardenHostFunction((callback, ...args) => {
+  const id = nextImmediateId++;
+  const handle = setImmediate(() => {
+    immediates.delete(id);
+    callback(...args);
+  });
+  immediates.set(id, handle);
+  return id;
+});
+
+const hostClearImmediate = hardenHostFunction((id) => {
+  const handle = immediates.get(id);
+  if (!handle) return;
+  immediates.delete(id);
+  clearImmediate(handle);
+});
+
 const installSandboxTimers = vm.runInContext(
   `
-((hostSetTimeout, hostClearTimeout, hostSetInterval, hostClearInterval) => {
+((hostSetTimeout, hostClearTimeout, hostSetInterval, hostClearInterval, hostSetImmediate, hostClearImmediate) => {
   return {
     setTimeout: (cb, delay, ...args) => hostSetTimeout(cb, delay, ...args),
     clearTimeout: (id) => hostClearTimeout(id),
     setInterval: (cb, delay, ...args) => hostSetInterval(cb, delay, ...args),
-    clearInterval: (id) => hostClearInterval(id)
+    clearInterval: (id) => hostClearInterval(id),
+    setImmediate: (cb, ...args) => hostSetImmediate(cb, ...args),
+    clearImmediate: (id) => hostClearImmediate(id)
   };
 })
 `,
@@ -159,12 +172,16 @@ const sandboxTimers = installSandboxTimers(
   hostSetTimeout,
   hostClearTimeout,
   hostSetInterval,
-  hostClearInterval
+  hostClearInterval,
+  hostSetImmediate,
+  hostClearImmediate
 );
 sandboxGlobal.setTimeout = sandboxTimers.setTimeout;
 sandboxGlobal.clearTimeout = sandboxTimers.clearTimeout;
 sandboxGlobal.setInterval = sandboxTimers.setInterval;
 sandboxGlobal.clearInterval = sandboxTimers.clearInterval;
+sandboxGlobal.setImmediate = sandboxTimers.setImmediate;
+sandboxGlobal.clearImmediate = sandboxTimers.clearImmediate;
 
 function normalizeBuiltinRequest(request) {
   return request.startsWith("node:") ? request.slice("node:".length) : request;
