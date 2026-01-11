@@ -315,6 +315,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
   const zoomControlledRef = useRef(props.zoom !== undefined);
   zoomControlledRef.current = props.zoom !== undefined;
+  const zoomGestureRef = useRef<number | null>(null);
 
   const [uncontrolledZoom, setUncontrolledZoom] = useState(() => clampZoom(props.zoom ?? 1));
   const zoom = props.zoom !== undefined ? clampZoom(props.zoom) : uncontrolledZoom;
@@ -422,10 +423,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const setZoomInternal = (nextZoom: number, options?: { anchorX?: number; anchorY?: number; force?: boolean }) => {
     const clamped = clampZoom(nextZoom);
     if (zoomControlledRef.current && !options?.force) {
+      zoomGestureRef.current = clamped;
       onZoomChangeRef.current?.(clamped);
       return;
     }
 
+    zoomGestureRef.current = null;
     const prev = zoomRef.current;
     zoomRef.current = clamped;
     if (!zoomControlledRef.current) {
@@ -444,6 +447,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   };
 
   useEffect(() => {
+    zoomGestureRef.current = null;
     if (props.zoom === undefined) return;
     const clamped = clampZoom(props.zoom);
     setUncontrolledZoom(clamped);
@@ -806,7 +810,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         // `delta` is in pixels (after normalization). Use an exponential scale so
         // small trackpad deltas feel smooth while mouse wheels produce ~10% steps.
         const zoomFactor = Math.exp(-delta * 0.001);
-        setZoomInternal(zoomRef.current * zoomFactor, { anchorX, anchorY });
+        const baseZoom = zoomGestureRef.current ?? zoomRef.current;
+        setZoomInternal(baseZoom * zoomFactor, { anchorX, anchorY });
         return;
       }
 
@@ -1150,7 +1155,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           const a = points[0]!;
           const b = points[1]!;
           const distance = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) || 1;
-          touchPinch = { startDistance: distance, startZoom: zoomRef.current };
+          touchPinch = { startDistance: distance, startZoom: zoomGestureRef.current ?? zoomRef.current };
           touchPan = null;
           touchTapDisabled = true;
         }
