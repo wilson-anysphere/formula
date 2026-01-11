@@ -35,6 +35,12 @@ export function AIChatPanel(props: AIChatPanelProps) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [sending, setSending] = useState(false);
 
+  function messageId(): string {
+    const maybeCrypto = globalThis.crypto as Crypto | undefined;
+    if (maybeCrypto && typeof maybeCrypto.randomUUID === "function") return maybeCrypto.randomUUID();
+    return `msg-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+  }
+
   const systemPrompt = useMemo(
     () =>
       props.systemPrompt ??
@@ -65,7 +71,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
     setSending(true);
 
     const userMsg: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: messageId(),
       role: "user",
       content: text,
       attachments,
@@ -88,14 +94,14 @@ export function AIChatPanel(props: AIChatPanelProps) {
     try {
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: "", pending: true },
+        { id: messageId(), role: "assistant", content: "", pending: true },
       ]);
 
       const onToolCall = (call: ToolCall, meta: { requiresApproval: boolean }) => {
         setMessages((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: messageId(),
             role: "tool",
             content: `${call.name}(${JSON.stringify(call.arguments)})`,
             requiresApproval: meta.requiresApproval,
@@ -107,7 +113,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
         setMessages((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: messageId(),
             role: "tool",
             content: `${call.name} result:\n${formatToolResult(result)}`,
           },
@@ -141,7 +147,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
           lastAssistant.content = result.final;
           lastAssistant.pending = false;
         } else {
-          next.push({ id: crypto.randomUUID(), role: "assistant", content: result.final });
+          next.push({ id: messageId(), role: "assistant", content: result.final });
         }
         return next;
       });
@@ -149,7 +155,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
       const message = err instanceof Error ? err.message : String(err);
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "assistant", content: tWithVars("chat.errorWithMessage", { message }) },
+        { id: messageId(), role: "assistant", content: tWithVars("chat.errorWithMessage", { message }) },
       ]);
     } finally {
       setSending(false);
