@@ -456,6 +456,43 @@ describe("AiCellFunctionEngine", () => {
     expect(userMessage).not.toContain("secret payload");
   });
 
+  it("DLP redacts only disallowed cells in provenance arrays without a range ref", async () => {
+    const workbookId = "dlp-provenance-array";
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    markCellRestricted({ workbookId, sheetId: "Sheet1", row: 0, col: 0 }); // A1
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+    });
+
+    const input = [
+      { __cellRef: "Sheet1!A1", value: "secret payload" },
+      { __cellRef: "Sheet1!A2", value: "public payload" },
+    ];
+
+    const pending = engine.evaluateAiFunction({
+      name: "AI",
+      args: ["summarize", input as any],
+      cellAddress: "Sheet1!B1",
+    });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("[REDACTED]");
+    expect(userMessage).toContain("public payload");
+    expect(userMessage).not.toContain("secret payload");
+  });
+
   it("propagates spreadsheet error codes from referenced cells", () => {
     const llmClient = { chat: vi.fn() };
     const engine = new AiCellFunctionEngine({

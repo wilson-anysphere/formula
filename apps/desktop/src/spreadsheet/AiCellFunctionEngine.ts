@@ -753,7 +753,7 @@ function compactArgForPrompt(params: {
     return compactArrayForPrompt({
       functionName: params.functionName,
       argIndex: params.argIndex,
-      values: unwrapArrayValues(params.value),
+      entries: params.value as Array<SpreadsheetValue | ProvenanceCellValue>,
       rangeRef: rangeRefFromArray(params.value),
       provenance: params.provenance,
       shouldRedact: params.shouldRedact,
@@ -859,7 +859,7 @@ function compactScalarForPrompt(params: {
 function compactArrayForPrompt(params: {
   functionName: string;
   argIndex: number;
-  values: SpreadsheetValue[];
+  entries: Array<SpreadsheetValue | ProvenanceCellValue>;
   rangeRef: string | null;
   provenance: AiFunctionArgumentProvenance;
   shouldRedact: boolean;
@@ -869,7 +869,11 @@ function compactArrayForPrompt(params: {
   classificationRecords: Array<{ selector: any; classification: any }>;
   maxCellChars: number;
 }): { value: unknown; compaction: unknown; redactedCount: number } {
-  const providedCount = params.values.length;
+  const values: SpreadsheetValue[] = params.entries.map((entry) => (isProvenanceCellValue(entry) ? entry.value : (entry as SpreadsheetValue)));
+  const cellRefs: Array<string | null> = params.entries.map((entry) => (isProvenanceCellValue(entry) ? String(entry.__cellRef) : null));
+  const hasPerCellRefs = cellRefs.some((r) => Boolean(r && r.trim()));
+
+  const providedCount = values.length;
 
   const rangeCandidate = params.provenance.ranges?.length === 1 ? params.provenance.ranges[0]! : params.rangeRef;
   const parsedRange = rangeCandidate ? parseProvenanceRef(rangeCandidate, params.defaultSheetId) : null;
@@ -912,9 +916,39 @@ function compactArrayForPrompt(params: {
   const redactedSeen = new Set<number>();
   let redactedCount = 0;
 
+  const classificationForCellRef = (refText: string): any => {
+    let classification = { ...DEFAULT_CLASSIFICATION };
+    for (const ref of String(refText).split(PROVENANCE_REF_SEPARATOR)) {
+      const parsed = parseProvenanceRef(ref, params.defaultSheetId);
+      if (!parsed) continue;
+
+      if (parsed.isCell) {
+        classification = maxClassification(
+          classification,
+          effectiveCellClassification(
+            { documentId: params.documentId, sheetId: parsed.sheetId, row: parsed.range.start.row, col: parsed.range.start.col } as any,
+            params.classificationRecords,
+          ),
+        );
+      } else {
+        classification = maxClassification(
+          classification,
+          effectiveRangeClassification(
+            { documentId: params.documentId, sheetId: parsed.sheetId, range: parsed.range } as any,
+            params.classificationRecords,
+          ),
+        );
+      }
+
+      if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
+    }
+    return classification;
+  };
+
   const shouldRedactAll =
     params.shouldRedact &&
     !range &&
+    !hasPerCellRefs &&
     ((params.provenance.cells?.length ?? 0) > 0 || (params.provenance.ranges?.length ?? 0) > 0) &&
     (() => {
       const classification = classificationForProvenance({
@@ -947,7 +981,8 @@ function compactArrayForPrompt(params: {
   };
 
   const formatAt = (index: number): string => {
-    const raw = params.values[index] ?? null;
+    const raw = values[index] ?? null;
+    const cellRef = cellRefs[index];
 
     if (params.shouldRedact) {
       if (shouldRedactAll) {
@@ -958,6 +993,23 @@ function compactArrayForPrompt(params: {
         return DLP_REDACTION_PLACEHOLDER;
       }
 
+      if (cellRef) {
+        const classification = classificationForCellRef(cellRef);
+        const cellDecision = evaluatePolicy({
+          action: DLP_ACTION.AI_CLOUD_PROCESSING,
+          classification,
+          policy: params.policy,
+          options: { includeRestrictedContent: false },
+        });
+
+        if (cellDecision.decision !== DLP_DECISION.ALLOW) {
+          if (!redactedSeen.has(index)) {
+            redactedSeen.add(index);
+            redactedCount += 1;
+          }
+          return DLP_REDACTION_PLACEHOLDER;
+        }
+      } else
       // If we can map indices -> cells, enforce per-cell redaction.
       if (range && cols && rangeSheetId) {
         const rowOffset = Math.floor(index / cols);
