@@ -6,6 +6,12 @@ import path from "node:path";
 
 import WebSocket from "ws";
 
+import {
+  createMetadataManagerForSession,
+  createNamedRangeManagerForSession,
+  createSheetManagerForSession,
+} from "@formula/collab-workbook";
+
 import { createCollabSession } from "../src/index.ts";
 import { createCollabVersioning } from "../../versioning/src/index.ts";
 import { SQLiteVersionStore } from "../../../versioning/src/store/sqliteVersionStore.js";
@@ -14,6 +20,16 @@ import {
   startSyncServer,
   waitForCondition,
 } from "../../../../services/sync-server/test/test-helpers.ts";
+
+/**
+ * @param {import("../src/index.ts").CollabSession} session
+ */
+function snapshotSheets(session) {
+  return session.sheets.toArray().map((sheet) => ({
+    id: String(sheet.get("id") ?? ""),
+    name: sheet.get("name") == null ? null : String(sheet.get("name")),
+  }));
+}
 
 test("CollabVersioning integration: restore syncs + persists (sync-server)", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "collab-versioning-sync-server-"));
@@ -82,6 +98,26 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
     autoStart: false,
   });
 
+  const sheetsA = createSheetManagerForSession(sessionA);
+  const namedRangesA = createNamedRangeManagerForSession(sessionA);
+  const metadataA = createMetadataManagerForSession(sessionA);
+
+  // Workbook metadata that should be included in checkpoints/restores.
+  sheetsA.addSheet({ id: "Sheet2", name: "Budget" });
+  sheetsA.moveSheet("Sheet1", 1);
+  namedRangesA.set("MyRange", { sheetId: "Sheet2", range: "A1:B2" });
+  metadataA.set("title", "Quarterly Budget");
+
+  await waitForCondition(() => {
+    const sheets = snapshotSheets(sessionB);
+    if (sheets.length !== 2) return false;
+    if (sheets[0]?.id !== "Sheet2" || sheets[0]?.name !== "Budget") return false;
+    if (sheets[1]?.id !== "Sheet1") return false;
+    const nr = sessionB.namedRanges.get("MyRange");
+    if (nr?.sheetId !== "Sheet2" || nr?.range !== "A1:B2") return false;
+    return sessionB.metadata.get("title") === "Quarterly Budget";
+  }, 10_000);
+
   // Initial edits + checkpoint.
   sessionA.setCellValue("Sheet1:0:0", "alpha");
   sessionA.setCellValue("Sheet1:0:1", 123);
@@ -93,8 +129,15 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
   // More edits (including a new cell that should be deleted on restore).
   sessionA.setCellValue("Sheet1:0:0", "beta");
   sessionA.setCellValue("Sheet1:2:0", "extra");
+  sheetsA.renameSheet("Sheet2", "Budget Updated");
+  sheetsA.removeSheet("Sheet2");
+  namedRangesA.delete("MyRange");
+  metadataA.set("title", "After");
   await waitForCondition(() => sessionB.getCell("Sheet1:0:0")?.value === "beta", 10_000);
   await waitForCondition(() => sessionB.getCell("Sheet1:2:0")?.value === "extra", 10_000);
+  await waitForCondition(() => snapshotSheets(sessionB).length === 1, 10_000);
+  await waitForCondition(() => sessionB.namedRanges.has("MyRange") === false, 10_000);
+  await waitForCondition(() => sessionB.metadata.get("title") === "After", 10_000);
 
   // Restore the checkpoint and ensure the other collaborator converges.
   await versioning.restoreVersion(checkpoint.id);
@@ -102,6 +145,15 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
   await waitForCondition(() => sessionB.getCell("Sheet1:0:0")?.value === "alpha", 10_000);
   await waitForCondition(() => sessionB.getCell("Sheet1:0:1")?.value === 123, 10_000);
   await waitForCondition(() => sessionB.getCell("Sheet1:2:0") == null, 10_000);
+  await waitForCondition(() => {
+    const sheets = snapshotSheets(sessionB);
+    if (sheets.length !== 2) return false;
+    if (sheets[0]?.id !== "Sheet2" || sheets[0]?.name !== "Budget") return false;
+    if (sheets[1]?.id !== "Sheet1") return false;
+    const nr = sessionB.namedRanges.get("MyRange");
+    if (nr?.sheetId !== "Sheet2" || nr?.range !== "A1:B2") return false;
+    return sessionB.metadata.get("title") === "Quarterly Budget";
+  }, 10_000);
 
   assert.equal(sessionB.getCell("Sheet1:0:0")?.value, "alpha");
   assert.equal(sessionB.getCell("Sheet1:0:1")?.value, 123);
@@ -119,4 +171,3 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
   assert.ok(persisted.some((v) => v.kind === "restore"));
   reopened.close();
 });
-
