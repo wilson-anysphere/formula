@@ -1,5 +1,6 @@
 use std::io::{Cursor, Write};
 
+use formula_model::rich_text::{RichText, RichTextRunStyle};
 use formula_model::{CellRef, CellValue};
 
 use formula_xlsx::{CellPatch, WorkbookCellPatches, XlsxPackage};
@@ -32,6 +33,41 @@ fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
 
     zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
     zip.write_all(sheet_xml.as_bytes()).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
+fn build_minimal_xlsx_with_shared_strings(sheet_xml: &str, shared_strings_xml: &str) -> Vec<u8> {
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .unwrap();
+    zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.write_all(sheet_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/sharedStrings.xml", options).unwrap();
+    zip.write_all(shared_strings_xml.as_bytes()).unwrap();
 
     zip.finish().unwrap().into_inner()
 }
@@ -255,5 +291,121 @@ fn apply_cell_patches_inserts_new_cells_before_row_extlst() {
     assert!(
         b1_pos < ext_pos,
         "expected inserted cells to appear before row extLst, got: {out_xml}"
+    );
+}
+
+#[test]
+fn apply_cell_patches_uses_str_type_for_formula_string_results_without_touching_shared_strings() {
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1"/>
+  </sheetData>
+</worksheet>"#;
+
+    let shared_strings_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1">
+  <si><t>existing</t></si>
+</sst>"#;
+
+    let bytes = build_minimal_xlsx_with_shared_strings(worksheet_xml, shared_strings_xml);
+    let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let original_ss = pkg.part("xl/sharedStrings.xml").unwrap().to_vec();
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1").unwrap(),
+        CellPatch::set_value_with_formula(CellValue::String("hi".to_string()), r#"="hi""#),
+    );
+    pkg.apply_cell_patches(&patches).expect("apply patches");
+
+    assert_eq!(
+        pkg.part("xl/sharedStrings.xml").unwrap(),
+        original_ss.as_slice(),
+        "expected sharedStrings.xml to remain unchanged for formula string results"
+    );
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    let doc = roxmltree::Document::parse(out_xml).expect("parse worksheet xml");
+    let cell = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
+        .expect("expected A1 cell");
+    assert_eq!(cell.attribute("t"), Some("str"));
+    assert!(
+        cell.children()
+            .any(|n| n.is_element() && n.tag_name().name() == "v" && n.text() == Some("hi")),
+        "expected cached string result in <v>, got: {out_xml}"
+    );
+    assert!(
+        !cell
+            .children()
+            .any(|n| n.is_element() && n.tag_name().name() == "is"),
+        "expected no inline string <is> when using t=\"str\", got: {out_xml}"
+    );
+}
+
+#[test]
+fn apply_cell_patches_writes_inline_rich_text_when_shared_strings_absent() {
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1"/>
+  </sheetData>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(worksheet_xml);
+    let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let rich = RichText::from_segments(vec![
+        ("Hi ".to_string(), RichTextRunStyle::default()),
+        (
+            "World".to_string(),
+            RichTextRunStyle {
+                bold: Some(true),
+                ..Default::default()
+            },
+        ),
+    ]);
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1").unwrap(),
+        CellPatch::set_value(CellValue::RichText(rich)),
+    );
+    pkg.apply_cell_patches(&patches).expect("apply patches");
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    let doc = roxmltree::Document::parse(out_xml).expect("parse worksheet xml");
+    let cell = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
+        .expect("expected A1 cell");
+    assert_eq!(cell.attribute("t"), Some("inlineStr"));
+
+    let is = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "is")
+        .expect("expected inline string <is>");
+
+    let runs: Vec<_> = is
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "r")
+        .collect();
+    assert_eq!(
+        runs.len(),
+        2,
+        "expected two rich text runs inside <is>, got: {out_xml}"
+    );
+
+    assert!(
+        is.descendants()
+            .any(|n| n.is_element() && n.tag_name().name() == "b"),
+        "expected <b> element for bold rich text run, got: {out_xml}"
     );
 }

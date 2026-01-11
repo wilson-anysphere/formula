@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use formula_model::rich_text::RichText;
+use formula_model::rich_text::{RichText, RichTextRunStyle};
 use formula_model::{CellRef, CellValue, StyleTable};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
@@ -708,7 +708,6 @@ fn patch_sheet_data<R: std::io::BufRead>(
                             patch,
                             None,
                             None,
-                            None,
                             shared_strings,
                             style_id_to_xf,
                         )?;
@@ -794,7 +793,6 @@ fn patch_row<R: std::io::BufRead>(
                         patch,
                         None,
                         None,
-                        None,
                         shared_strings,
                         style_id_to_xf,
                     )?;
@@ -877,7 +875,6 @@ fn patch_row<R: std::io::BufRead>(
                         patch,
                         None,
                         None,
-                        None,
                         shared_strings,
                         style_id_to_xf,
                     )?;
@@ -919,7 +916,6 @@ fn patch_row<R: std::io::BufRead>(
                             patch,
                             None,
                             None,
-                            None,
                             shared_strings,
                             style_id_to_xf,
                         )?;
@@ -940,7 +936,6 @@ fn patch_row<R: std::io::BufRead>(
                             patch,
                             None,
                             None,
-                            None,
                             shared_strings,
                             style_id_to_xf,
                         )?;
@@ -958,7 +953,6 @@ fn patch_row<R: std::io::BufRead>(
                         row_num,
                         col,
                         patch,
-                        None,
                         None,
                         None,
                         shared_strings,
@@ -1000,7 +994,6 @@ fn write_new_row(
             patch,
             None,
             None,
-            None,
             shared_strings,
             style_id_to_xf,
         )?;
@@ -1016,7 +1009,6 @@ fn write_cell_patch(
     patch: &CellPatch,
     existing_t: Option<&str>,
     existing_s: Option<&str>,
-    existing_shared_idx: Option<u32>,
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
 ) -> Result<bool, XlsxError> {
@@ -1028,213 +1020,47 @@ fn write_cell_patch(
         .style_index_override(style_id_to_xf)?
         .or_else(|| existing_s.and_then(|s| s.parse::<u32>().ok()));
 
-    let mut cell = String::new();
-    cell.push_str(r#"<c r=""#);
-    cell.push_str(&a1);
-    cell.push('"');
-
-    if let Some(s) = style_index.filter(|s| *s != 0) {
-        cell.push_str(&format!(r#" s="{s}""#));
-    }
-
     let (value, formula) = match patch {
         CellPatch::Clear { .. } => (None, None),
         CellPatch::Set { value, formula, .. } => (Some(value), formula.as_deref()),
     };
 
-    let mut ty: Option<&str> = None;
-    let mut value_xml = String::new();
-
-    if let Some(formula) = formula {
-        let display = crate::formula_text::normalize_display_formula(formula);
-        let formula = crate::formula_text::add_xlfn_prefixes(&display);
-        value_xml.push_str("<f>");
-        value_xml.push_str(&escape_text(&formula));
-        value_xml.push_str("</f>");
-    }
-
-    if let Some(value) = value {
-        match value {
-            CellValue::Empty => {}
-            CellValue::Number(n) => {
-                value_xml.push_str("<v>");
-                value_xml.push_str(&escape_text(&n.to_string()));
-                value_xml.push_str("</v>");
-            }
-            CellValue::Boolean(b) => {
-                ty = Some("b");
-                value_xml.push_str("<v>");
-                value_xml.push_str(if *b { "1" } else { "0" });
-                value_xml.push_str("</v>");
-            }
-            CellValue::Error(e) => {
-                ty = Some("e");
-                value_xml.push_str("<v>");
-                value_xml.push_str(&escape_text(e.as_str()));
-                value_xml.push_str("</v>");
-            }
-            CellValue::String(s) => {
-                // Preserve existing string storage form when possible; otherwise default to shared
-                // strings when the package already has `sharedStrings.xml`.
-                // If the existing cell uses an unknown/less-common type (e.g. `t="d"`), keep the
-                // type and write the raw value text into `<v>`. This avoids corrupting the sheet
-                // by rewriting it as a shared string / inline string when we don't understand the
-                // original semantics.
-                if let Some(existing_t) = existing_t {
-                    if !matches!(existing_t, "s" | "b" | "e" | "n" | "str" | "inlineStr") {
-                        ty = Some(existing_t);
-                        value_xml.push_str("<v>");
-                        value_xml.push_str(&escape_text(s));
-                        value_xml.push_str("</v>");
-                    } else {
-                        let prefer_shared = shared_strings.is_some() && existing_t != "inlineStr";
-
-                        match (existing_t, prefer_shared) {
-                            ("inlineStr", _) => {
-                                ty = Some("inlineStr");
-                                value_xml.push_str("<is><t");
-                                if needs_space_preserve(s) {
-                                    value_xml.push_str(r#" xml:space="preserve""#);
-                                }
-                                value_xml.push('>');
-                                value_xml.push_str(&escape_text(s));
-                                value_xml.push_str("</t></is>");
-                            }
-                            ("str", _) => {
-                                ty = Some("str");
-                                value_xml.push_str("<v>");
-                                value_xml.push_str(&escape_text(s));
-                                value_xml.push_str("</v>");
-                            }
-                            (_, true) => {
-                                let reuse_idx = existing_shared_idx.and_then(|idx| {
-                                    let matches = shared_strings
-                                        .as_deref()
-                                        .and_then(|ss| ss.rich_at(idx))
-                                        .map(|rt| rt.text.as_str() == s)
-                                        .unwrap_or(false);
-                                    matches.then_some(idx)
-                                });
-
-                                let idx = reuse_idx.unwrap_or_else(|| {
-                                    shared_strings
-                                        .as_deref_mut()
-                                        .map(|ss| ss.get_or_insert_plain(s))
-                                        .unwrap_or(0)
-                                });
-                                ty = Some("s");
-                                value_xml.push_str("<v>");
-                                value_xml.push_str(&idx.to_string());
-                                value_xml.push_str("</v>");
-                            }
-                            _ => {
-                                ty = Some("inlineStr");
-                                value_xml.push_str("<is><t");
-                                if needs_space_preserve(s) {
-                                    value_xml.push_str(r#" xml:space="preserve""#);
-                                }
-                                value_xml.push('>');
-                                value_xml.push_str(&escape_text(s));
-                                value_xml.push_str("</t></is>");
-                            }
-                        }
-                    }
-                } else {
-                    let prefer_shared = shared_strings.is_some();
-
-                    if prefer_shared {
-                        let reuse_idx = existing_shared_idx.and_then(|idx| {
-                            let matches = shared_strings
-                                .as_deref()
-                                .and_then(|ss| ss.rich_at(idx))
-                                .map(|rt| rt.text.as_str() == s)
-                                .unwrap_or(false);
-                            matches.then_some(idx)
-                        });
-                        let idx = reuse_idx.unwrap_or_else(|| {
-                            shared_strings
-                                .as_deref_mut()
-                                .map(|ss| ss.get_or_insert_plain(s))
-                                .unwrap_or(0)
-                        });
-                        ty = Some("s");
-                        value_xml.push_str("<v>");
-                        value_xml.push_str(&idx.to_string());
-                        value_xml.push_str("</v>");
-                    } else {
-                        ty = Some("inlineStr");
-                        value_xml.push_str("<is><t");
-                        if needs_space_preserve(s) {
-                            value_xml.push_str(r#" xml:space="preserve""#);
-                        }
-                        value_xml.push('>');
-                        value_xml.push_str(&escape_text(s));
-                        value_xml.push_str("</t></is>");
-                    }
-                }
-            }
-            CellValue::RichText(rich) => {
-                let prefer_shared = shared_strings.is_some() && existing_t != Some("inlineStr");
-                if prefer_shared {
-                    let reuse_idx = existing_shared_idx.and_then(|idx| {
-                        let matches = shared_strings
-                            .as_deref()
-                            .and_then(|ss| ss.rich_at(idx))
-                            .map(|rt| rt == rich)
-                            .unwrap_or(false);
-                        matches.then_some(idx)
-                    });
-                    let idx = reuse_idx.unwrap_or_else(|| {
-                        shared_strings
-                            .as_deref_mut()
-                            .map(|ss| ss.get_or_insert_rich(rich))
-                            .unwrap_or(0)
-                    });
-                    ty = Some("s");
-                    value_xml.push_str("<v>");
-                    value_xml.push_str(&idx.to_string());
-                    value_xml.push_str("</v>");
-                } else {
-                    // Inline rich text support would require writing `<is><r>...`; for now we
-                    // preserve the plain text as an inline string when a shared strings table is
-                    // unavailable.
-                    ty = Some("inlineStr");
-                    value_xml.push_str("<is><t");
-                    if needs_space_preserve(&rich.text) {
-                        value_xml.push_str(r#" xml:space="preserve""#);
-                    }
-                    value_xml.push('>');
-                    value_xml.push_str(&escape_text(&rich.text));
-                    value_xml.push_str("</t></is>");
-                }
-            }
-            CellValue::Array(_) | CellValue::Spill(_) => {
-                return Err(XlsxError::Invalid(format!(
-                    "unsupported cell value type for patch: {value:?}"
-                )));
-            }
-        }
-    }
-
-    if let Some(t) = ty {
-        cell.push_str(&format!(r#" t="{t}""#));
-    }
+    let (new_t, body_kind) =
+        cell_representation_for_patch(value, formula, existing_t, shared_strings)?;
 
     if let Some(shared_strings) = shared_strings.as_deref_mut() {
         let old_uses_shared = existing_t == Some("s");
-        let new_uses_shared = ty == Some("s");
+        let new_uses_shared = new_t.as_deref() == Some("s");
         shared_strings.note_shared_string_ref_delta(old_uses_shared, new_uses_shared);
     }
 
-    if value_xml.is_empty() {
-        cell.push_str("/>");
-    } else {
-        cell.push('>');
-        cell.push_str(&value_xml);
-        cell.push_str("</c>");
+    let mut c = BytesStart::new("c");
+    c.push_attribute(("r", a1.as_str()));
+
+    let style_value = style_index.filter(|s| *s != 0).map(|s| s.to_string());
+    if let Some(style) = style_value.as_deref() {
+        c.push_attribute(("s", style));
     }
 
-    writer.get_mut().extend_from_slice(cell.as_bytes());
+    if let Some(t) = new_t.as_deref() {
+        c.push_attribute(("t", t));
+    }
+
+    let has_children = formula.is_some() || !matches!(body_kind, CellBodyKind::None);
+    if !has_children {
+        writer.write_event(Event::Empty(c))?;
+        return Ok(true);
+    }
+
+    writer.write_event(Event::Start(c))?;
+
+    if let Some(formula) = formula {
+        write_formula_element(writer, None, formula, false, "f")?;
+    }
+
+    write_value_element(writer, &body_kind, "v", "is", "t")?;
+
+    writer.write_event(Event::End(BytesEnd::new("c")))?;
     Ok(true)
 }
 
@@ -1269,6 +1095,7 @@ enum CellBodyKind {
     None,
     V(String),
     InlineStr(String),
+    InlineRich(RichText),
 }
 
 fn patch_cell_element(
@@ -1637,32 +1464,56 @@ fn cell_representation_for_patch(
                 if should_preserve_unknown_t(existing_t) {
                     return Ok((Some(existing_t.to_string()), CellBodyKind::V(s.clone())));
                 }
-
-                let prefer_shared = shared_strings.is_some() && existing_t != "inlineStr";
-                match (existing_t, prefer_shared) {
-                    ("inlineStr", _) => Ok((Some("inlineStr".to_string()), CellBodyKind::InlineStr(s.clone()))),
-                    ("str", _) => Ok((Some("str".to_string()), CellBodyKind::V(s.clone()))),
-                    (_, true) => {
-                        let idx = shared_strings
-                            .as_deref_mut()
-                            .map(|ss| ss.get_or_insert_plain(s))
-                            .unwrap_or(0);
-                        Ok((Some("s".to_string()), CellBodyKind::V(idx.to_string())))
+                match existing_t {
+                    "inlineStr" => {
+                        return Ok((
+                            Some("inlineStr".to_string()),
+                            CellBodyKind::InlineStr(s.clone()),
+                        ));
                     }
-                    _ => Ok((Some("inlineStr".to_string()), CellBodyKind::InlineStr(s.clone()))),
+                    "str" => return Ok((Some("str".to_string()), CellBodyKind::V(s.clone()))),
+                    _ => {}
                 }
-            } else if shared_strings.is_some() {
-                let idx = shared_strings
-                    .as_deref_mut()
-                    .map(|ss| ss.get_or_insert_plain(s))
-                    .unwrap_or(0);
-                Ok((Some("s".to_string()), CellBodyKind::V(idx.to_string())))
+            }
+
+            if shared_strings.is_some() {
+                let wants_shared = match existing_t {
+                    Some("s") => true,
+                    // Match streaming patcher behavior: prefer `t="str"` for formula string results
+                    // unless the original cell already used shared strings.
+                    _ => formula.is_none(),
+                };
+                if wants_shared {
+                    let idx = shared_strings
+                        .as_deref_mut()
+                        .map(|ss| ss.get_or_insert_plain(s))
+                        .unwrap_or(0);
+                    return Ok((Some("s".to_string()), CellBodyKind::V(idx.to_string())));
+                }
+            }
+
+            if formula.is_some() {
+                Ok((Some("str".to_string()), CellBodyKind::V(s.clone())))
             } else {
-                let _ = formula;
-                Ok((Some("inlineStr".to_string()), CellBodyKind::InlineStr(s.clone())))
+                Ok((
+                    Some("inlineStr".to_string()),
+                    CellBodyKind::InlineStr(s.clone()),
+                ))
             }
         }
         CellValue::RichText(rich) => {
+            if let Some(existing_t) = existing_t {
+                if should_preserve_unknown_t(existing_t) {
+                    return Ok((Some(existing_t.to_string()), CellBodyKind::V(rich.text.clone())));
+                }
+                if existing_t == "inlineStr" {
+                    return Ok((
+                        Some("inlineStr".to_string()),
+                        CellBodyKind::InlineRich(rich.clone()),
+                    ));
+                }
+            }
+
             let prefer_shared = shared_strings.is_some() && existing_t != Some("inlineStr");
             if prefer_shared {
                 let idx = shared_strings
@@ -1673,7 +1524,7 @@ fn cell_representation_for_patch(
             } else {
                 Ok((
                     Some("inlineStr".to_string()),
-                    CellBodyKind::InlineStr(rich.text.clone()),
+                    CellBodyKind::InlineRich(rich.clone()),
                 ))
             }
         }
@@ -1985,19 +1836,119 @@ fn write_value_element(
         }
         CellBodyKind::InlineStr(text) => {
             writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
-            let mut t = BytesStart::new(t_tag);
-            if needs_space_preserve(text) {
-                t.push_attribute(("xml:space", "preserve"));
+            write_rich_text_t(writer, t_tag, text)?;
+            writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
+        }
+        CellBodyKind::InlineRich(rich) => {
+            let prefix = t_tag.rsplit_once(':').map(|(p, _)| p);
+            let r_tag = prefixed_tag(prefix, "r");
+            let rpr_tag = prefixed_tag(prefix, "rPr");
+
+            writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
+            if rich.runs.is_empty() {
+                write_rich_text_t(writer, t_tag, &rich.text)?;
+            } else {
+                for run in &rich.runs {
+                    writer.write_event(Event::Start(BytesStart::new(r_tag.as_str())))?;
+                    if !run.style.is_empty() {
+                        writer.write_event(Event::Start(BytesStart::new(rpr_tag.as_str())))?;
+                        write_rich_text_rpr(writer, prefix, &run.style)?;
+                        writer.write_event(Event::End(BytesEnd::new(rpr_tag.as_str())))?;
+                    }
+
+                    let segment = rich.slice_run_text(run);
+                    write_rich_text_t(writer, t_tag, segment)?;
+
+                    writer.write_event(Event::End(BytesEnd::new(r_tag.as_str())))?;
+                }
             }
-            writer.write_event(Event::Start(t))?;
-            writer.write_event(Event::Text(BytesText::new(text)))?;
-            writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
             writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
         }
         CellBodyKind::None => {}
     }
 
     Ok(())
+}
+
+fn write_rich_text_t(
+    writer: &mut Writer<Vec<u8>>,
+    t_tag: &str,
+    text: &str,
+) -> Result<(), XlsxError> {
+    let mut t = BytesStart::new(t_tag);
+    if needs_space_preserve(text) {
+        t.push_attribute(("xml:space", "preserve"));
+    }
+    writer.write_event(Event::Start(t))?;
+    writer.write_event(Event::Text(BytesText::new(text)))?;
+    writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+    Ok(())
+}
+
+fn write_rich_text_rpr(
+    writer: &mut Writer<Vec<u8>>,
+    prefix: Option<&str>,
+    style: &RichTextRunStyle,
+) -> Result<(), XlsxError> {
+    if let Some(font) = &style.font {
+        let mut rfont = BytesStart::new(prefixed_tag(prefix, "rFont"));
+        rfont.push_attribute(("val", font.as_str()));
+        writer.write_event(Event::Empty(rfont))?;
+    }
+
+    if let Some(size_100pt) = style.size_100pt {
+        let mut sz = BytesStart::new(prefixed_tag(prefix, "sz"));
+        let value = format_size_100pt(size_100pt);
+        sz.push_attribute(("val", value.as_str()));
+        writer.write_event(Event::Empty(sz))?;
+    }
+
+    if let Some(color) = style.color {
+        let mut c = BytesStart::new(prefixed_tag(prefix, "color"));
+        let value = format!("{:08X}", color.argb().unwrap_or(0));
+        c.push_attribute(("rgb", value.as_str()));
+        writer.write_event(Event::Empty(c))?;
+    }
+
+    if let Some(bold) = style.bold {
+        let mut b = BytesStart::new(prefixed_tag(prefix, "b"));
+        if !bold {
+            b.push_attribute(("val", "0"));
+        }
+        writer.write_event(Event::Empty(b))?;
+    }
+
+    if let Some(italic) = style.italic {
+        let mut i = BytesStart::new(prefixed_tag(prefix, "i"));
+        if !italic {
+            i.push_attribute(("val", "0"));
+        }
+        writer.write_event(Event::Empty(i))?;
+    }
+
+    if let Some(ul) = style.underline {
+        let mut u = BytesStart::new(prefixed_tag(prefix, "u"));
+        if let Some(val) = ul.to_ooxml() {
+            u.push_attribute(("val", val));
+        }
+        writer.write_event(Event::Empty(u))?;
+    }
+
+    Ok(())
+}
+
+fn format_size_100pt(size_100pt: u16) -> String {
+    let int = size_100pt / 100;
+    let frac = size_100pt % 100;
+    if frac == 0 {
+        return int.to_string();
+    }
+
+    let mut s = format!("{int}.{frac:02}");
+    while s.ends_with('0') {
+        s.pop();
+    }
+    s
 }
 
 fn should_detach_shared_formula(f: &BytesStart<'_>, patch_formula: &str) -> bool {
@@ -2093,12 +2044,6 @@ fn local_name(name: &[u8]) -> &[u8] {
 
 fn needs_space_preserve(text: &str) -> bool {
     text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace)
-}
-
-fn escape_text(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 fn patch_bounds(patches: &WorksheetCellPatches) -> Option<(u32, u32, u32, u32)> {
