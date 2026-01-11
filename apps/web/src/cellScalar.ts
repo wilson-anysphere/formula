@@ -1,4 +1,5 @@
 import type { CellScalar } from "@formula/engine";
+import { normalizeFormulaTextOpt } from "@formula/engine";
 
 export function scalarToDisplayString(value: CellScalar): string {
   if (value === null) return "";
@@ -7,7 +8,9 @@ export function scalarToDisplayString(value: CellScalar): string {
 }
 
 export function parseCellScalarInput(raw: string): CellScalar {
-  if (raw.startsWith("=") && raw.length > 1) return raw;
+  if (raw.trimStart().startsWith("=")) {
+    return normalizeFormulaTextOpt(raw);
+  }
 
   const trimmed = raw.trim();
   if (trimmed === "") return null;
@@ -23,6 +26,5 @@ export function parseCellScalarInput(raw: string): CellScalar {
 }
 
 export function isFormulaInput(value: CellScalar): value is string {
-  return typeof value === "string" && value.startsWith("=") && value.length > 1;
+  return typeof value === "string" && value.trimStart().startsWith("=");
 }
-

@@ -55,7 +55,7 @@ function cellInputFromState(state) {
 function isFormulaString(input) {
   if (typeof input !== "string") return false;
   const trimmed = input.trimStart();
-  return trimmed.startsWith("=") && trimmed.length > 1;
+  return trimmed.startsWith("=");
 }
 
 function denseRectForDeltas(deltas) {

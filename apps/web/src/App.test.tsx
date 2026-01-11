@@ -102,7 +102,14 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("@formula/engine", () => ({
-  createEngineClient: () => mocks.engine
+  createEngineClient: () => mocks.engine,
+  normalizeFormulaTextOpt: (formula: string) => {
+    const trimmed = String(formula).trim();
+    const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+    const stripped = strippedLeading.trim();
+    if (stripped === "") return null;
+    return `=${stripped}`;
+  }
 }));
 
 function createMock2dContext(

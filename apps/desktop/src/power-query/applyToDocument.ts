@@ -74,7 +74,7 @@ function cellValueToDocumentInput(value: unknown): unknown {
   // Wrap these strings in `{ value }` to bypass the string parsing path.
   if (typeof value === "string") {
     const trimmed = value.trimStart();
-    if ((trimmed.startsWith("=") && trimmed.length > 1) || value.startsWith("'")) {
+    if (trimmed.startsWith("=") || value.startsWith("'")) {
       return { value };
     }
   }
