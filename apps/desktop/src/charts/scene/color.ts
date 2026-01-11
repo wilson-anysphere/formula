@@ -14,15 +14,25 @@ function getCssParserCtx(): CanvasRenderingContext2D | null {
   if (cssParserCtx !== undefined) return cssParserCtx;
 
   if (typeof OffscreenCanvas !== "undefined") {
-    const canvas = new OffscreenCanvas(1, 1);
-    cssParserCtx = canvas.getContext("2d");
-    return cssParserCtx ?? null;
+    try {
+      const canvas = new OffscreenCanvas(1, 1);
+      cssParserCtx = canvas.getContext("2d");
+      return cssParserCtx ?? null;
+    } catch {
+      cssParserCtx = null;
+      return null;
+    }
   }
 
   if (typeof document !== "undefined") {
-    const canvas = document.createElement("canvas");
-    cssParserCtx = canvas.getContext("2d");
-    return cssParserCtx ?? null;
+    try {
+      const canvas = document.createElement("canvas");
+      cssParserCtx = canvas.getContext("2d");
+      return cssParserCtx ?? null;
+    } catch {
+      cssParserCtx = null;
+      return null;
+    }
   }
 
   cssParserCtx = null;
