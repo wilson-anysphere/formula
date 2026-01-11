@@ -79,7 +79,19 @@ export class YjsBranchStore {
    * @param {DocumentState} initialState
    */
   async ensureDocument(docId, actor, initialState) {
-    const existingRoot = this.#meta.get("rootCommitId");
+    let existingRoot = this.#meta.get("rootCommitId");
+    if (typeof existingRoot !== "string" || existingRoot.length === 0) {
+      const inferredRoot = this.#inferRootCommitId(docId);
+      if (inferredRoot) {
+        this.#ydoc.transact(() => {
+          const current = this.#meta.get("rootCommitId");
+          if (typeof current === "string" && current.length > 0) return;
+          this.#meta.set("rootCommitId", inferredRoot);
+        });
+        existingRoot = inferredRoot;
+      }
+    }
+
     if (typeof existingRoot === "string" && existingRoot.length > 0) {
       const rootCommitMap = getYMap(this.#commits.get(existingRoot));
       if (!rootCommitMap) throw new Error(`Root commit not found: ${existingRoot}`);
@@ -96,6 +108,8 @@ export class YjsBranchStore {
       const needsSnapshot = rootCommitMap.get("snapshot") === undefined && patch;
       const snapshot = needsSnapshot ? this._applyPatch(emptyDocumentState(), patch) : null;
 
+      const headForMissingMainBranch = this.#inferLatestCommitId(docId) ?? existingRoot;
+
       this.#ydoc.transact(() => {
         // Backwards-compatible migration: ensure main branch exists.
         let mainBranch = getYMap(this.#branches.get("main"));
@@ -110,7 +124,7 @@ export class YjsBranchStore {
           main.set("createdBy", createdBy);
           main.set("createdAt", createdAt);
           main.set("description", null);
-          main.set("headCommitId", existingRoot);
+          main.set("headCommitId", headForMissingMainBranch);
           this.#branches.set("main", main);
           mainBranch = main;
         } else if (String(mainBranch.get("docId") ?? "") !== docId) {
@@ -176,17 +190,93 @@ export class YjsBranchStore {
   }
 
   /**
+   * Best-effort recovery for corrupted/migrating docs: infer the root commit id
+   * even if `branching:meta.rootCommitId` is missing.
+   *
+   * @param {string} docId
+   * @returns {string | null}
+   */
+  #inferRootCommitId(docId) {
+    const mainBranch = getYMap(this.#branches.get("main"));
+    if (mainBranch) {
+      const branchDocId = mainBranch.get("docId");
+      if (typeof branchDocId === "string" && branchDocId.length > 0 && branchDocId !== docId) {
+        return null;
+      }
+      let currentId = mainBranch.get("headCommitId");
+      /** @type {Set<string>} */
+      const seen = new Set();
+      while (typeof currentId === "string" && currentId.length > 0) {
+        if (seen.has(currentId)) break;
+        seen.add(currentId);
+        const commitMap = getYMap(this.#commits.get(currentId));
+        if (!commitMap) break;
+        const parent = commitMap.get("parentCommitId");
+        if (!parent) return currentId;
+        currentId = parent;
+      }
+    }
+
+    /** @type {{ id: string, createdAt: number }[]} */
+    const candidates = [];
+    this.#commits.forEach((value, key) => {
+      const commitMap = getYMap(value);
+      if (!commitMap) return;
+      const parent = commitMap.get("parentCommitId");
+      if (parent !== null && parent !== undefined) return;
+
+      const commitDocId = commitMap.get("docId");
+      if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
+      const createdAt = Number(commitMap.get("createdAt") ?? 0);
+      if (typeof key === "string" && key.length > 0) candidates.push({ id: key, createdAt });
+    });
+
+    candidates.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    return candidates[0]?.id ?? null;
+  }
+
+  /**
+   * Infer a reasonable branch head for a repaired "main" branch.
+   *
+   * @param {string} docId
+   * @returns {string | null}
+   */
+  #inferLatestCommitId(docId) {
+    /** @type {{ id: string, createdAt: number }[]} */
+    const candidates = [];
+    this.#commits.forEach((value, key) => {
+      const commitMap = getYMap(value);
+      if (!commitMap) return;
+      const commitDocId = commitMap.get("docId");
+      if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
+      const createdAt = Number(commitMap.get("createdAt") ?? 0);
+      if (typeof key === "string" && key.length > 0) candidates.push({ id: key, createdAt });
+    });
+
+    candidates.sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id));
+    return candidates[0]?.id ?? null;
+  }
+
+  /**
    * @param {string} docId
    * @returns {Promise<boolean>}
    */
   async hasDocument(docId) {
-    const root = this.#meta.get("rootCommitId");
+    let root = this.#meta.get("rootCommitId");
+    if (typeof root !== "string" || root.length === 0) {
+      root = this.#inferRootCommitId(docId);
+    }
     if (typeof root !== "string" || root.length === 0) return false;
     const commit = getYMap(this.#commits.get(root));
     if (!commit) return false;
     const commitDocId = commit.get("docId");
     if (typeof commitDocId === "string" && commitDocId.length > 0) {
       return commitDocId === docId;
+    }
+    const mainBranch = getYMap(this.#branches.get("main"));
+    const mainDocId = mainBranch?.get("docId");
+    if (typeof mainDocId === "string" && mainDocId.length > 0) {
+      return mainDocId === docId;
     }
     return true;
   }
