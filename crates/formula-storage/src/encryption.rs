@@ -110,7 +110,7 @@ impl KeyProvider for InMemoryKeyProvider {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct KeyBytes([u8; KEY_LEN]);
 
 impl KeyBytes {
@@ -120,6 +120,14 @@ impl KeyBytes {
 
     pub fn as_bytes(&self) -> &[u8; KEY_LEN] {
         &self.0
+    }
+}
+
+impl std::fmt::Debug for KeyBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("KeyBytes")
+            .field(&format_args!("<redacted; {KEY_LEN} bytes>"))
+            .finish()
     }
 }
 
@@ -149,11 +157,21 @@ impl<'de> Deserialize<'de> for KeyBytes {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyRing {
     pub current_version: u32,
     pub keys: BTreeMap<u32, KeyBytes>,
+}
+
+impl std::fmt::Debug for KeyRing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let versions: Vec<u32> = self.keys.keys().copied().collect();
+        f.debug_struct("KeyRing")
+            .field("current_version", &self.current_version)
+            .field("key_versions", &versions)
+            .finish()
+    }
 }
 
 impl KeyRing {
