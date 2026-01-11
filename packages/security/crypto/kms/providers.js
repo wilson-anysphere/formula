@@ -37,7 +37,7 @@ async function loadAwsSdk() {
       throw new Error(
         [
           "AwsKmsProvider is not available in this build.",
-          "Install @aws-sdk/client-kms to enable it.",
+          "Install @aws-sdk/client-kms (as a dependency of the service/runtime image) to enable it.",
           `Underlying error: ${message}`
         ].join(" ")
       );
