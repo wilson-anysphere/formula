@@ -547,10 +547,10 @@ mod tests {
         // End of sheets list (we keep scanning for context records).
         write_record(&mut workbook_bin, biff12::SHEETS_END, &[]);
 
-        // Internal SupBook (raw name is empty string).
+        // Internal SupBook (some producers store the first sheet name here rather than an empty string).
         let mut supbook = Vec::new();
         supbook.extend_from_slice(&2u16.to_le_bytes()); // ctab
-        supbook.extend_from_slice(&0u32.to_le_bytes()); // empty xlWideString
+        write_utf16_string(&mut supbook, "Sheet1");
         write_record(&mut workbook_bin, 0x01AE, &supbook);
 
         // ExternSheet table mapping ixti 0 -> Sheet1, ixti 1 -> Sheet2.
