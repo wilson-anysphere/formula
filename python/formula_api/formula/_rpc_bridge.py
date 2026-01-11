@@ -56,6 +56,13 @@ class StdioRpcBridge:
     def rename_sheet(self, sheet_id: str, name: str) -> None:
         self._request("rename_sheet", {"sheet_id": sheet_id, "name": name})
 
+    # Selection operations
+    def get_selection(self) -> Dict[str, Any]:
+        return self._request("get_selection", None)
+
+    def set_selection(self, selection: Dict[str, Any]) -> None:
+        self._request("set_selection", {"selection": selection})
+
     # Range/cell operations
     def get_range_values(self, range_ref: Dict[str, Any]) -> List[List[Any]]:
         return self._request("get_range_values", {"range": range_ref})
@@ -75,3 +82,9 @@ class StdioRpcBridge:
     def clear_range(self, range_ref: Dict[str, Any]) -> None:
         self._request("clear_range", {"range": range_ref})
 
+    # Formatting operations
+    def set_range_format(self, range_ref: Dict[str, Any], format_obj: Any) -> None:
+        self._request("set_range_format", {"range": range_ref, "format": format_obj})
+
+    def get_range_format(self, range_ref: Dict[str, Any]) -> Any:
+        return self._request("get_range_format", {"range": range_ref})

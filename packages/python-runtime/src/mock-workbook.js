@@ -6,6 +6,29 @@ function cellKey(row, col) {
   return `${row},${col}`;
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function deepMerge(base, patch) {
+  if (!isPlainObject(base) || !isPlainObject(patch)) return patch;
+  const out = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    if (isPlainObject(value) && isPlainObject(out[key])) {
+      out[key] = deepMerge(out[key], value);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function applyFormatPatch(base, patch) {
+  if (patch == null) return {};
+  return deepMerge(isPlainObject(base) ? base : {}, patch);
+}
+
 function colLettersToIndex(letters) {
   let col = 0;
   for (const ch of letters) {
@@ -166,6 +189,13 @@ export class MockWorkbook {
     this.sheets = new Map();
     this.activeSheetId = sheetIdForIndex(1);
     this.sheets.set(this.activeSheetId, { id: this.activeSheetId, name: "Sheet1", cells: new Map() });
+    this.selection = {
+      sheet_id: this.activeSheetId,
+      start_row: 0,
+      start_col: 0,
+      end_row: 0,
+      end_col: 0,
+    };
   }
 
   get_active_sheet_id() {
@@ -199,6 +229,20 @@ export class MockWorkbook {
     return null;
   }
 
+  get_selection() {
+    return { ...this.selection };
+  }
+
+  set_selection({ selection }) {
+    if (!selection || typeof selection.sheet_id !== "string") {
+      throw new Error("set_selection expects { selection: { sheet_id, start_row, start_col, end_row, end_col } }");
+    }
+    this._requireSheet(selection.sheet_id);
+    this.selection = { ...selection };
+    this.activeSheetId = selection.sheet_id;
+    return null;
+  }
+
   get_cell_value({ sheet_id, row, col }) {
     const sheet = this._requireSheet(sheet_id);
     const cell = sheet.cells.get(cellKey(row, col));
@@ -219,7 +263,7 @@ export class MockWorkbook {
     const sheet = this._requireSheet(sheet_id);
     const key = cellKey(start_row, start_col);
     const existing = sheet.cells.get(key) ?? {};
-    sheet.cells.set(key, { ...existing, value, formula: null });
+    sheet.cells.set(key, { ...existing, value, formula: null, format: existing.format ?? {} });
     this._recalculateSheet(sheet);
     return null;
   }
@@ -230,7 +274,7 @@ export class MockWorkbook {
     const sheet = this._requireSheet(sheet_id);
     const key = cellKey(start_row, start_col);
     const existing = sheet.cells.get(key) ?? {};
-    sheet.cells.set(key, { ...existing, formula });
+    sheet.cells.set(key, { ...existing, formula, format: existing.format ?? {} });
     this._recalculateSheet(sheet);
     return null;
   }
@@ -262,7 +306,7 @@ export class MockWorkbook {
         for (let c = 0; c < colCount; c++) {
           const key = cellKey(start_row + r, start_col + c);
           const existing = sheet.cells.get(key) ?? {};
-          sheet.cells.set(key, { ...existing, value: values, formula: null });
+          sheet.cells.set(key, { ...existing, value: values, formula: null, format: existing.format ?? {} });
         }
       }
     } else {
@@ -271,13 +315,35 @@ export class MockWorkbook {
           const key = cellKey(start_row + r, start_col + c);
           const existing = sheet.cells.get(key) ?? {};
           const value = values[r]?.[c] ?? null;
-          sheet.cells.set(key, { ...existing, value, formula: null });
+          sheet.cells.set(key, { ...existing, value, formula: null, format: existing.format ?? {} });
         }
       }
     }
 
     this._recalculateSheet(sheet);
     return null;
+  }
+
+  set_range_format({ range, format }) {
+    const { sheet_id, start_row, start_col, end_row, end_col } = range;
+    const sheet = this._requireSheet(sheet_id);
+    for (let r = start_row; r <= end_row; r++) {
+      for (let c = start_col; c <= end_col; c++) {
+        const key = cellKey(r, c);
+        const existing = sheet.cells.get(key) ?? { value: null, formula: null, format: {} };
+        const baseFormat = existing.format ?? {};
+        const nextFormat = applyFormatPatch(baseFormat, format);
+        sheet.cells.set(key, { ...existing, format: nextFormat });
+      }
+    }
+    return null;
+  }
+
+  get_range_format({ range }) {
+    const { sheet_id, start_row, start_col } = range;
+    const sheet = this._requireSheet(sheet_id);
+    const cell = sheet.cells.get(cellKey(start_row, start_col));
+    return cell?.format ?? {};
   }
 
   clear_range({ range }) {

@@ -202,12 +202,18 @@ function registerFormulaBridge(runtime) {
     get_sheet_name: (sheet_id) => rpcCallSync("get_sheet_name", { sheet_id }),
     rename_sheet: (sheet_id, name) => rpcCallSync("rename_sheet", { sheet_id, name }),
 
+    get_selection: () => rpcCallSync("get_selection", null),
+    set_selection: (selection) => rpcCallSync("set_selection", { selection }),
+
     get_range_values: (range) => rpcCallSync("get_range_values", { range }),
     set_range_values: (range, values) => rpcCallSync("set_range_values", { range, values }),
     set_cell_value: (range, value) => rpcCallSync("set_cell_value", { range, value }),
     get_cell_formula: (range) => rpcCallSync("get_cell_formula", { range }),
     set_cell_formula: (range, formula) => rpcCallSync("set_cell_formula", { range, formula }),
     clear_range: (range) => rpcCallSync("clear_range", { range }),
+
+    set_range_format: (range, format) => rpcCallSync("set_range_format", { range, format }),
+    get_range_format: (range) => rpcCallSync("get_range_format", { range }),
   });
 }
 

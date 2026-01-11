@@ -34,6 +34,13 @@ class JsBridge:
     def rename_sheet(self, sheet_id: str, name: str) -> None:
         formula_bridge.rename_sheet(sheet_id, name)
 
+    # Selection operations
+    def get_selection(self) -> Dict[str, Any]:
+        return to_py(formula_bridge.get_selection())
+
+    def set_selection(self, selection: Dict[str, Any]) -> None:
+        formula_bridge.set_selection(selection)
+
     # Range/cell operations
     def get_range_values(self, range_ref: Dict[str, Any]) -> List[List[Any]]:
         return to_py(formula_bridge.get_range_values(range_ref))
@@ -53,3 +60,9 @@ class JsBridge:
     def clear_range(self, range_ref: Dict[str, Any]) -> None:
         formula_bridge.clear_range(range_ref)
 
+    # Formatting operations
+    def set_range_format(self, range_ref: Dict[str, Any], format_obj: Any) -> None:
+        formula_bridge.set_range_format(range_ref, format_obj)
+
+    def get_range_format(self, range_ref: Dict[str, Any]) -> Any:
+        return to_py(formula_bridge.get_range_format(range_ref))

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { MacroRecorder, generateTypeScriptMacro } from "../apps/desktop/src/macro-recorder/index.js";
-import { ScriptRuntime, Workbook } from "@formula/scripting/node";
+import { ScriptRuntime, Workbook } from "../packages/scripting/src/node.js";
 
 test("macro recorder generates runnable TypeScript that replays simple edits", async () => {
   const workbook = new Workbook();

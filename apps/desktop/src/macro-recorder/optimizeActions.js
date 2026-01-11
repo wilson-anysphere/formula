@@ -1,4 +1,4 @@
-import { formatRangeAddress, parseCellAddress } from "@formula/scripting";
+import { formatRangeAddress, parseCellAddress } from "../../../../packages/scripting/src/a1.js";
 
 function cellKey(row, col) {
   return `${row},${col}`;

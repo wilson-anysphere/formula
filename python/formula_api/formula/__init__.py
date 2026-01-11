@@ -71,6 +71,23 @@ def create_sheet(name: str) -> "Sheet":
     return Sheet(sheet_id=sheet_id, bridge=bridge)
 
 
+def get_selection() -> Dict[str, Any]:
+    """
+    Get the current selection as a range reference dict:
+    {sheet_id, start_row, start_col, end_row, end_col}.
+    """
+
+    bridge = _require_bridge()
+    return bridge.get_selection()
+
+
+def set_selection(selection: Dict[str, Any]) -> None:
+    """Set the current selection using a range reference dict."""
+
+    bridge = _require_bridge()
+    bridge.set_selection(selection)
+
+
 def _pandas() -> Any:
     try:
         import pandas as pd  # type: ignore
@@ -202,6 +219,17 @@ class Range:
         if not self._ref.is_single_cell:
             raise ValueError("Range.formula is only available for a single cell range")
         self._bridge.set_cell_formula(self._ref.__dict__, val)
+
+    @property
+    def format(self) -> Any:
+        return self._bridge.get_range_format(self._ref.__dict__)
+
+    @format.setter
+    def format(self, val: Any) -> None:
+        self._bridge.set_range_format(self._ref.__dict__, val)
+
+    def set_format(self, val: Any) -> None:
+        self.format = val
 
     def clear(self) -> None:
         self._bridge.clear_range(self._ref.__dict__)

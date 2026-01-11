@@ -26,6 +26,13 @@ export class DocumentControllerBridge {
     this.doc = doc;
     this.activeSheetId = options.activeSheetId ?? "Sheet1";
     this.sheetIds = new Set([this.activeSheetId]);
+    this.selection = {
+      sheet_id: this.activeSheetId,
+      start_row: 0,
+      start_col: 0,
+      end_row: 0,
+      end_col: 0,
+    };
   }
 
   get_active_sheet_id() {
@@ -50,6 +57,21 @@ export class DocumentControllerBridge {
     this.sheetIds.delete(sheet_id);
     this.sheetIds.add(name);
     if (this.activeSheetId === sheet_id) this.activeSheetId = name;
+    if (this.selection.sheet_id === sheet_id) this.selection.sheet_id = name;
+    return null;
+  }
+
+  get_selection() {
+    return { ...this.selection };
+  }
+
+  set_selection({ selection }) {
+    if (!selection || !selection.sheet_id) {
+      throw new Error("set_selection expects { selection: { sheet_id, start_row, start_col, end_row, end_col } }");
+    }
+    this.sheetIds.add(selection.sheet_id);
+    this.activeSheetId = selection.sheet_id;
+    this.selection = { ...selection };
     return null;
   }
 
@@ -111,5 +133,23 @@ export class DocumentControllerBridge {
       end: { row: range.end_row, col: range.end_col },
     });
     return null;
+  }
+
+  set_range_format({ range, format }) {
+    this.doc.setRangeFormat(
+      range.sheet_id,
+      {
+        start: { row: range.start_row, col: range.start_col },
+        end: { row: range.end_row, col: range.end_col },
+      },
+      format,
+    );
+    return null;
+  }
+
+  get_range_format({ range }) {
+    const cell = this.doc.getCell(range.sheet_id, { row: range.start_row, col: range.start_col });
+    const styleId = cell?.styleId ?? 0;
+    return this.doc.styleTable?.get(styleId) ?? {};
   }
 }

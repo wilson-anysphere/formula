@@ -1,4 +1,9 @@
-import { formatCellAddress, formatRangeAddress, parseRangeAddress, TypedEventEmitter } from "@formula/scripting";
+import {
+  formatCellAddress,
+  formatRangeAddress,
+  parseRangeAddress,
+  TypedEventEmitter,
+} from "../../../../packages/scripting/src/index.js";
 
 function valueEquals(a, b) {
   if (a === b) return true;
