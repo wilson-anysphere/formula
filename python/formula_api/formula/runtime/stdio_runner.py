@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import builtins
+import importlib.machinery
+import importlib._bootstrap
 import json
 import sys
 import traceback
@@ -107,6 +109,34 @@ def main() -> None:
                     sys.modules.pop(name, None)
 
             sys.meta_path.insert(0, _ImportBlocker())
+
+            # Best-effort: block common importlib escape hatches that can load
+            # built-in modules directly without consulting sys.meta_path.
+            try:
+                original_builtin_from_name = importlib._bootstrap._builtin_from_name  # type: ignore[attr-defined]
+
+                def guarded_builtin_from_name(name: str):  # type: ignore[no-untyped-def]
+                    root = name.split(".", 1)[0]
+                    if root in blocked_import_roots:
+                        raise PermissionError(f"Import of {root!r} is not permitted")
+                    return original_builtin_from_name(name)
+
+                importlib._bootstrap._builtin_from_name = guarded_builtin_from_name  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+            try:
+                original_load_module = importlib.machinery.BuiltinImporter.load_module
+
+                def guarded_load_module(name: str):  # type: ignore[no-untyped-def]
+                    root = name.split(".", 1)[0]
+                    if root in blocked_import_roots:
+                        raise PermissionError(f"Import of {root!r} is not permitted")
+                    return original_load_module(name)
+
+                importlib.machinery.BuiltinImporter.load_module = guarded_load_module  # type: ignore[assignment]
+            except Exception:
+                pass
 
         # Drop references to the runner + sandbox modules so scripts can't fetch them
         # directly from sys.modules (e.g. to restore original import/open functions).
