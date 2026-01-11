@@ -12,3 +12,30 @@ test("v1 reader rejects gzip bombs via uncompressed size limit", () => {
 
   assert.throws(() => readExtensionPackageV1(gz), /maximum uncompressed size/i);
 });
+
+test("v1 reader rejects packages where package.json does not match embedded manifest", () => {
+  const bundle = {
+    format: "formula-extension-package",
+    formatVersion: 1,
+    createdAt: "2020-01-01T00:00:00.000Z",
+    manifest: { name: "a", publisher: "p", version: "1.0.0", main: "./dist/extension.js", engines: { formula: "^1.0.0" } },
+    files: [
+      {
+        path: "package.json",
+        dataBase64: Buffer.from(
+          JSON.stringify({
+            name: "b",
+            publisher: "p",
+            version: "1.0.0",
+            main: "./dist/extension.js",
+            engines: { formula: "^1.0.0" },
+          }),
+          "utf8",
+        ).toString("base64"),
+      },
+    ],
+  };
+
+  const gz = zlib.gzipSync(Buffer.from(JSON.stringify(bundle), "utf8"), { level: 9 });
+  assert.throws(() => readExtensionPackageV1(gz), /package\.json does not match/i);
+});

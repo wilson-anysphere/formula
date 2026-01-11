@@ -6,6 +6,32 @@ const PACKAGE_FORMAT = "formula-extension-package";
 const PACKAGE_FORMAT_VERSION = 1;
 const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function canonicalJsonString(value) {
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number") return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => canonicalJsonString(v)).join(",")}]`;
+  }
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value).sort();
+    const items = keys
+      .filter((k) => value[k] !== undefined)
+      .map((k) => `${JSON.stringify(k)}:${canonicalJsonString(value[k])}`);
+    return `{${items.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function manifestsMatch(a, b) {
+  return canonicalJsonString(a) === canonicalJsonString(b);
+}
+
 async function walkFiles(rootDir) {
   const results = [];
 
@@ -82,6 +108,25 @@ function readExtensionPackageV1(packageBytes) {
 
   if (!Array.isArray(parsed.files) || typeof parsed.manifest !== "object" || !parsed.manifest) {
     throw new Error("Invalid extension package contents");
+  }
+
+  const packageJsonEntry =
+    parsed.files.find((f) => typeof f?.path === "string" && f.path.replace(/\\/g, "/") === "package.json") || null;
+  if (!packageJsonEntry?.dataBase64 || typeof packageJsonEntry.dataBase64 !== "string") {
+    throw new Error("Invalid extension package: missing package.json file");
+  }
+
+  let packageJson = null;
+  try {
+    packageJson = JSON.parse(Buffer.from(packageJsonEntry.dataBase64, "base64").toString("utf8"));
+  } catch {
+    throw new Error("Invalid extension package: package.json is not valid JSON");
+  }
+  if (!isPlainObject(packageJson)) {
+    throw new Error("Invalid extension package: package.json must be a JSON object");
+  }
+  if (!manifestsMatch(packageJson, parsed.manifest)) {
+    throw new Error("Invalid extension package: package.json does not match embedded manifest");
   }
 
   return parsed;

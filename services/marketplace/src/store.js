@@ -5,6 +5,7 @@ const zlib = require("node:zlib");
 
 const { verifyBytesSignature, sha256 } = require("../../../shared/crypto/signing");
 const {
+  canonicalJsonBytes,
   detectExtensionPackageFormatVersion,
   readExtensionPackageV2,
   verifyExtensionPackageV2,
@@ -644,6 +645,7 @@ class MarketplaceStore {
       if (bundle.files.length > MAX_FILES) throw new Error("Extension package contains too many files");
 
       const seen = new Set();
+      let packageJsonBytes = null;
       for (const file of bundle.files) {
         if (!file?.path || typeof file.path !== "string" || typeof file.dataBase64 !== "string") {
           throw new Error("Invalid file entry in extension package");
@@ -660,12 +662,31 @@ class MarketplaceStore {
         if (bytes.length > MAX_SINGLE_FILE_BYTES) {
           throw new Error(`Extension package contains oversized file: ${normalizedPath}`);
         }
+        if (normalizedPath === "package.json") {
+          packageJsonBytes = bytes;
+        }
         unpackedSize += bytes.length;
         fileRecords.push({ path: normalizedPath, sha256: sha256(bytes), size: bytes.length });
 
         if (normalizedPath.toLowerCase() === "readme.md") {
           readme = bytes.toString("utf8");
         }
+      }
+
+      if (!packageJsonBytes) {
+        throw new Error("Invalid extension package: missing package.json file");
+      }
+      let packageJson = null;
+      try {
+        packageJson = JSON.parse(packageJsonBytes.toString("utf8"));
+      } catch {
+        throw new Error("Invalid extension package: package.json is not valid JSON");
+      }
+      if (!packageJson || typeof packageJson !== "object" || Array.isArray(packageJson)) {
+        throw new Error("Invalid extension package: package.json must be a JSON object");
+      }
+      if (!canonicalJsonBytes(packageJson).equals(canonicalJsonBytes(manifest))) {
+        throw new Error("Invalid extension package: package.json does not match embedded manifest");
       }
 
       fileCount = fileRecords.length;
