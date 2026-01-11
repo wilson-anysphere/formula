@@ -40,6 +40,8 @@ import { DocumentWorkbookAdapter } from "../search/documentWorkbookAdapter.js";
 import { parseGoTo } from "../../../../packages/search/index.js";
 import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadsheet-frontend/a1";
+import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
+import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
@@ -256,6 +258,8 @@ export class SpreadsheetApp {
 
   private resizeObserver: ResizeObserver;
 
+  private readonly inlineEditController: InlineEditController;
+
   private readonly currentUser: CommentAuthor;
   private readonly commentsDoc = new Y.Doc();
   private readonly commentManager = new CommentManager(this.commentsDoc);
@@ -276,7 +280,15 @@ export class SpreadsheetApp {
   constructor(
     private root: HTMLElement,
     private status: SpreadsheetAppStatusElements,
-    opts: { limits?: GridLimits; formulaBar?: HTMLElement } = {}
+    opts: {
+      limits?: GridLimits;
+      formulaBar?: HTMLElement;
+      inlineEdit?: {
+        llmClient?: InlineEditLLMClient;
+        model?: string;
+        auditStore?: AIAuditStore;
+      };
+    } = {}
   ) {
     this.limits = opts.limits ?? { ...DEFAULT_GRID_LIMITS, maxRows: 10_000, maxCols: 200 };
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
@@ -389,6 +401,26 @@ export class SpreadsheetApp {
         this.updateStatus();
         this.focus();
       }
+    });
+
+    this.inlineEditController = new InlineEditController({
+      container: this.root,
+      document: this.document,
+      getSheetId: () => this.sheetId,
+      getSelectionRange: () => this.getInlineEditSelectionRange(),
+      onApplied: () => {
+        this.renderGrid();
+        this.renderCharts();
+        this.renderSelection();
+        this.updateStatus();
+        this.focus();
+      },
+      onClosed: () => {
+        this.focus();
+      },
+      llmClient: opts.inlineEdit?.llmClient,
+      model: opts.inlineEdit?.model,
+      auditStore: opts.inlineEdit?.auditStore
     });
 
     this.root.addEventListener("pointerdown", (e) => this.onPointerDown(e));
@@ -1479,6 +1511,9 @@ export class SpreadsheetApp {
   }
 
   private onKeyDown(e: KeyboardEvent): void {
+    if (this.inlineEditController.isOpen()) {
+      return;
+    }
     if (this.editor.isOpen()) {
       // The editor handles Enter/Tab/Escape itself. We keep focus on the textarea.
       return;
@@ -1516,6 +1551,13 @@ export class SpreadsheetApp {
     }
 
     const primary = e.ctrlKey || e.metaKey;
+    if (primary && (e.key === "k" || e.key === "K")) {
+      // Inline edit (Cmd/Ctrl+K) should not trigger while the formula bar is actively editing.
+      if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+      e.preventDefault();
+      this.inlineEditController.open();
+      return;
+    }
     if (e.key === "Delete") {
       e.preventDefault();
       this.clearSelectionContents();
@@ -1837,6 +1879,11 @@ export class SpreadsheetApp {
         { label: "Clear contents" }
       );
     }
+  }
+
+  private getInlineEditSelectionRange(): Range | null {
+    const range = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
+    return range ? { ...range } : null;
   }
 }
 

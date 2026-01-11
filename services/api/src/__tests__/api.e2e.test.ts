@@ -126,7 +126,11 @@ describe("API e2e: auth + RBAC + sync token", () => {
         trustProxy: false,
         gc: true,
         dataDir,
-        persistence: { backend: "file", compactAfterUpdates: 50, encryption: { mode: "off" } },
+        persistence: {
+          backend: "file",
+          compactAfterUpdates: 50,
+          encryption: { mode: "off" }
+        },
         auth: {
           mode: "jwt-hs256",
           secret: config.syncTokenSecret,
@@ -161,7 +165,10 @@ describe("API e2e: auth + RBAC + sync token", () => {
         ws.send(Buffer.from([0, 0, 1, 0]));
 
         const firstMessage = await new Promise<WebSocket.RawData>((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error("Timed out waiting for sync server message")), 10_000);
+          const timeout = setTimeout(
+            () => reject(new Error("Timed out waiting for sync server message")),
+            10_000
+          );
           timeout.unref?.();
           ws.once("message", (data) => {
             clearTimeout(timeout);
@@ -187,10 +194,16 @@ describe("API e2e: auth + RBAC + sync token", () => {
         // Give the sync server a moment to flush file persistence writes after the
         // last client disconnects (y-websocket does not await writeState()).
         await new Promise((resolve) => setTimeout(resolve, 250));
-        await rm(dataDir, { recursive: true, force: true });
+        // Retry cleanup to avoid flaking on transient ENOTEMPTY races.
+        await rm(dataDir, {
+          recursive: true,
+          force: true,
+          maxRetries: 10,
+          retryDelay: 25
+        });
       }
     },
-    15_000
+    20_000
   );
 
   it("enforces document share permission (viewer cannot invite)", async () => {

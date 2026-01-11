@@ -19,7 +19,10 @@ export class FormulaBarModel {
   #rangeInsertion: { start: number; end: number } | null = null;
   #hoveredReference: RangeAddress | null = null;
   /**
-   * Full text suggestion for the current draft (not the "ghost text" tail).
+   * Full text suggestion for the current draft (not just the "ghost text" tail).
+   *
+   * `setAiSuggestion()` accepts either a full replacement string (e.g. "=SUM(A1:A10)")
+   * or a tail insertion (e.g. "M") and normalizes it into a full suggestion.
    *
    * Consumers should derive ghost text via `aiGhostText()` when rendering inline
    * suggestions, and call `acceptAiSuggestion()` (typically on Tab) to apply.
@@ -135,7 +138,24 @@ export class FormulaBarModel {
   }
 
   setAiSuggestion(suggestion: string | null): void {
-    this.#aiSuggestion = suggestion;
+    if (!suggestion) {
+      this.#aiSuggestion = null;
+      return;
+    }
+
+    // Normalize "tail" suggestions ("M") into full-string suggestions ("=SUM")
+    // so `aiGhostText()` + `acceptAiSuggestion()` can operate consistently.
+    if (!this.#isEditing) {
+      this.#aiSuggestion = suggestion;
+      return;
+    }
+
+    const start = Math.min(this.#cursorStart, this.#cursorEnd);
+    const end = Math.max(this.#cursorStart, this.#cursorEnd);
+    const prefix = this.#draft.slice(0, start);
+    const suffix = this.#draft.slice(end);
+    const looksLikeFullSuggestion = suggestion.startsWith(prefix) && (!suffix || suggestion.endsWith(suffix));
+    this.#aiSuggestion = looksLikeFullSuggestion ? suggestion : prefix + suggestion + suffix;
   }
 
   aiSuggestion(): string | null {

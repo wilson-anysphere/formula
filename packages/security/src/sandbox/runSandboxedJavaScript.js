@@ -201,27 +201,26 @@ export async function runSandboxedJavaScript({
 
     worker.on("error", (err) => {
       finalize(() => {
+        let mapped = err;
         if (err?.code === "ERR_WORKER_OUT_OF_MEMORY") {
-          const oom = new SandboxMemoryLimitError({ memoryMb, usedMb: null });
-          oom.stdout = stdout;
-          oom.stderr = stderr;
-          auditLogger?.log({
-            eventType: `security.${label}.run`,
-            actor: principal,
-            success: false,
-            metadata: { phase: "memory_limit", memoryMb, language: "javascript", code: err.code }
-          });
-          reject(oom);
-          return;
+          mapped = new SandboxMemoryLimitError({ memoryMb, usedMb: null });
+          mapped.cause = err;
         }
-
+        mapped.stdout = stdout;
+        mapped.stderr = stderr;
         auditLogger?.log({
           eventType: `security.${label}.run`,
           actor: principal,
           success: false,
-          metadata: { phase: "error", language: "javascript", message: err?.message, code: err?.code }
+          metadata: {
+            phase: mapped.code === "SANDBOX_MEMORY_LIMIT" ? "memory_limit" : "error",
+            name: mapped.name,
+            message: mapped.message,
+            language: "javascript",
+            code: mapped.code
+          }
         });
-        reject(err);
+        reject(mapped);
       });
     });
 
