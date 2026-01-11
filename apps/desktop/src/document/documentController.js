@@ -695,6 +695,34 @@ export class DocumentController {
   }
 
   /**
+   * Apply a set of deltas that originated externally (e.g. collaboration sync).
+   *
+   * Unlike user edits, these changes:
+   * - bypass `canEditCell` (permissions should be enforced at the collaboration layer)
+   * - do NOT create a new undo/redo history entry
+   *
+   * They still emit `change` + `update` events so UI layers can react, and they
+   * mark the document dirty.
+   *
+   * @param {CellDelta[]} deltas
+   * @param {{ recalc?: boolean }} [options]
+   */
+  applyExternalDeltas(deltas, options = {}) {
+    if (!deltas || deltas.length === 0) return;
+
+    // External updates should never merge with user edits.
+    this.lastMergeKey = null;
+    this.lastMergeTime = 0;
+
+    const recalc = options.recalc ?? true;
+    this.#applyDeltas(deltas, { recalc, emitChange: true });
+
+    // Mark dirty even though we didn't advance the undo cursor.
+    this.savedCursor = null;
+    this.#emitDirty();
+  }
+
+  /**
    * @param {CellState} before
    * @param {any} input
    * @returns {CellState}
