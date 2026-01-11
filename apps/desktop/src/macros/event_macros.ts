@@ -311,6 +311,8 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   let pendingChangesBySheet = new Map<string, Rect>();
   let changeFlushScheduled = false;
   let changeQueuedAfterMacro = false;
+  let changeFlushPromise: Promise<void> | null = null;
+  let changeFlushQueued = false;
 
   let selectionTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingSelectionRect: Rect | null = null;
@@ -318,6 +320,8 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   let lastSelectionKeyFired = "";
   let selectionQueuedAfterMacro = false;
   let sawInitialSelection = false;
+  let selectionFlushPromise: Promise<void> | null = null;
+  let selectionFlushQueued = false;
 
   const statusPromise = (async () => {
     try {
@@ -400,7 +404,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       }
       if (selectionQueuedAfterMacro && !selectionTimer) {
         selectionQueuedAfterMacro = false;
-        void flushSelectionChange();
+        startFlushSelectionChange();
       }
     }
   }
@@ -468,7 +472,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     await runEventMacro("workbook_open", "fire_workbook_open", {});
   }
 
-  async function flushWorksheetChanges(): Promise<void> {
+  async function doFlushWorksheetChanges(): Promise<void> {
     await statusPromise;
     if (disposed) return;
     if (eventsDisabled) return;
@@ -509,11 +513,32 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     changeFlushScheduled = true;
     queueMicrotask(() => {
       changeFlushScheduled = false;
-      void flushWorksheetChanges();
+      startFlushWorksheetChanges();
     });
   }
 
-  async function flushSelectionChange(): Promise<void> {
+  function startFlushWorksheetChanges(): void {
+    if (disposed) return;
+    if (changeFlushPromise) {
+      changeFlushQueued = true;
+      return;
+    }
+    if (pendingChangesBySheet.size === 0) return;
+    changeFlushPromise = doFlushWorksheetChanges()
+      .catch((err) => {
+        console.warn("Failed to flush Worksheet_Change event macros:", err);
+      })
+      .finally(() => {
+        changeFlushPromise = null;
+        if (disposed) return;
+        if (pendingChangesBySheet.size > 0 || changeFlushQueued) {
+          changeFlushQueued = false;
+          scheduleFlushWorksheetChanges();
+        }
+      });
+  }
+
+  async function doFlushSelectionChange(): Promise<void> {
     await statusPromise;
     if (disposed) return;
     if (eventsDisabled) return;
@@ -548,6 +573,27 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     });
 
     lastSelectionKeyFired = key;
+  }
+
+  function startFlushSelectionChange(): void {
+    if (disposed) return;
+    if (selectionFlushPromise) {
+      selectionFlushQueued = true;
+      return;
+    }
+    if (!pendingSelectionRect) return;
+    selectionFlushPromise = doFlushSelectionChange()
+      .catch((err) => {
+        console.warn("Failed to flush SelectionChange event macros:", err);
+      })
+      .finally(() => {
+        selectionFlushPromise = null;
+        if (disposed) return;
+        if (pendingSelectionRect || selectionFlushQueued) {
+          selectionFlushQueued = false;
+          startFlushSelectionChange();
+        }
+      });
   }
 
   const stopDocListening = args.app.getDocument().on("change", ({ deltas, source }) => {
@@ -608,7 +654,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (selectionTimer) clearTimeout(selectionTimer);
     selectionTimer = setTimeout(() => {
       selectionTimer = null;
-      void flushSelectionChange();
+      startFlushSelectionChange();
     }, SELECTION_CHANGE_DEBOUNCE_MS);
   });
 

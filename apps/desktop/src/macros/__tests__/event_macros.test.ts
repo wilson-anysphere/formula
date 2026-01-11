@@ -134,6 +134,67 @@ describe("VBA event macros wiring", () => {
     wiring.dispose();
   });
 
+  it("captures Worksheet_Change edits that occur before macro security status resolves", async () => {
+    const calls: Array<{ cmd: string; args?: any }> = [];
+
+    let resolveStatus: ((value: any) => void) | null = null;
+    const statusPromise = new Promise<any>((resolve) => {
+      resolveStatus = resolve;
+    });
+
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_macro_security_status") {
+        return await statusPromise;
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_open") return { ok: true, output: [], updates: [] };
+      if (cmd === "fire_worksheet_change") return { ok: true, output: [], updates: [] };
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    const doc = new DocumentController();
+    const app = new FakeApp(doc);
+
+    const wiring = installVbaEventMacros({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    // Ensure the status call has been issued.
+    await Promise.resolve();
+
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "A");
+    doc.setCellValue("Sheet1", { row: 2, col: 3 }, "B");
+
+    expect(calls.some((c) => c.cmd === "fire_worksheet_change")).toBe(false);
+
+    resolveStatus?.({
+      has_macros: true,
+      origin_path: null,
+      workbook_fingerprint: null,
+      signature: null,
+      trust: "trusted_always",
+    });
+
+    await flushAsync();
+    await flushAsync();
+
+    const changeCalls = calls.filter((c) => c.cmd === "fire_worksheet_change");
+    expect(changeCalls).toHaveLength(1);
+    expect(changeCalls[0]?.args).toMatchObject({
+      sheet_id: "Sheet1",
+      start_row: 0,
+      start_col: 0,
+      end_row: 2,
+      end_col: 3,
+    });
+
+    wiring.dispose();
+  });
+
   it("ignores format-only deltas when firing Worksheet_Change", async () => {
     const calls: Array<{ cmd: string; args?: any }> = [];
 
