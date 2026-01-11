@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 
 use formula_model::rich_text::RichText;
@@ -110,14 +110,6 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
     output: W,
     cell_patches: &[WorksheetCellPatch],
 ) -> Result<(), StreamingPatchError> {
-    let recalc_policy = if cell_patches.iter().any(|p| p.formula.is_some()) {
-        // Match `XlsxPackage::apply_cell_patches` default: dropping calcChain and requesting a full
-        // calc on load is the safest behavior after formula edits.
-        RecalcPolicy::default()
-    } else {
-        RecalcPolicy::PRESERVE
-    };
-
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
     for patch in cell_patches {
         patches_by_part
@@ -131,6 +123,17 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
     }
 
     let mut archive = ZipArchive::new(input)?;
+    let mut formula_changed = cell_patches.iter().any(|p| p.formula.is_some());
+    if !formula_changed {
+        formula_changed = streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
+    }
+    let recalc_policy = if formula_changed {
+        // Match `XlsxPackage::apply_cell_patches` default: dropping calcChain and requesting a full
+        // calc on load is the safest behavior after formula edits (including removing formulas).
+        RecalcPolicy::default()
+    } else {
+        RecalcPolicy::PRESERVE
+    };
     patch_xlsx_streaming_with_archive(
         &mut archive,
         output,
@@ -224,7 +227,11 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
         patches.sort_by_key(|p| (p.cell.row, p.cell.col));
     }
 
-    let recalc_policy = if saw_formula_patch {
+    let mut formula_changed = saw_formula_patch;
+    if !formula_changed {
+        formula_changed = streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
+    }
+    let recalc_policy = if formula_changed {
         RecalcPolicy::default()
     } else {
         RecalcPolicy::PRESERVE
@@ -368,7 +375,11 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
         patches.sort_by_key(|p| (p.cell.row, p.cell.col));
     }
 
-    let recalc_policy = if saw_formula_patch {
+    let mut formula_changed = saw_formula_patch;
+    if !formula_changed {
+        formula_changed = streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
+    }
+    let recalc_policy = if formula_changed {
         RecalcPolicy::default()
     } else {
         RecalcPolicy::PRESERVE
@@ -885,6 +896,111 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
 
     zip.finish()?;
     Ok(())
+}
+
+fn streaming_patches_remove_existing_formulas<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    patches_by_part: &HashMap<String, Vec<WorksheetCellPatch>>,
+) -> Result<bool, StreamingPatchError> {
+    for (worksheet_part, patches) in patches_by_part {
+        let mut target_cells: HashSet<String> = HashSet::new();
+        for patch in patches {
+            if patch.formula.is_none() {
+                target_cells.insert(patch.cell.to_a1());
+            }
+        }
+        if target_cells.is_empty() {
+            continue;
+        }
+
+        let file = match archive.by_name(worksheet_part) {
+            Ok(file) => file,
+            // If the worksheet is missing, the main streaming pass will surface this as
+            // `MissingWorksheetPart`. Don't change the error type here.
+            Err(zip::result::ZipError::FileNotFound) => continue,
+            Err(err) => return Err(err.into()),
+        };
+
+        if worksheet_contains_formula_in_cells(file, &target_cells)? {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn worksheet_contains_formula_in_cells<R: Read>(
+    input: R,
+    target_cells: &HashSet<String>,
+) -> Result<bool, StreamingPatchError> {
+    let mut reader = Reader::from_reader(BufReader::new(input));
+    reader.config_mut().trim_text(false);
+
+    let mut buf = Vec::new();
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e) if e.name().as_ref() == b"c" => {
+                if cell_is_in_set(e, target_cells)? {
+                    if cell_contains_formula(&mut reader, &mut buf)? {
+                        return Ok(true);
+                    }
+                }
+            }
+            // `<c .../>` cannot contain a formula.
+            Event::Empty(ref e) if e.name().as_ref() == b"c" => {
+                if cell_is_in_set(e, target_cells)? {
+                    // Target cell exists but is empty / non-formula.
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(false)
+}
+
+fn cell_is_in_set(
+    cell_start: &BytesStart<'_>,
+    target_cells: &HashSet<String>,
+) -> Result<bool, StreamingPatchError> {
+    for attr in cell_start.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"r" {
+            let r = attr.unescape_value()?;
+            return Ok(target_cells.contains(r.as_ref()));
+        }
+    }
+    Ok(false)
+}
+
+fn cell_contains_formula<R: BufRead>(
+    reader: &mut Reader<R>,
+    buf: &mut Vec<u8>,
+) -> Result<bool, StreamingPatchError> {
+    // We are currently positioned just after the opening `<c ...>` event; scan until the matching
+    // `</c>` looking for an `<f>` element.
+    let mut depth = 1usize;
+    loop {
+        let event = reader.read_event_into(buf)?;
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e) if e.name().as_ref() == b"f" => return Ok(true),
+            Event::Empty(ref e) if e.name().as_ref() == b"f" => return Ok(true),
+            Event::Start(_) => depth += 1,
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(false)
 }
 
 fn maybe_patch_recalc_part(
