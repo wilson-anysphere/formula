@@ -499,6 +499,49 @@ impl Worksheet {
         self.tables.iter().find(|t| t.range.contains(cell))
     }
 
+    /// Find a table by its workbook-scoped name (case-insensitive, like Excel).
+    pub fn table_by_name_case_insensitive(&self, table_name: &str) -> Option<&Table> {
+        self.tables
+            .iter()
+            .find(|t| {
+                t.name.eq_ignore_ascii_case(table_name)
+                    || t.display_name.eq_ignore_ascii_case(table_name)
+            })
+    }
+
+    /// Find a table by id.
+    pub fn table_by_id(&self, table_id: u32) -> Option<&Table> {
+        self.tables.iter().find(|t| t.id == table_id)
+    }
+
+    /// Find a mutable table by its workbook-scoped name (case-insensitive, like Excel).
+    pub fn table_mut_by_name_case_insensitive(&mut self, table_name: &str) -> Option<&mut Table> {
+        self.tables
+            .iter_mut()
+            .find(|t| {
+                t.name.eq_ignore_ascii_case(table_name)
+                    || t.display_name.eq_ignore_ascii_case(table_name)
+            })
+    }
+
+    /// Remove a table by name (case-insensitive).
+    pub fn remove_table_by_name(&mut self, table_name: &str) -> Option<Table> {
+        let idx = self
+            .tables
+            .iter()
+            .position(|t| {
+                t.name.eq_ignore_ascii_case(table_name)
+                    || t.display_name.eq_ignore_ascii_case(table_name)
+            })?;
+        Some(self.tables.remove(idx))
+    }
+
+    /// Remove a table by id.
+    pub fn remove_table_by_id(&mut self, table_id: u32) -> Option<Table> {
+        let idx = self.tables.iter().position(|t| t.id == table_id)?;
+        Some(self.tables.remove(idx))
+    }
+
     /// Number of stored cells.
     ///
     /// This is proportional to memory usage for the sheet's cell content.
@@ -894,6 +937,11 @@ impl Worksheet {
     /// Get the formula text for a cell, if present.
     pub fn formula(&self, cell: CellRef) -> Option<&str> {
         self.cell(cell).and_then(|c| c.formula.as_deref())
+    }
+
+    /// Get the formula text for a cell addressed by an A1 reference.
+    pub fn formula_a1(&self, a1: &str) -> Result<Option<&str>, A1ParseError> {
+        Ok(self.formula(CellRef::from_a1(a1)?))
     }
 
     /// Set a cell formula.

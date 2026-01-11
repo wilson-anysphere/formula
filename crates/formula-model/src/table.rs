@@ -1,7 +1,150 @@
+use std::collections::HashSet;
+
+use thiserror::Error;
+
 use crate::{CellRef, Range};
 use serde::{Deserialize, Serialize};
 
 pub use crate::autofilter::{FilterColumn, SheetAutoFilter as AutoFilter, SortCondition, SortState};
+
+/// Errors that can occur when creating or mutating a table.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum TableError {
+    #[error("table name cannot be empty")]
+    EmptyName,
+    #[error("table name exceeds Excel's 255 character limit")]
+    NameTooLong,
+    #[error("table name must start with an ASCII letter or '_'")]
+    InvalidStartChar,
+    #[error("table name contains invalid character '{ch}'")]
+    InvalidChar { ch: char },
+    #[error("table name conflicts with a cell or range reference")]
+    ConflictsWithCellReference,
+    #[error("table name is reserved")]
+    ReservedName,
+    #[error("table name already exists in workbook")]
+    DuplicateName,
+    #[error("worksheet not found")]
+    SheetNotFound,
+    #[error("table not found")]
+    TableNotFound,
+    #[error("table range is too small for header/totals row settings")]
+    InvalidRange,
+}
+
+/// Identifier for a table within a worksheet.
+///
+/// Excel tables are workbook-scoped by name, but APIs may still need to refer to
+/// tables by either their name or stable `id`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TableIdentifier {
+    Name(String),
+    Id(u32),
+}
+
+impl From<u32> for TableIdentifier {
+    fn from(value: u32) -> Self {
+        TableIdentifier::Id(value)
+    }
+}
+
+impl From<String> for TableIdentifier {
+    fn from(value: String) -> Self {
+        TableIdentifier::Name(value)
+    }
+}
+
+impl From<&str> for TableIdentifier {
+    fn from(value: &str) -> Self {
+        TableIdentifier::Name(value.to_string())
+    }
+}
+
+/// Validate an Excel table name (ListObject name).
+///
+/// This mirrors Excel's rules approximately:
+/// - Names are non-empty, <= 255 chars.
+/// - First character must be an ASCII letter or `_`.
+/// - Remaining characters may contain ASCII letters, digits, `_`, or `.`.
+/// - Names may not look like A1 or R1C1 references (e.g. `A1`, `R1C1`).
+/// - Names may not be reserved (`R`, `C`, `TRUE`, `FALSE`).
+///
+/// Workbook-wide uniqueness is enforced by [`crate::Workbook`] APIs.
+pub fn validate_table_name(name: &str) -> Result<(), TableError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(TableError::EmptyName);
+    }
+    if name.chars().count() > 255 {
+        return Err(TableError::NameTooLong);
+    }
+
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(TableError::EmptyName);
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return Err(TableError::InvalidStartChar);
+    }
+
+    for ch in chars {
+        if !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '.') {
+            return Err(TableError::InvalidChar { ch });
+        }
+    }
+
+    // Names cannot look like cell/range references in A1 notation.
+    if Range::from_a1(name).is_ok() {
+        return Err(TableError::ConflictsWithCellReference);
+    }
+
+    // Names cannot look like R1C1 references.
+    let upper = name.to_ascii_uppercase();
+    if upper == "R" || upper == "C" || upper == "TRUE" || upper == "FALSE" {
+        return Err(TableError::ReservedName);
+    }
+    if looks_like_r1c1_reference(&upper) {
+        return Err(TableError::ConflictsWithCellReference);
+    }
+
+    Ok(())
+}
+
+fn looks_like_r1c1_reference(upper: &str) -> bool {
+    // R1C1 or R1 or C1 style references (case folded by caller).
+    // We treat all of these as invalid table names.
+    if let Some(rest) = upper.strip_prefix('R') {
+        if rest.is_empty() {
+            return false;
+        }
+        // R<digits>
+        if rest.chars().all(|c| c.is_ascii_digit()) {
+            return true;
+        }
+        // R<digits>C<digits>
+        let mut iter = rest.chars().peekable();
+        let mut saw_row_digit = false;
+        while matches!(iter.peek(), Some(c) if c.is_ascii_digit()) {
+            saw_row_digit = true;
+            iter.next();
+        }
+        if !saw_row_digit || iter.next() != Some('C') {
+            return false;
+        }
+        let mut saw_col_digit = false;
+        while matches!(iter.peek(), Some(c) if c.is_ascii_digit()) {
+            saw_col_digit = true;
+            iter.next();
+        }
+        return saw_col_digit && iter.next().is_none();
+    }
+
+    if let Some(rest) = upper.strip_prefix('C') {
+        return !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit());
+    }
+
+    false
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableStyleInfo {
@@ -83,6 +226,62 @@ impl Table {
                 );
             }
         }
+    }
+
+    pub fn set_range(&mut self, new_range: Range) -> Result<(), TableError> {
+        let required_rows = self.header_row_count + self.totals_row_count;
+        if new_range.height() < required_rows {
+            return Err(TableError::InvalidRange);
+        }
+
+        let new_col_count = new_range.width() as usize;
+        let current_col_count = self.columns.len();
+
+        if new_col_count < current_col_count {
+            self.columns.truncate(new_col_count);
+        } else if new_col_count > current_col_count {
+            let mut used_names: HashSet<String> = self
+                .columns
+                .iter()
+                .map(|c| c.name.to_ascii_lowercase())
+                .collect();
+            let mut next_id = self.columns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+            let mut next_default_num: u32 = 1;
+
+            for _ in current_col_count..new_col_count {
+                let name = loop {
+                    let candidate = format!("Column{next_default_num}");
+                    next_default_num += 1;
+                    if used_names.insert(candidate.to_ascii_lowercase()) {
+                        break candidate;
+                    }
+                };
+                self.columns.push(TableColumn {
+                    id: next_id,
+                    name,
+                    formula: None,
+                    totals_formula: None,
+                });
+                next_id += 1;
+            }
+        }
+
+        self.range = new_range;
+
+        // Best-effort keep auto filter metadata consistent.
+        if let Some(auto_filter) = &mut self.auto_filter {
+            auto_filter.range = new_range;
+            auto_filter
+                .filter_columns
+                .retain(|c| (c.col_id as usize) < new_col_count);
+            if let Some(sort_state) = &mut auto_filter.sort_state {
+                sort_state
+                    .conditions
+                    .retain(|cond| cond.range.intersects(&new_range));
+            }
+        }
+
+        Ok(())
     }
 
     pub fn data_range(&self) -> Option<Range> {

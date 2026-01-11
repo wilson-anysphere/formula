@@ -11,11 +11,12 @@ use crate::names::{
 };
 use crate::sheet_name::{validate_sheet_name, SheetNameError};
 use crate::{
-    rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula, CalcSettings,
-    rewrite_table_names_in_formula, DateSystem, ManualPageBreaks, PageSetup, PrintTitles, Range,
-    SheetPrintSettings, SheetVisibility, Style, StyleTable, TabColor, Table, ThemePalette,
-    WorkbookPrintSettings, WorkbookProtection, WorkbookView, Worksheet, WorksheetId,
+    rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula,
+    rewrite_table_names_in_formula, CalcSettings, DateSystem, ManualPageBreaks, PageSetup,
+    PrintTitles, Range, SheetPrintSettings, SheetVisibility, Style, StyleTable, TabColor, Table,
+    ThemePalette, WorkbookPrintSettings, WorkbookProtection, WorkbookView, Worksheet, WorksheetId,
 };
+use crate::table::{validate_table_name, TableError, TableIdentifier};
 
 /// Identifier for a workbook.
 pub type WorkbookId = u32;
@@ -613,6 +614,137 @@ impl Workbook {
             }
         }
         None
+    }
+
+    /// Find a table by its workbook-scoped name (case-insensitive, like Excel).
+    pub fn find_table_case_insensitive(&self, table_name: &str) -> Option<(&Worksheet, &Table)> {
+        self.find_table(table_name)
+    }
+
+    /// Add a table to `sheet_id`, enforcing Excel table name rules and workbook-wide uniqueness.
+    pub fn add_table(&mut self, sheet_id: WorksheetId, mut table: Table) -> Result<(), TableError> {
+        table.name = table.name.trim().to_string();
+        table.display_name = table.display_name.trim().to_string();
+        validate_table_name(&table.name)?;
+        validate_table_name(&table.display_name)?;
+
+        if self.find_table_case_insensitive(&table.name).is_some()
+            || self.find_table_case_insensitive(&table.display_name).is_some()
+        {
+            return Err(TableError::DuplicateName);
+        }
+
+        let sheet = self.sheet_mut(sheet_id).ok_or(TableError::SheetNotFound)?;
+        sheet.tables.push(table);
+        Ok(())
+    }
+
+    /// Remove a table by name from `sheet_id`.
+    pub fn remove_table_by_name(
+        &mut self,
+        sheet_id: WorksheetId,
+        table_name: &str,
+    ) -> Result<Table, TableError> {
+        let sheet = self.sheet_mut(sheet_id).ok_or(TableError::SheetNotFound)?;
+        sheet
+            .remove_table_by_name(table_name)
+            .ok_or(TableError::TableNotFound)
+    }
+
+    /// Remove a table by id from `sheet_id`.
+    pub fn remove_table_by_id(
+        &mut self,
+        sheet_id: WorksheetId,
+        table_id: u32,
+    ) -> Result<Table, TableError> {
+        let sheet = self.sheet_mut(sheet_id).ok_or(TableError::SheetNotFound)?;
+        sheet
+            .remove_table_by_id(table_id)
+            .ok_or(TableError::TableNotFound)
+    }
+
+    /// Remove a table from `sheet_id` by name or id.
+    pub fn remove_table(
+        &mut self,
+        sheet_id: WorksheetId,
+        table: impl Into<TableIdentifier>,
+    ) -> Result<Table, TableError> {
+        match table.into() {
+            TableIdentifier::Name(name) => self.remove_table_by_name(sheet_id, &name),
+            TableIdentifier::Id(id) => self.remove_table_by_id(sheet_id, id),
+        }
+    }
+
+    /// Rename a table (workbook-wide) and rewrite structured references in all formulas.
+    pub fn rename_table(&mut self, old_name: &str, new_name: &str) -> Result<(), TableError> {
+        let new_name = new_name.trim();
+        validate_table_name(new_name)?;
+
+        let (sheet_idx, table_idx) = self
+            .sheets
+            .iter()
+            .enumerate()
+            .find_map(|(si, sheet)| {
+                sheet
+                    .tables
+                    .iter()
+                    .position(|t| {
+                        t.name.eq_ignore_ascii_case(old_name)
+                            || t.display_name.eq_ignore_ascii_case(old_name)
+                    })
+                    .map(|ti| (si, ti))
+            })
+            .ok_or(TableError::TableNotFound)?;
+
+        let actual_old_name = self.sheets[sheet_idx].tables[table_idx].name.clone();
+        let actual_old_display_name = self.sheets[sheet_idx].tables[table_idx].display_name.clone();
+
+        for (si, sheet) in self.sheets.iter().enumerate() {
+            for (ti, table) in sheet.tables.iter().enumerate() {
+                if si == sheet_idx && ti == table_idx {
+                    continue;
+                }
+                if table.name.eq_ignore_ascii_case(new_name)
+                    || table.display_name.eq_ignore_ascii_case(new_name)
+                {
+                    return Err(TableError::DuplicateName);
+                }
+            }
+        }
+
+        let mut renames = vec![(actual_old_name.clone(), new_name.to_string())];
+        if !actual_old_display_name.eq_ignore_ascii_case(&actual_old_name) {
+            renames.push((actual_old_display_name, new_name.to_string()));
+        }
+
+        for sheet in &mut self.sheets {
+            for (_, cell) in sheet.iter_cells_mut() {
+                if let Some(formula) = cell.formula.as_mut() {
+                    *formula = rewrite_table_names_in_formula(formula, &renames);
+                }
+            }
+
+            for table in &mut sheet.tables {
+                table.rewrite_table_references(&renames);
+            }
+
+            for rule in &mut sheet.conditional_formatting_rules {
+                rule.rewrite_table_references(&renames);
+            }
+
+            for assignment in &mut sheet.data_validations {
+                assignment.validation.rewrite_table_references(&renames);
+            }
+        }
+
+        for name in &mut self.defined_names {
+            name.refers_to = rewrite_table_names_in_formula(&name.refers_to, &renames);
+        }
+
+        let renamed = &mut self.sheets[sheet_idx].tables[table_idx];
+        renamed.name = new_name.to_string();
+        renamed.display_name = new_name.to_string();
+        Ok(())
     }
 
     /// Intern (deduplicate) a style into the workbook's style table.

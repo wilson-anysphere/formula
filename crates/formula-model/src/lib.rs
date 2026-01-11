@@ -80,8 +80,8 @@ pub use style::{
     HorizontalAlignment, Protection, Style, StyleTable, VerticalAlignment,
 };
 pub use table::{
-    AutoFilter, FilterColumn, SortCondition, SortState, Table, TableArea, TableColumn,
-    TableStyleInfo,
+    validate_table_name, AutoFilter, FilterColumn, SortCondition, SortState, Table, TableArea,
+    TableColumn, TableError, TableIdentifier, TableStyleInfo,
 };
 pub use theme::{
     indexed_color_argb, number_format_color, parse_number_format_color_token, resolve_color,
