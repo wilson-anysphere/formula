@@ -18,5 +18,9 @@ test("grid container is focusable and announces selection via live region", asyn
   const status = page.getByTestId("canvas-grid-a11y-status");
   await expect(status).toContainText("Active cell A1");
   await expect(status).toContainText("value 1");
-});
 
+  // Keyboard navigation should move the active cell and update the live region.
+  await page.keyboard.press("ArrowRight"); // B1
+  await expect(status).toContainText("Active cell B1");
+  await expect(status).toContainText("value 3");
+});
