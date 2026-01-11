@@ -575,7 +575,7 @@ def apply_sandbox(permissions: Dict[str, Any]) -> None:
     if block_process_execution:
         blocked_roots.add("subprocess")
     if network == "none":
-        blocked_roots.update({"socket", "ssl", "http", "urllib", "requests"})
+        blocked_roots.update({"socket", "_socket", "ssl", "_ssl", "http", "urllib", "requests"})
 
     if blocked_roots:
 

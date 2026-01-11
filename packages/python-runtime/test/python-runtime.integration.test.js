@@ -114,3 +114,19 @@ formula.active_sheet["A1"] = 1
 
   await assert.rejects(() => runtime.execute(script, { api: workbook }), /Import of 'socket' is not permitted/);
 });
+
+test("native python sandbox blocks low-level network modules by default (_socket)", async () => {
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import _socket
+_socket.socket(_socket.AF_INET, _socket.SOCK_STREAM, 0)
+`;
+
+  await assert.rejects(() => runtime.execute(script, { api: workbook }), /Import of '_socket' is not permitted/);
+});

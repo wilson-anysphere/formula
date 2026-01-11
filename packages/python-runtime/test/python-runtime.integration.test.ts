@@ -177,6 +177,22 @@ socket.socket()
     await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Import of 'socket' is not permitted/);
   });
 
+  it("blocks low-level network modules by default (_socket)", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import _socket
+_socket.socket(_socket.AF_INET, _socket.SOCK_STREAM, 0)
+`;
+
+    await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Import of '_socket' is not permitted/);
+  });
+
   it("blocks network access even if a script tries to use sys.modules for socket (network=none)", async () => {
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({

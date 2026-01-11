@@ -72,7 +72,7 @@ def main() -> None:
         if block_process_execution:
             blocked_import_roots.add("subprocess")
         if network == "none":
-            blocked_import_roots.update({"socket", "ssl", "http", "urllib", "requests"})
+            blocked_import_roots.update({"socket", "_socket", "ssl", "_ssl", "http", "urllib", "requests"})
 
         # This runner is executed as `__main__` (via `python -m`). If user code imports
         # `__main__`, it should see its own module, not the stdio runner internals.
