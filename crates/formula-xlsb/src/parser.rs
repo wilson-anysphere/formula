@@ -518,6 +518,22 @@ mod tests {
         let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
         assert_eq!(decoded, "Sheet2!A1");
     }
+
+    #[test]
+    fn parses_shared_string_phonetic_tail_as_opaque_bytes() {
+        // SI with phonetic flag set: [flags][xlWideString][phonetic bytes...]
+        let mut payload = Vec::new();
+        payload.push(0x02); // phonetic flag
+        write_utf16_string(&mut payload, "Hi");
+        payload.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]); // opaque phonetic tail
+
+        let si = parse_shared_string_item(&payload).expect("parse SI");
+        assert_eq!(si.plain_text(), "Hi");
+        assert_eq!(si.rich_text.text, "Hi");
+        assert_eq!(si.rich_text.runs.len(), 0);
+        assert_eq!(si.phonetic, Some(vec![0xDE, 0xAD, 0xBE, 0xEF]));
+        assert!(si.raw_si.is_some());
+    }
 }
 
 pub(crate) fn parse_shared_strings<R: Read>(
