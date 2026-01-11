@@ -10,8 +10,7 @@ use crate::ast::{
     SelectCaseArm, Stmt, UnOp, VarDecl, VbaProgram, VbaType,
 };
 use crate::object_model::{
-    range_on_active_sheet, row_col_to_a1, Spreadsheet, VbaErrObject, VbaObject, VbaObjectRef,
-    VbaRangeRef,
+    row_col_to_a1, Spreadsheet, VbaErrObject, VbaObject, VbaObjectRef, VbaRangeRef,
 };
 use crate::sandbox::{Permission, PermissionChecker, VbaSandboxPolicy};
 use crate::value::{VbaArray, VbaArrayRef, VbaValue};
@@ -1403,11 +1402,12 @@ impl<'a> Executor<'a> {
         let name_lc = name.to_ascii_lowercase();
         match name_lc.as_str() {
             "range" => {
-                let a1_expr = args
-                    .get(0)
-                    .ok_or_else(|| VbaError::Runtime("Range() missing argument".to_string()))?;
-                let a1 = self.eval_expr(frame, &a1_expr.expr)?.to_string_lossy();
-                Ok(VbaValue::Object(range_on_active_sheet(self.sheet, &a1)?))
+                if args.is_empty() {
+                    return Err(VbaError::Runtime("Range() missing argument".to_string()));
+                }
+                let sheet = self.sheet.active_sheet();
+                let range = self.eval_range_args(frame, sheet, args)?;
+                Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
             }
             "cells" => {
                 let row = self
@@ -1727,13 +1727,11 @@ impl<'a> Executor<'a> {
         match snapshot {
             VbaObject::Worksheet { sheet } => match member_lc.as_str() {
                 "range" => {
-                    let a1 = self
-                        .eval_required_arg(frame, args, 0, "Range")?
-                        .to_string_lossy();
-                    let range_ref = self.sheet_range(sheet, &a1)?;
-                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
-                        range_ref,
-                    ))))
+                    if args.is_empty() {
+                        return Err(VbaError::Runtime("Range() missing argument".to_string()));
+                    }
+                    let range_ref = self.eval_range_args(frame, sheet, args)?;
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range_ref))))
                 }
                 "cells" => {
                     let row = self
@@ -1900,8 +1898,12 @@ impl<'a> Executor<'a> {
             },
             VbaObject::Application => match member_lc.as_str() {
                 "range" => {
-                    let a1 = self.eval_required_arg(frame, args, 0, "Range")?.to_string_lossy();
-                    Ok(VbaValue::Object(range_on_active_sheet(self.sheet, &a1)?))
+                    if args.is_empty() {
+                        return Err(VbaError::Runtime("Range() missing argument".to_string()));
+                    }
+                    let sheet = self.sheet.active_sheet();
+                    let range_ref = self.eval_range_args(frame, sheet, args)?;
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range_ref))))
                 }
                 "worksheets" | "sheets" => {
                     let name = self
@@ -2049,6 +2051,68 @@ impl<'a> Executor<'a> {
             end_row: r2,
             end_col: c2,
         })
+    }
+
+    fn eval_range_args(
+        &mut self,
+        frame: &mut Frame,
+        sheet: usize,
+        args: &[crate::ast::CallArg],
+    ) -> Result<VbaRangeRef, VbaError> {
+        if args.is_empty() {
+            return Err(VbaError::Runtime("Range() missing argument".to_string()));
+        }
+        if args.len() > 2 {
+            return Err(VbaError::Runtime(format!(
+                "Range() expects 1 or 2 arguments (got {})",
+                args.len()
+            )));
+        }
+
+        let cell1 = arg_named_or_pos(args, "cell1", 0).unwrap_or(&args[0]);
+        let r1 = self.eval_range_arg_value(frame, sheet, &cell1.expr)?;
+
+        let cell2 = arg_named_or_pos(args, "cell2", 1);
+        if let Some(cell2) = cell2 {
+            let r2 = self.eval_range_arg_value(frame, sheet, &cell2.expr)?;
+            return Ok(VbaRangeRef {
+                sheet,
+                start_row: r1.start_row.min(r2.start_row),
+                start_col: r1.start_col.min(r2.start_col),
+                end_row: r1.end_row.max(r2.end_row),
+                end_col: r1.end_col.max(r2.end_col),
+            });
+        }
+
+        Ok(r1)
+    }
+
+    fn eval_range_arg_value(
+        &mut self,
+        frame: &mut Frame,
+        sheet: usize,
+        expr: &Expr,
+    ) -> Result<VbaRangeRef, VbaError> {
+        let value = self.eval_expr(frame, expr)?;
+        match value {
+            VbaValue::String(a1) => self.sheet_range(sheet, &a1),
+            VbaValue::Object(obj) => match &*obj.borrow() {
+                VbaObject::Range(range) => {
+                    if range.sheet != sheet {
+                        return Err(VbaError::Runtime(
+                            "Range arguments must be on the same sheet".to_string(),
+                        ));
+                    }
+                    Ok(*range)
+                }
+                _ => Err(VbaError::Runtime(
+                    "Range() arguments must be strings or Range objects".to_string(),
+                )),
+            },
+            _ => Err(VbaError::Runtime(
+                "Range() arguments must be strings or Range objects".to_string(),
+            )),
+        }
     }
 
     fn get_object_member(&mut self, obj: VbaObjectRef, member: &str) -> Result<VbaValue, VbaError> {

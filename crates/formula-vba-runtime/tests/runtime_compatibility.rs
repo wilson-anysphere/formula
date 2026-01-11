@@ -137,6 +137,31 @@ End Sub
 }
 
 #[test]
+fn range_accepts_two_arguments_strings_and_cells() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Range("C1") = Range("A1", "B2").Address
+    Range("C2") = Range(Cells(1, 1), Cells(2, 2)).Address
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "C1").unwrap(),
+        VbaValue::from("$A$1:$B$2")
+    );
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "C2").unwrap(),
+        VbaValue::from("$A$1:$B$2")
+    );
+}
+
+#[test]
 fn for_each_over_array_and_collection() {
     let code = r#"
 Sub Test()
