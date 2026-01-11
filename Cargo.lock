@@ -1433,6 +1433,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "formula-corpus-triage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "formula-engine",
+ "formula-model",
+ "formula-xlsx",
+ "serde",
+ "serde_json",
+ "sha2",
+ "xlsx-diff",
+]
+
+[[package]]
 name = "formula-dax"
 version = "0.1.0"
 dependencies = [

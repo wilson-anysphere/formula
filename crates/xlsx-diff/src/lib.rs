@@ -10,6 +10,7 @@ mod xml;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::File;
+use std::io::Cursor;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -124,6 +125,16 @@ impl WorkbookArchive {
         let file = File::open(path).with_context(|| format!("open workbook {}", path.display()))?;
         let mut zip = ZipArchive::new(file).context("parse zip archive")?;
 
+        Self::read_zip(&mut zip)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let cursor = Cursor::new(bytes);
+        let mut zip = ZipArchive::new(cursor).context("parse zip archive")?;
+        Self::read_zip(&mut zip)
+    }
+
+    fn read_zip<R: Read + std::io::Seek>(zip: &mut ZipArchive<R>) -> Result<Self> {
         let mut parts = BTreeMap::new();
         for i in 0..zip.len() {
             let mut file = zip.by_index(i).context("read zip entry")?;
@@ -153,6 +164,11 @@ impl WorkbookArchive {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct DiffOptions {
+    pub ignore_parts: BTreeSet<String>,
+}
+
 pub fn diff_workbooks(expected: &Path, actual: &Path) -> Result<DiffReport> {
     let expected = WorkbookArchive::open(expected)?;
     let actual = WorkbookArchive::open(actual)?;
@@ -160,10 +176,26 @@ pub fn diff_workbooks(expected: &Path, actual: &Path) -> Result<DiffReport> {
 }
 
 pub fn diff_archives(expected: &WorkbookArchive, actual: &WorkbookArchive) -> DiffReport {
+    diff_archives_with_options(expected, actual, &DiffOptions::default())
+}
+
+pub fn diff_archives_with_options(
+    expected: &WorkbookArchive,
+    actual: &WorkbookArchive,
+    options: &DiffOptions,
+) -> DiffReport {
     let mut report = DiffReport::default();
 
-    let expected_parts = expected.part_names();
-    let actual_parts = actual.part_names();
+    let expected_parts: BTreeSet<&str> = expected
+        .part_names()
+        .into_iter()
+        .filter(|part| !options.ignore_parts.contains(*part))
+        .collect();
+    let actual_parts: BTreeSet<&str> = actual
+        .part_names()
+        .into_iter()
+        .filter(|part| !options.ignore_parts.contains(*part))
+        .collect();
 
     for part in expected_parts.difference(&actual_parts) {
         report.differences.push(Difference::new(

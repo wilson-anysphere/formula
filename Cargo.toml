@@ -5,6 +5,7 @@ members = [
   "crates/formula-biff",
   "crates/formula-columnar",
   "crates/formula-dax",
+  "crates/formula-corpus-triage",
   "crates/formula-engine",
   "crates/formula-excel-oracle",
   "crates/formula-format",

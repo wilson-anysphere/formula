@@ -116,6 +116,8 @@ python -m tools.corpus.triage \
   --out-dir tools/corpus/out/public \
   --expectations tools/corpus/public/expectations.json
 ```
+Note: triage invokes a small Rust helper (built via `cargo`) to run the `formula-xlsx` round-trip and `xlsx-diff`
+structural comparison, so a Rust toolchain must be available.
 
 To fail fast on suspicious plaintext in a corpus directory:
 
@@ -156,10 +158,13 @@ The scheduled job should:
 
 ## Extending triage (future work)
 
-The current triage runner includes placeholders for:
-- recalculation correctness (`calc mismatch`)
-- headless rendering smoke tests
-- real round-trip save using the Formula XLSX writer and structural diff (Task 12/90)
+`tools/corpus/triage.py` is intended to be a compatibility regression harness that runs:
 
-As the XLSX read/write/diff tooling lands, wire it into `tools/corpus/triage.py` so the corpus becomes a true
-compatibility regression harness.
+- load (via `formula-xlsx`)
+- **optional** recalculation correctness checks (`--recalc`)
+- **optional** headless render/print smoke (`--render-smoke`)
+- round-trip save (via `formula-xlsx`)
+- structural diff (via `xlsx-diff`)
+
+Recalc/render are opt-in because they are heavier and may exercise engine coverage gaps; the scheduled private
+corpus job is the recommended place to enable them.

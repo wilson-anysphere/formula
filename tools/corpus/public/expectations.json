@@ -1,7 +1,7 @@
 {
   "simple.xlsx": {
     "open_ok": true,
-    "round_trip_ok": true
+    "round_trip_ok": true,
+    "diff_critical_count": 0
   }
 }
-

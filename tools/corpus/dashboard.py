@@ -54,15 +54,30 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
         f"- Calculate: **{counts['calculate_ok']} / {counts['total']}** ({rates['calculate']:.1%})"
     )
     lines.append(
+        f"- Render: **{counts['render_ok']} / {counts['total']}** ({rates['render']:.1%})"
+    )
+    lines.append(
         f"- Round-trip: **{counts['round_trip_ok']} / {counts['total']}** ({rates['round_trip']:.1%})"
     )
+    diff_totals = summary.get("diff_totals") or {}
+    if diff_totals:
+        lines.append(
+            f"- Diff totals (critical/warn/info): **{diff_totals.get('critical', 0)} / {diff_totals.get('warning', 0)} / {diff_totals.get('info', 0)}**"
+        )
     lines.append("")
     lines.append("## Per-workbook")
     lines.append("")
-    lines.append("| Workbook | Open | Calculate | Round-trip | Failure category |")
-    lines.append("|---|---:|---:|---:|---|")
+    lines.append("| Workbook | Open | Calculate | Render | Round-trip | Diff (C/W/I) | Failure category |")
+    lines.append("|---|---:|---:|---:|---:|---:|---|")
     for r in reports:
         res = r.get("result", {})
+        diff_cell = ""
+        if any(k in res for k in ("diff_critical_count", "diff_warning_count", "diff_info_count")):
+            diff_cell = (
+                f"{res.get('diff_critical_count', 0)}/"
+                f"{res.get('diff_warning_count', 0)}/"
+                f"{res.get('diff_info_count', 0)}"
+            )
         lines.append(
             "| "
             + " | ".join(
@@ -70,7 +85,9 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
                     r.get("display_name", "?"),
                     _status(res.get("open_ok")),
                     _status(res.get("calculate_ok")),
+                    _status(res.get("render_ok")),
                     _status(res.get("round_trip_ok")),
+                    diff_cell,
                     r.get("failure_category", ""),
                 ]
             )
@@ -127,15 +144,20 @@ def main() -> int:
     total = len(reports)
     open_ok = sum(1 for r in reports if r.get("result", {}).get("open_ok") is True)
     calc_ok = sum(1 for r in reports if r.get("result", {}).get("calculate_ok") is True)
+    render_ok = sum(1 for r in reports if r.get("result", {}).get("render_ok") is True)
     rt_ok = sum(1 for r in reports if r.get("result", {}).get("round_trip_ok") is True)
 
     failures_by_category: Counter[str] = Counter()
     failing_function_counts: Counter[str] = Counter()
     failing_feature_counts: Counter[str] = Counter()
+    diff_totals: Counter[str] = Counter()
 
     for r in reports:
         res = r.get("result", {})
-        failed = any(res.get(k) is False for k in ("open_ok", "calculate_ok", "round_trip_ok"))
+        failed = any(
+            res.get(k) is False
+            for k in ("open_ok", "calculate_ok", "render_ok", "round_trip_ok")
+        )
         if failed:
             failures_by_category[r.get("failure_category", "unknown")] += 1
             for fn, cnt in (r.get("functions") or {}).items():
@@ -143,6 +165,15 @@ def main() -> int:
             for feat, enabled in (r.get("features") or {}).items():
                 if enabled is True:
                     failing_feature_counts[feat] += 1
+
+        for key, out_key in [
+            ("diff_critical_count", "critical"),
+            ("diff_warning_count", "warning"),
+            ("diff_info_count", "info"),
+        ]:
+            val = res.get(key)
+            if isinstance(val, int):
+                diff_totals[out_key] += val
 
     summary: dict[str, Any] = {
         "timestamp": utc_now_iso(),
@@ -152,14 +183,17 @@ def main() -> int:
             "total": total,
             "open_ok": open_ok,
             "calculate_ok": calc_ok,
+            "render_ok": render_ok,
             "round_trip_ok": rt_ok,
         },
         "rates": {
             "open": _rate(open_ok, total),
             "calculate": _rate(calc_ok, total),
+            "render": _rate(render_ok, total),
             "round_trip": _rate(rt_ok, total),
         },
         "failures_by_category": dict(failures_by_category),
+        "diff_totals": dict(diff_totals),
         "top_functions_in_failures": [
             {"function": fn, "count": cnt}
             for fn, cnt in failing_function_counts.most_common(50)

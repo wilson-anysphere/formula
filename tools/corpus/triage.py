@@ -6,6 +6,8 @@ import argparse
 import io
 import json
 import os
+import subprocess
+import tempfile
 import time
 import zipfile
 from collections import Counter
@@ -124,42 +126,92 @@ def _extract_function_counts(z: zipfile.ZipFile) -> Counter[str]:
     return counts
 
 
-def _diff_workbooks(a: bytes, b: bytes, *, ignore: set[str] | None = None) -> dict[str, Any]:
-    if ignore is None:
-        ignore = set(DEFAULT_DIFF_IGNORE)
-
-    def parts(blob: bytes) -> dict[str, str]:
-        out: dict[str, str] = {}
-        with zipfile.ZipFile(io.BytesIO(blob), "r") as z:
-            for info in z.infolist():
-                if info.is_dir():
-                    continue
-                if info.filename in ignore:
-                    continue
-                out[info.filename] = sha256_hex(z.read(info.filename))
-        return out
-
-    a_parts = parts(a)
-    b_parts = parts(b)
-
-    a_names = set(a_parts.keys())
-    b_names = set(b_parts.keys())
-
-    added = sorted(b_names - a_names)
-    removed = sorted(a_names - b_names)
-    modified = sorted([n for n in (a_names & b_names) if a_parts[n] != b_parts[n]])
-
-    return {
-        "ignore": sorted(ignore),
-        "added": added,
-        "removed": removed,
-        "modified": modified,
-        "counts": {"added": len(added), "removed": len(removed), "modified": len(modified)},
-        "equal": not added and not removed and not modified,
-    }
+def _repo_root() -> Path:
+    # tools/corpus/triage.py -> tools/corpus -> tools -> repo root
+    return Path(__file__).resolve().parents[2]
 
 
-def triage_workbook(workbook: WorkbookInput) -> dict[str, Any]:
+def _rust_exe_name() -> str:
+    return "formula-corpus-triage.exe" if os.name == "nt" else "formula-corpus-triage"
+
+
+def _build_rust_helper() -> Path:
+    """Build (or reuse) the Rust triage helper binary."""
+
+    root = _repo_root()
+    target_dir = Path(os.environ.get("CARGO_TARGET_DIR") or (root / "target"))
+    exe = target_dir / "debug" / _rust_exe_name()
+
+    try:
+        subprocess.run(
+            ["cargo", "build", "-p", "formula-corpus-triage"],
+            cwd=root,
+            check=True,
+        )
+    except FileNotFoundError as e:  # noqa: PERF203 (CI signal)
+        raise RuntimeError("cargo not found; Rust toolchain is required for corpus triage") from e
+
+    if not exe.exists():
+        raise RuntimeError(f"Rust triage helper was built but executable is missing: {exe}")
+    return exe
+
+
+def _run_rust_triage(
+    exe: Path,
+    workbook_bytes: bytes,
+    *,
+    diff_ignore: set[str],
+    diff_limit: int,
+    recalc: bool,
+    render_smoke: bool,
+) -> dict[str, Any]:
+    """Invoke the Rust helper to run load/save/diff (+ optional recalc/render) on a workbook blob."""
+
+    with tempfile.TemporaryDirectory(prefix="corpus-triage-") as tmpdir:
+        input_path = Path(tmpdir) / "input.xlsx"
+        input_path.write_bytes(workbook_bytes)
+
+        cmd = [
+            str(exe),
+            "--input",
+            str(input_path),
+            "--diff-limit",
+            str(diff_limit),
+        ]
+        for part in sorted(diff_ignore):
+            cmd.extend(["--ignore-part", part])
+        if recalc:
+            cmd.append("--recalc")
+        if render_smoke:
+            cmd.append("--render-smoke")
+
+        proc = subprocess.run(
+            cmd,
+            cwd=_repo_root(),
+            capture_output=True,
+            text=True,
+        )
+
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"Rust triage helper failed (exit {proc.returncode}): {proc.stderr.strip()}"
+            )
+
+        out = proc.stdout.strip()
+        if not out:
+            raise RuntimeError("Rust triage helper returned empty stdout")
+        return json.loads(out)
+
+
+def triage_workbook(
+    workbook: WorkbookInput,
+    *,
+    rust_exe: Path,
+    diff_ignore: set[str],
+    diff_limit: int,
+    recalc: bool,
+    render_smoke: bool,
+) -> dict[str, Any]:
     report: dict[str, Any] = {
         "display_name": workbook.display_name,
         "sha256": sha256_hex(workbook.data),
@@ -169,54 +221,41 @@ def triage_workbook(workbook: WorkbookInput) -> dict[str, Any]:
         "run_url": github_run_url(),
     }
 
-    # Step: load (zip + parse workbook.xml)
-    start = _now_ms()
+    # Best-effort scan for feature/function fingerprints (privacy-safe).
     try:
         with zipfile.ZipFile(io.BytesIO(workbook.data), "r") as z:
             zip_names = [info.filename for info in z.infolist() if not info.is_dir()]
             report["features"] = _scan_features(zip_names)
             report["functions"] = dict(_extract_function_counts(z))
+    except Exception as e:  # noqa: BLE001 (triage tool)
+        report["features_error"] = str(e)
 
-            # Minimal "opens" check: workbook.xml must be present and parseable.
-            wb_xml = z.read("xl/workbook.xml")
-            from xml.etree import ElementTree as ET
-
-            ET.fromstring(wb_xml)
-
-        report["steps"] = {"load": asdict(_step_ok(start, details={"parts": len(zip_names)}))}
-        report["result"] = {"open_ok": True}
-    except Exception as e:  # noqa: BLE001 (reporting tool)
-        report["steps"] = {"load": asdict(_step_failed(start, e))}
-        report["result"] = {"open_ok": False}
-        report["failure_category"] = "parse_error"
+    # Core triage (Rust): load → optional recalc/render → round-trip save → structural diff.
+    try:
+        rust_out = _run_rust_triage(
+            rust_exe,
+            workbook.data,
+            diff_ignore=diff_ignore,
+            diff_limit=diff_limit,
+            recalc=recalc,
+            render_smoke=render_smoke,
+        )
+        report["steps"] = rust_out.get("steps") or {}
+        report["result"] = rust_out.get("result") or {}
+    except Exception as e:  # noqa: BLE001
+        report["steps"] = {"load": asdict(_step_failed(_now_ms(), e))}
+        report["result"] = {"open_ok": False, "round_trip_ok": False}
+        report["failure_category"] = "triage_error"
         return report
 
-    # Step: recalc (placeholder until engine integration exists)
-    report["steps"]["recalc"] = asdict(_step_skipped("no_calc_engine_configured"))
-    report["result"]["calculate_ok"] = None
-
-    # Step: render smoke (placeholder; opt-in to avoid heavy deps)
-    report["steps"]["render"] = asdict(_step_skipped("no_headless_renderer_configured"))
-    report["result"]["render_ok"] = None
-
-    # Step: round-trip save (placeholder: byte-for-byte copy)
-    start = _now_ms()
-    round_tripped = workbook.data
-    report["steps"]["round_trip"] = asdict(
-        _step_ok(start, details={"engine": "copy"})
-    )
-
-    # Step: diff
-    start = _now_ms()
-    try:
-        diff = _diff_workbooks(workbook.data, round_tripped)
-        report["steps"]["diff"] = asdict(_step_ok(start, details=diff))
-        report["result"]["round_trip_ok"] = diff["equal"]
-        if not diff["equal"]:
-            report["failure_category"] = "round_trip_diff"
-    except Exception as e:  # noqa: BLE001
-        report["steps"]["diff"] = asdict(_step_failed(start, e))
-        report["result"]["round_trip_ok"] = False
+    res = report.get("result", {})
+    if res.get("open_ok") is not True:
+        report["failure_category"] = "open_error"
+    elif res.get("calculate_ok") is False:
+        report["failure_category"] = "calc_mismatch"
+    elif res.get("render_ok") is False:
+        report["failure_category"] = "render_error"
+    elif res.get("round_trip_ok") is False:
         report["failure_category"] = "round_trip_diff"
 
     return report
@@ -235,10 +274,35 @@ def _compare_expectations(
         result = r.get("result", {})
         for key, exp_value in exp.items():
             actual = result.get(key)
-            if exp_value is True and actual is False:
-                regressions.append(f"{name}: expected {key}=true, got false")
-            if exp_value is False and actual is True:
-                improvements.append(f"{name}: expected {key}=false, got true")
+
+            # Booleans: exact match required (treat skips as regressions).
+            if isinstance(exp_value, bool):
+                if actual is not exp_value:
+                    regressions.append(
+                        f"{name}: expected {key}={str(exp_value).lower()}, got {actual}"
+                    )
+                continue
+
+            # Numbers: treat larger-than-expected as regression, smaller as improvement.
+            if isinstance(exp_value, (int, float)):
+                if not isinstance(actual, (int, float)):
+                    regressions.append(
+                        f"{name}: expected {key}={exp_value}, got {actual}"
+                    )
+                    continue
+                if actual > exp_value:
+                    regressions.append(
+                        f"{name}: expected {key}<={exp_value}, got {actual}"
+                    )
+                elif actual < exp_value:
+                    improvements.append(
+                        f"{name}: expected {key}={exp_value}, got {actual}"
+                    )
+                continue
+
+            # Fallback: strict equality.
+            if actual != exp_value:
+                regressions.append(f"{name}: expected {key}={exp_value}, got {actual}")
     return regressions, improvements
 
 
@@ -261,7 +325,32 @@ def main() -> int:
         default="CORPUS_ENCRYPTION_KEY",
         help="Env var containing Fernet key used to decrypt *.enc corpus files.",
     )
+    parser.add_argument(
+        "--recalc",
+        action="store_true",
+        help="Enable best-effort recalculation correctness check (off by default).",
+    )
+    parser.add_argument(
+        "--render-smoke",
+        action="store_true",
+        help="Enable lightweight headless render/print smoke test (off by default).",
+    )
+    parser.add_argument(
+        "--diff-ignore",
+        action="append",
+        default=[],
+        help="Additional part path to ignore during diff (can be repeated).",
+    )
+    parser.add_argument(
+        "--diff-limit",
+        type=int,
+        default=25,
+        help="Maximum number of diff entries to include in reports (privacy-safe).",
+    )
     args = parser.parse_args()
+
+    rust_exe = _build_rust_helper()
+    diff_ignore = set(DEFAULT_DIFF_IGNORE) | {p for p in args.diff_ignore if p}
 
     ensure_dir(args.out_dir)
     reports_dir = args.out_dir / "reports"
@@ -279,7 +368,14 @@ def main() -> int:
                     for f in scan.findings[:25]:
                         print(f"  {f.kind} in {f.part_name} sha256={f.match_sha256[:16]}")
                     return 1
-            report = triage_workbook(wb)
+            report = triage_workbook(
+                wb,
+                rust_exe=rust_exe,
+                diff_ignore=diff_ignore,
+                diff_limit=args.diff_limit,
+                recalc=args.recalc,
+                render_smoke=args.render_smoke,
+            )
         except Exception as e:  # noqa: BLE001
             report = {
                 "display_name": path.name,
@@ -288,7 +384,7 @@ def main() -> int:
                 "run_url": github_run_url(),
                 "steps": {"load": asdict(_step_failed(_now_ms(), e))},
                 "result": {"open_ok": False},
-                "failure_category": "parse_error",
+                "failure_category": "triage_error",
             }
 
         reports.append(report)
