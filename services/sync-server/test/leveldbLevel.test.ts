@@ -4,7 +4,19 @@ import test from "node:test";
 
 import { requireLevelForYLeveldb } from "../src/leveldbLevel.js";
 
-test("requireLevelForYLeveldb resolves 'level' even when it's only a y-leveldb dependency", () => {
+const require = createRequire(import.meta.url);
+let hasYLeveldb = true;
+try {
+  require.resolve("y-leveldb");
+} catch {
+  // y-leveldb is an optional dependency.
+  hasYLeveldb = false;
+}
+
+test(
+  "requireLevelForYLeveldb resolves 'level' even when it's only a y-leveldb dependency",
+  { skip: hasYLeveldb ? false : "y-leveldb not installed" },
+  () => {
   const require = createRequire(import.meta.url);
   let directLevelOk = true;
   try {
@@ -24,5 +36,5 @@ test("requireLevelForYLeveldb resolves 'level' even when it's only a y-leveldb d
     const yLeveldbRequire = createRequire(require.resolve("y-leveldb"));
     assert.equal(typeof yLeveldbRequire("level"), "function");
   }
-});
-
+  }
+);
