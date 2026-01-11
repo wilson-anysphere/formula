@@ -25,6 +25,7 @@ pub mod charts;
 pub mod comments;
 pub mod conditional_formatting;
 mod compare;
+mod content_types;
 mod formula_text;
 mod model_package;
 mod openxml;
@@ -71,7 +72,7 @@ pub use pivots::{
     pivot_charts::PivotChartPart,
     slicers::{PivotSlicerParts, SlicerDefinition, TimelineDefinition},
     PivotCacheDefinition, PivotCacheDefinitionPart, PivotCacheField, PivotCacheRecordsPart,
-    PivotCacheSourceType, PivotTablePart, XlsxPivots,
+    PivotCacheSourceType, PivotTablePart, PreservedPivotParts, XlsxPivots,
 };
 pub use recalc_policy::RecalcPolicy;
 pub use read::{load_from_bytes, load_from_path};

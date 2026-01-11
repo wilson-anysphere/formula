@@ -9,12 +9,15 @@ use crate::XlsxError;
 pub mod cache_definition;
 pub mod cache_records;
 pub mod pivot_charts;
+pub mod preserve;
 pub mod slicers;
 pub mod graph;
 
 pub use graph::{PivotTableInstance, XlsxPivotGraph};
 
 pub use cache_definition::{PivotCacheDefinition, PivotCacheField, PivotCacheSourceType};
+
+pub use preserve::{PreservedPivotParts, RelationshipStub};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PivotTablePart {
