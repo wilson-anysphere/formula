@@ -26,6 +26,7 @@ export type SyncServerConfig = {
   persistence: {
     backend: "leveldb" | "file";
     compactAfterUpdates: number;
+    leveldbDocNameHashing: boolean;
     encryption:
       | {
           mode: "off";
@@ -38,7 +39,7 @@ export type SyncServerConfig = {
      * Optional encryption for y-leveldb persistence values.
      *
      * Note: this only encrypts LevelDB *values*. Keys (including doc ids) remain
-     * plaintext unless a separate doc-id hashing layer is added.
+     * plaintext unless `SYNC_SERVER_LEVELDB_DOCNAME_HASHING` is enabled.
      */
     leveldbEncryption?: {
       key: Buffer;
@@ -175,6 +176,11 @@ export function loadConfigFromEnv(): SyncServerConfig {
           strict: leveldbEncryptionStrict,
         };
 
+  const leveldbDocNameHashing = envBool(
+    process.env.SYNC_SERVER_LEVELDB_DOCNAME_HASHING,
+    false
+  );
+
   const internalAdminToken =
     process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN !== undefined
       ? process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN || null
@@ -219,6 +225,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
     persistence: {
       backend,
       compactAfterUpdates,
+      leveldbDocNameHashing,
       encryption,
       leveldbEncryption,
     },

@@ -150,6 +150,25 @@ curl -X POST \
   http://127.0.0.1:1234/internal/retention/sweep
 ```
 
+#### LevelDB docName hashing (metadata privacy)
+
+By default, `y-leveldb` includes the raw `documentId` in **LevelDB keys** (e.g. `["v1", docName, "update", clock]`), which means document names appear in plaintext in SSTables/LOG.
+
+To reduce metadata leakage, you can enable doc-name hashing:
+
+- `SYNC_SERVER_LEVELDB_DOCNAME_HASHING=1` (default `0` for backcompat)
+
+When enabled, the server derives a persistent name for LevelDB keys:
+
+```
+persistedName = sha256(documentId) // hex
+```
+
+Migration / backcompat:
+
+- On first load of a document, the server will **also** look for legacy (unhashed) keys.
+- If legacy keys are present, the server will migrate the document (and any per-doc metas) into the hashed namespace on the next flush (when the last client disconnects) and then delete the legacy keys.
+
 #### Encryption at rest (file persistence)
 
 The `file` persistence backend supports **encryption at rest** (AES-256-GCM) for persisted `.yjs` documents.
