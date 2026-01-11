@@ -1518,12 +1518,6 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           touchPinch = null;
         }
 
-        if (touchPointers.size === 0) {
-          touchPan = null;
-          touchPinch = null;
-          touchTapDisabled = false;
-        }
-
         if (touchPan && event.pointerId === touchPan.pointerId) {
           const didMove = touchPan.moved;
           touchPan = null;
@@ -1539,7 +1533,61 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
             const point = getViewportPoint(event);
             const picked = renderer.pickCellAt(point.x, point.y);
             if (picked) {
-              renderer.setSelection(picked);
+              const { rowCount, colCount } = renderer.scroll.getCounts();
+              const viewport = renderer.scroll.getViewportState();
+              const headerRows = headerRowsRef.current;
+              const headerCols = headerColsRef.current;
+              const dataStartRow = headerRows >= rowCount ? 0 : headerRows;
+              const dataStartCol = headerCols >= colCount ? 0 : headerCols;
+
+              const isCornerHeader =
+                headerRows > 0 && headerCols > 0 && picked.row < headerRows && picked.col < headerCols;
+              const isColumnHeader = headerRows > 0 && picked.row < headerRows && picked.col >= headerCols;
+              const isRowHeader = headerCols > 0 && picked.col < headerCols && picked.row >= headerRows;
+
+              if (isCornerHeader || isColumnHeader || isRowHeader) {
+                const currentSelection = renderer.getSelection();
+
+                if (isCornerHeader) {
+                  const range: CellRange = {
+                    startRow: dataStartRow,
+                    endRow: rowCount,
+                    startCol: dataStartCol,
+                    endCol: colCount
+                  };
+
+                  const activeCell =
+                    currentSelection ??
+                    ({
+                      row: Math.max(dataStartRow, viewport.main.rows.start),
+                      col: Math.max(dataStartCol, viewport.main.cols.start)
+                    } as const);
+
+                  renderer.setSelectionRange(range, { activeCell });
+                } else if (isColumnHeader) {
+                  const range: CellRange = {
+                    startRow: dataStartRow,
+                    endRow: rowCount,
+                    startCol: picked.col,
+                    endCol: Math.min(colCount, picked.col + 1)
+                  };
+
+                  const baseRow = currentSelection ? currentSelection.row : Math.max(dataStartRow, viewport.main.rows.start);
+                  renderer.setSelectionRange(range, { activeCell: { row: baseRow, col: picked.col } });
+                } else {
+                  const range: CellRange = {
+                    startRow: picked.row,
+                    endRow: Math.min(rowCount, picked.row + 1),
+                    startCol: dataStartCol,
+                    endCol: colCount
+                  };
+
+                  const baseCol = currentSelection ? currentSelection.col : Math.max(dataStartCol, viewport.main.cols.start);
+                  renderer.setSelectionRange(range, { activeCell: { row: picked.row, col: baseCol } });
+                }
+              } else {
+                renderer.setSelection(picked);
+              }
               const nextSelection = renderer.getSelection();
               const nextRange = renderer.getSelectionRange();
               announceSelection(nextSelection, nextRange);
@@ -1561,6 +1609,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
               }
             }
           }
+        }
+
+        if (touchPointers.size === 0) {
+          touchPan = null;
+          touchPinch = null;
+          touchTapDisabled = false;
         }
 
         if (wasPinching && touchPointers.size === 1 && !touchPan) {

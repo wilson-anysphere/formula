@@ -10,22 +10,15 @@ import { CanvasGrid, type GridApi } from "../CanvasGrid";
 
 function createPointerEvent(
   type: string,
-  options: { clientX: number; clientY: number; pointerId: number; ctrlKey?: boolean; shiftKey?: boolean }
-): Event {
-  const PointerEventCtor = (window as unknown as { PointerEvent?: typeof PointerEvent }).PointerEvent;
-  if (PointerEventCtor) {
-    return new PointerEventCtor(type, {
-      bubbles: true,
-      cancelable: true,
-      clientX: options.clientX,
-      clientY: options.clientY,
-      buttons: 1,
-      pointerId: options.pointerId,
-      ctrlKey: options.ctrlKey,
-      shiftKey: options.shiftKey
-    } as PointerEventInit);
+  options: {
+    clientX: number;
+    clientY: number;
+    pointerId: number;
+    ctrlKey?: boolean;
+    shiftKey?: boolean;
+    pointerType?: string;
   }
-
+): Event {
   const event = new MouseEvent(type, {
     bubbles: true,
     cancelable: true,
@@ -36,6 +29,7 @@ function createPointerEvent(
     shiftKey: options.shiftKey
   });
   Object.defineProperty(event, "pointerId", { value: options.pointerId });
+  Object.defineProperty(event, "pointerType", { value: options.pointerType ?? "mouse" });
   return event;
 }
 
@@ -181,6 +175,72 @@ describe("CanvasGrid header selection", () => {
 
     // Selected rows 10..12 (inclusive) across all cols, excluding the header col.
     expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 10, endRow: 13, startCol: 1, endCol: 20 });
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("selects rows/cols/all when tapping header cells on touch", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      bottom: 200,
+      right: 200,
+      width: 200,
+      height: 200,
+      toJSON: () => ({})
+    } as unknown as DOMRect);
+
+    const apiRef = React.createRef<GridApi>();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: () => null }}
+          rowCount={20}
+          colCount={20}
+          headerRows={1}
+          headerCols={1}
+          frozenRows={1}
+          frozenCols={1}
+          defaultRowHeight={10}
+          defaultColWidth={10}
+          apiRef={apiRef}
+        />
+      );
+    });
+
+    const selectionCanvas = host.querySelectorAll("canvas")[2] as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    // Tap the top-left corner header: select all data cells (excluding headers).
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { clientX: 5, clientY: 5, pointerId: 1, pointerType: "touch" }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerup", { clientX: 5, clientY: 5, pointerId: 1, pointerType: "touch" }));
+    });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 1, endRow: 20, startCol: 1, endCol: 20 });
+
+    // Tap a column header (row 0, col 3): select entire column (excluding header row).
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { clientX: 35, clientY: 5, pointerId: 2, pointerType: "touch" }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerup", { clientX: 35, clientY: 5, pointerId: 2, pointerType: "touch" }));
+    });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 1, endRow: 20, startCol: 3, endCol: 4 });
+
+    // Tap a row header (row 5, col 0): select entire row (excluding header col).
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { clientX: 5, clientY: 55, pointerId: 3, pointerType: "touch" }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerup", { clientX: 5, clientY: 55, pointerId: 3, pointerType: "touch" }));
+    });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 5, endRow: 6, startCol: 1, endCol: 20 });
 
     await act(async () => {
       root.unmount();
