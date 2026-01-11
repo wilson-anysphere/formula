@@ -123,6 +123,8 @@ The preferred configuration is `SECRET_STORE_KEYS_JSON`, which enables key rotat
 }
 ```
 
+Key ids are application-defined (e.g. a date string), but must be non-empty and must not include `:` (the delimiter used in the on-disk encoding).
+
 If `SECRET_STORE_KEYS_JSON` is not set, the API falls back to legacy single-key mode using `SECRET_STORE_KEY` (compatible with older deployments).
 
 Note: legacy deployments derive the actual AES-256 key as `sha256(SECRET_STORE_KEY)`. When migrating from `SECRET_STORE_KEY` to `SECRET_STORE_KEYS_JSON`, include the derived key as one of the entries so existing secrets remain decryptable.
