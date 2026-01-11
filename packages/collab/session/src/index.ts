@@ -91,7 +91,23 @@ export interface CollabSessionOptions {
    * When enabled, the session tracks local edits using Yjs' UndoManager so undo/redo
    * only affects this client's changes (never remote users' edits).
    */
-  undo?: { captureTimeoutMs?: number; origin?: object };
+  undo?: {
+    captureTimeoutMs?: number;
+    origin?: object;
+    /**
+     * Additional Yjs root map names to include in the collaborative undo scope.
+     *
+     * These roots are created eagerly (via `doc.getMap(name)`) when undo is
+     * enabled so edits remain undoable even if the root is normally created
+     * lazily after session construction.
+     */
+    scopeNames?: string[];
+    /**
+     * Advanced escape hatch to include additional Yjs root types in the undo
+     * scope (e.g. `doc.getArray("foo")`).
+     */
+    includeRoots?: (doc: Y.Doc) => Array<Y.AbstractType<any>>;
+  };
   /**
    * When enabled, the session monitors formula updates for true conflicts
    * (offline/concurrent same-cell edits) and surfaces them via `onConflict`.
@@ -242,15 +258,31 @@ export class CollabSession {
     }
 
     if (options.undo) {
-      const scope = [this.cells, this.sheets, this.metadata, this.namedRanges] as Array<Y.AbstractType<any>>;
-      // Include comments in the undo scope when present (don't create it eagerly).
-      const comments = this.doc.share.get("comments");
-      if (comments) scope.push(comments as any);
+      const scope = new Set<Y.AbstractType<any>>([this.cells, this.sheets, this.metadata, this.namedRanges]);
+
+      // Include comments in the undo scope deterministically.
+      //
+      // Callers typically create the comments root lazily (e.g. via
+      // `doc.getMap("comments")` in CommentManager). If the session builds its
+      // undo scope before that happens, comment edits won't be undoable.
+      scope.add(this.doc.getMap("comments"));
+
+      const builtInScopeNames = new Set(["cells", "sheets", "metadata", "namedRanges", "comments"]);
+      for (const name of options.undo.scopeNames ?? []) {
+        if (!name || builtInScopeNames.has(name)) continue;
+        scope.add(this.doc.getMap(name));
+      }
+
+      if (typeof options.undo.includeRoots === "function") {
+        for (const root of options.undo.includeRoots(this.doc) ?? []) {
+          if (root) scope.add(root);
+        }
+      }
 
       const undo = createUndoService({
         mode: "collab",
         doc: this.doc,
-        scope,
+        scope: Array.from(scope),
         captureTimeoutMs: options.undo.captureTimeoutMs,
         origin: this.origin,
       });

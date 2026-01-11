@@ -34,16 +34,13 @@ function connectDocs(docA, docB) {
   };
 }
 
-function ensureCommentsRoot(doc) {
-  doc.getMap("comments");
-}
-
-test("CollabSession undo captures comment edits (in-memory sync)", () => {
+test("CollabSession undo captures comment edits when comments root is created lazily (in-memory sync)", () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
 
-  ensureCommentsRoot(docA);
-  ensureCommentsRoot(docB);
+  // Regression: callers often don't create `comments` until after the session is constructed.
+  assert.equal(docA.share.get("comments"), undefined);
+  assert.equal(docB.share.get("comments"), undefined);
 
   const disconnect = connectDocs(docA, docB);
 
