@@ -8,6 +8,27 @@ export interface RGBA {
   a: number;
 }
 
+let cssParserCtx: CanvasRenderingContext2D | null | undefined;
+
+function getCssParserCtx(): CanvasRenderingContext2D | null {
+  if (cssParserCtx !== undefined) return cssParserCtx;
+
+  if (typeof OffscreenCanvas !== "undefined") {
+    const canvas = new OffscreenCanvas(1, 1);
+    cssParserCtx = canvas.getContext("2d");
+    return cssParserCtx ?? null;
+  }
+
+  if (typeof document !== "undefined") {
+    const canvas = document.createElement("canvas");
+    cssParserCtx = canvas.getContext("2d");
+    return cssParserCtx ?? null;
+  }
+
+  cssParserCtx = null;
+  return null;
+}
+
 function clampChannel(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(255, Math.round(value)));
@@ -60,6 +81,20 @@ export function parseColor(input: string): RGBA | null {
     return { r, g, b, a: clamp01(a) };
   }
 
+  // Last-chance fallback: use the platform's CSS color parser via Canvas.
+  // This supports named colors and formats like `hsl(...)` when available, but
+  // will not resolve CSS variables (which should be handled upstream).
+  const ctx = getCssParserCtx();
+  if (ctx) {
+    ctx.fillStyle = "#010203";
+    const sentinel = ctx.fillStyle;
+    ctx.fillStyle = value;
+    const parsed = ctx.fillStyle;
+    if (parsed !== sentinel) {
+      return parseColor(parsed);
+    }
+  }
+
   return null;
 }
 
@@ -84,4 +119,3 @@ export function paintToRgba(paint: Paint): RGBA | null {
   const opacity = paint.opacity == null ? 1 : clamp01(paint.opacity);
   return { ...parsed, a: clamp01(parsed.a * opacity) };
 }
-
