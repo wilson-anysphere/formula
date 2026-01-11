@@ -273,3 +273,36 @@ fn expand_expands_with_default_and_custom_padding() {
     );
 }
 
+#[test]
+fn take_and_drop_return_calc_when_result_is_empty() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 4.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=TAKE(A1:B2,0)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D2", "=TAKE(A1:B2,1,0)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "E1", "=DROP(A1:B2,,2)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D1"),
+        Value::Error(ErrorKind::Calc)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D2"),
+        Value::Error(ErrorKind::Calc)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E1"),
+        Value::Error(ErrorKind::Calc)
+    );
+}
