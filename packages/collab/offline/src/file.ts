@@ -101,6 +101,21 @@ export function attachFilePersistence(doc: Y.Doc, opts: { filePath: string }): O
   const whenLoaded = async () => {
     if (destroyed) return;
     loadAndRepairFile({ doc, fd, filePath: opts.filePath });
+
+    // If the log is empty (brand new file, cleared file, or fully truncated due
+    // to corruption), persist a baseline snapshot so future incremental updates
+    // are replayable from scratch. This matches y-indexeddb's behavior of
+    // persisting a state snapshot during initialization.
+    try {
+      if (fs.fstatSync(fd).size === 0) {
+        const snapshot = Y.encodeStateAsUpdate(doc);
+        writeAllSync(fd, encodeRecord(snapshot));
+        bestEffortFsync(fd);
+      }
+    } catch {
+      // Best-effort: failure to write the baseline should not prevent the doc
+      // from loading. Subsequent edits may still be persisted incrementally.
+    }
   };
 
   const destroy = () => {
