@@ -39,11 +39,17 @@ function base64ToBytes(base64) {
   return out;
 }
 
+function isNodeRuntime() {
+  const proc = /** @type {any} */ (globalThis.process);
+  return Boolean(proc?.versions?.node);
+}
+
 /**
  * @param {unknown} value
  * @returns {value is Y.Map<any>}
  */
 function isYMap(value) {
+  if (value instanceof Y.Map) return true;
   if (!value || typeof value !== "object") return false;
   const maybe = /** @type {any} */ (value);
   if (maybe.constructor?.name !== "YMap") return false;
@@ -55,6 +61,7 @@ function isYMap(value) {
  * @returns {value is Y.Array<any>}
  */
 function isYArray(value) {
+  if (value instanceof Y.Array) return true;
   if (!value || typeof value !== "object") return false;
   const maybe = /** @type {any} */ (value);
   if (maybe.constructor?.name !== "YArray") return false;
@@ -115,7 +122,13 @@ function splitIntoChunks(bytes, chunkSize) {
  * @returns {Promise<Uint8Array>}
  */
 async function gzipBytes(bytes) {
-  // Browser.
+  // Prefer Node's zlib for stability/perf (Node also exposes CompressionStream).
+  if (isNodeRuntime()) {
+    const zlib = await import("node:zlib");
+    return new Uint8Array(zlib.gzipSync(bytes));
+  }
+
+  // Browser (and other web runtimes).
   // eslint-disable-next-line no-undef
   if (typeof CompressionStream !== "undefined") {
     // eslint-disable-next-line no-undef
@@ -125,10 +138,7 @@ async function gzipBytes(bytes) {
     return new Uint8Array(compressed);
   }
 
-  // Node.
-  const zlib = await import("node:zlib");
-  // gunzipSync/gzipSync return Buffer which is a Uint8Array.
-  return new Uint8Array(zlib.gzipSync(bytes));
+  throw new Error("YjsVersionStore: gzip compression is not supported in this environment");
 }
 
 /**
@@ -136,7 +146,11 @@ async function gzipBytes(bytes) {
  * @returns {Promise<Uint8Array>}
  */
 async function gunzipBytes(bytes) {
-  // Browser.
+  if (isNodeRuntime()) {
+    const zlib = await import("node:zlib");
+    return new Uint8Array(zlib.gunzipSync(bytes));
+  }
+
   // eslint-disable-next-line no-undef
   if (typeof DecompressionStream !== "undefined") {
     // eslint-disable-next-line no-undef
@@ -146,9 +160,7 @@ async function gunzipBytes(bytes) {
     return new Uint8Array(decompressed);
   }
 
-  // Node.
-  const zlib = await import("node:zlib");
-  return new Uint8Array(zlib.gunzipSync(bytes));
+  throw new Error("YjsVersionStore: gzip decompression is not supported in this environment");
 }
 
 /**
