@@ -58,3 +58,7 @@ Desktop can register it as an extra lib:
 ```js
 monaco.languages.typescript.typescriptDefaults.addExtraLib(FORMULA_API_DTS, "file:///formula.d.ts");
 ```
+
+## Formatting
+
+`Range.setFormat(null)` clears formatting (equivalent to removing all style keys).
