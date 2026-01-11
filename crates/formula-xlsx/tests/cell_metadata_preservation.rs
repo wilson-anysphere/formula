@@ -409,3 +409,83 @@ fn apply_cell_patches_writes_inline_rich_text_when_shared_strings_absent() {
         "expected <b> element for bold rich text run, got: {out_xml}"
     );
 }
+
+#[test]
+fn apply_cell_patches_preserves_prefixes_when_expanding_empty_sheetdata() {
+    // Some producers namespace SpreadsheetML using explicit prefixes instead of a default namespace.
+    // Ensure we preserve the prefix when expanding `<x:sheetData/>` into a non-empty sheetData and
+    // when inserting new rows/cells.
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:dimension ref="A1"/>
+  <x:sheetData/>
+</x:worksheet>"#;
+
+    let bytes = build_minimal_xlsx(worksheet_xml);
+    let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1").unwrap(),
+        CellPatch::set_value(CellValue::Number(2.0)),
+    );
+    pkg.apply_cell_patches(&patches).expect("apply patches");
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    roxmltree::Document::parse(out_xml).expect("output xml should be well-formed");
+    assert!(
+        out_xml.contains("<x:sheetData>"),
+        "expected prefixed sheetData start tag, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains("</x:sheetData>"),
+        "expected prefixed sheetData end tag, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains("<x:row"),
+        "expected prefixed row insertion, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains("<x:c r=\"A1\""),
+        "expected prefixed cell insertion, got: {out_xml}"
+    );
+}
+
+#[test]
+fn apply_cell_patches_preserves_prefixes_when_inserting_missing_sheetdata() {
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:dimension ref="A1"/>
+</x:worksheet>"#;
+
+    let bytes = build_minimal_xlsx(worksheet_xml);
+    let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1").unwrap(),
+        CellPatch::set_value(CellValue::Number(2.0)),
+    );
+    pkg.apply_cell_patches(&patches).expect("apply patches");
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    roxmltree::Document::parse(out_xml).expect("output xml should be well-formed");
+    assert!(
+        out_xml.contains("<x:sheetData>"),
+        "expected prefixed sheetData insertion, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains("</x:sheetData>"),
+        "expected prefixed sheetData end tag, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains("<x:row"),
+        "expected prefixed row insertion, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains("<x:c r=\"A1\""),
+        "expected prefixed cell insertion, got: {out_xml}"
+    );
+}

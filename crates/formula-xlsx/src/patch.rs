@@ -27,6 +27,8 @@ const REL_TYPE_SHARED_STRINGS: &str =
 const REL_TYPE_STYLES: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 
+const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
 /// An owned set of cell edits to apply to an existing workbook package.
 ///
 /// Patches are keyed by **worksheet (tab) name**, then by cell address.
@@ -537,9 +539,20 @@ fn patch_worksheet_xml(
     ));
 
     let mut buf = Vec::new();
+    let mut worksheet_prefix: Option<String> = None;
+    let mut worksheet_has_default_ns = false;
     let mut saw_sheet_data = false;
     loop {
         match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if local_name(e.name().as_ref()) == b"worksheet" => {
+                if worksheet_prefix.is_none() {
+                    worksheet_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                    worksheet_has_default_ns = worksheet_has_default_spreadsheetml_ns(&e)?;
+                }
+                writer.write_event(Event::Start(e.into_owned()))?;
+            }
             Event::Empty(e) if local_name(e.name().as_ref()) == b"dimension" => {
                 if let Some(bounds) = patch_bounds {
                     writer.write_event(Event::Empty(rewrite_dimension(&e, bounds)?))?;
@@ -556,6 +569,9 @@ fn patch_worksheet_xml(
             }
             Event::Start(e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 saw_sheet_data = true;
+                let sheet_prefix = element_prefix(e.name().as_ref())
+                    .and_then(|p| std::str::from_utf8(p).ok())
+                    .map(|s| s.to_string());
                 writer.write_event(Event::Start(e.into_owned()))?;
                 let changed = patch_sheet_data(
                     &mut reader,
@@ -565,6 +581,7 @@ fn patch_worksheet_xml(
                     &mut patch_row_idx,
                     &mut shared_strings,
                     style_id_to_xf,
+                    sheet_prefix.as_deref(),
                 )?;
                 formula_changed |= changed;
             }
@@ -574,6 +591,10 @@ fn patch_worksheet_xml(
                     writer.write_event(Event::Empty(e.into_owned()))?;
                 } else {
                     // Convert `<sheetData/>` into `<sheetData>...</sheetData>`.
+                    let sheet_data_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let sheet_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
                     writer.write_event(Event::Start(e.into_owned()))?;
                     for row in remaining_patch_rows.iter().skip(patch_row_idx).copied() {
                         let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
@@ -584,16 +605,23 @@ fn patch_worksheet_xml(
                             cells,
                             &mut shared_strings,
                             style_id_to_xf,
+                            sheet_prefix.as_deref(),
                         )?;
                     }
                     patch_row_idx = remaining_patch_rows.len();
-                    writer.write_event(Event::End(BytesEnd::new("sheetData")))?;
+                    writer.write_event(Event::End(BytesEnd::new(sheet_data_tag.as_str())))?;
                 }
             }
             Event::End(e) if local_name(e.name().as_ref()) == b"worksheet" => {
                 if !saw_sheet_data && !row_patches.is_empty() {
                     // Insert missing <sheetData> just before </worksheet>.
-                    writer.write_event(Event::Start(BytesStart::new("sheetData")))?;
+                    let sheet_prefix = if worksheet_has_default_ns {
+                        None
+                    } else {
+                        worksheet_prefix.as_deref()
+                    };
+                    let sheet_data_tag = prefixed_tag(sheet_prefix, "sheetData");
+                    writer.write_event(Event::Start(BytesStart::new(sheet_data_tag.as_str())))?;
                     for row in remaining_patch_rows.iter().skip(patch_row_idx).copied() {
                         let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
                         formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
@@ -603,10 +631,11 @@ fn patch_worksheet_xml(
                             cells,
                             &mut shared_strings,
                             style_id_to_xf,
+                            sheet_prefix,
                         )?;
                     }
                     patch_row_idx = remaining_patch_rows.len();
-                    writer.write_event(Event::End(BytesEnd::new("sheetData")))?;
+                    writer.write_event(Event::End(BytesEnd::new(sheet_data_tag.as_str())))?;
                 }
                 writer.write_event(Event::End(e.into_owned()))?;
             }
@@ -627,6 +656,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
     patch_row_idx: &mut usize,
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
+    sheet_prefix: Option<&str>,
 ) -> Result<bool, XlsxError> {
     let mut buf = Vec::new();
     let mut formula_changed = false;
@@ -646,7 +676,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
                     formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
-                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf)?;
+                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf, sheet_prefix)?;
                     *patch_row_idx += 1;
                 }
 
@@ -658,6 +688,11 @@ fn patch_sheet_data<R: std::io::BufRead>(
                         *patch_row_idx += 1;
                     }
 
+                    let row_prefix_owned = element_prefix(row_start.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                    let row_prefix = row_prefix_owned.as_deref().or(sheet_prefix);
+
                     writer.write_event(Event::Start(row_start.clone()))?;
                     let changed = patch_row(
                         reader,
@@ -666,6 +701,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                         cells,
                         shared_strings,
                         style_id_to_xf,
+                        row_prefix,
                     )?;
                     formula_changed |= changed;
                     // patch_row writes the row end.
@@ -686,7 +722,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
                     formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
-                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf)?;
+                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf, sheet_prefix)?;
                     *patch_row_idx += 1;
                 }
 
@@ -698,6 +734,11 @@ fn patch_sheet_data<R: std::io::BufRead>(
                     }
 
                     // Convert `<row/>` into `<row>...</row>`.
+                    let row_tag = String::from_utf8_lossy(row_empty.name().as_ref()).into_owned();
+                    let row_prefix_owned = element_prefix(row_empty.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                    let row_prefix = row_prefix_owned.as_deref().or(sheet_prefix);
                     writer.write_event(Event::Start(row_empty.clone()))?;
                     for (col, patch) in cells {
                         formula_changed |= patch_has_formula(patch);
@@ -710,9 +751,10 @@ fn patch_sheet_data<R: std::io::BufRead>(
                             None,
                             shared_strings,
                             style_id_to_xf,
+                            row_prefix,
                         )?;
                     }
-                    writer.write_event(Event::End(BytesEnd::new("row")))?;
+                    writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
                 } else {
                     writer.write_event(Event::Empty(row_empty))?;
                 }
@@ -723,7 +765,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                     let row = remaining_patch_rows[*patch_row_idx];
                     let cells = row_patches.get(&row).map(Vec::as_slice).unwrap_or_default();
                     formula_changed |= cells.iter().any(|(_, patch)| patch_has_formula(patch));
-                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf)?;
+                    write_new_row(writer, row, cells, shared_strings, style_id_to_xf, sheet_prefix)?;
                     *patch_row_idx += 1;
                 }
                 writer.write_event(Event::End(e.into_owned()))?;
@@ -749,11 +791,13 @@ fn patch_row<R: std::io::BufRead>(
     patches: &[(u32, &CellPatch)],
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
+    default_prefix: Option<&str>,
 ) -> Result<bool, XlsxError> {
     let mut buf = Vec::new();
     let mut patch_idx = 0usize;
     let mut formula_changed = false;
     let mut cell_depth = 0usize;
+    let mut cell_prefix: Option<String> = None;
 
     loop {
         match reader.read_event_into(&mut buf)? {
@@ -767,6 +811,12 @@ fn patch_row<R: std::io::BufRead>(
             }
             Event::Start(e) if local_name(e.name().as_ref()) == b"c" => {
                 let cell_start = e.into_owned();
+                if cell_prefix.is_none() {
+                    cell_prefix = element_prefix(cell_start.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
+                let insert_prefix = cell_prefix.as_deref().or(default_prefix);
                 let Some((cell_ref, existing_t, existing_s)) =
                     parse_cell_addr_and_attrs(&cell_start)?
                 else {
@@ -795,6 +845,7 @@ fn patch_row<R: std::io::BufRead>(
                         None,
                         shared_strings,
                         style_id_to_xf,
+                        insert_prefix,
                     )?;
                     patch_idx += 1;
                 }
@@ -852,6 +903,12 @@ fn patch_row<R: std::io::BufRead>(
             }
             Event::Empty(e) if local_name(e.name().as_ref()) == b"c" => {
                 let cell_empty = e.into_owned();
+                if cell_prefix.is_none() {
+                    cell_prefix = element_prefix(cell_empty.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
+                let insert_prefix = cell_prefix.as_deref().or(default_prefix);
                 let Some((cell_ref, existing_t, existing_s)) =
                     parse_cell_addr_and_attrs(&cell_empty)?
                 else {
@@ -877,6 +934,7 @@ fn patch_row<R: std::io::BufRead>(
                         None,
                         shared_strings,
                         style_id_to_xf,
+                        insert_prefix,
                     )?;
                     patch_idx += 1;
                 }
@@ -905,6 +963,7 @@ fn patch_row<R: std::io::BufRead>(
             Event::Start(e) => {
                 // Non-cell element inside the row (eg extLst). Ensure any remaining cell patches are
                 // emitted before it so cells stay grouped at the start of the row.
+                let insert_prefix = cell_prefix.as_deref().or(default_prefix);
                 if patch_idx < patches.len() && local_name(e.name().as_ref()) != b"c" {
                     while patch_idx < patches.len() {
                         let (col, patch) = patches[patch_idx];
@@ -918,6 +977,7 @@ fn patch_row<R: std::io::BufRead>(
                             None,
                             shared_strings,
                             style_id_to_xf,
+                            insert_prefix,
                         )?;
                         patch_idx += 1;
                     }
@@ -925,6 +985,7 @@ fn patch_row<R: std::io::BufRead>(
                 writer.write_event(Event::Start(e.into_owned()))?;
             }
             Event::Empty(e) => {
+                let insert_prefix = cell_prefix.as_deref().or(default_prefix);
                 if patch_idx < patches.len() && local_name(e.name().as_ref()) != b"c" {
                     while patch_idx < patches.len() {
                         let (col, patch) = patches[patch_idx];
@@ -938,6 +999,7 @@ fn patch_row<R: std::io::BufRead>(
                             None,
                             shared_strings,
                             style_id_to_xf,
+                            insert_prefix,
                         )?;
                         patch_idx += 1;
                     }
@@ -945,6 +1007,7 @@ fn patch_row<R: std::io::BufRead>(
                 writer.write_event(Event::Empty(e.into_owned()))?;
             }
             Event::End(e) if local_name(e.name().as_ref()) == b"row" => {
+                let insert_prefix = cell_prefix.as_deref().or(default_prefix);
                 while patch_idx < patches.len() {
                     let (col, patch) = patches[patch_idx];
                     formula_changed |= patch_has_formula(patch);
@@ -957,6 +1020,7 @@ fn patch_row<R: std::io::BufRead>(
                         None,
                         shared_strings,
                         style_id_to_xf,
+                        insert_prefix,
                     )?;
                     patch_idx += 1;
                 }
@@ -982,8 +1046,10 @@ fn write_new_row(
     patches: &[(u32, &CellPatch)],
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
+    prefix: Option<&str>,
 ) -> Result<(), XlsxError> {
-    let mut row = BytesStart::new("row");
+    let row_tag = prefixed_tag(prefix, "row");
+    let mut row = BytesStart::new(row_tag.as_str());
     row.push_attribute(("r", row_num.to_string().as_str()));
     writer.write_event(Event::Start(row))?;
     for (col, patch) in patches {
@@ -996,9 +1062,10 @@ fn write_new_row(
             None,
             shared_strings,
             style_id_to_xf,
+            prefix,
         )?;
     }
-    writer.write_event(Event::End(BytesEnd::new("row")))?;
+    writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
     Ok(())
 }
 
@@ -1011,6 +1078,7 @@ fn write_cell_patch(
     existing_s: Option<&str>,
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
+    prefix: Option<&str>,
 ) -> Result<bool, XlsxError> {
     let cell_ref = CellRef::new(row_num - 1, col);
     let a1 = cell_ref.to_a1();
@@ -1034,7 +1102,13 @@ fn write_cell_patch(
         shared_strings.note_shared_string_ref_delta(old_uses_shared, new_uses_shared);
     }
 
-    let mut c = BytesStart::new("c");
+    let cell_tag = prefixed_tag(prefix, "c");
+    let formula_tag = prefixed_tag(prefix, "f");
+    let v_tag = prefixed_tag(prefix, "v");
+    let is_tag = prefixed_tag(prefix, "is");
+    let t_tag = prefixed_tag(prefix, "t");
+
+    let mut c = BytesStart::new(cell_tag.as_str());
     c.push_attribute(("r", a1.as_str()));
 
     let style_value = style_index.filter(|s| *s != 0).map(|s| s.to_string());
@@ -1055,12 +1129,12 @@ fn write_cell_patch(
     writer.write_event(Event::Start(c))?;
 
     if let Some(formula) = formula {
-        write_formula_element(writer, None, formula, false, "f")?;
+        write_formula_element(writer, None, formula, false, &formula_tag)?;
     }
 
-    write_value_element(writer, &body_kind, "v", "is", "t")?;
+    write_value_element(writer, &body_kind, &v_tag, &is_tag, &t_tag)?;
 
-    writer.write_event(Event::End(BytesEnd::new("c")))?;
+    writer.write_event(Event::End(BytesEnd::new(cell_tag.as_str())))?;
     Ok(true)
 }
 
@@ -1984,6 +2058,16 @@ fn prefixed_tag(prefix: Option<&str>, local: &str) -> String {
 
 fn element_prefix(name: &[u8]) -> Option<&[u8]> {
     name.iter().rposition(|b| *b == b':').map(|idx| &name[..idx])
+}
+
+fn worksheet_has_default_spreadsheetml_ns(e: &BytesStart<'_>) -> Result<bool, XlsxError> {
+    for attr in e.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"xmlns" && attr.value.as_ref() == SPREADSHEETML_NS.as_bytes() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn is_element_named(name: &[u8], expected_prefix: Option<&[u8]>, local: &[u8]) -> bool {
