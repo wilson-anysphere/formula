@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import { normalizeRestriction } from "../../../packages/collab/permissions/index.js";
 
 import type { AuthMode } from "./config.js";
+import { statusCodeForIntrospectionReason } from "./introspection-reasons.js";
 
 export type SyncRole = "owner" | "admin" | "editor" | "commenter" | "viewer";
 
@@ -173,20 +174,6 @@ function parseJwtExpMs(token: string): number | null {
   }
 }
 
-function statusCodeForIntrospectionInactive(reason: string | undefined): 401 | 403 {
-  switch (reason) {
-    case "invalid_token":
-    case "token_expired":
-    case "session_not_found":
-    case "session_revoked":
-    case "session_expired":
-    case "session_user_mismatch":
-      return 401;
-    default:
-      return 403;
-  }
-}
-
 async function introspectTokenWithRetry(
   auth: Extract<AuthMode, { mode: "introspect" }>,
   token: string,
@@ -260,7 +247,7 @@ async function introspectTokenWithRetry(
               : undefined;
         throw new AuthError(
           reason ? `Token inactive: ${reason}` : "Invalid token",
-          statusCodeForIntrospectionInactive(reason)
+          statusCodeForIntrospectionReason(reason)
         );
       }
 

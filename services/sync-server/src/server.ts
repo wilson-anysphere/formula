@@ -52,6 +52,7 @@ import {
   createSyncTokenIntrospectionClient,
   type SyncTokenIntrospectionClient,
 } from "./introspection.js";
+import { statusCodeForIntrospectionReason } from "./introspection-reasons.js";
 
 const { setupWSConnection, setPersistence, getYDoc } = ywsUtils as {
   setupWSConnection: (
@@ -160,20 +161,6 @@ async function getDirectoryStats(dir: string): Promise<{
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return typeof err === "string" ? err : JSON.stringify(err);
-}
-
-function statusCodeForIntrospectionFailure(reason: string | undefined): 401 | 403 {
-  switch (reason) {
-    case "invalid_token":
-    case "token_expired":
-    case "session_not_found":
-    case "session_revoked":
-    case "session_expired":
-    case "session_user_mismatch":
-      return 401;
-    default:
-      return 403;
-  }
 }
 
 export type SyncServerHandle = {
@@ -1392,7 +1379,7 @@ export function createSyncServer(
             });
 
             if (!introspection.active) {
-              const statusCode = statusCodeForIntrospectionFailure(introspection.reason);
+              const statusCode = statusCodeForIntrospectionReason(introspection.reason);
               recordUpgradeRejection("auth_failure");
               logger.warn(
                 {
