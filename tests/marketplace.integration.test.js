@@ -13,7 +13,7 @@ import { MarketplaceClient } from "../apps/desktop/src/marketplace/client.js";
 import { ExtensionManager } from "../apps/desktop/src/marketplace/extensionManager.js";
 
 const { createMarketplaceServer } = marketplaceServerPkg;
-const { publishExtension } = publisherPkg;
+const { publishExtension, packageExtension } = publisherPkg;
 const { ExtensionHost } = extensionHostPkg;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -173,6 +173,67 @@ test("marketplace publish → discover → install → verify signature → run 
     assert.equal(resultV11, 10);
 
     await host2.dispose();
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("publish accepts v2 extension packages without signatureBase64", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-v2-nosig-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSource = path.join(tmpRoot, "ext");
+    await copyDir(sampleExtensionSrc, extSource);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSource, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    const packaged = await packageExtension(extSource, { privateKeyPem });
+
+    const publishRes = await fetch(`${baseUrl}/api/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        packageBase64: packaged.packageBytes.toString("base64"),
+      }),
+    });
+    assert.equal(publishRes.status, 200);
+    const published = await publishRes.json();
+    assert.deepEqual(published, { id: extensionId, version: manifest.version });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmpRoot, { recursive: true, force: true });
