@@ -1348,7 +1348,7 @@ fn render_sheet_data(
 
         match &cell.value {
             CellValue::Empty => {}
-            value @ CellValue::String(s) if matches!(value_kind, CellValueKind::Other { .. }) => {
+            value @ CellValue::String(s) if matches!(&value_kind, CellValueKind::Other { .. }) => {
                 out.push_str("<v>");
                 out.push_str(&escape_text(&raw_or_other(meta, s)));
                 out.push_str("</v>");
@@ -1442,8 +1442,8 @@ fn effective_value_kind(meta: Option<&crate::CellMeta>, cell: &formula_model::Ce
             // Cells with less-common or unknown `t=` attributes require the original `<v>` payload
             // to round-trip safely. If we don't have it, fall back to the inferred kind so we emit
             // a valid SpreadsheetML representation.
-            if matches!(kind, CellValueKind::Other { .. }) {
-                if meta.raw_value.is_some() && matches!(cell.value, CellValue::String(_)) {
+            if matches!(&kind, CellValueKind::Other { .. }) {
+                if meta.raw_value.is_some() && matches!(&cell.value, CellValue::String(_)) {
                     return kind;
                 }
             } else if value_kind_compatible(&kind, &cell.value) {

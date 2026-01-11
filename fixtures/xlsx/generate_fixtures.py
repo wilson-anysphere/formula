@@ -548,6 +548,18 @@ def sheet_two_xml() -> str:
 """
 
 
+def sheet_date_iso_cell_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="d"><v>2024-01-01T00:00:00Z</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
 def sheet_row_col_properties_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -1027,6 +1039,11 @@ def main() -> None:
     write_image_xlsx(ROOT / "basic" / "image.xlsx")
     write_hyperlinks_xlsx(ROOT / "hyperlinks" / "hyperlinks.xlsx")
 
+    write_xlsx(
+        ROOT / "metadata" / "date-iso-cell.xlsx",
+        [sheet_date_iso_cell_xml()],
+        styles_minimal_xml(),
+    )
     write_xlsx(
         ROOT / "metadata" / "row-col-properties.xlsx",
         [sheet_row_col_properties_xml()],
