@@ -188,6 +188,56 @@ test("NodeFsOfflineAuditQueue reclaims flush lock from a crashed flusher", async
   assert.equal(sent.length, 1);
 });
 
+test("NodeFsOfflineAuditQueue prevents concurrent flushers from duplicating sends", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-concurrent-flush-"));
+  const queueA = new NodeFsOfflineAuditQueue({ dirPath: dir, flushBatchSize: 10 });
+  const queueB = new NodeFsOfflineAuditQueue({ dirPath: dir, flushBatchSize: 10 });
+
+  const events = [makeEvent({ secret: "cf1" }), makeEvent({ secret: "cf2" }), makeEvent({ secret: "cf3" })];
+  for (const event of events) await queueA.enqueue(event);
+
+  let unblock;
+  const blockPromise = new Promise((resolve) => {
+    unblock = resolve;
+  });
+
+  let firstBatchStarted = false;
+  const sentA = [];
+  const exporterA = {
+    async sendBatch(batch) {
+      sentA.push(...batch.map((evt) => evt.id));
+      firstBatchStarted = true;
+      await blockPromise;
+    },
+  };
+
+  const flushA = queueA.flushToExporter(exporterA);
+  while (!firstBatchStarted) await sleep(1);
+
+  const sentB = [];
+  const exporterB = {
+    async sendBatch(batch) {
+      sentB.push(...batch.map((evt) => evt.id));
+    },
+  };
+
+  let flushBDone = false;
+  const flushB = queueB.flushToExporter(exporterB).then((result) => {
+    flushBDone = true;
+    return result;
+  });
+
+  await sleep(25);
+  assert.equal(flushBDone, false, "expected second flusher to wait on the lock");
+  unblock();
+
+  const [resultA, resultB] = await Promise.all([flushA, flushB]);
+  assert.equal(resultA.sent, events.length);
+  assert.equal(resultB.sent, 0);
+  assert.deepEqual(sentA.sort(), events.map((evt) => evt.id).sort());
+  assert.deepEqual(sentB, []);
+});
+
 test("NodeFsOfflineAuditQueue does not lose events when flushing an open segment with a partial tail record", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-open-segment-"));
   const queue = new NodeFsOfflineAuditQueue({
