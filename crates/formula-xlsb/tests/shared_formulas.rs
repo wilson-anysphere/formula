@@ -1,39 +1,13 @@
-use formula_xlsb::{parse_sheet_bin, CellValue};
+use formula_xlsb::{biff12_varint, parse_sheet_bin, CellValue};
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::io::Cursor;
 
 fn push_record(out: &mut Vec<u8>, id: u32, data: &[u8]) {
-    push_id(out, id);
-    push_len(out, data.len() as u32);
+    biff12_varint::write_record_id(out, id).expect("write record id");
+    let len = u32::try_from(data.len()).expect("record too large");
+    biff12_varint::write_record_len(out, len).expect("write record len");
     out.extend_from_slice(data);
-}
-
-fn push_id(out: &mut Vec<u8>, id: u32) {
-    // Mirrors `Biff12Reader::read_id()` (byte-wise little-endian, continuation
-    // bit preserved).
-    for i in 0..4u32 {
-        let byte = ((id >> (8 * i)) & 0xFF) as u8;
-        out.push(byte);
-        if byte & 0x80 == 0 {
-            break;
-        }
-    }
-}
-
-fn push_len(out: &mut Vec<u8>, mut len: u32) {
-    // Mirrors `Biff12Reader::read_len()` (LEB128 / 7-bit groups).
-    loop {
-        let mut byte = (len & 0x7F) as u8;
-        len >>= 7;
-        if len != 0 {
-            byte |= 0x80;
-        }
-        out.push(byte);
-        if len == 0 {
-            break;
-        }
-    }
 }
 
 #[test]
@@ -128,18 +102,24 @@ fn materializes_shared_formulas_via_ptgexp() {
     push_record(&mut sheet, WORKSHEET_END, &[]);
 
     let parsed = parse_sheet_bin(&mut Cursor::new(sheet), &[]).expect("parse synthetic sheet");
-    let mut cells: HashMap<(u32, u32), _> = parsed.cells.iter().map(|c| ((c.row, c.col), c)).collect();
+    let mut cells: HashMap<(u32, u32), _> =
+        parsed.cells.iter().map(|c| ((c.row, c.col), c)).collect();
 
     let b1 = cells.remove(&(0, 1)).expect("B1 present");
     assert_eq!(b1.value, CellValue::Number(0.0));
-    assert_eq!(b1.formula.as_ref().and_then(|f| f.text.as_deref()), Some("A1+1"));
+    assert_eq!(
+        b1.formula.as_ref().and_then(|f| f.text.as_deref()),
+        Some("A1+1")
+    );
 
     let b2 = cells.remove(&(1, 1)).expect("B2 present");
     assert_eq!(b2.value, CellValue::Number(0.0));
-    assert_eq!(b2.formula.as_ref().and_then(|f| f.text.as_deref()), Some("A2+1"));
+    assert_eq!(
+        b2.formula.as_ref().and_then(|f| f.text.as_deref()),
+        Some("A2+1")
+    );
 
     // Ensure we stored a materialized rgce (not just PtgExp).
     let b2_rgce = &b2.formula.as_ref().unwrap().rgce;
     assert_eq!(b2_rgce.first().copied(), Some(0x24)); // PtgRef
 }
-

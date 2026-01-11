@@ -1,7 +1,7 @@
 use std::io::{Read, Seek, Write};
 use std::path::Path;
 
-use formula_xlsb::{patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
+use formula_xlsb::{biff12_varint, patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
 use pretty_assertions::assert_eq;
 
 const WORKSHEET: u32 = 0x0181;
@@ -10,53 +10,10 @@ const SHEETDATA_END: u32 = 0x0192;
 const ROW: u32 = 0x0000;
 const FORMULA_FLOAT: u32 = 0x0009;
 
-fn write_record_id(out: &mut Vec<u8>, mut id: u32) {
-    // XLSB record ids use a variable-length encoding where the high bit of each
-    // byte indicates continuation (and is included in the value). This matches
-    // `Biff12Reader::read_id` in `parser.rs`.
-    let mut bytes = Vec::new();
-    loop {
-        bytes.push((id & 0xFF) as u8);
-        id >>= 8;
-        if id == 0 {
-            break;
-        }
-    }
-
-    // Ensure the last byte terminates (msb cleared).
-    if bytes.last().copied().unwrap_or(0) & 0x80 != 0 {
-        bytes.push(0);
-    }
-
-    assert!(bytes.len() <= 4, "record id too large for XLSB encoding");
-    for (idx, b) in bytes.iter().enumerate() {
-        if idx + 1 == bytes.len() {
-            assert_eq!(b & 0x80, 0, "last record id byte must have msb cleared");
-        } else {
-            assert_ne!(b & 0x80, 0, "intermediate record id byte must have msb set");
-        }
-        out.push(*b);
-    }
-}
-
-fn write_record_len(out: &mut Vec<u8>, mut len: u32) {
-    // Standard 7-bit LEB128 encoding (matches `Biff12Reader::read_len`).
-    loop {
-        let mut byte = (len & 0x7F) as u8;
-        len >>= 7;
-        if len != 0 {
-            byte |= 0x80;
-        }
-        out.push(byte);
-        if len == 0 {
-            break;
-        }
-    }
-}
-
 fn push_record(stream: &mut Vec<u8>, id: u32, data: &[u8]) {
-    write_record_id(stream, id);
-    write_record_len(stream, data.len() as u32);
+    biff12_varint::write_record_id(stream, id).expect("write record id");
+    let len = u32::try_from(data.len()).expect("record too large");
+    biff12_varint::write_record_len(stream, len).expect("write record len");
     stream.extend_from_slice(data);
 }
 
