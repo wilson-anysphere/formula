@@ -3218,8 +3218,12 @@ fn build_model_style_table(
     let mut mapping_rows = mapping_stmt.query(params![workbook_id.to_string()])?;
 
     while let Some(row) = mapping_rows.next()? {
-        let style_id: i64 = row.get(1)?;
-        let style = load_model_style(conn, style_id)?;
+        let Ok(style_id) = row.get::<_, i64>(1) else {
+            continue;
+        };
+        let Ok(style) = load_model_style(conn, style_id) else {
+            continue;
+        };
         let model_id = style_table.intern(style);
         storage_to_model.insert(style_id, model_id);
     }
@@ -3243,11 +3247,16 @@ fn build_model_style_table(
 
     let style_ids = stmt.query_map(params![workbook_id.to_string()], |r| r.get::<_, i64>(0))?;
     for style_id in style_ids {
-        let style_id = style_id?;
+        let style_id = match style_id {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
         if storage_to_model.contains_key(&style_id) {
             continue;
         }
-        let style = load_model_style(conn, style_id)?;
+        let Ok(style) = load_model_style(conn, style_id) else {
+            continue;
+        };
         let model_id = style_table.intern(style);
         storage_to_model.insert(style_id, model_id);
     }
