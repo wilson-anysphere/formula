@@ -158,7 +158,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 if in_sheet_data {
                     // Flush any trailing cell inserts for the final row before leaving SheetData.
                     if let Some(row) = current_row {
-                        flush_remaining_cells_in_row(
+                        let _ = flush_remaining_cells_in_row(
                             &mut writer,
                             edits,
                             &mut applied,
@@ -169,7 +169,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         )?;
                     }
                     // And append any remaining missing rows/cells.
-                    flush_remaining_rows(
+                    let _ = flush_remaining_rows(
                         &mut writer,
                         edits,
                         &mut applied,
@@ -185,7 +185,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
             biff12::ROW if in_sheet_data => {
                 // Before advancing to a new row, insert any missing cells for the prior row.
                 if let Some(row) = current_row {
-                    flush_remaining_cells_in_row(
+                    let _ = flush_remaining_cells_in_row(
                         &mut writer,
                         edits,
                         &mut applied,
@@ -198,7 +198,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
 
                 let row = read_u32(payload, 0)?;
                 // Insert any missing rows before this one (row-major order).
-                flush_missing_rows_before(
+                let _ = flush_missing_rows_before(
                     &mut writer,
                     edits,
                     &mut applied,
@@ -229,7 +229,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 let style = read_u32(payload, 4)?;
 
                 // Insert any missing cells that should appear before this one.
-                flush_missing_cells_before(
+                let _ = flush_missing_cells_before(
                     &mut writer,
                     edits,
                     &mut applied,
@@ -439,7 +439,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
         // Worksheet streams should always close `BrtSheetData`, but if they don't, still make a
         // best-effort attempt to apply all edits.
         if let Some(row) = current_row {
-            flush_remaining_cells_in_row(
+            let _ = flush_remaining_cells_in_row(
                 &mut writer,
                 edits,
                 &mut applied,
@@ -449,7 +449,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 &mut dim_additions,
             )?;
         }
-        flush_remaining_rows(
+        let _ = flush_remaining_rows(
             &mut writer,
             edits,
             &mut applied,
@@ -555,8 +555,9 @@ fn flush_missing_rows_before<W: io::Write>(
     cursor: &mut usize,
     before_row: u32,
     dim_additions: &mut Option<Bounds>,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     advance_insert_cursor(ordered, applied, cursor);
+    let mut wrote_any = false;
 
     while *cursor < ordered.len() {
         let idx = ordered[*cursor];
@@ -613,6 +614,7 @@ fn flush_missing_rows_before<W: io::Write>(
         }
 
         writer.write_record(biff12::ROW, &row.to_le_bytes())?;
+        wrote_any = true;
 
         while *cursor < ordered.len() {
             let idx = ordered[*cursor];
@@ -632,6 +634,7 @@ fn flush_missing_rows_before<W: io::Write>(
             }
 
             write_new_cell_record(writer, edit.col, edit)?;
+            wrote_any = true;
             applied[idx] = true;
             if !matches!(edit.new_value, CellValue::Blank) {
                 bounds_include(dim_additions, edit.row, edit.col);
@@ -642,7 +645,7 @@ fn flush_missing_rows_before<W: io::Write>(
         advance_insert_cursor(ordered, applied, cursor);
     }
 
-    Ok(())
+    Ok(wrote_any)
 }
 
 fn flush_missing_cells_before<W: io::Write>(
@@ -654,8 +657,9 @@ fn flush_missing_cells_before<W: io::Write>(
     row: u32,
     before_col: u32,
     dim_additions: &mut Option<Bounds>,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     advance_insert_cursor(ordered, applied, cursor);
+    let mut wrote_any = false;
 
     while *cursor < ordered.len() {
         let idx = ordered[*cursor];
@@ -677,6 +681,7 @@ fn flush_missing_cells_before<W: io::Write>(
         }
 
         write_new_cell_record(writer, edit.col, edit)?;
+        wrote_any = true;
         applied[idx] = true;
         if !matches!(edit.new_value, CellValue::Blank) {
             bounds_include(dim_additions, edit.row, edit.col);
@@ -685,7 +690,7 @@ fn flush_missing_cells_before<W: io::Write>(
         advance_insert_cursor(ordered, applied, cursor);
     }
 
-    Ok(())
+    Ok(wrote_any)
 }
 
 fn flush_remaining_cells_in_row<W: io::Write>(
@@ -696,8 +701,9 @@ fn flush_remaining_cells_in_row<W: io::Write>(
     cursor: &mut usize,
     row: u32,
     dim_additions: &mut Option<Bounds>,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     advance_insert_cursor(ordered, applied, cursor);
+    let mut wrote_any = false;
 
     while *cursor < ordered.len() {
         let idx = ordered[*cursor];
@@ -719,6 +725,7 @@ fn flush_remaining_cells_in_row<W: io::Write>(
         }
 
         write_new_cell_record(writer, edit.col, edit)?;
+        wrote_any = true;
         applied[idx] = true;
         if !matches!(edit.new_value, CellValue::Blank) {
             bounds_include(dim_additions, edit.row, edit.col);
@@ -727,7 +734,7 @@ fn flush_remaining_cells_in_row<W: io::Write>(
         advance_insert_cursor(ordered, applied, cursor);
     }
 
-    Ok(())
+    Ok(wrote_any)
 }
 
 fn flush_remaining_rows<W: io::Write>(
@@ -737,8 +744,9 @@ fn flush_remaining_rows<W: io::Write>(
     ordered: &[usize],
     cursor: &mut usize,
     dim_additions: &mut Option<Bounds>,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     advance_insert_cursor(ordered, applied, cursor);
+    let mut wrote_any = false;
 
     while *cursor < ordered.len() {
         let idx = ordered[*cursor];
@@ -788,6 +796,7 @@ fn flush_remaining_rows<W: io::Write>(
         }
 
         writer.write_record(biff12::ROW, &row.to_le_bytes())?;
+        wrote_any = true;
 
         while *cursor < ordered.len() {
             let idx = ordered[*cursor];
@@ -808,6 +817,7 @@ fn flush_remaining_rows<W: io::Write>(
             }
 
             write_new_cell_record(writer, edit.col, edit)?;
+            wrote_any = true;
             applied[idx] = true;
             if !matches!(edit.new_value, CellValue::Blank) {
                 bounds_include(dim_additions, edit.row, edit.col);
@@ -818,7 +828,7 @@ fn flush_remaining_rows<W: io::Write>(
         advance_insert_cursor(ordered, applied, cursor);
     }
 
-    Ok(())
+    Ok(wrote_any)
 }
 
 fn write_new_cell_record<W: io::Write>(

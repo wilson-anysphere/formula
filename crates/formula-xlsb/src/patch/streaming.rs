@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 
-use crate::parser::{biff12, Error};
+use crate::parser::{biff12, CellValue, Error};
 
 use super::{Biff12Writer, CellEdit};
 
@@ -16,8 +16,15 @@ struct RawRecordHeader {
 /// Patch a worksheet record stream (`xl/worksheets/sheetN.bin`) without materializing the whole
 /// part in memory.
 ///
-/// Returns `Ok(true)` when at least one record was rewritten, and `Ok(false)` when the output is
-/// byte-identical to the input stream.
+/// This streaming patcher supports the same insertion semantics as [`super::patch_sheet_bin`]:
+/// - missing rows/cells inside `BrtSheetData` are inserted in row-major order
+/// - edits that clear a missing cell to blank (`new_value = Blank` + `new_formula = None`) are
+///   treated as no-ops and do not materialize new records
+/// - the worksheet `BrtWsDim` / `DIMENSION` record is expanded (never shrunk) to include any
+///   edited non-blank cells
+///
+/// Returns `Ok(true)` when the output differs from the input stream, and `Ok(false)` when the
+/// output is byte-identical.
 pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
     mut input: R,
     output: W,
@@ -39,10 +46,28 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
             )));
         }
     }
+    let mut ordered_edits: Vec<usize> = (0..edits.len()).collect();
+    ordered_edits.sort_by_key(|&idx| (edits[idx].row, edits[idx].col));
     let mut applied = vec![false; edits.len()];
+    let mut insert_cursor = 0usize;
+
+    // For streaming we cannot "backpatch" the output stream, so precompute the bounding box of
+    // all non-blank edits. This is a conservative expansion that keeps the used range consistent
+    // when we insert new rows/cells.
+    let mut requested_bounds: Option<super::Bounds> = None;
+    for edit in edits {
+        if super::insertion_is_noop(edit) {
+            continue;
+        }
+        if matches!(edit.new_value, CellValue::Blank) {
+            continue;
+        }
+        super::bounds_include(&mut requested_bounds, edit.row, edit.col);
+    }
 
     let mut in_sheet_data = false;
     let mut current_row: Option<u32> = None;
+    let mut dim_additions: Option<super::Bounds> = None;
     let mut changed = false;
 
     while let Some(header) = read_record_header(&mut input)? {
@@ -50,6 +75,46 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
         let len = header.len as usize;
 
         match id {
+            biff12::DIMENSION => {
+                let mut payload = read_payload(&mut input, len)?;
+                if len < 16 {
+                    return Err(Error::UnexpectedEof);
+                }
+
+                let r1 = super::read_u32(&payload, 0)?;
+                let r2 = super::read_u32(&payload, 4)?;
+                let c1 = super::read_u32(&payload, 8)?;
+                let c2 = super::read_u32(&payload, 12)?;
+
+                let mut new_r1 = r1;
+                let mut new_r2 = r2;
+                let mut new_c1 = c1;
+                let mut new_c2 = c2;
+
+                if let Some(bounds) = requested_bounds {
+                    new_r1 = new_r1.min(bounds.min_row);
+                    new_r2 = new_r2.max(bounds.max_row);
+                    new_c1 = new_c1.min(bounds.min_col);
+                    new_c2 = new_c2.max(bounds.max_col);
+                }
+                if let Some(bounds) = dim_additions {
+                    new_r1 = new_r1.min(bounds.min_row);
+                    new_r2 = new_r2.max(bounds.max_row);
+                    new_c1 = new_c1.min(bounds.min_col);
+                    new_c2 = new_c2.max(bounds.max_col);
+                }
+
+                if (new_r1, new_r2, new_c1, new_c2) != (r1, r2, c1, c2) {
+                    payload[0..4].copy_from_slice(&new_r1.to_le_bytes());
+                    payload[4..8].copy_from_slice(&new_r2.to_le_bytes());
+                    payload[8..12].copy_from_slice(&new_c1.to_le_bytes());
+                    payload[12..16].copy_from_slice(&new_c2.to_le_bytes());
+                    changed = true;
+                }
+
+                write_raw_header(&mut writer, &header)?;
+                writer.write_raw(&payload)?;
+            }
             biff12::SHEETDATA => {
                 in_sheet_data = true;
                 current_row = None;
@@ -57,14 +122,69 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                 copy_exact(&mut input, &mut writer, len)?;
             }
             biff12::SHEETDATA_END => {
+                if in_sheet_data {
+                    if let Some(row) = current_row {
+                        if super::flush_remaining_cells_in_row(
+                            &mut writer,
+                            edits,
+                            &mut applied,
+                            &ordered_edits,
+                            &mut insert_cursor,
+                            row,
+                            &mut dim_additions,
+                        )? {
+                            changed = true;
+                        }
+                    }
+                    if super::flush_remaining_rows(
+                        &mut writer,
+                        edits,
+                        &mut applied,
+                        &ordered_edits,
+                        &mut insert_cursor,
+                        &mut dim_additions,
+                    )? {
+                        changed = true;
+                    }
+                }
                 in_sheet_data = false;
                 current_row = None;
                 write_raw_header(&mut writer, &header)?;
                 copy_exact(&mut input, &mut writer, len)?;
             }
             biff12::ROW if in_sheet_data => {
+                // Before advancing to a new row, insert any missing cells for the prior row.
+                if let Some(row) = current_row {
+                    if super::flush_remaining_cells_in_row(
+                        &mut writer,
+                        edits,
+                        &mut applied,
+                        &ordered_edits,
+                        &mut insert_cursor,
+                        row,
+                        &mut dim_additions,
+                    )? {
+                        changed = true;
+                    }
+                }
+
                 let payload = read_payload(&mut input, len)?;
-                current_row = Some(super::read_u32(&payload, 0)?);
+                let row = super::read_u32(&payload, 0)?;
+
+                // Insert any missing rows before this one (row-major order).
+                if super::flush_missing_rows_before(
+                    &mut writer,
+                    edits,
+                    &mut applied,
+                    &ordered_edits,
+                    &mut insert_cursor,
+                    row,
+                    &mut dim_additions,
+                )? {
+                    changed = true;
+                }
+
+                current_row = Some(row);
                 write_raw_header(&mut writer, &header)?;
                 writer.write_raw(&payload)?;
             }
@@ -86,6 +206,19 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                 let col = super::read_u32(&payload, 0)?;
                 let style = super::read_u32(&payload, 4)?;
 
+                if super::flush_missing_cells_before(
+                    &mut writer,
+                    edits,
+                    &mut applied,
+                    &ordered_edits,
+                    &mut insert_cursor,
+                    row,
+                    col,
+                    &mut dim_additions,
+                )? {
+                    changed = true;
+                }
+
                 let Some(&edit_idx) = edits_by_coord.get(&(row, col)) else {
                     write_raw_header(&mut writer, &header)?;
                     writer.write_raw(&payload)?;
@@ -94,6 +227,11 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
 
                 applied[edit_idx] = true;
                 let edit = &edits[edit_idx];
+                super::advance_insert_cursor(&ordered_edits, &applied, &mut insert_cursor);
+
+                if id == biff12::BLANK && !matches!(edit.new_value, CellValue::Blank) {
+                    super::bounds_include(&mut dim_additions, row, col);
+                }
 
                 match id {
                     biff12::FORMULA_FLOAT => {
@@ -164,6 +302,44 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             }
                             changed = true;
                             super::patch_rk_cell(&mut writer, col, style, &payload, edit)?;
+                        }
+                    }
+                    biff12::STRING => {
+                        if super::value_edit_is_noop_shared_string(&payload, edit)? {
+                            write_raw_header(&mut writer, &header)?;
+                            writer.write_raw(&payload)?;
+                        } else if let (CellValue::Text(_), Some(isst)) =
+                            (&edit.new_value, edit.shared_string_index)
+                        {
+                            if edit.new_formula.is_some() {
+                                return Err(Error::Io(io::Error::new(
+                                    io::ErrorKind::InvalidInput,
+                                    format!(
+                                        "attempted to set formula for non-formula cell at ({row}, {col})"
+                                    ),
+                                )));
+                            }
+
+                            changed = true;
+                            // BrtCellIsst: [col: u32][style: u32][isst: u32]
+                            let mut patched = [0u8; 12];
+                            patched[0..4].copy_from_slice(&col.to_le_bytes());
+                            patched[4..8].copy_from_slice(&style.to_le_bytes());
+                            patched[8..12].copy_from_slice(&isst.to_le_bytes());
+                            writer.write_record(biff12::STRING, &patched)?;
+                        } else {
+                            // No shared-string index provided: fall back to the generic writer
+                            // (FLOAT / inline string).
+                            if edit.new_formula.is_some() {
+                                return Err(Error::Io(io::Error::new(
+                                    io::ErrorKind::InvalidInput,
+                                    format!(
+                                        "attempted to set formula for non-formula cell at ({row}, {col})"
+                                    ),
+                                )));
+                            }
+                            changed = true;
+                            super::patch_value_cell(&mut writer, col, style, edit)?;
                         }
                     }
                     biff12::CELL_ST => {
@@ -255,6 +431,34 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
         }
     }
 
+    if in_sheet_data {
+        // Best-effort: if the stream ends without `BrtEndSheetData`, still insert any trailing
+        // rows/cells and validate that all edits were applied.
+        if let Some(row) = current_row {
+            if super::flush_remaining_cells_in_row(
+                &mut writer,
+                edits,
+                &mut applied,
+                &ordered_edits,
+                &mut insert_cursor,
+                row,
+                &mut dim_additions,
+            )? {
+                changed = true;
+            }
+        }
+        if super::flush_remaining_rows(
+            &mut writer,
+            edits,
+            &mut applied,
+            &ordered_edits,
+            &mut insert_cursor,
+            &mut dim_additions,
+        )? {
+            changed = true;
+        }
+    }
+
     if applied.iter().any(|&ok| !ok) {
         let mut missing = Vec::new();
         for (&(row, col), &idx) in edits_by_coord.iter() {
@@ -265,10 +469,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
         missing.sort();
         return Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!(
-                "cell edits not applied (cells not found): {}",
-                missing.join(", ")
-            ),
+            format!("cell edits not applied: {}", missing.join(", ")),
         )));
     }
 
