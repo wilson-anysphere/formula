@@ -134,6 +134,43 @@ pub fn avedev(values: &[f64]) -> Result<f64, ErrorKind> {
     }
 }
 
+pub fn trimmean(values: &[f64], percent: f64) -> Result<f64, ErrorKind> {
+    if !percent.is_finite() || percent < 0.0 || percent > 1.0 {
+        return Err(ErrorKind::Num);
+    }
+    if values.is_empty() {
+        return Err(ErrorKind::Div0);
+    }
+
+    let mut sorted = values.to_vec();
+    sort_numbers(&mut sorted);
+
+    let n = sorted.len();
+    let mut trim_total = (percent * (n as f64)).floor() as usize;
+    // Excel rounds the number of excluded points down to the nearest multiple of 2 so it can
+    // remove the same count from each tail.
+    if trim_total % 2 == 1 {
+        trim_total = trim_total.saturating_sub(1);
+    }
+    let trim_each = trim_total / 2;
+    if trim_each >= n {
+        return Err(ErrorKind::Div0);
+    }
+    let start = trim_each;
+    let end = n.saturating_sub(trim_each);
+    if end <= start {
+        return Err(ErrorKind::Div0);
+    }
+
+    let slice = &sorted[start..end];
+    let out = mean(slice);
+    if out.is_finite() {
+        Ok(out)
+    } else {
+        Err(ErrorKind::Num)
+    }
+}
+
 pub fn median(values: &[f64]) -> Result<f64, ErrorKind> {
     if values.is_empty() {
         return Err(ErrorKind::Num);

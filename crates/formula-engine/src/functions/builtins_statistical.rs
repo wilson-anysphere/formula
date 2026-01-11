@@ -372,6 +372,37 @@ fn avedev_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "TRIMMEAN",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Number],
+        implementation: trimmean_fn,
+    }
+}
+
+fn trimmean_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let mut values = Vec::new();
+    if let Err(e) = push_numbers_from_arg(ctx, &mut values, ctx.eval_arg(&args[0])) {
+        return Value::Error(e);
+    }
+
+    let percent = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    match crate::functions::statistical::trimmean(&values, percent) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
 fn arg_to_numeric_sequence(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec<Option<f64>>, ErrorKind> {
     match arg {
         ArgValue::Scalar(v) => match v {

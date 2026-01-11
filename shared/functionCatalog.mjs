@@ -2063,6 +2063,17 @@ export default {
       ]
     },
     {
+      "name": "TRIMMEAN",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "number"
+      ]
+    },
+    {
       "name": "TRUNC",
       "min_args": 1,
       "max_args": 2,

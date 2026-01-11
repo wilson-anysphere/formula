@@ -351,7 +351,7 @@ This document tracks every Excel feature and our implementation status. Features
 | T.INV.2T | ⬜ | |
 | T.TEST | ⬜ | |
 | TREND | ⬜ | Array function |
-| TRIMMEAN | ⬜ | |
+| TRIMMEAN | ✅ | |
 | VAR.P | ✅ | |
 | VAR.S | ✅ | |
 | VARA | ✅ | |

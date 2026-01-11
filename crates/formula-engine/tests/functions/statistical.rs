@@ -206,3 +206,23 @@ fn devsq_returns_div0_when_no_numeric_values_in_reference() {
     sheet.set("A1", Value::Text("x".to_string()));
     assert_eq!(sheet.eval("=DEVSQ(A1)"), Value::Error(ErrorKind::Div0));
 }
+
+#[test]
+fn trimmean_excludes_even_number_of_points_from_tails() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=TRIMMEAN({1,2,3,4,5,6,7,8,9,100},0.2)"), 5.5);
+    assert_number(&sheet.eval("=TRIMMEAN({1,2,3},0)"), 2.0);
+}
+
+#[test]
+fn trimmean_rejects_invalid_percent() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=TRIMMEAN({1,2,3},-0.1)"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        sheet.eval("=TRIMMEAN({1,2,3},1.1)"),
+        Value::Error(ErrorKind::Num)
+    );
+}
