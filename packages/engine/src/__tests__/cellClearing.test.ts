@@ -191,5 +191,40 @@ describe("EngineWorker null clear semantics", () => {
       engine.terminate();
     }
   });
-});
 
+  it("treats explicit null cells in JSON as absent and omits them on export", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.loadWorkbookFromJson(
+        JSON.stringify({
+          sheets: {
+            Sheet1: {
+              cells: {
+                A1: null,
+                A2: "=A1*2"
+              }
+            }
+          }
+        })
+      );
+
+      await engine.recalculate();
+      expect((await engine.getCell("A1")).input).toBeNull();
+      expect((await engine.getCell("A2")).value).toBe(0);
+
+      const exported = JSON.parse(await engine.toJson());
+      expect(exported.sheets.Sheet1.cells).not.toHaveProperty("A1");
+      expect(exported.sheets.Sheet1.cells).toHaveProperty("A2");
+    } finally {
+      engine.terminate();
+    }
+  });
+});
