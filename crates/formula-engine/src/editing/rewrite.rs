@@ -79,7 +79,13 @@ fn rewrite_formula_via_ast<F>(formula: &str, f: F) -> (String, bool)
 where
     F: FnOnce(&Expr) -> (Expr, bool),
 {
-    let ast = match parse_formula(formula, ParseOptions::default()) {
+    // Editor/eval paths accept leading whitespace before `=`, so tolerate it here as well.
+    // We preserve any leading whitespace on output for minimal diffs.
+    let trimmed = formula.trim_start();
+    let leading_len = formula.len().saturating_sub(trimmed.len());
+    let (leading_ws, canonical_src) = formula.split_at(leading_len);
+
+    let ast = match parse_formula(canonical_src, ParseOptions::default()) {
         Ok(ast) => ast,
         Err(_) => return (formula.to_string(), false),
     };
@@ -99,7 +105,7 @@ where
     opts.include_xlfn_prefix = true;
 
     match new_ast.to_string(opts) {
-        Ok(out) => (out, true),
+        Ok(out) => (format!("{leading_ws}{out}"), true),
         Err(_) => (formula.to_string(), false),
     }
 }
@@ -1291,5 +1297,12 @@ mod tests {
         let (out, changed) = rewrite_formula_for_range_map("=A1", "Sheet1", &edit);
         assert!(changed);
         assert_eq!(out, "=B2");
+    }
+
+    #[test]
+    fn rewrite_preserves_leading_whitespace_before_equals() {
+        let (out, changed) = rewrite_formula_for_copy_delta("   =A1", "Sheet1", 1, 0);
+        assert!(changed);
+        assert_eq!(out, "   =A2");
     }
 }
