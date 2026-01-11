@@ -80,7 +80,7 @@ test.describe("tauri workbook integration", () => {
       (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
     });
 
-    await page.waitForFunction(() => (window as any).__formulaApp.getCellValueA1("A1") === "Hello");
+    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
 
     await expect(page.getByTestId("sheet-switcher")).toHaveValue("Sheet1");
     await expect(page.getByTestId("active-cell")).toHaveText("A1");

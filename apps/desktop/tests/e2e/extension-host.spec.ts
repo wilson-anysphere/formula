@@ -80,7 +80,7 @@ test.describe("BrowserExtensionHost", () => {
         await host.loadExtensionFromUrl(manifestUrl);
 
         const sum = await host.executeCommand("sampleHello.sumSelection");
-        const a3 = app.getCellValueA1("A3");
+        const a3 = await app.getCellValueA1("A3");
         await host.dispose();
 
         return { sum, a3 };
@@ -206,6 +206,11 @@ test.describe("BrowserExtensionHost", () => {
       async ({ hostModuleUrl, extensionApiUrl }) => {
         const { BrowserExtensionHost } = await import(hostModuleUrl);
 
+        // The extension entrypoint is loaded via `blob:` URL, so its module resolution base
+        // is non-hierarchical. Convert Vite's `/@fs/...` path into an absolute http(s) URL so
+        // `import` inside the blob-backed worker can resolve it.
+        const extensionApiAbsoluteUrl = new URL(extensionApiUrl, location.href).href;
+
         const commandId = "wsExt.connectDenied";
         const manifest = {
           name: "ws-ext",
@@ -219,7 +224,7 @@ test.describe("BrowserExtensionHost", () => {
         };
 
         const code = `
-          import * as formula from ${JSON.stringify(extensionApiUrl)};
+          import * as formula from ${JSON.stringify(extensionApiAbsoluteUrl)};
           export async function activate(context) {
             context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
               commandId
