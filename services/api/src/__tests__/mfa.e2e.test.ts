@@ -259,6 +259,68 @@ describe("MFA e2e: encrypted TOTP secrets + recovery codes + org enforcement", (
     expect((reuse.json() as any).error).toBe("mfa_required");
   });
 
+  it("allows regenerating recovery codes using a recovery code", async () => {
+    const email = "mfa-recovery-regen@example.com";
+    const password = "password1234";
+
+    const reg = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email, password, name: "MFA Recovery Regen", orgName: "Org" }
+    });
+    expect(reg.statusCode).toBe(200);
+    const cookie = extractCookie(reg.headers["set-cookie"]);
+    const userId = (reg.json() as any).user.id as string;
+
+    const setup = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/setup",
+      headers: { cookie }
+    });
+    expect(setup.statusCode).toBe(200);
+    const secret = (setup.json() as any).secret as string;
+
+    const confirm = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/confirm",
+      headers: { cookie },
+      payload: { code: authenticator.generate(secret) }
+    });
+    expect(confirm.statusCode).toBe(200);
+
+    const regen1 = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/recovery-codes/regenerate",
+      headers: { cookie },
+      payload: { code: authenticator.generate(secret) }
+    });
+    expect(regen1.statusCode).toBe(200);
+    const codes1 = (regen1.json() as any).codes as string[];
+    expect(codes1).toHaveLength(10);
+
+    const regen2 = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/recovery-codes/regenerate",
+      headers: { cookie },
+      payload: { recoveryCode: codes1[0]! }
+    });
+    expect(regen2.statusCode).toBe(200);
+    const codes2 = (regen2.json() as any).codes as string[];
+    expect(codes2).toHaveLength(10);
+
+    const stored = await db.query(
+      "SELECT code_hash, used_at FROM user_mfa_recovery_codes WHERE user_id = $1 ORDER BY created_at ASC",
+      [userId]
+    );
+    // 1 consumed recovery code from the first batch + 10 new unused codes.
+    expect(stored.rowCount).toBe(11);
+    const usedCount = stored.rows.filter((row) => row.used_at != null).length;
+    const unusedCount = stored.rows.filter((row) => row.used_at == null).length;
+    expect(usedCount).toBe(1);
+    expect(unusedCount).toBe(10);
+    expect(stored.rows.every((row) => typeof row.code_hash === "string" && row.code_hash.startsWith("sha256:"))).toBe(true);
+  });
+
   it("requires a current MFA challenge to reset or disable TOTP when already enabled", async () => {
     const email = "mfa-reset@example.com";
     const password = "password1234";

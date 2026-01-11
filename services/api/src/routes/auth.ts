@@ -758,7 +758,14 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return reply.send({ ok: true });
   });
 
-  const RecoveryCodesRegenerateBody = z.object({ code: z.string().min(1) });
+  const RecoveryCodesRegenerateBody = z
+    .object({
+      code: z.string().min(1).optional(),
+      recoveryCode: z.string().min(1).optional()
+    })
+    .refine((value) => (value.code ? 1 : 0) + (value.recoveryCode ? 1 : 0) === 1, {
+      message: "code or recoveryCode is required"
+    });
 
   app.post(
     "/auth/mfa/recovery-codes/regenerate",
@@ -772,9 +779,22 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       const codes = Array.from({ length: 10 }, () => generateRecoveryCode());
       const userId = request.user!.id;
 
-      const ok = await withTransaction(app.db, async (client) => {
-        const secret = await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, userId);
-        if (!secret || !verifyTotpCode(secret, parsed.data.code.trim())) return false;
+      const txResult = await withTransaction(app.db, async (client) => {
+        const totpCode = parsed.data.code?.trim();
+        const recoveryCode = parsed.data.recoveryCode?.trim();
+        let usedRecoveryCodeId: string | null = null;
+
+        if (totpCode) {
+          const secret = await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, userId);
+          if (!secret || !verifyTotpCode(secret, totpCode)) return { ok: false as const, usedRecoveryCodeId: null };
+        } else if (recoveryCode) {
+          const consumedId = await consumeRecoveryCode(client, userId, recoveryCode);
+          if (!consumedId) return { ok: false as const, usedRecoveryCodeId: null };
+          usedRecoveryCodeId = consumedId;
+        } else {
+          // Should be unreachable due to request-body validation.
+          return { ok: false as const, usedRecoveryCodeId: null };
+        }
 
         await deleteUnusedRecoveryCodes(client, userId);
         for (const code of codes) {
@@ -783,10 +803,10 @@ export function registerAuthRoutes(app: FastifyInstance): void {
             [crypto.randomUUID(), userId, hashRecoveryCode(code)]
           );
         }
-        return true;
+        return { ok: true as const, usedRecoveryCodeId };
       });
 
-      if (!ok) return reply.code(400).send({ error: "invalid_code" });
+      if (!txResult.ok) return reply.code(400).send({ error: "invalid_code" });
 
       await writeAuditEvent(
         app.db,
@@ -805,6 +825,26 @@ export function registerAuthRoutes(app: FastifyInstance): void {
           details: { count: codes.length }
         })
       );
+
+      if (txResult.usedRecoveryCodeId) {
+        await writeAuditEvent(
+          app.db,
+          createAuditEvent({
+            eventType: "auth.mfa_recovery_code_used",
+            actor: { type: "user", id: userId },
+            context: {
+              userId,
+              userEmail: request.user!.email,
+              sessionId: request.session?.id,
+              ipAddress: getClientIp(request),
+              userAgent: getUserAgent(request)
+            },
+            resource: { type: "user", id: userId },
+            success: true,
+            details: { recoveryCodeId: txResult.usedRecoveryCodeId, operation: "recovery_codes_regenerate" }
+          })
+        );
+      }
 
       return reply.send({ codes });
     }
