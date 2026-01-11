@@ -95,6 +95,7 @@ export class SearchSession {
 
     this._building = (async () => {
       try {
+        const effectiveSignal = signal ?? this.options.signal;
         const query = this.query;
         if (query == null || String(query) === "") {
           this._matches = [];
@@ -119,7 +120,7 @@ export class SearchSession {
 
         const segments = this._effectiveSegments();
         const re = buildMatcher(query, { matchCase, matchEntireCell, useWildcards });
-        const slicer = createTimeSlicer({ signal, timeBudgetMs, scheduler, checkEvery });
+        const slicer = createTimeSlicer({ signal: effectiveSignal, timeBudgetMs, scheduler, checkEvery });
 
         /** @type {Array<ReturnType<typeof matchToResult> & { _pos: {segmentIndex:number,primary:number,secondary:number} }>} */
         const matches = [];
@@ -128,7 +129,7 @@ export class SearchSession {
         const canUseIndex = index && indexStrategy !== "never";
 
         for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
-          throwIfAborted(signal);
+          throwIfAborted(effectiveSignal);
           const segment = segments[segmentIndex];
           const sheet = getSheetByName(this.workbook, segment.sheetName);
 
@@ -138,7 +139,7 @@ export class SearchSession {
             if (indexStrategy === "always") {
               const before = index.getSheetModeIndex(segment.sheetName, modeKey)?.stats.cellsVisited ?? 0;
               const built = await index.ensureSheetModeBuilt(segment.sheetName, modeKey, { lookIn, valueMode }, {
-                signal,
+                signal: effectiveSignal,
                 timeBudgetMs,
                 scheduler,
                 checkEvery,
@@ -150,7 +151,7 @@ export class SearchSession {
               const res = await index.ensureIndexForQuery(
                 query,
                 { ...this.options, scope: "sheet", currentSheetName: segment.sheetName },
-                { signal, timeBudgetMs, scheduler, checkEvery },
+                { signal: effectiveSignal, timeBudgetMs, scheduler, checkEvery },
               );
               if (res) {
                 const after = index.getSheetModeIndex(segment.sheetName, modeKey)?.stats.cellsVisited ?? before;
@@ -169,7 +170,7 @@ export class SearchSession {
           // Process each range in-order (important for multi-area selections).
           const seenCandidateIds = Array.isArray(candidates) ? new Set() : null;
           for (const range of segment.ranges) {
-            throwIfAborted(signal);
+            throwIfAborted(effectiveSignal);
 
             if (Array.isArray(candidates)) {
               // Filter candidates to the current range.

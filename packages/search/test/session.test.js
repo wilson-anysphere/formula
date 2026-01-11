@@ -117,3 +117,20 @@ test("WorkbookSearchIndex: incremental update after replaceNext keeps the index 
   assert.equal(m.address, "Sheet1!A1");
   assert.equal(s2.stats.indexCellsVisited, 0);
 });
+
+test("SearchSession: uses options.signal when no signal is passed to methods", async () => {
+  const wb = new InMemoryWorkbook();
+  const sheet = wb.addSheet("Sheet1");
+  sheet.setValue(0, 0, "foo");
+
+  const controller = new AbortController();
+  controller.abort();
+
+  const session = new SearchSession(wb, "foo", {
+    scope: "sheet",
+    currentSheetName: "Sheet1",
+    signal: controller.signal,
+  });
+
+  await assert.rejects(session.findNext(), (err) => err?.name === "AbortError");
+});
