@@ -69,6 +69,11 @@ export class SelectionRenderer {
     return this.lastDebug;
   }
 
+  getFillHandleRect(selection: SelectionState, metrics: GridMetrics): Rect | null {
+    const style = this.style ?? defaultStyleFromTheme();
+    return this.computeFillHandleRect(selection, metrics, style);
+  }
+
   render(
     ctx: CanvasRenderingContext2D,
     selection: SelectionState,
@@ -104,7 +109,8 @@ export class SelectionRenderer {
 
     this.renderFill(ctx, visibleRanges, style);
     this.renderBorders(ctx, visibleRanges, style);
-    this.renderActiveCell(ctx, selection.active, metrics, selection.type, style);
+    this.renderActiveCell(ctx, selection.active, metrics, style);
+    this.renderFillHandle(ctx, selection, metrics, style);
 
     if (options.clipRect) {
       ctx.restore();
@@ -135,7 +141,6 @@ export class SelectionRenderer {
     ctx: CanvasRenderingContext2D,
     cell: CellCoord,
     metrics: GridMetrics,
-    selectionType: SelectionState["type"],
     style: SelectionRenderStyle,
   ) {
     const rect = metrics.getCellRect(cell);
@@ -147,13 +152,43 @@ export class SelectionRenderer {
     ctx.lineWidth = style.activeBorderWidth;
     ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.width - 1, rect.height - 1);
 
-    if (selectionType !== "row" && selectionType !== "column" && selectionType !== "all") {
-      const size = style.fillHandleSize;
-      ctx.fillStyle = style.activeBorderColor;
-      ctx.fillRect(rect.x + rect.width - size / 2, rect.y + rect.height - size / 2, size, size);
-    }
-
     ctx.restore();
+  }
+
+  private renderFillHandle(
+    ctx: CanvasRenderingContext2D,
+    selection: SelectionState,
+    metrics: GridMetrics,
+    style: SelectionRenderStyle,
+  ): void {
+    const rect = this.computeFillHandleRect(selection, metrics, style);
+    if (!rect) return;
+
+    ctx.save();
+    ctx.fillStyle = style.activeBorderColor;
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.restore();
+  }
+
+  private computeFillHandleRect(selection: SelectionState, metrics: GridMetrics, style: SelectionRenderStyle): Rect | null {
+    if (selection.type === "row" || selection.type === "column" || selection.type === "all") return null;
+
+    const range = selection.ranges[selection.activeRangeIndex] ?? selection.ranges[0];
+    if (!range) return null;
+
+    if (!metrics.visibleRows.includes(range.endRow) || !metrics.visibleCols.includes(range.endCol)) return null;
+
+    const cellRect = metrics.getCellRect({ row: range.endRow, col: range.endCol });
+    if (!cellRect) return null;
+    if (cellRect.width <= 0 || cellRect.height <= 0) return null;
+
+    const size = style.fillHandleSize;
+    return {
+      x: cellRect.x + cellRect.width - size / 2,
+      y: cellRect.y + cellRect.height - size / 2,
+      width: size,
+      height: size,
+    };
   }
 
   private computeVisibleRanges(

@@ -212,6 +212,11 @@ type ChartDef = {
   };
 };
 
+type DragState =
+  | { pointerId: number; mode: "normal" }
+  | { pointerId: number; mode: "formula" }
+  | { pointerId: number; mode: "fill"; sourceRange: Range; targetRange: Range; endCell: CellCoord };
+
 export interface SpreadsheetAppStatusElements {
   activeCell: HTMLElement;
   selectionRange: HTMLElement;
@@ -298,9 +303,10 @@ export class SpreadsheetApp {
   private formulaBarCompletion: FormulaBarTabCompletionController | null = null;
   private formulaEditCell: CellCoord | null = null;
   private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
+  private fillPreviewRange: Range | null = null;
   private showFormulas = false;
 
-  private dragState: { pointerId: number; mode: "normal" | "formula" } | null = null;
+  private dragState: DragState | null = null;
   private dragPointerPos: { x: number; y: number } | null = null;
   private dragAutoScrollRaf: number | null = null;
 
@@ -981,6 +987,19 @@ export class SpreadsheetApp {
     return this.getCellDisplayValue(cell);
   }
 
+  getCellRectA1(a1: string): { x: number; y: number; width: number; height: number } | null {
+    const cell = parseA1(a1);
+    return this.getCellRect(cell);
+  }
+
+  getFillHandleRect(): { x: number; y: number; width: number; height: number } | null {
+    return this.selectionRenderer.getFillHandleRect(this.selection, {
+      getCellRect: (cell) => this.getCellRect(cell),
+      visibleRows: this.visibleRows,
+      visibleCols: this.visibleCols,
+    });
+  }
+
   async getCellDisplayValueA1(a1: string): Promise<string> {
     return this.getCellValueA1(a1);
   }
@@ -1616,6 +1635,13 @@ export class SpreadsheetApp {
   }
 
   private renderSelection(): void {
+    const clipRect = {
+      x: this.rowHeaderWidth,
+      y: this.colHeaderHeight,
+      width: this.viewportWidth(),
+      height: this.viewportHeight(),
+    };
+
     this.selectionRenderer.render(
       this.selectionCtx,
       this.selection,
@@ -1625,14 +1651,30 @@ export class SpreadsheetApp {
         visibleCols: this.visibleCols,
       },
       {
-        clipRect: {
-          x: this.rowHeaderWidth,
-          y: this.colHeaderHeight,
-          width: this.viewportWidth(),
-          height: this.viewportHeight(),
-        },
+        clipRect,
       }
     );
+
+    if (this.fillPreviewRange) {
+      const startRect = this.getCellRect({ row: this.fillPreviewRange.startRow, col: this.fillPreviewRange.startCol });
+      const endRect = this.getCellRect({ row: this.fillPreviewRange.endRow, col: this.fillPreviewRange.endCol });
+      if (startRect && endRect) {
+        const x = startRect.x;
+        const y = startRect.y;
+        const width = endRect.x + endRect.width - startRect.x;
+        const height = endRect.y + endRect.height - startRect.y;
+
+        this.selectionCtx.save();
+        this.selectionCtx.beginPath();
+        this.selectionCtx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+        this.selectionCtx.clip();
+        this.selectionCtx.strokeStyle = resolveCssVar("--warning", { fallback: "CanvasText" });
+        this.selectionCtx.lineWidth = 2;
+        this.selectionCtx.setLineDash([4, 3]);
+        this.selectionCtx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+        this.selectionCtx.restore();
+      }
+    }
 
     // If scrolling/resizing happened during editing, keep the editor aligned.
     if (this.editor.isOpen()) {
@@ -2395,15 +2437,34 @@ export class SpreadsheetApp {
       if (!didScroll) return;
 
       const cell = this.cellFromPoint(px, py);
-      this.selection = extendSelectionToCell(this.selection, cell, this.limits);
+      if (this.dragState.mode === "fill") {
+        const source = this.dragState.sourceRange;
+        const target: Range = {
+          startRow: Math.min(source.startRow, cell.row),
+          endRow: Math.max(source.endRow, cell.row),
+          startCol: Math.min(source.startCol, cell.col),
+          endCol: Math.max(source.endCol, cell.col)
+        };
+        this.dragState.targetRange = target;
+        this.dragState.endCell = cell;
+        this.fillPreviewRange =
+          target.startRow === source.startRow &&
+          target.endRow === source.endRow &&
+          target.startCol === source.startCol &&
+          target.endCol === source.endCol
+            ? null
+            : target;
+      } else {
+        this.selection = extendSelectionToCell(this.selection, cell, this.limits);
 
-      if (this.dragState.mode === "formula" && this.formulaBar) {
-        const r = this.selection.ranges[0];
-        if (r) {
-          this.formulaBar.updateRangeSelection({
-            start: { row: r.startRow, col: r.startCol },
-            end: { row: r.endRow, col: r.endCol }
-          });
+        if (this.dragState.mode === "formula" && this.formulaBar) {
+          const r = this.selection.ranges[0];
+          if (r) {
+            this.formulaBar.updateRangeSelection({
+              start: { row: r.startRow, col: r.startCol },
+              end: { row: r.endRow, col: r.endCol }
+            });
+          }
         }
       }
 
@@ -2481,6 +2542,36 @@ export class SpreadsheetApp {
       return;
     }
 
+    const fillHandle = this.selectionRenderer.getFillHandleRect(this.selection, {
+      getCellRect: (c) => this.getCellRect(c),
+      visibleRows: this.visibleRows,
+      visibleCols: this.visibleCols,
+    });
+    if (
+      fillHandle &&
+      x >= fillHandle.x &&
+      x <= fillHandle.x + fillHandle.width &&
+      y >= fillHandle.y &&
+      y <= fillHandle.y + fillHandle.height
+    ) {
+      e.preventDefault();
+      const sourceRange = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
+      if (sourceRange) {
+        this.dragState = {
+          pointerId: e.pointerId,
+          mode: "fill",
+          sourceRange,
+          targetRange: sourceRange,
+          endCell: { row: sourceRange.endRow, col: sourceRange.endCol }
+        };
+        this.dragPointerPos = { x, y };
+        this.fillPreviewRange = null;
+        this.root.setPointerCapture(e.pointerId);
+        this.focus();
+        return;
+      }
+    }
+
     this.dragState = { pointerId: e.pointerId, mode: "normal" };
     this.dragPointerPos = { x, y };
     this.root.setPointerCapture(e.pointerId);
@@ -2524,6 +2615,29 @@ export class SpreadsheetApp {
       if (this.editor.isOpen()) return;
       this.hideCommentTooltip();
       const cell = this.cellFromPoint(x, y);
+
+      if (this.dragState.mode === "fill") {
+        const source = this.dragState.sourceRange;
+        const target: Range = {
+          startRow: Math.min(source.startRow, cell.row),
+          endRow: Math.max(source.endRow, cell.row),
+          startCol: Math.min(source.startCol, cell.col),
+          endCol: Math.max(source.endCol, cell.col)
+        };
+        this.dragState.targetRange = target;
+        this.dragState.endCell = cell;
+        this.fillPreviewRange =
+          target.startRow === source.startRow &&
+          target.endRow === source.endRow &&
+          target.startCol === source.startCol &&
+          target.endCol === source.endCol
+            ? null
+            : target;
+        this.renderSelection();
+        this.maybeStartDragAutoScroll();
+        return;
+      }
+
       this.selection = extendSelectionToCell(this.selection, cell, this.limits);
       this.renderSelection();
       this.updateStatus();
@@ -2584,7 +2698,7 @@ export class SpreadsheetApp {
 
     if (!this.dragState) return;
     if (e.pointerId !== this.dragState.pointerId) return;
-    const mode = this.dragState.mode;
+    const state = this.dragState;
     this.dragState = null;
     this.dragPointerPos = null;
     if (this.dragAutoScrollRaf != null) {
@@ -2593,10 +2707,137 @@ export class SpreadsheetApp {
     }
     this.dragAutoScrollRaf = null;
 
-    if (mode === "formula" && this.formulaBar) {
+    if (state.mode === "fill") {
+      this.fillPreviewRange = null;
+      const { sourceRange, targetRange, endCell } = state;
+      const changed =
+        targetRange.startRow !== sourceRange.startRow ||
+        targetRange.endRow !== sourceRange.endRow ||
+        targetRange.startCol !== sourceRange.startCol ||
+        targetRange.endCol !== sourceRange.endCol;
+
+      if (changed) {
+        this.applyFill(sourceRange, targetRange);
+        this.selection = buildSelection(
+          {
+            ranges: [targetRange],
+            active: endCell,
+            anchor: endCell,
+            activeRangeIndex: 0
+          },
+          this.limits
+        );
+        this.refresh();
+        this.focus();
+      } else {
+        // Clear any preview overlay.
+        this.renderSelection();
+      }
+      return;
+    }
+
+    if (state.mode === "formula" && this.formulaBar) {
       this.formulaBar.endRangeSelection();
       // Restore focus to the formula bar without clearing its insertion state mid-drag.
       this.formulaBar.focus();
+    }
+  }
+
+  private applyFill(sourceRange: Range, targetRange: Range): void {
+    const sheetId = this.sheetId;
+    const source = sourceRange;
+    const target = targetRange;
+
+    const sourceHeight = source.endRow - source.startRow + 1;
+    const sourceWidth = source.endCol - source.startCol + 1;
+
+    const isVertical1d =
+      sourceWidth === 1 && sourceHeight >= 1 && target.startCol === source.startCol && target.endCol === source.endCol;
+    const isHorizontal1d =
+      sourceHeight === 1 && sourceWidth >= 1 && target.startRow === source.startRow && target.endRow === source.endRow;
+
+    this.document.beginBatch({ label: "Fill" });
+    try {
+      // Excel-style numeric series for simple 1D numeric inputs (e.g. 1,2 -> 3,4).
+      const didSeries = (isVertical1d || isHorizontal1d) && this.applyNumericSeriesFill(sheetId, source, target);
+      if (!didSeries) {
+        this.applyPatternFill(sheetId, source, target, sourceHeight, sourceWidth);
+      }
+    } finally {
+      this.document.endBatch();
+    }
+  }
+
+  private applyNumericSeriesFill(sheetId: string, source: Range, target: Range): boolean {
+    const sourceHeight = source.endRow - source.startRow + 1;
+    const sourceWidth = source.endCol - source.startCol + 1;
+    const isVertical = sourceWidth === 1 && target.startCol === source.startCol && target.endCol === source.endCol;
+    const isHorizontal = sourceHeight === 1 && target.startRow === source.startRow && target.endRow === source.endRow;
+    if (!isVertical && !isHorizontal) return false;
+
+    const len = isVertical ? sourceHeight : sourceWidth;
+    if (len <= 0) return false;
+
+    const nums: number[] = [];
+    let outputAsString = true;
+
+    for (let i = 0; i < len; i += 1) {
+      const row = isVertical ? source.startRow + i : source.startRow;
+      const col = isVertical ? source.startCol : source.startCol + i;
+      const state = this.document.getCell(sheetId, { row, col }) as { value: unknown; formula: string | null };
+      if (state?.formula != null) return false;
+
+      const value = state?.value ?? null;
+      if (typeof value !== "string") outputAsString = false;
+      const num = coerceNumber(value);
+      if (num == null) return false;
+      nums.push(num);
+    }
+
+    let step = 0;
+    if (nums.length >= 2) {
+      step = nums[1]! - nums[0]!;
+      for (let i = 2; i < nums.length; i += 1) {
+        const expected = nums[0]! + step * i;
+        if (nums[i] !== expected) return false;
+      }
+    }
+
+    const start = nums[0]!;
+
+    for (let row = target.startRow; row <= target.endRow; row += 1) {
+      for (let col = target.startCol; col <= target.endCol; col += 1) {
+        if (row >= source.startRow && row <= source.endRow && col >= source.startCol && col <= source.endCol) continue;
+        const offset = isVertical ? row - source.startRow : col - source.startCol;
+        const next = start + step * offset;
+        this.document.setCellInput(sheetId, { row, col }, outputAsString ? String(next) : next);
+      }
+    }
+
+    return true;
+  }
+
+  private applyPatternFill(sheetId: string, source: Range, target: Range, sourceHeight: number, sourceWidth: number): void {
+    for (let row = target.startRow; row <= target.endRow; row += 1) {
+      for (let col = target.startCol; col <= target.endCol; col += 1) {
+        if (row >= source.startRow && row <= source.endRow && col >= source.startCol && col <= source.endCol) continue;
+
+        const sourceRow = source.startRow + mod(row - source.startRow, sourceHeight);
+        const sourceCol = source.startCol + mod(col - source.startCol, sourceWidth);
+        const state = this.document.getCell(sheetId, { row: sourceRow, col: sourceCol }) as {
+          value: unknown;
+          formula: string | null;
+        };
+
+        const deltaRow = row - sourceRow;
+        const deltaCol = col - sourceCol;
+
+        if (state?.formula != null) {
+          this.document.setCellInput(sheetId, { row, col }, shiftA1References(state.formula, deltaRow, deltaCol));
+        } else {
+          this.document.setCellInput(sheetId, { row, col }, state?.value ?? null);
+        }
+      }
     }
   }
 
@@ -3097,6 +3338,146 @@ function intersectRanges(a: Range, b: Range): Range | null {
   const endCol = Math.min(a.endCol, b.endCol);
   if (startRow > endRow || startCol > endCol) return null;
   return { startRow, endRow, startCol, endCol };
+}
+
+function mod(n: number, m: number): number {
+  if (!Number.isFinite(n) || !Number.isFinite(m) || m === 0) return 0;
+  return ((n % m) + m) % m;
+}
+
+function coerceNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return null;
+    const num = Number(trimmed);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
+
+const A1_REF_PATTERN =
+  /^((?:'[^']+'|[A-Za-z_][A-Za-z0-9_. ]*)!)?(\$?[A-Za-z]{1,3}\$?[1-9]\d*)(?::(\$?[A-Za-z]{1,3}\$?[1-9]\d*))?/;
+
+function shiftA1References(formula: string, deltaRow: number, deltaCol: number): string {
+  if (deltaRow === 0 && deltaCol === 0) return formula;
+
+  let out = "";
+  let i = 0;
+  let inString = false;
+
+  while (i < formula.length) {
+    const ch = formula[i] ?? "";
+
+    if (inString) {
+      out += ch;
+      if (ch === '"') {
+        if (formula[i + 1] === '"') {
+          out += '"';
+          i += 2;
+          continue;
+        }
+        inString = false;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      i += 1;
+      continue;
+    }
+
+    // Don't start a reference in the middle of an identifier (e.g. "FOOA1").
+    if (i > 0 && isIdentifierPart(formula[i - 1] ?? "")) {
+      out += ch;
+      i += 1;
+      continue;
+    }
+
+    const match = A1_REF_PATTERN.exec(formula.slice(i));
+    if (!match) {
+      out += ch;
+      i += 1;
+      continue;
+    }
+
+    const full = match[0] ?? "";
+    const prefix = match[1] ?? "";
+    const first = match[2] ?? "";
+    const second = match[3] ?? "";
+
+    // Some function names look like cell references (e.g. LOG10). If a token is
+    // immediately followed by a "(", assume it's a function call and leave it
+    // untouched.
+    let lookahead = i + full.length;
+    while (lookahead < formula.length && isWhitespace(formula[lookahead] ?? "")) lookahead += 1;
+    if (formula[lookahead] === "(") {
+      out += full;
+      i += full.length;
+      continue;
+    }
+
+    out += prefix;
+    out += shiftA1CellRef(first, deltaRow, deltaCol);
+    if (second) {
+      out += ":";
+      out += shiftA1CellRef(second, deltaRow, deltaCol);
+    }
+    i += full.length;
+  }
+
+  return out;
+}
+
+function shiftA1CellRef(ref: string, deltaRow: number, deltaCol: number): string {
+  const match = /^(\$?)([A-Za-z]{1,3})(\$?)([1-9]\d*)$/.exec(ref);
+  if (!match) return ref;
+
+  const absCol = match[1] === "$";
+  const colLetters = match[2]?.toUpperCase() ?? "";
+  const absRow = match[3] === "$";
+  const row1 = Number.parseInt(match[4] ?? "", 10);
+  if (!Number.isFinite(row1) || row1 <= 0) return ref;
+
+  const col0 = colNameToIndex(colLetters);
+  if (col0 == null) return ref;
+
+  const row0 = row1 - 1;
+  const nextRow0 = absRow ? row0 : row0 + deltaRow;
+  const nextCol0 = absCol ? col0 : col0 + deltaCol;
+
+  if (nextRow0 < 0 || nextCol0 < 0) return "#REF!";
+
+  return `${absCol ? "$" : ""}${colToNameA1(nextCol0)}${absRow ? "$" : ""}${nextRow0 + 1}`;
+}
+
+function colNameToIndex(label: string): number | null {
+  if (!label) return null;
+  let n = 0;
+  for (const ch of label.toUpperCase()) {
+    const code = ch.charCodeAt(0);
+    if (code < 65 || code > 90) return null;
+    n = n * 26 + (code - 64);
+  }
+  return n - 1;
+}
+
+function isWhitespace(ch: string): boolean {
+  return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
+}
+
+function isIdentifierPart(ch: string): boolean {
+  return (
+    (ch >= "A" && ch <= "Z") ||
+    (ch >= "a" && ch <= "z") ||
+    (ch >= "0" && ch <= "9") ||
+    ch === "_" ||
+    ch === "."
+  );
 }
 
 function colToName(col: number): string {
