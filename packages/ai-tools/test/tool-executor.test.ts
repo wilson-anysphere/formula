@@ -599,6 +599,44 @@ describe("ToolExecutor", () => {
     expect(result.data.url).toBe("https://download.example.com/final");
   });
 
+  it("fetch_external_data drops headers when redirects are opaque (browser opaqueredirect)", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com"] });
+
+    const payload = JSON.stringify([{ foo: "bar" }]);
+    const fetchMock = vi.fn(async (_url: string, init?: any) => {
+      if (init?.redirect === "manual") {
+        return { type: "opaqueredirect" } as any;
+      }
+      if (init?.redirect === "follow") {
+        return new Response(payload, {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        });
+      }
+      throw new Error("Unexpected fetch init");
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com/start",
+        destination: "Sheet1!A1",
+        headers: { Authorization: "Bearer SECRET" }
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: "manual", headers: { Authorization: "Bearer SECRET" } });
+    expect((fetchMock.mock.calls[1]?.[1] as any)?.headers).toBeUndefined();
+
+    expect(result.ok).toBe(true);
+  });
+
   it("fetch_external_data enforces max_external_bytes using content-length header", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook, {

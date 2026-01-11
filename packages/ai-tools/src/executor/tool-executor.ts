@@ -925,8 +925,11 @@ export class ToolExecutor {
       // that does not expose redirect location details. Fall back to automatic redirects and
       // validate the final resolved URL.
       if (response.type === "opaqueredirect") {
+        // We can't inspect intermediate redirect hops here, so drop any user-supplied
+        // headers before following redirects to avoid leaking secrets across hosts.
+        requestHeaders = undefined;
         response = await fetch(currentUrl.toString(), {
-          headers: requestHeaders ?? undefined,
+          headers: undefined,
           credentials: "omit",
           cache: "no-store",
           redirect: "follow"
