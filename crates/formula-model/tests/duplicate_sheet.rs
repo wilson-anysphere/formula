@@ -2,8 +2,8 @@ use std::cell::Cell;
 
 use formula_model::{
     parse_range_a1, validate_sheet_name, CellRef, CellValue, CfRule, CfRuleKind, CfRuleSchema,
-    CfStyleOverride, Color, DuplicateSheetError, FormulaEvaluator, Range, SheetNameError, Table,
-    TableColumn, Workbook,
+    CfStyleOverride, Color, Comment, CommentKind, CommentPatch, DuplicateSheetError, FormulaEvaluator,
+    Range, SheetNameError, Table, TableColumn, Workbook,
 };
 
 #[test]
@@ -232,6 +232,64 @@ fn duplicate_sheet_clears_conditional_formatting_cache_after_rewrites() {
         None
     );
     assert_eq!(evaluator.calls(), 2);
+}
+
+#[test]
+fn duplicate_sheet_copies_comments_and_outline() {
+    let mut wb = Workbook::new();
+    let sheet1 = wb.add_sheet("Sheet1").unwrap();
+
+    {
+        let sheet = wb.sheet_mut(sheet1).unwrap();
+        sheet.group_rows(1, 3);
+        sheet
+            .add_comment(
+                CellRef::from_a1("A1").unwrap(),
+                Comment {
+                    kind: CommentKind::Note,
+                    content: "hello".to_string(),
+                    ..Comment::default()
+                },
+            )
+            .unwrap();
+    };
+
+    let source_outline = wb.sheet(sheet1).unwrap().outline.clone();
+
+    let copied = wb.duplicate_sheet(sheet1, None).unwrap();
+
+    // Comments are copied.
+    let copied_comment_id = {
+        let copied_sheet = wb.sheet(copied).unwrap();
+        let copied_comments = copied_sheet.comments_for_cell(CellRef::from_a1("A1").unwrap());
+        assert_eq!(copied_comments.len(), 1);
+        assert_eq!(copied_comments[0].content, "hello");
+
+        // Outline state is copied.
+        assert_eq!(copied_sheet.outline, source_outline);
+
+        copied_comments[0].id.clone()
+    };
+
+    // Mutating the copied sheet should not affect the source sheet.
+    wb.sheet_mut(copied)
+        .unwrap()
+        .update_comment(
+            &copied_comment_id,
+            CommentPatch {
+                content: Some("copied".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    wb.sheet_mut(copied).unwrap().ungroup_rows(1, 3);
+
+    let source_sheet = wb.sheet(sheet1).unwrap();
+    assert_eq!(
+        source_sheet.comments_for_cell(CellRef::from_a1("A1").unwrap())[0].content,
+        "hello"
+    );
+    assert_eq!(source_sheet.outline, source_outline);
 }
 
 #[test]
