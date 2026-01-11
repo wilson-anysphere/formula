@@ -317,6 +317,11 @@ export class RefreshManager {
       resolve = res;
       reject = rej;
     });
+    // Refresh jobs are often scheduled (interval/cron/on-open) without a consumer
+    // awaiting the returned promise. Attach a noop handler to avoid unhandled
+    // rejection warnings while still allowing callers that *do* await/attach
+    // handlers to observe failures.
+    promise.catch(() => {});
 
     /** @type {RefreshJob} */
     const job = {
