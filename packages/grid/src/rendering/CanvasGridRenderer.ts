@@ -431,6 +431,7 @@ export class CanvasGridRenderer {
 
   private prefetchVisibleRange(viewport: GridViewportState, options?: { force?: boolean }): void {
     if (!this.provider.prefetch) return;
+    if (viewport.width <= 0 || viewport.height <= 0) return;
 
     const rowCount = this.getRowCount();
     const colCount = this.getColCount();
