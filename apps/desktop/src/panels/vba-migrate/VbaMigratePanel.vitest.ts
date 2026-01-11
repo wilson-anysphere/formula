@@ -35,6 +35,7 @@ describe("VbaMigratePanel", () => {
 
   it("loads the VBA project via get_vba_project and renders module buttons", async () => {
     const invoke = vi.fn(async (cmd: string) => {
+      if (cmd === "list_macros") return [];
       if (cmd !== "get_vba_project") throw new Error(`Unexpected command: ${cmd}`);
       return {
         name: "TestProject",
@@ -76,7 +77,8 @@ describe("VbaMigratePanel", () => {
   });
 
   it("shows an analyzer report with risk + object model usage", async () => {
-    installTauriInvoke(async () => {
+    installTauriInvoke(async (cmd: string) => {
+      if (cmd === "list_macros") return [];
       return {
         name: "RiskyProject",
         constants: null,
@@ -119,7 +121,8 @@ describe("VbaMigratePanel", () => {
   it(
     "can convert a selected module via a mocked migrator/LLM",
     async () => {
-    installTauriInvoke(async () => {
+    installTauriInvoke(async (cmd: string) => {
+      if (cmd === "list_macros") return [];
       return {
         name: "ConvertProject",
         constants: null,
@@ -196,6 +199,9 @@ describe("VbaMigratePanel", () => {
               },
             ],
           };
+        }
+        if (cmd === "list_macros") {
+          return [{ id: "Main", name: "Main", language: "vba", module: "Module1" }];
         }
         if (cmd === "validate_vba_migration") {
           return {

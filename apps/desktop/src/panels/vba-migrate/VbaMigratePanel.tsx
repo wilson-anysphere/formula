@@ -250,6 +250,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
   const [project, setProject] = useState<VbaProjectSummary | null>(null);
   const [loadingProject, setLoadingProject] = useState(true);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [availableMacros, setAvailableMacros] = useState<Array<{ id: string; name: string; module?: string | null }>>([]);
 
   const [selectedModuleName, setSelectedModuleName] = useState<string | null>(null);
   const [analysisScope, setAnalysisScope] = useState<"module" | "project">("module");
@@ -284,17 +285,41 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
     setProjectError(null);
     try {
       const workbookId = props.workbookId ?? "local-workbook";
-      const result = await getVbaProject(workbookId);
+      const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
+      const [result, macros] = await Promise.all([
+        getVbaProject(workbookId),
+        invoke
+          ? invoke("list_macros", { workbook_id: workbookId }).catch(() => [])
+          : Promise.resolve([]),
+      ]);
       setProject(result);
+      setAvailableMacros(
+        Array.isArray(macros)
+          ? macros
+              .map((m: any) => ({
+                id: String(m?.id ?? ""),
+                name: String(m?.name ?? ""),
+                module: m?.module != null ? String(m.module) : null,
+              }))
+              .filter((m: any) => m.id && m.name)
+          : [],
+      );
       setSelectedModuleName((prev) => {
         if (!result?.modules?.length) return null;
         if (prev && result.modules.some((m) => m.name === prev)) return prev;
         return result.modules[0]?.name ?? null;
       });
+      setEntryPoint((prev) => {
+        if (!Array.isArray(macros) || macros.length === 0) return prev;
+        const ids = new Set(macros.map((m: any) => String(m?.id ?? "")).filter(Boolean));
+        if (prev && ids.has(prev)) return prev;
+        return String(macros[0]?.id ?? prev);
+      });
     } catch (err) {
       setProjectError(err instanceof Error ? err.message : String(err));
       setProject(null);
       setSelectedModuleName(null);
+      setAvailableMacros([]);
     } finally {
       setLoadingProject(false);
     }
@@ -629,13 +654,28 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
             <div style={{ fontWeight: 600, flex: 1 }}>Conversion</div>
             <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
               Macro:
-              <input
-                value={entryPoint}
-                onChange={(e) => setEntryPoint(e.target.value)}
-                placeholder="Main"
-                style={{ ...monospace, padding: "4px 6px", width: 120 }}
-                data-testid="vba-entrypoint"
-              />
+              {availableMacros.length > 0 ? (
+                <select
+                  value={entryPoint}
+                  onChange={(e) => setEntryPoint(e.target.value)}
+                  style={{ ...monospace, padding: "4px 6px", width: 160 }}
+                  data-testid="vba-entrypoint"
+                >
+                  {availableMacros.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={entryPoint}
+                  onChange={(e) => setEntryPoint(e.target.value)}
+                  placeholder="Main"
+                  style={{ ...monospace, padding: "4px 6px", width: 120 }}
+                  data-testid="vba-entrypoint"
+                />
+              )}
             </label>
             <button
               type="button"
