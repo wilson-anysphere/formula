@@ -1288,7 +1288,8 @@ export class CanvasGridRenderer {
     let currentFontWeight = "";
 
     const startColXSheet = this.scroll.cols.positionOf(startCol);
-    let rowYSheet = this.scroll.rows.positionOf(startRow);
+    const startRowYSheet = this.scroll.rows.positionOf(startRow);
+    let rowYSheet = startRowYSheet;
     for (let row = startRow; row < endRow; row++) {
       const rowHeight = this.scroll.rows.getSize(row);
       const y = rowYSheet - quadrant.scrollBaseY + quadrant.originY;
@@ -1519,13 +1520,12 @@ export class CanvasGridRenderer {
     gridCtx.strokeStyle = theme.gridLine;
     gridCtx.lineWidth = 1;
 
-    const xStart = this.scroll.cols.positionOf(startCol) - quadrant.scrollBaseX + quadrant.originX;
-    const xEnd = this.scroll.cols.positionOf(endCol) - quadrant.scrollBaseX + quadrant.originX;
-    const yStart = this.scroll.rows.positionOf(startRow) - quadrant.scrollBaseY + quadrant.originY;
-    const yEnd = this.scroll.rows.positionOf(endRow) - quadrant.scrollBaseY + quadrant.originY;
+    const xStart = startColXSheet - quadrant.scrollBaseX + quadrant.originX;
+    const yStart = startRowYSheet - quadrant.scrollBaseY + quadrant.originY;
+    const yEnd = rowYSheet - quadrant.scrollBaseY + quadrant.originY;
 
     gridCtx.beginPath();
-    let xSheet = this.scroll.cols.positionOf(startCol);
+    let xSheet = startColXSheet;
     for (let col = startCol; col <= endCol; col++) {
       const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
       const cx = crispLine(x);
@@ -1534,7 +1534,9 @@ export class CanvasGridRenderer {
       if (col < endCol) xSheet += this.scroll.cols.getSize(col);
     }
 
-    let ySheet = this.scroll.rows.positionOf(startRow);
+    const xEnd = xSheet - quadrant.scrollBaseX + quadrant.originX;
+
+    let ySheet = startRowYSheet;
     for (let row = startRow; row <= endRow; row++) {
       const yy = ySheet - quadrant.scrollBaseY + quadrant.originY;
       const cy = crispLine(yy);
