@@ -466,7 +466,7 @@ export class RefreshOrchestrator {
     const scheduled = new Set();
 
     /** @type {Record<string, QueryExecutionResult>} */
-    const targetResults = {};
+    const targetResults = Object.create(null);
 
     let done = false;
     let cancelled = false;
@@ -614,7 +614,9 @@ export class RefreshOrchestrator {
       if (terminalError) {
         reject(terminalError);
       } else {
-        resolve(targetResults);
+        // Return a normal object for ergonomic access, but keep the internal map
+        // null-prototype so query ids like "__proto__" can't mutate its prototype.
+        resolve({ ...targetResults });
       }
     };
 
