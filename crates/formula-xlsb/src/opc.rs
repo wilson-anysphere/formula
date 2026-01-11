@@ -371,7 +371,7 @@ impl XlsbWorkbook {
             }
 
             // Drop calcChain when any worksheet was edited.
-            if edited && name == "xl/calcChain.bin" {
+            if edited && name.eq_ignore_ascii_case("xl/calcChain.bin") {
                 if overrides.contains_key(&name) {
                     used_overrides.insert(name);
                 }
@@ -577,7 +577,9 @@ fn should_drop_content_type_event<B: std::io::BufRead>(
     let name = qname.as_ref();
     if name.ends_with(b"Override") {
         if let Some(part) = xml_attr_value(e, reader, b"PartName")? {
-            if part == "/xl/calcChain.bin" || part == "xl/calcChain.bin" {
+            if part.eq_ignore_ascii_case("/xl/calcChain.bin")
+                || part.eq_ignore_ascii_case("xl/calcChain.bin")
+            {
                 return Ok(true);
             }
         }
@@ -640,13 +642,14 @@ fn should_drop_workbook_rel_event<B: std::io::BufRead>(
     }
 
     if let Some(target) = xml_attr_value(e, reader, b"Target")? {
-        if target.replace('\\', "/").ends_with("calcChain.bin") {
+        let normalized = target.replace('\\', "/");
+        if normalized.to_ascii_lowercase().ends_with("calcchain.bin") {
             return Ok(true);
         }
     }
 
     if let Some(ty) = xml_attr_value(e, reader, b"Type")? {
-        if ty.contains("relationships/calcChain") {
+        if ty.to_ascii_lowercase().contains("relationships/calcchain") {
             return Ok(true);
         }
     }
