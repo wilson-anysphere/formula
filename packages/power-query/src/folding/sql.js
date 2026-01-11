@@ -71,6 +71,14 @@ import { getSqlSourceId } from "../privacy/sourceId.js";
  *   // When known, output column ordering + names. Used for conservative folding
  *   // of operations that need an explicit projection (rename/changeType/merge).
   *   columns: string[] | null;
+  *   // SQL Server does not allow `ORDER BY` in derived tables unless paired with
+  *   // `TOP`/`OFFSET`. Because this folding engine wraps each step in a subquery,
+  *   // we track the current sort spec separately and only emit the final `ORDER BY`
+  *   // at the outermost level (or alongside `TOP`).
+  *   sortBy?: import("../model.js").SortSpec[] | null;
+  *   // Whether `fragment.sql` currently includes a top-level `ORDER BY` that matches
+  *   // `sortBy` (only relevant for SQL Server, where `TOP` queries embed ordering).
+  *   sortInFragment?: boolean;
   *   // Connection identity used to ensure we only fold `merge`/`append` when both
   *   // sides originate from the same database connection.
   *   connectionId: string | null;
@@ -196,13 +204,15 @@ export class QueryFoldingEngine {
     }
 
     if (localSteps.length === 0) {
+      const sql = finalizeSqlForDialect(current, dialect);
       return diagnostics.length > 0
-        ? { type: "sql", sql: current.fragment.sql, params: current.fragment.params, diagnostics }
-        : { type: "sql", sql: current.fragment.sql, params: current.fragment.params };
+        ? { type: "sql", sql, params: current.fragment.params, diagnostics }
+        : { type: "sql", sql, params: current.fragment.params };
     }
+    const sql = finalizeSqlForDialect(current, dialect);
     return diagnostics.length > 0
-      ? { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps, diagnostics }
-      : { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps };
+      ? { type: "hybrid", sql, params: current.fragment.params, localSteps, diagnostics }
+      : { type: "hybrid", sql, params: current.fragment.params, localSteps };
   }
 
   /**
@@ -319,24 +329,26 @@ export class QueryFoldingEngine {
         stepId: step.id,
         opType: step.operation.type,
         status: "folded",
-        sqlFragment: current.fragment.sql,
+        sqlFragment: finalizeSqlForDialect(current, dialect),
       });
     }
 
     if (localSteps.length === 0) {
+      const sql = finalizeSqlForDialect(current, dialect);
       return {
         plan:
           diagnostics.length > 0
-            ? { type: "sql", sql: current.fragment.sql, params: current.fragment.params, diagnostics }
-            : { type: "sql", sql: current.fragment.sql, params: current.fragment.params },
+            ? { type: "sql", sql, params: current.fragment.params, diagnostics }
+            : { type: "sql", sql, params: current.fragment.params },
         steps,
       };
     }
+    const sql = finalizeSqlForDialect(current, dialect);
     return {
       plan:
         diagnostics.length > 0
-          ? { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps, diagnostics }
-          : { type: "hybrid", sql: current.fragment.sql, params: current.fragment.params, localSteps },
+          ? { type: "hybrid", sql, params: current.fragment.params, localSteps, diagnostics }
+          : { type: "hybrid", sql, params: current.fragment.params, localSteps },
       steps,
     };
   }
@@ -394,7 +406,14 @@ export class QueryFoldingEngine {
       case "database": {
         const columns = source.columns ? source.columns.slice() : null;
         const connectionId = resolveConnectionId(source, ctx.getConnectionIdentity);
-        return { fragment: { sql: source.query, params: [] }, columns, connectionId, connection: source.connection };
+        return {
+          fragment: { sql: source.query, params: [] },
+          columns,
+          sortBy: null,
+          sortInFragment: false,
+          connectionId,
+          connection: source.connection,
+        };
       }
       case "query": {
         const target = ctx.queries?.[source.queryId];
@@ -426,16 +445,22 @@ export class QueryFoldingEngine {
     const quoteIdentifier = dialect.quoteIdentifier;
     const params = state.fragment.params.slice();
     const param = makeParam(dialect, params);
+    const sortBy = state.sortBy ?? null;
 
     const from = `(${state.fragment.sql}) AS t`;
     switch (operation.type) {
       case "selectColumns": {
         if (operation.columns.length === 0) return null;
         if (hasDuplicateStrings(operation.columns)) return null;
+        if (dialect.name === "sqlserver" && sortBy && sortBy.some((spec) => !operation.columns.includes(spec.column))) {
+          return null;
+        }
         const cols = operation.columns.map((c) => `t.${quoteIdentifier(c)}`).join(", ");
         return {
           fragment: { sql: `SELECT ${cols} FROM ${from}`, params },
           columns: operation.columns.slice(),
+          sortBy,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -446,6 +471,9 @@ export class QueryFoldingEngine {
         for (const name of operation.columns) {
           if (!state.columns.includes(name)) return null;
         }
+        if (dialect.name === "sqlserver" && sortBy && sortBy.some((spec) => remove.has(spec.column))) {
+          return null;
+        }
 
         const remaining = state.columns.filter((name) => !remove.has(name));
         if (remaining.length === 0) return null;
@@ -453,6 +481,8 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${cols} FROM ${from}`, params },
           columns: remaining,
+          sortBy,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -470,6 +500,8 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT * FROM ${from} WHERE ${where}`, params },
           columns: state.columns,
+          sortBy,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -479,6 +511,18 @@ export class QueryFoldingEngine {
           return {
             fragment: { sql: state.fragment.sql, params },
             columns: state.columns,
+            sortBy,
+            sortInFragment: state.sortInFragment ?? false,
+            connectionId: state.connectionId,
+            connection: state.connection,
+          };
+        }
+        if (dialect.name === "sqlserver") {
+          return {
+            fragment: { sql: `SELECT * FROM ${from}`, params },
+            columns: state.columns,
+            sortBy: operation.sortBy.slice(),
+            sortInFragment: false,
             connectionId: state.connectionId,
             connection: state.connection,
           };
@@ -487,6 +531,8 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT * FROM ${from} ORDER BY ${orderBy}`, params },
           columns: state.columns,
+          sortBy: null,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -502,6 +548,8 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT DISTINCT ${cols} FROM ${from}`, params },
           columns: state.columns.slice(),
+          sortBy,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -537,6 +585,8 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${selectList} FROM ${groupFrom}${groupByClause}`, params },
           columns,
+          sortBy: null,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -552,6 +602,8 @@ export class QueryFoldingEngine {
           return {
             fragment: { sql: state.fragment.sql, params },
             columns: state.columns.slice(),
+            sortBy,
+            sortInFragment: state.sortInFragment ?? false,
             connectionId: state.connectionId,
             connection: state.connection,
           };
@@ -567,9 +619,16 @@ export class QueryFoldingEngine {
         const nextColumns = state.columns.slice();
         nextColumns[idx] = operation.newName;
 
+        const nextSortBy =
+          dialect.name === "sqlserver" && sortBy
+            ? sortBy.map((spec) => (spec.column === operation.oldName ? { ...spec, column: operation.newName } : spec))
+            : sortBy;
+
         return {
           fragment: { sql: `SELECT ${cols.join(", ")} FROM ${from}`, params },
           columns: nextColumns,
+          sortBy: nextSortBy,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -579,12 +638,17 @@ export class QueryFoldingEngine {
           return {
             fragment: { sql: state.fragment.sql, params },
             columns: state.columns ? state.columns.slice() : null,
+            sortBy,
+            sortInFragment: state.sortInFragment ?? false,
             connectionId: state.connectionId,
             connection: state.connection,
           };
         }
         if (!state.columns) return null;
         if (!state.columns.includes(operation.column)) return null;
+        if (dialect.name === "sqlserver" && sortBy && sortBy.some((spec) => spec.column === operation.column)) {
+          return null;
+        }
 
         const expr = changeTypeToSqlExpr(dialect, `t.${quoteIdentifier(operation.column)}`, operation.newType);
         if (!expr) return null;
@@ -597,6 +661,8 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${cols.join(", ")} FROM ${from}`, params },
           columns: state.columns.slice(),
+          sortBy,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -604,6 +670,13 @@ export class QueryFoldingEngine {
       case "transformColumns": {
         if (!state.columns) return null;
         const byName = new Map(operation.transforms.map((t) => [t.column, t]));
+        if (
+          dialect.name === "sqlserver" &&
+          sortBy &&
+          operation.transforms.some((t) => sortBy.some((spec) => spec.column === t.column))
+        ) {
+          return null;
+        }
         const projections = [];
         for (const name of state.columns) {
           const t = byName.get(name);
@@ -633,6 +706,8 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT ${projections.join(", ")} FROM ${from}`, params },
           columns: state.columns.slice(),
+          sortBy,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -665,6 +740,8 @@ export class QueryFoldingEngine {
             params: nextParams,
           },
           columns: nextColumns,
+          sortBy,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -675,9 +752,12 @@ export class QueryFoldingEngine {
           // `TOP (?)` appears before the wrapped subquery, so its placeholder must
           // come before any placeholders in `state.fragment.sql`.
           const nextParams = [operation.count, ...params];
+          const orderBy = sortBy && sortBy.length > 0 ? sortSpecsToSql(dialect, sortBy) : null;
           return {
-            fragment: { sql: `SELECT TOP (?) * FROM ${from}`, params: nextParams },
+            fragment: { sql: orderBy ? `SELECT TOP (?) * FROM ${from} ORDER BY ${orderBy}` : `SELECT TOP (?) * FROM ${from}`, params: nextParams },
             columns: state.columns,
+            sortBy,
+            sortInFragment: Boolean(orderBy),
             connectionId: state.connectionId,
             connection: state.connection,
           };
@@ -686,6 +766,8 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: `SELECT * FROM ${from} LIMIT ?`, params },
           columns: state.columns,
+          sortBy: null,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -744,6 +826,8 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: mergedSql, params: [...state.fragment.params, ...rightState.fragment.params] },
           columns: [...leftCols, ...rightOut.map((c) => c.out)],
+          sortBy: null,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -789,6 +873,8 @@ export class QueryFoldingEngine {
         return {
           fragment: { sql: unionSql, params: unionParams },
           columns: baseColumns.slice(),
+          sortBy: null,
+          sortInFragment: false,
           connectionId: state.connectionId,
           connection: state.connection,
         };
@@ -1059,6 +1145,23 @@ function connectionsMatch(left, right) {
  */
 function sortSpecsToSql(dialect, specs) {
   return specs.flatMap((spec) => dialect.sortSpecToSql("t", spec)).join(", ");
+}
+
+/**
+ * SQL Server does not allow `ORDER BY` in derived tables unless paired with
+ * `TOP`/`OFFSET`. Because the folding engine wraps each step in a subquery, we
+ * defer emitting the final `ORDER BY` until the outermost query.
+ *
+ * @param {SqlState} state
+ * @param {SqlDialect} dialect
+ * @returns {string}
+ */
+function finalizeSqlForDialect(state, dialect) {
+  if (dialect.name !== "sqlserver") return state.fragment.sql;
+  const sortBy = state.sortBy;
+  if (!sortBy || sortBy.length === 0) return state.fragment.sql;
+  if (state.sortInFragment) return state.fragment.sql;
+  return `${state.fragment.sql} ORDER BY ${sortSpecsToSql(dialect, sortBy)}`;
 }
 
 /**

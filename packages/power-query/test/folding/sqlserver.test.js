@@ -37,6 +37,34 @@ test("sqlserver: ORDER BY emulates NULLS FIRST/LAST", () => {
   });
 });
 
+test("sqlserver: sort followed by take folds to TOP with ORDER BY (no nested ORDER BY)", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_sqlserver_sort_take",
+    name: "SQL Server Sort + Take",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [
+      {
+        id: "s1",
+        name: "Sort",
+        operation: { type: "sortRows", sortBy: [{ column: "Sales", direction: "descending", nulls: "first" }] },
+      },
+      {
+        id: "s2",
+        name: "Take",
+        operation: { type: "take", count: 5 },
+      },
+    ],
+  };
+
+  const plan = folding.compile(query, { dialect: "sqlserver" });
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: "SELECT TOP (?) * FROM (SELECT * FROM (SELECT * FROM sales) AS t) AS t ORDER BY (CASE WHEN t.[Sales] IS NULL THEN 1 ELSE 0 END) DESC, t.[Sales] DESC",
+    params: [5],
+  });
+});
+
 test("sqlserver: placeholder normalization converts ? -> @pN (ignores strings/comments)", () => {
   const sql = "SELECT [col?] AS q, '?' AS lit FROM t -- ? comment\nWHERE a = ? AND b = ? /* ? block */";
   assert.equal(
@@ -127,4 +155,3 @@ test("sqlserver: compile/explain for a simple folded query stays in sync", () =>
   assert.deepEqual(explained.plan, compiled);
   assert.deepEqual(explained.steps.map((s) => s.status), ["folded"]);
 });
-
