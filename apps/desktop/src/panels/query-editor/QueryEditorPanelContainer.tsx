@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Query } from "../../../../../packages/power-query/src/model.js";
 import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
@@ -11,6 +11,7 @@ import { maybeGetPowerQueryDlpContext } from "../../power-query/dlpContext.js";
 import { createDesktopQueryEngine } from "../../power-query/engine.js";
 import { DesktopPowerQueryRefreshManager } from "../../power-query/refresh.js";
 import { createPowerQueryRefreshStateStore } from "../../power-query/refreshStateStore.js";
+import { DesktopPowerQueryRefreshOrchestrator } from "../../power-query/refreshAll.js";
 
 import { QueryEditorPanel } from "./QueryEditorPanel.js";
 
@@ -132,6 +133,16 @@ export function QueryEditorPanelContainer(props: Props) {
     });
   }, [doc, engine, refreshStateStore]);
 
+  const refreshOrchestrator = useMemo(() => {
+    return new DesktopPowerQueryRefreshOrchestrator({
+      engine,
+      document: doc,
+      getContext: () => ({}),
+      concurrency: 2,
+      batchSize: 1024,
+    });
+  }, [doc, engine]);
+
   const [query, setQuery] = useState<Query>(() => {
     if (typeof localStorage === "undefined") return defaultQuery();
     const stored = localStorage.getItem(storageId);
@@ -145,6 +156,7 @@ export function QueryEditorPanelContainer(props: Props) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeLoad, setActiveLoad] = useState<{ jobId: string; controller: AbortController } | null>(null);
   const [activeRefresh, setActiveRefresh] = useState<{ jobId: string; cancel: () => void; applying: boolean } | null>(null);
+  const [activeRefreshAll, setActiveRefreshAll] = useState<{ sessionId: string; cancel: () => void } | null>(null);
   const triggeredOnOpenForQueryId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -173,6 +185,12 @@ export function QueryEditorPanelContainer(props: Props) {
   }, [refreshManager, query]);
 
   useEffect(() => {
+    refreshOrchestrator.registerQuery(query);
+    return () => refreshOrchestrator.unregisterQuery(query.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshOrchestrator, query]);
+
+  useEffect(() => {
     if (typeof localStorage === "undefined") return;
     try {
       localStorage.setItem(storageId, JSON.stringify(query));
@@ -181,60 +199,73 @@ export function QueryEditorPanelContainer(props: Props) {
     }
   }, [query, storageId]);
 
-  useEffect(() => {
-    return refreshManager.onEvent((evt) => {
-      setRefreshEvent(evt);
+  const handleRefreshEvent = useCallback((evt: any): void => {
+    setRefreshEvent(evt);
 
-      if (evt?.type === "apply:completed" && typeof evt?.queryId === "string") {
-        const rows = evt?.result?.rows;
-        const cols = evt?.result?.cols;
-        if (typeof rows === "number" && typeof cols === "number") {
-          // Persist the last output size in local state so `clearExisting` can clear
-          // the prior output range across subsequent query edits / refreshes.
-          setQuery((prev) => {
-            if (prev.id !== evt.queryId) return prev;
-            const dest = isQuerySheetDestination(prev.destination) ? prev.destination : null;
-            if (!dest) return prev;
-            const existing = dest.lastOutputSize;
-            if (existing?.rows === rows && existing?.cols === cols) return prev;
-            return { ...prev, destination: { ...dest, lastOutputSize: { rows, cols } } };
-          });
-        }
-      }
-
-      const refreshJobId = evt?.job?.id;
-      if (typeof refreshJobId === "string" && (evt.type === "error" || evt.type === "cancelled")) {
-        setActiveRefresh((prev) => (prev?.jobId === refreshJobId ? null : prev));
-      }
-
-      if (typeof refreshJobId === "string" && evt.type === "completed") {
-        // If the refresh completes but no "apply" phase starts (e.g. no destination),
-        // clear the active refresh state on the next tick.
-        queueMicrotask(() => {
-          setActiveRefresh((prev) => (prev?.jobId === refreshJobId && !prev.applying ? null : prev));
+    if (evt?.type === "apply:completed" && typeof evt?.queryId === "string") {
+      const rows = evt?.result?.rows;
+      const cols = evt?.result?.cols;
+      if (typeof rows === "number" && typeof cols === "number") {
+        // Persist the last output size in local state so `clearExisting` can clear
+        // the prior output range across subsequent query edits / refreshes.
+        setQuery((prev) => {
+          if (prev.id !== evt.queryId) return prev;
+          const dest = isQuerySheetDestination(prev.destination) ? prev.destination : null;
+          if (!dest) return prev;
+          const existing = dest.lastOutputSize;
+          if (existing?.rows === rows && existing?.cols === cols) return prev;
+          return { ...prev, destination: { ...dest, lastOutputSize: { rows, cols } } };
         });
       }
+    }
 
-      const applyJobId = evt?.jobId;
-      if (
-        typeof applyJobId === "string" &&
-        evt.type === "apply:started"
-      ) {
-        setActiveRefresh((prev) => (prev?.jobId === applyJobId ? { ...prev, applying: true } : prev));
-      }
+    // The per-query refresh manager and dependency-aware refresh orchestrator can
+    // emit overlapping job id ranges (`refresh_1`, etc). Avoid letting graph refresh
+    // events stomp the per-query refresh UI state by only tracking job ids on the
+    // legacy manager (which doesn't include `sessionId`).
+    if (typeof evt?.sessionId === "string") return;
 
-      if (
-        typeof applyJobId === "string" &&
-        (evt.type === "apply:completed" || evt.type === "apply:error" || evt.type === "apply:cancelled")
-      ) {
-        setActiveRefresh((prev) => (prev?.jobId === applyJobId ? null : prev));
-      }
-    });
-  }, [refreshManager]);
+    const refreshJobId = evt?.job?.id;
+    if (typeof refreshJobId === "string" && (evt.type === "error" || evt.type === "cancelled")) {
+      setActiveRefresh((prev) => (prev?.jobId === refreshJobId ? null : prev));
+    }
+
+    if (typeof refreshJobId === "string" && evt.type === "completed") {
+      // If the refresh completes but no "apply" phase starts (e.g. no destination),
+      // clear the active refresh state on the next tick.
+      queueMicrotask(() => {
+        setActiveRefresh((prev) => (prev?.jobId === refreshJobId && !prev.applying ? null : prev));
+      });
+    }
+
+    const applyJobId = evt?.jobId;
+    if (typeof applyJobId === "string" && evt.type === "apply:started") {
+      setActiveRefresh((prev) => (prev?.jobId === applyJobId ? { ...prev, applying: true } : prev));
+    }
+
+    if (
+      typeof applyJobId === "string" &&
+      (evt.type === "apply:completed" || evt.type === "apply:error" || evt.type === "apply:cancelled")
+    ) {
+      setActiveRefresh((prev) => (prev?.jobId === applyJobId ? null : prev));
+    }
+  }, []);
+
+  useEffect(() => {
+    return refreshManager.onEvent(handleRefreshEvent);
+  }, [handleRefreshEvent, refreshManager]);
+
+  useEffect(() => {
+    return refreshOrchestrator.onEvent(handleRefreshEvent);
+  }, [handleRefreshEvent, refreshOrchestrator]);
 
   useEffect(() => {
     return () => refreshManager.dispose();
   }, [refreshManager]);
+
+  useEffect(() => {
+    return () => refreshOrchestrator.dispose();
+  }, [refreshOrchestrator]);
 
   function activeSheetId(): string {
     return props.getActiveSheetId?.() ?? doc?.getSheetIds?.()?.[0] ?? "Sheet1";
@@ -411,6 +442,17 @@ export function QueryEditorPanelContainer(props: Props) {
     }
   }
 
+  function refreshAll(): void {
+    setActionError(null);
+    try {
+      const handle = refreshOrchestrator.refreshAll();
+      setActiveRefreshAll({ sessionId: handle.sessionId, cancel: handle.cancel });
+      handle.promise.finally(() => setActiveRefreshAll(null)).catch(() => {});
+    } catch (err: any) {
+      setActionError(err?.message ?? String(err));
+    }
+  }
+
   return (
     <div style={{ flex: 1, minHeight: 0 }}>
       {engineError ? (
@@ -455,6 +497,14 @@ export function QueryEditorPanelContainer(props: Props) {
         {activeRefresh ? (
           <button type="button" onClick={activeRefresh.cancel}>
             Cancel refresh
+          </button>
+        ) : null}
+        <button type="button" onClick={refreshAll}>
+          Refresh all (graph)
+        </button>
+        {activeRefreshAll ? (
+          <button type="button" onClick={activeRefreshAll.cancel}>
+            Cancel refresh all
           </button>
         ) : null}
       </div>
