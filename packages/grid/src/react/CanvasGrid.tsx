@@ -407,25 +407,29 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const mqlContrast = canMatchMedia ? window.matchMedia("(prefers-contrast: more)") : null;
     const onMediaChange = () => refreshTheme();
 
-    if (mqlDark) {
-      if ("addEventListener" in mqlDark) mqlDark.addEventListener("change", onMediaChange);
-      else mqlDark.addListener(onMediaChange);
-    }
-    if (mqlContrast) {
-      if ("addEventListener" in mqlContrast) mqlContrast.addEventListener("change", onMediaChange);
-      else mqlContrast.addListener(onMediaChange);
-    }
+    const attachMediaListener = (mql: MediaQueryList | null) => {
+      if (!mql) return () => {};
+      const legacy = mql as unknown as {
+        addListener?: (listener: () => void) => void;
+        removeListener?: (listener: () => void) => void;
+      };
+
+      if (typeof (mql as any).addEventListener === "function") {
+        mql.addEventListener("change", onMediaChange);
+        return () => mql.removeEventListener("change", onMediaChange);
+      }
+
+      legacy.addListener?.(onMediaChange);
+      return () => legacy.removeListener?.(onMediaChange);
+    };
+
+    const detachDark = attachMediaListener(mqlDark);
+    const detachContrast = attachMediaListener(mqlContrast);
 
     return () => {
       for (const observer of observers) observer.disconnect();
-      if (mqlDark) {
-        if ("removeEventListener" in mqlDark) mqlDark.removeEventListener("change", onMediaChange);
-        else mqlDark.removeListener(onMediaChange);
-      }
-      if (mqlContrast) {
-        if ("removeEventListener" in mqlContrast) mqlContrast.removeEventListener("change", onMediaChange);
-        else mqlContrast.removeListener(onMediaChange);
-      }
+      detachDark();
+      detachContrast();
     };
   }, []);
 

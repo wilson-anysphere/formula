@@ -15,12 +15,11 @@ export interface EngineCellProviderOptions {
  * state.
  */
 export class EngineCellProvider extends EngineGridProvider {
-  readonly cache: EngineCellCache;
+  readonly cellCache: EngineCellCache;
 
   constructor(options: EngineCellProviderOptions) {
-    const cache = options.cache ?? new EngineCellCache(options.engine);
-    super({ cache, rowCount: options.rowCount, colCount: options.colCount, sheet: options.sheet, headers: true });
-    this.cache = cache;
+    const cellCache = options.cache ?? new EngineCellCache(options.engine);
+    super({ cache: cellCache, rowCount: options.rowCount, colCount: options.colCount, sheet: options.sheet, headers: true });
+    this.cellCache = cellCache;
   }
 }
-
