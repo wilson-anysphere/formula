@@ -213,6 +213,32 @@ class VBAViewer {
 
 ---
 
+## VBA Execution (desktop - current)
+
+The desktop (Tauri) app includes a first-pass VBA runtime integration. VBA execution is handled in
+the Rust backend (so the webview stays responsive), and cell edits produced by macros are applied
+back into the UI.
+
+### Automatic event macros
+
+The desktop app automatically fires the following Excel/VBA event macros (subject to Trust Center
+policy and sandbox permissions):
+
+- `Workbook_Open`
+- `Worksheet_Change` (debounced; per-sheet bounding box)
+- `Worksheet_SelectionChange` (debounced)
+- `Workbook_BeforeClose` (window close + tray quit)
+
+Important behavioral notes (current implementation):
+
+- Macro-driven cell updates are applied to the `DocumentController` as **external deltas** (not
+  undoable) and are tagged so the desktop workbook sync bridge does **not** echo them back into the
+  backend.
+- While applying macro updates, `Worksheet_Change` event macros are suppressed to prevent runaway
+  recursion (infinite loops when event handlers write cells).
+
+---
+
 ## VBA Execution (Future)
 
 ### Execution Approaches
