@@ -173,3 +173,58 @@ test("CollabSession cell value conflict monitor ignores sequential deletes that 
   docA.destroy();
   docB.destroy();
 });
+
+test("CollabSession resolving a value conflict by choosing remote preserves concurrent formulas", async () => {
+  // For concurrent map-entry overwrites, Yjs deterministically breaks ties using
+  // clientID (higher wins). Ensure the remote formula writer wins the value key.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    cellValueConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+
+  const sessionB = createCollabSession({ doc: docB });
+
+  // Establish base.
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "base");
+
+  // Offline concurrent edits: A writes a value, B writes a formula (which sets value=null).
+  disconnect();
+  await sessionA.setCellValue("Sheet1:0:0", "ours");
+  await sessionB.setCellFormula("Sheet1:0:0", "=1");
+
+  // Reconnect.
+  disconnect = connectDocs(docA, docB);
+
+  assert.ok(conflictsA.length >= 1, "expected at least one conflict to be detected");
+  const conflict = conflictsA[0];
+
+  // The concurrent formula should be present in the doc at conflict time.
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.formula, "=1");
+
+  // Choosing the remote value is a no-op (remote state is already applied) and must not
+  // clear the formula via setLocalValue().
+  assert.ok(sessionA.cellValueConflictMonitor?.resolveConflict(conflict.id, conflict.remoteValue));
+
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.formula, "=1");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, "=1");
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});

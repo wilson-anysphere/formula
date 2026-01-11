@@ -99,7 +99,13 @@ export class CellConflictMonitor {
     const conflict = this._conflicts.get(conflictId);
     if (!conflict) return false;
 
-    this.setLocalValue(conflict.cellKey, chosenValue);
+    const normalizedChosen = chosenValue ?? null;
+    // The remote value is already applied in the doc at conflict time, so
+    // choosing it is a no-op (and importantly should not clear unrelated state
+    // like a concurrently-written formula).
+    if (!valuesDeeplyEqual(normalizedChosen, conflict.remoteValue)) {
+      this.setLocalValue(conflict.cellKey, normalizedChosen);
+    }
     this._conflicts.delete(conflictId);
     return true;
   }
