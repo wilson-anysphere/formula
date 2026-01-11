@@ -64,6 +64,34 @@ test("table signatures bump version when document edits touch the table rectangl
   assert.equal(parsedBumped.version, parsedInitial.version + 1);
 });
 
+test("table signatures also invalidate when the table contains formulas and edits occur outside the rectangle", () => {
+  const doc = new DocumentController();
+  // Seed a formula cell inside the table so we conservatively treat it as depending on workbook state.
+  doc.setCellFormula("Sheet1", "A1", "=C1");
+  refreshTableSignaturesFromBackend(
+    doc,
+    [
+      {
+        name: "Table1",
+        sheet_id: "Sheet1",
+        start_row: 0,
+        start_col: 0,
+        end_row: 1,
+        end_col: 1,
+        columns: ["A", "B"],
+      },
+    ],
+    { workbookSignature: "workbook:test" },
+  );
+
+  const context = getContextForDocument(doc);
+  const initial = context.getTableSignature?.("Table1");
+
+  // Change a cell outside the rectangle; because formulas might reference it, the signature bumps.
+  doc.setCellValue("Sheet1", "C1", 1);
+  assert.notEqual(context.getTableSignature?.("Table1"), initial);
+});
+
 test("QueryEngine cache keys incorporate table signatures", async () => {
   const doc = new DocumentController();
   refreshTableSignaturesFromBackend(doc, [

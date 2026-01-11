@@ -18,6 +18,7 @@ type TableRegistryEntry = {
   rectangle: TableRectangle;
   definitionHash: string;
   version: number;
+  hasFormula: boolean;
 };
 
 function computeDefinitionHash(rectangle: TableRectangle, columns: string[]): string {
@@ -58,6 +59,14 @@ function cellContentsEqual(before: any, after: any): boolean {
   return valuesEqual && (before?.formula ?? null) === (after?.formula ?? null);
 }
 
+function parseRowColKey(key: string): { row: number; col: number } | null {
+  const [rowStr, colStr] = key.split(",");
+  const row = Number(rowStr);
+  const col = Number(colStr);
+  if (!Number.isInteger(row) || !Number.isInteger(col)) return null;
+  return { row, col };
+}
+
 /**
  * In-memory registry of workbook table definitions + versions.
  *
@@ -70,6 +79,7 @@ function cellContentsEqual(before: any, after: any): boolean {
  * safely cache table-source queries (the workbook hash prevents cross-workbook collisions).
  */
 export class TableSignatureRegistry {
+  readonly #doc: DocumentController;
   #tablesByName = new Map<string, TableRegistryEntry>();
   #tablesByLowerName = new Map<string, TableRegistryEntry>();
   #tablesBySheetId = new Map<string, TableRegistryEntry[]>();
@@ -77,6 +87,7 @@ export class TableSignatureRegistry {
   #workbookSignatureHash: string;
 
   constructor(doc: DocumentController) {
+    this.#doc = doc;
     // Ensure table signatures are scoped to a specific document/workbook session so
     // cached results do not leak across workbook opens. Callers can override this
     // via `refreshFromTables(..., { workbookSignature })` with a stable workbook
@@ -117,7 +128,7 @@ export class TableSignatureRegistry {
     // and defined names independently.
     const next = new Map<string, TableRegistryEntry>();
     for (const entry of this.#tablesByName.values()) {
-      if (entry.kind !== "table") next.set(entry.name, entry);
+      if (entry.kind !== "table") next.set(entry.name, { ...entry, hasFormula: Boolean((entry as any).hasFormula) });
     }
 
     for (const table of tables) {
@@ -147,13 +158,14 @@ export class TableSignatureRegistry {
       if (existing && existing.kind === "table") {
         const changed = existing.definitionHash !== definitionHash;
         const version = changed ? existing.version + 1 : existing.version;
-        next.set(name, { ...existing, rectangle, definitionHash, version });
+        next.set(name, { ...existing, rectangle, definitionHash, version, hasFormula: Boolean((existing as any).hasFormula) });
       } else {
-        next.set(name, { name, kind: "table", rectangle, definitionHash, version: 0 });
+        next.set(name, { name, kind: "table", rectangle, definitionHash, version: 0, hasFormula: false });
       }
     }
 
     this.#tablesByName = next;
+    this.populateFormulaFlags();
     this.rebuildIndices();
   }
 
@@ -176,7 +188,7 @@ export class TableSignatureRegistry {
     const next = new Map<string, TableRegistryEntry>();
     // Preserve non-defined-name entries (tables).
     for (const entry of this.#tablesByName.values()) {
-      if (entry.kind !== "defined-name") next.set(entry.name, entry);
+      if (entry.kind !== "defined-name") next.set(entry.name, { ...entry, hasFormula: Boolean((entry as any).hasFormula) });
     }
 
     for (const def of definedNames) {
@@ -219,13 +231,14 @@ export class TableSignatureRegistry {
       if (existing && existing.kind === "defined-name") {
         const changed = existing.definitionHash !== definitionHash;
         const version = changed ? existing.version + 1 : existing.version;
-        next.set(name, { ...existing, rectangle, definitionHash, version });
+        next.set(name, { ...existing, rectangle, definitionHash, version, hasFormula: Boolean((existing as any).hasFormula) });
       } else {
-        next.set(name, { name, kind: "defined-name", rectangle, definitionHash, version: 0 });
+        next.set(name, { name, kind: "defined-name", rectangle, definitionHash, version: 0, hasFormula: false });
       }
     }
 
     this.#tablesByName = next;
+    this.populateFormulaFlags();
     this.rebuildIndices();
   }
 
@@ -248,6 +261,7 @@ export class TableSignatureRegistry {
     // `applyState` can generate huge delta lists; avoid double-scanning by tracking
     // which tables we've already bumped for this batch.
     const bumped = new Set<string>();
+    let sawNonFormatChange = false;
 
     for (const delta of deltas) {
       const sheetId = typeof (delta as any)?.sheetId === "string" ? String((delta as any).sheetId) : "";
@@ -256,14 +270,15 @@ export class TableSignatureRegistry {
       const col = Number((delta as any).col);
       if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
 
-      const candidates = this.#tablesBySheetId.get(sheetId);
-      if (!candidates || candidates.length === 0) continue;
-
       // Ignore format-only changes so table signatures reflect the cell values/formulas
       // Power Query reads (not cosmetic formatting edits).
       const before = (delta as any)?.before;
       const after = (delta as any)?.after;
       if (before && after && cellContentsEqual(before, after)) continue;
+      sawNonFormatChange = true;
+
+      const candidates = this.#tablesBySheetId.get(sheetId);
+      if (!candidates || candidates.length === 0) continue;
 
       for (const entry of candidates) {
         if (bumped.has(entry.name)) continue;
@@ -271,13 +286,67 @@ export class TableSignatureRegistry {
         bumped.add(entry.name);
         const current = this.#tablesByName.get(entry.name);
         if (!current) continue;
-        this.#tablesByName.set(entry.name, { ...current, version: current.version + 1 });
+        const nextHasFormula = current.hasFormula || typeof after?.formula === "string";
+        this.#tablesByName.set(entry.name, { ...current, version: current.version + 1, hasFormula: nextHasFormula });
+      }
+    }
+
+    // If a table/range contains any formulas, edits outside the rectangle can still change the
+    // values Power Query sees (via formula dependencies). Conservatively invalidate those entries
+    // on any non-format change in the workbook.
+    if (sawNonFormatChange) {
+      for (const entry of this.#tablesByName.values()) {
+        if (!entry.hasFormula) continue;
+        if (bumped.has(entry.name)) continue;
+        bumped.add(entry.name);
+        this.#tablesByName.set(entry.name, { ...entry, version: entry.version + 1 });
       }
     }
 
     if (bumped.size > 0) {
       // Rebuild indices so `#tablesBySheetId` and case-insensitive lookup reflect the bumped entries.
       this.rebuildIndices();
+    }
+  }
+
+  private populateFormulaFlags(): void {
+    const sheets = (this.#doc as any)?.model?.sheets;
+    if (!sheets || typeof sheets.get !== "function") return;
+
+    const candidatesBySheet = new Map<string, TableRegistryEntry[]>();
+    for (const entry of this.#tablesByName.values()) {
+      if (entry.hasFormula) continue;
+      const sheetList = candidatesBySheet.get(entry.rectangle.sheetId);
+      if (sheetList) sheetList.push(entry);
+      else candidatesBySheet.set(entry.rectangle.sheetId, [entry]);
+    }
+
+    if (candidatesBySheet.size === 0) return;
+
+    for (const [sheetId, candidates] of candidatesBySheet.entries()) {
+      const sheet = sheets.get(sheetId);
+      const cells: Map<string, any> | undefined = sheet?.cells;
+      if (!cells || typeof (cells as any).entries !== "function") continue;
+
+      let remaining = candidates.length;
+
+      for (const [key, cell] of cells.entries()) {
+        if (!cell || typeof cell !== "object") continue;
+        const formula = (cell as any).formula;
+        if (typeof formula !== "string" || formula.trim() === "") continue;
+
+        const coord = parseRowColKey(String(key));
+        if (!coord) continue;
+
+        for (const entry of candidates) {
+          if (entry.hasFormula) continue;
+          if (!containsCell(entry.rectangle, coord)) continue;
+          entry.hasFormula = true;
+          remaining -= 1;
+          if (remaining === 0) break;
+        }
+        if (remaining === 0) break;
+      }
     }
   }
 
