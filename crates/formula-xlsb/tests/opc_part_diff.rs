@@ -37,6 +37,10 @@ fn build_fixture_with_calc_chain_and_styles(base_bytes: &[u8]) -> Vec<u8> {
     // preserved part; the tests ensure we never churn it accidentally.
     parts.insert("xl/styles.bin".to_string(), b"styles\0".to_vec());
 
+    // Add an unknown binary part to ensure we preserve unrecognized ZIP entries even when
+    // `OpenOptions::preserve_unknown_parts` is false (the writer should still copy from source).
+    parts.insert("xl/unknown.bin".to_string(), b"unknown\0".to_vec());
+
     // Add a dummy calcChain part + references, so edited saves can validate the "remove calcChain"
     // behavior without checking in an additional binary fixture.
     parts.insert("xl/calcChain.bin".to_string(), b"dummy".to_vec());
