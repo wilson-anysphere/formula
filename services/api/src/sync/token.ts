@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { DocumentRole } from "../rbac/roles";
 
 type JwtModule = typeof import("jsonwebtoken");
@@ -14,6 +15,13 @@ export interface SyncTokenClaims {
   docId: string;
   orgId: string;
   role: DocumentRole;
+  /**
+   * Optional issuing session id.
+   *
+   * Revoking a session (`sessions.revoked_at`) implicitly revokes all derived sync
+   * tokens because sync-server can revalidate this session via the internal
+   * `/internal/sync/introspect` endpoint.
+   */
   sessionId?: string;
 }
 
@@ -27,7 +35,10 @@ export function signSyncToken(params: {
   const token = jwt.sign(params.claims, params.secret, {
     algorithm: "HS256",
     expiresIn: params.ttlSeconds,
-    audience: "formula-sync"
+    audience: "formula-sync",
+    // Add a unique identifier so we can support explicit sync token revocation in
+    // the future if needed (in addition to session-based revocation).
+    jwtid: crypto.randomUUID()
   });
   return { token, expiresAt };
 }

@@ -103,6 +103,7 @@ function createConfig(ttlMs: number, dataDir: string): SyncServerConfig {
     },
     auth: { mode: "opaque", token: "test-token" },
     enforceRangeRestrictions: false,
+    introspection: null,
     internalAdminToken: "admin-token",
     retention: { ttlMs, sweepIntervalMs: 0, tombstoneTtlMs: 7 * 24 * 60 * 60 * 1000 },
     limits: {

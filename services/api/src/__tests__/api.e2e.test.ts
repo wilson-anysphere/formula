@@ -137,10 +137,13 @@ describe("API e2e: auth + RBAC + sync token", () => {
         port: 0,
         trustProxy: false,
         gc: true,
+        tls: null,
         dataDir,
+        disableDataDirLock: false,
         persistence: {
           backend: "file",
           compactAfterUpdates: 50,
+          leveldbDocNameHashing: false,
           encryption: { mode: "off" }
         },
         auth: {
@@ -148,15 +151,22 @@ describe("API e2e: auth + RBAC + sync token", () => {
           secret: config.syncTokenSecret,
           audience: "formula-sync"
         },
+        enforceRangeRestrictions: false,
+        introspection: null,
         internalAdminToken: null,
-        retention: { ttlMs: 0, sweepIntervalMs: 0 },
+        retention: { ttlMs: 0, sweepIntervalMs: 0, tombstoneTtlMs: 0 },
         limits: {
           maxConnections: 100,
           maxConnectionsPerIp: 100,
           maxConnAttemptsPerWindow: 500,
           connAttemptWindowMs: 60_000,
+          maxMessageBytes: 2 * 1024 * 1024,
           maxMessagesPerWindow: 5_000,
-          messageWindowMs: 10_000
+          messageWindowMs: 10_000,
+          maxAwarenessStateBytes: 64 * 1024,
+          maxAwarenessEntries: 10,
+          maxMessagesPerDocWindow: 10_000,
+          docMessageWindowMs: 10_000
         },
         logLevel: "silent"
       };

@@ -70,6 +70,19 @@ export type SyncServerConfig = {
   enforceRangeRestrictions: boolean;
 
   /**
+   * Optional API-side token introspection for sync JWTs.
+   *
+   * When enabled, sync-server will call the API internal endpoint on each websocket
+   * connection to ensure the issuing session is still active and document
+   * permissions haven't been revoked.
+   */
+  introspection: {
+    url: string;
+    token: string;
+    cacheTtlMs: number;
+  } | null;
+
+  /**
    * Optional shared secret for internal admin endpoints (purge, retention ops, etc).
    *
    * Disabled by default. To enable, set `SYNC_SERVER_INTERNAL_ADMIN_TOKEN`.
@@ -308,6 +321,31 @@ export function loadConfigFromEnv(): SyncServerConfig {
     auth = { mode: "opaque", token: "dev-token" };
   }
 
+  const introspectionUrlRaw = process.env.SYNC_SERVER_INTROSPECTION_URL?.trim();
+  const introspectionTokenRaw = process.env.SYNC_SERVER_INTROSPECTION_TOKEN?.trim();
+  const introspectionCacheTtlMs = envInt(process.env.SYNC_SERVER_INTROSPECTION_CACHE_TTL_MS, 15_000);
+
+  let introspection: SyncServerConfig["introspection"] = null;
+  if (introspectionUrlRaw) {
+    if (!introspectionTokenRaw) {
+      throw new Error(
+        "SYNC_SERVER_INTROSPECTION_URL requires SYNC_SERVER_INTROSPECTION_TOKEN (shared secret for API internal endpoints)."
+      );
+    }
+
+    // Allow operators to pass either a base API URL ("https://api.internal") or
+    // the full endpoint URL ("https://api.internal/internal/sync/introspect").
+    const url = introspectionUrlRaw.includes("/internal/sync/introspect")
+      ? introspectionUrlRaw
+      : new URL("/internal/sync/introspect", introspectionUrlRaw).toString();
+
+    introspection = {
+      url,
+      token: introspectionTokenRaw,
+      cacheTtlMs: introspectionCacheTtlMs
+    };
+  }
+
   return {
     host,
     port,
@@ -324,6 +362,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
     },
     auth,
     enforceRangeRestrictions,
+    introspection,
     internalAdminToken,
     retention: {
       ttlMs: retentionTtlMs,

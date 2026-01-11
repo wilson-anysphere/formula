@@ -48,6 +48,10 @@ import { TombstoneStore, docKeyFromDocName } from "./tombstones.js";
 import { Y } from "./yjs.js";
 import { installYwsSecurity } from "./ywsSecurity.js";
 import { createSyncServerMetrics } from "./metrics.js";
+import {
+  createSyncTokenIntrospectionClient,
+  type SyncTokenIntrospectionClient,
+} from "./introspection.js";
 
 const { setupWSConnection, setPersistence, getYDoc } = ywsUtils as {
   setupWSConnection: (
@@ -158,6 +162,20 @@ function toErrorMessage(err: unknown): string {
   return typeof err === "string" ? err : JSON.stringify(err);
 }
 
+function statusCodeForIntrospectionFailure(reason: string | undefined): 401 | 403 {
+  switch (reason) {
+    case "invalid_token":
+    case "token_expired":
+    case "session_not_found":
+    case "session_revoked":
+    case "session_expired":
+    case "session_user_mismatch":
+      return 401;
+    default:
+      return 403;
+  }
+}
+
 export type SyncServerHandle = {
   start: () => Promise<{ port: number }>;
   stop: () => Promise<void>;
@@ -255,6 +273,10 @@ export function createSyncServer(
 
   const tombstones = new TombstoneStore(config.dataDir, logger);
   const shouldPersist = (docName: string) => !tombstones.has(docKeyFromDocName(docName));
+
+  const syncTokenIntrospection: SyncTokenIntrospectionClient | null = config.introspection
+    ? createSyncTokenIntrospectionClient(config.introspection)
+    : null;
 
   type TombstoneSweepResult = {
     expiredTombstonesRemoved: number;
@@ -1343,6 +1365,50 @@ export function createSyncServer(
           recordUpgradeRejection("tombstone");
           sendUpgradeRejection(socket, 410, "Gone");
           return;
+        }
+
+        // Optional revalidation for locally-verified JWTs. This prevents
+        // long-lived/replayed sync tokens from granting access after sessions are
+        // revoked or document permissions change.
+        if (syncTokenIntrospection && authCtx.tokenType === "jwt") {
+          try {
+            const uaHeader = req.headers["user-agent"];
+            const userAgent =
+              typeof uaHeader === "string"
+                ? uaHeader
+                : Array.isArray(uaHeader)
+                  ? uaHeader[0]
+                  : undefined;
+
+            const introspection = await syncTokenIntrospection.introspect({
+              token: token!,
+              docId: docName,
+              clientIp: ip,
+              userAgent,
+            });
+
+            if (!introspection.active) {
+              const statusCode = statusCodeForIntrospectionFailure(introspection.reason);
+              recordUpgradeRejection("auth_failure");
+              logger.warn(
+                {
+                  ip,
+                  docName,
+                  statusCode,
+                  reason: introspection.reason ?? "inactive",
+                  userId: authCtx.userId,
+                },
+                "ws_connection_rejected_introspection_inactive"
+              );
+              sendUpgradeRejection(socket, statusCode, introspection.reason ?? "inactive");
+              return;
+            }
+          } catch (err) {
+            recordUpgradeRejection("auth_failure");
+            logger.error({ err, ip, docName }, "ws_introspection_failed");
+            sendUpgradeRejection(socket, 503, "Introspection failed");
+            return;
+          }
         }
 
         const connResult = connectionTracker.tryRegister(ip);
