@@ -122,6 +122,29 @@ test("NodeFsOfflineAuditQueue enforces maxBytes backpressure", async () => {
   await assert.rejects(queue.enqueue(makeEvent({ secret: "c" })), (error) => error?.code === "EQUEUEFULL");
 });
 
+test("NodeFsOfflineAuditQueue rotates segments by maxSegmentAgeMs", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-age-"));
+  const queue = new NodeFsOfflineAuditQueue({
+    dirPath: dir,
+    maxSegmentAgeMs: 1,
+    maxSegmentBytes: 1024 * 1024,
+  });
+
+  await queue.enqueue(makeEvent({ secret: "age1" }));
+  await sleep(5);
+  await queue.enqueue(makeEvent({ secret: "age2" }));
+
+  const segmentsDir = path.join(dir, "segments");
+  const files = await listFiles(segmentsDir);
+  const openSegments = files.filter((name) => name.endsWith(".open.jsonl"));
+  const pendingSegments = files.filter(
+    (name) => name.endsWith(".jsonl") && !name.includes(".open.") && !name.includes(".inflight.") && !name.includes(".acked.")
+  );
+
+  assert.equal(openSegments.length, 1);
+  assert.equal(pendingSegments.length, 1);
+});
+
 test("NodeFsOfflineAuditQueue does not lose events when flushing an open segment with a partial tail record", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-open-segment-"));
   const queue = new NodeFsOfflineAuditQueue({
