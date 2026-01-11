@@ -789,7 +789,7 @@ export class DocumentController {
       }
 
       const trimmed = input.trimStart();
-      if (trimmed.startsWith("=") && trimmed.length > 1) {
+      if (trimmed.startsWith("=")) {
         return { value: null, formula: normalizeFormula(trimmed), styleId: before.styleId };
       }
 

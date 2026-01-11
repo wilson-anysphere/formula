@@ -108,6 +108,10 @@ test("formula normalization trims and treats bare '=' as empty", () => {
   doc.setCellInput("Sheet1", "A4", "   =   ");
   assert.equal(doc.getCell("Sheet1", "A4").formula, null);
   assert.equal(doc.getCell("Sheet1", "A4").value, null);
+
+  doc.setCellInput("Sheet1", "A5", "=");
+  assert.equal(doc.getCell("Sheet1", "A5").formula, null);
+  assert.equal(doc.getCell("Sheet1", "A5").value, null);
 });
 
 test("setRangeFormat is undoable (formatting changes)", () => {

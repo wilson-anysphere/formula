@@ -126,7 +126,7 @@ fn parse_cell_input(input: &JsonValue) -> (Option<JsonValue>, Option<String>) {
                 return (Some(JsonValue::String(rest.to_string())), None);
             }
             let trimmed = s.trim_start();
-            if trimmed.starts_with('=') && trimmed.len() > 1 {
+            if trimmed.starts_with('=') {
                 return (None, normalize_formula_text(trimmed));
             }
             (Some(JsonValue::String(s.clone())), None)
