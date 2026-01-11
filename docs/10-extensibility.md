@@ -43,6 +43,8 @@ The desktop app wires marketplace installs into the Node extension host runtime:
     - Exposes `executeCommand`, `invokeCustomFunction`, and `listContributions` for the app to route UI actions
     - Verifies extracted extension integrity using the file manifest stored in `statePath` both on startup
       and during subsequent syncs; corrupted/tampered installs are quarantined and require reinstall
+    - Emits `onDidChangeContributions()` events after reload/unload/sync so the app can refresh command palettes,
+      menus, and panels in response to extension changes
 4. **Execution + contributions** via `ExtensionHost` (`packages/extension-host`)
     - Spawns an isolated worker per extension
     - Registers contributions (commands, panels, menus, keybindings, custom functions, data connectors)
