@@ -218,4 +218,42 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     const a1Final = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1Final).toBe("Hello");
   });
+
+  test("Ctrl/Cmd+Z does not steal undo while editing the formula bar", async ({ page }) => {
+    await page.goto("/");
+    await page.click("#grid", { position: { x: 5, y: 5 } });
+
+    // Clear any seeded value.
+    await page.keyboard.press("Delete");
+    await waitForIdle(page);
+
+    // Commit A1 = Hello.
+    await page.keyboard.press("F2");
+    const cellEditor = page.locator("textarea.cell-editor");
+    await expect(cellEditor).toBeVisible();
+    await cellEditor.fill("Hello");
+    await page.keyboard.press("Enter");
+    await waitForIdle(page);
+
+    // Move back to A1 and start editing in the formula bar.
+    await page.keyboard.press("ArrowUp");
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.getByTestId("formula-highlight").click();
+    const input = page.getByTestId("formula-input");
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue("Hello");
+
+    // Create a text edit inside the formula bar.
+    await page.keyboard.type("X");
+    await expect(input).toHaveValue("HelloX");
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${modifier}+Z`);
+
+    // Should undo inside the textarea (native undo), not the spreadsheet history.
+    await expect(input).toHaveValue("Hello");
+    const a1AfterFormulaUndo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1AfterFormulaUndo).toBe("Hello");
+  });
 });
