@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { EnvelopeKmsProvider, KmsProviderFactory } from "../crypto/kms";
 import { importSecurityModule } from "../crypto/securityImport";
-import { canonicalJson } from "../crypto/utils";
+import { aadFromContext, assertBufferLength, canonicalJson } from "../crypto/utils";
 import { withTransaction } from "./tx";
 
 export type CreateDocumentVersionParams = {
@@ -98,20 +98,6 @@ const AES_256_KEY_BYTES = 32;
 const AES_GCM_IV_BYTES = 12;
 const AES_GCM_TAG_BYTES = 16;
 
-function assertBufferLength(buf: Buffer, expected: number, name: string): void {
-  if (!Buffer.isBuffer(buf)) {
-    throw new TypeError(`${name} must be a Buffer`);
-  }
-  if (buf.length !== expected) {
-    throw new RangeError(`${name} must be ${expected} bytes (got ${buf.length})`);
-  }
-}
-
-function aadBytes(context: unknown | null | undefined): Buffer | null {
-  if (context === null || context === undefined) return null;
-  return Buffer.from(canonicalJson(context), "utf8");
-}
-
 function decryptAes256Gcm({
   ciphertext,
   key,
@@ -195,7 +181,7 @@ function deriveLegacyLocalKek({
 }
 
 function legacyDekWrapAad(orgId: string, kmsKeyId: string): Buffer {
-  return aadBytes({
+  return aadFromContext({
     v: 1,
     purpose: "dek-wrap",
     orgId,
@@ -514,7 +500,7 @@ export async function getDocumentVersionData(
     key: dek,
     iv,
     tag,
-    aad: aadBytes(expectedAad)
+    aad: aadFromContext(expectedAad)
   });
 }
 
