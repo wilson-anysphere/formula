@@ -8,10 +8,14 @@ import { EncryptedCacheStore } from "../../../../../packages/power-query/src/cac
 let indexedDbAvailable = true;
 /** @type {import("fake-indexeddb").indexedDB | null} */
 let fakeIndexedDB = null;
+/** @type {import("fake-indexeddb").IDBKeyRange | null} */
+let fakeIDBKeyRange = null;
 try {
   const mod = await import("fake-indexeddb");
   // @ts-ignore - `fake-indexeddb` has a default export map; `indexedDB` is the common entry.
   fakeIndexedDB = mod.indexedDB ?? null;
+  // @ts-ignore - runtime export
+  fakeIDBKeyRange = mod.IDBKeyRange ?? null;
   indexedDbAvailable = Boolean(fakeIndexedDB);
 } catch {
   indexedDbAvailable = false;
@@ -49,6 +53,9 @@ test(
 
     // Ensure a clean starting point.
     globalThis.indexedDB = fakeIndexedDB;
+    if (fakeIDBKeyRange) {
+      globalThis.IDBKeyRange = fakeIDBKeyRange;
+    }
     await deleteDatabase(DB_NAME).catch(() => {});
 
     // 32-byte deterministic key for tests.
