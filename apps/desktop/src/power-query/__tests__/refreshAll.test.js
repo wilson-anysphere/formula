@@ -229,6 +229,95 @@ test("DesktopPowerQueryRefreshOrchestrator serializes apply operations to avoid 
   orchestrator.dispose();
 });
 
+test("DesktopPowerQueryRefreshOrchestrator shares apply serialization across instances for the same document", async () => {
+  const table1 = DataTable.fromGrid(
+    [["A"], ...Array.from({ length: 20 }, (_, idx) => [idx + 1])],
+    { hasHeaders: true, inferTypes: true },
+  );
+  const table2 = DataTable.fromGrid([["B"], ["ok"]], { hasHeaders: true, inferTypes: true });
+
+  const engine = new ScriptedEngine({
+    q1: { table: table1 },
+    q2: { table: table2 },
+  });
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const orch1 = new DesktopPowerQueryRefreshOrchestrator({ engine, document: doc, concurrency: 1, batchSize: 1 });
+  const orch2 = new DesktopPowerQueryRefreshOrchestrator({ engine, document: doc, concurrency: 1, batchSize: 1 });
+
+  orch1.registerQuery({
+    id: "q1",
+    name: "Q1",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  orch2.registerQuery({
+    id: "q2",
+    name: "Q2",
+    source: { type: "range", range: { values: [["Y"], [2]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 3 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  const applied = new Promise((resolve, reject) => {
+    /** @type {Set<string>} */
+    const done = new Set();
+    const maybeDone = () => {
+      if (done.size !== 2) return;
+      unsub1();
+      unsub2();
+      resolve(undefined);
+    };
+
+    const unsub1 = orch1.onEvent((evt) => {
+      if (evt.type === "apply:error") reject(evt.error);
+      if (evt.type === "apply:completed" && evt.queryId === "q1") {
+        done.add("q1");
+        maybeDone();
+      }
+    });
+
+    const unsub2 = orch2.onEvent((evt) => {
+      if (evt.type === "apply:error") reject(evt.error);
+      if (evt.type === "apply:completed" && evt.queryId === "q2") {
+        done.add("q2");
+        maybeDone();
+      }
+    });
+  });
+
+  const handle1 = orch1.refreshAll(["q1"]);
+
+  const started = new Promise((resolve) => {
+    const unsub = orch1.onEvent((evt) => {
+      if (evt.type === "apply:started" && evt.queryId === "q1") {
+        unsub();
+        resolve(undefined);
+      }
+    });
+  });
+
+  await started;
+  const handle2 = orch2.refreshAll(["q2"]);
+
+  await Promise.all([handle1.promise, handle2.promise]);
+  await applied;
+
+  // Each apply should create its own history entry, even when driven by different orchestrator instances.
+  assert.equal(doc.history.length, 2);
+  assert.equal(doc.batchDepth, 0);
+
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 0 }).value, "A");
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 3 }).value, "B");
+
+  orch1.dispose();
+  orch2.dispose();
+});
+
 test("DesktopPowerQueryRefreshOrchestrator cancelQuery aborts the apply phase for that query only", async () => {
   const bigTable = DataTable.fromGrid(
     [["A"], ...Array.from({ length: 50 }, (_, i) => [i + 1])],
