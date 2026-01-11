@@ -123,6 +123,7 @@ export class FormulaBarView {
     textarea.addEventListener("input", () => this.#onInputOrSelection());
     textarea.addEventListener("click", () => this.#onInputOrSelection());
     textarea.addEventListener("keyup", () => this.#onInputOrSelection());
+    textarea.addEventListener("select", () => this.#onInputOrSelection());
     textarea.addEventListener("scroll", () => this.#syncScroll());
     textarea.addEventListener("keydown", (e) => this.#onKeyDown(e));
 

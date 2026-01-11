@@ -86,4 +86,42 @@ describe("FormulaBarView tab completion (integration)", () => {
     completion.destroy();
     host.remove();
   });
+
+  it("clears suggestions when the selection is not collapsed", async () => {
+    const doc = new DocumentController();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe("=VLOOKUP(");
+    expect(view.model.aiGhostText()).toBe("OKUP(");
+
+    view.textarea.setSelectionRange(0, 2);
+    view.textarea.dispatchEvent(new Event("select"));
+
+    expect(view.model.aiSuggestion()).toBeNull();
+    expect(view.model.aiGhostText()).toBe("");
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+    expect(view.model.draft).toBe("=VLO");
+
+    completion.destroy();
+    host.remove();
+  });
 });
