@@ -185,6 +185,24 @@ Clients that have the appropriate per-range key can decrypt and display the
 plaintext content; clients without the key see a fixed masked placeholder (e.g.
 `"###"`).
 
+The collaboration session APIs take an optional encryption resolver:
+
+```ts
+import { createCollabSession } from "@formula/collab-session";
+
+const session = createCollabSession({
+  connection: { wsUrl, docId },
+  encryption: {
+    keyForCell: ({ sheetId, row, col }) => {
+      if (sheetId === "Sheet1" && row === 0 && col === 0) {
+        return { keyId: "k-range-1", keyBytes: new Uint8Array(32) };
+      }
+      return null; // no key => cell will be masked/decrypt-fail safe
+    }
+  }
+});
+```
+
 ### Handling Formulas in CRDT
 
 Formulas require special handling because they're interconnected:
