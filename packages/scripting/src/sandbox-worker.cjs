@@ -172,6 +172,31 @@ function compileTypeScript(tsSource) {
   return result.outputText;
 }
 
+function isModuleScript(tsSource) {
+  if (ts) {
+    const sourceFile = ts.createSourceFile("user-script.ts", tsSource, ts.ScriptTarget.ES2022, true);
+    for (const stmt of sourceFile.statements) {
+      if (
+        ts.isImportDeclaration(stmt) ||
+        ts.isImportEqualsDeclaration(stmt) ||
+        ts.isExportAssignment(stmt) ||
+        ts.isExportDeclaration(stmt)
+      ) {
+        return true;
+      }
+      const mods = stmt.modifiers;
+      if (mods && mods.some((m) => m.kind === ts.SyntaxKind.ExportKeyword || m.kind === ts.SyntaxKind.DefaultKeyword)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Best-effort fallback. We intentionally keep this strict because without the
+  // TypeScript compiler we only support the simplest module scripts.
+  return /^\s*export\s+default\b/m.test(tsSource);
+}
+
 function compileTypeScriptModule(tsSource) {
   if (!ts) {
     // Fallback: support scripts that use ESM `export default` but do not require
@@ -210,7 +235,7 @@ function compileTypeScriptModule(tsSource) {
 }
 
 async function runUserScript(tsSource) {
-  const isModule = /\bexport\s+default\b/.test(tsSource);
+  const isModule = isModuleScript(tsSource);
   const jsSource = isModule ? compileTypeScriptModule(tsSource) : compileTypeScript(tsSource);
 
   const networkSandbox = applyNetworkSandbox(workerData.permissions ?? {});

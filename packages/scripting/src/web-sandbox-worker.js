@@ -219,10 +219,24 @@ function compileTypeScriptModule(tsSource) {
   return result.outputText;
 }
 
+function isModuleScript(tsSource) {
+  const sourceFile = ts.createSourceFile("user-script.ts", tsSource, ts.ScriptTarget.ES2022, true);
+  for (const stmt of sourceFile.statements) {
+    if (ts.isImportDeclaration(stmt) || ts.isImportEqualsDeclaration(stmt) || ts.isExportAssignment(stmt) || ts.isExportDeclaration(stmt)) {
+      return true;
+    }
+    const mods = stmt.modifiers;
+    if (mods && mods.some((m) => m.kind === ts.SyntaxKind.ExportKeyword || m.kind === ts.SyntaxKind.DefaultKeyword)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function runUserScript({ code, activeSheetName, selection, permissions }) {
   applyNetworkSandbox(permissions ?? {});
 
-  const isModule = /\bexport\s+default\b/.test(code);
+  const isModule = isModuleScript(code);
   const jsSource = isModule
     ? `${compileTypeScriptModule(code)}\n//# sourceURL=user-script.js`
     : `${compileTypeScript(code)}\n//# sourceURL=user-script.js\nreturn __formulaUserMain(ctx);`;
