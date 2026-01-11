@@ -377,14 +377,45 @@ export class CellStructuralConflictMonitor {
  
     // move-destination conflict (same source moved to different destinations).
     if (oursOp.kind === "move" && theirsOp.kind === "move") {
-      if (oursOp.fromCellKey === theirsOp.fromCellKey && oursOp.toCellKey !== theirsOp.toCellKey) {
-        this._emitConflict({
-          type: "move",
-          reason: "move-destination",
-          sourceCellKey: oursOp.fromCellKey,
-          local: oursOp,
-          remote: theirsOp
-        });
+      if (oursOp.fromCellKey === theirsOp.fromCellKey) {
+        if (oursOp.toCellKey !== theirsOp.toCellKey) {
+          this._emitConflict({
+            type: "move",
+            reason: "move-destination",
+            sourceCellKey: oursOp.fromCellKey,
+            local: oursOp,
+            remote: theirsOp
+          });
+        } else {
+          const oursCell = normalizeCell(oursOp.cell);
+          const theirsCell = normalizeCell(theirsOp.cell);
+          if (cellsEqual(oursCell, theirsCell)) return;
+
+          const reason = didContentChange(oursCell, theirsCell) ? "content" : "format";
+
+          const oursAsEdit = {
+            kind: "edit",
+            userId: oursOp.userId,
+            cellKey: oursOp.toCellKey,
+            before: null,
+            after: oursCell
+          };
+          const theirsAsEdit = {
+            kind: "edit",
+            userId: theirsOp.userId,
+            cellKey: theirsOp.toCellKey,
+            before: null,
+            after: theirsCell
+          };
+
+          this._emitConflict({
+            type: "cell",
+            reason,
+            sourceCellKey: oursOp.toCellKey,
+            local: oursAsEdit,
+            remote: theirsAsEdit
+          });
+        }
       }
       return;
     }

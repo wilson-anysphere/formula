@@ -343,4 +343,71 @@ test("CellStructuralConflictMonitor move conflict resolution applies the chosen 
   docA.destroy();
   docB.destroy();
 });
+
+test("CellStructuralConflictMonitor surfaces content conflicts when two users move the same cell to the same destination with different content", async () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+  /** @type {Array<any>} */
+  const conflictsB = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    cellConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    cellConflicts: {
+      localUserId: "user-b",
+      onConflict: (c) => conflictsB.push(c),
+    },
+  });
+
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "base");
+
+  disconnect();
+
+  // Diverge content offline, then both move A1 -> B1.
+  await sessionA.setCellValue("Sheet1:0:0", "from-a");
+  await sessionB.setCellValue("Sheet1:0:0", "from-b");
+  cutPaste(sessionA, "Sheet1:0:0", "Sheet1:0:1");
+  cutPaste(sessionB, "Sheet1:0:0", "Sheet1:0:1");
+
+  disconnect = connectDocs(docA, docB);
+
+  const allConflicts = [...conflictsA, ...conflictsB];
+  assert.ok(allConflicts.length >= 1, "expected at least one conflict to be detected");
+
+  const conflictSide = conflictsA.length > 0 ? sessionA : sessionB;
+  const conflict = conflictsA.length > 0 ? conflictsA[0] : conflictsB[0];
+
+  assert.equal(conflict.type, "cell");
+  assert.equal(conflict.reason, "content");
+  assert.equal(conflict.cellKey, "Sheet1:0:1");
+
+  const expected = conflict.local?.after?.value ?? null;
+  assert.ok(
+    conflictSide.cellConflictMonitor?.resolveConflict(conflict.id, {
+      choice: "ours",
+    }),
+  );
+
+  assert.equal(await sessionA.getCell("Sheet1:0:0"), null);
+  assert.equal(await sessionB.getCell("Sheet1:0:0"), null);
+  assert.equal((await sessionA.getCell("Sheet1:0:1"))?.value ?? null, expected);
+  assert.equal((await sessionB.getCell("Sheet1:0:1"))?.value ?? null, expected);
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
  
