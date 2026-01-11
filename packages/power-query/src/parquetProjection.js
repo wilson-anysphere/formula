@@ -7,6 +7,8 @@
  * output does not implicitly require "all source columns".
  */
 
+import { collectExprColumnRefs, parseFormula } from "./expr/index.js";
+
 /**
  * @typedef {import("./model.js").QueryStep} QueryStep
  * @typedef {import("./model.js").QueryOperation} QueryOperation
@@ -26,25 +28,6 @@ const SUPPORTED_OPS = new Set([
   "fillDown",
   "replaceValues",
 ]);
-
-/**
- * Extract bracketed column references (`[Column Name]`) from an `addColumn` formula.
- *
- * This intentionally mirrors `compileRowFormula`'s very small supported surface area.
- *
- * @param {string} formula
- * @returns {Set<string>}
- */
-function parseFormulaColumnRefs(formula) {
-  const refs = new Set();
-  let expr = formula.trim();
-  if (expr.startsWith("=")) expr = expr.slice(1).trim();
-  for (const match of expr.matchAll(/\[([^\]]+)\]/g)) {
-    const name = String(match[1]).trim();
-    if (name) refs.add(name);
-  }
-  return refs;
-}
 
 /**
  * @param {FilterPredicate} predicate
@@ -141,7 +124,11 @@ export function computeParquetProjectionColumns(steps) {
         requireColumn(op.column);
         break;
       case "addColumn":
-        parseFormulaColumnRefs(op.formula).forEach(requireColumn);
+        try {
+          collectExprColumnRefs(parseFormula(op.formula)).forEach(requireColumn);
+        } catch {
+          return null;
+        }
         break;
       case "renameColumn":
         requireColumn(op.oldName);

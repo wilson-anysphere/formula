@@ -180,6 +180,86 @@ test("compile: folds addColumn for a safe subset of formula expressions", () => 
   });
 });
 
+test("compile: folds addColumn with exponent number literals", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_add_exponent",
+    name: "Add exponent",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Sales"] } },
+      { id: "s2", name: "Add", operation: { type: "addColumn", name: "Scaled", formula: "=[Sales] * 1e3" } },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT t.*, (t."Sales" * ?) AS "Scaled" FROM (SELECT t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
+    params: [1000],
+  });
+});
+
+test("compile: folds addColumn ternary expressions", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_add_ternary",
+    name: "Add ternary",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Sales"] } },
+      { id: "s2", name: "Add", operation: { type: "addColumn", name: "Bucket", formula: '=[Sales] > 100 ? "big" : "small"' } },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT t.*, (CASE WHEN (t."Sales" > ?) THEN ? ELSE ? END) AS "Bucket" FROM (SELECT t."Sales" FROM (SELECT * FROM sales) AS t) AS t',
+    params: [100, "big", "small"],
+  });
+});
+
+test("compile: folds addColumn string literals with escapes", () => {
+  const folding = new QueryFoldingEngine();
+  const payload = 'a"b\\c\n';
+  const query = {
+    id: "q_add_string_escape",
+    name: "Add string escape",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [{ id: "s1", name: "Add", operation: { type: "addColumn", name: "Text", formula: JSON.stringify(payload) } }],
+  };
+
+  const plan = folding.compile(query);
+  assert.equal(plan.type, "sql");
+  assert.ok(plan.sql.includes("?"));
+  assert.deepEqual(plan.params, [payload]);
+});
+
+test("compile: addColumn params come before nested query params (placeholder order)", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_add_param_order",
+    name: "Add param order",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } },
+      },
+      { id: "s2", name: "Add", operation: { type: "addColumn", name: "Injected", formula: '"x"' } },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT t.*, ? AS "Injected" FROM (SELECT * FROM (SELECT * FROM sales) AS t WHERE (t."Region" = ?)) AS t',
+    params: ["x", "East"],
+  });
+});
+
 test("compile: non-translatable addColumn formula breaks folding into a hybrid plan", () => {
   const folding = new QueryFoldingEngine();
   const query = {

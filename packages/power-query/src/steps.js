@@ -1,6 +1,7 @@
 import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable, inferColumnType, makeUniqueColumnNames } from "./table.js";
 import { compilePredicate } from "./predicate.js";
+import { bindExprColumns, evaluateExpr, parseFormula } from "./expr/index.js";
 
 /** @type {((columns: Record<string, any[] | ArrayLike<any>>) => any) | null} */
 let arrowTableFromColumns = null;
@@ -633,34 +634,9 @@ function changeType(table, column, newType) {
  * @returns {(values: unknown[]) => unknown}
  */
 export function compileRowFormula(table, formula) {
-  let expr = formula.trim();
-  if (expr.startsWith("=")) expr = expr.slice(1).trim();
-
-  expr = expr.replaceAll(/\[([^\]]+)\]/g, (_match, rawName) => {
-    const name = String(rawName).trim();
-    const idx = table.getColumnIndex(name);
-    return `values[${idx}]`;
-  });
-
-  // Very defensive sanitization: allow only a small subset of JS.
-  if (/[{};]/.test(expr)) {
-    throw new Error("Formula contains unsupported characters");
-  }
-
-  if (
-    /\b(?:while|for|function|class|return|new|this|globalThis|process|require|import|eval|Function|constructor|prototype)\b/.test(
-      expr,
-    )
-  ) {
-    throw new Error("Formula contains unsupported identifiers");
-  }
-
-  if (!/^[\d\s+\-*/%().,<>=!&|?:'"[\]A-Za-z_]+$/.test(expr)) {
-    throw new Error("Formula contains unsupported tokens");
-  }
-
-  // eslint-disable-next-line no-new-func
-  return new Function("values", `"use strict"; return (${expr});`);
+  const expr = parseFormula(formula);
+  const bound = bindExprColumns(expr, (name) => table.getColumnIndex(name));
+  return (values) => evaluateExpr(bound, values);
 }
 
 /**

@@ -100,3 +100,26 @@ test("security: addColumn string literals are parameterized (no SQL injection vi
   assert.deepEqual(plan.params, [payload]);
 });
 
+test("security: addColumn literals are always parameterized + preserve placeholder ordering (property test)", () => {
+  const rng = makeRng(0x5151757);
+  const folding = new QueryFoldingEngine();
+
+  for (let i = 0; i < 250; i++) {
+    const payload = `__payload__${i}:${randomIdentifier(rng, 60)}`;
+    const query = {
+      id: `q_formula_prop_${i}`,
+      name: "Formula injection (property)",
+      source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+      steps: [
+        { id: "s1", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } } },
+        { id: "s2", name: "Add", operation: { type: "addColumn", name: "Injected", formula: JSON.stringify(payload) } },
+      ],
+    };
+
+    const plan = folding.compile(query);
+    assert.equal(plan.type, "sql");
+    assert.ok(plan.sql.includes("?"));
+    assert.ok(!plan.sql.includes(payload));
+    assert.deepEqual(plan.params, [payload, "East"]);
+  }
+});
