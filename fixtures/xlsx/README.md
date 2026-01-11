@@ -37,6 +37,8 @@ fixtures/xlsx/
   - `print-settings.xlsx` - page setup + print titles/areas.
 - `formulas/`:
   - `formulas.xlsx` - simple formula + cached result.
+  - `formulas-stale-cache.xlsx` - formula with an intentionally stale cached result (used to ensure imports do not auto-recalc).
+  - `shared-formula.xlsx` - shared formula range (`t="shared"`) with textless followers.
 - `metadata/`:
   - `row-col-properties.xlsx` - custom row height + hidden row, custom column width + hidden column.
   - `data-validation-list.xlsx` - simple list data validation (`<dataValidations>`).

@@ -473,6 +473,23 @@ def sheet_formulas_xml() -> str:
 """
 
 
+def sheet_formulas_stale_cache_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+      <c r="B1"><v>2</v></c>
+      <c r="C1">
+        <f>A1+B1</f>
+        <v>999</v>
+      </c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
 def sheet_shared_formula_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -1069,6 +1086,11 @@ def main() -> None:
     write_xlsx(
         ROOT / "formulas" / "formulas.xlsx",
         [sheet_formulas_xml()],
+        styles_minimal_xml(),
+    )
+    write_xlsx(
+        ROOT / "formulas" / "formulas-stale-cache.xlsx",
+        [sheet_formulas_stale_cache_xml()],
         styles_minimal_xml(),
     )
     write_xlsx(

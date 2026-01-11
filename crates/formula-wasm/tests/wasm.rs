@@ -358,6 +358,35 @@ fn from_xlsx_bytes_imports_formulas_and_recalculates() {
 }
 
 #[wasm_bindgen_test]
+fn from_xlsx_bytes_preserves_stale_formula_cache_until_recalc() {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/formulas/formulas-stale-cache.xlsx"
+    ));
+
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+
+    // Before recalc, `getCell` should expose the cached value from the XLSX file.
+    let cell_js = wb.get_cell("C1".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.input, json!("=A1+B1"));
+    assert_json_number(&cell.value, 999.0);
+
+    // A manual recalc should replace the stale cached value with the computed one.
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].sheet, DEFAULT_SHEET);
+    assert_eq!(changes[0].address, "C1");
+    assert_json_number(&changes[0].value, 3.0);
+
+    let cell_js = wb.get_cell("C1".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.input, json!("=A1+B1"));
+    assert_json_number(&cell.value, 3.0);
+}
+
+#[wasm_bindgen_test]
 fn from_xlsx_bytes_loads_basic_fixture() {
     let bytes = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
