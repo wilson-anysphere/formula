@@ -14,6 +14,8 @@ test("extension-api types file exports the expected surface", async () => {
     "function setRange(ref: string, values: CellValue[][]): Promise<void>;",
     "readonly sheets: Sheet[];",
     "readonly activeSheet: Sheet;",
+    "readonly address: string;",
+    "readonly formulas: (string | null)[][];",
     "export namespace sheets",
     "function createSheet(name: string): Promise<Sheet>;",
     "function deleteSheet(name: string): Promise<void>;",

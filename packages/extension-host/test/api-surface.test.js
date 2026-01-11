@@ -63,9 +63,14 @@ test("api surface: cells.getRange/setRange roundtrip uses A1 refs and serializes
     startCol: 0,
     endRow: 1,
     endCol: 1,
+    address: "A1:B2",
     values: [
       [1, 2],
       [3, 4]
+    ],
+    formulas: [
+      [null, null],
+      [null, null]
     ]
   });
 

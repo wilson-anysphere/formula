@@ -37,8 +37,11 @@ export interface Range {
   readonly startCol: number;
   readonly endRow: number;
   readonly endCol: number;
+  readonly address: string;
   /** 2D array indexed by [row][col] relative to startRow/startCol. */
   readonly values: CellValue[][];
+  /** Formula strings for the range (null when not available). */
+  readonly formulas: (string | null)[][];
 }
 
 export interface PanelWebview {

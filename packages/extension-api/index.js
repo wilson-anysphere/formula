@@ -208,6 +208,55 @@ function attachNonEnumerableMethods(target, methods) {
   return target;
 }
 
+function columnIndexToLetters(index) {
+  let n = Number(index);
+  if (!Number.isFinite(n) || n < 0) return "";
+  n = Math.floor(n);
+  let out = "";
+  while (n >= 0) {
+    out = String.fromCharCode(65 + (n % 26)) + out;
+    n = Math.floor(n / 26) - 1;
+  }
+  return out;
+}
+
+function buildA1Address(startRow, startCol, endRow, endCol) {
+  const start = `${columnIndexToLetters(startCol)}${Number(startRow) + 1}`;
+  const end = `${columnIndexToLetters(endCol)}${Number(endRow) + 1}`;
+  return start === end ? start : `${start}:${end}`;
+}
+
+function createNullMatrix(rows, cols) {
+  const out = [];
+  for (let r = 0; r < rows; r++) {
+    const row = [];
+    for (let c = 0; c < cols; c++) row.push(null);
+    out.push(row);
+  }
+  return out;
+}
+
+function enhanceRange(range) {
+  if (!range || typeof range !== "object") return range;
+  const obj = { ...range };
+  const startRow = Number(obj.startRow ?? 0);
+  const startCol = Number(obj.startCol ?? 0);
+  const endRow = Number(obj.endRow ?? startRow);
+  const endCol = Number(obj.endCol ?? startCol);
+
+  if (typeof obj.address !== "string" || obj.address.trim().length === 0) {
+    obj.address = buildA1Address(startRow, startCol, endRow, endCol);
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(obj, "formulas")) {
+    const rows = Math.max(0, endRow - startRow + 1);
+    const cols = Math.max(0, endCol - startCol + 1);
+    obj.formulas = createNullMatrix(rows, cols);
+  }
+
+  return obj;
+}
+
 function enhanceWorkbook(workbook) {
   if (!workbook || typeof workbook !== "object") return workbook;
   const obj = { ...workbook };
@@ -260,7 +309,8 @@ function enhanceSheet(sheet) {
 
   return attachNonEnumerableMethods(obj, {
     async getRange(ref) {
-      return rpcCall("cells", "getRange", [`${obj.name}!${String(ref)}`]);
+      const result = await rpcCall("cells", "getRange", [`${obj.name}!${String(ref)}`]);
+      return enhanceRange(result);
     },
     async setRange(ref, values) {
       await rpcCall("cells", "setRange", [`${obj.name}!${String(ref)}`, values]);
@@ -338,11 +388,13 @@ class PanelImpl {
 
 const cells = {
   async getSelection() {
-    return rpcCall("cells", "getSelection", []);
+    const result = await rpcCall("cells", "getSelection", []);
+    return enhanceRange(result);
   },
 
   async getRange(ref) {
-    return rpcCall("cells", "getRange", [String(ref)]);
+    const result = await rpcCall("cells", "getRange", [String(ref)]);
+    return enhanceRange(result);
   },
 
   async getCell(row, col) {
@@ -592,7 +644,13 @@ const clipboard = {
 
 const events = {
   onSelectionChanged(callback) {
-    return addEventHandler("selectionChanged", callback);
+    return addEventHandler("selectionChanged", (e) => {
+      if (e && typeof e === "object" && e.selection && typeof e.selection === "object") {
+        callback({ ...e, selection: enhanceRange(e.selection) });
+        return;
+      }
+      callback(e);
+    });
   },
   onCellChanged(callback) {
     return addEventHandler("cellChanged", callback);
