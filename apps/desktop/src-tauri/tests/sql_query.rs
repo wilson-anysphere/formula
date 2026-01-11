@@ -68,3 +68,20 @@ async fn odbc_with_unsupported_driver_returns_clear_error() {
         "unexpected error: {err}"
     );
 }
+
+#[tokio::test]
+async fn odbc_dsn_connections_return_clear_error() {
+    let err = sql::sql_query(
+        json!({ "kind": "odbc", "connectionString": "dsn=mydb" }),
+        "SELECT 1".to_string(),
+        Vec::new(),
+        None,
+    )
+    .await
+    .expect_err("expected DSN-only connection to error");
+
+    assert!(
+        err.to_string().to_ascii_lowercase().contains("dsn") && err.to_string().contains("not supported"),
+        "unexpected error: {err}"
+    );
+}

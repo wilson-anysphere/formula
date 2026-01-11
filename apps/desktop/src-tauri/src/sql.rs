@@ -159,6 +159,10 @@ fn odbc_first<'a>(props: &'a HashMap<String, String>, keys: &[&str]) -> Option<&
     None
 }
 
+fn odbc_driver_name(props: &HashMap<String, String>) -> Option<&str> {
+    odbc_first(props, &["driver", "drv"])
+}
+
 fn parse_host_port(input: &str) -> (String, Option<u16>) {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -638,9 +642,17 @@ pub async fn sql_query(
             let descriptor: OdbcConnectionDescriptor =
                 serde_json::from_value(connection).context("invalid odbc connection descriptor")?;
             let props = parse_odbc_connection_string(&descriptor.connection_string);
-            let driver = odbc_first(&props, &["driver", "drv"])
-                .map(|s| s.to_string())
-                .ok_or_else(|| anyhow!("odbc connection string requires a `Driver` field"))?;
+            let driver = match odbc_driver_name(&props) {
+                Some(value) => value.to_string(),
+                None => {
+                    if let Some(dsn) = odbc_first(&props, &["dsn"]) {
+                        return Err(anyhow!(
+                            "ODBC DSN connections (DSN={dsn}) are not supported. Provide an explicit Driver and connection details (e.g. Driver={{PostgreSQL}};Server=...;Database=...; or Driver=SQLite3;Database=...;)."
+                        ));
+                    }
+                    return Err(anyhow!("odbc connection string requires a `Driver` field"));
+                }
+            };
             let driver_lower = driver.to_ascii_lowercase();
 
             if driver_lower.contains("sqlite") {
@@ -785,9 +797,17 @@ pub async fn sql_get_schema(
             let descriptor: OdbcConnectionDescriptor =
                 serde_json::from_value(connection).context("invalid odbc connection descriptor")?;
             let props = parse_odbc_connection_string(&descriptor.connection_string);
-            let driver = odbc_first(&props, &["driver", "drv"])
-                .map(|s| s.to_string())
-                .ok_or_else(|| anyhow!("odbc connection string requires a `Driver` field"))?;
+            let driver = match odbc_driver_name(&props) {
+                Some(value) => value.to_string(),
+                None => {
+                    if let Some(dsn) = odbc_first(&props, &["dsn"]) {
+                        return Err(anyhow!(
+                            "ODBC DSN connections (DSN={dsn}) are not supported. Provide an explicit Driver and connection details (e.g. Driver={{PostgreSQL}};Server=...;Database=...; or Driver=SQLite3;Database=...;)."
+                        ));
+                    }
+                    return Err(anyhow!("odbc connection string requires a `Driver` field"));
+                }
+            };
             let driver_lower = driver.to_ascii_lowercase();
 
             if driver_lower.contains("sqlite") {
