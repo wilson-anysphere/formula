@@ -6,5 +6,6 @@ edition = "2021"
 [dependencies]
 calamine = "0.32"
 cfb = "0.10"
+formula-format = { path = "../formula-format" }
 formula-model = { path = "../formula-model" }
 thiserror = "2.0"
