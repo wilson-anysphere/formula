@@ -147,6 +147,9 @@ export function registerAuditRoutes(app: FastifyInstance): void {
       const orgId = (request.params as { orgId: string }).orgId;
       const role = await requireOrgRole(request, reply, orgId);
       if (!role) return;
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
       const ip = getClientIp(request) ?? "unknown";
       const limited = ingestRateLimiter.take(`${orgId}:${ip}`);
