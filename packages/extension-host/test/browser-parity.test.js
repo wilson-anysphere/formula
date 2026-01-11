@@ -37,3 +37,13 @@ test("browser host parity: manifest validation is shared (no drift)", async () =
   assert.strictEqual(browserManifestPkg.validateExtensionManifest, sharedManifestPkg.validateExtensionManifest);
   assert.strictEqual(browserManifestPkg.ManifestError, sharedManifestPkg.ManifestError);
 });
+
+test("permission schema: API_PERMISSIONS only uses known manifest permissions", () => {
+  const unknown = new Set();
+  for (const perms of Object.values(nodeHostPkg.API_PERMISSIONS)) {
+    for (const perm of perms) {
+      if (!nodeManifestPkg.VALID_PERMISSIONS.has(perm)) unknown.add(perm);
+    }
+  }
+  assert.deepEqual([...unknown].sort(), []);
+});
