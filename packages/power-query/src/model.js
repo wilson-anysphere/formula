@@ -52,42 +52,36 @@
 /**
  * @typedef {{
  *   type: "database";
- *   /**
- *    * Optional stable identifier for the database connection.
- *    *
- *    * This must be stable across refreshes (and JSON-serializable) so it can be
- *    * used for deterministic cache keys and to decide whether folding can safely
- *    * `merge`/`append` across queries.
- *    *
- *    * If omitted, the engine will try to derive an identity from the connection
- *    * descriptor:
- *    * - Prefer `SqlConnector.getConnectionIdentity(connection)` when available.
- *    * - Fall back to `connection.id` when present.
- *    *
- *    * When no stable identity is available, database sources are treated as
- *    * non-cacheable to avoid incorrect reuse across connections.
- *    */
+ *   // Optional stable identifier for the database connection.
+ *   //
+ *   // This must be stable across refreshes (and JSON-serializable) so it can be
+ *   // used for deterministic cache keys and to decide whether folding can safely
+ *   // `merge`/`append` across queries.
+ *   //
+ *   // If omitted, the engine will try to derive an identity from the connection
+ *   // descriptor:
+ *   // - Prefer `SqlConnector.getConnectionIdentity(connection)` when available.
+ *   // - Fall back to `connection.id` when present.
+ *   //
+ *   // When no stable identity is available, database sources are treated as
+ *   // non-cacheable to avoid incorrect reuse across connections.
  *   connectionId?: string;
  *   connection: unknown;
  *   query: string;
- *   /**
- *    * SQL dialect name used for query folding / compilation.
- *    *
- *    * This is optional because some host apps might not know the exact backend
- *    * dialect, but pushdown folding should only be enabled when the dialect is
- *    * known to avoid generating incompatible SQL.
- *    */
+ *   // SQL dialect name used for query folding / compilation.
+ *   //
+ *   // This is optional because some host apps might not know the exact backend
+ *   // dialect, but pushdown folding should only be enabled when the dialect is
+ *   // known to avoid generating incompatible SQL.
  *   dialect?: "postgres" | "mysql" | "sqlite" | "sqlserver";
- *   /**
- *    * Optional column names for the query result.
- *    *
- *    * Some folding operations (e.g. `renameColumn`, `changeType`) require an
- *    * explicit projection list to avoid duplicate output columns. When this
- *    * metadata is available, the folding engine can push those operations down.
- *    *
- *    * When omitted and SQL folding is enabled, the engine may attempt to discover
- *    * the schema via an optional `SqlConnector.getSchema` hook.
- *    */
+ *   // Optional column names for the query result.
+ *   //
+ *   // Some folding operations (e.g. `renameColumn`, `changeType`) require an
+ *   // explicit projection list to avoid duplicate output columns. When this
+ *   // metadata is available, the folding engine can push those operations down.
+ *   //
+ *   // When omitted and SQL folding is enabled, the engine may attempt to discover
+ *   // the schema via an optional `SqlConnector.getSchema` hook.
  *   columns?: string[];
  * }} DatabaseQuerySource
  */
@@ -107,26 +101,20 @@
 /**
  * @typedef {{
  *   type: "odata";
- *   /**
-    * Entity set endpoint URL.
-    *
-    * Example: `https://services.odata.org/V4/OData/OData.svc/Products`
-    */
+ *   // Entity set endpoint URL.
+ *   //
+ *   // Example: `https://services.odata.org/V4/OData/OData.svc/Products`
  *   url: string;
  *   headers?: Record<string, string>;
  *   // Optional per-request auth configuration (same shape as `api` sources).
  *   auth?: { type: "oauth2"; providerId: string; scopes?: string[] | string };
- *   /**
-    * Optional JSON path selecting the rows array from the response payload.
-    *
-    * OData v4 responses typically wrap rows as `{ value: [...] }`, so the default
-    * is `"value"`.
-    */
+ *   // Optional JSON path selecting the rows array from the response payload.
+ *   //
+ *   // OData v4 responses typically wrap rows as `{ value: [...] }`, so the default
+ *   // is `"value"`.
  *   rowsPath?: string;
- *   /**
-    * Backwards/interop alias for `rowsPath`. When both are provided, `rowsPath`
-    * wins.
-    */
+ *   // Backwards/interop alias for `rowsPath`. When both are provided, `rowsPath`
+ *   // wins.
  *   jsonPath?: string;
  * }} ODataQuerySource
  */
@@ -289,11 +277,9 @@
  *   type: "on-open"
  * } | {
  *   type: "cron",
- *   /**
- *    * 5-field cron schedule: `minute hour day-of-month month day-of-week`
- *    *
- *    * Example: `*\/15 9-17 * * 1-5` (every 15 minutes during business hours, Mon-Fri)
- *    */
+ *   // 5-field cron schedule: `minute hour day-of-month month day-of-week`
+ *   //
+ *   // Example: `*\/15 9-17 * * 1-5` (every 15 minutes during business hours, Mon-Fri)
  *   cron: string
  * }} RefreshPolicy
  */
