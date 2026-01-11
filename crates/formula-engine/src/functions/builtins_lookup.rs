@@ -46,6 +46,8 @@ fn vlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(table_ref) => {
             let table = table_ref.normalized();
+            // Record dereference for dynamic dependency tracing (e.g. VLOOKUP(…, OFFSET(...), …)).
+            ctx.record_reference(&table);
             let cols = (table.end.col - table.start.col + 1) as i64;
             if col_index > cols {
                 return Value::Error(ErrorKind::Ref);
@@ -136,6 +138,8 @@ fn hlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(table_ref) => {
             let table = table_ref.normalized();
+            // Record dereference for dynamic dependency tracing (e.g. HLOOKUP(…, OFFSET(...), …)).
+            ctx.record_reference(&table);
             let rows = (table.end.row - table.start.row + 1) as i64;
             if row_index > rows {
                 return Value::Error(ErrorKind::Ref);
@@ -220,6 +224,8 @@ fn index_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match ctx.eval_arg(&args[0]) {
         ArgValue::Reference(r) => {
             let array = r.normalized();
+            // Record dereference for dynamic dependency tracing (e.g. INDEX(OFFSET(...), …)).
+            ctx.record_reference(&array);
             let rows = (array.end.row - array.start.row + 1) as i64;
             let cols = (array.end.col - array.start.col + 1) as i64;
             if row > rows || col > cols {
@@ -282,6 +288,8 @@ fn match_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Some(v) => v,
                 None => return Value::Error(ErrorKind::NA),
             };
+            // Record dereference for dynamic dependency tracing (e.g. MATCH(…, OFFSET(...), …)).
+            ctx.record_reference(&array);
             match match_type {
                 0 => exact_match_1d(ctx, &lookup, &array.sheet_id, &values),
                 1 => approximate_match_1d(ctx, &lookup, &array.sheet_id, &values, true),
