@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 
 import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { createUndoService } from "../packages/collab/undo/index.js";
+import { maskCellValue } from "../packages/collab/permissions/index.js";
 import { createCollabSession } from "../packages/collab/session/src/index.ts";
 import { bindYjsToDocumentController } from "../packages/collab/binder/index.js";
 import {
@@ -324,4 +325,117 @@ test("sync-server + Yjs↔DocumentController binder: sync format-only cells", as
   clientA.documentController.setRangeFormat("Sheet1", "A1", null);
   await waitForCell(clientB.documentController, "Sheet1", "A1", { value: "hello", formula: null });
   await waitForCellStyle(clientB.documentController, "Sheet1", "A1", null);
+});
+
+test("sync-server + Yjs↔DocumentController binder: permission-masked cells are unreadable and uneditable", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-e2e-permissions-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const port = await getAvailablePort();
+  // Resolve deps from the sync-server package so this test doesn't need to add them to the root package.json.
+  const requireFromSyncServer = createRequire(
+    new URL("../services/sync-server/package.json", import.meta.url)
+  );
+  const WebSocket = requireFromSyncServer("ws");
+
+  const server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const restrictions = [
+    // Lock A1 so only u-a can read/edit.
+    {
+      sheetName: "Sheet1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 0,
+      endCol: 0,
+      readAllowlist: ["u-a"],
+      editAllowlist: ["u-a"],
+    },
+  ];
+
+  const createClient = ({ wsUrl: wsBaseUrl, docId, token, user, activeSheet, permissions }) => {
+    const session = createCollabSession({
+      connection: {
+        wsUrl: wsBaseUrl,
+        docId,
+        token,
+        WebSocketPolyfill: WebSocket,
+        disableBc: true,
+      },
+      presence: { user, activeSheet, throttleMs: 0 },
+      defaultSheetId: activeSheet,
+    });
+
+    const ydoc = session.doc;
+    const undo = createUndoService({ mode: "collab", doc: ydoc, scope: session.cells });
+    const documentController = new DocumentController();
+    const binder = bindYjsToDocumentController({
+      ydoc,
+      documentController,
+      undoService: undo,
+      defaultSheetId: activeSheet,
+      userId: user.id,
+      permissions,
+    });
+
+    let destroyed = false;
+    const destroy = () => {
+      if (destroyed) return;
+      destroyed = true;
+      binder.destroy();
+      session.destroy();
+      ydoc.destroy();
+    };
+
+    return { session, undo, documentController, binder, destroy };
+  };
+
+  const docId = `e2e-permissions-${randomUUID()}`;
+  const wsUrl = server.wsUrl;
+
+  const clientA = createClient({
+    wsUrl,
+    docId,
+    token: "test-token",
+    user: { id: "u-a", name: "User A", color: "#ff0000" },
+    activeSheet: "Sheet1",
+    permissions: { role: "editor", restrictions, userId: "u-a" },
+  });
+  const clientB = createClient({
+    wsUrl,
+    docId,
+    token: "test-token",
+    user: { id: "u-b", name: "User B", color: "#00ff00" },
+    activeSheet: "Sheet1",
+    permissions: { role: "editor", restrictions, userId: "u-b" },
+  });
+
+  t.after(() => {
+    clientA.destroy();
+    clientB.destroy();
+  });
+
+  await Promise.all([clientA.session.whenSynced(), clientB.session.whenSynced()]);
+
+  // A writes a secret value; B should only see a masked placeholder.
+  clientA.documentController.setCellValue("Sheet1", "A1", "top-secret");
+  await waitForCell(clientA.documentController, "Sheet1", "A1", { value: "top-secret", formula: null });
+  await waitForCell(clientB.documentController, "Sheet1", "A1", { value: maskCellValue("top-secret"), formula: null });
+
+  // B attempts to edit the protected cell; binder should reject + revert locally and not push to Yjs.
+  clientB.documentController.setCellValue("Sheet1", "A1", "hacked");
+  await waitForCell(clientB.documentController, "Sheet1", "A1", { value: maskCellValue("top-secret"), formula: null });
+  await waitForCell(clientA.documentController, "Sheet1", "A1", { value: "top-secret", formula: null });
+
+  assert.equal((await clientA.session.getCell("Sheet1:0:0"))?.value, "top-secret");
+  assert.equal((await clientB.session.getCell("Sheet1:0:0"))?.value, "top-secret");
 });

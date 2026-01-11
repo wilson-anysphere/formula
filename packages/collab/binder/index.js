@@ -6,7 +6,7 @@ import {
   encryptCellPlaintext,
   isEncryptedCellPayload,
 } from "../encryption/src/index.node.js";
-import { maskCellValue as defaultMaskCellValue } from "../permissions/index.js";
+import { getCellPermissions, maskCellValue as defaultMaskCellValue } from "../permissions/index.js";
 
 const MASKED_CELL_VALUE = "###";
 
@@ -159,7 +159,11 @@ function sameNormalizedCell(a, b) {
  *   } | null,
  *   canReadCell?: (cell: { sheetId: string, row: number, col: number }) => boolean,
  *   canEditCell?: (cell: { sheetId: string, row: number, col: number }) => boolean,
+ *   permissions?:
+ *     | ((cell: { sheetId: string, row: number, col: number }) => { canRead: boolean, canEdit: boolean })
+ *     | { role: string, restrictions?: any[], userId?: string | null },
  *   maskCellValue?: (value: unknown, cell?: { sheetId: string, row: number, col: number }) => unknown,
+ *   onEditRejected?: (deltas: any[]) => void,
  * }} options
  */
 export function bindYjsToDocumentController(options) {
@@ -172,7 +176,9 @@ export function bindYjsToDocumentController(options) {
     encryption = null,
     canReadCell = null,
     canEditCell = null,
+    permissions = null,
     maskCellValue = defaultMaskCellValue,
+    onEditRejected = null,
   } = options ?? {};
 
   if (!ydoc) throw new Error("bindYjsToDocumentController requires { ydoc }");
@@ -214,8 +220,27 @@ export function bindYjsToDocumentController(options) {
   let applyingRemote = false;
   let hasEncryptedCells = false;
 
-  const readGuard = typeof canReadCell === "function" ? canReadCell : null;
-  const editGuard = typeof canEditCell === "function" ? canEditCell : null;
+  const permissionResolver = createPermissionsResolver(permissions, userId);
+  const legacyReadGuard = typeof canReadCell === "function" ? canReadCell : null;
+  const legacyEditGuard = typeof canEditCell === "function" ? canEditCell : null;
+
+  /**
+   * @param {{ sheetId: string, row: number, col: number }} cell
+   */
+  const resolveCellPermissions = (cell) => {
+    const resolved = permissionResolver ? permissionResolver(cell) : { canRead: true, canEdit: true };
+    let canRead = resolved.canRead;
+    let canEdit = resolved.canEdit;
+
+    if (legacyReadGuard) canRead = canRead && legacyReadGuard(cell);
+    if (legacyEditGuard) canEdit = canEdit && legacyEditGuard(cell);
+    if (!canRead) canEdit = false;
+
+    return { canRead, canEdit };
+  };
+
+  const readGuard = legacyReadGuard || permissionResolver ? (cell) => resolveCellPermissions(cell).canRead : null;
+  const editGuard = legacyEditGuard || permissionResolver ? (cell) => resolveCellPermissions(cell).canEdit : null;
   const maskFn = typeof maskCellValue === "function" ? maskCellValue : defaultMaskCellValue;
 
   // Ensure local user edits in DocumentController are permission-aware by default.
@@ -730,6 +755,8 @@ export function bindYjsToDocumentController(options) {
     /** @type {any[]} */
     const allowed = [];
     /** @type {any[]} */
+    const rejected = [];
+    /** @type {any[]} */
     const deniedInverse = [];
 
     for (const delta of deltas) {
@@ -740,6 +767,13 @@ export function bindYjsToDocumentController(options) {
       if (allowedByPermissions && allowedByEncryption) {
         allowed.push(delta);
       } else {
+        rejected.push(delta);
+        if (!allowedByEncryption) {
+          console.warn(
+            "bindYjsToDocumentController: refused edit to encrypted cell (missing key or encryption required)",
+            makeCellKey(cellRef),
+          );
+        }
         deniedInverse.push({
           sheetId: delta.sheetId,
           row: delta.row,
@@ -751,6 +785,14 @@ export function bindYjsToDocumentController(options) {
     }
 
     if (allowed.length > 0) enqueueWrite(allowed);
+
+    if (rejected.length > 0 && typeof onEditRejected === "function") {
+      try {
+        onEditRejected(rejected);
+      } catch (err) {
+        console.warn("bindYjsToDocumentController: onEditRejected callback threw", err);
+      }
+    }
 
     if (deniedInverse.length > 0) {
       // Keep local UI state aligned with the shared document when a user attempts to
@@ -803,4 +845,39 @@ function isUndoManager(value) {
   const maybe = value;
   if (maybe.constructor?.name === "UndoManager") return true;
   return typeof maybe.undo === "function" && typeof maybe.redo === "function" && maybe.trackedOrigins instanceof Set;
+}
+
+/**
+ * @param {any} permissions
+ * @param {string | null} defaultUserId
+ * @returns {(cell: { sheetId: string, row: number, col: number }) => { canRead: boolean, canEdit: boolean } | null}
+ */
+function createPermissionsResolver(permissions, defaultUserId) {
+  if (!permissions) return null;
+
+  if (typeof permissions === "function") {
+    return (cell) => {
+      const resolved = permissions(cell);
+      const canRead = resolved?.canRead !== false;
+      const canEdit = canRead && resolved?.canEdit !== false;
+      return { canRead, canEdit };
+    };
+  }
+
+  if (typeof permissions === "object") {
+    const role = permissions.role;
+    const restrictions = permissions.restrictions;
+    const userId = permissions.userId ?? defaultUserId ?? null;
+
+    if (!role) {
+      throw new Error("bindYjsToDocumentController permissions.role is required when using role-based permissions");
+    }
+
+    return (cell) => {
+      const { canRead, canEdit } = getCellPermissions({ role, restrictions, userId, cell });
+      return { canRead, canEdit: canRead && canEdit };
+    };
+  }
+
+  throw new Error("bindYjsToDocumentController permissions must be a function or { role, restrictions, userId }");
 }
