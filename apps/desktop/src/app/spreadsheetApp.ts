@@ -561,7 +561,11 @@ export class SpreadsheetApp {
     try {
       this.document.applyState(snapshot);
       if (this.wasmEngine) {
-        await engineHydrateFromDocument(this.wasmEngine, this.document);
+        try {
+          await engineHydrateFromDocument(this.wasmEngine, this.document);
+        } catch {
+          // Ignore WASM sync failures; the DocumentController remains the source of truth.
+        }
       }
     } finally {
       this.wasmSyncSuspended = false;
@@ -585,11 +589,18 @@ export class SpreadsheetApp {
       await engineHydrateFromDocument(engine, this.document);
 
       this.wasmEngine = engine;
-      this.wasmUnsubscribe = this.document.on("change", ({ deltas }: { deltas: any[] }) => {
+      this.wasmUnsubscribe = this.document.on("change", ({ deltas, source }: { deltas: any[]; source?: string }) => {
         if (!this.wasmEngine || this.wasmSyncSuspended) return;
-        void engineApplyDeltas(this.wasmEngine, deltas).catch(() => {
+        const syncError = () => {
           // Ignore WASM sync failures; the DocumentController remains the source of truth.
-        });
+        };
+
+        if (source === "applyState") {
+          void engineHydrateFromDocument(this.wasmEngine, this.document).catch(syncError);
+          return;
+        }
+
+        void engineApplyDeltas(this.wasmEngine, deltas).catch(syncError);
       });
     } catch {
       // Ignore initialization failures (e.g. missing WASM bundle).

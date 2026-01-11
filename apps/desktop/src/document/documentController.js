@@ -242,7 +242,7 @@ export class DocumentController {
    * Subscribe to controller events.
    *
    * Events:
-   * - `change`: { deltas: CellDelta[] }
+   * - `change`: { deltas: CellDelta[], source?: string }
    * - `history`: { canUndo: boolean, canRedo: boolean }
    * - `dirty`: { isDirty: boolean }
    * - `update`: emitted after any applied change (including undo/redo) for versioning adapters
@@ -686,7 +686,7 @@ export class DocumentController {
 
     // Apply changes as a single engine batch.
     this.engine?.beginBatch?.();
-    this.#applyDeltas(deltas, { recalc: false, emitChange: true });
+    this.#applyDeltas(deltas, { recalc: false, emitChange: true, source: "applyState" });
     this.engine?.endBatch?.();
     this.engine?.recalculate();
 
@@ -1025,7 +1025,7 @@ export class DocumentController {
    * Apply deltas to the model and engine. This is the single authoritative mutation path.
    *
    * @param {CellDelta[]} deltas
-   * @param {{ recalc: boolean, emitChange: boolean }} options
+   * @param {{ recalc: boolean, emitChange: boolean, source?: string }} options
    */
   #applyDeltas(deltas, options) {
     // Apply to the canonical model first.
@@ -1056,7 +1056,9 @@ export class DocumentController {
     }
 
     if (options.emitChange) {
-      this.#emit("change", { deltas: deltas.map(cloneDelta) });
+      const payload = { deltas: deltas.map(cloneDelta) };
+      if (options.source) payload.source = options.source;
+      this.#emit("change", payload);
     }
 
     this.#emit("update", {});
