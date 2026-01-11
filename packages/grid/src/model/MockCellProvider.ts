@@ -37,6 +37,12 @@ export class MockCellProvider implements CellProvider {
         ? `Column ${col + 1}`
         : col === 0
           ? row
+          : row === 4 && col === 1
+            ? true
+            : row === 5 && col === 1
+              ? false
+              : row === 6 && col === 1
+                ? "#DIV/0!"
           : row === 1 && col === 1
             ? "This is a long piece of text that should wrap in the cell (word wrap)."
             : row === 2 && col === 1
