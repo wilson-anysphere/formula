@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
 import { z } from "zod";
-import { writeAuditEvent } from "../audit/audit";
+import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { isMfaEnforcedForOrg } from "../auth/mfa";
 import { normalizeClassification, selectorKey, validateDlpPolicy } from "../dlp/dlp";
 import { getClientIp, getUserAgent } from "../http/request-meta";
@@ -136,19 +136,24 @@ export function registerDocRoutes(app: FastifyInstance): void {
       );
     });
 
-    await writeAuditEvent(app.db, {
-      orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "document.created",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { title },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "document.created",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: { title }
+      })
+    );
 
     return reply.send({ document: { id: docId, orgId, title } });
   });
@@ -177,19 +182,24 @@ export function registerDocRoutes(app: FastifyInstance): void {
       [docId]
     );
 
-    await writeAuditEvent(app.db, {
-      orgId: membership.orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "document.deleted",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { soft: true },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "document.deleted",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId: membership.orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: { soft: true }
+      })
+    );
 
     return reply.send({ ok: true });
   });
@@ -383,19 +393,24 @@ export function registerDocRoutes(app: FastifyInstance): void {
       [docId, membership.orgId, parsed.data.reason ?? null, request.user!.id]
     );
 
-    await writeAuditEvent(app.db, {
-      orgId: membership.orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "retention.legal_hold_enabled",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { reason: parsed.data.reason ?? null },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "retention.legal_hold_enabled",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId: membership.orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: { reason: parsed.data.reason ?? null }
+      })
+    );
 
     return reply.send({ ok: true });
   });
@@ -421,19 +436,24 @@ export function registerDocRoutes(app: FastifyInstance): void {
 
     if ((released.rowCount ?? 0) === 0) return reply.code(404).send({ error: "legal_hold_not_found" });
 
-    await writeAuditEvent(app.db, {
-      orgId: membership.orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "retention.legal_hold_released",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: {},
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "retention.legal_hold_released",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId: membership.orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: {}
+      })
+    );
 
     return reply.send({ ok: true });
   });
@@ -485,19 +505,24 @@ export function registerDocRoutes(app: FastifyInstance): void {
       );
     });
 
-    await writeAuditEvent(app.db, {
-      orgId: membership.orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "sharing.added",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { invitedEmail: email, role: invitedRole },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "sharing.added",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId: membership.orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: { invitedEmail: email, role: invitedRole }
+      })
+    );
 
     return reply.send({ ok: true });
   });
@@ -543,19 +568,24 @@ export function registerDocRoutes(app: FastifyInstance): void {
       }
     });
 
-    await writeAuditEvent(app.db, {
-      orgId: membership.orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "document.opened",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { via: "sync-token" },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "document.opened",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId: membership.orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: { via: "sync-token" }
+      })
+    );
 
     return reply.send({ token, expiresAt: expiresAt.toISOString() });
   });
@@ -608,19 +638,28 @@ export function registerDocRoutes(app: FastifyInstance): void {
       [id, docId, tokenHash, parsed.data.visibility, parsed.data.role, request.user!.id, expiresAt]
     );
 
-    await writeAuditEvent(app.db, {
-      orgId: membership.orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "sharing.link_created",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { visibility: parsed.data.visibility, role: parsed.data.role, expiresAt: expiresAt?.toISOString() ?? null },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "sharing.link_created",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId: membership.orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: {
+          visibility: parsed.data.visibility,
+          role: parsed.data.role,
+          expiresAt: expiresAt?.toISOString() ?? null
+        }
+      })
+    );
 
     return reply.send({
       shareLink: {
@@ -725,19 +764,24 @@ export function registerDocRoutes(app: FastifyInstance): void {
       );
     });
 
-    await writeAuditEvent(app.db, {
-      orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "sharing.added",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { via: "share-link", shareLinkId: linkRow.id, role: nextRole },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "sharing.added",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: { via: "share-link", shareLinkId: linkRow.id, role: nextRole }
+      })
+    );
 
     return reply.send({ ok: true, documentId: docId, role: nextRole });
   });
@@ -790,22 +834,27 @@ export function registerDocRoutes(app: FastifyInstance): void {
       ]
     );
 
-    await writeAuditEvent(app.db, {
-      orgId: membership.orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "sharing.modified",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: {
-        type: "range-permission",
-        permission: parsed.data
-      },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "sharing.modified",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId: membership.orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: {
+          type: "range-permission",
+          permission: parsed.data
+        }
+      })
+    );
 
     return reply.send({ ok: true, id });
   });
@@ -951,19 +1000,24 @@ export function registerDocRoutes(app: FastifyInstance): void {
       [docId, JSON.stringify(parsed.data.policy)]
     );
 
-    await writeAuditEvent(app.db, {
-      orgId: membership.orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "admin.settings_changed",
-      resourceType: "document",
-      resourceId: docId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { type: "dlp-policy" },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "admin.settings_changed",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId: membership.orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: { type: "dlp-policy" }
+      })
+    );
 
     return reply.send({ policy: parsed.data.policy });
   });

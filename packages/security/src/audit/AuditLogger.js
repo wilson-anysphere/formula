@@ -1,4 +1,4 @@
-import crypto from "node:crypto";
+import { createAuditEvent } from "../../../audit-core/index.js";
 
 export class AuditLogger {
   /**
@@ -17,18 +17,25 @@ export class AuditLogger {
    * @param {string} input.eventType
    * @param {{type: string, id: string}} input.actor
    * @param {boolean} input.success
-   * @param {object} [input.metadata]
+   * @param {object} [input.context]
+   * @param {object} [input.resource]
+   * @param {object} [input.error]
+   * @param {object} [input.details]
+   * @param {object} [input.metadata] - legacy alias for details
+   * @param {object} [input.correlation]
    * @returns {string} event id
    */
   log(input) {
-    const event = {
-      id: crypto.randomUUID(),
-      ts: Date.now(),
+    const event = createAuditEvent({
       eventType: input.eventType,
       actor: input.actor,
       success: Boolean(input.success),
-      metadata: input.metadata ?? {}
-    };
+      context: input.context,
+      resource: input.resource,
+      error: input.error,
+      details: input.details ?? input.metadata ?? {},
+      correlation: input.correlation
+    });
 
     this.store.append(event);
     return event.id;

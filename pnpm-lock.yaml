@@ -140,6 +140,8 @@ importers:
         specifier: ^5.2.11
         version: 5.4.21(@types/node@22.19.5)
 
+  packages/audit-core: {}
+
   packages/ai-audit:
     dependencies:
       sql.js:
@@ -255,7 +257,11 @@ importers:
 
   packages/search: {}
 
-  packages/security: {}
+  packages/security:
+    dependencies:
+      '@formula/audit-core':
+        specifier: workspace:*
+        version: link:../audit-core
 
   packages/spreadsheet-frontend:
     dependencies:
@@ -285,6 +291,9 @@ importers:
 
   services/api:
     dependencies:
+      '@formula/audit-core':
+        specifier: workspace:*
+        version: link:../../packages/audit-core
       '@fastify/cookie':
         specifier: ^10.0.1
         version: 10.0.1

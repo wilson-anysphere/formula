@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
 import { z } from "zod";
-import { writeAuditEvent } from "../audit/audit";
+import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { generateTotpSecret, buildOtpAuthUrl, verifyTotpCode } from "../auth/mfa";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { createSession, lookupSessionByToken, revokeSession } from "../auth/sessions";
@@ -115,19 +115,24 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       secure: app.config.cookieSecure
     });
 
-    await writeAuditEvent(app.db, {
-      orgId,
-      userId,
-      userEmail: email,
-      eventType: "auth.login",
-      resourceType: "session",
-      resourceId: sessionId,
-      sessionId,
-      success: true,
-      details: { method: "password", operation: "register" },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "auth.login",
+        actor: { type: "user", id: userId },
+        context: {
+          orgId,
+          userId,
+          userEmail: email,
+          sessionId,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "session", id: sessionId },
+        success: true,
+        details: { method: "password", operation: "register" }
+      })
+    );
 
     return reply.send({
       user: { id: userId, email, name },
@@ -160,17 +165,22 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
     if (found.rowCount !== 1) {
       app.metrics.authFailuresTotal.inc({ reason: "invalid_credentials" });
-      await writeAuditEvent(app.db, {
-        userEmail: email,
-        eventType: "auth.login_failed",
-        resourceType: "user",
-        resourceId: null,
-        success: false,
-        errorCode: "invalid_credentials",
-        details: { method: "password" },
-        ipAddress: getClientIp(request),
-        userAgent: getUserAgent(request)
-      });
+      await writeAuditEvent(
+        app.db,
+        createAuditEvent({
+          eventType: "auth.login_failed",
+          actor: { type: "anonymous", id: email },
+          context: {
+            userEmail: email,
+            ipAddress: getClientIp(request),
+            userAgent: getUserAgent(request)
+          },
+          resource: { type: "user", id: null },
+          success: false,
+          error: { code: "invalid_credentials" },
+          details: { method: "password" }
+        })
+      );
       return reply.code(401).send({ error: "invalid_credentials" });
     }
 
@@ -185,36 +195,46 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
     if (!row.password_hash) {
       app.metrics.authFailuresTotal.inc({ reason: "password_login_disabled" });
-      await writeAuditEvent(app.db, {
-        userId: row.id,
-        userEmail: row.email,
-        eventType: "auth.login_failed",
-        resourceType: "user",
-        resourceId: row.id,
-        success: false,
-        errorCode: "password_login_disabled",
-        details: { method: "password" },
-        ipAddress: getClientIp(request),
-        userAgent: getUserAgent(request)
-      });
+      await writeAuditEvent(
+        app.db,
+        createAuditEvent({
+          eventType: "auth.login_failed",
+          actor: { type: "user", id: row.id },
+          context: {
+            userId: row.id,
+            userEmail: row.email,
+            ipAddress: getClientIp(request),
+            userAgent: getUserAgent(request)
+          },
+          resource: { type: "user", id: row.id },
+          success: false,
+          error: { code: "password_login_disabled" },
+          details: { method: "password" }
+        })
+      );
       return reply.code(401).send({ error: "invalid_credentials" });
     }
 
     const ok = await verifyPassword(password, row.password_hash);
     if (!ok) {
       app.metrics.authFailuresTotal.inc({ reason: "invalid_credentials" });
-      await writeAuditEvent(app.db, {
-        userId: row.id,
-        userEmail: row.email,
-        eventType: "auth.login_failed",
-        resourceType: "user",
-        resourceId: row.id,
-        success: false,
-        errorCode: "invalid_credentials",
-        details: { method: "password" },
-        ipAddress: getClientIp(request),
-        userAgent: getUserAgent(request)
-      });
+      await writeAuditEvent(
+        app.db,
+        createAuditEvent({
+          eventType: "auth.login_failed",
+          actor: { type: "user", id: row.id },
+          context: {
+            userId: row.id,
+            userEmail: row.email,
+            ipAddress: getClientIp(request),
+            userAgent: getUserAgent(request)
+          },
+          resource: { type: "user", id: row.id },
+          success: false,
+          error: { code: "invalid_credentials" },
+          details: { method: "password" }
+        })
+      );
       return reply.code(401).send({ error: "invalid_credentials" });
     }
 
@@ -222,18 +242,23 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       const code = body.data.mfaCode;
       if (!code || !row.mfa_totp_secret || !verifyTotpCode(row.mfa_totp_secret, code)) {
         app.metrics.authFailuresTotal.inc({ reason: "mfa_required" });
-        await writeAuditEvent(app.db, {
-          userId: row.id,
-          userEmail: row.email,
-          eventType: "auth.login_failed",
-          resourceType: "user",
-          resourceId: row.id,
-          success: false,
-          errorCode: "mfa_required",
-          details: { method: "password" },
-          ipAddress: getClientIp(request),
-          userAgent: getUserAgent(request)
-        });
+        await writeAuditEvent(
+          app.db,
+          createAuditEvent({
+            eventType: "auth.login_failed",
+            actor: { type: "user", id: row.id },
+            context: {
+              userId: row.id,
+              userEmail: row.email,
+              ipAddress: getClientIp(request),
+              userAgent: getUserAgent(request)
+            },
+            resource: { type: "user", id: row.id },
+            success: false,
+            error: { code: "mfa_required" },
+            details: { method: "password" }
+          })
+        );
         return reply.code(401).send({ error: "mfa_required" });
       }
     }
@@ -256,18 +281,23 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       secure: app.config.cookieSecure
     });
 
-    await writeAuditEvent(app.db, {
-      userId: row.id,
-      userEmail: row.email,
-      eventType: "auth.login",
-      resourceType: "session",
-      resourceId: sessionId,
-      sessionId,
-      success: true,
-      details: { method: "password" },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "auth.login",
+        actor: { type: "user", id: row.id },
+        context: {
+          userId: row.id,
+          userEmail: row.email,
+          sessionId,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "session", id: sessionId },
+        success: true,
+        details: { method: "password" }
+      })
+    );
 
     return reply.send({ user: { id: row.id, email: row.email, name: row.name } });
   });
@@ -276,17 +306,23 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     const sessionId = request.session?.id;
     if (sessionId) {
       await revokeSession(app.db, sessionId);
-      await writeAuditEvent(app.db, {
-        userId: request.user?.id,
-        userEmail: request.user?.email,
-        eventType: "auth.logout",
-        resourceType: "session",
-        resourceId: sessionId,
-        sessionId,
-        success: true,
-        ipAddress: getClientIp(request),
-        userAgent: getUserAgent(request)
-      });
+      await writeAuditEvent(
+        app.db,
+        createAuditEvent({
+          eventType: "auth.logout",
+          actor: { type: "user", id: request.user?.id ?? "unknown" },
+          context: {
+            userId: request.user?.id ?? null,
+            userEmail: request.user?.email ?? null,
+            sessionId,
+            ipAddress: getClientIp(request),
+            userAgent: getUserAgent(request)
+          },
+          resource: { type: "session", id: sessionId },
+          success: true,
+          details: {}
+        })
+      );
     }
 
     reply.clearCookie(app.config.sessionCookieName, { path: "/" });
@@ -345,17 +381,23 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     }
 
     await app.db.query("UPDATE users SET mfa_totp_enabled = true WHERE id = $1", [request.user!.id]);
-    await writeAuditEvent(app.db, {
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "auth.mfa_enabled",
-      resourceType: "user",
-      resourceId: request.user!.id,
-      sessionId: request.session?.id,
-      success: true,
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "auth.mfa_enabled",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "user", id: request.user!.id },
+        success: true,
+        details: {}
+      })
+    );
 
     return reply.send({ ok: true });
   });
@@ -379,17 +421,23 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       request.user!.id
     ]);
 
-    await writeAuditEvent(app.db, {
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "auth.mfa_disabled",
-      resourceType: "user",
-      resourceId: request.user!.id,
-      sessionId: request.session?.id,
-      success: true,
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "auth.mfa_disabled",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "user", id: request.user!.id },
+        success: true,
+        details: {}
+      })
+    );
 
     return reply.send({ ok: true });
   });

@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { writeAuditEvent } from "../audit/audit";
+import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { validateDlpPolicy } from "../dlp/dlp";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
@@ -326,19 +326,24 @@ export function registerOrgRoutes(app: FastifyInstance): void {
       values
     );
 
-    await writeAuditEvent(app.db, {
-      orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "admin.settings_changed",
-      resourceType: "organization",
-      resourceId: orgId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { updates },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "admin.settings_changed",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "organization", id: orgId },
+        success: true,
+        details: { updates }
+      })
+    );
 
     const policyChanged = {
       encryption: JSON.stringify(beforePolicy.encryption) !== JSON.stringify(nextPolicy.encryption),
@@ -351,19 +356,24 @@ export function registerOrgRoutes(app: FastifyInstance): void {
       before: OrgPolicySnapshot[keyof OrgPolicySnapshot],
       after: OrgPolicySnapshot[keyof OrgPolicySnapshot]
     ) => {
-      await writeAuditEvent(app.db, {
-        orgId,
-        userId: request.user!.id,
-        userEmail: request.user!.email,
-        eventType: `org.policy.${String(section)}.updated`,
-        resourceType: "organization",
-        resourceId: orgId,
-        sessionId: request.session?.id,
-        success: true,
-        details: { before, after },
-        ipAddress: getClientIp(request),
-        userAgent: getUserAgent(request)
-      });
+      await writeAuditEvent(
+        app.db,
+        createAuditEvent({
+          eventType: `org.policy.${String(section)}.updated`,
+          actor: { type: "user", id: request.user!.id },
+          context: {
+            orgId,
+            userId: request.user!.id,
+            userEmail: request.user!.email,
+            sessionId: request.session?.id,
+            ipAddress: getClientIp(request),
+            userAgent: getUserAgent(request)
+          },
+          resource: { type: "organization", id: orgId },
+          success: true,
+          details: { before, after }
+        })
+      );
     };
 
     if (policyChanged.encryption) {
@@ -417,19 +427,24 @@ export function registerOrgRoutes(app: FastifyInstance): void {
       [orgId, JSON.stringify(parsed.data.policy)]
     );
 
-    await writeAuditEvent(app.db, {
-      orgId,
-      userId: request.user!.id,
-      userEmail: request.user!.email,
-      eventType: "admin.settings_changed",
-      resourceType: "organization",
-      resourceId: orgId,
-      sessionId: request.session?.id,
-      success: true,
-      details: { updates: { dlpPolicy: true } },
-      ipAddress: getClientIp(request),
-      userAgent: getUserAgent(request)
-    });
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "admin.settings_changed",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "organization", id: orgId },
+        success: true,
+        details: { updates: { dlpPolicy: true } }
+      })
+    );
 
     return reply.send({ policy: parsed.data.policy });
   });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import * as http from "node:http";
 import test from "node:test";
 
+import { createAuditEvent } from "../packages/audit-core/index.js";
 import { SiemExporter } from "../packages/security/siem/exporter.js";
 
 test("SiemExporter batches events and retries failed requests", async () => {
@@ -43,20 +44,28 @@ test("SiemExporter batches events and retries failed requests", async () => {
     retry: { maxAttempts: 3, baseDelayMs: 5, maxDelayMs: 50, jitter: false }
   });
 
-  exporter.enqueue({
-    id: "11111111-1111-4111-8111-111111111111",
-    timestamp: "2025-01-01T00:00:00.000Z",
-    orgId: "org_1",
-    eventType: "document.opened",
-    details: { token: "supersecret" }
-  });
-  exporter.enqueue({
-    id: "22222222-2222-4222-8222-222222222222",
-    timestamp: "2025-01-01T00:00:01.000Z",
-    orgId: "org_1",
-    eventType: "document.modified",
-    details: { password: "p@ssw0rd" }
-  });
+  exporter.enqueue(
+    createAuditEvent({
+      id: "11111111-1111-4111-8111-111111111111",
+      timestamp: "2025-01-01T00:00:00.000Z",
+      eventType: "document.opened",
+      actor: { type: "user", id: "user_1" },
+      context: { orgId: "org_1" },
+      success: true,
+      details: { token: "supersecret" }
+    })
+  );
+  exporter.enqueue(
+    createAuditEvent({
+      id: "22222222-2222-4222-8222-222222222222",
+      timestamp: "2025-01-01T00:00:01.000Z",
+      eventType: "document.modified",
+      actor: { type: "user", id: "user_1" },
+      context: { orgId: "org_1" },
+      success: true,
+      details: { password: "p@ssw0rd" }
+    })
+  );
 
   await exporter.flush();
 

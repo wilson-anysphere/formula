@@ -83,5 +83,5 @@ test("integration: Restricted range blocks clipboard + export and redacts AI con
 
   const events = auditLogger.list();
   assert.equal(events.length, 1);
-  assert.equal(events[0].redactedCellCount, 4);
+  assert.equal(events[0].details.redactedCellCount, 4);
 });

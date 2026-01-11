@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://formula.invalid/schemas/audit-event.schema.json",
+  "title": "AuditEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "timestamp", "eventType", "actor", "success"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "eventType": { "type": "string", "minLength": 1 },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "orgId": { "type": ["string", "null"], "minLength": 1 },
+        "userId": { "type": ["string", "null"], "minLength": 1 },
+        "userEmail": { "type": ["string", "null"], "minLength": 1 },
+        "ipAddress": { "type": ["string", "null"], "minLength": 1 },
+        "userAgent": { "type": ["string", "null"], "minLength": 1 },
+        "sessionId": { "type": ["string", "null"], "minLength": 1 }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "id": { "type": ["string", "null"], "minLength": 1 },
+        "name": { "type": ["string", "null"], "minLength": 1 }
+      }
+    },
+    "success": { "type": "boolean" },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": ["string", "null"], "minLength": 1 },
+        "message": { "type": ["string", "null"], "minLength": 1 }
+      }
+    },
+    "details": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestId": { "type": ["string", "null"], "minLength": 1 },
+        "traceId": { "type": ["string", "null"], "minLength": 1 }
+      }
+    }
+  }
+}
+
