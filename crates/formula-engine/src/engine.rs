@@ -617,6 +617,37 @@ impl Engine {
         self.workbook.get_cell(key)?.formula.as_deref()
     }
 
+    /// Returns the formula for `addr` rendered in R1C1 reference style.
+    ///
+    /// The engine persists formulas as canonical A1 strings; this converts them on demand using the
+    /// syntax-only parser/serializer.
+    pub fn get_cell_formula_r1c1(&self, sheet: &str, addr: &str) -> Option<String> {
+        let sheet_id = self.workbook.sheet_id(sheet)?;
+        let addr = parse_a1(addr).ok()?;
+        let key = CellKey { sheet: sheet_id, addr };
+        let formula = self.workbook.get_cell(key)?.formula.as_deref()?;
+
+        let origin = crate::CellAddr::new(addr.row, addr.col);
+        let ast = crate::parse_formula(
+            formula,
+            crate::ParseOptions {
+                locale: crate::LocaleConfig::en_us(),
+                reference_style: crate::ReferenceStyle::A1,
+                normalize_relative_to: Some(origin),
+            },
+        )
+        .ok()?;
+
+        ast.to_string(crate::SerializeOptions {
+            locale: crate::LocaleConfig::en_us(),
+            reference_style: crate::ReferenceStyle::R1C1,
+            include_xlfn_prefix: true,
+            origin: Some(origin),
+            omit_equals: false,
+        })
+        .ok()
+    }
+
     pub fn apply_operation(&mut self, op: EditOp) -> Result<EditResult, EditError> {
         let before = self.workbook.clone();
         let mut formula_rewrites = Vec::new();

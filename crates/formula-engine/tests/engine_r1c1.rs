@@ -51,3 +51,20 @@ fn engine_evaluates_r1c1_ranges_equivalent_to_a1() {
         Some((eval::parse_a1("C5").unwrap(), eval::parse_a1("C7").unwrap()))
     );
 }
+
+#[test]
+fn engine_renders_stored_a1_formula_as_r1c1_for_cell() {
+    let mut engine = Engine::new();
+    engine.set_cell_formula("Sheet1", "C5", "=A1").unwrap();
+
+    assert_eq!(
+        engine.get_cell_formula_r1c1("Sheet1", "C5"),
+        Some("=R[-4]C[-2]".to_string())
+    );
+
+    engine.set_cell_formula("Sheet1", "C5", "=$A$1").unwrap();
+    assert_eq!(
+        engine.get_cell_formula_r1c1("Sheet1", "C5"),
+        Some("=R1C1".to_string())
+    );
+}
