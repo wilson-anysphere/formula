@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
-import jwt from "jsonwebtoken";
+import jwt, { type Algorithm } from "jsonwebtoken";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../../audit/audit";
 import { createSession } from "../sessions";
@@ -197,7 +197,7 @@ async function verifyIdToken(options: {
   jwksUri: string;
   expectedNonce: string;
 }): Promise<Record<string, unknown>> {
-  const allowedAlgorithms = ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"] as const;
+  const allowedAlgorithms: Algorithm[] = ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"];
   const decoded = jwt.decode(options.idToken, { complete: true }) as
     | { header?: Record<string, unknown> }
     | null;
@@ -205,7 +205,7 @@ async function verifyIdToken(options: {
   const kid = typeof header?.kid === "string" ? header.kid : undefined;
   const alg = typeof header?.alg === "string" ? header.alg : undefined;
   if (!alg) throw new Error("OIDC id_token missing alg");
-  if (!allowedAlgorithms.includes(alg as (typeof allowedAlgorithms)[number])) {
+  if (!allowedAlgorithms.includes(alg as Algorithm)) {
     throw new Error(`OIDC id_token alg not allowed: ${alg}`);
   }
 
@@ -217,7 +217,7 @@ async function verifyIdToken(options: {
 
   const publicKey = jwkToPublicKey(jwk);
   const claims = jwt.verify(options.idToken, publicKey, {
-    algorithms: allowedAlgorithms as unknown as string[],
+    algorithms: allowedAlgorithms,
     issuer: options.issuer,
     audience: options.audience
   }) as unknown;
