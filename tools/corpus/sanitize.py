@@ -264,7 +264,11 @@ def _sanitize_threaded_comments(xml: bytes, *, options: SanitizeOptions) -> byte
 
 
 def _sanitize_table(
-    xml: bytes, *, options: SanitizeOptions, table_rename_map: dict[str, str] | None = None
+    xml: bytes,
+    *,
+    options: SanitizeOptions,
+    table_rename_map: dict[str, str] | None = None,
+    table_column_rename_map: dict[str, dict[str, str]] | None = None,
 ) -> bytes:
     root = ET.fromstring(xml)
     if root.tag.split("}")[-1] != "table":
@@ -284,6 +288,23 @@ def _sanitize_table(
         for attr in ("name", "displayName"):
             if attr in root.attrib:
                 root.attrib[attr] = new
+
+        # Table column names are duplicated metadata (separate from header cell values) and
+        # are displayed in the UI. They can contain sensitive business terms, so scrub them
+        # alongside table names. Structured references in formulas must be rewritten using
+        # the same mapping (handled separately when sanitizing formulas).
+        if table_column_rename_map is not None:
+            col_map = table_column_rename_map.get(new, {})
+            for col in root.iter():
+                if col.tag.split("}")[-1] != "tableColumn":
+                    continue
+                name = col.attrib.get("name")
+                if name and name in col_map:
+                    col.attrib["name"] = col_map[name]
+                # Totals labels are displayed text too.
+                label = col.attrib.get("totalsRowLabel")
+                if label:
+                    col.attrib["totalsRowLabel"] = _sanitize_text(label, options=options)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
@@ -325,6 +346,7 @@ def _sanitize_chart(
     options: SanitizeOptions,
     sheet_rename_map: dict[str, str] | None = None,
     table_rename_map: dict[str, str] | None = None,
+    table_column_rename_map: dict[str, dict[str, str]] | None = None,
 ) -> bytes:
     root = ET.fromstring(xml)
     # Remove cached series values; these can leak computed data.
@@ -358,6 +380,7 @@ def _sanitize_chart(
                 options=options,
                 sheet_rename_map=sheet_rename_map or {},
                 table_rename_map=table_rename_map or {},
+                table_column_rename_map=table_column_rename_map or {},
             )
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
@@ -488,7 +511,20 @@ def _sanitize_workbook(
 
 def _looks_like_external_url(value: str) -> bool:
     v = value.strip().lower()
-    return v.startswith(("http://", "https://", "mailto:", "ftp://", "ftps://", "file:"))
+    return v.startswith(
+        (
+            "http://",
+            "https://",
+            "mailto:",
+            "ftp://",
+            "ftps://",
+            "file:",
+            "tel:",
+            "smb://",
+            "\\\\",  # UNC path
+            "//",  # network-path reference
+        )
+    )
 
 
 def _rewrite_formula_sheet_references(formula: str, *, sheet_rename_map: dict[str, str]) -> str:
@@ -517,18 +553,105 @@ def _rewrite_formula_table_references(formula: str, *, table_rename_map: dict[st
     return out
 
 
+def _rewrite_structured_refs_for_table(
+    formula: str, *, table_name: str, column_map: dict[str, str]
+) -> str:
+    if not table_name or not column_map:
+        return formula
+
+    # Rewrite only outside of string literals to avoid accidentally mutating user strings.
+    out: list[str] = []
+    i = 0
+    in_string = False
+    while i < len(formula):
+        ch = formula[i]
+
+        if in_string:
+            out.append(ch)
+            if ch == '"':
+                # Escaped quote inside string: "" -> literal "
+                if i + 1 < len(formula) and formula[i + 1] == '"':
+                    out.append('"')
+                    i += 2
+                    continue
+                in_string = False
+            i += 1
+            continue
+
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+
+        if formula.startswith(table_name, i) and i + len(table_name) < len(formula) and formula[i + len(table_name)] == "[":
+            # Ensure the table name isn't part of a larger identifier.
+            if i > 0 and re.match(r"[A-Za-z0-9_]", formula[i - 1]):
+                out.append(ch)
+                i += 1
+                continue
+
+            out.append(table_name)
+            i += len(table_name)
+
+            # Parse the structured reference chunk, balancing nested brackets.
+            start = i
+            depth = 0
+            while i < len(formula):
+                ch = formula[i]
+                if ch == "[":
+                    depth += 1
+                elif ch == "]":
+                    depth -= 1
+                    if depth == 0:
+                        i += 1
+                        break
+                i += 1
+
+            chunk = formula[start:i]
+            new_chunk = chunk
+            # Replace longer names first to avoid partial matches.
+            for old, new in sorted(column_map.items(), key=lambda kv: len(kv[0]), reverse=True):
+                if not old:
+                    continue
+                new_chunk = new_chunk.replace(f"[@{old}]", f"[@{new}]")
+                new_chunk = new_chunk.replace(f"[{old}]", f"[{new}]")
+            out.append(new_chunk)
+            continue
+
+        out.append(ch)
+        i += 1
+
+    return "".join(out)
+
+
+def _rewrite_formula_table_column_references(
+    formula: str, *, table_column_rename_map: dict[str, dict[str, str]]
+) -> str:
+    if not table_column_rename_map:
+        return formula
+
+    out = formula
+    for table_name, column_map in table_column_rename_map.items():
+        out = _rewrite_structured_refs_for_table(out, table_name=table_name, column_map=column_map)
+    return out
+
+
 def _sanitize_formula_text(
     formula: str,
     *,
     options: SanitizeOptions,
     sheet_rename_map: dict[str, str],
     table_rename_map: dict[str, str],
+    table_column_rename_map: dict[str, dict[str, str]],
 ) -> str:
     out = formula
     if sheet_rename_map:
         out = _rewrite_formula_sheet_references(out, sheet_rename_map=sheet_rename_map)
     if table_rename_map:
         out = _rewrite_formula_table_references(out, table_rename_map=table_rename_map)
+    if table_column_rename_map:
+        out = _rewrite_formula_table_column_references(out, table_column_rename_map=table_column_rename_map)
 
     # If we're hashing, also hash string literals inside formulas; those can leak PII.
     if options.hash_strings:
@@ -553,6 +676,7 @@ def _sanitize_formula_cells_in_worksheet(
     options: SanitizeOptions,
     sheet_rename_map: dict[str, str],
     table_rename_map: dict[str, str],
+    table_column_rename_map: dict[str, dict[str, str]],
 ) -> None:
     for c in root.iter(qn(NS_MAIN, "c")):
         f_el = c.find(qn(NS_MAIN, "f"))
@@ -563,6 +687,7 @@ def _sanitize_formula_cells_in_worksheet(
             options=options,
             sheet_rename_map=sheet_rename_map,
             table_rename_map=table_rename_map,
+            table_column_rename_map=table_column_rename_map,
         )
 
     if sheet_rename_map:
@@ -594,7 +719,8 @@ def scan_xlsx_bytes_for_leaks(
 
     # Keep URL matching fairly strict to avoid false positives on unrelated strings.
     email_re = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
-    url_re = re.compile(r"\bhttps?://[^\s\"'<>]+", re.IGNORECASE)
+    url_re = re.compile(r"\b(?:https?|file|ftp|ftps|smb)://[^\s\"'<>]+", re.IGNORECASE)
+    unc_re = re.compile(r"\\\\\\\\[^\\s\"'<>]+")
     aws_key_re = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
     jwt_re = re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")
 
@@ -673,6 +799,9 @@ def scan_xlsx_bytes_for_leaks(
                     continue
                 _record(part, "url", m)
 
+            for m in unc_re.findall(text):
+                _record(part, "url", m)
+
     return LeakScanResult(findings=findings)
 
 
@@ -700,7 +829,13 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
             removed_parts |= {n for n in names if n.startswith("xl/media/")}
             removed_parts |= {n for n in names if n.startswith("xl/embeddings/")}
             removed_parts |= {n for n in names if n == "xl/vbaProject.bin"}
+            removed_parts |= {n for n in names if n == "xl/vbaProjectSignature.bin"}
+            removed_parts |= {n for n in names if n.startswith("xl/activeX/")}
             removed_parts |= {n for n in names if n.startswith("customUI/")}
+            removed_parts |= {n for n in names if n.startswith("docProps/thumbnail")}
+
+        if options.scrub_metadata:
+            removed_parts |= {n for n in names if n == "docProps/custom.xml"}
 
         sheet_rename_map: dict[str, str] = {}
         if options.rename_sheets:
@@ -725,6 +860,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                 sheet_rename_map = {}
 
         table_rename_map: dict[str, str] = {}
+        table_column_rename_map: dict[str, dict[str, str]] = {}
         if options.scrub_metadata or options.hash_strings:
             table_parts = sorted([n for n in names if n.startswith("xl/tables/") and n.endswith(".xml")])
             idx = 1
@@ -739,10 +875,29 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                 if not old:
                     continue
                 if options.hash_strings:
-                    new = _hash_text(old, salt=_require_hash_salt(options))
+                    new_table = _hash_text(old, salt=_require_hash_salt(options))
                 else:
-                    new = f"Table{idx}"
-                table_rename_map[old] = new
+                    new_table = f"Table{idx}"
+                table_rename_map[old] = new_table
+
+                # Table column names are duplicated metadata and should be scrubbed too.
+                col_map: dict[str, str] = {}
+                col_idx = 1
+                for col in t_root.iter():
+                    if col.tag.split("}")[-1] != "tableColumn":
+                        continue
+                    col_name = col.attrib.get("name")
+                    if not col_name:
+                        continue
+                    if options.hash_strings:
+                        new_col = _hash_text(col_name, salt=_require_hash_salt(options))
+                    else:
+                        new_col = f"Column{col_idx}"
+                    col_map[col_name] = new_col
+                    col_idx += 1
+                if col_map:
+                    table_column_rename_map[new_table] = col_map
+
                 idx += 1
 
         rewritten: list[str] = []
@@ -786,7 +941,13 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                         )
                     ):
                         new = _sanitize_worksheet(raw, options=options)
-                        if options.redact_cell_values or options.hash_strings or sheet_rename_map or table_rename_map:
+                        if (
+                            options.redact_cell_values
+                            or options.hash_strings
+                            or sheet_rename_map
+                            or table_rename_map
+                            or table_column_rename_map
+                        ):
                             # Rewrite formula sheet/table references and scrub string literals.
                             ws_root = ET.fromstring(new)
                             _sanitize_formula_cells_in_worksheet(
@@ -794,6 +955,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                                 options=options,
                                 sheet_rename_map=sheet_rename_map,
                                 table_rename_map=table_rename_map,
+                                table_column_rename_map=table_column_rename_map,
                             )
                             new = ET.tostring(ws_root, encoding="utf-8", xml_declaration=True)
                         rewritten.append(name)
@@ -819,7 +981,12 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                     elif name.startswith("xl/tables/") and name.endswith(".xml") and (
                         options.scrub_metadata or options.hash_strings
                     ):
-                        new = _sanitize_table(raw, options=options, table_rename_map=table_rename_map)
+                        new = _sanitize_table(
+                            raw,
+                            options=options,
+                            table_rename_map=table_rename_map,
+                            table_column_rename_map=table_column_rename_map,
+                        )
                         rewritten.append(name)
                     elif name.startswith("xl/drawings/") and name.endswith(".xml") and (
                         options.scrub_metadata or options.hash_strings or options.remove_secrets
@@ -842,6 +1009,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                             options=options,
                             sheet_rename_map=sheet_rename_map or None,
                             table_rename_map=table_rename_map or None,
+                            table_column_rename_map=table_column_rename_map or None,
                         )
                         rewritten.append(name)
                 except ET.ParseError:

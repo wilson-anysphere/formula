@@ -176,7 +176,10 @@ class SanitizeTests(unittest.TestCase):
 
         # High-level summary: removed binary/custom UI surfaces + rewrote XML parts.
         self.assertIn("xl/vbaProject.bin", summary.removed_parts)
+        self.assertIn("xl/vbaProjectSignature.bin", summary.removed_parts)
         self.assertIn("customUI/customUI.xml", summary.removed_parts)
+        self.assertIn("docProps/custom.xml", summary.removed_parts)
+        self.assertIn("docProps/thumbnail.jpeg", summary.removed_parts)
         self.assertIn("xl/workbook.xml", summary.rewritten_parts)
         self.assertIn("xl/worksheets/sheet1.xml", summary.rewritten_parts)
         self.assertIn("xl/comments1.xml", summary.rewritten_parts)
@@ -190,9 +193,12 @@ class SanitizeTests(unittest.TestCase):
             "ACME_SECRET_NAME",
             "ACME_SECRET_TOKEN",
             "ACME_TABLE_SECRET",
+            "ACME_COLUMN_SECRET",
             "CHART_TOKEN_123",
             "DRAWING_TOKEN",
             "VBASECRET",
+            "SIGNATURESECRET",
+            "THUMBSECRET",
         ]
 
         with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
@@ -202,10 +208,16 @@ class SanitizeTests(unittest.TestCase):
             # Removed parts should not exist and must be removed from [Content_Types].xml.
             names = set(z.namelist())
             self.assertNotIn("xl/vbaProject.bin", names)
+            self.assertNotIn("xl/vbaProjectSignature.bin", names)
             self.assertNotIn("customUI/customUI.xml", names)
+            self.assertNotIn("docProps/custom.xml", names)
+            self.assertNotIn("docProps/thumbnail.jpeg", names)
             ct = z.read("[Content_Types].xml").decode("utf-8")
             self.assertNotIn("/xl/vbaProject.bin", ct)
+            self.assertNotIn("/xl/vbaProjectSignature.bin", ct)
             self.assertNotIn("/customUI/customUI.xml", ct)
+            self.assertNotIn("/docProps/custom.xml", ct)
+            self.assertNotIn("/docProps/thumbnail.jpeg", ct)
 
             # Ensure common leak surfaces no longer contain the injected tokens.
             for part in z.namelist():

@@ -62,11 +62,13 @@ The sanitization pipeline is implemented in `tools/corpus/sanitize.py` and suppo
   - scrubs hyperlink display/tooltips inside worksheets
 - **Remove secrets**
   - drops common secret-bearing parts like `xl/connections.xml`, `customXml/**`, and `xl/queryTables/**`
-  - removes `xl/vbaProject.bin`, `customUI/**`, and embedded binaries like `xl/media/**`
+  - removes `xl/vbaProject.bin`/`xl/vbaProjectSignature.bin`, `customUI/**`, and embedded binaries like `xl/media/**`
+  - removes preview images like `docProps/thumbnail.*`
 - **Scrub metadata**
   - redacts author fields in `docProps/core.xml` and sensitive fields in `docProps/app.xml`
+  - removes `docProps/custom.xml` (custom document properties)
   - removes workbook defined names (`<definedNames>`) which often embed business terms
-  - scrubs comments (`xl/comments*.xml`), headers/footers, drawing text, and table names
+  - scrubs comments (`xl/comments*.xml`), headers/footers, drawing text, and table/table-column names
 
 As a defense-in-depth safety net, `tools/corpus/sanitize.py` also includes a **leak scanner**
 (`scan_xlsx_bytes_for_leaks`) that can be used to fail CI if sanitized outputs still match high-risk
