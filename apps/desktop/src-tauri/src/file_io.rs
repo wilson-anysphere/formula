@@ -1367,6 +1367,16 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../../fixtures/xlsx/basic/comments.xlsx"
         ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse original package");
+        let original_sheet_xml =
+            std::str::from_utf8(original_pkg.part("xl/worksheets/sheet1.xml").unwrap())
+                .expect("original sheet1.xml utf8");
+        assert!(
+            original_sheet_xml.contains("<legacyDrawing"),
+            "expected fixture sheet1.xml to contain legacyDrawing for comments"
+        );
+
         let mut workbook = read_xlsx_blocking(fixture_path).expect("read comments fixture workbook");
 
         let sheet_id = workbook.sheets[0].id.clone();
@@ -1378,6 +1388,18 @@ mod tests {
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("edited.xlsx");
         write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read edited bytes");
+        assert_non_worksheet_parts_preserved(&original_bytes, &written_bytes);
+
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+        let written_sheet_xml =
+            std::str::from_utf8(written_pkg.part("xl/worksheets/sheet1.xml").unwrap())
+                .expect("written sheet1.xml utf8");
+        assert!(
+            written_sheet_xml.contains("<legacyDrawing"),
+            "expected patched sheet1.xml to retain legacyDrawing for comments"
+        );
 
         let report = xlsx_diff::diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
         assert!(
@@ -1433,6 +1455,7 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../../fixtures/xlsx/pivots/pivot-fixture.xlsx"
         ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
         let mut workbook = read_xlsx_blocking(fixture_path).expect("read pivot fixture workbook");
 
         let sheet_id = workbook.sheets[0].id.clone();
@@ -1444,6 +1467,9 @@ mod tests {
         let tmp = tempfile::tempdir().expect("temp dir");
         let out_path = tmp.path().join("edited.xlsx");
         write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read edited bytes");
+        assert_non_worksheet_parts_preserved(&original_bytes, &written_bytes);
 
         let report = xlsx_diff::diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
         assert!(
