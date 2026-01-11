@@ -215,6 +215,7 @@ function findCycle(graph) {
  *   queryIds: string[];
  *   promise: Promise<Record<string, QueryExecutionResult>>;
  *   cancel: () => void;
+ *   cancelQuery?: (queryId: string) => void;
  * }} RefreshAllHandle
  */
 
@@ -296,11 +297,13 @@ export class RefreshOrchestrator {
       const promise = Promise.reject(error);
       promise.catch(() => {});
 
+      const now = new Date(this.now());
       const job = {
         id: `${sessionId}:graph`,
         queryId,
         reason,
-        queuedAt: new Date(this.now()),
+        queuedAt: now,
+        completedAt: now,
       };
       this.emitter.emit(
         "event",
@@ -578,7 +581,10 @@ export class RefreshOrchestrator {
 
     const forward = (evt) => {
       const phase = targetSet.has(evt.job.queryId) ? "target" : "dependency";
-      this.emitter.emit("event", /** @type {RefreshGraphEvent} */ ({ ...evt, sessionId, phase }));
+      // Namespace job IDs with the session id so callers can safely treat `job.id`
+      // as globally unique across multiple refreshAll sessions.
+      const job = { ...evt.job, id: `${sessionId}:${evt.job.id}` };
+      this.emitter.emit("event", /** @type {RefreshGraphEvent} */ ({ ...evt, sessionId, phase, job }));
     };
 
     const unsubscribe = manager.onEvent((evt) => {
@@ -634,6 +640,25 @@ export class RefreshOrchestrator {
       cancel: () => {
         if (done) return;
         cancelSession(abortError("Aborted"));
+        finalize();
+      },
+      cancelQuery: (queryId) => {
+        if (done) return;
+        if (!closure.has(queryId)) return;
+        if (terminalIds.has(queryId)) return;
+
+        const handle = handles.get(queryId);
+        if (handle) {
+          handle.cancel();
+          return;
+        }
+
+        // Query hasn't been scheduled yet. Emit a synthetic cancellation and cancel
+        // anything downstream that can no longer run.
+        if (!terminalError) terminalError = abortError("Aborted");
+        emitSyntheticCancelled(queryId);
+        markTerminal(queryId);
+        cancelDependents(queryId);
         finalize();
       },
     };

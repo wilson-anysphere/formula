@@ -278,6 +278,25 @@ test("RefreshOrchestrator: refreshAll sessions get unique sessionIds", async () 
   assert.notEqual(h1.sessionId, h2.sessionId);
 });
 
+test("RefreshOrchestrator: job ids are namespaced by the refreshAll sessionId", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 1 });
+  orchestrator.registerQuery(makeQuery("q1", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+
+  /** @type {any[]} */
+  const events = [];
+  orchestrator.onEvent((evt) => events.push(evt));
+
+  const handle = orchestrator.refreshAll(["q1"]);
+  engine.calls[0].deferred.resolve(makeResult("q1"));
+  await handle.promise;
+
+  const started = events.find((e) => e.type === "started" && e.job.queryId === "q1");
+  assert.ok(started);
+  assert.equal(typeof started.job.id, "string");
+  assert.ok(started.job.id.startsWith(`${handle.sessionId}:`));
+});
+
 test("RefreshOrchestrator: refreshAll([]) resolves immediately without engine work", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
@@ -606,6 +625,41 @@ test("RefreshOrchestrator: cancellation rejects even when dependents were never 
   handle.cancel();
   await assert.rejects(handle.promise, (err) => err?.name === "AbortError");
   assert.deepEqual(new Set(cancelled), new Set(["A", "B", "C"]));
+});
+
+test("RefreshOrchestrator: cancelQuery cancels a branch without stopping independent targets", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "A" }));
+  orchestrator.registerQuery(makeQuery("D", { type: "range", range: { values: [["Value"], [4]], hasHeaders: true } }));
+
+  /** @type {string[]} */
+  const completed = [];
+  /** @type {string[]} */
+  const cancelled = [];
+  orchestrator.onEvent((evt) => {
+    if (evt.type === "completed") completed.push(evt.job.queryId);
+    if (evt.type === "cancelled") cancelled.push(evt.job.queryId);
+  });
+
+  const handle = orchestrator.refreshAll(["B", "D"]);
+  assert.equal(engine.calls.length, 2);
+
+  const callA = engine.calls.find((c) => c.queryId === "A");
+  const callD = engine.calls.find((c) => c.queryId === "D");
+  assert.ok(callA);
+  assert.ok(callD);
+
+  handle.cancelQuery?.("A");
+  await new Promise((r) => setImmediate(r));
+
+  assert.ok(cancelled.includes("B"), "dependent target should be cancelled after cancelling its dependency");
+  assert.equal(engine.calls.length, 2, "cancelling a dependency should not start dependents");
+
+  callD.deferred.resolve(makeResult("D"));
+  await assert.rejects(handle.promise, (err) => err?.name === "AbortError");
+  assert.ok(completed.includes("D"), "independent target should still complete");
 });
 
 test("RefreshOrchestrator: injected now() is used for synthetic cancelled timestamps", async () => {
