@@ -202,6 +202,12 @@ where
             if !changed {
                 return (expr.clone(), false);
             }
+            // The spill-range operator (`#`) cannot be applied to error literals in our canonical
+            // grammar (e.g. `#REF!#`), and Excel drops the operator once the base reference becomes
+            // invalid. If a rewrite turns the operand into an error, emit just the error.
+            if *op == crate::PostfixOp::SpillRange && matches!(inner, Expr::Error(_)) {
+                return (inner, true);
+            }
             (
                 Expr::Postfix(PostfixExpr {
                     op: *op,
@@ -1537,5 +1543,32 @@ mod tests {
         let (out, changed) = rewrite_formula_for_range_map("=SUM(A1:C1)", "Sheet1", &edit);
         assert!(changed);
         assert_eq!(out, "=SUM((A1,B1))");
+    }
+
+    #[test]
+    fn spill_postfix_is_dropped_when_reference_becomes_ref_error() {
+        let delete_col = StructuralEdit::DeleteCols {
+            sheet: "Sheet1".to_string(),
+            col: 0,
+            count: 1,
+        };
+        let (out, changed) = rewrite_formula_for_structural_edit("=A1#", "Sheet1", &delete_col);
+        assert!(changed);
+        assert_eq!(out, "=#REF!");
+
+        let (out, changed) = rewrite_formula_for_copy_delta("=A1#", "Sheet1", 0, -1);
+        assert!(changed);
+        assert_eq!(out, "=#REF!");
+
+        let range_map = RangeMapEdit {
+            sheet: "Sheet1".to_string(),
+            moved_region: GridRange::new(0, 0, u32::MAX, u32::MAX),
+            delta_row: 0,
+            delta_col: 0,
+            deleted_region: Some(GridRange::new(0, 0, 0, 0)),
+        };
+        let (out, changed) = rewrite_formula_for_range_map("=A1#", "Sheet1", &range_map);
+        assert!(changed);
+        assert_eq!(out, "=#REF!");
     }
 }
