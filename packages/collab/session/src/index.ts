@@ -120,6 +120,10 @@ export interface CollabSessionOptions {
    *
    * When enabled (default), the session ensures the workbook schema roots exist
    * and creates a default sheet when the document has no sheets.
+   *
+   * When using a sync provider (e.g. y-websocket), initialization is deferred
+   * until the first `sync=true` event so we don't create local default sheets
+   * before hydration (which would later show up as duplicates).
    */
   schema?: { autoInit?: boolean; defaultSheetId?: string; defaultSheetName?: string };
   /**
