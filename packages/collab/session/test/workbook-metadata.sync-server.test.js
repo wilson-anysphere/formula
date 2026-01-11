@@ -91,7 +91,7 @@ test("CollabSession workbook metadata persists via sync-server (sheets + namedRa
   const metadataA = createMetadataManagerForSession(sessionA);
 
   sheetsA.addSheet({ id: "Sheet2", name: "Budget" });
-  sheetsA.moveSheet("Sheet2", 0);
+  sheetsA.moveSheet("Sheet1", 1);
   namedRangesA.set("MyRange", { sheetId: "Sheet2", range: "A1:B2" });
   metadataA.set("title", "Quarterly Budget");
 

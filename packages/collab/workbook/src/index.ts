@@ -126,8 +126,7 @@ export class SheetManager {
       if (!sheet) throw new Error(`Sheet missing at index ${fromIndex}: ${id}`);
 
       this.sheets.delete(fromIndex, 1);
-      const insertIndex = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
-      this.sheets.insert(insertIndex, [sheet]);
+      this.sheets.insert(targetIndex, [sheet]);
     });
   }
 

@@ -72,7 +72,8 @@ test("CollabSession workbook metadata: sheets + namedRanges sync and local undo 
   sessionA.undo?.stopCapturing();
   assert.deepEqual(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.name, "Budget");
 
-  sheetsA.moveSheet("Sheet2", 0);
+  // Move forward: sheet1 from index 0 -> 1 should result in ["Sheet2", "Sheet1"].
+  sheetsA.moveSheet("Sheet1", 1);
   sessionA.undo?.stopCapturing();
   assert.deepEqual(snapshotSheets(sessionB).map((s) => s.id), ["Sheet2", "Sheet1"]);
 
