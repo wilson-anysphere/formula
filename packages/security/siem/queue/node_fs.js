@@ -363,6 +363,10 @@ export class NodeFsOfflineAuditQueue {
       // we want to recover quickly without stalling enqueues for minutes.
       await acquireEnqueueLock(this.enqueueLockPath, { staleMs: 10_000, timeoutMs: 5_000 });
       try {
+        // If we crashed after marking segments as ACKed (or after deleting cursors), we can be left
+        // with large `.acked` files on disk. Those should never count against the maxBytes budget.
+        await this._gcAckedSegments();
+
         const usage = await calculateDirBytes(this.segmentsDir);
         if (usage + lineBytes > this.maxBytes) {
           const error = new Error("offline audit queue is full");

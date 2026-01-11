@@ -127,6 +127,31 @@ test("NodeFsOfflineAuditQueue enforces maxBytes backpressure", async () => {
   await assert.rejects(queue.enqueue(makeEvent({ secret: "c" })), (error) => error?.code === "EQUEUEFULL");
 });
 
+test("NodeFsOfflineAuditQueue ignores acked segments when enforcing maxBytes", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-acked-gc-"));
+  const queue = new NodeFsOfflineAuditQueue({
+    dirPath: dir,
+    maxBytes: 300,
+    maxSegmentBytes: 1024 * 1024,
+  });
+
+  await queue.ensureDir();
+  const segmentsDir = path.join(dir, "segments");
+  const baseName = `segment-${Date.now()}-acked`;
+  const ackedPath = path.join(segmentsDir, `${baseName}.acked.jsonl`);
+  const cursorPath = path.join(segmentsDir, `${baseName}.cursor.json`);
+
+  // Create a big acked file that would otherwise fill the queue and block new writes.
+  await writeFile(ackedPath, "x".repeat(500), "utf8");
+  await writeFile(cursorPath, JSON.stringify({ acked: 1 }), "utf8");
+
+  await queue.enqueue(makeEvent({ secret: "after-acked" }));
+
+  const files = await listFiles(segmentsDir);
+  assert.ok(!files.includes(path.basename(ackedPath)));
+  assert.ok(!files.includes(path.basename(cursorPath)));
+});
+
 test("NodeFsOfflineAuditQueue rotates segments by maxSegmentAgeMs", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-age-"));
   const queue = new NodeFsOfflineAuditQueue({
