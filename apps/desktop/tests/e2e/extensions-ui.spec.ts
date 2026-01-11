@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, waitForDesktopReady } from "./helpers";
 
 test.describe("Extensions UI integration", () => {
   test("runs sampleHello.openPanel and renders the panel webview", async ({ page }) => {
@@ -42,5 +42,23 @@ test.describe("Extensions UI integration", () => {
     await page.getByTestId("run-command-sampleHello.sumSelection").click();
 
     await expect(page.getByTestId("toast-root")).toContainText("Sum: 10");
+  });
+
+  test("persists an extension panel in the layout and re-activates it after reload", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.getByTestId("open-extensions-panel").click();
+    await page.getByTestId("run-command-sampleHello.openPanel").click();
+
+    await expect(page.getByTestId("panel-sampleHello.panel")).toBeVisible();
+    const frame = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
+    await expect(frame.locator("h1")).toHaveText("Sample Hello Panel");
+
+    await page.reload();
+    await waitForDesktopReady(page);
+
+    await expect(page.getByTestId("panel-sampleHello.panel")).toBeVisible();
+    const frameAfter = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
+    await expect(frameAfter.locator("h1")).toHaveText("Sample Hello Panel");
   });
 });

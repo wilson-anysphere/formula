@@ -599,10 +599,28 @@ if (
     }
   };
 
+  const activateOpenExtensionPanels = () => {
+    if (!extensionHostManager.ready || extensionHostManager.error) return;
+    if (!extensionPanelBridge) return;
+    const layout = layoutController.layout;
+    const openPanelIds = [
+      ...layout.docks.left.panels,
+      ...layout.docks.right.panels,
+      ...layout.docks.bottom.panels,
+      ...Object.keys(layout.floating),
+    ];
+    for (const panelId of openPanelIds) {
+      const def = panelRegistry.get(panelId) as any;
+      if (def?.source?.kind !== "extension") continue;
+      void extensionPanelBridge.activateView(panelId);
+    }
+  };
+
   extensionHostManager.subscribe(() => {
     syncContributedCommands();
     syncContributedPanels();
     updateKeybindings();
+    activateOpenExtensionPanels();
   });
   syncContributedCommands();
   syncContributedPanels();
@@ -1127,6 +1145,13 @@ if (
       body.replaceChildren();
       body.appendChild(mount.container);
       return;
+    }
+
+    const panelDef = panelRegistry.get(panelId) as any;
+    if (panelDef?.source?.kind === "extension" && !extensionHostManager.ready) {
+      // If the user persisted an extension panel in their layout, ensure the extension host is
+      // loaded so the view can activate and populate its webview.
+      void ensureExtensionsLoaded();
     }
 
     panelBodyRenderer.renderPanelBody(panelId, body);
