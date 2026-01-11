@@ -8,6 +8,12 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+const hasBash = (() => {
+  if (process.platform === 'win32') return false;
+  const probe = spawnSync('bash', ['-lc', 'exit 0'], { stdio: 'ignore' });
+  return probe.status === 0;
+})();
+
 function runBash(command) {
   const proc = spawnSync('bash', ['-lc', command], {
     encoding: 'utf8',
@@ -18,7 +24,7 @@ function runBash(command) {
   return proc.stdout.trim();
 }
 
-test('agent-init defaults CARGO_HOME to a repo-local directory', () => {
+test('agent-init defaults CARGO_HOME to a repo-local directory', { skip: !hasBash }, () => {
   const cargoHome = runBash(
     [
       'unset CARGO_HOME',
@@ -32,7 +38,7 @@ test('agent-init defaults CARGO_HOME to a repo-local directory', () => {
   assert.equal(cargoHome, resolve(repoRoot, 'target', 'cargo-home'));
 });
 
-test('agent-init preserves an existing CARGO_HOME override', () => {
+test('agent-init preserves an existing CARGO_HOME override', { skip: !hasBash }, () => {
   const override = mkdtempSync(resolve(tmpdir(), 'formula-cargo-home-'));
   const cargoHome = runBash(
     [
@@ -46,7 +52,7 @@ test('agent-init preserves an existing CARGO_HOME override', () => {
   assert.equal(cargoHome, override);
 });
 
-test('agent-init prepends CARGO_HOME/bin to PATH', () => {
+test('agent-init prepends CARGO_HOME/bin to PATH', { skip: !hasBash }, () => {
   const out = runBash(
     [
       'unset CARGO_HOME',
