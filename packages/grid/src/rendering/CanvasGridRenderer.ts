@@ -529,7 +529,7 @@ export class CanvasGridRenderer {
   }
 
   private static sanitizeOverscan(value: number | undefined): number {
-    if (!Number.isFinite(value)) return 0;
+    if (typeof value !== "number" || !Number.isFinite(value)) return 0;
     return Math.max(0, Math.floor(value));
   }
 
