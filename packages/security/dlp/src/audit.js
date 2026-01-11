@@ -24,7 +24,9 @@ export class InMemoryAuditLogger {
         : { type: "system", id: "dlp" };
 
     const decision = input.decision?.decision;
-    const success = typeof input.success === "boolean" ? input.success : decision ? decision !== "BLOCK" : true;
+    const normalizedDecision = typeof decision === "string" ? decision.toLowerCase() : null;
+    const success =
+      typeof input.success === "boolean" ? input.success : normalizedDecision ? normalizedDecision !== "block" : true;
 
     const resource =
       typeof input.documentId === "string" && input.documentId.length > 0
