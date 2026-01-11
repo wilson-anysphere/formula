@@ -49,4 +49,4 @@ openssl s_client -connect "$HOST:$PORT" -servername "$HOST" -showcerts </dev/nul
 
 - During certificate rotation, add **multiple** fingerprints to `certificate_pins` to allow a smooth transition.
 - If `certificate_pinning_enabled = true` but `certificate_pins` is empty/invalid, outbound delivery is treated as a configuration error and fails.
-
+- Certificate pinning requires an **HTTPS** endpoint. If pinning is enabled and an integration is configured with an `http://` URL, delivery fails as a configuration error.
