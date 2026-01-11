@@ -7,10 +7,12 @@ use thiserror::Error;
 
 use crate::patch::{apply_cell_patches_to_package, WorkbookCellPatches};
 use crate::pivots::XlsxPivots;
+use crate::recalc_policy::RecalcPolicyError;
 use crate::sheet_metadata::{
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
     WorkbookSheetInfo,
 };
+use crate::RecalcPolicy;
 use formula_model::TabColor;
 
 #[derive(Debug, Error)]
@@ -37,6 +39,16 @@ pub enum XlsxError {
     InvalidSheetId,
     #[error("hyperlink error: {0}")]
     Hyperlink(String),
+}
+
+impl From<RecalcPolicyError> for XlsxError {
+    fn from(err: RecalcPolicyError) -> Self {
+        match err {
+            RecalcPolicyError::Io(err) => XlsxError::Io(err),
+            RecalcPolicyError::Xml(err) => XlsxError::Xml(err),
+            RecalcPolicyError::XmlAttr(err) => XlsxError::Attr(err),
+        }
+    }
 }
 
 /// In-memory representation of an XLSX/XLSM package as a map of part name -> bytes.
@@ -186,7 +198,17 @@ impl XlsxPackage {
     /// (plus `xl/sharedStrings.xml` / `xl/workbook.xml` when required) are rewritten;
     /// every unrelated part is preserved byte-for-byte.
     pub fn apply_cell_patches(&mut self, patches: &WorkbookCellPatches) -> Result<(), XlsxError> {
-        apply_cell_patches_to_package(self, patches)
+        self.apply_cell_patches_with_recalc_policy(patches, RecalcPolicy::default())
+    }
+
+    /// Apply a set of cell edits to the existing workbook package using the provided
+    /// [`RecalcPolicy`].
+    pub fn apply_cell_patches_with_recalc_policy(
+        &mut self,
+        patches: &WorkbookCellPatches,
+        recalc_policy: RecalcPolicy,
+    ) -> Result<(), XlsxError> {
+        apply_cell_patches_to_package(self, patches, recalc_policy)
     }
 
     /// Remove macro-related parts and relationships from the package.

@@ -15,8 +15,9 @@ use quick_xml::{Reader, Writer};
 
 use crate::openxml::{parse_relationships, rels_part_name, resolve_relationship_target};
 use crate::path::resolve_target;
+use crate::recalc_policy::apply_recalc_policy_to_parts;
 use crate::shared_strings::{parse_shared_strings_xml, write_shared_strings_xml, SharedStrings};
-use crate::{WorkbookSheetInfo, XlsxError, XlsxPackage};
+use crate::{RecalcPolicy, WorkbookSheetInfo, XlsxError, XlsxPackage};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
 const REL_TYPE_SHARED_STRINGS: &str =
@@ -208,6 +209,7 @@ impl SharedStringsState {
 pub(crate) fn apply_cell_patches_to_package(
     pkg: &mut XlsxPackage,
     patches: &WorkbookCellPatches,
+    recalc_policy: RecalcPolicy,
 ) -> Result<(), XlsxError> {
     if patches.is_empty() {
         return Ok(());
@@ -261,11 +263,7 @@ pub(crate) fn apply_cell_patches_to_package(
     }
 
     if any_formula_changed {
-        // Excel can crash / show "repaired records" dialogs if calcChain.xml gets out of sync
-        // with edited formulas. We choose the conservative option: remove it and force Excel to
-        // rebuild.
-        pkg.parts_map_mut().remove("xl/calcChain.xml");
-        ensure_workbook_full_calc_on_load(pkg)?;
+        apply_recalc_policy_to_parts(pkg.parts_map_mut(), recalc_policy)?;
     }
 
     Ok(())
@@ -915,117 +913,6 @@ fn parse_cell_addr_and_attrs(
     let Some(r) = r else { return Ok(None) };
     let cell_ref = CellRef::from_a1(&r).ok();
     Ok(cell_ref.map(|cr| (cr, t, s)))
-}
-
-fn ensure_workbook_full_calc_on_load(pkg: &mut XlsxPackage) -> Result<(), XlsxError> {
-    let part = "xl/workbook.xml";
-    let Some(bytes) = pkg.part(part) else {
-        return Ok(());
-    };
-
-    if workbook_has_full_calc_on_load(bytes)? {
-        return Ok(());
-    }
-
-    let mut reader = Reader::from_reader(bytes);
-    reader.config_mut().trim_text(false);
-    let mut writer = Writer::new(Vec::with_capacity(bytes.len() + 32));
-    let mut buf = Vec::new();
-
-    let mut saw_calc_pr = false;
-    let mut skipping_calc_pr = false;
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if local_name(e.name().as_ref()) == b"calcPr" => {
-                saw_calc_pr = true;
-                skipping_calc_pr = true;
-                writer
-                    .get_mut()
-                    .extend_from_slice(&render_calc_pr_with_full_calc_on_load(&e)?);
-            }
-            Event::Empty(e) if local_name(e.name().as_ref()) == b"calcPr" => {
-                saw_calc_pr = true;
-                writer
-                    .get_mut()
-                    .extend_from_slice(&render_calc_pr_with_full_calc_on_load(&e)?);
-            }
-            Event::End(e) if local_name(e.name().as_ref()) == b"calcPr" => {
-                if skipping_calc_pr {
-                    skipping_calc_pr = false;
-                } else {
-                    writer.write_event(Event::End(e.into_owned()))?;
-                }
-            }
-            Event::End(e) if local_name(e.name().as_ref()) == b"workbook" => {
-                if !saw_calc_pr {
-                    // Insert calcPr before closing workbook.
-                    writer
-                        .get_mut()
-                        .extend_from_slice(br#"<calcPr fullCalcOnLoad="1"/>"#);
-                }
-                writer.write_event(Event::End(e.into_owned()))?;
-            }
-            Event::Eof => break,
-            ev if skipping_calc_pr => drop(ev),
-            ev => writer.write_event(ev.into_owned())?,
-        }
-        buf.clear();
-    }
-
-    pkg.set_part(part, writer.into_inner());
-    Ok(())
-}
-
-fn workbook_has_full_calc_on_load(bytes: &[u8]) -> Result<bool, XlsxError> {
-    let mut reader = Reader::from_reader(bytes);
-    reader.config_mut().trim_text(false);
-    let mut buf = Vec::new();
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Start(e) | Event::Empty(e) if local_name(e.name().as_ref()) == b"calcPr" => {
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    if local_name(attr.key.as_ref()) == b"fullCalcOnLoad" {
-                        let v = attr.unescape_value()?.into_owned();
-                        return Ok(v == "1" || v.eq_ignore_ascii_case("true"));
-                    }
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-    Ok(false)
-}
-
-fn render_calc_pr_with_full_calc_on_load(start: &BytesStart<'_>) -> Result<Vec<u8>, XlsxError> {
-    let mut out = String::new();
-    out.push_str("<calcPr");
-    let mut has_full = false;
-    for attr in start.attributes() {
-        let attr = attr?;
-        let key_bytes = attr.key.as_ref();
-        let key = std::str::from_utf8(key_bytes).unwrap_or("attr");
-        let local = local_name(key_bytes);
-        if local == b"fullCalcOnLoad" {
-            has_full = true;
-            out.push_str(r#" fullCalcOnLoad="1""#);
-            continue;
-        }
-        let value = attr.unescape_value()?.into_owned();
-        out.push(' ');
-        out.push_str(key);
-        out.push_str(r#"=""#);
-        out.push_str(&escape_text(&value).replace('\"', "&quot;"));
-        out.push('"');
-    }
-    if !has_full {
-        out.push_str(r#" fullCalcOnLoad="1""#);
-    }
-    out.push_str("/>");
-    Ok(out.into_bytes())
 }
 
 fn local_name(name: &[u8]) -> &[u8] {

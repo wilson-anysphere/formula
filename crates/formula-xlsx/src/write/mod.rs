@@ -16,9 +16,10 @@ use zip::write::FileOptions;
 use zip::ZipWriter;
 
 use crate::path::{rels_for_part, resolve_target};
+use crate::recalc_policy::{apply_recalc_policy_to_parts, RecalcPolicyError};
 use crate::sheet_metadata::{parse_sheet_tab_color, write_sheet_tab_color};
 use crate::styles::XlsxStylesEditor;
-use crate::{CellValueKind, DateSystem, SheetMeta, XlsxDocument, XlsxError};
+use crate::{CellValueKind, DateSystem, RecalcPolicy, SheetMeta, XlsxDocument, XlsxError};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
 const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
@@ -44,6 +45,16 @@ pub enum WriteError {
     Styles(#[from] crate::styles::StylesPartError),
     #[error(transparent)]
     Xlsx(#[from] XlsxError),
+}
+
+impl From<RecalcPolicyError> for WriteError {
+    fn from(err: RecalcPolicyError) -> Self {
+        match err {
+            RecalcPolicyError::Io(err) => WriteError::Io(err),
+            RecalcPolicyError::Xml(err) => WriteError::Xml(err),
+            RecalcPolicyError::XmlAttr(err) => WriteError::XmlAttr(err),
+        }
+    }
 }
 
 const WORKSHEET_REL_TYPE: &str =
@@ -225,7 +236,19 @@ fn plan_sheet_structure(
 }
 
 pub fn write_to_vec(doc: &XlsxDocument) -> Result<Vec<u8>, WriteError> {
+    write_to_vec_with_recalc_policy(doc, RecalcPolicy::default())
+}
+
+pub fn write_to_vec_with_recalc_policy(
+    doc: &XlsxDocument,
+    recalc_policy: RecalcPolicy,
+) -> Result<Vec<u8>, WriteError> {
+    let formula_changed = formulas_changed(doc);
+
     let mut parts = build_parts(doc)?;
+    if formula_changed {
+        apply_recalc_policy_to_parts(&mut parts, recalc_policy)?;
+    }
 
     // Deterministic ordering helps debugging and makes fixtures stable.
     let cursor = Cursor::new(Vec::new());
@@ -239,6 +262,72 @@ pub fn write_to_vec(doc: &XlsxDocument) -> Result<Vec<u8>, WriteError> {
 
     let cursor = zip.finish()?;
     Ok(cursor.into_inner())
+}
+
+fn formulas_changed(doc: &XlsxDocument) -> bool {
+    let mut seen: HashSet<(WorksheetId, CellRef)> = HashSet::new();
+
+    for sheet in &doc.workbook.sheets {
+        let sheet_id = sheet.id;
+        for (cell_ref, cell) in sheet.iter_cells() {
+            let Some(formula) = cell.formula.as_deref() else {
+                continue;
+            };
+            if strip_leading_equals(formula).is_empty() {
+                continue;
+            }
+
+            seen.insert((sheet_id, cell_ref));
+            let baseline = doc
+                .meta
+                .cell_meta
+                .get(&(sheet_id, cell_ref))
+                .and_then(|m| m.formula.as_ref())
+                .map(|f| f.file_text.as_str());
+            if formula_text_differs(baseline, Some(formula)) {
+                return true;
+            }
+        }
+    }
+
+    // Detect removed formulas (cells that had a stored formula, but now have none).
+    for ((sheet_id, cell_ref), meta) in &doc.meta.cell_meta {
+        let Some(formula_meta) = meta.formula.as_ref() else {
+            continue;
+        };
+        if formula_meta.file_text.is_empty() {
+            // Textless shared formula followers are intentionally not represented in the model.
+            continue;
+        }
+        if seen.contains(&(*sheet_id, *cell_ref)) {
+            continue;
+        }
+        let model_formula = doc
+            .workbook
+            .sheet(*sheet_id)
+            .and_then(|s| s.cell(*cell_ref))
+            .and_then(|c| c.formula.as_deref());
+        if formula_text_differs(Some(formula_meta.file_text.as_str()), model_formula) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn formula_text_differs(baseline_file_text: Option<&str>, model_formula: Option<&str>) -> bool {
+    let baseline = normalize_formula_for_compare(baseline_file_text);
+    let model = normalize_formula_for_compare(model_formula);
+    baseline != model
+}
+
+fn normalize_formula_for_compare(formula: Option<&str>) -> Option<String> {
+    let formula = formula?;
+    let stripped = strip_leading_equals(formula);
+    if stripped.is_empty() {
+        return None;
+    }
+    Some(crate::formula_text::strip_xlfn_prefixes(stripped))
 }
 
 fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteError> {

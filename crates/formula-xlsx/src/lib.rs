@@ -38,6 +38,7 @@ pub mod patch;
 mod path;
 pub mod pivots;
 pub mod print;
+mod recalc_policy;
 mod read;
 mod reader;
 mod relationships;
@@ -70,6 +71,7 @@ pub use pivots::{
     PivotCacheDefinition, PivotCacheDefinitionPart, PivotCacheField, PivotCacheRecordsPart,
     PivotCacheSourceType, PivotTablePart, XlsxPivots,
 };
+pub use recalc_policy::RecalcPolicy;
 pub use read::{load_from_bytes, load_from_path};
 pub use reader::{read_workbook, read_workbook_from_reader};
 pub use sheet_metadata::{
@@ -212,7 +214,14 @@ impl XlsxDocument {
     }
 
     pub fn save_to_vec(&self) -> Result<Vec<u8>, write::WriteError> {
-        write::write_to_vec(self)
+        self.save_to_vec_with_recalc_policy(RecalcPolicy::default())
+    }
+
+    pub fn save_to_vec_with_recalc_policy(
+        &self,
+        recalc_policy: RecalcPolicy,
+    ) -> Result<Vec<u8>, write::WriteError> {
+        write::write_to_vec_with_recalc_policy(self, recalc_policy)
     }
 
     pub fn set_cell_value(&mut self, sheet_id: WorksheetId, cell: CellRef, value: CellValue) -> bool {
@@ -260,41 +269,58 @@ impl XlsxDocument {
 
         let Some(formula_display) = formula_display else {
             sheet.set_formula(cell, None);
-            if let Some(meta) = self.meta.cell_meta.get_mut(&(sheet_id, cell)) {
-                meta.formula = None;
-                if meta.value_kind.is_none() && meta.raw_value.is_none() {
+
+            // Preserve `FormulaMeta.file_text` for master formulas so the writer can detect
+            // formula removals and apply recalculation safety as needed.
+            let remove_meta = match self.meta.cell_meta.get_mut(&(sheet_id, cell)) {
+                Some(meta) => {
+                    if let Some(formula_meta) = meta.formula.as_mut() {
+                        if formula_meta.file_text.is_empty() {
+                            // Shared formula follower (no inline text) - clearing should remove the
+                            // formula metadata entirely so the writer doesn't keep it.
+                            meta.formula = None;
+                        }
+                    }
+
+                    meta.formula.is_none() && meta.value_kind.is_none() && meta.raw_value.is_none()
+                }
+                None => false,
+            };
+
+            if remove_meta {
+                self.meta.cell_meta.remove(&(sheet_id, cell));
+            }
+
+            // If the cell became truly empty, keep formula metadata (if any) so we can still
+            // detect that a formula was removed later.
+            if sheet.cell(cell).is_none() {
+                let keep = self
+                    .meta
+                    .cell_meta
+                    .get(&(sheet_id, cell))
+                    .and_then(|m| m.formula.as_ref())
+                    .is_some_and(|f| !f.file_text.is_empty());
+                if !keep {
                     self.meta.cell_meta.remove(&(sheet_id, cell));
                 }
             }
-            if sheet.cell(cell).is_none() {
-                self.meta.cell_meta.remove(&(sheet_id, cell));
-            }
+
             return true;
         };
 
         let display = crate::formula_text::normalize_display_formula(&formula_display);
         sheet.set_formula(cell, Some(display.clone()));
 
-        let file_text = crate::formula_text::add_xlfn_prefixes(&display);
-
         let meta = self.meta.cell_meta.entry((sheet_id, cell)).or_default();
-        match meta.formula.as_mut() {
-            Some(existing) => {
-                let was_textless = existing.file_text.is_empty();
-                existing.file_text = file_text;
-                if was_textless {
-                    // Textless shared formulas become standalone formulas when edited.
-                    existing.t = None;
-                    existing.reference = None;
-                    existing.shared_index = None;
-                }
+        if let Some(existing) = meta.formula.as_mut() {
+            if existing.file_text.is_empty() {
+                // Textless shared formulas become standalone formulas when edited.
+                existing.t = None;
+                existing.reference = None;
+                existing.shared_index = None;
+                existing.always_calc = None;
             }
-            None => {
-                meta.formula = Some(FormulaMeta {
-                    file_text,
-                    ..Default::default()
-                });
-            }
+            // Keep `file_text` unchanged so it can act as a baseline for detecting formula edits.
         }
 
         if let Some(cell_record) = sheet.cell(cell) {
@@ -319,7 +345,23 @@ impl XlsxDocument {
             return false;
         };
         sheet.clear_cell(cell);
-        self.meta.cell_meta.remove(&(sheet_id, cell));
+
+        // Keep formula metadata for cleared master formulas so the writer can detect formula
+        // removals and apply recalculation safety as needed.
+        let keep_formula_meta = self
+            .meta
+            .cell_meta
+            .get(&(sheet_id, cell))
+            .and_then(|m| m.formula.as_ref())
+            .is_some_and(|f| !f.file_text.is_empty());
+        if keep_formula_meta {
+            if let Some(meta) = self.meta.cell_meta.get_mut(&(sheet_id, cell)) {
+                meta.value_kind = None;
+                meta.raw_value = None;
+            }
+        } else {
+            self.meta.cell_meta.remove(&(sheet_id, cell));
+        }
         true
     }
 }
