@@ -50,8 +50,9 @@ export function App() {
   useEffect(() => {
     if (!engineReady) return;
     const cache = new EngineCellCache(engine);
-    setProvider(new EngineGridProvider({ cache, rowCount, colCount, sheet: activeSheet, headers: true }));
-    void engine.recalculate(activeSheet);
+    const nextProvider = new EngineGridProvider({ cache, rowCount, colCount, sheet: activeSheet, headers: true });
+    setProvider(nextProvider);
+    void nextProvider.recalculate();
   }, [engine, engineReady, activeSheet]);
 
   return (
