@@ -247,6 +247,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     if (!membership) return;
     if (!canDocument(membership.role, "edit")) return reply.code(403).send({ error: "forbidden" });
     if (membership.deletedAt) return reply.code(403).send({ error: "doc_deleted" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const parsed = CreateDocVersionBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
@@ -299,6 +302,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const versions = await app.db.query(
       `
@@ -341,6 +347,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const res = await app.db.query(
       `
@@ -378,6 +387,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const deleted = await app.db.query(
       "DELETE FROM document_versions WHERE document_id = $1 AND id = $2 RETURNING id",
@@ -668,6 +680,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "edit")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const parsed = UpdateDocVersionBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });

@@ -399,4 +399,71 @@ describe("MFA e2e: encrypted TOTP secrets + recovery codes + org enforcement", (
     expect(allowed.statusCode).toBe(200);
     expect((allowed.json() as any).ok).toBe(true);
   });
+
+  it("enforces org require_mfa on document version export endpoints", async () => {
+    const reg = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "doc-versions-mfa@example.com", password: "password1234", name: "Doc Versions", orgName: "Org" }
+    });
+    expect(reg.statusCode).toBe(200);
+    const cookie = extractCookie(reg.headers["set-cookie"]);
+    const body = reg.json() as any;
+    const orgId = body.organization.id as string;
+
+    const createdDoc = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { cookie },
+      payload: { orgId, title: "Versions doc" }
+    });
+    expect(createdDoc.statusCode).toBe(200);
+    const docId = (createdDoc.json() as any).document.id as string;
+
+    const bytes = Buffer.from("hello versions");
+    const dataBase64 = bytes.toString("base64");
+    const createVersion = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/versions`,
+      headers: { cookie },
+      payload: { description: "v1", dataBase64 }
+    });
+    expect(createVersion.statusCode).toBe(200);
+    const versionId = (createVersion.json() as any).version.id as string;
+
+    await db.query("UPDATE org_settings SET require_mfa = true WHERE org_id = $1", [orgId]);
+
+    const blocked = await app.inject({
+      method: "GET",
+      url: `/docs/${docId}/versions/${versionId}`,
+      headers: { cookie }
+    });
+    expect(blocked.statusCode).toBe(403);
+    expect((blocked.json() as any).error).toBe("mfa_required");
+
+    const setup = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/setup",
+      headers: { cookie }
+    });
+    expect(setup.statusCode).toBe(200);
+    const secret = (setup.json() as any).secret as string;
+
+    const confirm = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/confirm",
+      headers: { cookie },
+      payload: { code: authenticator.generate(secret) }
+    });
+    expect(confirm.statusCode).toBe(200);
+
+    const allowed = await app.inject({
+      method: "GET",
+      url: `/docs/${docId}/versions/${versionId}`,
+      headers: { cookie }
+    });
+    expect(allowed.statusCode).toBe(200);
+    const fetched = (allowed.json() as any).version as any;
+    expect(Buffer.from(fetched.dataBase64, "base64").equals(bytes)).toBe(true);
+  });
 });
