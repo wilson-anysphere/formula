@@ -154,6 +154,7 @@ export class CpuBackend {
         bin = bins - 1;
       } else {
         bin = Math.floor((v - min) * invWidth);
+        if (!Number.isFinite(bin)) bin = 0;
       }
       if (bin < 0) bin = 0;
       if (bin >= bins) bin = bins - 1;

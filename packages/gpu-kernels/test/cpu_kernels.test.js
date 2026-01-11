@@ -77,3 +77,10 @@ test("cpu: histogram", async () => {
   // With clamping, 1.0 falls in last bin.
   assert.deepEqual(Array.from(bins), [3, 4]);
 });
+
+test("cpu: histogram handles infinite min/max without producing NaN bins", async () => {
+  const cpu = new CpuBackend();
+  const values = new Float64Array([-100, 0, 0.5, 1.0, 2.0]);
+  const bins = await cpu.histogram(values, { min: Number.NEGATIVE_INFINITY, max: 1, bins: 2 });
+  assert.deepEqual(Array.from(bins), [3, 2]);
+});

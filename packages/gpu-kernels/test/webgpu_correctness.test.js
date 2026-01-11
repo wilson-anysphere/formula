@@ -84,6 +84,21 @@ test("webgpu: f32 + f64 correctness for SUM / SUMPRODUCT / HISTOGRAM (if WebGPU 
   }
 
   {
+    const values = new Float32Array([0, -0]);
+    const cpuMin = await cpu.min(values);
+    const cpuMax = await cpu.max(values);
+    const cpuAvg = await cpu.average(values);
+
+    const gpuMin = await gpu.min(values, { precision: "f32" });
+    const gpuMax = await gpu.max(values, { precision: "f32" });
+    const gpuAvg = await gpu.average(values, { precision: "f32" });
+
+    assert.ok(Object.is(gpuMin, cpuMin), `min: gpu=${gpuMin} cpu=${cpuMin}`);
+    assert.ok(Object.is(gpuMax, cpuMax), `max: gpu=${gpuMax} cpu=${cpuMax}`);
+    assert.ok(Object.is(gpuAvg, cpuAvg), `avg: gpu=${gpuAvg} cpu=${cpuAvg}`);
+  }
+
+  {
     const rng = makeRng(13579);
     const aRows = 32;
     const aCols = 32;
@@ -173,6 +188,21 @@ test("webgpu: f32 + f64 correctness for SUM / SUMPRODUCT / HISTOGRAM (if WebGPU 
       assert.equal(gpuMin, cpuMin);
       assert.equal(gpuMax, cpuMax);
       assert.equal(gpuAvg, cpuAvg);
+    }
+
+    {
+      const values = new Float64Array([0, -0]);
+      const cpuMin = await cpu.min(values);
+      const cpuMax = await cpu.max(values);
+      const cpuAvg = await cpu.average(values);
+
+      const gpuMin = await gpu.min(values, { precision: "f64", allowFp32FallbackForF64: false });
+      const gpuMax = await gpu.max(values, { precision: "f64", allowFp32FallbackForF64: false });
+      const gpuAvg = await gpu.average(values, { precision: "f64", allowFp32FallbackForF64: false });
+
+      assert.ok(Object.is(gpuMin, cpuMin), `min: gpu=${gpuMin} cpu=${cpuMin}`);
+      assert.ok(Object.is(gpuMax, cpuMax), `max: gpu=${gpuMax} cpu=${cpuMax}`);
+      assert.ok(Object.is(gpuAvg, cpuAvg), `avg: gpu=${gpuAvg} cpu=${cpuAvg}`);
     }
 
     {
