@@ -59,6 +59,8 @@ fn preserves_print_settings_and_allows_updates() {
     // Update a couple of fields and ensure they survive a write/read.
     let mut updated_settings = settings.clone();
     let updated_sheet = &mut updated_settings.sheets[0];
+    // Sheet names are case-insensitive in Excel; allow callers to supply any casing.
+    updated_sheet.sheet_name = "sheet1".to_string();
     updated_sheet.print_area = Some(vec![CellRange {
         start_row: 2,
         end_row: 5,

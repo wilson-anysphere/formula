@@ -87,7 +87,7 @@ pub fn parse_print_area_defined_name(
 
     let mut ranges = Vec::new();
     for area in areas {
-        if area.sheet_name != expected_sheet_name {
+        if !area.sheet_name.eq_ignore_ascii_case(expected_sheet_name) {
             return Err(PrintError::InvalidA1(format!(
                 "expected sheet {expected_sheet_name:?}, found {found:?}",
                 found = area.sheet_name
@@ -118,7 +118,7 @@ pub fn parse_print_titles_defined_name(
 
     let mut titles = PrintTitles::default();
     for area in areas {
-        if area.sheet_name != expected_sheet_name {
+        if !area.sheet_name.eq_ignore_ascii_case(expected_sheet_name) {
             return Err(PrintError::InvalidA1(format!(
                 "expected sheet {expected_sheet_name:?}, found {found:?}",
                 found = area.sheet_name

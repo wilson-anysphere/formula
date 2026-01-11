@@ -74,14 +74,15 @@ pub fn write_workbook_print_settings(
     let workbook = parse_workbook_xml(&workbook_xml)?;
     let rels = parse_workbook_rels(&rels_xml)?;
 
-    let mut settings_by_sheet: HashMap<&str, &SheetPrintSettings> = HashMap::new();
+    // Excel sheet names are case-insensitive; accept settings keyed by any casing.
+    let mut settings_by_sheet: HashMap<String, &SheetPrintSettings> = HashMap::new();
     for sheet in &settings.sheets {
-        settings_by_sheet.insert(sheet.sheet_name.as_str(), sheet);
+        settings_by_sheet.insert(sheet.sheet_name.to_ascii_uppercase(), sheet);
     }
 
     let mut defined_name_edits: HashMap<(String, usize), DefinedNameEdit> = HashMap::new();
     for (sheet_index, sheet) in workbook.sheets.iter().enumerate() {
-        if let Some(sheet_settings) = settings_by_sheet.get(sheet.name.as_str()) {
+        if let Some(sheet_settings) = settings_by_sheet.get(&sheet.name.to_ascii_uppercase()) {
             match sheet_settings.print_area {
                 Some(ref ranges) => {
                     defined_name_edits.insert(
@@ -118,7 +119,7 @@ pub fn write_workbook_print_settings(
 
     let mut updated_sheets: HashMap<String, Vec<u8>> = HashMap::new();
     for sheet in &workbook.sheets {
-        let Some(sheet_settings) = settings_by_sheet.get(sheet.name.as_str()) else {
+        let Some(sheet_settings) = settings_by_sheet.get(&sheet.name.to_ascii_uppercase()) else {
             continue;
         };
         let Some(sheet_target) = rels.get(&sheet.r_id) else {
@@ -133,8 +134,7 @@ pub fn write_workbook_print_settings(
     // Rewind zip to iterate entries again.
     let mut zip = ZipArchive::new(Cursor::new(xlsx_bytes))?;
     let mut out = ZipWriter::new(Cursor::new(Vec::new()));
-    let options =
-        FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)?;
