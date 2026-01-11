@@ -1933,6 +1933,54 @@ mod tests {
     }
 
     #[test]
+    fn sorts_bool_descending_and_keeps_blanks_last() {
+        let data = vec![
+            pv_row(&["Flag".into(), "Sales".into()]),
+            pv_row(&[false.into(), 1.into()]),
+            pv_row(&[true.into(), 2.into()]),
+            pv_row(&[PivotValue::Blank, 3.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                sort_order: SortOrder::Descending,
+                ..PivotField::new("Flag")
+            }],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        // Descending: true before false. Blank is always last.
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Flag".into(), "Sum of Sales".into()],
+                vec!["true".into(), 2.into()],
+                vec!["false".into(), 1.into()],
+                vec![PivotValue::Text(String::new()), 3.into()],
+            ]
+        );
+    }
+
+    #[test]
     fn produces_basic_subtotals_for_multiple_row_fields() {
         let data = vec![
             pv_row(&["Region".into(), "Product".into(), "Sales".into()]),

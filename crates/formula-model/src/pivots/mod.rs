@@ -27,6 +27,7 @@ pub enum SortOrder {
 pub enum PivotKeyPart {
     Blank,
     Number(u64),
+    Date(NaiveDate),
     Text(String),
     Bool(bool),
 }
