@@ -144,6 +144,8 @@ function getArgContext(input, openParenIndex, cursorPosition) {
   let lastCommaIndex = -1;
   let inString = false;
   let inSheetQuote = false;
+  let bracketDepth = 0;
+  let braceDepth = 0;
 
   for (let i = openParenIndex + 1; i < cursorPosition; i++) {
     const ch = input[i];
@@ -175,9 +177,25 @@ function getArgContext(input, openParenIndex, cursorPosition) {
       inSheetQuote = true;
       continue;
     }
+    if (ch === "[") {
+      bracketDepth += 1;
+      continue;
+    }
+    if (ch === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      continue;
+    }
+    if (ch === "{") {
+      braceDepth += 1;
+      continue;
+    }
+    if (ch === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
     if (ch === "(") depth++;
     else if (ch === ")") depth = Math.max(baseDepth, depth - 1);
-    else if (ch === "," && depth === baseDepth) {
+    else if (ch === "," && depth === baseDepth && bracketDepth === 0 && braceDepth === 0) {
       argIndex++;
       lastCommaIndex = i;
     }

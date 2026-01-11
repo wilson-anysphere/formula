@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { TabCompletionEngine } from "../src/tabCompletionEngine.js";
+import { parsePartialFormula } from "../src/formulaPartialParser.js";
+import { FunctionRegistry } from "../src/functionRegistry.js";
 
 function createMockCellContext(valuesByA1) {
   // valuesByA1: { "A1": 1, ... }
@@ -282,6 +284,20 @@ test("TabCompletionEngine caches suggestions by context key", async () => {
 
   assert.deepEqual(s1, s2);
   assert.equal(callCount, 1, "Expected local model to be called once due to caching");
+});
+
+test("parsePartialFormula ignores commas inside structured refs and array constants", () => {
+  const registry = new FunctionRegistry();
+
+  const structured = "=SUM(Table1[[#All],[Amount]]";
+  const structuredParsed = parsePartialFormula(structured, structured.length, registry);
+  assert.equal(structuredParsed.argIndex, 0);
+  assert.equal(structuredParsed.currentArg?.text, "Table1[[#All],[Amount]]");
+
+  const arrayConst = "=SUM({1,2},A";
+  const arrayParsed = parsePartialFormula(arrayConst, arrayConst.length, registry);
+  assert.equal(arrayParsed.argIndex, 1);
+  assert.equal(arrayParsed.currentArg?.text, "A");
 });
 
 test("TabCompletionEngine cache busts when schemaProvider cache key changes", async () => {
