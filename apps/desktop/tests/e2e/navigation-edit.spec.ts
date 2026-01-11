@@ -56,6 +56,24 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("D5");
   });
 
+  test("PageDown scrolls the grid and keeps the active cell visible", async ({ page, browserName }) => {
+    test.skip(browserName === "webkit", "PageDown key handling can be unreliable in webkit headless");
+    await page.goto("/");
+    const grid = page.locator("#grid");
+    await grid.click({ position: { x: 60, y: 40 } });
+
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    const activeBefore = await page.evaluate(() => (window as any).__formulaApp.getActiveCell());
+
+    await page.keyboard.press("PageDown");
+
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    const activeAfter = await page.evaluate(() => (window as any).__formulaApp.getActiveCell());
+
+    expect(scrollAfter).toBeGreaterThan(scrollBefore);
+    expect(activeAfter.row).toBeGreaterThan(activeBefore.row);
+  });
+
   test("F2 edit commits with Enter and cancels with Escape", async ({ page }) => {
     await page.goto("/");
     await page.click("#grid", { position: { x: 5, y: 5 } });

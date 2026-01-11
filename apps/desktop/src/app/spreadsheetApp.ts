@@ -2337,6 +2337,68 @@ export class SpreadsheetApp {
       return;
     }
 
+    // Page navigation (Excel-style): PageUp/PageDown move by approximately one viewport.
+    // Alt+PageUp/PageDown scroll horizontally.
+    if (!primary && (e.key === "PageDown" || e.key === "PageUp")) {
+      e.preventDefault();
+      this.ensureActiveCellVisible();
+      const dir = e.key === "PageDown" ? 1 : -1;
+      const visualRow = this.rowToVisual.get(this.selection.active.row);
+      const visualCol = this.colToVisual.get(this.selection.active.col);
+      if (visualRow === undefined || visualCol === undefined) return;
+
+      if (e.altKey) {
+        const pageCols = Math.max(1, Math.floor(this.viewportWidth() / this.cellWidth));
+        const nextColVisual = Math.min(
+          Math.max(0, visualCol + dir * pageCols),
+          Math.max(0, this.colIndexByVisual.length - 1)
+        );
+        const col = this.colIndexByVisual[nextColVisual] ?? 0;
+        this.selection = e.shiftKey
+          ? extendSelectionToCell(this.selection, { row: this.selection.active.row, col }, this.limits)
+          : setActiveCell(this.selection, { row: this.selection.active.row, col }, this.limits);
+      } else {
+        const pageRows = Math.max(1, Math.floor(this.viewportHeight() / this.cellHeight));
+        const nextRowVisual = Math.min(
+          Math.max(0, visualRow + dir * pageRows),
+          Math.max(0, this.rowIndexByVisual.length - 1)
+        );
+        const row = this.rowIndexByVisual[nextRowVisual] ?? 0;
+        this.selection = e.shiftKey
+          ? extendSelectionToCell(this.selection, { row, col: this.selection.active.col }, this.limits)
+          : setActiveCell(this.selection, { row, col: this.selection.active.col }, this.limits);
+      }
+
+      this.ensureActiveCellVisible();
+      const didScroll = this.scrollCellIntoView(this.selection.active);
+      this.renderSelection();
+      this.updateStatus();
+      if (didScroll) this.refresh("scroll");
+      return;
+    }
+
+    // Home/End without Ctrl/Cmd.
+    // Home: first visible column in the current row.
+    // End: last visible column in the current row.
+    if (!primary && !e.altKey && (e.key === "Home" || e.key === "End")) {
+      e.preventDefault();
+      this.ensureActiveCellVisible();
+      const row = this.selection.active.row;
+      const col =
+        e.key === "Home"
+          ? (this.colIndexByVisual[0] ?? 0)
+          : (this.colIndexByVisual[this.colIndexByVisual.length - 1] ?? 0);
+      this.selection = e.shiftKey
+        ? extendSelectionToCell(this.selection, { row, col }, this.limits)
+        : setActiveCell(this.selection, { row, col }, this.limits);
+      this.ensureActiveCellVisible();
+      const didScroll = this.scrollCellIntoView(this.selection.active);
+      this.renderSelection();
+      this.updateStatus();
+      if (didScroll) this.refresh("scroll");
+      return;
+    }
+
     // Excel-like "start typing to edit" behavior: any printable key begins edit
     // mode and replaces the cell contents.
     if (!primary && !e.altKey && e.key.length === 1) {
