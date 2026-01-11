@@ -68,7 +68,7 @@ fn xlsx_write_does_not_emit_leading_equals_in_f() {
     let formulas = worksheet_formula_texts_from_xlsx(&bytes, "xl/worksheets/sheet1.xml");
     for f in formulas.into_iter().filter(|f| !f.is_empty()) {
         assert!(
-            !f.starts_with('='),
+            !f.trim_start().starts_with('='),
             "SpreadsheetML <f> text must not start with '=' (got {f:?})"
         );
     }
@@ -81,7 +81,7 @@ fn xlsx_document_write_does_not_emit_leading_equals_in_f() {
     let formulas = worksheet_formula_texts_from_xlsx(&bytes, "xl/worksheets/sheet1.xml");
     for f in formulas.into_iter().filter(|f| !f.is_empty()) {
         assert!(
-            !f.starts_with('='),
+            !f.trim_start().starts_with('='),
             "SpreadsheetML <f> text must not start with '=' (got {f:?})"
         );
     }

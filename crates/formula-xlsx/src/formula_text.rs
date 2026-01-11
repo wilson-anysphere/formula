@@ -14,8 +14,10 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
 ];
 
 pub(crate) fn normalize_display_formula(input: &str) -> String {
-    let input = input.strip_prefix('=').unwrap_or(input);
-    strip_xlfn_prefixes(input)
+    let Some(normalized) = formula_model::normalize_formula_text(input) else {
+        return String::new();
+    };
+    strip_xlfn_prefixes(&normalized)
 }
 
 pub(crate) fn strip_xlfn_prefixes(formula: &str) -> String {
@@ -155,6 +157,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn normalize_display_formula_strips_leading_equals_and_trims() {
+        assert_eq!(normalize_display_formula("=1+1"), "1+1");
+        assert_eq!(normalize_display_formula("   = 1+1  "), "1+1");
+        assert_eq!(normalize_display_formula("   "), "");
+        assert_eq!(normalize_display_formula("="), "");
+    }
+
+    #[test]
     fn strip_xlfn_prefixes_ignores_string_literals() {
         let input = r#"CONCAT("_xlfn.",_xlfn.SEQUENCE(1))"#;
         assert_eq!(strip_xlfn_prefixes(input), r#"CONCAT("_xlfn.",SEQUENCE(1))"#);
@@ -175,4 +185,3 @@ mod tests {
         assert_eq!(add_xlfn_prefixes(&display), file);
     }
 }
-

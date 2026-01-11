@@ -19,6 +19,17 @@ fn diff_parts(expected: &Path, actual: &Path) -> BTreeSet<String> {
         .collect::<BTreeSet<_>>()
 }
 
+fn worksheet_cell_formula(sheet_xml: &str, cell_ref: &str) -> Option<String> {
+    let xml_doc = roxmltree::Document::parse(sheet_xml).ok()?;
+    let cell = xml_doc.descendants().find(|n| {
+        n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some(cell_ref)
+    })?;
+    let f = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "f")?;
+    Some(f.text().unwrap_or_default().to_string())
+}
+
 #[test]
 fn apply_cell_patches_preserves_unrelated_parts_for_xlsx() -> Result<(), Box<dyn std::error::Error>>
 {
@@ -143,7 +154,7 @@ fn apply_cell_patches_drops_calc_chain_when_formulas_change(
     patches.set_cell(
         "Sheet1",
         CellRef::from_a1("A1")?,
-        CellPatch::set_value_with_formula(CellValue::Number(2.0), "=1+1"),
+        CellPatch::set_value_with_formula(CellValue::Number(2.0), " =1+1"),
     );
     pkg.apply_cell_patches(&patches)?;
 
@@ -153,6 +164,14 @@ fn apply_cell_patches_drops_calc_chain_when_formulas_change(
         workbook_xml.contains("fullCalcOnLoad=\"1\""),
         "workbook.xml should request full recalculation on load when formulas change"
     );
+
+    let sheet_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap())?;
+    let formula = worksheet_cell_formula(sheet_xml, "A1").expect("patched cell should have <f>");
+    assert!(
+        !formula.trim_start().starts_with('='),
+        "patched <f> text must not include a leading '=' (got {formula:?})"
+    );
+    assert_eq!(formula, "1+1");
 
     Ok(())
 }

@@ -727,9 +727,10 @@ fn write_cell_patch(
     let mut value_xml = String::new();
 
     if let Some(formula) = formula {
-        let formula = formula.strip_prefix('=').unwrap_or(formula);
+        let display = crate::formula_text::normalize_display_formula(formula);
+        let formula = crate::formula_text::add_xlfn_prefixes(&display);
         value_xml.push_str("<f>");
-        value_xml.push_str(&escape_text(formula));
+        value_xml.push_str(&escape_text(&formula));
         value_xml.push_str("</f>");
     }
 

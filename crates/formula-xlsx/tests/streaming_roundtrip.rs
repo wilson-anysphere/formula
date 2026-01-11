@@ -70,7 +70,7 @@ fn streaming_patch_updates_cell_value_and_formula() -> Result<(), Box<dyn std::e
         "xl/worksheets/sheet1.xml",
         a1,
         CellValue::Number(2.0),
-        Some("=1+1".to_string()),
+        Some(" =1+1".to_string()),
     );
 
     let mut out = Cursor::new(Vec::new());
@@ -87,6 +87,27 @@ fn streaming_patch_updates_cell_value_and_formula() -> Result<(), Box<dyn std::e
     assert_eq!(cell.value, CellValue::Number(2.0));
     assert_eq!(cell.formula.as_deref(), Some("1+1"));
     assert_eq!(cell.style_id, orig_style, "patcher should preserve cell style");
+
+    let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    let xml_doc = roxmltree::Document::parse(&sheet_xml)?;
+    let patched_cell = xml_doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
+        .expect("A1 cell should exist");
+    let f = patched_cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "f")
+        .and_then(|n| n.text())
+        .unwrap_or_default();
+    assert!(
+        !f.trim_start().starts_with('='),
+        "patched <f> text must not include a leading '=' (got {f:?})"
+    );
+    assert_eq!(f, "1+1");
 
     Ok(())
 }

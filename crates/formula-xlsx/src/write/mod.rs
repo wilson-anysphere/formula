@@ -1914,7 +1914,9 @@ fn formula_file_text(meta: &crate::FormulaMeta, display: Option<&str>) -> String
 }
 
 fn strip_leading_equals(s: &str) -> &str {
-    s.strip_prefix('=').unwrap_or(s)
+    let trimmed = s.trim();
+    let stripped = trimmed.strip_prefix('=').unwrap_or(trimmed);
+    stripped.trim()
 }
 
 fn raw_or_number(meta: Option<&crate::CellMeta>, n: f64) -> String {

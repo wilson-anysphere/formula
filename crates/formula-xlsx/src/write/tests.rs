@@ -71,7 +71,7 @@ fn writes_spreadsheetml_formula_text_without_leading_equals() {
     let formulas = worksheet_formula_texts_from_xlsx(&bytes, "xl/worksheets/sheet1.xml");
     for f in formulas.into_iter().filter(|f| !f.is_empty()) {
         assert!(
-            !f.starts_with('='),
+            !f.trim_start().starts_with('='),
             "SpreadsheetML <f> text must not start with '=' (got {f:?})"
         );
     }

@@ -847,8 +847,9 @@ fn write_value_element<W: Write>(
 }
 
 fn should_detach_shared_formula(f: &BytesStart<'_>, patch_formula: &str) -> bool {
-    let patch_formula = patch_formula.strip_prefix('=').unwrap_or(patch_formula);
-    if patch_formula.is_empty() {
+    let trimmed = patch_formula.trim();
+    let stripped = trimmed.strip_prefix('=').unwrap_or(trimmed).trim();
+    if stripped.is_empty() {
         return false;
     }
 
