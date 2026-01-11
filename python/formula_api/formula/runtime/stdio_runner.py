@@ -33,6 +33,107 @@ def _network_permission(permissions: Dict[str, Any]) -> str:
     return _normalize_permission(raw, {"none", "allowlist", "full"}, "none")
 
 
+def _normalize_hostname(host: str) -> str:
+    host = host.strip().lower()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    return host.rstrip(".")
+
+
+def _parse_network_allowlist(raw: Any) -> tuple[set[str], tuple[str, ...]]:
+    if not isinstance(raw, (list, tuple, set)):
+        return set(), ()
+
+    exact: set[str] = set()
+    wildcard_suffixes: set[str] = set()
+
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        entry = _normalize_hostname(item)
+        if not entry:
+            continue
+        if entry.startswith("*.") and len(entry) > 2:
+            wildcard_suffixes.add(entry[2:])
+        else:
+            exact.add(entry)
+
+    return exact, tuple(sorted(wildcard_suffixes))
+
+
+def _hostname_in_allowlist(hostname: str, exact: set[str], wildcard_suffixes: tuple[str, ...]) -> bool:
+    if hostname in exact:
+        return True
+    for suffix in wildcard_suffixes:
+        if hostname != suffix and hostname.endswith(f".{suffix}"):
+            return True
+    return False
+
+
+def _extract_hostname(value: Any) -> str | None:
+    host: Any
+    if isinstance(value, (tuple, list)):
+        if not value:
+            return None
+        host = value[0]
+    else:
+        host = value
+
+    if isinstance(host, bytes):
+        try:
+            host = host.decode("utf-8", errors="ignore")
+        except Exception:
+            return None
+
+    if isinstance(host, str):
+        normalized = _normalize_hostname(host)
+        return normalized or None
+
+    return None
+
+
+def _install_network_audit_hook(network: str, permissions: Dict[str, Any]) -> None:
+    """Best-effort network enforcement via sys.addaudithook (native only)."""
+
+    if network == "full" or not hasattr(sys, "addaudithook"):
+        return
+
+    raw_allowlist = permissions.get("networkAllowlist", permissions.get("network_allowlist", []))
+    exact, wildcard_suffixes = _parse_network_allowlist(raw_allowlist)
+
+    def audit_hook(event: str, args: Any) -> None:
+        if not isinstance(event, str) or not event.startswith("socket."):
+            return
+
+        if network == "none":
+            raise PermissionError("Network access is not permitted")
+
+        # allowlist enforcement
+        hostname: str | None = None
+        if event in {"socket.connect", "socket.sendto", "socket.sendmsg"}:
+            if isinstance(args, tuple) and len(args) >= 2:
+                hostname = _extract_hostname(args[1])
+        elif event == "socket.getaddrinfo":
+            if isinstance(args, tuple) and args:
+                hostname = _extract_hostname(args[0])
+        elif event in {"socket.gethostbyname", "socket.gethostbyaddr"}:
+            if isinstance(args, tuple) and args:
+                hostname = _extract_hostname(args[0])
+        elif event == "socket.getnameinfo":
+            if isinstance(args, tuple) and args:
+                hostname = _extract_hostname(args[0])
+        else:
+            return
+
+        if hostname is None or not _hostname_in_allowlist(hostname, exact, wildcard_suffixes):
+            raise PermissionError(f"Network access to {hostname!r} is not permitted")
+
+    try:
+        sys.addaudithook(audit_hook)
+    except Exception:
+        pass
+
+
 def main() -> None:
     # Stdout is reserved for protocol messages. Redirect user output to stderr so
     # prints don't corrupt the JSON stream.
@@ -56,18 +157,20 @@ def main() -> None:
         timeout_ms=cmd.get("timeout_ms", cmd.get("timeoutMs")),
     )
 
+    permissions = cmd.get("permissions", {}) if isinstance(cmd.get("permissions", {}), dict) else {}
+    filesystem = _filesystem_permission(permissions)
+    network = _network_permission(permissions)
+
+    _install_network_audit_hook(network, permissions)
+
     # Configure the bridge before applying sandbox restrictions so our own
     # imports aren't blocked.
     bridge = StdioRpcBridge(protocol_in=sys.stdin, protocol_out=protocol_out)
     formula.set_bridge(bridge)
 
-    apply_sandbox(cmd.get("permissions", {}))
+    apply_sandbox(permissions)
 
     try:
-        permissions = cmd.get("permissions", {}) if isinstance(cmd.get("permissions", {}), dict) else {}
-        filesystem = _filesystem_permission(permissions)
-        network = _network_permission(permissions)
-
         block_process_execution = not (filesystem == "readwrite" and network == "full")
 
         blocked_import_roots = set()
