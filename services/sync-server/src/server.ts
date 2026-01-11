@@ -1306,6 +1306,13 @@ export function createSyncServer(
     void (async () => {
       try {
         const ip = pickIp(req, config.trustProxy);
+        const uaHeader = req.headers["user-agent"];
+        const userAgent =
+          typeof uaHeader === "string"
+            ? uaHeader
+            : Array.isArray(uaHeader)
+              ? uaHeader[0]
+              : undefined;
 
         if (!connectionAttemptLimiter.consume(ip)) {
           recordUpgradeRejection("rate_limit");
@@ -1341,6 +1348,8 @@ export function createSyncServer(
         try {
           authCtx = await authenticateRequest(config.auth, token, docName, {
             introspectCache,
+            clientIp: ip,
+            userAgent,
           });
         } catch (err) {
           if (err instanceof AuthError) {
@@ -1363,14 +1372,6 @@ export function createSyncServer(
         // revoked or document permissions change.
         if (syncTokenIntrospection && authCtx.tokenType === "jwt") {
           try {
-            const uaHeader = req.headers["user-agent"];
-            const userAgent =
-              typeof uaHeader === "string"
-                ? uaHeader
-                : Array.isArray(uaHeader)
-                  ? uaHeader[0]
-                  : undefined;
-
             const introspection = await syncTokenIntrospection.introspect({
               token: token!,
               docId: docName,

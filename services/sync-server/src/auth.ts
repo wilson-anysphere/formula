@@ -196,7 +196,8 @@ function parseJwtExpMs(token: string): number | null {
 async function introspectTokenWithRetry(
   auth: Extract<AuthMode, { mode: "introspect" }>,
   token: string,
-  docId: string
+  docId: string,
+  options: { clientIp?: string | null; userAgent?: string | null } = {}
 ): Promise<{
   userId: string;
   orgId: string;
@@ -216,7 +217,12 @@ async function introspectTokenWithRetry(
           "content-type": "application/json",
           "x-internal-admin-token": auth.token,
         },
-        body: JSON.stringify({ token, docId }),
+        body: JSON.stringify({
+          token,
+          docId,
+          ...(options.clientIp ? { clientIp: options.clientIp } : {}),
+          ...(options.userAgent ? { userAgent: options.userAgent } : {}),
+        }),
         signal: AbortSignal.timeout(timeoutMs),
       });
 
@@ -325,7 +331,11 @@ export async function authenticateRequest(
   auth: AuthMode,
   token: string | null,
   docName: string,
-  options: { introspectCache?: IntrospectCache | null } = {}
+  options: {
+    introspectCache?: IntrospectCache | null;
+    clientIp?: string | null;
+    userAgent?: string | null;
+  } = {}
 ): Promise<AuthContext> {
   if (!token) throw new AuthError("Missing token", 401);
 
@@ -342,9 +352,12 @@ export async function authenticateRequest(
 
   if (auth.mode === "introspect") {
     const cache = options.introspectCache ?? null;
-    // Cache entries are scoped per (token, doc) so a single user/session token can
-    // be safely used across multiple documents.
-    const tokenHash = cache ? sha256Hex(`${token}\n${docName}`) : null;
+    // Cache entries are scoped per (token, doc, clientIp) so a single user/session
+    // token can be safely used across multiple documents and cannot be replayed
+    // from a different client IP during the cache window.
+    const tokenHash = cache
+      ? sha256Hex(`${token}\n${docName}\n${options.clientIp ?? ""}`)
+      : null;
     const now = Date.now();
     if (cache && tokenHash) {
       maybeSweepIntrospectCache(cache, now, auth.cacheMs);
@@ -358,7 +371,10 @@ export async function authenticateRequest(
     }
 
     try {
-      const result = await introspectTokenWithRetry(auth, token, docName);
+      const result = await introspectTokenWithRetry(auth, token, docName, {
+        clientIp: options.clientIp ?? null,
+        userAgent: options.userAgent ?? null,
+      });
       const ctx: AuthContext = {
         userId: result.userId,
         tokenType: "introspect",
