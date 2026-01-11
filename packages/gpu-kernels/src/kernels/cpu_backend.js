@@ -366,20 +366,6 @@ export class CpuBackend {
       }
     }
 
-    // Canonicalize order for stable semantics across backends.
-    if (total > 1) {
-      const packed = new BigUint64Array(total);
-      for (let i = 0; i < total; i++) {
-        packed[i] = (BigInt(leftIndex[i]) << 32n) | BigInt(rightIndex[i]);
-      }
-      packed.sort();
-      for (let i = 0; i < total; i++) {
-        const v = packed[i];
-        leftIndex[i] = Number(v >> 32n);
-        rightIndex[i] = Number(v & 0xffff_ffffn);
-      }
-    }
-
     return { leftIndex, rightIndex };
   }
 }
