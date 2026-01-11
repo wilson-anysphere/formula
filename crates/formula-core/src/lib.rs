@@ -775,7 +775,7 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
             _ if ch.is_ascii_alphabetic() || ch == '$' || ch == '_' => {
                 let mut buf = String::new();
                 while let Some(ch2) = chars.peek().copied() {
-                    if ch2.is_ascii_alphanumeric() || ch2 == '$' || ch2 == '_' {
+                    if ch2.is_ascii_alphanumeric() || ch2 == '$' || ch2 == '_' || ch2 == '.' {
                         buf.push(ch2.to_ascii_uppercase());
                         chars.next();
                     } else {
@@ -1177,5 +1177,14 @@ mod tests {
 
         wb.recalculate(None).unwrap();
         assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(ERROR_REF));
+    }
+
+    #[test]
+    fn dotted_function_names_fall_back_to_name_error() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("=_xlfn.SEQUENCE(1)"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(ERROR_NAME));
     }
 }
