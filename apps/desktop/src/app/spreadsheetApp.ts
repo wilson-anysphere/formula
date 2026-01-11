@@ -2729,23 +2729,7 @@ export class SpreadsheetApp {
       return;
     }
 
-    this.ensureViewportMappingCurrent();
-    const fillHandle = this.selectionRenderer.getFillHandleRect(
-      this.selection,
-      {
-        getCellRect: (cell) => this.getCellRect(cell),
-        visibleRows: this.visibleRows,
-        visibleCols: this.visibleCols,
-      },
-      {
-        clipRect: {
-          x: this.rowHeaderWidth,
-          y: this.colHeaderHeight,
-          width: this.viewportWidth(),
-          height: this.viewportHeight(),
-        },
-      }
-    );
+    const fillHandle = this.getFillHandleRect();
     const overFillHandle =
       fillHandle &&
       x >= fillHandle.x &&
