@@ -93,6 +93,7 @@ function createConfig(ttlMs: number, dataDir: string): SyncServerConfig {
     trustProxy: false,
     gc: true,
     tls: null,
+    metrics: { public: true },
     dataDir,
     disableDataDirLock: true,
     persistence: {

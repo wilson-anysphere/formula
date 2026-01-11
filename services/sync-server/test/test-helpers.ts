@@ -236,6 +236,8 @@ export async function startSyncServer(opts: {
       // Prevent TLS-related env vars from leaking into unrelated tests.
       SYNC_SERVER_TLS_CERT_PATH: "",
       SYNC_SERVER_TLS_KEY_PATH: "",
+      // Prevent local ops hardening flags from affecting test behavior.
+      SYNC_SERVER_DISABLE_PUBLIC_METRICS: "",
       ...authEnv,
       ...(opts.env ?? {}),
     },

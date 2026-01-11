@@ -45,6 +45,14 @@ export type SyncServerConfig = {
       }
     | null;
 
+  metrics: {
+    /**
+     * Whether to expose `/metrics` publicly. `/internal/metrics` remains protected
+     * by `SYNC_SERVER_INTERNAL_ADMIN_TOKEN`.
+     */
+    public: boolean;
+  };
+
   dataDir: string;
   disableDataDirLock: boolean;
   persistence: {
@@ -178,6 +186,8 @@ export function loadConfigFromEnv(): SyncServerConfig {
   const port = envInt(process.env.SYNC_SERVER_PORT, 1234);
   const trustProxy = envBool(process.env.SYNC_SERVER_TRUST_PROXY, false);
   const gc = envBool(process.env.SYNC_SERVER_GC, true);
+
+  const disablePublicMetrics = envBool(process.env.SYNC_SERVER_DISABLE_PUBLIC_METRICS, false);
 
   const enforceRangeRestrictionsDefault = nodeEnv === "production";
   const enforceRangeRestrictions = envBool(
@@ -352,6 +362,9 @@ export function loadConfigFromEnv(): SyncServerConfig {
     trustProxy,
     gc,
     tls,
+    metrics: {
+      public: !disablePublicMetrics,
+    },
     dataDir,
     disableDataDirLock,
     persistence: {

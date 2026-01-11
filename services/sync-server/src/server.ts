@@ -966,6 +966,10 @@ export function createSyncServer(
       const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
 
       if (req.method === "GET" && url.pathname === "/metrics") {
+        if (!config.metrics.public) {
+          sendText(res, 404, "not_found", "text/plain; charset=utf-8");
+          return;
+        }
         const body = await metrics.metricsText();
         sendText(res, 200, body, metrics.registry.contentType);
         return;

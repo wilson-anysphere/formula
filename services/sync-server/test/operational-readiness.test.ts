@@ -138,3 +138,34 @@ test("supports HTTPS/WSS when SYNC_SERVER_TLS_CERT_PATH and SYNC_SERVER_TLS_KEY_
   });
   ws.terminate();
 });
+
+test("can disable public /metrics while keeping /internal/metrics", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-metrics-disabled-"));
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "admin-token",
+      SYNC_SERVER_DISABLE_PUBLIC_METRICS: "true",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const publicRes = await fetch(`${server.httpUrl}/metrics`);
+  assert.equal(publicRes.status, 404);
+
+  const internalRes = await fetch(`${server.httpUrl}/internal/metrics`, {
+    headers: { "x-internal-admin-token": "admin-token" },
+  });
+  assert.equal(internalRes.status, 200);
+  assert.match(internalRes.headers.get("content-type") ?? "", /text\/plain/);
+  const body = await internalRes.text();
+  assert.match(body, /sync_server_ws_connections_total/);
+});

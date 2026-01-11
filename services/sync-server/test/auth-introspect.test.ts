@@ -120,6 +120,7 @@ test("auth:introspect enforces roles and caches introspection results", async (t
     trustProxy: false,
     gc: true,
     tls: null,
+    metrics: { public: true },
     dataDir,
     disableDataDirLock: true,
     persistence: {

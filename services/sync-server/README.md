@@ -200,7 +200,7 @@ Endpoints:
 
 The server exposes Prometheus text format at:
 
-- `GET /metrics` (public)
+- `GET /metrics` (public by default; set `SYNC_SERVER_DISABLE_PUBLIC_METRICS=1` to disable)
 
 Notable metrics (prefix `sync_server_`):
 
