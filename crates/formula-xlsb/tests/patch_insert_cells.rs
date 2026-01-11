@@ -60,6 +60,16 @@ fn patch_sheet_bin_can_insert_into_missing_row_and_expand_dimension() {
     let wb2 = XlsbWorkbook::open(&output_path).expect("open patched workbook");
     let sheet = wb2.read_sheet(0).expect("read patched sheet");
 
+    let coords: Vec<(u32, u32)> = sheet.cells.iter().map(|c| (c.row, c.col)).collect();
+    assert_eq!(coords, vec![(0, 0), (5, 3)]);
+
+    let original = sheet
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 0))
+        .expect("original cell exists");
+    assert_eq!(original.value, CellValue::Number(1.0));
+
     let inserted = sheet
         .cells
         .iter()
@@ -69,8 +79,10 @@ fn patch_sheet_bin_can_insert_into_missing_row_and_expand_dimension() {
 
     let dim = sheet.dimension.expect("dimension exists");
     let (end_row, end_col) = dim_end_row_col(&dim);
-    assert!(dim.start_row <= 5 && end_row >= 5);
-    assert!(dim.start_col <= 3 && end_col >= 3);
+    assert_eq!(dim.start_row, 0);
+    assert_eq!(dim.start_col, 0);
+    assert_eq!(end_row, 5);
+    assert_eq!(end_col, 3);
 }
 
 #[test]
@@ -121,6 +133,7 @@ fn patch_sheet_bin_can_insert_into_existing_row_in_column_order() {
     let dim = sheet.dimension.expect("dimension exists");
     let (end_row, end_col) = dim_end_row_col(&dim);
     assert_eq!(dim.start_row, 0);
+    assert_eq!(dim.start_col, 0);
     assert_eq!(end_row, 0);
-    assert!(dim.start_col <= 10 && end_col >= 10);
+    assert_eq!(end_col, 10);
 }

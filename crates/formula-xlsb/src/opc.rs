@@ -300,7 +300,8 @@ impl XlsbWorkbook {
     /// ([`patch_sheet_bin`]) plus the part override writer
     /// ([`XlsbWorkbook::save_with_part_overrides`]).
     ///
-    /// Note: this only supports updating an existing cell; it does not insert rows/columns.
+    /// Note: this may insert missing `BrtRow` / cell records inside `BrtSheetData` if the target
+    /// cell does not already exist in the worksheet stream.
     pub fn save_with_edits(
         &self,
         dest: impl AsRef<Path>,
