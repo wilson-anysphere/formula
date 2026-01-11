@@ -130,7 +130,11 @@ impl AutoSaveManager {
         self.memory.record_change(change)?;
         // If the task has already exited we just drop the wake-up signal; higher
         // layers can always fall back to explicit persistence.
-        let _ = self.tx.send(Command::Touch);
+        if self.tx.send(Command::Touch).is_err() {
+            // The autosave task is gone; fall back to synchronous flushing so
+            // callers still get persistence guarantees.
+            flush_dirty_pages(&self.memory, &self.save_count)?;
+        }
         Ok(())
     }
 
@@ -140,14 +144,21 @@ impl AutoSaveManager {
 
     pub async fn flush(&self) -> StorageResult<()> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.tx.send(Command::Flush(tx));
-        rx.await.unwrap_or(Ok(()))
+        if self.tx.send(Command::Flush(tx)).is_err() {
+            flush_dirty_pages(&self.memory, &self.save_count)?;
+            return Ok(());
+        }
+        rx.await.unwrap_or_else(|_| flush_dirty_pages(&self.memory, &self.save_count))
     }
 
     pub async fn shutdown(self) -> StorageResult<()> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.tx.send(Command::Shutdown(tx));
-        let result = rx.await.unwrap_or(Ok(()));
+        let result = if self.tx.send(Command::Shutdown(tx)).is_err() {
+            flush_dirty_pages(&self.memory, &self.save_count)
+        } else {
+            rx.await
+                .unwrap_or_else(|_| flush_dirty_pages(&self.memory, &self.save_count))
+        };
         let _ = self.handle.await;
         result
     }
@@ -164,4 +175,3 @@ fn flush_dirty_pages(memory: &MemoryManager, save_count: &AtomicUsize) -> Storag
     }
     Ok(())
 }
-
