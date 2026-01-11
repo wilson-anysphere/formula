@@ -864,7 +864,7 @@ enforces that the dist entrypoints stay in sync with `src/extension.js`.
 
 ```typescript
 // extension.ts
-import * as formula from "@formula/api";
+import * as formula from "@formula/extension-api";
 
 export function activate(context: formula.ExtensionContext) {
   // Register command
@@ -920,7 +920,7 @@ function inferChartType(data: CellValue[][]): ChartConfiguration {
 
 ```typescript
 // extension.ts
-import * as formula from "@formula/api";
+import * as formula from "@formula/extension-api";
 
 export function activate(context: formula.ExtensionContext) {
   // Register custom function
