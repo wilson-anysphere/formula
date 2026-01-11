@@ -187,6 +187,7 @@ export function startWorkbookSync(args: {
 
   const stopListening = args.document.on("change", ({ deltas }) => {
     if (stopped) return;
+    if (!Array.isArray(deltas) || deltas.length === 0) return;
     for (const delta of deltas) {
       // Ignore format-only deltas (we can't mirror those over set_cell/set_range yet).
       if (inputEquals(delta.before, delta.after)) continue;
