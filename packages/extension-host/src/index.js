@@ -49,6 +49,28 @@ function serializeError(error) {
   return { message: String(error) };
 }
 
+function deserializeError(payload) {
+  const message = typeof payload === "string" ? payload : String(payload?.message ?? "Unknown error");
+  const err = new Error(message);
+  if (payload?.stack) err.stack = String(payload.stack);
+  return err;
+}
+
+function createTimeoutError({ extensionId, operation, timeoutMs }) {
+  const err = new Error(`Extension ${extensionId} ${operation} timed out after ${timeoutMs}ms`);
+  err.name = "ExtensionTimeoutError";
+  err.code = "EXTENSION_TIMEOUT";
+  return err;
+}
+
+function createWorkerTerminatedError({ extensionId, reason, cause }) {
+  const base = cause instanceof Error ? cause.message : String(cause ?? "unknown reason");
+  const err = new Error(`Extension worker terminated: ${extensionId}: ${reason}: ${base}`);
+  err.name = "ExtensionWorkerTerminatedError";
+  err.code = "EXTENSION_WORKER_TERMINATED";
+  return err;
+}
+
 class ExtensionHost {
   constructor({
     engineVersion = "1.0.0",
@@ -56,6 +78,10 @@ class ExtensionHost {
     permissionsStoragePath = path.join(process.cwd(), ".formula", "permissions.json"),
     extensionStoragePath = path.join(process.cwd(), ".formula", "storage.json"),
     auditDbPath = null,
+    activationTimeoutMs = 5000,
+    commandTimeoutMs = 5000,
+    customFunctionTimeoutMs = 5000,
+    memoryMb = 256,
     spreadsheet = new InMemorySpreadsheet()
   } = {}) {
     this._engineVersion = engineVersion;
@@ -65,7 +91,18 @@ class ExtensionHost {
     this._customFunctions = new Map(); // functionName -> extensionId
     this._messages = [];
     this._clipboardText = "";
-    this._pendingWorkerRequests = new Map();
+    this._activationTimeoutMs = Number.isFinite(activationTimeoutMs)
+      ? Math.max(0, activationTimeoutMs)
+      : 5000;
+    this._commandTimeoutMs = Number.isFinite(commandTimeoutMs) ? Math.max(0, commandTimeoutMs) : 5000;
+    this._customFunctionTimeoutMs = Number.isFinite(customFunctionTimeoutMs)
+      ? Math.max(0, customFunctionTimeoutMs)
+      : 5000;
+
+    // Best-effort sandboxing: V8 resource limits prevent a single extension worker from
+    // consuming unbounded heap memory, but they do not cover all native/externals.
+    // Set to null/0 to disable.
+    this._memoryMb = Number.isFinite(memoryMb) ? Math.max(0, memoryMb) : 0;
     this._extensionStoragePath = extensionStoragePath;
     this._spreadsheet = spreadsheet;
 
@@ -82,6 +119,9 @@ class ExtensionHost {
       storagePath: permissionsStoragePath,
       prompt: permissionPrompt
     });
+
+    this._workerScriptPath = path.resolve(__dirname, "../worker/extension-worker.js");
+    this._apiModulePath = path.resolve(__dirname, "../../extension-api/index.js");
 
     this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e));
     this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e));
@@ -100,35 +140,23 @@ class ExtensionHost {
     const extensionId = `${manifest.publisher}.${manifest.name}`;
 
     const mainPath = path.resolve(extensionPath, manifest.main);
-    const workerScript = path.resolve(__dirname, "../worker/extension-worker.js");
-    const apiModulePath = path.resolve(__dirname, "../../extension-api/index.js");
-
-    const worker = new Worker(workerScript, {
-      workerData: {
-        extensionId,
-        extensionPath,
-        mainPath,
-        apiModulePath
-      }
-    });
-
     const extension = {
       id: extensionId,
       path: extensionPath,
       mainPath,
       manifest,
-      worker,
+      worker: null,
       active: false,
-      registeredCommands: new Set()
-    };
-
-    worker.on("message", (msg) => this._handleWorkerMessage(extension, msg));
-    worker.on("error", (err) => this._handleWorkerCrash(extension, err));
-    worker.on("exit", (code) => {
-      if (code !== 0) {
-        this._handleWorkerCrash(extension, new Error(`Worker exited with code ${code}`));
+      registeredCommands: new Set(),
+      pendingRequests: new Map(),
+      workerTermination: null,
+      workerData: {
+        extensionId,
+        extensionPath,
+        mainPath,
+        apiModulePath: this._apiModulePath
       }
-    });
+    };
 
     // Register contributed commands so the app can route executions before activation.
     for (const cmd of manifest.contributes.commands ?? []) {
@@ -143,6 +171,7 @@ class ExtensionHost {
     }
 
     this._extensions.set(extensionId, extension);
+    this._spawnWorker(extension);
 
     return extensionId;
   }
@@ -201,19 +230,19 @@ class ExtensionHost {
       await this._activateExtension(extension, activationEvent);
     }
 
-    const id = crypto.randomUUID();
-    const promise = new Promise((resolve, reject) => {
-      this._pendingWorkerRequests.set(id, { resolve, reject });
-    });
-
-    extension.worker.postMessage({
-      type: "execute_command",
-      id,
-      commandId,
-      args
-    });
-
-    return promise;
+    await this._ensureWorker(extension);
+    return this._requestFromWorker(
+      extension,
+      {
+        type: "execute_command",
+        commandId,
+        args
+      },
+      {
+        timeoutMs: this._commandTimeoutMs,
+        operation: `command '${commandId}'`
+      }
+    );
   }
 
   getPanel(panelId) {
@@ -231,6 +260,9 @@ class ExtensionHost {
     if (!panel) throw new Error(`Unknown panel: ${panelId}`);
     const extension = this._extensions.get(panel.extensionId);
     if (!extension) throw new Error(`Extension not loaded: ${panel.extensionId}`);
+    if (!extension.worker) {
+      throw new Error(`Extension worker not running: ${panel.extensionId}`);
+    }
     extension.worker.postMessage({ type: "panel_message", panelId, message });
   }
 
@@ -250,19 +282,19 @@ class ExtensionHost {
       await this._activateExtension(extension, activationEvent);
     }
 
-    const id = crypto.randomUUID();
-    const promise = new Promise((resolve, reject) => {
-      this._pendingWorkerRequests.set(id, { resolve, reject });
-    });
-
-    extension.worker.postMessage({
-      type: "invoke_custom_function",
-      id,
-      functionName: name,
-      args
-    });
-
-    return promise;
+    await this._ensureWorker(extension);
+    return this._requestFromWorker(
+      extension,
+      {
+        type: "invoke_custom_function",
+        functionName: name,
+        args
+      },
+      {
+        timeoutMs: this._customFunctionTimeoutMs,
+        operation: `custom function '${name}'`
+      }
+    );
   }
 
   getMessages() {
@@ -387,14 +419,155 @@ class ExtensionHost {
     this._messages = [];
 
     await Promise.allSettled(
-      extensions.map(async (ext) => {
-        try {
-          await ext.worker.terminate();
-        } catch {
-          // ignore
-        }
-      })
+      extensions.map(async (ext) =>
+        this._terminateWorker(ext, { reason: "dispose", cause: new Error("ExtensionHost disposed") })
+      )
     );
+  }
+
+  async reloadExtension(extensionId) {
+    const id = String(extensionId);
+    const extension = this._extensions.get(id);
+    if (!extension) throw new Error(`Extension not loaded: ${id}`);
+
+    await this._terminateWorker(extension, {
+      reason: "reload",
+      cause: new Error("Extension reloaded")
+    });
+
+    this._spawnWorker(extension);
+  }
+
+  _getWorkerResourceLimits() {
+    if (!this._memoryMb) return undefined;
+    const oldGeneration = Math.floor(this._memoryMb);
+    if (oldGeneration <= 0) return undefined;
+    const youngGeneration = Math.min(oldGeneration, Math.min(64, Math.max(16, Math.floor(oldGeneration / 4))));
+    return {
+      // Best-effort: caps V8 heap size inside the extension worker thread.
+      maxOldGenerationSizeMb: oldGeneration,
+      maxYoungGenerationSizeMb: youngGeneration
+    };
+  }
+
+  _spawnWorker(extension) {
+    if (extension.worker) return;
+
+    const options = {
+      workerData: extension.workerData
+    };
+
+    const resourceLimits = this._getWorkerResourceLimits();
+    if (resourceLimits) options.resourceLimits = resourceLimits;
+
+    const worker = new Worker(this._workerScriptPath, options);
+    extension.worker = worker;
+
+    worker.on("message", (msg) => this._handleWorkerMessage(extension, worker, msg));
+    worker.on("error", (err) => this._handleWorkerCrash(extension, worker, err));
+    worker.on("exit", (code) => {
+      if (worker !== extension.worker) return;
+      const err =
+        code === 0
+          ? new Error("Worker exited")
+          : new Error(`Worker exited with code ${code ?? "unknown"}`);
+      void this._terminateWorker(extension, { reason: "exit", cause: err });
+    });
+  }
+
+  async _ensureWorker(extension) {
+    if (extension.worker) return;
+    if (extension.workerTermination) {
+      try {
+        await extension.workerTermination;
+      } catch {
+        // ignore
+      }
+    }
+
+    // A fresh worker always starts inactive until we successfully activate.
+    extension.active = false;
+    this._spawnWorker(extension);
+  }
+
+  _requestFromWorker(extension, message, { timeoutMs, operation }) {
+    const worker = extension.worker;
+    if (!worker) {
+      throw new Error(`Extension worker not running: ${extension.id}`);
+    }
+
+    const id = crypto.randomUUID();
+    const payload = { ...message, id };
+
+    return new Promise((resolve, reject) => {
+      const timeout =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              const pending = extension.pendingRequests.get(id);
+              if (!pending) return;
+              extension.pendingRequests.delete(id);
+              const err = createTimeoutError({
+                extensionId: extension.id,
+                operation,
+                timeoutMs
+              });
+              pending.reject(err);
+              void this._terminateWorker(extension, {
+                reason: "timeout",
+                cause: err
+              });
+            }, timeoutMs)
+          : null;
+
+      extension.pendingRequests.set(id, { resolve, reject, timeout });
+
+      try {
+        worker.postMessage(payload);
+      } catch (error) {
+        extension.pendingRequests.delete(id);
+        if (timeout) clearTimeout(timeout);
+        reject(error);
+      }
+    });
+  }
+
+  async _terminateWorker(extension, { reason, cause }) {
+    const worker = extension.worker;
+
+    extension.active = false;
+
+    // Reject outstanding requests bound for this worker.
+    for (const [id, pending] of extension.pendingRequests.entries()) {
+      if (pending.timeout) clearTimeout(pending.timeout);
+      pending.reject(
+        createWorkerTerminatedError({
+          extensionId: extension.id,
+          reason,
+          cause
+        })
+      );
+      extension.pendingRequests.delete(id);
+    }
+
+    if (!worker) return extension.workerTermination ?? null;
+
+    // Mark worker dead immediately so new activations can spawn a fresh one.
+    extension.worker = null;
+
+    if (extension.workerTermination) return extension.workerTermination;
+
+    const termination = worker
+      .terminate()
+      .catch(() => {
+        // ignore
+      })
+      .finally(() => {
+        if (extension.workerTermination === termination) extension.workerTermination = null;
+      });
+
+    extension.workerTermination = termination;
+
+    return extension.workerTermination;
   }
 
   async _ensureSecurity() {
@@ -423,6 +596,7 @@ class ExtensionHost {
   async _handleApiCall(extension, message) {
     const { id, namespace, method, args } = message;
     const apiKey = `${namespace}.${method}`;
+    const worker = extension.worker;
 
     const permissions = API_PERMISSIONS[apiKey] ?? [];
     const securityPrincipal = { type: "extension", id: extension.id };
@@ -454,11 +628,15 @@ class ExtensionHost {
 
       const result = await this._executeApi(namespace, method, args, extension);
 
-      extension.worker.postMessage({
-        type: "api_result",
-        id,
-        result
-      });
+      try {
+        worker?.postMessage({
+          type: "api_result",
+          id,
+          result
+        });
+      } catch {
+        // ignore
+      }
     } catch (error) {
       if (isNetworkFetch) {
         try {
@@ -474,11 +652,15 @@ class ExtensionHost {
         }
       }
 
-      extension.worker.postMessage({
-        type: "api_error",
-        id,
-        error: serializeError(error)
-      });
+      try {
+        worker?.postMessage({
+          type: "api_error",
+          id,
+          error: serializeError(error)
+        });
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -679,7 +861,8 @@ class ExtensionHost {
     await fs.writeFile(this._extensionStoragePath, JSON.stringify(store, null, 2), "utf8");
   }
 
-  _handleWorkerMessage(extension, message) {
+  _handleWorkerMessage(extension, worker, message) {
+    if (worker !== extension.worker) return;
     if (!message || typeof message !== "object") return;
 
     switch (message.type) {
@@ -687,45 +870,51 @@ class ExtensionHost {
         this._handleApiCall(extension, message);
         return;
       case "activate_result": {
-        const pending = this._pendingWorkerRequests.get(message.id);
+        const pending = extension.pendingRequests.get(message.id);
         if (!pending) return;
-        this._pendingWorkerRequests.delete(message.id);
+        extension.pendingRequests.delete(message.id);
+        if (pending.timeout) clearTimeout(pending.timeout);
         pending.resolve(true);
         return;
       }
       case "activate_error": {
-        const pending = this._pendingWorkerRequests.get(message.id);
+        const pending = extension.pendingRequests.get(message.id);
         if (!pending) return;
-        this._pendingWorkerRequests.delete(message.id);
-        pending.reject(new Error(String(message.error?.message ?? message.error)));
+        extension.pendingRequests.delete(message.id);
+        if (pending.timeout) clearTimeout(pending.timeout);
+        pending.reject(deserializeError(message.error));
         return;
       }
       case "command_result": {
-        const pending = this._pendingWorkerRequests.get(message.id);
+        const pending = extension.pendingRequests.get(message.id);
         if (!pending) return;
-        this._pendingWorkerRequests.delete(message.id);
+        extension.pendingRequests.delete(message.id);
+        if (pending.timeout) clearTimeout(pending.timeout);
         pending.resolve(message.result);
         return;
       }
       case "command_error": {
-        const pending = this._pendingWorkerRequests.get(message.id);
+        const pending = extension.pendingRequests.get(message.id);
         if (!pending) return;
-        this._pendingWorkerRequests.delete(message.id);
-        pending.reject(new Error(String(message.error?.message ?? message.error)));
+        extension.pendingRequests.delete(message.id);
+        if (pending.timeout) clearTimeout(pending.timeout);
+        pending.reject(deserializeError(message.error));
         return;
       }
       case "custom_function_result": {
-        const pending = this._pendingWorkerRequests.get(message.id);
+        const pending = extension.pendingRequests.get(message.id);
         if (!pending) return;
-        this._pendingWorkerRequests.delete(message.id);
+        extension.pendingRequests.delete(message.id);
+        if (pending.timeout) clearTimeout(pending.timeout);
         pending.resolve(message.result);
         return;
       }
       case "custom_function_error": {
-        const pending = this._pendingWorkerRequests.get(message.id);
+        const pending = extension.pendingRequests.get(message.id);
         if (!pending) return;
-        this._pendingWorkerRequests.delete(message.id);
-        pending.reject(new Error(String(message.error?.message ?? message.error)));
+        extension.pendingRequests.delete(message.id);
+        if (pending.timeout) clearTimeout(pending.timeout);
+        pending.reject(deserializeError(message.error));
         return;
       }
       case "log": {
@@ -745,22 +934,22 @@ class ExtensionHost {
     }
   }
 
-  _handleWorkerCrash(extension, error) {
-    for (const [id, pending] of this._pendingWorkerRequests.entries()) {
-      pending.reject(new Error(`Extension worker crashed: ${extension.id}: ${error.message}`));
-      this._pendingWorkerRequests.delete(id);
-    }
+  _handleWorkerCrash(extension, worker, error) {
+    if (worker !== extension.worker) return;
+    void this._terminateWorker(extension, {
+      reason: "crash",
+      cause: error
+    });
   }
 
   async _activateExtension(extension, reason) {
-    const id = crypto.randomUUID();
-    const promise = new Promise((resolve, reject) => {
-      this._pendingWorkerRequests.set(id, { resolve, reject });
-    });
-
-    extension.worker.postMessage({ type: "activate", id, reason });
-
-    await promise;
+    if (extension.active) return;
+    await this._ensureWorker(extension);
+    await this._requestFromWorker(
+      extension,
+      { type: "activate", reason },
+      { timeoutMs: this._activationTimeoutMs, operation: `activation (${reason})` }
+    );
     extension.active = true;
   }
 
