@@ -9,6 +9,7 @@ edition = "2021"
 write = ["formula-biff/encode"]
 
 [dependencies]
+formula-model = { path = "../formula-model" }
 quick-xml = "0.31"
 thiserror = "1.0"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }

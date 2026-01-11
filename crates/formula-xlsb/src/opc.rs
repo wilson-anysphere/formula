@@ -5,6 +5,7 @@ use crate::parser::{
 };
 use crate::patch::{patch_sheet_bin, CellEdit};
 use crate::workbook_context::WorkbookContext;
+use crate::SharedString;
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
@@ -53,6 +54,7 @@ pub struct XlsbWorkbook {
     path: PathBuf,
     sheets: Vec<SheetMeta>,
     shared_strings: Vec<String>,
+    shared_strings_table: Vec<SharedString>,
     workbook_context: WorkbookContext,
     preserved_parts: HashMap<String, Vec<u8>>,
 }
@@ -105,15 +107,18 @@ impl XlsbWorkbook {
             Ok(mut sst) => {
                 let mut bytes = Vec::with_capacity(sst.size() as usize);
                 sst.read_to_end(&mut bytes)?;
-                let strings = parse_shared_strings(&mut Cursor::new(&bytes))?;
+                let table = parse_shared_strings(&mut Cursor::new(&bytes))?;
+                let strings = table.iter().map(|s| s.plain_text().to_string()).collect();
                 if options.preserve_parsed_parts {
                     preserved_parts.insert("xl/sharedStrings.bin".to_string(), bytes);
                 }
-                strings
+                (strings, table)
             }
-            Err(zip::result::ZipError::FileNotFound) => Vec::new(),
+            Err(zip::result::ZipError::FileNotFound) => (Vec::new(), Vec::new()),
             Err(e) => return Err(e.into()),
         };
+
+        let (shared_strings, shared_strings_table) = shared_strings;
 
         let known_parts: HashSet<&str> = [
             "[Content_Types].xml",
@@ -156,6 +161,7 @@ impl XlsbWorkbook {
             path,
             sheets,
             shared_strings,
+            shared_strings_table,
             workbook_context,
             preserved_parts,
         })
@@ -167,6 +173,11 @@ impl XlsbWorkbook {
 
     pub fn shared_strings(&self) -> &[String] {
         &self.shared_strings
+    }
+
+    /// Shared strings with rich text / phonetic preservation.
+    pub fn shared_strings_table(&self) -> &[SharedString] {
+        &self.shared_strings_table
     }
 
     pub fn workbook_context(&self) -> &WorkbookContext {

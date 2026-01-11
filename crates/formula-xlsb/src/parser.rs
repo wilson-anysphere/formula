@@ -3,7 +3,10 @@ use std::io::{self, BufReader, Read};
 
 use crate::biff12_varint;
 use crate::workbook_context::{ExternName, ExternSheet, SupBook, SupBookKind, WorkbookContext};
+use formula_model::rich_text::{RichText, RichTextRunStyle};
 use thiserror::Error;
+
+use crate::shared_strings::SharedString;
 
 // Record IDs (BIFF12 / MS-XLSB). Values taken from pyxlsb (public domain-ish) and MS-XLSB.
 #[allow(dead_code)]
@@ -512,23 +515,269 @@ mod tests {
 
 pub(crate) fn parse_shared_strings<R: Read>(
     shared_strings_bin: &mut R,
-) -> Result<Vec<String>, Error> {
+) -> Result<Vec<SharedString>, Error> {
     let mut reader = Biff12Reader::new(shared_strings_bin);
     let mut buf = Vec::new();
     let mut strings = Vec::new();
     while let Some(rec) = reader.read_record(&mut buf)? {
         match rec.id {
             biff12::SI => {
-                let mut rr = RecordReader::new(rec.data);
-                // Flags byte (rich text / phonetic) – not handled yet.
-                rr.skip(1)?;
-                strings.push(rr.read_utf16_string()?);
+                strings.push(parse_shared_string_item(rec.data)?);
             }
             biff12::SST_END => break,
             _ => {}
         }
     }
     Ok(strings)
+}
+
+fn parse_shared_string_item(data: &[u8]) -> Result<SharedString, Error> {
+    let mut rr = RecordReader::new(data);
+    let flags = rr.read_u8()?;
+    let base_text = rr.read_utf16_string()?;
+
+    // MS-XLSB `SI` flags:
+    // - bit 0: rich text runs
+    // - bit 1: phonetic (ruby) data
+    // Higher bits are reserved but should be preserved.
+    let has_rich = flags & 0x01 != 0;
+    let has_phonetic = flags & 0x02 != 0;
+
+    // Plain strings can be represented losslessly by their decoded text.
+    if !has_rich && !has_phonetic && flags == 0 {
+        return Ok(SharedString {
+            rich_text: RichText::new(base_text),
+            run_formats: Vec::new(),
+            phonetic: None,
+            raw_si: None,
+        });
+    }
+
+    let raw_si = Some(data.to_vec());
+
+    let (rich_text, run_formats, offset_after_rich) = if has_rich {
+        let start_offset = rr.offset;
+        match parse_rich_runs_best_effort(data, start_offset, &base_text, has_phonetic) {
+            Some((rt, formats, new_offset)) => (rt, formats, new_offset),
+            None => (RichText::new(base_text.clone()), Vec::new(), start_offset),
+        }
+    } else {
+        (RichText::new(base_text.clone()), Vec::new(), rr.offset)
+    };
+
+    rr.offset = offset_after_rich;
+    let remaining = rr.data.len().saturating_sub(rr.offset);
+    let phonetic = if has_phonetic && remaining > 0 {
+        Some(rr.read_slice(remaining)?.to_vec())
+    } else {
+        None
+    };
+
+    Ok(SharedString {
+        rich_text,
+        run_formats,
+        phonetic,
+        raw_si,
+    })
+}
+
+/// Best-effort rich text run parsing.
+///
+/// XLSB rich runs reference fonts/styles; we treat the formatting bytes as opaque.
+///
+/// Returns `(rich_text, run_formats, new_offset)` on success, otherwise `None` and the caller
+/// should fall back to treating the string as plain text while still preserving `raw_si`.
+fn parse_rich_runs_best_effort(
+    data: &[u8],
+    offset: usize,
+    text: &str,
+    has_phonetic: bool,
+) -> Option<(RichText, Vec<Vec<u8>>, usize)> {
+    // Candidate layouts:
+    // - MS-XLSB uses a u32 run count followed by `StrRun` entries.
+    //   A `StrRun` is 8 bytes: [ich: u32][ifnt: u16][reserved: u16].
+    // - Some producers may use legacy BIFF8-style runs (u16 count, 4-byte runs). We support
+    //   this as a fallback to avoid hard failures on weird files.
+    const LAYOUTS: &[(usize, usize, fn(&[u8]) -> usize)] = &[
+        // (count_size, run_size, read_count_fn)
+        (4, 8, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize),
+        (2, 4, |b| u16::from_le_bytes([b[0], b[1]]) as usize),
+    ];
+
+    for (count_size, run_size, read_count) in LAYOUTS {
+        let mut off = offset;
+        if data.len().saturating_sub(off) < *count_size {
+            continue;
+        }
+        let count = read_count(&data[off..off + count_size]);
+        off += count_size;
+
+        // Sanity: avoid absurd allocations if the count is garbage.
+        if count > 1_000_000 {
+            continue;
+        }
+
+        let remaining = data.len().saturating_sub(off);
+        let needed = count.checked_mul(*run_size)?;
+        if needed > remaining {
+            continue;
+        }
+
+        let run_bytes = &data[off..off + needed];
+        off += needed;
+
+        // If there is no phonetic data, we expect to consume the whole record payload.
+        if !has_phonetic && off != data.len() {
+            // Some files may include padding or unknown tail bytes; accept them by not requiring
+            // full consumption, but prefer layouts that fully consume the record.
+            // We'll still allow this layout if other layouts don't match.
+        }
+
+        let (starts_utf16, formats) = match *run_size {
+            8 => parse_runs_8(run_bytes, count),
+            4 => parse_runs_4(run_bytes, count),
+            _ => continue,
+        }?;
+
+        let (rich_text, run_formats) = build_rich_text_from_runs(text, &starts_utf16, formats)?;
+        return Some((rich_text, run_formats, off));
+    }
+
+    None
+}
+
+fn parse_runs_8(run_bytes: &[u8], count: usize) -> Option<(Vec<usize>, Vec<Vec<u8>>)> {
+    if run_bytes.len() != count.checked_mul(8)? {
+        return None;
+    }
+    let mut starts = Vec::with_capacity(count);
+    let mut formats = Vec::with_capacity(count);
+    for chunk in run_bytes.chunks_exact(8) {
+        let ich = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as usize;
+        starts.push(ich);
+        formats.push(chunk[4..8].to_vec());
+    }
+    Some((starts, formats))
+}
+
+fn parse_runs_4(run_bytes: &[u8], count: usize) -> Option<(Vec<usize>, Vec<Vec<u8>>)> {
+    if run_bytes.len() != count.checked_mul(4)? {
+        return None;
+    }
+    let mut starts = Vec::with_capacity(count);
+    let mut formats = Vec::with_capacity(count);
+    for chunk in run_bytes.chunks_exact(4) {
+        let ich = u16::from_le_bytes([chunk[0], chunk[1]]) as usize;
+        starts.push(ich);
+        formats.push(chunk[2..4].to_vec());
+    }
+    Some((starts, formats))
+}
+
+fn build_rich_text_from_runs(
+    text: &str,
+    starts_utf16: &[usize],
+    mut formats: Vec<Vec<u8>>,
+) -> Option<(RichText, Vec<Vec<u8>>)> {
+    if starts_utf16.is_empty() {
+        // Rich flag set but no runs. Treat as plain.
+        return Some((RichText::new(text.to_string()), Vec::new()));
+    }
+
+    // Convert UTF-16 code unit indices into Rust `char` indices (Unicode scalar values).
+    let mut starts: Vec<usize> = starts_utf16
+        .iter()
+        .filter_map(|&u16_idx| utf16_offset_to_char_index(text, u16_idx))
+        .collect();
+
+    // If we couldn't map all run boundaries, fall back to treating them as char indices.
+    if starts.len() != starts_utf16.len() {
+        starts = starts_utf16.to_vec();
+    }
+
+    // Pair starts with formats and sort by start index.
+    let mut paired: Vec<(usize, Vec<u8>)> = starts.into_iter().zip(formats.drain(..)).collect();
+    paired.sort_by_key(|(s, _)| *s);
+
+    // Drop any runs that start beyond the end of the string.
+    let char_len = text.chars().count();
+    paired.retain(|(s, _)| *s <= char_len);
+    if paired.is_empty() {
+        return Some((RichText::new(text.to_string()), Vec::new()));
+    }
+
+    // Ensure we have a run starting at 0. If missing, insert a default run with empty formatting.
+    if paired[0].0 != 0 {
+        paired.insert(0, (0, Vec::new()));
+    }
+
+    let mut segments = Vec::with_capacity(paired.len());
+    let mut out_formats = Vec::with_capacity(paired.len());
+
+    for i in 0..paired.len() {
+        let start = paired[i].0;
+        let end = paired
+            .get(i + 1)
+            .map(|(s, _)| *s)
+            .unwrap_or(char_len);
+        let seg = slice_by_char_range(text, start, end).to_string();
+        segments.push((seg, RichTextRunStyle::default()));
+        out_formats.push(paired[i].1.clone());
+    }
+
+    Some((RichText::from_segments(segments), out_formats))
+}
+
+fn utf16_offset_to_char_index(text: &str, utf16_offset: usize) -> Option<usize> {
+    if utf16_offset == 0 {
+        return Some(0);
+    }
+
+    let mut u16_cursor = 0usize;
+    let mut char_cursor = 0usize;
+
+    for ch in text.chars() {
+        let ch_u16 = ch.len_utf16();
+        if u16_cursor + ch_u16 > utf16_offset {
+            // Inside a UTF-16 codepoint (surrogate pair boundary mismatch).
+            return None;
+        }
+        u16_cursor += ch_u16;
+        char_cursor += 1;
+        if u16_cursor == utf16_offset {
+            return Some(char_cursor);
+        }
+    }
+
+    if u16_cursor == utf16_offset {
+        Some(char_cursor)
+    } else {
+        None
+    }
+}
+
+fn slice_by_char_range(text: &str, start: usize, end: usize) -> &str {
+    if start == end {
+        return "";
+    }
+
+    let mut start_byte = None;
+    let mut end_byte = None;
+
+    for (i, (byte_idx, _ch)) in text.char_indices().enumerate() {
+        if i == start {
+            start_byte = Some(byte_idx);
+        }
+        if i == end {
+            end_byte = Some(byte_idx);
+            break;
+        }
+    }
+
+    let start_byte = start_byte.unwrap_or_else(|| text.len());
+    let end_byte = end_byte.unwrap_or_else(|| text.len());
+
+    &text[start_byte..end_byte]
 }
 
 pub(crate) fn parse_sheet<R: Read>(

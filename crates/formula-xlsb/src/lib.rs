@@ -10,11 +10,13 @@ pub mod workbook_context;
 mod opc;
 mod patch;
 mod parser;
+mod shared_strings;
 mod writer;
 
 pub use opc::{OpenOptions, XlsbWorkbook};
 pub use patch::{patch_sheet_bin, CellEdit};
 pub use parser::{Cell, CellValue, Dimension, Error, Formula, SheetData, SheetMeta};
+pub use shared_strings::SharedString;
 
 #[cfg(feature = "write")]
 pub use formula_biff::{encode_rgce as encode_formula_rgce, EncodeRgceError};

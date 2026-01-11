@@ -1641,6 +1641,7 @@ dependencies = [
  "calamine 0.26.1",
  "formula-biff",
  "formula-engine",
+ "formula-model",
  "pretty_assertions",
  "proptest",
  "quick-xml 0.31.0",
