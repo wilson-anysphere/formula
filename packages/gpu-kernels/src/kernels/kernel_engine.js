@@ -187,6 +187,9 @@ export class KernelEngine {
    */
   _withinTolerance(gpu, cpu) {
     if (Object.is(gpu, cpu)) return true;
+    // Treat +0 and -0 as distinct: they can affect downstream formulas
+    // (e.g. 1/(-0) => -Infinity).
+    if (gpu === 0 && cpu === 0) return false;
     if (!Number.isFinite(gpu) || !Number.isFinite(cpu)) return false;
     const diff = Math.abs(gpu - cpu);
     if (diff <= this._validation.absTolerance) return true;

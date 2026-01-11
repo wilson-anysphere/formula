@@ -32,6 +32,15 @@ test("cpu: min/max/average propagate NaN and handle Infinity", async () => {
   assert.ok(Number.isNaN(await cpu.average(values)));
 });
 
+test("cpu: min/max preserve signed zero like JS Math.min/Math.max", async () => {
+  const cpu = new CpuBackend();
+  const values = new Float64Array([0, -0]);
+  const min = await cpu.min(values);
+  const max = await cpu.max(values);
+  assert.ok(Object.is(min, -0), `expected -0, got ${min}`);
+  assert.ok(Object.is(max, 0) && !Object.is(max, -0), `expected +0, got ${max}`);
+});
+
 test("cpu: min/max on empty arrays", async () => {
   const cpu = new CpuBackend();
   assert.equal(await cpu.min(new Float64Array()), Number.POSITIVE_INFINITY);

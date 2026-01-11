@@ -10,7 +10,18 @@ fn nan_propagating_max(a: Scalar, b: Scalar) -> Scalar {
   if (a > b) {
     return a;
   }
-  return b;
+  if (a < b) {
+    return b;
+  }
+  // Handle signed zero like JS Math.max: if either operand is +0, return +0.
+  if (a == 0.0 && b == 0.0) {
+    // Both must be -0 to preserve negative zero.
+    if ((1.0 / a) < 0.0 && (1.0 / b) < 0.0) {
+      return -0.0;
+    }
+    return 0.0;
+  }
+  return a;
 }
 
 struct Params {
