@@ -50,6 +50,10 @@ const rightKeys = new Uint32Array([2, 2, 3, 4]);
 const joined = await engine.hashJoin(leftKeys, rightKeys);
 console.log(joined.leftIndex, joined.rightIndex);
 
+// Hash join (left join): unmatched left rows use rightIndex=0xFFFF_FFFF.
+const leftJoined = await engine.hashJoin(leftKeys, rightKeys, { joinType: "left" });
+console.log(leftJoined.leftIndex, leftJoined.rightIndex);
+
 console.log(engine.diagnostics());
 await engine.dispose();
 ```
