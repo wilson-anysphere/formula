@@ -1,0 +1,57 @@
+import type * as Y from "yjs";
+import { IndexeddbPersistence } from "y-indexeddb";
+
+import type { OfflinePersistenceHandle } from "./types.ts";
+
+function deleteDatabase(name: string): Promise<void> {
+  const idb: IDBFactory | undefined = (globalThis as any).indexedDB;
+  if (!idb?.deleteDatabase) {
+    return Promise.reject(new Error("indexedDB.deleteDatabase is unavailable in this environment"));
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = idb.deleteDatabase(name);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error("indexedDB.deleteDatabase failed"));
+    request.onblocked = () => reject(new Error("indexedDB.deleteDatabase was blocked"));
+  });
+}
+
+export function attachIndexeddbPersistence(doc: Y.Doc, opts: { key: string }): OfflinePersistenceHandle {
+  const persistence = new IndexeddbPersistence(opts.key, doc) as any;
+
+  // y-indexeddb uses `whenSynced` for "load complete".
+  const whenLoaded = async () => {
+    await Promise.resolve(persistence.whenSynced);
+  };
+
+  let destroyed = false;
+  const destroy = () => {
+    if (destroyed) return;
+    destroyed = true;
+    persistence.destroy?.();
+  };
+
+  const clear = async () => {
+    // Prefer the library's API when available.
+    if (typeof persistence.clearData === "function") {
+      await persistence.clearData();
+      return;
+    }
+    const ctor: any = IndexeddbPersistence as any;
+    if (typeof ctor.clearData === "function") {
+      await ctor.clearData(opts.key);
+      return;
+    }
+
+    // Last resort: delete the database directly.
+    // Note: if the connection is still open, deletion can be blocked.
+    destroy();
+    await deleteDatabase(opts.key);
+  };
+
+  doc.on("destroy", destroy);
+
+  return { whenLoaded, destroy, clear };
+}
+

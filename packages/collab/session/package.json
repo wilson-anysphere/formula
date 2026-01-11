@@ -6,6 +6,7 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
+    "@formula/collab-offline": "workspace:*",
     "@formula/collab-conflicts": "workspace:*",
     "@formula/collab-encryption": "workspace:*",
     "@formula/collab-presence": "workspace:*",

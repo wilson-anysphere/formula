@@ -1,5 +1,6 @@
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
+import { attachOfflinePersistence } from "@formula/collab-offline";
 import { PresenceManager } from "@formula/collab-presence";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
 import {
@@ -123,6 +124,34 @@ export interface CollabSessionOptions {
    */
   schema?: { autoInit?: boolean; defaultSheetId?: string; defaultSheetName?: string };
   /**
+   * Optional offline persistence configuration. When enabled, the session will
+   * load/store Yjs updates locally so edits survive reload/crash and merge when
+   * connectivity returns.
+   */
+  offline?: {
+    mode: "indexeddb" | "file";
+    /**
+     * Storage key / namespace. Defaults to `connection.docId` (when provided)
+     * and otherwise `doc.guid`.
+     */
+    key?: string;
+    /**
+     * File path for Node/desktop persistence when `mode: "file"` is used.
+     */
+    filePath?: string;
+    /**
+     * When false, offline persistence is only started when `session.offline.whenLoaded()`
+     * is first called. Defaults to true.
+     */
+    autoLoad?: boolean;
+    /**
+     * When true (default when offline is enabled alongside `connection`), the
+     * session delays WebSocket provider connection until offline state has
+     * finished loading.
+     */
+    autoConnectAfterLoad?: boolean;
+  };
+  /**
    * When enabled, the session tracks local edits using Yjs' UndoManager so undo/redo
    * only affects this client's changes (never remote users' edits).
    */
@@ -244,6 +273,16 @@ export class CollabSession {
   readonly provider: CollabSessionProvider | null;
   readonly awareness: unknown;
   readonly presence: PresenceManager | null;
+  /**
+   * Optional offline persistence status + controls. Present when `options.offline`
+   * is provided.
+   */
+  readonly offline?: {
+    whenLoaded: () => Promise<void>;
+    isLoaded: boolean;
+    destroy: () => void;
+    clear: () => Promise<void>;
+  };
 
   /**
    * Origin token used for local transactions. Exposed for downstream consumers
@@ -284,6 +323,7 @@ export class CollabSession {
   private schemaSyncHandler: ((isSynced: boolean) => void) | null = null;
   private sheetsSchemaObserver: (() => void) | null = null;
   private ensuringSchema = false;
+  private readonly offlineAutoConnectAfterLoad: boolean;
 
   constructor(options: CollabSessionOptions = {}) {
     // When connecting to a sync provider, use the provider document id as the
@@ -296,6 +336,12 @@ export class CollabSession {
       throw new Error("CollabSession cannot be constructed with both `connection` and `provider` options");
     }
 
+    const offlineEnabled = options.offline != null;
+    const offlineAutoLoad = options.offline?.autoLoad ?? true;
+    const offlineAutoConnectAfterLoad =
+      offlineEnabled && options.connection ? (options.offline?.autoConnectAfterLoad ?? true) : false;
+    this.offlineAutoConnectAfterLoad = offlineAutoConnectAfterLoad;
+
     this.provider =
       options.provider ??
       (options.connection
@@ -303,12 +349,51 @@ export class CollabSession {
             WebSocketPolyfill: options.connection.WebSocketPolyfill,
             disableBc: options.connection.disableBc,
             params: {
-              ...(options.connection.params ?? {}),
-              ...(options.connection.token !== undefined ? { token: options.connection.token } : {}),
-            },
-          })
+               ...(options.connection.params ?? {}),
+               ...(options.connection.token !== undefined ? { token: options.connection.token } : {}),
+             },
+             connect: offlineAutoConnectAfterLoad ? false : true,
+           })
         : null);
     this.awareness = options.awareness ?? this.provider?.awareness ?? null;
+
+    if (offlineEnabled) {
+      const key = options.offline?.key ?? options.connection?.docId ?? this.doc.guid;
+      const handle = attachOfflinePersistence(this.doc, {
+        mode: options.offline!.mode,
+        key,
+        filePath: options.offline!.filePath,
+        autoLoad: options.offline!.autoLoad,
+      });
+
+      const state = {
+        isLoaded: false,
+        whenLoaded: async () => {
+          await handle.whenLoaded();
+          state.isLoaded = true;
+        },
+        destroy: () => handle.destroy(),
+        clear: () => handle.clear(),
+      };
+
+      this.offline = state;
+
+      if (offlineAutoLoad) {
+        void state.whenLoaded().catch(() => {
+          // Consumers can observe the failure by awaiting `session.offline.whenLoaded()`.
+        });
+      }
+
+      if (offlineAutoConnectAfterLoad && this.provider?.connect) {
+        void state
+          .whenLoaded()
+          .catch(() => {
+            // Ignore offline load errors when auto-connecting. Callers can
+            // observe the rejection by awaiting `session.offline.whenLoaded()`.
+          })
+          .then(() => this.provider?.connect?.());
+      }
+    }
 
     const schemaAutoInit = options.schema?.autoInit ?? true;
     const schemaDefaultSheetId = options.schema?.defaultSheetId ?? options.defaultSheetId ?? "Sheet1";
@@ -341,6 +426,9 @@ export class CollabSession {
         providerSynced = Boolean(provider.synced);
       }
 
+      const shouldWaitForOffline = this.offline && (offlineAutoLoad || offlineAutoConnectAfterLoad);
+      let offlineReady = !shouldWaitForOffline;
+
       const ensureSchema = () => {
         // Avoid mutating the workbook schema while a sync provider is still in
         // the middle of initial hydration. In particular, sheets can be created
@@ -348,6 +436,7 @@ export class CollabSession {
         // and eagerly inserting a default sheet during that window can create
         // spurious extra sheets.
         if (!providerSynced) return;
+        if (!offlineReady) return;
         if (this.ensuringSchema) return;
         this.ensuringSchema = true;
         try {
@@ -359,6 +448,18 @@ export class CollabSession {
           this.ensuringSchema = false;
         }
       };
+
+      if (shouldWaitForOffline) {
+        void this.offline!
+          .whenLoaded()
+          .catch(() => {
+            // Schema init should still run even if offline persistence fails to load.
+          })
+          .then(() => {
+            offlineReady = true;
+            ensureSchema();
+          });
+      }
 
       // Keep the sheets array well-formed over time (e.g. remove duplicate ids).
       // This primarily protects against concurrent schema initialization when two
@@ -473,11 +574,24 @@ export class CollabSession {
     this.cellConflictMonitor?.dispose();
     this.cellValueConflictMonitor?.dispose();
     this.presence?.destroy();
+    this.offline?.destroy();
     this.provider?.destroy?.();
   }
 
   connect(): void {
-    this.provider?.connect?.();
+    if (!this.provider?.connect) return;
+
+    if (this.offline && this.offlineAutoConnectAfterLoad && !this.offline.isLoaded) {
+      void this.offline
+        .whenLoaded()
+        .catch(() => {
+          // Ignore offline load errors. Callers can await `session.offline.whenLoaded()`.
+        })
+        .then(() => this.provider?.connect?.());
+      return;
+    }
+
+    this.provider.connect();
   }
 
   disconnect(): void {
