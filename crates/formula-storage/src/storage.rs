@@ -7,12 +7,12 @@ use crate::types::{
     CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, SheetVisibility, Style, WorkbookMeta,
 };
 use formula_model::{validate_sheet_name, ErrorValue, SheetNameError};
-use rusqlite::backup::Backup;
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, DatabaseName, OpenFlags, OptionalExtension, Transaction};
 use serde_json::json;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
@@ -191,7 +191,8 @@ impl Storage {
                     } else {
                         let flags = OpenFlags::SQLITE_OPEN_READ_ONLY;
                         let src = Connection::open_with_flags(&path, flags)?;
-                        backup_connection(&src, &mut conn)?;
+                        let sqlite_bytes = export_connection_to_sqlite_bytes(&src)?;
+                        load_sqlite_bytes_into_connection(&mut conn, &sqlite_bytes)?;
                     }
                 }
             }
@@ -1179,33 +1180,47 @@ fn get_or_insert_style_tx(tx: &Transaction<'_>, style: &Style) -> Result<i64> {
     Ok(tx.last_insert_rowid())
 }
 
-fn backup_connection(src: &Connection, dst: &mut Connection) -> Result<()> {
-    let backup = Backup::new(src, dst)?;
-    backup.run_to_completion(128, Duration::from_millis(0), None)?;
-    Ok(())
-}
-
 fn load_sqlite_bytes_into_connection(dst: &mut Connection, sqlite_bytes: &[u8]) -> Result<()> {
-    let mut temp = NamedTempFile::new()?;
-    temp.write_all(sqlite_bytes)?;
-    temp.flush()?;
-    let temp_path = temp.into_temp_path();
+    if sqlite_bytes.is_empty() {
+        return Ok(());
+    }
 
-    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY;
-    let src = Connection::open_with_flags(&temp_path, flags)?;
-    backup_connection(&src, dst)?;
+    let sz: rusqlite::ffi::sqlite3_int64 = sqlite_bytes.len().try_into().map_err(|_| {
+        rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_TOOBIG), None)
+    })?;
+
+    let ptr = unsafe { rusqlite::ffi::sqlite3_malloc64(sqlite_bytes.len() as u64) }
+        as *mut std::os::raw::c_uchar;
+    if ptr.is_null() {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_NOMEM),
+            None,
+        )
+        .into());
+    }
+
+    unsafe {
+        ptr::copy_nonoverlapping(sqlite_bytes.as_ptr(), ptr.cast(), sqlite_bytes.len());
+    }
+
+    let schema = std::ffi::CString::new("main").expect("main schema name has no nul bytes");
+    let flags = rusqlite::ffi::SQLITE_DESERIALIZE_FREEONCLOSE
+        | rusqlite::ffi::SQLITE_DESERIALIZE_RESIZEABLE;
+    let handle = unsafe { dst.handle() };
+    let rc = unsafe { rusqlite::ffi::sqlite3_deserialize(handle, schema.as_ptr(), ptr, sz, sz, flags) };
+    if rc != rusqlite::ffi::SQLITE_OK {
+        unsafe {
+            rusqlite::ffi::sqlite3_free(ptr.cast());
+        }
+        return Err(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rc), None).into());
+    }
+
     Ok(())
 }
 
 fn export_connection_to_sqlite_bytes(conn: &Connection) -> Result<Vec<u8>> {
-    let temp = NamedTempFile::new()?;
-    let temp_path = temp.into_temp_path();
-
-    let mut dst = Connection::open(&temp_path)?;
-    backup_connection(conn, &mut dst)?;
-    drop(dst);
-
-    Ok(fs::read(&temp_path)?)
+    let data = conn.serialize(DatabaseName::Main)?;
+    Ok(data.to_vec())
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
