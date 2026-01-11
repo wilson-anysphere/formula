@@ -217,7 +217,9 @@ if (
                 document.cancelBatch();
                 throw err;
               }
-              app.repaint();
+              app.refresh();
+              await app.whenIdle();
+              app.refresh();
             },
           }).catch((err) => {
             body.textContent = `Failed to load macros: ${String(err)}`;
