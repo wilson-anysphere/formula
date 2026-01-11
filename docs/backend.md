@@ -32,6 +32,15 @@ The API issues short-lived JWT sync tokens via `POST /docs/:docId/sync-token`.
 - Sync-server verification secret: `SYNC_SERVER_JWT_SECRET` (must match `SYNC_TOKEN_SECRET`)
 - JWT audience: `SYNC_SERVER_JWT_AUDIENCE` (must match the token `aud`, default: `formula-sync`)
 
+## Persistence (local docker-compose)
+
+The docker-compose stack configures the sync server with:
+
+- `SYNC_SERVER_PERSISTENCE_BACKEND=file`
+- `SYNC_SERVER_DATA_DIR=/data` (stored in the `sync_server_data` named volume)
+
+To wipe local sync persistence, run `docker-compose down -v`.
+
 ## API overview
 
 ### Authentication
