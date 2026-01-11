@@ -56,9 +56,12 @@ fn credential_string(credentials: Option<&JsonValue>, key: &str) -> Option<Strin
 }
 
 fn credential_password(credentials: Option<&JsonValue>) -> Option<String> {
-    credential_string(credentials, "password")
-        .or_else(|| credential_string(credentials, "token"))
-        .or_else(|| credential_string(credentials, "secret"))
+    match credentials? {
+        JsonValue::String(s) => Some(s.clone()),
+        _ => credential_string(credentials, "password")
+            .or_else(|| credential_string(credentials, "token"))
+            .or_else(|| credential_string(credentials, "secret")),
+    }
 }
 
 fn sqlite_type_to_data_type(type_name: &str) -> SqlDataType {

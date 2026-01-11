@@ -674,3 +674,65 @@ test("sqlite database cache entries are invalidated when the db file mtime chang
     globalThis.__TAURI__ = originalTauri;
   }
 });
+
+test("sql_get_schema resolves credential handles before invoking Tauri", async () => {
+  const originalTauri = globalThis.__TAURI__;
+
+  /** @type {{ cmd: string, args: any }[]} */
+  const calls = [];
+  let secretCalls = 0;
+
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+        if (cmd === "sql_get_schema") {
+          return { columns: ["A"], types: { A: "number" } };
+        }
+        if (cmd === "sql_query") {
+          return { columns: ["A"], types: { A: "number" }, rows: [[1]] };
+        }
+        throw new Error(`Unexpected invoke: ${cmd}`);
+      },
+    },
+  };
+
+  try {
+    const engine = createDesktopQueryEngine({
+      fileAdapter: { readText: async () => "", readBinary: async () => new Uint8Array() },
+      onCredentialRequest: async () => ({
+        credentialId: "cred-1",
+        getSecret: async () => {
+          secretCalls += 1;
+          return { password: "pw" };
+        },
+      }),
+    });
+
+    const query = {
+      id: "q_db_schema_creds",
+      name: "DB Schema creds",
+      source: {
+        type: "database",
+        connection: { kind: "postgres", host: "localhost", port: 5432, database: "db", user: "u" },
+        query: "SELECT 1 AS A",
+        dialect: "postgres",
+      },
+      steps: [],
+    };
+
+    await engine.executeQuery(query, {}, { cache: { validation: "none" } });
+
+    assert.ok(
+      calls.some((c) => c.cmd === "sql_get_schema" && c.args.credentials && c.args.credentials.password === "pw"),
+      "expected sql_get_schema to receive resolved credential secret",
+    );
+    assert.ok(
+      calls.some((c) => c.cmd === "sql_query" && c.args.credentials && c.args.credentials.password === "pw"),
+      "expected sql_query to receive resolved credential secret",
+    );
+    assert.equal(secretCalls, 2, "expected credential handle getSecret() to be called for schema + query execution");
+  } finally {
+    globalThis.__TAURI__ = originalTauri;
+  }
+});

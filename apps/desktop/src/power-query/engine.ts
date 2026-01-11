@@ -943,13 +943,23 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
     queryOptions: { params?: unknown[]; signal?: AbortSignal; credentials?: unknown } = {},
   ) => {
     const invoke = getTauriInvoke();
+    let credentials = queryOptions.credentials;
+    if (
+      credentials &&
+      typeof credentials === "object" &&
+      !Array.isArray(credentials) &&
+      typeof (credentials as any).getSecret === "function"
+    ) {
+      // Allow callers to pass a credential handle (CredentialManager convention).
+      credentials = await withAbort(Promise.resolve((credentials as any).getSecret()), queryOptions.signal);
+    }
 
     const payload = await withAbort(
       invoke("sql_query", {
         connection,
         sql,
         ...(queryOptions.params ? { params: queryOptions.params } : null),
-        ...(queryOptions.credentials ? { credentials: queryOptions.credentials } : null),
+        ...(credentials != null ? { credentials } : null),
       }) as Promise<any>,
       queryOptions.signal,
     );
@@ -978,11 +988,22 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
     schemaOptions: { signal?: AbortSignal; credentials?: unknown } = {},
   ) => {
     const invoke = getTauriInvoke();
+    let credentials = schemaOptions.credentials;
+    if (
+      credentials &&
+      typeof credentials === "object" &&
+      !Array.isArray(credentials) &&
+      typeof (credentials as any).getSecret === "function"
+    ) {
+      // Schema discovery is called directly by the engine (not via SqlConnector.execute),
+      // so we need to resolve credential handles here as well.
+      credentials = await withAbort(Promise.resolve((credentials as any).getSecret()), schemaOptions.signal);
+    }
     const payload = await withAbort(
       invoke("sql_get_schema", {
         connection: request.connection,
         sql: request.sql,
-        ...(schemaOptions.credentials ? { credentials: schemaOptions.credentials } : null),
+        ...(credentials != null ? { credentials } : null),
       }) as Promise<any>,
       schemaOptions.signal,
     );
