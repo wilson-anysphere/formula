@@ -161,7 +161,7 @@ export const CreateChartParamsSchema = z.object({
   chart_type: z.enum(["bar", "line", "pie", "scatter", "area"]),
   data_range: A1RangeSchema,
   title: z.string().optional(),
-  position: z.string().optional()
+  position: A1RangeSchema.optional()
 });
 
 export type CreateChartParams = z.infer<typeof CreateChartParamsSchema>;

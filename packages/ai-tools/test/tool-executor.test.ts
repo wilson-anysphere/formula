@@ -302,6 +302,23 @@ describe("ToolExecutor", () => {
     expect(result.error?.code).toBe("not_implemented");
   });
 
+  it("create_chart validates position as an A1 reference", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { default_sheet: "Sheet1" });
+
+    const result = await executor.execute({
+      name: "create_chart",
+      parameters: {
+        chart_type: "bar",
+        data_range: "A1:B3",
+        position: "NotACell"
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("validation_error");
+  });
+
   it("fetch_external_data json_to_table writes headers + rows and returns provenance metadata", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com"] });
