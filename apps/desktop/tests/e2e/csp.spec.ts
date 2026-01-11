@@ -93,6 +93,50 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
   });
 
+  test("@formula/engine loads formula-wasm in a module Worker under CSP", async ({ page }) => {
+    const cspViolations: string[] = [];
+
+    page.on("console", (msg) => {
+      if (msg.type() !== "error" && msg.type() !== "warning") {
+        return;
+      }
+      const text = msg.text();
+      if (/content security policy/i.test(text)) {
+        cspViolations.push(text);
+      }
+    });
+
+    const response = await page.goto("/");
+    const cspHeader = response?.headers()["content-security-policy"];
+    expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
+
+    await expect(page.locator("#grid")).toHaveCount(1);
+
+    const engineEntryUrl = viteFsUrl(path.join(repoRoot, "packages/engine/src/index.ts"));
+
+    const result = await page.evaluate(async ({ engineEntryUrl }) => {
+      const { createEngineClient } = await import(engineEntryUrl);
+
+      const engine = createEngineClient();
+      try {
+        await engine.init();
+        await engine.newWorkbook();
+        await engine.setCell("A1", 1);
+        await engine.setCell("A2", 2);
+        await engine.setCell("B1", "=A1+A2");
+        await engine.recalculate();
+        return await engine.getCell("B1");
+      } finally {
+        engine.terminate();
+      }
+    }, {
+      engineEntryUrl
+    });
+
+    expect(result?.value).toBe(3);
+    expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
+  });
+
   test("BrowserExtensionHost can run an extension in a Worker without CSP violations", async ({ page }) => {
     const cspViolations: string[] = [];
 
