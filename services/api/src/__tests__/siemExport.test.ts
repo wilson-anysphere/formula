@@ -249,6 +249,49 @@ describe("SIEM export worker", () => {
     }
   });
 
+  it("fails fast when certificate pinning is enabled but pins are missing", async () => {
+    const orgId = crypto.randomUUID();
+    await insertOrg(db, orgId);
+
+    await db.query("UPDATE org_settings SET certificate_pinning_enabled = true WHERE org_id = $1", [orgId]);
+
+    const eventId = crypto.randomUUID();
+    await insertAuditEvent({
+      db,
+      table: "audit_log",
+      id: eventId,
+      orgId,
+      createdAt: new Date("2025-01-01T03:00:00.000Z"),
+      eventType: "test.pinning_missing"
+    });
+
+    const config: SiemEndpointConfig = {
+      endpointUrl: "https://example.invalid/ingest",
+      format: "json",
+      retry: { maxAttempts: 5, baseDelayMs: 1, maxDelayMs: 5, jitter: false }
+    };
+
+    const metrics = createMetrics();
+    const worker = new SiemExportWorker({
+      db,
+      configProvider: new StaticConfigProvider([{ orgId, config }]),
+      metrics,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+      pollIntervalMs: 0
+    });
+
+    await worker.tick();
+
+    const state = await db.query(
+      "SELECT last_event_id, consecutive_failures, last_error FROM org_siem_export_state WHERE org_id = $1",
+      [orgId]
+    );
+    expect(state.rowCount).toBe(1);
+    expect(state.rows[0].last_event_id).toBeNull();
+    expect(state.rows[0].consecutive_failures).toBe(1);
+    expect(String(state.rows[0].last_error)).toContain("certificatePins must be non-empty");
+  });
+
   it("skips exports when disabled_until is in the future", async () => {
     const orgId = crypto.randomUUID();
     await insertOrg(db, orgId);
