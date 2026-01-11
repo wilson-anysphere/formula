@@ -8,12 +8,12 @@ This repo contains a minimal-but-extensible **enterprise/cloud backend foundatio
 ## Quickstart
 
 Prereqs:
-- Docker / docker-compose
+- Docker + Docker Compose (use `docker compose`)
 
 Start the local stack:
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 Services (default ports shown; see “Port overrides” below):
@@ -29,7 +29,7 @@ The API automatically runs SQL migrations on startup.
 If you already have something running on these ports, you can override the published ports:
 
 ```bash
-API_PORT=3001 SYNC_WS_PORT=1235 POSTGRES_PORT=5433 docker-compose up --build
+API_PORT=3001 SYNC_WS_PORT=1235 POSTGRES_PORT=5433 docker compose up --build
 ```
 
 Defaults are:
@@ -53,7 +53,7 @@ The API issues short-lived JWT sync tokens via `POST /docs/:docId/sync-token`.
 In `docker-compose.yml`, the sync server is configured to reuse the API secret by default, so you can override both by setting `SYNC_TOKEN_SECRET`:
 
 ```bash
-SYNC_TOKEN_SECRET=my-local-sync-secret docker-compose up --build
+SYNC_TOKEN_SECRET=my-local-sync-secret docker compose up --build
 ```
 
 ## Persistence (local docker-compose)
@@ -63,7 +63,7 @@ The docker-compose stack configures the sync server with:
 - `SYNC_SERVER_PERSISTENCE_BACKEND=file`
 - `SYNC_SERVER_DATA_DIR=/data` (stored in the `sync_server_data` named volume)
 
-To wipe local sync persistence, run `docker-compose down -v`.
+To wipe local sync persistence, run `docker compose down -v`.
 
 ## API overview
 
