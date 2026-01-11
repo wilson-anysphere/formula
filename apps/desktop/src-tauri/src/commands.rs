@@ -271,11 +271,11 @@ fn app_error(err: AppStateError) -> String {
 #[cfg(feature = "desktop")]
 fn coerce_save_path_to_xlsx(path: &str) -> String {
     let mut buf = PathBuf::from(path);
-    if buf.extension().and_then(|s| s.to_str()).is_some_and(|ext| {
-        ext.eq_ignore_ascii_case("xls")
-            || ext.eq_ignore_ascii_case("xlsb")
-            || ext.eq_ignore_ascii_case("csv")
-    }) {
+    if buf
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("xls") || ext.eq_ignore_ascii_case("csv"))
+    {
         buf.set_extension("xlsx");
         return buf.to_string_lossy().to_string();
     }
@@ -697,6 +697,11 @@ pub async fn save_workbook(
 
     let save_path = coerce_save_path_to_xlsx(&save_path);
 
+    let wants_origin_bytes = PathBuf::from(&save_path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx") || ext.eq_ignore_ascii_case("xlsm"));
+
     if let Some(autosave) = autosave.as_ref() {
         autosave.flush().await.map_err(|e| e.to_string())?;
     }
@@ -708,11 +713,19 @@ pub async fn save_workbook(
     let save_path_clone = save_path.clone();
     let written_bytes = tauri::async_runtime::spawn_blocking(move || {
         let path = std::path::Path::new(&save_path_clone);
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
+
+        // XLSB saves must go through the `formula-xlsb` round-trip writer. The storage export
+        // path only knows how to generate XLSX.
+        if ext.eq_ignore_ascii_case("xlsb") {
+            return crate::file_io::write_xlsx_blocking(path, &workbook).map_err(|e| e.to_string());
+        }
+
         // Prefer the existing patch-based save path when we have the original XLSX bytes.
         // This preserves unknown parts (theme, comments, conditional formatting, etc.) by
         // rewriting only the modified worksheet XML.
         //
-        // Fall back to the storage->model export path for non-XLSX origins (csv/xls/xlsb) and
+        // Fall back to the storage->model export path for non-XLSX origins (csv/xls) and
         // for new workbooks without an `origin_xlsx_bytes` baseline.
         if workbook.origin_xlsx_bytes.is_some() {
             crate::file_io::write_xlsx_blocking(path, &workbook).map_err(|e| e.to_string())
@@ -727,7 +740,7 @@ pub async fn save_workbook(
     {
         let mut state = state.inner().lock().unwrap();
         state
-            .mark_saved(Some(save_path), Some(written_bytes))
+            .mark_saved(Some(save_path), wants_origin_bytes.then_some(written_bytes))
             .map_err(app_error)?;
     }
 

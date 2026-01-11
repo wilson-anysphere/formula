@@ -4,18 +4,16 @@ use calamine::{open_workbook_auto, Data, Reader};
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_model::{
     import::{import_csv_to_columnar_table, CsvOptions},
-    CellValue as ModelCellValue,
-    DateSystem as WorkbookDateSystem,
-    WorksheetId,
+    CellValue as ModelCellValue, DateSystem as WorkbookDateSystem, WorksheetId,
 };
-use formula_xlsb::{CellValue as XlsbCellValue, XlsbWorkbook};
+use formula_xlsb::{CellEdit as XlsbCellEdit, CellValue as XlsbCellValue, XlsbWorkbook};
 use formula_xlsx::drawingml::PreservedDrawingParts;
 use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
 };
 use formula_xlsx::{
-    CellPatch as XlsxCellPatch, PreservedPivotParts, WorkbookCellPatches,
-    patch_xlsx_streaming_workbook_cell_patches, XlsxPackage,
+    patch_xlsx_streaming_workbook_cell_patches, CellPatch as XlsxCellPatch, PreservedPivotParts,
+    WorkbookCellPatches, XlsxPackage,
 };
 use rust_xlsxwriter::{Workbook as XlsxWorkbook, XlsxError};
 use std::collections::{HashMap, HashSet};
@@ -31,6 +29,7 @@ use crate::macro_trust::compute_macro_fingerprint;
 pub struct Sheet {
     pub id: String,
     pub name: String,
+    pub(crate) origin_ordinal: Option<usize>,
     pub(crate) cells: HashMap<(usize, usize), Cell>,
     pub(crate) dirty_cells: HashSet<(usize, usize)>,
     pub(crate) columnar: Option<Arc<ColumnarTable>>,
@@ -62,6 +61,7 @@ impl Sheet {
         Self {
             id,
             name,
+            origin_ordinal: None,
             cells: HashMap::new(),
             dirty_cells: HashSet::new(),
             columnar: None,
@@ -232,6 +232,9 @@ pub struct Workbook {
     /// Raw bytes for the workbook we opened (XLSX/XLSM only). When present we use it as the base
     /// package and patch only the edited worksheet cell XML (+ print settings) on save.
     pub origin_xlsx_bytes: Option<Arc<[u8]>>,
+    /// When the workbook was opened from an XLSB file, this stores the origin path so we can
+    /// re-open the source package and write back using `formula-xlsb`'s lossless OPC writer.
+    pub origin_xlsb_path: Option<String>,
     pub vba_project_bin: Option<Vec<u8>>,
     /// Stable identifier used for macro trust decisions (hash of workbook identity + `vbaProject.bin`).
     pub macro_fingerprint: Option<String>,
@@ -266,6 +269,7 @@ impl Workbook {
             origin_path: path.clone(),
             path,
             origin_xlsx_bytes: None,
+            origin_xlsb_path: None,
             vba_project_bin: None,
             macro_fingerprint: None,
             preserved_drawing_parts: None,
@@ -376,8 +380,9 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         let origin_xlsx_bytes = Arc::<[u8]>::from(
             std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?,
         );
-        let workbook_model = formula_xlsx::read_workbook_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
-            .with_context(|| format!("parse xlsx {:?}", path))?;
+        let workbook_model =
+            formula_xlsx::read_workbook_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
+                .with_context(|| format!("parse xlsx {:?}", path))?;
         let print_settings = read_workbook_print_settings(origin_xlsx_bytes.as_ref())
             .ok()
             .unwrap_or_default();
@@ -386,6 +391,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             path: Some(path.to_string_lossy().to_string()),
             origin_path: Some(path.to_string_lossy().to_string()),
             origin_xlsx_bytes: Some(origin_xlsx_bytes.clone()),
+            origin_xlsb_path: None,
             vba_project_bin: None,
             macro_fingerprint: None,
             preserved_drawing_parts: None,
@@ -489,6 +495,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
         origin_xlsx_bytes: None,
+        origin_xlsb_path: None,
         vba_project_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
@@ -639,6 +646,7 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
         origin_xlsx_bytes: None,
+        origin_xlsb_path: Some(path.to_string_lossy().to_string()),
         vba_project_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
@@ -666,6 +674,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
         origin_xlsx_bytes: None,
+        origin_xlsb_path: Some(path.to_string_lossy().to_string()),
         vba_project_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
@@ -691,6 +700,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
 
     for (idx, sheet_meta) in wb.sheet_metas().iter().enumerate() {
         let mut sheet = Sheet::new(sheet_meta.name.clone(), sheet_meta.name.clone());
+        sheet.origin_ordinal = Some(idx);
         let styles = wb.styles();
         let mut undecoded_formula_cells: Vec<(usize, usize, CellScalar, Option<String>)> =
             Vec::new();
@@ -859,6 +869,11 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         .extension()
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
+
+    if matches!(extension.as_deref(), Some("xlsb")) {
+        return write_xlsb_blocking(path, workbook);
+    }
+
     let xlsx_date_system = match workbook.date_system {
         WorkbookDateSystem::Excel1900 => formula_xlsx::DateSystem::V1900,
         WorkbookDateSystem::Excel1904 => formula_xlsx::DateSystem::V1904,
@@ -1093,6 +1108,267 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
     Ok(bytes)
 }
 
+fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[u8]>> {
+    let origin_path = workbook
+        .origin_xlsb_path
+        .as_deref()
+        .or(workbook.origin_path.as_deref())
+        .ok_or_else(|| anyhow::anyhow!("cannot save as .xlsb: workbook has no origin xlsb path"))?;
+    let origin_path = Path::new(origin_path);
+
+    let print_settings_changed = workbook.print_settings != workbook.original_print_settings;
+    if print_settings_changed {
+        anyhow::bail!("saving print settings to .xlsb is not supported yet");
+    }
+
+    let any_dirty_cells = workbook
+        .sheets
+        .iter()
+        .any(|sheet| !sheet.dirty_cells.is_empty());
+
+    let dest_is_origin = std::fs::canonicalize(origin_path)
+        .ok()
+        .zip(std::fs::canonicalize(path).ok())
+        .is_some_and(|(origin, dest)| origin == dest);
+
+    let mut temp_paths: Vec<std::path::PathBuf> = Vec::new();
+    let res = (|| -> anyhow::Result<()> {
+        let xlsb = XlsbWorkbook::open(origin_path)
+            .with_context(|| format!("open xlsb {:?}", origin_path))?;
+
+        // Avoid writing directly over the source workbook since `formula-xlsb` streams from
+        // `origin_path` while writing the destination ZIP.
+        let final_out_path = if dest_is_origin {
+            let dir = path.parent().unwrap_or_else(|| Path::new("."));
+            let pid = std::process::id();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let mut candidate = dir.join(format!(".formula-xlsb-save-{pid}-{nanos}-final.xlsb"));
+            let mut bump = 0u32;
+            while candidate.exists() {
+                bump += 1;
+                candidate = dir.join(format!(
+                    ".formula-xlsb-save-{pid}-{nanos}-{bump}-final.xlsb"
+                ));
+            }
+            temp_paths.push(candidate.clone());
+            candidate
+        } else {
+            path.to_path_buf()
+        };
+
+        if !any_dirty_cells {
+            xlsb.save_as(&final_out_path)
+                .with_context(|| format!("save xlsb {:?}", final_out_path))?;
+            return Ok(());
+        }
+
+        let sheet_index_by_name: HashMap<String, usize> = xlsb
+            .sheet_metas()
+            .iter()
+            .enumerate()
+            .map(|(idx, meta)| (meta.name.clone(), idx))
+            .collect();
+
+        let mut edits_by_sheet: HashMap<usize, Vec<XlsbCellEdit>> = HashMap::new();
+        for sheet in &workbook.sheets {
+            if sheet.dirty_cells.is_empty() {
+                continue;
+            }
+
+            let sheet_index = sheet_index_by_name
+                .get(&sheet.name)
+                .copied()
+                .or(sheet.origin_ordinal)
+                .with_context(|| {
+                    format!(
+                        "cannot map sheet {:?} to XLSB sheet index (no name match, no origin ordinal)",
+                        sheet.name
+                    )
+                })?;
+            if sheet_index >= xlsb.sheet_metas().len() {
+                anyhow::bail!(
+                    "sheet index {sheet_index} out of bounds for XLSB workbook ({} sheets)",
+                    xlsb.sheet_metas().len()
+                );
+            }
+
+            let edits = edits_by_sheet.entry(sheet_index).or_default();
+            for (row, col) in &sheet.dirty_cells {
+                let (value, formula) = match sheet.cells.get(&(*row, *col)) {
+                    Some(cell) => (
+                        cell.input_value
+                            .as_ref()
+                            .unwrap_or(&cell.computed_value)
+                            .clone(),
+                        cell.formula.clone(),
+                    ),
+                    None => (CellScalar::Empty, None),
+                };
+
+                let row_u32 = u32::try_from(*row)
+                    .with_context(|| format!("row index {row} is too large for XLSB"))?;
+                let col_u32 = u32::try_from(*col)
+                    .with_context(|| format!("col index {col} is too large for XLSB"))?;
+
+                let new_value = scalar_to_xlsb_value(&value);
+                let edit = match formula.as_deref() {
+                    Some(formula) => {
+                        let normalized = if formula.starts_with('=') {
+                            formula.to_string()
+                        } else {
+                            format!("={formula}")
+                        };
+                        XlsbCellEdit::with_formula_text(row_u32, col_u32, new_value, &normalized)
+                            .map_err(|e| anyhow::anyhow!(e.to_string()))
+                            .with_context(|| {
+                                format!("encode RGCE for formula cell at ({row}, {col})")
+                            })?
+                    }
+                    None => XlsbCellEdit {
+                        row: row_u32,
+                        col: col_u32,
+                        new_value,
+                        new_formula: None,
+                        shared_string_index: None,
+                    },
+                };
+                edits.push(edit);
+            }
+        }
+
+        let mut edits: Vec<(usize, Vec<XlsbCellEdit>)> = edits_by_sheet.into_iter().collect();
+        edits.sort_by_key(|(sheet_index, _)| *sheet_index);
+
+        if edits.is_empty() {
+            xlsb.save_as(&final_out_path)
+                .with_context(|| format!("save xlsb {:?}", final_out_path))?;
+            return Ok(());
+        }
+
+        if edits.len() == 1 {
+            let (sheet_index, edits) = &edits[0];
+            xlsb.save_with_cell_edits(&final_out_path, *sheet_index, edits)
+                .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
+            return Ok(());
+        }
+
+        // `formula-xlsb` edits are applied per-sheet. For workbooks with changes across multiple
+        // worksheets, apply patches sequentially through intermediate packages.
+        let dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+
+        let mut source_path = origin_path.to_path_buf();
+        for (step, (sheet_index, sheet_edits)) in edits.iter().enumerate() {
+            let is_last = step + 1 == edits.len();
+            let out_path = if is_last {
+                final_out_path.clone()
+            } else {
+                let mut candidate =
+                    dir.join(format!(".formula-xlsb-save-{pid}-{nanos}-step{step}.xlsb"));
+                let mut bump = 0u32;
+                while candidate.exists() {
+                    bump += 1;
+                    candidate = dir.join(format!(
+                        ".formula-xlsb-save-{pid}-{nanos}-step{step}-{bump}.xlsb"
+                    ));
+                }
+                temp_paths.push(candidate.clone());
+                candidate
+            };
+
+            let wb = XlsbWorkbook::open(&source_path)
+                .with_context(|| format!("open xlsb {:?}", source_path))?;
+            wb.save_with_cell_edits(&out_path, *sheet_index, sheet_edits)
+                .with_context(|| format!("save edited xlsb {:?}", out_path))?;
+
+            source_path = out_path;
+        }
+
+        Ok(())
+    })();
+
+    if let Err(err) = res {
+        for tmp in &temp_paths {
+            let _ = std::fs::remove_file(tmp);
+        }
+        return Err(err);
+    }
+
+    if dest_is_origin {
+        // We've already written to a temp path in the same directory.
+        let tmp_final = temp_paths
+            .iter()
+            .find(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().contains("final"))
+            })
+            .cloned();
+        if let Some(tmp_final) = tmp_final {
+            #[cfg(windows)]
+            std::fs::remove_file(path)
+                .with_context(|| format!("remove original xlsb {:?}", path))?;
+            std::fs::rename(&tmp_final, path)
+                .with_context(|| format!("replace original xlsb {:?}", path))?;
+        }
+    }
+
+    for tmp in &temp_paths {
+        let _ = std::fs::remove_file(tmp);
+    }
+
+    let bytes =
+        Arc::<[u8]>::from(std::fs::read(path).with_context(|| format!("read xlsb {:?}", path))?);
+    Ok(bytes)
+}
+
+fn scalar_to_xlsb_value(value: &CellScalar) -> XlsbCellValue {
+    match value {
+        CellScalar::Empty => XlsbCellValue::Blank,
+        CellScalar::Number(n) => XlsbCellValue::Number(*n),
+        CellScalar::Bool(b) => XlsbCellValue::Bool(*b),
+        CellScalar::Text(s) => XlsbCellValue::Text(s.clone()),
+        CellScalar::Error(e) => XlsbCellValue::Error(xlsb_error_code(e)),
+    }
+}
+
+fn xlsb_error_code(display: &str) -> u8 {
+    match display.trim() {
+        "#NULL!" => 0x00,
+        "#DIV/0!" => 0x07,
+        "#VALUE!" => 0x0F,
+        "#REF!" => 0x17,
+        "#NAME?" => 0x1D,
+        "#NUM!" => 0x24,
+        "#N/A" => 0x2A,
+        "#GETTING_DATA" => 0x2B,
+        other => {
+            if let Some(inner) = other
+                .strip_prefix("#ERR(")
+                .and_then(|s| s.strip_suffix(')'))
+                .map(str::trim)
+            {
+                if let Some(hex) = inner
+                    .strip_prefix("0x")
+                    .or_else(|| inner.strip_prefix("0X"))
+                {
+                    if let Ok(code) = u8::from_str_radix(hex, 16) {
+                        return code;
+                    }
+                }
+            }
+            // Best-effort fallback.
+            0x0F
+        }
+    }
+}
+
 fn scalar_to_model_value(value: &CellScalar) -> formula_model::CellValue {
     match value {
         CellScalar::Empty => formula_model::CellValue::Empty,
@@ -1116,7 +1392,8 @@ mod tests {
     use crate::state::AppState;
     use formula_format::{format_value, FormatOptions, Value as FormatValue};
     use rust_xlsxwriter::{Chart, ChartType};
-    use xlsx_diff::{diff_workbooks, Severity};
+    use std::collections::BTreeSet;
+    use xlsx_diff::{diff_workbooks, Severity, WorkbookArchive};
 
     fn assert_no_critical_diffs(expected: &Path, actual: &Path) {
         let report = diff_workbooks(expected, actual).expect("diff workbooks");
@@ -1194,6 +1471,138 @@ mod tests {
             CellScalar::Number(85.0)
         );
         assert_eq!(sheet.get_cell(0, 2).formula.as_deref(), Some("=B1*2"));
+    }
+
+    #[test]
+    fn xlsb_roundtrip_save_as_is_lossless() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read xlsb workbook");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("roundtrip.xlsb");
+        write_xlsx_blocking(&out_path, &workbook).expect("write xlsb workbook");
+
+        let report = diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
+        assert!(
+            report.is_empty(),
+            "expected no diffs, got:\n{}",
+            report
+                .differences
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    #[test]
+    fn xlsb_cell_edit_changes_only_expected_parts() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+        let fixture_archive = WorkbookArchive::open(fixture_path).expect("open fixture archive");
+        let fixture_has_calc_chain = fixture_archive.get("xl/calcChain.bin").is_some();
+
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read xlsb workbook");
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Number(123.0))),
+        );
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("edited.xlsb");
+        write_xlsx_blocking(&out_path, &workbook).expect("write xlsb workbook");
+
+        let report = diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
+        let report_text = report
+            .differences
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let extra_parts: Vec<_> = report
+            .differences
+            .iter()
+            .filter(|d| d.kind == "extra_part")
+            .map(|d| d.part.clone())
+            .collect();
+        assert!(
+            extra_parts.is_empty(),
+            "unexpected extra parts: {extra_parts:?}\n{report_text}"
+        );
+
+        assert!(
+            report
+                .differences
+                .iter()
+                .any(|d| d.part == "xl/worksheets/sheet1.bin"),
+            "expected worksheet part to change, got:\n{report_text}",
+        );
+
+        let mut allowed_parts: BTreeSet<String> =
+            BTreeSet::from(["xl/worksheets/sheet1.bin".to_string()]);
+        if fixture_has_calc_chain {
+            allowed_parts.extend([
+                "xl/calcChain.bin".to_string(),
+                "[Content_Types].xml".to_string(),
+                "xl/_rels/workbook.bin.rels".to_string(),
+            ]);
+        } else {
+            assert!(
+                report
+                    .differences
+                    .iter()
+                    .all(|d| !d.part.starts_with("xl/calcChain.")),
+                "did not expect calcChain changes for fixture without calcChain.bin; got:\n{report_text}",
+            );
+            let out_archive = WorkbookArchive::open(&out_path).expect("open written archive");
+            assert!(
+                out_archive.get("xl/calcChain.bin").is_none(),
+                "written workbook should not gain xl/calcChain.bin"
+            );
+        }
+
+        let missing_parts: Vec<_> = report
+            .differences
+            .iter()
+            .filter(|d| d.kind == "missing_part")
+            .map(|d| d.part.clone())
+            .collect();
+        if fixture_has_calc_chain {
+            assert!(
+                missing_parts == vec!["xl/calcChain.bin".to_string()],
+                "expected only calcChain.bin to be missing; got {missing_parts:?}\n{report_text}"
+            );
+        } else {
+            assert!(
+                missing_parts.is_empty(),
+                "unexpected missing parts: {missing_parts:?}\n{report_text}"
+            );
+        }
+
+        let diff_parts: BTreeSet<String> =
+            report.differences.iter().map(|d| d.part.clone()).collect();
+        let unexpected_parts: Vec<_> = diff_parts.difference(&allowed_parts).cloned().collect();
+        assert!(
+            unexpected_parts.is_empty(),
+            "unexpected diff parts: {unexpected_parts:?}\n{report_text}"
+        );
+
+        let patched = XlsbWorkbook::open(&out_path).expect("re-open patched xlsb");
+        let sheet = patched.read_sheet(0).expect("read patched sheet");
+        let b1 = sheet
+            .cells
+            .iter()
+            .find(|c| c.row == 0 && c.col == 1)
+            .expect("B1 exists");
+        assert_eq!(b1.value, XlsbCellValue::Number(123.0));
     }
 
     #[test]
@@ -1808,7 +2217,8 @@ mod tests {
             "/../../../fixtures/xlsx/metadata/defined-names.xlsx"
         ));
 
-        let workbook = read_xlsx_blocking(fixture_path).expect("read defined-names fixture workbook");
+        let workbook =
+            read_xlsx_blocking(fixture_path).expect("read defined-names fixture workbook");
         assert!(
             workbook.defined_names.iter().any(|n| n.name == "ZedName"),
             "expected defined name ZedName, got: {:?}",
@@ -1834,7 +2244,10 @@ mod tests {
             .find(|n| n.name == "ZedName")
             .expect("ZedName exists");
         assert_eq!(zed.refers_to, "Sheet1!$B$1");
-        assert!(zed.sheet_id.is_none(), "expected ZedName to be workbook-scoped");
+        assert!(
+            zed.sheet_id.is_none(),
+            "expected ZedName to be workbook-scoped"
+        );
     }
 
     #[test]
@@ -1885,7 +2298,10 @@ mod tests {
         assert_eq!(t.start_col, 0);
         assert_eq!(t.end_row, 2);
         assert_eq!(t.end_col, 1);
-        assert_eq!(t.columns, vec!["Amount".to_string(), "Category".to_string()]);
+        assert_eq!(
+            t.columns,
+            vec!["Amount".to_string(), "Category".to_string()]
+        );
     }
 
     #[test]
@@ -2204,8 +2620,8 @@ mod tests {
         let written_bytes =
             write_xlsx_blocking(&out_path, state.get_workbook().unwrap()).expect("write workbook");
 
-        let doc =
-            formula_xlsx::load_from_bytes(written_bytes.as_ref()).expect("load saved workbook from bytes");
+        let doc = formula_xlsx::load_from_bytes(written_bytes.as_ref())
+            .expect("load saved workbook from bytes");
         let sheet = doc
             .workbook
             .sheet_by_name("Sheet1")

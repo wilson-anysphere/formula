@@ -37,7 +37,7 @@ formula-model = { path = "../../../crates/formula-model" }
 formula-storage = { path = "../../../crates/formula-storage" }
 formula-vba = { path = "../../../crates/formula-vba" }
 formula-vba-runtime = { path = "../../../crates/formula-vba-runtime" }
-formula-xlsb = { path = "../../../crates/formula-xlsb" }
+formula-xlsb = { path = "../../../crates/formula-xlsb", features = ["write"] }
 formula-xlsx = { path = "../../../crates/formula-xlsx" }
 rust_xlsxwriter = "0.79"
 serde = { version = "1.0", features = ["derive"] }

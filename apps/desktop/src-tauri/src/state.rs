@@ -596,37 +596,52 @@ impl AppState {
         new_origin_xlsx_bytes: Option<Arc<[u8]>>,
     ) -> Result<(), AppStateError> {
         let requested_path = new_path.clone();
+        let workbook = self
+            .workbook
+            .as_mut()
+            .ok_or(AppStateError::NoWorkbookLoaded)?;
+
+        if let Some(path) = new_path {
+            workbook.path = Some(path);
+        }
+
+        let ext = workbook
+            .path
+            .as_deref()
+            .and_then(|p| std::path::Path::new(p).extension().and_then(|s| s.to_str()));
+
+        if ext.is_some_and(|ext| ext.eq_ignore_ascii_case("xlsb")) {
+            workbook.origin_xlsb_path = workbook.path.clone();
+            workbook.origin_xlsx_bytes = None;
+        } else if ext.is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx") || ext.eq_ignore_ascii_case("xlsm"))
         {
-            let workbook = self
-                .workbook
-                .as_mut()
-                .ok_or(AppStateError::NoWorkbookLoaded)?;
-            if let Some(path) = new_path {
-                workbook.path = Some(path);
-            }
+            workbook.origin_xlsb_path = None;
             if let Some(bytes) = new_origin_xlsx_bytes {
                 workbook.origin_xlsx_bytes = Some(bytes);
             }
-            // Saving establishes a new baseline for "net" changes. Clear the per-cell baseline so
-            // subsequent edits are tracked against this saved state (not the previously opened or
-            // previously saved workbook bytes).
-            workbook.cell_input_baseline.clear();
-            workbook.original_print_settings = workbook.print_settings.clone();
-            for sheet in &mut workbook.sheets {
-                sheet.clear_dirty_cells();
-            }
+        } else if let Some(bytes) = new_origin_xlsx_bytes {
+            workbook.origin_xlsx_bytes = Some(bytes);
+        }
 
-            // If the saved file is `.xlsx`, macros are not preserved; clear any in-memory macro
-            // payloads so the UI doesn't continue to treat the workbook as macro-enabled.
-            if workbook
-                .path
-                .as_deref()
-                .and_then(|p| std::path::Path::new(p).extension().and_then(|s| s.to_str()))
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
-            {
-                workbook.vba_project_bin = None;
-                workbook.macro_fingerprint = None;
-            }
+        // Saving establishes a new baseline for "net" changes. Clear the per-cell baseline so
+        // subsequent edits are tracked against this saved state (not the previously opened or
+        // previously saved workbook bytes).
+        workbook.cell_input_baseline.clear();
+        workbook.original_print_settings = workbook.print_settings.clone();
+        for sheet in &mut workbook.sheets {
+            sheet.clear_dirty_cells();
+        }
+
+        // If the saved file is `.xlsx`, macros are not preserved; clear any in-memory macro
+        // payloads so the UI doesn't continue to treat the workbook as macro-enabled.
+        if workbook
+            .path
+            .as_deref()
+            .and_then(|p| std::path::Path::new(p).extension().and_then(|s| s.to_str()))
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
+        {
+            workbook.vba_project_bin = None;
+            workbook.macro_fingerprint = None;
         }
         self.dirty = false;
 
@@ -1952,7 +1967,8 @@ impl AppState {
 
         for pass in 0..MAX_PIVOT_REFRESH_PASSES {
             let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
-            let formula_updates = self.refresh_computed_values_from_recalc_changes(&recalc_changes)?;
+            let formula_updates =
+                self.refresh_computed_values_from_recalc_changes(&recalc_changes)?;
 
             let mut changed_for_pivots = pending_changes.clone();
             changed_for_pivots.extend(
