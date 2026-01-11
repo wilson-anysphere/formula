@@ -5,6 +5,7 @@ import { FunctionRegistry } from "../src/functionRegistry.js";
 
 test("FunctionRegistry loads the Rust function catalog (HLOOKUP is present)", () => {
   const registry = new FunctionRegistry();
+  assert.ok(registry.getFunction("SEQUENCE"), "Expected SEQUENCE (catalog-only) to be present");
   assert.ok(registry.getFunction("XLOOKUP"), "Expected XLOOKUP to be present");
   assert.ok(registry.getFunction("_xlfn.XLOOKUP"), "Expected _xlfn.XLOOKUP alias to be present");
   assert.ok(registry.isRangeArg("_xlfn.XLOOKUP", 1), "Expected _xlfn.XLOOKUP arg2 to be a range");
