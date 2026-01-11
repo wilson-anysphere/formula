@@ -121,10 +121,32 @@ For production, set **one** of:
 - `SYNC_SERVER_AUTH_TOKEN` (opaque shared token), or
 - `SYNC_SERVER_JWT_SECRET` (HMAC JWT secret; HS256)
 
-If using JWTs, include either:
+If using JWTs, tokens are verified with:
 
-- `docs: string[]` (e.g. `["my-document-id"]` or `["*"]`), or
-- `doc: string`
+- algorithm: `HS256`
+- audience: `SYNC_SERVER_JWT_AUDIENCE` (defaults to `formula-sync`) — tokens must include a matching `aud`
+
+JWT claims:
+
+- **Preferred:** `docId: string` — must match the websocket document path exactly (e.g. connecting to `ws://.../my-document-id` requires `docId: "my-document-id"`).
+- `role: owner|admin|editor|commenter|viewer` (optional; defaults to `editor`)
+  - `viewer` and `commenter` are enforced as **read-only** at the Yjs protocol layer.
+- `orgId: string` (optional; included in API-issued tokens)
+
+Legacy (backwards-compatible) allowlisting is still supported if `docId` is not present:
+
+- `doc: string`, or
+- `docs: string[]` (e.g. `["my-document-id"]` or `["*"]`)
+
+Token minting:
+
+- The Formula API (`services/api`) can mint compatible sync tokens via `POST /docs/:docId/sync-token`.
+  - These tokens include `docId`, `orgId`, `role`, and `aud=formula-sync`.
+  - To use them with `services/sync-server`, configure the secrets to match (`SYNC_TOKEN_SECRET` in the API must equal `SYNC_SERVER_JWT_SECRET` in the sync server).
+
+Awareness hardening:
+
+- The server sanitizes awareness updates to prevent presence spoofing; presence `id` is forced to the JWT `sub`.
 
 #### Connect from a Yjs client
 
