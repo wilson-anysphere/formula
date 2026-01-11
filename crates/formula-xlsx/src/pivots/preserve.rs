@@ -335,42 +335,285 @@ impl XlsxPackage {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PivotCacheEntry {
+    cache_id: Option<u32>,
+    raw_xml: String,
+}
+
+/// Merge the preserved `<pivotCaches>` block into an existing `xl/workbook.xml` document.
+///
+/// Excel enforces a strict ordering for direct children of `<workbook>`. In particular,
+/// `<pivotCaches>` must appear **after** `<customWorkbookViews>` (if present) and **before**
+/// elements like `<fileRecoveryPr>`/`<extLst>`. Inserting the section naively before
+/// `</workbook>` can violate that ordering and cause Excel to repair/corrupt the file.
+///
+/// This helper:
+/// - Inserts `<pivotCaches>` at a schema-safe location when missing.
+/// - When `<pivotCaches>` already exists, merges only the missing `<pivotCache cacheId="…">`
+///   entries (does not delete or reorder existing entries).
+/// - Ensures the `<workbook>` element declares `xmlns:r` if any inserted pivot cache uses
+///   `r:id`.
+pub fn apply_preserved_pivot_caches_to_workbook_xml(
+    workbook_xml: &str,
+    preserved_pivot_caches_xml: &str,
+) -> Result<String, ChartExtractionError> {
+    apply_preserved_pivot_caches_to_workbook_xml_with_part(
+        workbook_xml,
+        "xl/workbook.xml",
+        preserved_pivot_caches_xml,
+    )
+}
+
+fn apply_preserved_pivot_caches_to_workbook_xml_with_part(
+    workbook_xml: &str,
+    part_name: &str,
+    preserved_pivot_caches_xml: &str,
+) -> Result<String, ChartExtractionError> {
+    if preserved_pivot_caches_xml.trim().is_empty() {
+        return Ok(workbook_xml.to_string());
+    }
+
+    let doc =
+        Document::parse(workbook_xml).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let workbook = doc.root_element();
+
+    let mut updated = if let Some(pivot_caches) = workbook
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "pivotCaches")
+    {
+        merge_pivot_caches(workbook_xml, pivot_caches, preserved_pivot_caches_xml)?
+    } else {
+        insert_pivot_caches(workbook_xml, &workbook, preserved_pivot_caches_xml)?
+    };
+
+    if updated.contains("r:id") && !updated.contains("xmlns:r=") {
+        updated = ensure_workbook_has_r_namespace(&updated, part_name)?;
+    }
+
+    Ok(updated)
+}
+
+fn merge_pivot_caches(
+    workbook_xml: &str,
+    existing_pivot_caches: roxmltree::Node<'_, '_>,
+    preserved_pivot_caches_xml: &str,
+) -> Result<String, ChartExtractionError> {
+    let pivot_caches_range = existing_pivot_caches.range();
+    let existing_section = &workbook_xml[pivot_caches_range.clone()];
+
+    let existing_cache_ids: HashSet<u32> = existing_pivot_caches
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "pivotCache")
+        .filter_map(|n| n.attribute("cacheId").and_then(|v| v.parse::<u32>().ok()))
+        .collect();
+    let existing_pivot_cache_count = existing_pivot_caches
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "pivotCache")
+        .count();
+
+    let preserved_entries = parse_pivot_cache_entries(preserved_pivot_caches_xml)?;
+
+    let mut to_insert = Vec::new();
+    for entry in preserved_entries {
+        match entry.cache_id {
+            Some(id) if existing_cache_ids.contains(&id) => continue,
+            Some(_) | None => to_insert.push(entry),
+        }
+    }
+
+    if to_insert.is_empty() {
+        return Ok(workbook_xml.to_string());
+    }
+
+    let mut inserted_xml = String::new();
+    for entry in &to_insert {
+        inserted_xml.push_str(&entry.raw_xml);
+    }
+
+    let mut new_section = if is_self_closing_element(existing_section) {
+        let (start, trailing_ws) = split_trailing_whitespace(existing_section);
+        let start = start.trim_end().strip_suffix("/>").unwrap_or(start.trim_end());
+        let mut section = String::new();
+        section.push_str(start);
+        section.push('>');
+        section.push_str(&inserted_xml);
+        section.push_str("</pivotCaches>");
+        section.push_str(trailing_ws);
+        section
+    } else {
+        let close_tag_pos = existing_section.rfind("</pivotCaches>").ok_or_else(|| {
+            ChartExtractionError::XmlStructure("workbook.xml: missing </pivotCaches>".to_string())
+        })?;
+        let mut section =
+            String::with_capacity(existing_section.len().saturating_add(inserted_xml.len()));
+        section.push_str(&existing_section[..close_tag_pos]);
+        section.push_str(&inserted_xml);
+        section.push_str(&existing_section[close_tag_pos..]);
+        section
+    };
+
+    // Keep `count="..."` in sync when present.
+    let new_count = existing_pivot_cache_count + to_insert.len();
+    new_section = update_pivot_caches_count_attr(&new_section, new_count);
+
+    let mut out = String::with_capacity(workbook_xml.len() + inserted_xml.len());
+    out.push_str(&workbook_xml[..pivot_caches_range.start]);
+    out.push_str(&new_section);
+    out.push_str(&workbook_xml[pivot_caches_range.end..]);
+    Ok(out)
+}
+
+fn insert_pivot_caches(
+    workbook_xml: &str,
+    workbook_node: &roxmltree::Node<'_, '_>,
+    preserved_pivot_caches_xml: &str,
+) -> Result<String, ChartExtractionError> {
+    let mut insert_idx = None;
+
+    // 1) Prefer inserting after `<customWorkbookViews>` when present.
+    for child in workbook_node.children().filter(|n| n.is_element()) {
+        if child.tag_name().name() == "customWorkbookViews" {
+            insert_idx = Some(child.range().end);
+            break;
+        }
+    }
+
+    // 2) Otherwise insert before the first "after" element.
+    if insert_idx.is_none() {
+        let after = [
+            "smartTagPr",
+            "smartTagTypes",
+            "webPublishing",
+            "fileRecoveryPr",
+            "webPublishObjects",
+            "extLst",
+        ];
+        for child in workbook_node.children().filter(|n| n.is_element()) {
+            if after.contains(&child.tag_name().name()) {
+                insert_idx = Some(child.range().start);
+                break;
+            }
+        }
+    }
+
+    // 3) Fallback: insert before closing `</workbook>`.
+    let insert_idx = match insert_idx {
+        Some(idx) => idx,
+        None => workbook_xml.rfind("</workbook>").ok_or_else(|| {
+            ChartExtractionError::XmlStructure("workbook.xml: missing </workbook>".to_string())
+        })?,
+    };
+
+    let mut out = String::with_capacity(workbook_xml.len() + preserved_pivot_caches_xml.len());
+    out.push_str(&workbook_xml[..insert_idx]);
+    out.push_str(preserved_pivot_caches_xml);
+    out.push_str(&workbook_xml[insert_idx..]);
+    Ok(out)
+}
+
+fn parse_pivot_cache_entries(xml: &str) -> Result<Vec<PivotCacheEntry>, ChartExtractionError> {
+    // The preserved `<pivotCaches>` section usually relies on `xmlns:r` declared on the
+    // surrounding `<workbook>` element. When parsing it in isolation we need to provide
+    // a namespace binding for the `r:` prefix so `r:id="..."` attributes remain valid.
+    let wrapped = format!(r#"<root xmlns:r="{REL_NS}">{xml}</root>"#);
+    let doc = Document::parse(&wrapped)
+        .map_err(|e| ChartExtractionError::XmlParse("pivotCaches".to_string(), e))?;
+
+    let pivot_caches = doc.descendants().find(|n| {
+        n.is_element() && n.tag_name().name() == "pivotCaches"
+    }).ok_or_else(|| {
+        ChartExtractionError::XmlStructure("pivotCaches: missing <pivotCaches>".to_string())
+    })?;
+
+    let mut entries = Vec::new();
+    for node in pivot_caches
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "pivotCache")
+    {
+        let cache_id = node.attribute("cacheId").and_then(|v| v.parse::<u32>().ok());
+        let raw_xml = wrapped[node.range()].to_string();
+        entries.push(PivotCacheEntry { cache_id, raw_xml });
+    }
+
+    Ok(entries)
+}
+
+fn ensure_workbook_has_r_namespace(
+    workbook_xml: &str,
+    part_name: &str,
+) -> Result<String, ChartExtractionError> {
+    if workbook_xml.contains("xmlns:r=") {
+        return Ok(workbook_xml.to_string());
+    }
+
+    let workbook_start = workbook_xml.find("<workbook").ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: missing <workbook"))
+    })?;
+    let tag_end_rel = workbook_xml[workbook_start..].find('>').ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: invalid <workbook> start tag"))
+    })?;
+    let insert_pos = workbook_start + tag_end_rel;
+
+    let mut out = workbook_xml.to_string();
+    out.insert_str(insert_pos, &format!(" xmlns:r=\"{REL_NS}\""));
+    Ok(out)
+}
+
+fn is_self_closing_element(xml: &str) -> bool {
+    let trimmed = xml.trim_end();
+    trimmed.ends_with("/>") && !trimmed.contains("</")
+}
+
+fn split_trailing_whitespace(s: &str) -> (&str, &str) {
+    let trimmed_len = s.trim_end_matches(char::is_whitespace).len();
+    (&s[..trimmed_len], &s[trimmed_len..])
+}
+
+fn update_pivot_caches_count_attr(pivot_caches_xml: &str, new_count: usize) -> String {
+    let Some(tag_end) = pivot_caches_xml.find('>') else {
+        return pivot_caches_xml.to_string();
+    };
+    let start_tag = &pivot_caches_xml[..tag_end];
+    let Some(count_idx) = start_tag.find("count=") else {
+        return pivot_caches_xml.to_string();
+    };
+
+    let value_start = count_idx + "count=".len();
+    let quote = pivot_caches_xml.as_bytes().get(value_start).copied();
+    let quote = match quote {
+        Some(b'"') => '"',
+        Some(b'\'') => '\'',
+        _ => return pivot_caches_xml.to_string(),
+    };
+
+    let value_start = value_start + 1;
+    let Some(value_rel_end) = pivot_caches_xml[value_start..].find(quote) else {
+        return pivot_caches_xml.to_string();
+    };
+    let value_end = value_start + value_rel_end;
+
+    let mut out = pivot_caches_xml.to_string();
+    out.replace_range(value_start..value_end, &new_count.to_string());
+    out
+}
+
 fn ensure_workbook_xml_has_pivot_caches(
     workbook_xml: &[u8],
     part_name: &str,
     pivot_caches_xml: &[u8],
 ) -> Result<Vec<u8>, ChartExtractionError> {
-    let mut xml = std::str::from_utf8(workbook_xml)
-        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?
-        .to_string();
-
-    if xml.contains("<pivotCaches") {
-        return Ok(workbook_xml.to_vec());
-    }
-
+    let workbook_xml = std::str::from_utf8(workbook_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
     let pivot_caches_str = std::str::from_utf8(pivot_caches_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8("pivotCaches".to_string(), e))?;
 
-    if pivot_caches_str.contains("r:id")
-        && !xml.contains(
-            "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"",
-        )
-    {
-        let workbook_start = xml.find("<workbook").ok_or_else(|| {
-            ChartExtractionError::XmlStructure(format!("{part_name}: missing <workbook"))
-        })?;
-        let tag_end = xml[workbook_start..].find('>').ok_or_else(|| {
-            ChartExtractionError::XmlStructure(format!("{part_name}: invalid <workbook> start tag"))
-        })?;
-        let insert_pos = workbook_start + tag_end;
-        xml.insert_str(insert_pos, &format!(" xmlns:r=\"{REL_NS}\""));
-    }
-
-    let close_idx = xml.rfind("</workbook>").ok_or_else(|| {
-        ChartExtractionError::XmlStructure(format!("{part_name}: missing </workbook>"))
-    })?;
-    xml.insert_str(close_idx, pivot_caches_str);
-    Ok(xml.into_bytes())
+    let updated = apply_preserved_pivot_caches_to_workbook_xml_with_part(
+        workbook_xml,
+        part_name,
+        pivot_caches_str,
+    )?;
+    Ok(updated.into_bytes())
 }
 
 /// Merge (or insert) a `<pivotTables>` block into a worksheet XML string.
