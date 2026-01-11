@@ -22,6 +22,35 @@ export type MergeConflict =
       base: Cell | null;
       ours: { to: string } | null;
       theirs: { to: string } | null;
+    }
+  | {
+      type: "sheet";
+      reason: "rename" | "order" | "presence";
+      sheetId?: string;
+      base: unknown;
+      ours: unknown;
+      theirs: unknown;
+    }
+  | {
+      type: "metadata";
+      key: string;
+      base: unknown;
+      ours: unknown;
+      theirs: unknown;
+    }
+  | {
+      type: "namedRange";
+      key: string;
+      base: unknown;
+      ours: unknown;
+      theirs: unknown;
+    }
+  | {
+      type: "comment";
+      id: string;
+      base: unknown;
+      ours: unknown;
+      theirs: unknown;
     };
 
 export type MergePreview = {
@@ -31,9 +60,18 @@ export type MergePreview = {
 
 export type Actor = { userId: string; role: "owner" | "admin" | "editor" | "commenter" | "viewer" };
 
-export type ConflictResolution =
-  | { conflictIndex: number; choice: "ours" | "theirs" | "manual"; manualCell?: Cell | null }
-  | { conflictIndex: number; choice: "ours" | "theirs" | "manual"; manualMoveTo?: string };
+export type ConflictResolution = {
+  conflictIndex: number;
+  choice: "ours" | "theirs" | "manual";
+  manualCell?: Cell | null;
+  manualMoveTo?: string;
+  manualSheetName?: string | null;
+  manualSheetOrder?: string[];
+  manualSheetState?: unknown;
+  manualMetadataValue?: unknown;
+  manualNamedRangeValue?: unknown;
+  manualCommentValue?: unknown;
+};
 
 export type BranchService = {
   previewMerge(actor: Actor, input: { sourceBranch: string }): Promise<MergePreview>;
@@ -45,6 +83,33 @@ function cellSummary(cell: Cell | null) {
   if (cell.formula) return cell.formula;
   if (cell.value !== undefined) return JSON.stringify(cell.value);
   return "∅";
+}
+
+function jsonSummary(value: unknown) {
+  if (value === null || value === undefined) return "∅";
+  try {
+    const json = JSON.stringify(value);
+    return json.length > 200 ? `${json.slice(0, 200)}…` : json;
+  } catch {
+    return String(value);
+  }
+}
+
+function conflictHeader(c: MergeConflict) {
+  if (c.type === "cell" || c.type === "move") {
+    return `${c.sheetId}!${c.cell} (${c.reason})`;
+  }
+  if (c.type === "sheet") {
+    if (c.reason === "rename") return `sheet rename: ${c.sheetId ?? "?"}`;
+    if (c.reason === "order") return "sheet order";
+    if (c.reason === "presence") return `sheet presence: ${c.sheetId ?? "?"}`;
+    return "sheet";
+  }
+  if (c.type === "namedRange") return `named range: ${c.key}`;
+  if (c.type === "comment") return `comment: ${c.id}`;
+  if (c.type === "metadata") return `metadata: ${c.key}`;
+  // Exhaustive fallback.
+  return "conflict";
 }
 
 export function MergeBranchPanel({
@@ -100,9 +165,7 @@ export function MergeBranchPanel({
               key={`${c.type}-${idx}`}
               style={{ border: "1px solid var(--border)", padding: 8, marginBottom: 8 }}
             >
-              <div style={{ fontWeight: 600 }}>
-                {c.sheetId}!{c.cell} ({c.reason})
-              </div>
+              <div style={{ fontWeight: 600 }}>{conflictHeader(c)}</div>
               {c.type === "cell" ? (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                   <div>
@@ -118,10 +181,25 @@ export function MergeBranchPanel({
                     <div>{cellSummary(c.theirs)}</div>
                   </div>
                 </div>
-              ) : (
+              ) : c.type === "move" ? (
                 <div style={{ display: "flex", gap: 8 }}>
                   <div>{tWithVars("branchMerge.conflict.move.oursTo", { to: c.ours?.to ?? "?" })}</div>
                   <div>{tWithVars("branchMerge.conflict.move.theirsTo", { to: c.theirs?.to ?? "?" })}</div>
+                </div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                  <div>
+                    <div style={{ color: "var(--text-secondary)" }}>{t("branchMerge.conflict.base")}</div>
+                    <div>{jsonSummary(c.base)}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--text-secondary)" }}>{t("branchMerge.conflict.ours")}</div>
+                    <div>{jsonSummary(c.ours)}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--text-secondary)" }}>{t("branchMerge.conflict.theirs")}</div>
+                    <div>{jsonSummary(c.theirs)}</div>
+                  </div>
                 </div>
               )}
 
@@ -142,27 +220,41 @@ export function MergeBranchPanel({
                 </button>
                 <button
                   onClick={() => {
-                    const manual =
-                      c.type === "move"
-                        ? window.prompt(t("branchMerge.prompt.moveDestination"), c.ours?.to ?? "")
-                        : window.prompt(t("branchMerge.prompt.manualJson"), "");
-                    if (manual === null) return;
-                    if (c.type === "move") {
-                      setResolutions(
-                        new Map(resolutions).set(idx, {
-                          conflictIndex: idx,
-                          choice: "manual",
-                          manualMoveTo: manual
-                        })
-                      );
-                    } else {
-                      setResolutions(
-                        new Map(resolutions).set(idx, {
-                          conflictIndex: idx,
-                          choice: "manual",
-                          manualCell: manual ? (JSON.parse(manual) as Cell) : null
-                        })
-                      );
+                    try {
+                      const manual =
+                        c.type === "move"
+                          ? window.prompt(t("branchMerge.prompt.moveDestination"), c.ours?.to ?? "")
+                          : c.type === "sheet" && c.reason === "rename"
+                            ? window.prompt(t("branchMerge.prompt.manualJson"), String(c.ours ?? ""))
+                            : c.type === "sheet" && c.reason === "order"
+                              ? window.prompt(t("branchMerge.prompt.manualJson"), JSON.stringify(c.ours ?? []))
+                              : window.prompt(t("branchMerge.prompt.manualJson"), JSON.stringify(c.ours ?? null));
+
+                      if (manual === null) return;
+
+                      const resolution: ConflictResolution = { conflictIndex: idx, choice: "manual" };
+
+                      if (c.type === "move") {
+                        resolution.manualMoveTo = manual;
+                      } else if (c.type === "cell") {
+                        resolution.manualCell = manual ? (JSON.parse(manual) as Cell) : null;
+                      } else if (c.type === "sheet" && c.reason === "rename") {
+                        resolution.manualSheetName = manual.length > 0 ? manual : null;
+                      } else if (c.type === "sheet" && c.reason === "order") {
+                        resolution.manualSheetOrder = manual ? (JSON.parse(manual) as string[]) : [];
+                      } else if (c.type === "sheet" && c.reason === "presence") {
+                        resolution.manualSheetState = manual ? JSON.parse(manual) : null;
+                      } else if (c.type === "metadata") {
+                        resolution.manualMetadataValue = manual ? JSON.parse(manual) : null;
+                      } else if (c.type === "namedRange") {
+                        resolution.manualNamedRangeValue = manual ? JSON.parse(manual) : null;
+                      } else if (c.type === "comment") {
+                        resolution.manualCommentValue = manual ? JSON.parse(manual) : null;
+                      }
+
+                      setResolutions(new Map(resolutions).set(idx, resolution));
+                    } catch (e) {
+                      setError((e as Error).message);
                     }
                   }}
                 >
