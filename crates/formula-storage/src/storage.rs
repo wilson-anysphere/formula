@@ -234,7 +234,28 @@ impl Storage {
             return Ok(());
         };
         let _persist_guard = ctx.persist_lock.lock().expect("storage persist mutex poisoned");
+        self.persist_inner(ctx)
+    }
 
+    /// Rotate the current encryption key (preserving older versions for decryption) and persist.
+    ///
+    /// Returns `Ok(None)` when this storage is not using encrypted-at-rest mode.
+    pub fn rotate_encryption_key(&self) -> Result<Option<u32>> {
+        let Some(ctx) = self.encrypted.as_ref() else {
+            return Ok(None);
+        };
+        let _persist_guard = ctx.persist_lock.lock().expect("storage persist mutex poisoned");
+
+        let mut keyring = load_or_create_keyring(ctx.key_provider.as_ref(), true)?;
+        keyring.rotate();
+        ctx.key_provider
+            .store_keyring(&keyring)
+            .map_err(crate::encryption::EncryptionError::from)?;
+        self.persist_inner(ctx)?;
+        Ok(Some(keyring.current_version))
+    }
+
+    fn persist_inner(&self, ctx: &EncryptedStorageContext) -> Result<()> {
         let sqlite_bytes = {
             let conn = self.conn.lock().expect("storage mutex poisoned");
             export_connection_to_sqlite_bytes(&conn)?
@@ -246,23 +267,6 @@ impl Storage {
         atomic_write(&ctx.path, &encrypted_bytes)?;
         cleanup_sqlite_sidecar_files(&ctx.path)?;
         Ok(())
-    }
-
-    /// Rotate the current encryption key (preserving older versions for decryption) and persist.
-    ///
-    /// Returns `Ok(None)` when this storage is not using encrypted-at-rest mode.
-    pub fn rotate_encryption_key(&self) -> Result<Option<u32>> {
-        let Some(ctx) = self.encrypted.as_ref() else {
-            return Ok(None);
-        };
-
-        let mut keyring = load_or_create_keyring(ctx.key_provider.as_ref(), true)?;
-        keyring.rotate();
-        ctx.key_provider
-            .store_keyring(&keyring)
-            .map_err(crate::encryption::EncryptionError::from)?;
-        self.persist()?;
-        Ok(Some(keyring.current_version))
     }
 
     pub fn save_data_model(&self, workbook_id: Uuid, model: &formula_dax::DataModel) -> Result<()> {
