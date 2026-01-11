@@ -62,7 +62,7 @@ Enable:
 - Provide key material via **one** of:
   - `SYNC_SERVER_ENCRYPTION_KEYRING_JSON` (KeyRing JSON string), or
   - `SYNC_SERVER_ENCRYPTION_KEYRING_PATH` (path to a JSON file containing KeyRing JSON)
-  - (Optional shorthand) `SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64` (base64 32-byte key; creates a single-version keyring)
+  - (Optional shorthand) `SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64` (base64 32-byte key; creates a single-version keyring — use KeyRing JSON for rotation)
 
 Generate / rotate / validate KeyRing material:
 
