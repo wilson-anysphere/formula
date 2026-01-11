@@ -44,6 +44,8 @@ The first delimiter after the header is a **literal tab character** (`\t`). Key/
 
 Formula uses a canonical `AuditEvent` shape defined in `@formula/audit-core` (`createAuditEvent`). The API stores a flattened subset in Postgres (`audit_log` + `audit_log_archive`) and reconstructs canonical events on export via `auditLogRowToAuditEvent`.
 
+Note: `GET /orgs/:orgId/audit/export` returns this canonical `AuditEvent` shape. The background SIEM export worker emits a flattened event representation (see below).
+
 Example:
 
 ```json
@@ -139,6 +141,30 @@ High-level flow:
 2. Fetch audit events (including archived) in ascending order via `services/api/src/siem/auditSource.ts`.
 3. Send a batch to the org’s configured `endpointUrl` using `services/api/src/siem/sender.ts`.
 4. Persist cursor + backoff state in `org_siem_export_state` (`services/api/migrations/0003_siem_export_state.sql`).
+
+### Exported event shape (background worker)
+
+The worker exports batches of audit events in a flattened schema (see `services/api/src/siem/types.ts`), e.g.:
+
+```json
+{
+  "id": "11111111-1111-4111-8111-111111111111",
+  "timestamp": "2026-01-01T00:00:00.000Z",
+  "orgId": "org_1",
+  "userId": "user_1",
+  "userEmail": "user@example.com",
+  "eventType": "document.created",
+  "resourceType": "document",
+  "resourceId": "doc_1",
+  "ipAddress": "203.0.113.5",
+  "userAgent": "UnitTest/1.0",
+  "sessionId": "sess_1",
+  "success": true,
+  "errorCode": null,
+  "errorMessage": null,
+  "details": { "title": "Q1 Plan" }
+}
+```
 
 ## Client-side delivery helpers (desktop / offline-first)
 
