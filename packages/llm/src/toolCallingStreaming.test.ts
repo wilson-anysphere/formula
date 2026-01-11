@@ -92,5 +92,66 @@ describe("runChatWithToolsStreaming", () => {
     expect(nonStreamingResult.final).toBe(streamingResult.final);
     expect(nonStreamingResult.messages).toEqual(streamingResult.messages);
   });
-});
 
+  it("summarizes large tool results before appending them to the next streamed request", async () => {
+    const bigValues = Array.from({ length: 100 }, (_, r) => Array.from({ length: 100 }, (_, c) => r * 100 + c));
+
+    const toolExecutor: ToolExecutor = {
+      tools: [
+        {
+          name: "read_range",
+          description: "read range",
+          parameters: { type: "object", properties: { range: { type: "string" } }, required: ["range"] },
+        },
+      ],
+      execute: vi.fn(async (call: any) => {
+        return {
+          tool: "read_range",
+          ok: true,
+          timing: { started_at_ms: 0, duration_ms: 0 },
+          data: { range: call.arguments.range, values: bigValues },
+        };
+      }),
+    };
+
+    let streamCalls = 0;
+    const client = {
+      async chat() {
+        throw new Error("chat() should not be called when streamChat is available");
+      },
+      async *streamChat(request: any) {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield { type: "tool_call_start", id: "call-1", name: "read_range" } satisfies ChatStreamEvent;
+          yield { type: "tool_call_delta", id: "call-1", delta: '{"range":"Sheet1!A1:CV100"}' } satisfies ChatStreamEvent;
+          yield { type: "done" } satisfies ChatStreamEvent;
+          return;
+        }
+
+        const last = request.messages.at(-1);
+        expect(last.role).toBe("tool");
+        expect(last.toolCallId).toBe("call-1");
+        expect(typeof last.content).toBe("string");
+        expect(last.content.length).toBeLessThanOrEqual(20_000);
+
+        const payload = JSON.parse(last.content);
+        expect(payload.tool).toBe("read_range");
+        expect(payload.ok).toBe(true);
+        expect(payload.data?.truncated).toBe(true);
+        expect(payload.data?.shape).toEqual({ rows: 100, cols: 100 });
+
+        yield { type: "text", delta: "done" } satisfies ChatStreamEvent;
+        yield { type: "done" } satisfies ChatStreamEvent;
+      },
+    };
+
+    const result = await runChatWithToolsStreaming({
+      client: client as any,
+      toolExecutor,
+      messages: [{ role: "user", content: "Read a big range" }],
+    });
+
+    expect(result.final).toBe("done");
+    expect(toolExecutor.execute).toHaveBeenCalledTimes(1);
+  });
+});

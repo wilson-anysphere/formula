@@ -6,18 +6,7 @@
  */
 
 import { runChatWithTools } from "./toolCalling.js";
-
-/**
- * @param {unknown} value
- */
-function safeStringify(value) {
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
+import { serializeToolResultForModel } from "./toolResultSerialization.js";
 
 /**
  * @param {unknown} input
@@ -155,6 +144,7 @@ export async function runChatWithToolsStreaming(params) {
   const requireApproval = params.requireApproval ?? (async () => true);
   const continueOnApprovalDenied = params.continueOnApprovalDenied ?? false;
   const toolDefs = params.toolExecutor.tools ?? [];
+  const maxToolResultChars = 20_000;
 
   /** @type {LLMMessage[]} */
   const messages = params.messages.slice();
@@ -199,7 +189,7 @@ export async function runChatWithToolsStreaming(params) {
         messages.push({
           role: "tool",
           toolCallId: call.id,
-          content: safeStringify(skippedResult),
+          content: serializeToolResultForModel({ toolCall: call, result: skippedResult, maxChars: maxToolResultChars }),
         });
         continue;
       }
@@ -219,7 +209,7 @@ export async function runChatWithToolsStreaming(params) {
           messages.push({
             role: "tool",
             toolCallId: call.id,
-            content: safeStringify(deniedResult),
+            content: serializeToolResultForModel({ toolCall: call, result: deniedResult, maxChars: maxToolResultChars }),
           });
           if (!continueOnApprovalDenied) {
             throw new Error(deniedResult.error.message);
@@ -236,7 +226,7 @@ export async function runChatWithToolsStreaming(params) {
       messages.push({
         role: "tool",
         toolCallId: call.id,
-        content: safeStringify(result),
+        content: serializeToolResultForModel({ toolCall: call, result, maxChars: maxToolResultChars }),
       });
     }
   }
