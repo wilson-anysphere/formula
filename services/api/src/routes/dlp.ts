@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { enforceOrgIpAllowlistForSessionWithAllowlist } from "../auth/orgIpAllowlist";
 import { DLP_ACTION, selectorKey } from "../dlp/dlp";
 import { evaluateDocumentDlpPolicy } from "../dlp/effective";
 import { canDocument, type DocumentRole } from "../rbac/roles";
@@ -12,8 +13,9 @@ async function requireDocRead(
 ): Promise<{ orgId: string; role: DocumentRole } | null> {
   const membership = await request.server.db.query(
     `
-      SELECT d.org_id, dm.role
+      SELECT d.org_id, dm.role, os.ip_allowlist
       FROM documents d
+      LEFT JOIN org_settings os ON os.org_id = d.org_id
       LEFT JOIN document_members dm
         ON dm.document_id = d.id AND dm.user_id = $2
       WHERE d.id = $1
@@ -27,7 +29,11 @@ async function requireDocRead(
     return null;
   }
 
-  const row = membership.rows[0] as { org_id: string; role: DocumentRole | null };
+  const row = membership.rows[0] as { org_id: string; role: DocumentRole | null; ip_allowlist: unknown };
+  if (!(await enforceOrgIpAllowlistForSessionWithAllowlist(request, reply, row.org_id, row.ip_allowlist))) {
+    return null;
+  }
+
   if (!row.role || !canDocument(row.role, "read")) {
     reply.code(403).send({ error: "forbidden" });
     return null;
@@ -85,4 +91,3 @@ export function registerDlpRoutes(app: FastifyInstance): void {
     });
   });
 }
-

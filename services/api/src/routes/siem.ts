@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
+import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { deleteSecret, putSecret } from "../secrets/secretStore";
@@ -316,7 +317,10 @@ async function storeAuth(options: {
 }
 
 export function registerSiemRoutes(app: FastifyInstance): void {
-  app.get("/orgs/:orgId/siem", { preHandler: requireAuth }, async (request, reply) => {
+  app.get(
+    "/orgs/:orgId/siem",
+    { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
+    async (request, reply) => {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgAdmin(request, reply, orgId);
     if (!member) return;
@@ -331,9 +335,13 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     }
 
     return reply.send({ enabled: Boolean(row.enabled), config: maskSecrets(config) });
-  });
+    }
+  );
 
-  app.put("/orgs/:orgId/siem", { preHandler: requireAuth }, async (request, reply) => {
+  app.put(
+    "/orgs/:orgId/siem",
+    { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
+    async (request, reply) => {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgAdmin(request, reply, orgId);
     if (!member) return;
@@ -485,9 +493,13 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     );
 
     return reply.send({ enabled, config: maskSecrets(storedConfig) });
-  });
+    }
+  );
 
-  app.delete("/orgs/:orgId/siem", { preHandler: requireAuth }, async (request, reply) => {
+  app.delete(
+    "/orgs/:orgId/siem",
+    { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
+    async (request, reply) => {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgAdmin(request, reply, orgId);
     if (!member) return;
@@ -522,6 +534,6 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     );
 
     return reply.code(204).send();
-  });
+    }
+  );
 }
-

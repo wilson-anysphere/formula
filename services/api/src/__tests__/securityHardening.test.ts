@@ -179,6 +179,15 @@ describe("security hardening", () => {
     expect(blockedOrg.statusCode).toBe(403);
     expect((blockedOrg.json() as any).error).toBe("ip_not_allowed");
 
+    const blockedSiem = await app.inject({
+      method: "GET",
+      url: `/orgs/${orgId}/siem`,
+      headers: { cookie },
+      remoteAddress: "203.0.113.10"
+    });
+    expect(blockedSiem.statusCode).toBe(403);
+    expect((blockedSiem.json() as any).error).toBe("ip_not_allowed");
+
     const blockedDoc = await app.inject({
       method: "GET",
       url: `/docs/${docId}`,
@@ -187,6 +196,16 @@ describe("security hardening", () => {
     });
     expect(blockedDoc.statusCode).toBe(403);
     expect((blockedDoc.json() as any).error).toBe("ip_not_allowed");
+
+    const blockedDocDlp = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/dlp/evaluate`,
+      headers: { cookie },
+      remoteAddress: "203.0.113.10",
+      payload: { action: "export.csv" }
+    });
+    expect(blockedDocDlp.statusCode).toBe(403);
+    expect((blockedDocDlp.json() as any).error).toBe("ip_not_allowed");
 
     const allowedOrg = await app.inject({
       method: "GET",
@@ -202,4 +221,3 @@ describe("security hardening", () => {
     expect(audit.rowCount).toBeGreaterThan(0);
   });
 });
-
