@@ -152,5 +152,25 @@ test.describe("grid scrolling + virtualization", () => {
     // Chart DOM nodes are positioned in sheet space minus scroll offsets.
     expect(Math.abs((before!.top - after!.top) - deltaScroll)).toBeLessThan(1);
     expect(Math.abs(before!.left - after!.left)).toBeLessThan(1);
+
+    // Horizontal scroll should move the chart's x position by the scroll delta.
+    await page.mouse.wheel(240, 0);
+
+    const afterX = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const el = document.querySelector<HTMLElement>('[data-testid="chart-object"]');
+      if (!el) return null;
+      return {
+        scroll: app.getScroll(),
+        left: Number.parseFloat(el.style.left),
+        top: Number.parseFloat(el.style.top),
+      };
+    });
+    expect(afterX).not.toBeNull();
+
+    const deltaScrollX = afterX!.scroll.x - after!.scroll.x;
+    expect(deltaScrollX).toBeGreaterThan(0);
+    expect(Math.abs((after!.left - afterX!.left) - deltaScrollX)).toBeLessThan(1);
+    expect(Math.abs(after!.top - afterX!.top)).toBeLessThan(1);
   });
 });
