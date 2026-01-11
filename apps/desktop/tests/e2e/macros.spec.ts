@@ -83,7 +83,7 @@ test.describe("macros panel", () => {
     await panel.getByRole("button", { name: "Run" }).click();
 
     await expect(page.getByTestId("active-value")).toHaveText("FromMacro");
-    await page.waitForFunction(() => (window as any).__formulaApp.getCellValueA1("A2") === "MacroA2");
+    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A2")) === "MacroA2");
 
     // Focus the grid to ensure keyboard shortcuts route to the SpreadsheetApp handler.
     await page.click("#grid", { position: { x: 5, y: 5 } });
@@ -96,4 +96,3 @@ test.describe("macros panel", () => {
     expect(a2).toBe("A");
   });
 });
-
