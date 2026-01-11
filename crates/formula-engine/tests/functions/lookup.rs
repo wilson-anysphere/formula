@@ -121,6 +121,24 @@ fn xmatch_supports_next_smaller_and_next_larger() {
 }
 
 #[test]
+fn xmatch_approximate_modes_handle_duplicates_like_sorted_insertion_points() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 2.0);
+    sheet.set("A4", 2.0);
+    sheet.set("A5", 3.0);
+
+    // Next smaller: insertion point for 2.5 is after the last 2.
+    assert_eq!(sheet.eval("=XMATCH(2.5, A1:A5, -1)"), Value::Number(4.0));
+    assert_eq!(sheet.eval("=XMATCH(2.5, A1:A5, -1, 2)"), Value::Number(4.0));
+
+    // Next larger: insertion point for 1.5 is before the first 2.
+    assert_eq!(sheet.eval("=XMATCH(1.5, A1:A5, 1)"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=XMATCH(1.5, A1:A5, 1, 2)"), Value::Number(2.0));
+}
+
+#[test]
 fn xmatch_binary_search_modes() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);

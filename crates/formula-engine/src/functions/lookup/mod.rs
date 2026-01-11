@@ -111,6 +111,19 @@ fn lower_bound_by(values: &[Value], needle: &Value, cmp: impl Fn(&Value, &Value)
     lo
 }
 
+fn upper_bound_by(values: &[Value], needle: &Value, cmp: impl Fn(&Value, &Value) -> Ordering) -> usize {
+    let mut lo = 0usize;
+    let mut hi = values.len();
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        match cmp(&values[mid], needle) {
+            Ordering::Greater => hi = mid,
+            Ordering::Less | Ordering::Equal => lo = mid + 1,
+        }
+    }
+    lo
+}
+
 /// XMATCH(lookup_value, lookup_array, [match_mode], [search_mode])
 ///
 /// Returns a 1-based index on success, or `#N/A` when no match is found.
@@ -185,10 +198,14 @@ fn xmatch_linear(
                         None => Some(idx),
                         Some(best_idx) => {
                             let best_val = &lookup_array[best_idx];
-                            if lookup_cmp(candidate, best_val) == Ordering::Greater {
-                                Some(idx)
-                            } else {
-                                Some(best_idx)
+                            match lookup_cmp(candidate, best_val) {
+                                Ordering::Greater => Some(idx),
+                                Ordering::Equal => {
+                                    // For "next smaller", choose the last occurrence of the winning
+                                    // value (insertion point is after duplicates).
+                                    if idx > best_idx { Some(idx) } else { Some(best_idx) }
+                                }
+                                Ordering::Less => Some(best_idx),
                             }
                         }
                     };
@@ -208,10 +225,14 @@ fn xmatch_linear(
                         None => Some(idx),
                         Some(best_idx) => {
                             let best_val = &lookup_array[best_idx];
-                            if lookup_cmp(candidate, best_val) == Ordering::Less {
-                                Some(idx)
-                            } else {
-                                Some(best_idx)
+                            match lookup_cmp(candidate, best_val) {
+                                Ordering::Less => Some(idx),
+                                Ordering::Equal => {
+                                    // For "next larger", choose the first occurrence of the winning
+                                    // value (insertion point is before duplicates).
+                                    if idx < best_idx { Some(idx) } else { Some(best_idx) }
+                                }
+                                Ordering::Greater => Some(best_idx),
                             }
                         }
                     };
@@ -275,14 +296,11 @@ fn xmatch_binary(
             if lb < lookup_array.len() && values_equal_for_lookup(lookup_value, &lookup_array[lb]) {
                 return Ok(lb);
             }
-            if lb == 0 {
+            let ub = upper_bound_by(lookup_array, lookup_value, cmp);
+            if ub == 0 {
                 return Err(ErrorKind::NA);
             }
-
-            let candidate_idx = lb - 1;
-            let candidate_val = &lookup_array[candidate_idx];
-            let first = lower_bound_by(lookup_array, candidate_val, cmp);
-            Ok(first)
+            Ok(ub - 1)
         }
         MatchMode::Wildcard => Err(ErrorKind::Value),
     }
