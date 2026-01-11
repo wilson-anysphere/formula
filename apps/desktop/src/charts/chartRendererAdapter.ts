@@ -1,0 +1,181 @@
+import { resolveCssVar } from "../theme/cssVars.js";
+import type { ChartRenderer } from "../drawings/overlay";
+import type { Rect } from "../drawings/types";
+import {
+  defaultChartTheme,
+  renderChartToCanvas,
+  resolveChartData,
+  type ChartModel,
+  type ChartTheme,
+  type ResolvedChartData,
+} from "./renderChart";
+
+export interface ChartStore {
+  getChartModel(chartId: string): ChartModel | undefined;
+  getChartData(chartId: string): Partial<ResolvedChartData> | undefined;
+  getChartTheme(chartId: string): Partial<ChartTheme> | undefined;
+}
+
+type Surface = {
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  ctx: CanvasRenderingContext2D;
+  width: number;
+  height: number;
+};
+
+type ParsedVar = { name: string; fallback: string | null };
+
+function parseCssVar(input: string): ParsedVar | null {
+  const value = input.trim();
+  if (!value.startsWith("var(")) return null;
+
+  const open = value.indexOf("(");
+  if (open === -1) return null;
+
+  let depth = 0;
+  let close = -1;
+  for (let i = open; i < value.length; i += 1) {
+    const ch = value[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        close = i;
+        break;
+      }
+    }
+  }
+
+  if (close === -1) return null;
+  if (value.slice(close + 1).trim() !== "") return null;
+
+  const body = value.slice(open + 1, close);
+  let split = -1;
+  depth = 0;
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (ch === "," && depth === 0) {
+      split = i;
+      break;
+    }
+  }
+
+  const rawName = (split === -1 ? body : body.slice(0, split)).trim();
+  if (!rawName.startsWith("--")) return null;
+
+  const fallback = split === -1 ? null : body.slice(split + 1).trim() || null;
+  return { name: rawName, fallback };
+}
+
+function resolveCssColor(input: string, fallback: string): string {
+  const value = input.trim();
+  if (!value) return fallback;
+
+  const parsed = parseCssVar(value);
+  if (!parsed) return value;
+
+  const resolved = resolveCssVar(parsed.name, { fallback: "" });
+  if (resolved) return resolved;
+
+  if (parsed.fallback) return resolveCssColor(parsed.fallback, fallback);
+  return fallback;
+}
+
+function resolveThemeForCanvas(theme: ChartTheme): ChartTheme {
+  const axis = resolveCssColor(theme.axis, "black");
+  return {
+    ...theme,
+    background: resolveCssColor(theme.background, "white"),
+    border: resolveCssColor(theme.border, "black"),
+    axis,
+    gridline: resolveCssColor(theme.gridline, axis),
+    title: resolveCssColor(theme.title, "black"),
+    label: resolveCssColor(theme.label, "black"),
+    seriesColors: theme.seriesColors.map((color) => resolveCssColor(color, "black")),
+  };
+}
+
+function getContextScale(ctx: CanvasRenderingContext2D): number {
+  try {
+    const transform = ctx.getTransform?.();
+    const scale = transform?.a;
+    if (typeof scale === "number" && Number.isFinite(scale) && scale > 0) return scale;
+  } catch {
+    // Ignore missing DOMMatrix support.
+  }
+  return 1;
+}
+
+function createCanvasSurface(width: number, height: number): { canvas: HTMLCanvasElement | OffscreenCanvas; ctx: CanvasRenderingContext2D } {
+  if (typeof OffscreenCanvas !== "undefined") {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("chart offscreen 2d context not available");
+    return { canvas, ctx: ctx as unknown as CanvasRenderingContext2D };
+  }
+
+  if (typeof document !== "undefined") {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("chart canvas 2d context not available");
+    return { canvas, ctx };
+  }
+
+  throw new Error("chart rendering requires OffscreenCanvas or document");
+}
+
+export class ChartRendererAdapter implements ChartRenderer {
+  private readonly surfaces = new Map<string, Surface>();
+
+  constructor(private readonly store: ChartStore) {}
+
+  renderToCanvas(ctx: CanvasRenderingContext2D, chartId: string, rect: Rect): void {
+    const model = this.store.getChartModel(chartId);
+    if (!model) {
+      throw new Error(`Chart not found: ${chartId}`);
+    }
+
+    const liveData = this.store.getChartData(chartId);
+    const data = resolveChartData(model, liveData);
+
+    const themePatch = this.store.getChartTheme(chartId);
+    const mergedTheme: ChartTheme = {
+      ...defaultChartTheme,
+      ...(themePatch ?? {}),
+      seriesColors:
+        themePatch?.seriesColors && themePatch.seriesColors.length > 0 ? themePatch.seriesColors : defaultChartTheme.seriesColors,
+    };
+    const theme = resolveThemeForCanvas(mergedTheme);
+
+    const scale = getContextScale(ctx);
+    const widthPx = Math.max(1, Math.round(rect.width * scale));
+    const heightPx = Math.max(1, Math.round(rect.height * scale));
+
+    const surface = this.getSurface(chartId, widthPx, heightPx);
+    renderChartToCanvas(surface.ctx, model, data, theme, { width: widthPx, height: heightPx });
+    ctx.drawImage(surface.canvas as any, rect.x, rect.y, rect.width, rect.height);
+  }
+
+  private getSurface(chartId: string, width: number, height: number): Surface {
+    const existing = this.surfaces.get(chartId);
+    if (existing) {
+      if (existing.width !== width || existing.height !== height) {
+        existing.canvas.width = width;
+        existing.canvas.height = height;
+        existing.width = width;
+        existing.height = height;
+      }
+      return existing;
+    }
+
+    const created = createCanvasSurface(width, height);
+    const surface: Surface = { ...created, width, height };
+    this.surfaces.set(chartId, surface);
+    return surface;
+  }
+}
+

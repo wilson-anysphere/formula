@@ -20,6 +20,10 @@ export interface Viewport {
   dpr: number;
 }
 
+export interface ChartRenderer {
+  renderToCanvas(ctx: CanvasRenderingContext2D, chartId: string, rect: Rect): void;
+}
+
 export function emuToPx(emu: number): number {
   return emu / EMU_PER_PX;
 }
@@ -79,6 +83,7 @@ export class DrawingOverlay {
     private readonly canvas: HTMLCanvasElement,
     private readonly images: ImageStore,
     private readonly geom: GridGeometry,
+    private readonly chartRenderer?: ChartRenderer,
   ) {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("overlay canvas 2d context not available");
@@ -118,6 +123,27 @@ export class DrawingOverlay {
         const bitmap = await this.bitmapCache.get(entry);
         ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
         continue;
+      }
+
+      if (obj.kind.type === "chart") {
+        const chartId = obj.kind.chartId;
+        if (this.chartRenderer && typeof chartId === "string" && chartId.length > 0) {
+          let rendered = false;
+          ctx.save();
+          try {
+            ctx.beginPath();
+            ctx.rect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+            ctx.clip();
+            this.chartRenderer.renderToCanvas(ctx, chartId, screenRect);
+            rendered = true;
+          } catch {
+            rendered = false;
+          } finally {
+            ctx.restore();
+          }
+
+          if (rendered) continue;
+        }
       }
 
       // Placeholder rendering for shapes/charts/unknown.

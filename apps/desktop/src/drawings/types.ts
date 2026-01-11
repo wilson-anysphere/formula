@@ -30,7 +30,7 @@ export type Anchor =
 export type DrawingObjectKind =
   | { type: "image"; imageId: string }
   | { type: "shape"; label?: string }
-  | { type: "chart"; label?: string }
+  | { type: "chart"; chartId?: string; label?: string }
   | { type: "unknown"; label?: string };
 
 export interface DrawingObject {
@@ -60,4 +60,3 @@ export interface Rect {
   width: number;
   height: number;
 }
-
