@@ -1576,6 +1576,8 @@ impl Storage {
             }
         }
 
+        sync_named_range_into_defined_names_tx(&tx, range)?;
+        touch_workbook_modified_at_by_workbook_id(&tx, range.workbook_id)?;
         tx.commit()?;
         Ok(())
     }
@@ -2237,6 +2239,84 @@ fn merge_named_ranges_into_defined_names(
         next_id = next_id.wrapping_add(1);
     }
 
+    Ok(())
+}
+
+fn sync_named_range_into_defined_names_tx(tx: &Transaction<'_>, range: &NamedRange) -> Result<()> {
+    let workbook_id_str = range.workbook_id.to_string();
+    let wants_workbook_scope = range.scope.eq_ignore_ascii_case("workbook");
+
+    let scope = if wants_workbook_scope {
+        DefinedNameScope::Workbook
+    } else {
+        let sheet_key = canonical_sheet_name_key(&range.scope);
+        let mut stmt =
+            tx.prepare("SELECT name, model_sheet_id FROM sheets WHERE workbook_id = ?1")?;
+        let mut rows = stmt.query(params![&workbook_id_str])?;
+        let mut sheet_id: Option<u32> = None;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(0)?;
+            let model_sheet_id: Option<i64> = row.get(1)?;
+            if canonical_sheet_name_key(&name) == sheet_key {
+                sheet_id = model_sheet_id.and_then(|id| u32::try_from(id).ok());
+                break;
+            }
+        }
+
+        let Some(sheet_id) = sheet_id else {
+            // Unknown scope (likely stale sheet name); keep the legacy row but don't try to map it
+            // into `workbooks.defined_names`.
+            return Ok(());
+        };
+
+        DefinedNameScope::Sheet(sheet_id)
+    };
+
+    let defined_names: Option<serde_json::Value> = tx.query_row(
+        "SELECT defined_names FROM workbooks WHERE id = ?1",
+        params![&workbook_id_str],
+        |r| r.get(0),
+    )?;
+
+    let mut names = match defined_names {
+        Some(raw) => match serde_json::from_value::<Vec<DefinedName>>(raw) {
+            Ok(names) => names,
+            // Corrupt JSON blob - avoid overwriting it from the legacy compatibility layer.
+            Err(_) => return Ok(()),
+        },
+        None => Vec::new(),
+    };
+
+    let refers_to = normalize_refers_to(&range.reference);
+    if let Some(existing) = names
+        .iter_mut()
+        .find(|n| n.scope == scope && n.name.eq_ignore_ascii_case(&range.name))
+    {
+        existing.refers_to = refers_to;
+    } else {
+        let mut used: HashSet<u32> = names.iter().map(|n| n.id).collect();
+        let mut next_id = names.iter().map(|n| n.id).max().unwrap_or(0).wrapping_add(1);
+        while used.contains(&next_id) {
+            next_id = next_id.wrapping_add(1);
+        }
+        used.insert(next_id);
+
+        names.push(DefinedName {
+            id: next_id,
+            name: range.name.clone(),
+            scope,
+            refers_to,
+            comment: None,
+            hidden: false,
+            xlsx_local_sheet_id: None,
+        });
+    }
+
+    let updated = (!names.is_empty()).then_some(serde_json::to_value(&names)?);
+    tx.execute(
+        "UPDATE workbooks SET defined_names = ?1 WHERE id = ?2",
+        params![updated, &workbook_id_str],
+    )?;
     Ok(())
 }
 
