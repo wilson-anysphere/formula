@@ -3,11 +3,22 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.js",
-    "./node": "./src/node.js",
-    "./web": "./src/web.js"
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./node": {
+      "types": "./src/node.d.ts",
+      "default": "./src/node.js"
+    },
+    "./web": {
+      "types": "./src/web.d.ts",
+      "default": "./src/web.js"
+    }
   },
   "dependencies": {
     "typescript": "^5.8.2"
