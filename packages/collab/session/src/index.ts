@@ -350,15 +350,15 @@ export class CollabSession {
       options.provider ??
       (options.connection
         ? new WebsocketProvider(options.connection.wsUrl, options.connection.docId, this.doc, {
-            WebSocketPolyfill: options.connection.WebSocketPolyfill,
-            disableBc: options.connection.disableBc,
-            params: {
-               ...(options.connection.params ?? {}),
-               ...(options.connection.token !== undefined ? { token: options.connection.token } : {}),
-             },
-             connect: offlineAutoConnectAfterLoad ? false : true,
-           })
-        : null);
+             WebSocketPolyfill: options.connection.WebSocketPolyfill,
+             disableBc: options.connection.disableBc,
+             params: {
+              ...(options.connection.params ?? {}),
+              ...(options.connection.token !== undefined ? { token: options.connection.token } : {}),
+            },
+            connect: offlineAutoConnectAfterLoad ? false : true,
+          })
+         : null);
     this.awareness = options.awareness ?? this.provider?.awareness ?? null;
 
     if (offlineEnabled) {
