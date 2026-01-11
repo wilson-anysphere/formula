@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CellChange, CellData as EngineCellData, CellScalar } from "@formula/engine";
+import type { CellChange, CellData as EngineCellData, CellScalar, EngineClient } from "@formula/engine";
 import { EngineCellCache, fromA1, toA1 } from "../src/index.js";
 
 class FakeEngine {
@@ -48,8 +48,8 @@ describe("EngineCellCache", () => {
       ["Sheet1!D1", 4]
     ]);
 
-    const engine = new FakeEngine(values) as any;
-    const cache = new EngineCellCache(engine, { maxEntries: 3 });
+    const engine = new FakeEngine(values);
+    const cache = new EngineCellCache(engine as unknown as EngineClient, { maxEntries: 3 });
 
     await cache.prefetch({ startRow0: 0, endRow0Exclusive: 1, startCol0: 0, endCol0Exclusive: 4 });
 
@@ -68,8 +68,8 @@ describe("EngineCellCache", () => {
       ["Sheet1!D1", 4]
     ]);
 
-    const engine = new FakeEngine(values) as any;
-    const cache = new EngineCellCache(engine, { maxEntries: 3 });
+    const engine = new FakeEngine(values);
+    const cache = new EngineCellCache(engine as unknown as EngineClient, { maxEntries: 3 });
 
     await cache.prefetch({ startRow0: 0, endRow0Exclusive: 1, startCol0: 0, endCol0Exclusive: 3 });
     cache.applyRecalcChanges([{ sheet: "Sheet1", address: "A1", value: 10 }]);
@@ -82,4 +82,3 @@ describe("EngineCellCache", () => {
     expect(cache.getValue(0, 3)).toBe(4);
   });
 });
-
