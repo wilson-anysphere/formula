@@ -174,33 +174,14 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 }
             }
             Expr::Unary { op, expr } => {
-                let v = self.eval_scalar(expr);
-                match v {
-                    Value::Error(e) => EvalValue::Scalar(Value::Error(e)),
-                    other => {
-                        let n = match other.coerce_to_number() {
-                            Ok(n) => n,
-                            Err(e) => return EvalValue::Scalar(Value::Error(e)),
-                        };
-                        let out = match op {
-                            UnaryOp::Plus => n,
-                            UnaryOp::Minus => -n,
-                        };
-                        EvalValue::Scalar(Value::Number(out))
-                    }
-                }
+                let v = self.eval_value(expr);
+                let v = self.deref_eval_value_dynamic(v);
+                EvalValue::Scalar(elementwise_unary(&v, |elem| numeric_unary(*op, elem)))
             }
             Expr::Postfix { op, expr } => match op {
                 PostfixOp::Percent => {
-                    let v = self.eval_scalar(expr);
-                    if let Value::Error(e) = v {
-                        return EvalValue::Scalar(Value::Error(e));
-                    }
-                    let n = match v.coerce_to_number() {
-                        Ok(n) => n,
-                        Err(e) => return EvalValue::Scalar(Value::Error(e)),
-                    };
-                    EvalValue::Scalar(Value::Number(n / 100.0))
+                    let v = self.deref_eval_value_dynamic(self.eval_value(expr));
+                    EvalValue::Scalar(elementwise_unary(&v, numeric_percent))
                 }
             },
             Expr::Binary { op, left, right } => match *op {
@@ -208,77 +189,23 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     self.eval_reference_binary(*op, left, right)
                 }
                 BinaryOp::Concat => {
-                    let l = self.eval_scalar(left);
-                    if let Value::Error(e) = l {
-                        return EvalValue::Scalar(Value::Error(e));
-                    }
-                    let r = self.eval_scalar(right);
-                    if let Value::Error(e) = r {
-                        return EvalValue::Scalar(Value::Error(e));
-                    }
-                    let ls = match l.coerce_to_string() {
-                        Ok(s) => s,
-                        Err(e) => return EvalValue::Scalar(Value::Error(e)),
-                    };
-                    let rs = match r.coerce_to_string() {
-                        Ok(s) => s,
-                        Err(e) => return EvalValue::Scalar(Value::Error(e)),
-                    };
-                    EvalValue::Scalar(Value::Text(format!("{ls}{rs}")))
+                    let l = self.deref_eval_value_dynamic(self.eval_value(left));
+                    let r = self.deref_eval_value_dynamic(self.eval_value(right));
+                    let out = elementwise_binary(&l, &r, concat_binary);
+                    EvalValue::Scalar(out)
                 }
                 BinaryOp::Pow | BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
-                    let l = self.eval_scalar(left);
-                    if let Value::Error(e) = l {
-                        return EvalValue::Scalar(Value::Error(e));
-                    }
-                    let r = self.eval_scalar(right);
-                    if let Value::Error(e) = r {
-                        return EvalValue::Scalar(Value::Error(e));
-                    }
-                    let ln = match l.coerce_to_number() {
-                        Ok(n) => n,
-                        Err(e) => return EvalValue::Scalar(Value::Error(e)),
-                    };
-                    let rn = match r.coerce_to_number() {
-                        Ok(n) => n,
-                        Err(e) => return EvalValue::Scalar(Value::Error(e)),
-                    };
-                    let out = match *op {
-                        BinaryOp::Add => Value::Number(ln + rn),
-                        BinaryOp::Sub => Value::Number(ln - rn),
-                        BinaryOp::Mul => Value::Number(ln * rn),
-                        BinaryOp::Div => {
-                            if rn == 0.0 {
-                                Value::Error(ErrorKind::Div0)
-                            } else {
-                                Value::Number(ln / rn)
-                            }
-                        }
-                        BinaryOp::Pow => match crate::functions::math::power(ln, rn) {
-                            Ok(n) => Value::Number(n),
-                            Err(e) => Value::Error(match e {
-                                ExcelError::Div0 => ErrorKind::Div0,
-                                ExcelError::Value => ErrorKind::Value,
-                                ExcelError::Num => ErrorKind::Num,
-                            }),
-                        },
-                        _ => unreachable!("handled by match guard"),
-                    };
+                    let l = self.deref_eval_value_dynamic(self.eval_value(left));
+                    let r = self.deref_eval_value_dynamic(self.eval_value(right));
+                    let out = elementwise_binary(&l, &r, |a, b| numeric_binary(*op, a, b));
                     EvalValue::Scalar(out)
                 }
             },
             Expr::Compare { op, left, right } => {
-                let l = self.eval_scalar(left);
-                if let Value::Error(e) = l {
-                    return EvalValue::Scalar(Value::Error(e));
-                }
-                let r = self.eval_scalar(right);
-                if let Value::Error(e) = r {
-                    return EvalValue::Scalar(Value::Error(e));
-                }
-
-                let b = excel_compare(&l, &r, *op);
-                EvalValue::Scalar(b)
+                let l = self.deref_eval_value_dynamic(self.eval_value(left));
+                let r = self.deref_eval_value_dynamic(self.eval_value(right));
+                let out = elementwise_binary(&l, &r, |a, b| excel_compare(a, b, *op));
+                EvalValue::Scalar(out)
             }
             Expr::FunctionCall { name, args, .. } => {
                 EvalValue::Scalar(crate::functions::call_function(self, name, args))
@@ -292,6 +219,13 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     }
                 }
             }
+        }
+    }
+
+    fn deref_eval_value_dynamic(&self, value: EvalValue) -> Value {
+        match value {
+            EvalValue::Scalar(v) => v,
+            EvalValue::Reference(range) => self.deref_reference_dynamic(range),
         }
     }
 
@@ -698,4 +632,155 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         | (Value::Spill { .. }, _)
         | (_, Value::Spill { .. }) => Ordering::Equal,
     })
+}
+
+fn numeric_unary(op: UnaryOp, value: &Value) -> Value {
+    match value {
+        Value::Error(e) => return Value::Error(*e),
+        other => {
+            let n = match other.coerce_to_number() {
+                Ok(n) => n,
+                Err(e) => return Value::Error(e),
+            };
+            let out = match op {
+                UnaryOp::Plus => n,
+                UnaryOp::Minus => -n,
+            };
+            Value::Number(out)
+        }
+    }
+}
+
+fn numeric_percent(value: &Value) -> Value {
+    match value {
+        Value::Error(e) => return Value::Error(*e),
+        other => {
+            let n = match other.coerce_to_number() {
+                Ok(n) => n,
+                Err(e) => return Value::Error(e),
+            };
+            Value::Number(n / 100.0)
+        }
+    }
+}
+
+fn concat_binary(left: &Value, right: &Value) -> Value {
+    if let Value::Error(e) = left {
+        return Value::Error(*e);
+    }
+    if let Value::Error(e) = right {
+        return Value::Error(*e);
+    }
+
+    let ls = match left.coerce_to_string() {
+        Ok(s) => s,
+        Err(e) => return Value::Error(e),
+    };
+    let rs = match right.coerce_to_string() {
+        Ok(s) => s,
+        Err(e) => return Value::Error(e),
+    };
+
+    Value::Text(format!("{ls}{rs}"))
+}
+
+fn numeric_binary(op: BinaryOp, left: &Value, right: &Value) -> Value {
+    if let Value::Error(e) = left {
+        return Value::Error(*e);
+    }
+    if let Value::Error(e) = right {
+        return Value::Error(*e);
+    }
+
+    let ln = match left.coerce_to_number() {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let rn = match right.coerce_to_number() {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+
+    match op {
+        BinaryOp::Add => Value::Number(ln + rn),
+        BinaryOp::Sub => Value::Number(ln - rn),
+        BinaryOp::Mul => Value::Number(ln * rn),
+        BinaryOp::Div => {
+            if rn == 0.0 {
+                Value::Error(ErrorKind::Div0)
+            } else {
+                Value::Number(ln / rn)
+            }
+        }
+        BinaryOp::Pow => match crate::functions::math::power(ln, rn) {
+            Ok(n) => Value::Number(n),
+            Err(e) => Value::Error(match e {
+                ExcelError::Div0 => ErrorKind::Div0,
+                ExcelError::Value => ErrorKind::Value,
+                ExcelError::Num => ErrorKind::Num,
+            }),
+        },
+        _ => Value::Error(ErrorKind::Value),
+    }
+}
+
+fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
+    match value {
+        Value::Array(arr) => Value::Array(Array::new(
+            arr.rows,
+            arr.cols,
+            arr.iter().map(f).collect(),
+        )),
+        other => f(other),
+    }
+}
+
+fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) -> Value) -> Value {
+    match (left, right) {
+        (Value::Array(left_arr), Value::Array(right_arr)) => {
+            if left_arr.rows == right_arr.rows && left_arr.cols == right_arr.cols {
+                return Value::Array(Array::new(
+                    left_arr.rows,
+                    left_arr.cols,
+                    left_arr
+                        .values
+                        .iter()
+                        .zip(right_arr.values.iter())
+                        .map(|(a, b)| f(a, b))
+                        .collect(),
+                ));
+            }
+
+            if left_arr.rows == 1 && left_arr.cols == 1 {
+                let scalar = left_arr.values.get(0).unwrap_or(&Value::Blank);
+                return Value::Array(Array::new(
+                    right_arr.rows,
+                    right_arr.cols,
+                    right_arr.values.iter().map(|b| f(scalar, b)).collect(),
+                ));
+            }
+
+            if right_arr.rows == 1 && right_arr.cols == 1 {
+                let scalar = right_arr.values.get(0).unwrap_or(&Value::Blank);
+                return Value::Array(Array::new(
+                    left_arr.rows,
+                    left_arr.cols,
+                    left_arr.values.iter().map(|a| f(a, scalar)).collect(),
+                ));
+            }
+
+            Value::Error(ErrorKind::Value)
+        }
+        (Value::Array(left_arr), right_scalar) => Value::Array(Array::new(
+            left_arr.rows,
+            left_arr.cols,
+            left_arr.values.iter().map(|a| f(a, right_scalar)).collect(),
+        )),
+        (left_scalar, Value::Array(right_arr)) => Value::Array(Array::new(
+            right_arr.rows,
+            right_arr.cols,
+            right_arr.values.iter().map(|b| f(left_scalar, b)).collect(),
+        )),
+        (left_scalar, right_scalar) => f(left_scalar, right_scalar),
+    }
 }
