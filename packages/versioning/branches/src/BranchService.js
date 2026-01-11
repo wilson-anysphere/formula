@@ -161,7 +161,8 @@ export class BranchService {
       createdBy: actor.userId,
       createdAt: Date.now(),
       message: message ?? null,
-      patch
+      patch,
+      nextState,
     });
     await this.#store.updateBranchHead(this.#docId, branch.name, commit.id);
     return commit;
@@ -228,7 +229,8 @@ export class BranchService {
       createdBy: actor.userId,
       createdAt: Date.now(),
       message: message ?? `Merge branch '${sourceBranch}'`,
-      patch
+      patch,
+      nextState: finalState,
     });
 
     const currentBranch = await this.getCurrentBranch();

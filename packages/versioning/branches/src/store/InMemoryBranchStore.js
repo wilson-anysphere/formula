@@ -1,6 +1,8 @@
 import { applyPatch } from "../patch.js";
 import { randomUUID } from "../uuid.js";
 
+const UTF8_ENCODER = new TextEncoder();
+
 /**
  * @typedef {import("../types.js").Branch} Branch
  * @typedef {import("../types.js").Commit} Commit
@@ -18,7 +20,7 @@ import { randomUUID } from "../uuid.js";
  *   renameBranch(docId: string, oldName: string, newName: string): Promise<void>,
  *   deleteBranch(docId: string, name: string): Promise<void>,
  *   updateBranchHead(docId: string, name: string, headCommitId: string): Promise<void>,
- *   createCommit(input: { docId: string, parentCommitId: string | null, mergeParentCommitId: string | null, createdBy: string, createdAt: number, message: string | null, patch: Patch }): Promise<Commit>,
+ *   createCommit(input: { docId: string, parentCommitId: string | null, mergeParentCommitId: string | null, createdBy: string, createdAt: number, message: string | null, patch: Patch, nextState?: DocumentState }): Promise<Commit>,
  *   getCommit(commitId: string): Promise<Commit | null>,
  *   getDocumentStateAtCommit(commitId: string): Promise<DocumentState>
  * }} BranchStore
@@ -26,15 +28,31 @@ import { randomUUID } from "../uuid.js";
 
 /**
  * In-memory store used for tests and as a reference implementation. It stores
- * commits as patches relative to the first parent; this keeps branch operations
- * lightweight and avoids duplicating full document snapshots.
+ * commits as patches relative to the first parent, with periodic full-state
+ * snapshots to keep checkouts from becoming O(history length).
  */
 export class InMemoryBranchStore {
+  /**
+   * @param {{
+   *   snapshotEveryNCommits?: number,
+   *   snapshotWhenPatchExceedsBytes?: number
+   * }=} options
+   */
+  constructor(options = {}) {
+    this.snapshotEveryNCommits =
+      options.snapshotEveryNCommits == null ? 50 : options.snapshotEveryNCommits;
+    this.snapshotWhenPatchExceedsBytes =
+      options.snapshotWhenPatchExceedsBytes == null ? null : options.snapshotWhenPatchExceedsBytes;
+  }
+
   /** @type {Map<string, Branch[]>} */
   #branchesByDoc = new Map();
 
   /** @type {Map<string, Commit>} */
   #commits = new Map();
+
+  /** @type {Map<string, DocumentState>} */
+  #snapshotsByCommitId = new Map();
 
   /** @type {Map<string, string>} */
   #rootCommitByDoc = new Map();
@@ -43,6 +61,7 @@ export class InMemoryBranchStore {
     if (this.#rootCommitByDoc.has(docId)) return;
 
     const rootCommitId = randomUUID();
+    const snapshot = { sheets: structuredClone(initialState.sheets ?? {}) };
     const rootCommit = {
       id: rootCommitId,
       docId,
@@ -51,10 +70,11 @@ export class InMemoryBranchStore {
       createdBy: actor.userId,
       createdAt: Date.now(),
       message: "root",
-      patch: { sheets: structuredClone(initialState.sheets ?? {}) }
+      patch: { sheets: structuredClone(initialState.sheets ?? {}) },
     };
 
     this.#commits.set(rootCommitId, rootCommit);
+    this.#snapshotsByCommitId.set(rootCommitId, snapshot);
     this.#rootCommitByDoc.set(docId, rootCommitId);
 
     /** @type {Branch} */
@@ -125,8 +145,20 @@ export class InMemoryBranchStore {
     branch.headCommitId = headCommitId;
   }
 
-  async createCommit({ docId, parentCommitId, mergeParentCommitId, createdBy, createdAt, message, patch }) {
+  async createCommit({
+    docId,
+    parentCommitId,
+    mergeParentCommitId,
+    createdBy,
+    createdAt,
+    message,
+    patch,
+    nextState,
+  }) {
     const id = randomUUID();
+
+    const shouldSnapshot = await this.#shouldSnapshotCommit({ parentCommitId, patch });
+    const snapshot = shouldSnapshot ? await this.#resolveSnapshotState({ parentCommitId, patch, nextState }) : null;
     /** @type {Commit} */
     const commit = {
       id,
@@ -136,9 +168,10 @@ export class InMemoryBranchStore {
       createdBy,
       createdAt,
       message,
-      patch: structuredClone(patch)
+      patch: structuredClone(patch),
     };
     this.#commits.set(id, commit);
+    if (snapshot) this.#snapshotsByCommitId.set(id, snapshot);
     return structuredClone(commit);
   }
 
@@ -150,10 +183,13 @@ export class InMemoryBranchStore {
     const commit = this.#commits.get(commitId);
     if (!commit) throw new Error(`Commit not found: ${commitId}`);
 
+    const directSnapshot = this.#snapshotsByCommitId.get(commitId);
+    if (directSnapshot) return structuredClone(directSnapshot);
+
     /** @type {Commit[]} */
     const chain = [];
     let current = commit;
-    while (current) {
+    while (current && !this.#snapshotsByCommitId.has(current.id)) {
       chain.push(current);
       if (!current.parentCommitId) break;
       const parent = this.#commits.get(current.parentCommitId);
@@ -164,10 +200,55 @@ export class InMemoryBranchStore {
     chain.reverse();
 
     /** @type {DocumentState} */
-    let state = { sheets: {} };
+    const baseSnapshot = current ? this.#snapshotsByCommitId.get(current.id) : null;
+    let state = baseSnapshot ? structuredClone(baseSnapshot) : { sheets: {} };
     for (const c of chain) {
-      state = applyPatch(state, c.patch);
+      state = this._applyPatch(state, c.patch);
     }
     return state;
+  }
+
+  /**
+   * @param {DocumentState} state
+   * @param {Patch} patch
+   * @returns {DocumentState}
+   */
+  _applyPatch(state, patch) {
+    return applyPatch(state, patch);
+  }
+
+  async #shouldSnapshotCommit({ parentCommitId, patch }) {
+    if (this.snapshotWhenPatchExceedsBytes != null && this.snapshotWhenPatchExceedsBytes > 0) {
+      const patchBytes = UTF8_ENCODER.encode(JSON.stringify(patch)).length;
+      if (patchBytes > this.snapshotWhenPatchExceedsBytes) return true;
+    }
+
+    if (this.snapshotEveryNCommits != null && this.snapshotEveryNCommits > 0) {
+      const distance = this.#distanceFromSnapshotCommit(parentCommitId);
+      if (distance + 1 >= this.snapshotEveryNCommits) return true;
+    }
+
+    return false;
+  }
+
+  #distanceFromSnapshotCommit(startCommitId) {
+    if (!startCommitId) return 0;
+    let distance = 0;
+    let currentId = startCommitId;
+    while (currentId) {
+      const commit = this.#commits.get(currentId);
+      if (!commit) throw new Error(`Commit not found: ${currentId}`);
+      if (this.#snapshotsByCommitId.has(commit.id)) return distance;
+      if (!commit.parentCommitId) return distance;
+      distance += 1;
+      currentId = commit.parentCommitId;
+    }
+    return distance;
+  }
+
+  async #resolveSnapshotState({ parentCommitId, patch, nextState }) {
+    if (nextState) return structuredClone(nextState);
+    const base = parentCommitId ? await this.getDocumentStateAtCommit(parentCommitId) : { sheets: {} };
+    return this._applyPatch(base, patch);
   }
 }

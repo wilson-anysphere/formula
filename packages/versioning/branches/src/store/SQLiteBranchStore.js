@@ -4,6 +4,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { applyPatch } from "../patch.js";
 import { randomUUID } from "../uuid.js";
+import {
+  decodeEncryptedFileBytes,
+  encodeEncryptedFileBytes,
+  isEncryptedFileBytes
+} from "../../../../security/crypto/encryptedFile.js";
 
 /**
  * SQLite-backed store.
@@ -22,7 +27,16 @@ import { randomUUID } from "../uuid.js";
 
 export class SQLiteBranchStore {
   /**
-   * @param {{ filePath?: string, filename?: string }} options
+   * @param {{
+   *   filePath?: string,
+   *   filename?: string,
+   *   snapshotEveryNCommits?: number,
+   *   snapshotWhenPatchExceedsBytes?: number,
+   *   encryption?: (
+   *     | { mode: "off" }
+   *     | { mode: "keyring", keyRing: import("../../../../security/crypto/keyring.js").KeyRing, aadContext?: any }
+   *   )
+   * }} options
    */
   constructor(options) {
     const filePath = options.filePath ?? options.filename;
@@ -30,6 +44,15 @@ export class SQLiteBranchStore {
       throw new Error("SQLiteBranchStore requires { filePath }");
     }
     this.filePath = filePath;
+    this.snapshotEveryNCommits =
+      options.snapshotEveryNCommits == null ? 50 : options.snapshotEveryNCommits;
+    this.snapshotWhenPatchExceedsBytes =
+      options.snapshotWhenPatchExceedsBytes == null ? null : options.snapshotWhenPatchExceedsBytes;
+
+    this.encryption = options.encryption ?? { mode: "off" };
+    if (this.encryption.mode === "keyring" && !this.encryption.keyRing) {
+      throw new Error("SQLiteBranchStore encryption.mode='keyring' requires { keyRing }");
+    }
 
     /** @type {any | null} */
     this._db = null;
@@ -37,6 +60,12 @@ export class SQLiteBranchStore {
     this._initPromise = null;
     /** @type {Promise<void>} */
     this._persistChain = Promise.resolve();
+  }
+
+  _aadContext() {
+    return this.encryption.mode === "keyring"
+      ? (this.encryption.aadContext ?? { scope: "formula.branches.sqlite", schemaVersion: 1 })
+      : null;
   }
 
   /**
@@ -62,7 +91,16 @@ export class SQLiteBranchStore {
       existing = null;
     }
 
-    const db = existing ? new SQL.Database(existing) : new SQL.Database();
+    let bytes = existing ? Buffer.from(existing) : null;
+    if (bytes && isEncryptedFileBytes(bytes)) {
+      if (this.encryption.mode !== "keyring") {
+        throw new Error("Encrypted SQLiteBranchStore requires encryption.mode='keyring'");
+      }
+      const decoded = decodeEncryptedFileBytes(bytes);
+      bytes = this.encryption.keyRing.decryptBytes(decoded, { aadContext: this._aadContext() });
+    }
+
+    const db = bytes ? new SQL.Database(bytes) : new SQL.Database();
     this._db = db;
     this._ensureSchema();
     return db;
@@ -81,7 +119,8 @@ export class SQLiteBranchStore {
         created_by TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         message TEXT,
-        patch_json TEXT NOT NULL
+        patch_json TEXT NOT NULL,
+        snapshot_json TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_commits_doc ON commits(doc_id);
 
@@ -97,13 +136,37 @@ export class SQLiteBranchStore {
       );
       CREATE INDEX IF NOT EXISTS idx_branches_doc ON branches(doc_id);
     `);
+
+    // Schema migration: add snapshot_json column for existing stores.
+    const info = this._db.exec("PRAGMA table_info(commits);");
+    const cols = new Set();
+    if (info[0]?.values) {
+      for (const row of info[0].values) {
+        cols.add(row[1]);
+      }
+    }
+    if (!cols.has("snapshot_json")) {
+      this._db.run("ALTER TABLE commits ADD COLUMN snapshot_json TEXT;");
+    }
   }
 
   async _persist() {
     const db = await this._open();
-    const data = db.export();
+    const data = Buffer.from(db.export());
+    let out = data;
+
+    if (this.encryption.mode === "keyring") {
+      const encrypted = this.encryption.keyRing.encryptBytes(out, { aadContext: this._aadContext() });
+      out = encodeEncryptedFileBytes({
+        keyVersion: encrypted.keyVersion,
+        iv: encrypted.iv,
+        tag: encrypted.tag,
+        ciphertext: encrypted.ciphertext
+      });
+    }
+
     const tmp = `${this.filePath}.tmp`;
-    await fs.writeFile(tmp, data);
+    await fs.writeFile(tmp, out);
     await fs.rename(tmp, this.filePath);
   }
 
@@ -130,13 +193,14 @@ export class SQLiteBranchStore {
     const mainBranchId = randomUUID();
 
     const patch = { sheets: structuredClone(initialState.sheets ?? {}) };
+    const snapshot = { sheets: structuredClone(initialState.sheets ?? {}) };
 
     db.run("BEGIN");
     try {
       const insertCommit = db.prepare(
         `INSERT INTO commits
-          (id, doc_id, parent_commit_id, merge_parent_commit_id, created_by, created_at, message, patch_json)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, doc_id, parent_commit_id, merge_parent_commit_id, created_by, created_at, message, patch_json, snapshot_json)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       insertCommit.run([
         rootCommitId,
@@ -147,6 +211,7 @@ export class SQLiteBranchStore {
         now,
         "root",
         JSON.stringify(patch),
+        JSON.stringify(snapshot),
       ]);
       insertCommit.free();
 
@@ -300,16 +365,23 @@ export class SQLiteBranchStore {
   }
 
   /**
-   * @param {{ docId: string, parentCommitId: string | null, mergeParentCommitId: string | null, createdBy: string, createdAt: number, message: string | null, patch: Patch }} input
+   * @param {{ docId: string, parentCommitId: string | null, mergeParentCommitId: string | null, createdBy: string, createdAt: number, message: string | null, patch: Patch, nextState?: DocumentState }} input
    * @returns {Promise<Commit>}
    */
   async createCommit(input) {
     const db = await this._open();
     const id = randomUUID();
+
+    const patchJson = JSON.stringify(input.patch);
+    const shouldSnapshot = await this.#shouldSnapshotCommit({ parentCommitId: input.parentCommitId, patchJson });
+    const snapshotState = shouldSnapshot
+      ? await this.#resolveSnapshotState({ parentCommitId: input.parentCommitId, patch: input.patch, nextState: input.nextState })
+      : null;
+    const snapshotJson = snapshotState ? JSON.stringify(snapshotState) : null;
     const stmt = db.prepare(
       `INSERT INTO commits
-        (id, doc_id, parent_commit_id, merge_parent_commit_id, created_by, created_at, message, patch_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        (id, doc_id, parent_commit_id, merge_parent_commit_id, created_by, created_at, message, patch_json, snapshot_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     stmt.run([
       id,
@@ -319,7 +391,8 @@ export class SQLiteBranchStore {
       input.createdBy,
       input.createdAt,
       input.message,
-      JSON.stringify(input.patch),
+      patchJson,
+      snapshotJson,
     ]);
     stmt.free();
     await this._queuePersist();
@@ -371,27 +444,103 @@ export class SQLiteBranchStore {
    * @returns {Promise<DocumentState>}
    */
   async getDocumentStateAtCommit(commitId) {
-    const commit = await this.getCommit(commitId);
-    if (!commit) throw new Error(`Commit not found: ${commitId}`);
+    const row = await this.#getCommitForState(commitId);
+    if (!row) throw new Error(`Commit not found: ${commitId}`);
 
-    /** @type {Commit[]} */
+    if (row.snapshotJson) {
+      return JSON.parse(row.snapshotJson);
+    }
+
+    /** @type {{ id: string, patch: Patch }[]} */
     const chain = [];
-    let current = commit;
-    while (current) {
-      chain.push(current);
+    let current = row;
+    while (current && !current.snapshotJson) {
+      chain.push({ id: current.id, patch: JSON.parse(current.patchJson) });
       if (!current.parentCommitId) break;
-      const parent = await this.getCommit(current.parentCommitId);
+      const parent = await this.#getCommitForState(current.parentCommitId);
       if (!parent) throw new Error(`Commit not found: ${current.parentCommitId}`);
       current = parent;
     }
+
     chain.reverse();
 
     /** @type {DocumentState} */
-    let state = { sheets: {} };
+    let state = current?.snapshotJson ? JSON.parse(current.snapshotJson) : { sheets: {} };
     for (const c of chain) {
-      state = applyPatch(state, c.patch);
+      state = this._applyPatch(state, c.patch);
     }
     return state;
+  }
+
+  /**
+   * @param {DocumentState} state
+   * @param {Patch} patch
+   * @returns {DocumentState}
+   */
+  _applyPatch(state, patch) {
+    return applyPatch(state, patch);
+  }
+
+  async #shouldSnapshotCommit({ parentCommitId, patchJson }) {
+    if (this.snapshotWhenPatchExceedsBytes != null && this.snapshotWhenPatchExceedsBytes > 0) {
+      const patchBytes = Buffer.byteLength(patchJson, "utf8");
+      if (patchBytes > this.snapshotWhenPatchExceedsBytes) return true;
+    }
+
+    if (this.snapshotEveryNCommits != null && this.snapshotEveryNCommits > 0) {
+      const distance = await this.#distanceFromSnapshotCommit(parentCommitId);
+      if (distance + 1 >= this.snapshotEveryNCommits) return true;
+    }
+
+    return false;
+  }
+
+  async #distanceFromSnapshotCommit(startCommitId) {
+    if (!startCommitId) return 0;
+    let distance = 0;
+    let currentId = startCommitId;
+    while (currentId) {
+      const row = await this.#getCommitForState(currentId);
+      if (!row) throw new Error(`Commit not found: ${currentId}`);
+      if (row.snapshotJson) return distance;
+      if (!row.parentCommitId) return distance;
+      distance += 1;
+      currentId = row.parentCommitId;
+    }
+    return distance;
+  }
+
+  async #resolveSnapshotState({ parentCommitId, patch, nextState }) {
+    if (nextState) return structuredClone(nextState);
+    const base = parentCommitId ? await this.getDocumentStateAtCommit(parentCommitId) : { sheets: {} };
+    return this._applyPatch(base, patch);
+  }
+
+  /**
+   * Fetches a lightweight commit row for state reconstruction / snapshot traversal.
+   *
+   * @param {string} commitId
+   * @returns {Promise<{ id: string, parentCommitId: string | null, patchJson: string, snapshotJson: string | null } | null>}
+   */
+  async #getCommitForState(commitId) {
+    const db = await this._open();
+    const stmt = db.prepare(
+      `SELECT id, parent_commit_id, patch_json, snapshot_json
+       FROM commits WHERE id = ? LIMIT 1`
+    );
+    stmt.bind([commitId]);
+    if (!stmt.step()) {
+      stmt.free();
+      return null;
+    }
+    const row = stmt.getAsObject();
+    stmt.free();
+    return {
+      id: row.id,
+      parentCommitId: row.parent_commit_id ?? null,
+      patchJson: row.patch_json,
+      snapshotJson: row.snapshot_json ?? null,
+    };
   }
 
   close() {
