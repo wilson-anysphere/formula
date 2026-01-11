@@ -45,6 +45,15 @@ function sheetNameFromDoc(doc, sheetId) {
   return null;
 }
 
+function commentContentFromDoc(doc, commentId) {
+  const comments = doc.getMap("comments");
+  const value = comments.get(commentId);
+  const map = getYMap(value);
+  if (map) return map.get("content") ?? null;
+  if (!value || typeof value !== "object") return null;
+  return value.content ?? null;
+}
+
 /**
  * @param {import("../packages/collab/session/src/index.ts").CollabSession} session
  */
@@ -164,6 +173,13 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
       sheetId: "Sheet1",
       rect: { r0: 0, c0: 0, r1: 0, c1: 0 },
     });
+    sessionA.doc.getMap("comments").set("c1", {
+      id: "c1",
+      cellRef: "A1",
+      content: "feature comment",
+      resolved: false,
+      replies: [],
+    });
   }, sessionA.origin);
   await workflow.commitCurrentState(owner, "feature edit");
 
@@ -179,11 +195,18 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
       sheetId: "Sheet1",
       rect: { r0: 0, c0: 1, r1: 0, c1: 1 },
     });
+    sessionA.doc.getMap("comments").set("c1", {
+      id: "c1",
+      cellRef: "A1",
+      content: "main comment",
+      resolved: false,
+      replies: [],
+    });
   }, sessionA.origin);
   await workflow.commitCurrentState(owner, "main edit");
 
   const preview = await workflow.previewMerge(owner, { sourceBranch: "feature" });
-  assert.equal(preview.conflicts.length, 4);
+  assert.equal(preview.conflicts.length, 5);
   const a1Idx = preview.conflicts.findIndex(
     (c) => c.type === "cell" && c.sheetId === "Sheet1" && c.cell === "A1"
   );
@@ -194,10 +217,12 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
     (c) => c.type === "sheet" && c.reason === "rename" && c.sheetId === "Sheet1"
   );
   const namedRangeIdx = preview.conflicts.findIndex((c) => c.type === "namedRange" && c.key === "NR1");
+  const commentIdx = preview.conflicts.findIndex((c) => c.type === "comment" && c.id === "c1");
   assert.ok(a1Idx >= 0);
   assert.ok(b1Idx >= 0);
   assert.ok(sheetIdx >= 0);
   assert.ok(namedRangeIdx >= 0);
+  assert.ok(commentIdx >= 0);
   assert.equal(preview.conflicts[a1Idx]?.reason, "content");
   assert.equal(preview.conflicts[b1Idx]?.reason, "format");
   assert.equal(preview.conflicts[sheetIdx]?.reason, "rename");
@@ -209,6 +234,7 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
       { conflictIndex: b1Idx, choice: "theirs" },
       { conflictIndex: sheetIdx, choice: "theirs" },
       { conflictIndex: namedRangeIdx, choice: "theirs" },
+      { conflictIndex: commentIdx, choice: "theirs" },
     ],
     message: "merge feature into main",
   });
@@ -237,6 +263,8 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
     rect: { c0: 0, c1: 0, r0: 0, r1: 0 },
     sheetId: "Sheet1",
   });
+  await waitForCondition(() => commentContentFromDoc(sessionB.doc, "c1") === "feature comment", 10_000);
+  assert.equal(commentContentFromDoc(sessionB.doc, "c1"), "feature comment");
 
   // --- Branch metadata propagates too (stored in the same Y.Doc) ---
   await waitForCondition(() => {
@@ -305,6 +333,7 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
     rect: { c0: 0, c1: 0, r0: 0, r1: 0 },
     sheetId: "Sheet1",
   });
+  assert.equal(commentContentFromDoc(sessionC.doc, "c1"), "feature comment");
 
   // --- Branch metadata persisted inside the Y.Doc ---
   const branches = sessionC.doc.getMap("branching:branches");
