@@ -383,6 +383,87 @@ test("search matches multi-token queries across different fields", async () => {
   }
 });
 
+test("search supports category/tag/verified/featured filters", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-search-filters-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extA = path.join(tmpRoot, "ext-a");
+    const extB = path.join(tmpRoot, "ext-b");
+    await copyDir(sampleExtensionSrc, extA);
+    await copyDir(sampleExtensionSrc, extB);
+
+    await patchManifest(extA, { name: "sample-filter-a", categories: ["Utilities"], tags: ["foo"] });
+    await patchManifest(extB, { name: "sample-filter-b", categories: ["Themes"], tags: ["bar"] });
+
+    const manifestA = JSON.parse(await fs.readFile(path.join(extA, "package.json"), "utf8"));
+    const manifestB = JSON.parse(await fs.readFile(path.join(extB, "package.json"), "utf8"));
+    const idA = `${manifestA.publisher}.${manifestA.name}`;
+    const idB = `${manifestB.publisher}.${manifestB.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifestA.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({ extensionDir: extA, marketplaceUrl: baseUrl, token: publisherToken, privateKeyPemOrPath: privateKeyPath });
+    await publishExtension({ extensionDir: extB, marketplaceUrl: baseUrl, token: publisherToken, privateKeyPemOrPath: privateKeyPath });
+
+    const featureRes = await fetch(`${baseUrl}/api/extensions/${encodeURIComponent(idB)}/flags`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ featured: true }),
+    });
+    assert.equal(featureRes.status, 200);
+
+    const client = new MarketplaceClient({ baseUrl });
+
+    const byCategory = await client.search({ category: "utilities" });
+    assert.deepEqual(byCategory.results.map((r) => r.id).sort(), [idA]);
+
+    const byTag = await client.search({ tag: "bar" });
+    assert.deepEqual(byTag.results.map((r) => r.id).sort(), [idB]);
+
+    const byFeatured = await client.search({ featured: true });
+    assert.deepEqual(byFeatured.results.map((r) => r.id).sort(), [idB]);
+
+    const byVerified = await client.search({ verified: true });
+    assert.deepEqual(new Set(byVerified.results.map((r) => r.id)), new Set([idA, idB]));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("client refuses install when signature verification fails", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-badsig-"));
   const dataDir = path.join(tmpRoot, "marketplace-data");
