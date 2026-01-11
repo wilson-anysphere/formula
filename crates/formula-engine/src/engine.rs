@@ -1331,9 +1331,9 @@ impl Engine {
             let cell_id = cell_id_from_key(cell);
             let mut out: Vec<CellKey> = self
                 .calc_graph
-                .dependents_of(cell_id)
+                .direct_dependents(cell_id)
                 .into_iter()
-                .map(|edge| cell_key_from_id(edge.dependent))
+                .map(cell_key_from_id)
                 .filter(|d| impacted_set.contains(d))
                 .collect();
             if out.is_empty() {
@@ -2247,14 +2247,12 @@ impl Engine {
         let cell_id = cell_id_from_key(key);
         let mut out: Vec<PrecedentNode> = self
             .calc_graph
-            .dependents_of(cell_id)
+            .direct_dependents(cell_id)
             .into_iter()
-            .map(|edge| PrecedentNode::Cell {
-                sheet: sheet_id_from_graph(edge.dependent.sheet_id),
-                addr: CellAddr {
-                    row: edge.dependent.cell.row,
-                    col: edge.dependent.cell.col,
-                },
+            .map(cell_key_from_id)
+            .map(|key| PrecedentNode::Cell {
+                sheet: key.sheet,
+                addr: key.addr,
             })
             .collect();
         sort_and_dedup_nodes(&mut out);
@@ -2314,8 +2312,8 @@ impl Engine {
 
         while let Some(cell) = queue.pop_front() {
             let cell_id = cell_id_from_key(cell);
-            for edge in self.calc_graph.dependents_of(cell_id) {
-                let dep = cell_key_from_id(edge.dependent);
+            for dep_id in self.calc_graph.direct_dependents(cell_id) {
+                let dep = cell_key_from_id(dep_id);
                 if visited.insert(dep) {
                     out.push(dep);
                     queue.push_back(dep);
