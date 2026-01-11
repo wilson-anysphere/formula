@@ -217,7 +217,12 @@ fn pivot_row_scan(
 ) -> DaxResult<PivotResult> {
     let engine = DaxEngine::new();
 
-    let base_rows = crate::engine::resolve_table_rows(model, filter, base_table)?;
+    let table_ref = model
+        .table(base_table)
+        .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+    let base_rows = (!filter.is_empty())
+        .then(|| crate::engine::resolve_table_rows(model, filter, base_table))
+        .transpose()?;
     let mut seen: HashSet<Vec<Value>> = HashSet::new();
     let mut groups: Vec<Vec<Value>> = Vec::new();
     let group_exprs: Vec<Expr> = group_by
@@ -242,7 +247,7 @@ fn pivot_row_scan(
 
     // Build the set of groups by scanning the base table rows. This ensures we only create
     // groups that actually exist in the fact table under the current filter context.
-    for row in base_rows {
+    let mut process_row = |row: usize| -> DaxResult<()> {
         let mut row_ctx = RowContext::default();
         row_ctx.push(base_table, row);
 
@@ -254,6 +259,17 @@ fn pivot_row_scan(
 
         if seen.insert(key.clone()) {
             groups.push(key);
+        }
+        Ok(())
+    };
+
+    if let Some(rows) = base_rows {
+        for row in rows {
+            process_row(row)?;
+        }
+    } else {
+        for row in 0..table_ref.row_count() {
+            process_row(row)?;
         }
     }
 
