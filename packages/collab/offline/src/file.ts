@@ -122,6 +122,7 @@ export function attachFilePersistence(doc: Y.Doc, opts: { filePath: string }): O
       if (destroyed) return;
 
       isLoading = true;
+      let loadError: unknown = null;
       try {
         loadAndRepairFile({ doc, fd });
 
@@ -140,6 +141,8 @@ export function attachFilePersistence(doc: Y.Doc, opts: { filePath: string }): O
           // Best-effort: failure to write the baseline should not prevent the doc
           // from loading. Subsequent edits may still be persisted incrementally.
         }
+      } catch (err) {
+        loadError = err;
       } finally {
         isLoading = false;
       }
@@ -152,6 +155,8 @@ export function attachFilePersistence(doc: Y.Doc, opts: { filePath: string }): O
           bestEffortFsync(fd);
         }
       }
+
+      if (loadError) throw loadError;
     })();
 
     return loadPromise;
