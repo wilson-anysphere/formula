@@ -19,6 +19,20 @@ function utf8ByteLength(text) {
   return encoder.encode(text).length;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function randomToken() {
+  if (globalThis.crypto?.getRandomValues) {
+    const bytes = new Uint8Array(8);
+    globalThis.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  return Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
+}
+
 function requestToPromise(request) {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -87,13 +101,33 @@ async function setMetaNumber(tx, key, value) {
   await requestToPromise(store.put({ key, value }));
 }
 
+async function getMetaValue(tx, key) {
+  const store = tx.objectStore("meta");
+  const record = await requestToPromise(store.get(key));
+  return record?.value;
+}
+
+async function setMetaValue(tx, key, value) {
+  const store = tx.objectStore("meta");
+  await requestToPromise(store.put({ key, value }));
+}
+
+async function deleteMetaValue(tx, key) {
+  const store = tx.objectStore("meta");
+  await requestToPromise(store.delete(key));
+}
+
 export class IndexedDbOfflineAuditQueue {
   constructor(options = {}) {
     this.dbName = options.dbName ?? options.name ?? "siem-offline-audit-queue";
     this.maxBytes = options.maxBytes ?? 50 * 1024 * 1024;
     this.flushBatchSize = options.flushBatchSize ?? 250;
+    this.flushLockStaleMs = options.flushLockStaleMs ?? 5 * 60_000;
+    this.flushLockTimeoutMs = options.flushLockTimeoutMs ?? 30_000;
     this.redact = options.redact !== false;
     this.redactionOptions = options.redactionOptions;
+
+    this.instanceId = options.instanceId ?? randomToken();
 
     this._mutex = Promise.resolve();
     this.flushPromise = null;
@@ -113,6 +147,53 @@ export class IndexedDbOfflineAuditQueue {
   async _getDb() {
     if (!this.dbPromise) this.dbPromise = openDatabase(this.dbName);
     return this.dbPromise;
+  }
+
+  async _acquireFlushLock(db) {
+    const startedAt = Date.now();
+    let delayMs = 25;
+
+    while (true) {
+      try {
+        await runTransaction(db, ["meta"], "readwrite", async (tx) => {
+          const existing = await getMetaValue(tx, "flushLock");
+          const owner = existing?.owner;
+          const createdAtMs = Number(existing?.createdAtMs);
+          const expired = !Number.isFinite(createdAtMs) || Date.now() - createdAtMs > this.flushLockStaleMs;
+
+          if (existing && owner !== this.instanceId && !expired) {
+            const locked = new Error("offline audit queue is currently flushing");
+            locked.code = "EQUEUELOCKED";
+            throw locked;
+          }
+
+          await setMetaValue(tx, "flushLock", { owner: this.instanceId, createdAtMs: Date.now() });
+        });
+
+        return;
+      } catch (error) {
+        if (error?.code !== "EQUEUELOCKED") throw error;
+        if (Date.now() - startedAt > this.flushLockTimeoutMs) throw error;
+        await sleep(delayMs);
+        delayMs = Math.min(1_000, Math.floor(delayMs * 1.5));
+      }
+    }
+  }
+
+  async _touchFlushLock(db) {
+    await runTransaction(db, ["meta"], "readwrite", async (tx) => {
+      const existing = await getMetaValue(tx, "flushLock");
+      if (existing?.owner !== this.instanceId) return;
+      await setMetaValue(tx, "flushLock", { owner: this.instanceId, createdAtMs: Date.now() });
+    });
+  }
+
+  async _releaseFlushLock(db) {
+    await runTransaction(db, ["meta"], "readwrite", async (tx) => {
+      const existing = await getMetaValue(tx, "flushLock");
+      if (existing?.owner !== this.instanceId) return;
+      await deleteMetaValue(tx, "flushLock");
+    });
   }
 
   async enqueue(event) {
@@ -230,26 +311,32 @@ export class IndexedDbOfflineAuditQueue {
 
     this.flushPromise = (async () => {
       const db = await this._getDb();
-      await runTransaction(db, ["events"], "readwrite", (tx) => this._reclaimInflight(tx));
+      await this._acquireFlushLock(db);
+      try {
+        await runTransaction(db, ["events"], "readwrite", (tx) => this._reclaimInflight(tx));
 
-      let sent = 0;
-      while (true) {
-        const records = await this._claimBatch();
-        if (records.length === 0) break;
+        let sent = 0;
+        while (true) {
+          const records = await this._claimBatch();
+          if (records.length === 0) break;
 
-        const events = records.map((record) => record.event);
-        try {
-          await exporter.sendBatch(events);
-        } catch (error) {
-          await this._releaseBatch(records);
-          throw error;
+          const events = records.map((record) => record.event);
+          try {
+            await exporter.sendBatch(events);
+          } catch (error) {
+            await this._releaseBatch(records);
+            throw error;
+          }
+
+          await this._ackBatch(records);
+          sent += events.length;
+          await this._touchFlushLock(db);
         }
 
-        await this._ackBatch(records);
-        sent += events.length;
+        return { sent };
+      } finally {
+        await this._releaseFlushLock(db).catch(() => {});
       }
-
-      return { sent };
     })();
 
     try {
@@ -259,4 +346,3 @@ export class IndexedDbOfflineAuditQueue {
     }
   }
 }
-

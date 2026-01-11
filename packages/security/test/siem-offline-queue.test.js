@@ -20,6 +20,10 @@ function makeEvent({ secret = "supersecret", eventType = "document.opened" } = {
   };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function listFiles(dirPath) {
   const entries = await readdir(dirPath, { withFileTypes: true });
   return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
@@ -260,4 +264,56 @@ test("IndexedDbOfflineAuditQueue enforces maxBytes backpressure", async () => {
 
   await queue.enqueue(makeEvent({ secret: "a" }));
   await assert.rejects(queue.enqueue(makeEvent({ secret: "b" })), (error) => error?.code === "EQUEUEFULL");
+});
+
+test("IndexedDbOfflineAuditQueue prevents concurrent flushers from duplicating sends", async () => {
+  globalThis.indexedDB = indexedDB;
+  globalThis.IDBKeyRange = IDBKeyRange;
+
+  const dbName = `siem-idb-lock-${randomUUID()}`;
+  const queueA = new IndexedDbOfflineAuditQueue({ dbName, flushBatchSize: 10, flushLockTimeoutMs: 2_000 });
+  const events = [makeEvent({ secret: "a1" }), makeEvent({ secret: "a2" }), makeEvent({ secret: "a3" })];
+  for (const event of events) await queueA.enqueue(event);
+
+  let unblock;
+  const blockPromise = new Promise((resolve) => {
+    unblock = resolve;
+  });
+
+  let firstBatchStarted = false;
+  const sentA = [];
+  const exporterA = {
+    async sendBatch(batch) {
+      sentA.push(...batch.map((evt) => evt.id));
+      firstBatchStarted = true;
+      await blockPromise;
+    },
+  };
+
+  const flushA = queueA.flushToExporter(exporterA);
+  while (!firstBatchStarted) await sleep(1);
+
+  const queueB = new IndexedDbOfflineAuditQueue({ dbName, flushBatchSize: 10, flushLockTimeoutMs: 2_000 });
+  const sentB = [];
+  const exporterB = {
+    async sendBatch(batch) {
+      sentB.push(...batch.map((evt) => evt.id));
+    },
+  };
+
+  let flushBDone = false;
+  const flushB = queueB.flushToExporter(exporterB).then((result) => {
+    flushBDone = true;
+    return result;
+  });
+
+  await sleep(25);
+  assert.equal(flushBDone, false, "expected second flusher to wait for the lock");
+  unblock();
+
+  const [resultA, resultB] = await Promise.all([flushA, flushB]);
+  assert.equal(resultA.sent, 3);
+  assert.equal(resultB.sent, 0);
+  assert.deepEqual(sentA.sort(), events.map((evt) => evt.id).sort());
+  assert.deepEqual(sentB, []);
 });
