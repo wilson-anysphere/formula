@@ -165,7 +165,16 @@ function compileTypeScript(tsSource) {
 
 function compileTypeScriptModule(tsSource) {
   if (!ts) {
-    throw new Error("TypeScript compiler is required to run module-style scripts");
+    // Fallback: support scripts that use ESM `export default` but do not require
+    // TypeScript syntax (i.e. are valid JavaScript aside from the export keyword).
+    //
+    // This keeps recorded macros runnable in minimal environments where the
+    // `typescript` dependency is unavailable.
+    if (/\bimport\s+/.test(tsSource) || /\bexport\s+(?!default\b)/.test(tsSource)) {
+      throw new Error("TypeScript compiler is required to run module scripts with imports/exports");
+    }
+
+    return tsSource.replace(/\bexport\s+default\s+/, "exports.default = ");
   }
 
   const result = ts.transpileModule(tsSource, {

@@ -16,14 +16,19 @@ test("macro recorder generates runnable TypeScript that replays edits against Do
   workbook.setSelection("Sheet1", "A1");
   const sheet = workbook.getActiveSheet();
   sheet.getRange("A1:B1").setValues([[10, 32]]);
-  sheet.getRange("A1:B1").setFormat({ bold: true });
+  sheet.getRange("A1:B1").setFormat({ bold: true, backgroundColor: "#FFFFFF00", numberFormat: "0%" });
   workbook.setSelection("Sheet1", "A2");
 
   const actions = recorder.stop();
   assert.deepEqual(actions, [
     { type: "setSelection", sheetName: "Sheet1", address: "A1" },
     { type: "setRangeValues", sheetName: "Sheet1", address: "A1:B1", values: [[10, 32]] },
-    { type: "setFormat", sheetName: "Sheet1", address: "A1:B1", format: { bold: true } },
+    {
+      type: "setFormat",
+      sheetName: "Sheet1",
+      address: "A1:B1",
+      format: { bold: true, backgroundColor: "#FFFFFF00", numberFormat: "0%" },
+    },
     { type: "setSelection", sheetName: "Sheet1", address: "A2" },
   ]);
   const script = generateTypeScriptMacro(actions);
@@ -37,8 +42,16 @@ test("macro recorder generates runnable TypeScript that replays edits against Do
 
   const freshSheet = freshWorkbook.getActiveSheet();
   assert.deepEqual(freshSheet.getRange("A1:B1").getValues(), [[10, 32]]);
-  assert.deepEqual(freshSheet.getRange("A1").getFormat(), { bold: true });
-  assert.deepEqual(freshSheet.getRange("B1").getFormat(), { bold: true });
+  assert.deepEqual(freshSheet.getRange("A1").getFormat(), {
+    bold: true,
+    backgroundColor: "#FFFFFF00",
+    numberFormat: "0%",
+  });
+  assert.deepEqual(freshSheet.getRange("B1").getFormat(), {
+    bold: true,
+    backgroundColor: "#FFFFFF00",
+    numberFormat: "0%",
+  });
   assert.deepEqual(freshWorkbook.getSelection(), { sheetName: "Sheet1", address: "A2" });
 
   const a1 = freshController.getCell("Sheet1", "A1");
@@ -48,6 +61,9 @@ test("macro recorder generates runnable TypeScript that replays edits against Do
   assert.equal(a1Style.font?.bold, true);
   assert.equal(b1Style.font?.bold, true);
   assert.equal(a1Style.bold, undefined); // adapter should map to DocumentController schema
+  assert.equal(a1Style.fill?.fgColor, "#FFFFFF00");
+  assert.equal(b1Style.fill?.fgColor, "#FFFFFF00");
+  assert.equal(a1Style.numberFormat, "0%");
 
   workbook.dispose();
   freshWorkbook.dispose();
