@@ -1147,6 +1147,7 @@ export function createSyncServer(
     metrics.wsConnectionsCurrent.set(wss.clients.size);
 
     let messagesInWindow = 0;
+    let oversizeMessageCounted = false;
     const messageWindow = setInterval(() => {
       messagesInWindow = 0;
     }, config.limits.messageWindowMs);
@@ -1155,7 +1156,6 @@ export function createSyncServer(
     ws.on("message", (data) => {
       const messageBytes = rawDataByteLength(data);
       if (messageBytes > config.limits.maxMessageBytes) {
-        metrics.wsMessagesTooLargeTotal.inc();
         logger.warn(
           {
             ip,
@@ -1202,6 +1202,14 @@ export function createSyncServer(
 
     ws.on("close", (code) => {
       metrics.wsClosesTotal.inc({ code: closeCodeLabel(code) });
+      if (code === 1009) {
+        // Count oversize payloads closed via 1009 (Message Too Big). Avoid
+        // double-counting when `ws` also emitted a maxPayload error.
+        if (!oversizeMessageCounted) {
+          oversizeMessageCounted = true;
+          metrics.wsMessagesTooLargeTotal.inc();
+        }
+      }
       clearInterval(messageWindow);
       connectionTracker.unregister(ip);
       docConnectionTracker.unregister(persistedName);
@@ -1221,6 +1229,21 @@ export function createSyncServer(
     });
 
     ws.on("error", (err) => {
+      const wsErrorCode = (err as { code?: unknown }).code;
+      if (
+        wsErrorCode === "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH" ||
+        (err instanceof RangeError && err.message.includes("Max payload size exceeded"))
+      ) {
+        // When `ws` rejects a frame because it exceeds `maxPayload`, it may emit an
+        // error and close the connection without completing a close handshake. In
+        // that case the `close` event is reported as 1006 (abnormal closure) even
+        // though the peer observed a 1009 close code. Count the oversize payload
+        // via the error event so operators can monitor abuse.
+        if (!oversizeMessageCounted) {
+          oversizeMessageCounted = true;
+          metrics.wsMessagesTooLargeTotal.inc();
+        }
+      }
       logger.warn({ err, ip, docName }, "ws_connection_error");
     });
 
