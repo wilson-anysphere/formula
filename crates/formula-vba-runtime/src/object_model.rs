@@ -43,7 +43,7 @@ pub trait Spreadsheet {
         col: u32,
     ) -> Result<Option<String>, VbaError>;
 
-    /// Set a formula for a cell and clear any existing literal value.
+    /// Set a formula for a cell.
     fn set_cell_formula(
         &mut self,
         sheet: usize,
@@ -365,7 +365,6 @@ impl Spreadsheet for InMemoryWorkbook {
             .get_mut(sheet)
             .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
         let cell = sh.cells.entry((row, col)).or_default();
-        cell.value = VbaValue::Empty;
         cell.formula = if formula.trim().is_empty() {
             None
         } else {

@@ -354,7 +354,6 @@ impl Spreadsheet for ExecutionWorkbook {
             .get_mut(sheet)
             .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
         let cell = sh.cells.entry((row, col)).or_default();
-        cell.value = VbaValue::Empty;
         cell.formula = Some(formula);
         Ok(())
     }

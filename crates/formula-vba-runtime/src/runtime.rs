@@ -2460,6 +2460,7 @@ impl<'a> Executor<'a> {
                 self.sheet.clear_cell_contents(dest.sheet, tr, tc)?;
                 if include_formulas {
                     if let Some(formula) = formula {
+                        self.sheet.set_cell_value(dest.sheet, tr, tc, value)?;
                         self.sheet.set_cell_formula(dest.sheet, tr, tc, formula)?;
                     } else {
                         self.sheet.set_cell_value(dest.sheet, tr, tc, value)?;
