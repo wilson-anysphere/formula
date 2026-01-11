@@ -22,6 +22,9 @@ export type MacroTrustDecision =
  *
  * These values intentionally mirror the backend's snake_case strings so the
  * frontend can round-trip them back to the Trust Center APIs.
+ *
+ * Note: `signed_untrusted` is reserved for a future state where the signature is
+ * cryptographically valid but the certificate chain is not trusted.
  */
 export type MacroSignatureStatus =
   | "unsigned"
