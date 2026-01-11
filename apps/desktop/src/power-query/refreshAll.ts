@@ -35,6 +35,7 @@ export type DesktopPowerQueryRefreshAllHandle = {
   // requested target query ids (not necessarily including dependencies).
   promise: Promise<Record<string, any>>;
   cancel: () => void;
+  cancelQuery?: (queryId: string) => void;
 };
 
 class Emitter<T> {
@@ -96,7 +97,7 @@ class RefreshingEngine {
   }
 }
 
-type ApplyControllerEntry = { sessionId: string; jobId: string; controller: AbortController };
+type ApplyControllerEntry = { sessionId: string; jobId: string; queryId: string; controller: AbortController };
 
 /**
  * Desktop wrapper around the core dependency-aware `RefreshOrchestrator`.
@@ -167,6 +168,15 @@ export class DesktopPowerQueryRefreshOrchestrator {
       }
     };
 
+    const cancelQuery = (queryId: string) => {
+      (handle as any).cancelQuery?.(queryId);
+      for (const entry of this.applyControllers.values()) {
+        if (entry.sessionId !== sessionId) continue;
+        if (entry.queryId !== queryId) continue;
+        entry.controller.abort();
+      }
+    };
+
     this.activeSessions.set(sessionId, cancel);
     handle.promise
       .finally(() => {
@@ -178,6 +188,7 @@ export class DesktopPowerQueryRefreshOrchestrator {
     return {
       ...handle,
       cancel,
+      cancelQuery,
     };
   }
 
@@ -223,8 +234,10 @@ export class DesktopPowerQueryRefreshOrchestrator {
     }
 
     const controller = new AbortController();
-    const applyKey = `${sessionId}:${jobId}`;
-    this.applyControllers.set(applyKey, { sessionId, jobId, controller });
+    // Core `RefreshOrchestrator` namespaces `job.id` with the session id, but older
+    // builds may not. Ensure uniqueness either way.
+    const applyKey = jobId.startsWith(`${sessionId}:`) ? jobId : `${sessionId}:${jobId}`;
+    this.applyControllers.set(applyKey, { sessionId, jobId, queryId, controller });
 
     this.emitter.emit({ type: "apply:started", jobId, queryId, destination, sessionId } as any);
 
