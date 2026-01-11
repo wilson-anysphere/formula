@@ -421,7 +421,7 @@ describe("ToolExecutor", () => {
     expect(result.error?.message).toMatch(/too large/i);
   });
 
-  it("fetch_external_data enforces max_external_bytes while streaming when content-length is missing", async () => {
+  it("fetch_external_data enforces max_external_bytes while streaming even when content-length is underreported", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook, {
       allow_external_data: true,
@@ -441,7 +441,10 @@ describe("ToolExecutor", () => {
       return new Response(stream, {
         status: 200,
         headers: {
-          "content-type": "text/plain"
+          "content-type": "text/plain",
+          // The executor still must enforce max_external_bytes even if the declared size is
+          // missing or inaccurate.
+          "content-length": "5"
         }
       });
     });
