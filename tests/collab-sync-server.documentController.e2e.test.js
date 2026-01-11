@@ -23,6 +23,20 @@ async function waitForCell(documentController, sheetId, coord, expected) {
   }, 10_000);
 }
 
+async function waitForCellStyle(documentController, sheetId, coord, expectedStyle) {
+  await waitForCondition(() => {
+    const cell = documentController.getCell(sheetId, coord);
+    if (expectedStyle == null) return cell.styleId === 0;
+    if (cell.styleId === 0) return false;
+    try {
+      assert.deepEqual(documentController.styleTable.get(cell.styleId), expectedStyle);
+      return true;
+    } catch {
+      return false;
+    }
+  }, 10_000);
+}
+
 test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo, persistence", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-e2e-"));
   t.after(async () => {
@@ -167,4 +181,103 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
   await waitForCell(clientC.documentController, "Sheet1", "B1", { value: null, formula: "=1+1" });
   await waitForCell(clientC.documentController, "Sheet1", "C1", { value: 123, formula: null });
   await waitForCell(clientC.documentController, "Sheet1", "A1", { value: null, formula: null });
+});
+
+test("sync-server + Yjs↔DocumentController binder: sync format-only cells", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-e2e-formatting-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const port = await getAvailablePort();
+  // Resolve deps from the sync-server package so this test doesn't need to add them to the root package.json.
+  const requireFromSyncServer = createRequire(
+    new URL("../services/sync-server/package.json", import.meta.url)
+  );
+  const WebSocket = requireFromSyncServer("ws");
+
+  const server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const createClient = ({ wsUrl: wsBaseUrl, docId, token, user, activeSheet }) => {
+    const session = createCollabSession({
+      connection: {
+        wsUrl: wsBaseUrl,
+        docId,
+        token,
+        WebSocketPolyfill: WebSocket,
+        disableBc: true,
+      },
+      presence: { user, activeSheet, throttleMs: 0 },
+      defaultSheetId: activeSheet,
+    });
+
+    const ydoc = session.doc;
+    const undo = createUndoService({ mode: "collab", doc: ydoc, scope: session.cells });
+    const documentController = new DocumentController();
+    const binder = bindYjsToDocumentController({
+      ydoc,
+      documentController,
+      undoService: undo,
+      defaultSheetId: activeSheet,
+      userId: user.id,
+    });
+
+    let destroyed = false;
+    const destroy = () => {
+      if (destroyed) return;
+      destroyed = true;
+      binder.destroy();
+      session.destroy();
+      ydoc.destroy();
+    };
+
+    return { session, undo, documentController, binder, destroy };
+  };
+
+  const docId = `e2e-formatting-${randomUUID()}`;
+  const wsUrl = server.wsUrl;
+
+  const clientA = createClient({
+    wsUrl,
+    docId,
+    token: "test-token",
+    user: { id: "u-a", name: "User A", color: "#ff0000" },
+    activeSheet: "Sheet1",
+  });
+  const clientB = createClient({
+    wsUrl,
+    docId,
+    token: "test-token",
+    user: { id: "u-b", name: "User B", color: "#00ff00" },
+    activeSheet: "Sheet1",
+  });
+
+  t.after(() => {
+    clientA.destroy();
+    clientB.destroy();
+  });
+
+  await Promise.all([clientA.session.whenSynced(), clientB.session.whenSynced()]);
+
+  // Apply formatting to an empty cell and ensure it propagates.
+  clientA.documentController.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+  await waitForCell(clientB.documentController, "Sheet1", "A1", { value: null, formula: null });
+  await waitForCellStyle(clientB.documentController, "Sheet1", "A1", { font: { bold: true } });
+
+  // Ensure content+format updates round-trip.
+  clientA.documentController.setCellValue("Sheet1", "A1", "hello");
+  await waitForCell(clientB.documentController, "Sheet1", "A1", { value: "hello", formula: null });
+  await waitForCellStyle(clientB.documentController, "Sheet1", "A1", { font: { bold: true } });
+
+  // Clearing formatting should preserve the value.
+  clientA.documentController.setRangeFormat("Sheet1", "A1", null);
+  await waitForCell(clientB.documentController, "Sheet1", "A1", { value: "hello", formula: null });
+  await waitForCellStyle(clientB.documentController, "Sheet1", "A1", null);
 });
