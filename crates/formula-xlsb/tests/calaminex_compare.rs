@@ -4,7 +4,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook_auto, Reader};
-use formula_xlsb::XlsbWorkbook;
+use formula_xlsb::format::format_hex;
+use formula_xlsb::rgce::decode_rgce;
+use formula_xlsb::{Formula, XlsbWorkbook};
 use pretty_assertions::assert_eq;
 
 mod fixture_builder;
@@ -126,12 +128,26 @@ fn compare_fixture(path: &Path) {
                 );
             };
 
-            let Some(decoded_text) = decoded.as_deref() else {
-                panic!(
-                    "fixture {}: sheet {sheet_name:?} cell {} has a formula but formula-xlsb could not decode it",
-                    path.display(),
-                    a1_notation(row, col)
-                );
+            let decoded_text = match decoded.text.as_deref() {
+                Some(text) => text,
+                None => match decode_rgce(&decoded.rgce) {
+                    Ok(unexpected) => {
+                        panic!(
+                            "fixture {}: sheet {sheet_name:?} cell {}: formula_xlsb returned Formula::text=None, but decode_rgce succeeded ({unexpected:?}); rgce={}",
+                            path.display(),
+                            a1_notation(row, col),
+                            format_hex(&decoded.rgce)
+                        );
+                    }
+                    Err(err) => {
+                        panic!(
+                            "fixture {}: sheet {sheet_name:?} cell {}: formula-xlsb could not decode rgce (expected formula {cal_formula:?}): {err}; rgce={}",
+                            path.display(),
+                            a1_notation(row, col),
+                            format_hex(&decoded.rgce)
+                        );
+                    }
+                },
             };
 
             let cal_norm = normalize_formula_for_compare(&cal_formula);
@@ -139,7 +155,7 @@ fn compare_fixture(path: &Path) {
             assert_eq!(
                 decoded_norm,
                 cal_norm,
-                "fixture {} sheet {sheet_name} cell {}",
+                "fixture {} sheet {sheet_name} cell {}\ncalamine: {cal_formula}\nformula-xlsb: {decoded_text}",
                 path.display(),
                 a1_notation(row, col)
             );
@@ -202,18 +218,18 @@ fn read_calamine_formulas(path: &Path) -> SheetFormulas<String> {
     out
 }
 
-fn read_formula_xlsb_formulas(path: &Path) -> SheetFormulas<Option<String>> {
+fn read_formula_xlsb_formulas(path: &Path) -> SheetFormulas<Formula> {
     let wb = XlsbWorkbook::open(path)
         .unwrap_or_else(|err| panic!("fixture {}: formula-xlsb open failed: {err}", path.display()));
 
-    let mut out: SheetFormulas<Option<String>> = HashMap::new();
+    let mut out: SheetFormulas<Formula> = HashMap::new();
     for (sheet_idx, sheet_meta) in wb.sheet_metas().iter().enumerate() {
         let sheet_name = sheet_meta.name.clone();
-        let mut formulas: HashMap<CellCoord, Option<String>> = HashMap::new();
+        let mut formulas: HashMap<CellCoord, Formula> = HashMap::new();
 
         wb.for_each_cell(sheet_idx, |cell| {
             if let Some(formula) = cell.formula {
-                formulas.insert((cell.row, cell.col), formula.text);
+                formulas.insert((cell.row, cell.col), formula);
             }
         })
         .unwrap_or_else(|err| {
@@ -236,16 +252,26 @@ fn normalize_formula_for_compare(formula: &str) -> String {
     let mut out = String::with_capacity(trimmed.len() + 1);
     let mut in_string = false;
     let mut in_quoted_ident = false;
+    let mut pending_ws = false;
+    let mut prev_emitted: Option<char> = None;
     let mut chars = trimmed.chars().peekable();
 
     while let Some(ch) = chars.next() {
         if ch == '"' && !in_quoted_ident {
+            if pending_ws && !in_string {
+                if should_keep_space(prev_emitted, ch) {
+                    out.push(' ');
+                }
+                pending_ws = false;
+            }
             out.push(ch);
+            prev_emitted = Some(ch);
             if in_string {
                 if chars.peek() == Some(&'"') {
                     // Escaped quote inside a string literal.
                     out.push('"');
                     chars.next();
+                    prev_emitted = Some('"');
                 } else {
                     in_string = false;
                 }
@@ -256,12 +282,20 @@ fn normalize_formula_for_compare(formula: &str) -> String {
         }
 
         if ch == '\'' && !in_string {
+            if pending_ws && !in_quoted_ident {
+                if should_keep_space(prev_emitted, ch) {
+                    out.push(' ');
+                }
+                pending_ws = false;
+            }
             out.push(ch);
+            prev_emitted = Some(ch);
             if in_quoted_ident {
                 if chars.peek() == Some(&'\'') {
                     // Escaped quote inside a quoted sheet/workbook identifier.
                     out.push('\'');
                     chars.next();
+                    prev_emitted = Some('\'');
                 } else {
                     in_quoted_ident = false;
                 }
@@ -272,17 +306,42 @@ fn normalize_formula_for_compare(formula: &str) -> String {
         }
 
         if !in_string && !in_quoted_ident && ch.is_whitespace() {
+            pending_ws = true;
             continue;
+        }
+
+        if pending_ws && !in_string && !in_quoted_ident {
+            if should_keep_space(prev_emitted, ch) {
+                out.push(' ');
+            }
+            pending_ws = false;
         }
 
         if in_string || in_quoted_ident {
             out.push(ch);
+            prev_emitted = Some(ch);
         } else {
-            out.push(ch.to_ascii_uppercase());
+            let ch = ch.to_ascii_uppercase();
+            out.push(ch);
+            prev_emitted = Some(ch);
         }
     }
 
     format!("={out}")
+}
+
+fn should_keep_space(prev: Option<char>, next: char) -> bool {
+    let Some(prev) = prev else {
+        return false;
+    };
+    !is_space_insensitive_delimiter(prev) && !is_space_insensitive_delimiter(next)
+}
+
+fn is_space_insensitive_delimiter(ch: char) -> bool {
+    matches!(
+        ch,
+        '(' | ')' | ',' | '+' | '-' | '*' | '/' | '^' | '&' | '=' | '<' | '>' | ':' | '!' | '%' | '{' | '}' | '[' | ']' | '@'
+    )
 }
 
 fn a1_notation(row: u32, col: u32) -> String {
