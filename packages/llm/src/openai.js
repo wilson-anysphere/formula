@@ -84,7 +84,8 @@ export class OpenAIClient {
    * }} [options]
    */
   constructor(options = {}) {
-    const envKey = globalThis.process?.env?.OPENAI_API_KEY;
+    const env = globalThis.process?.env;
+    const envKey = env?.OPENAI_API_KEY;
     const apiKey = options.apiKey ?? envKey;
     if (!apiKey) {
       throw new Error(
@@ -93,8 +94,11 @@ export class OpenAIClient {
     }
 
     this.apiKey = apiKey;
-    this.model = options.model ?? "gpt-4o-mini";
-    this.baseUrl = options.baseUrl ?? "https://api.openai.com/v1";
+    const envModel = env?.OPENAI_MODEL;
+    this.model = options.model ?? envModel ?? "gpt-4o-mini";
+
+    const envBaseUrl = env?.OPENAI_BASE_URL ?? env?.OPENAI_API_BASE_URL ?? env?.OPENAI_API_BASE;
+    this.baseUrl = (options.baseUrl ?? envBaseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
     this.timeoutMs = options.timeoutMs ?? 30_000;
   }
 

@@ -134,4 +134,26 @@ describe("AnthropicClient", () => {
       maxTokens: 42,
     });
   });
+
+  it("propagates abort errors when the request signal is cancelled", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: any) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        return new Promise((_resolve, reject) => {
+          const error = new Error("Aborted");
+          (error as any).name = "AbortError";
+          if (!signal) return reject(error);
+          if (signal.aborted) return reject(error);
+          signal.addEventListener("abort", () => reject(error), { once: true });
+        });
+      }) as any,
+    );
+
+    const client = new AnthropicClient({ apiKey: "test-key", timeoutMs: 5_000 });
+    const controller = new AbortController();
+    const promise = client.chat({ messages: [{ role: "user", content: "hi" }] as any, signal: controller.signal });
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+  });
 });

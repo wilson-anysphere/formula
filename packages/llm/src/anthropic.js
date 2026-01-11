@@ -138,7 +138,8 @@ export class AnthropicClient {
   * }} [options]
   */
   constructor(options = {}) {
-    const envKey = globalThis.process?.env?.ANTHROPIC_API_KEY;
+    const env = globalThis.process?.env;
+    const envKey = env?.ANTHROPIC_API_KEY;
     const apiKey = options.apiKey ?? envKey;
     if (!apiKey) {
       throw new Error(
@@ -147,8 +148,11 @@ export class AnthropicClient {
     }
 
     this.apiKey = apiKey;
-    this.model = options.model ?? "claude-3-5-sonnet-latest";
-    this.baseUrl = (options.baseUrl ?? "https://api.anthropic.com/v1").replace(/\/$/, "");
+    const envModel = env?.ANTHROPIC_MODEL;
+    this.model = options.model ?? envModel ?? "claude-3-5-sonnet-latest";
+
+    const envBaseUrl = env?.ANTHROPIC_BASE_URL ?? env?.ANTHROPIC_API_BASE_URL;
+    this.baseUrl = (options.baseUrl ?? envBaseUrl ?? "https://api.anthropic.com/v1").replace(/\/$/, "");
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.maxTokens = options.maxTokens ?? 1024;
   }

@@ -83,8 +83,12 @@ export class OllamaChatClient {
    * }} [options]
    */
   constructor(options = {}) {
-    this.model = options.model ?? "llama3.1";
-    this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:11434").replace(/\/$/, "");
+    const env = globalThis.process?.env;
+    const envModel = env?.OLLAMA_MODEL;
+    const envBaseUrl = env?.OLLAMA_HOST ?? env?.OLLAMA_BASE_URL;
+
+    this.model = options.model ?? envModel ?? "llama3.1";
+    this.baseUrl = (options.baseUrl ?? envBaseUrl ?? "http://127.0.0.1:11434").replace(/\/$/, "");
     this.timeoutMs = options.timeoutMs ?? 30_000;
   }
 
