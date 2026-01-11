@@ -11,7 +11,8 @@ thiserror = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 lru = "0.12"
+formula-model = { path = "../formula-model" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "time"] }
-
+tempfile = "3"

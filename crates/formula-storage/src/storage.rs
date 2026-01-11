@@ -2,6 +2,7 @@ use crate::schema;
 use crate::types::{
     CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, SheetVisibility, Style, WorkbookMeta,
 };
+use formula_model::ErrorValue;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde_json::json;
 use std::path::Path;
@@ -74,18 +75,18 @@ pub struct CellChange {
 
 impl Storage {
     pub fn open_path(path: impl AsRef<Path>) -> Result<Self> {
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
-        schema::init(&conn)?;
+        schema::init(&mut conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
     pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()?;
+        let mut conn = Connection::open_in_memory()?;
         conn.busy_timeout(Duration::from_secs(5))?;
-        schema::init(&conn)?;
+        schema::init(&mut conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -95,15 +96,19 @@ impl Storage {
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_URI;
-        let conn = Connection::open_with_flags(uri, flags)?;
+        let mut conn = Connection::open_with_flags(uri, flags)?;
         conn.busy_timeout(Duration::from_secs(5))?;
-        schema::init(&conn)?;
+        schema::init(&mut conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
-    pub fn create_workbook(&self, name: &str, metadata: Option<serde_json::Value>) -> Result<WorkbookMeta> {
+    pub fn create_workbook(
+        &self,
+        name: &str,
+        metadata: Option<serde_json::Value>,
+    ) -> Result<WorkbookMeta> {
         let workbook = WorkbookMeta {
             id: Uuid::new_v4(),
             name: name.to_string(),
@@ -256,7 +261,8 @@ impl Storage {
             let visibility: String = r.get(4)?;
             Ok(SheetMeta {
                 id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                workbook_id: Uuid::parse_str(&workbook_id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                workbook_id: Uuid::parse_str(&workbook_id)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 name: r.get(2)?,
                 position: r.get(3)?,
                 visibility: SheetVisibility::parse(&visibility),
@@ -423,9 +429,7 @@ impl Storage {
             .ok_or(StorageError::SheetNotFound(sheet_id))?;
 
         let sheet = sheets.remove(current_index);
-        let clamped = new_position
-            .max(0)
-            .min(sheets.len() as i64) as usize;
+        let clamped = new_position.max(0).min(sheets.len() as i64) as usize;
         sheets.insert(clamped, sheet);
 
         for (idx, sheet) in sheets.iter().enumerate() {
@@ -454,7 +458,10 @@ impl Storage {
             "DELETE FROM change_log WHERE sheet_id = ?1",
             params![sheet_id.to_string()],
         )?;
-        tx.execute("DELETE FROM sheets WHERE id = ?1", params![sheet_id.to_string()])?;
+        tx.execute(
+            "DELETE FROM sheets WHERE id = ?1",
+            params![sheet_id.to_string()],
+        )?;
 
         // Renormalize remaining sheet positions.
         let sheets = self.list_sheets_tx(&tx, meta.workbook_id)?;
@@ -471,11 +478,15 @@ impl Storage {
     }
 
     /// Load all non-empty cells within an inclusive range.
-    pub fn load_cells_in_range(&self, sheet_id: Uuid, range: CellRange) -> Result<Vec<((i64, i64), CellSnapshot)>> {
+    pub fn load_cells_in_range(
+        &self,
+        sheet_id: Uuid,
+        range: CellRange,
+    ) -> Result<Vec<((i64, i64), CellSnapshot)>> {
         let conn = self.conn.lock().expect("storage mutex poisoned");
         let mut stmt = conn.prepare(
             r#"
-            SELECT row, col, value_type, value_number, value_string, formula, style_id
+            SELECT row, col, value_type, value_number, value_string, value_json, formula, style_id
             FROM cells
             WHERE sheet_id = ?1
               AND row >= ?2 AND row <= ?3
@@ -495,7 +506,14 @@ impl Storage {
             |r| {
                 let row: i64 = r.get(0)?;
                 let col: i64 = r.get(1)?;
-                let snapshot = snapshot_from_row(r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)?;
+                let snapshot = snapshot_from_row(
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
+                )?;
                 Ok(((row, col), snapshot))
             },
         )?;
@@ -562,7 +580,8 @@ impl Storage {
                     let sheet_id: String = r.get(1)?;
                     Ok(ChangeLogEntry {
                         id: r.get(0)?,
-                        sheet_id: Uuid::parse_str(&sheet_id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        sheet_id: Uuid::parse_str(&sheet_id)
+                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
                         user_id: r.get(2)?,
                         operation: r.get(3)?,
                         target: r.get(4)?,
@@ -599,7 +618,12 @@ impl Storage {
         Ok(id)
     }
 
-    pub fn get_named_range(&self, workbook_id: Uuid, name: &str, scope: &str) -> Result<Option<NamedRange>> {
+    pub fn get_named_range(
+        &self,
+        workbook_id: Uuid,
+        name: &str,
+        scope: &str,
+    ) -> Result<Option<NamedRange>> {
         let conn = self.conn.lock().expect("storage mutex poisoned");
         let row = conn
             .query_row(
@@ -670,7 +694,8 @@ impl Storage {
             let visibility: String = r.get(4)?;
             Ok(SheetMeta {
                 id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                workbook_id: Uuid::parse_str(&workbook_id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                workbook_id: Uuid::parse_str(&workbook_id)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 name: r.get(2)?,
                 position: r.get(3)?,
                 visibility: SheetVisibility::parse(&visibility),
@@ -743,20 +768,32 @@ fn snapshot_from_row(
     value_type: Option<String>,
     value_number: Option<f64>,
     value_string: Option<String>,
+    value_json: Option<String>,
     formula: Option<String>,
     style_id: Option<i64>,
 ) -> rusqlite::Result<CellSnapshot> {
-    let value = match value_type.as_deref() {
-        Some("number") => CellValue::Number(value_number.unwrap_or(0.0)),
-        Some("string") => CellValue::Text(value_string.unwrap_or_default()),
-        Some("boolean") => CellValue::Boolean(value_number.unwrap_or(0.0) != 0.0),
-        Some("error") => CellValue::Error(value_string.unwrap_or_default()),
-        Some("formula") => CellValue::Empty,
-        // `NULL` value_type means a style-only blank cell.
-        None => CellValue::Empty,
-        Some(other) => {
-            // Unknown value types are treated as strings to preserve data.
-            CellValue::Text(other.to_string())
+    let value = if let Some(raw_json) = value_json.as_deref().filter(|s| !s.trim().is_empty()) {
+        serde_json::from_str::<CellValue>(raw_json).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(err))
+        })?
+    } else {
+        match value_type.as_deref() {
+            Some("number") => CellValue::Number(value_number.unwrap_or(0.0)),
+            Some("string") => CellValue::String(value_string.unwrap_or_default()),
+            Some("boolean") => CellValue::Boolean(value_number.unwrap_or(0.0) != 0.0),
+            Some("error") => {
+                let legacy = value_string.unwrap_or_default();
+                let parsed = legacy.parse::<ErrorValue>().unwrap_or(ErrorValue::Unknown);
+                CellValue::Error(parsed)
+            }
+            // Legacy sentinel used by older schema versions when a cell contains a formula but no cached value.
+            Some("formula") => CellValue::Empty,
+            // `NULL` value_type means a style-only blank cell.
+            None => CellValue::Empty,
+            Some(other) => {
+                // Unknown value types are treated as strings to preserve data.
+                CellValue::String(other.to_string())
+            }
         }
     };
 
@@ -794,37 +831,38 @@ fn apply_one_change(tx: &Transaction<'_>, change: &CellChange) -> Result<()> {
         None => None,
     };
 
-    let (value_type, value_number, value_string, formula) = if let Some(formula) = &change.data.formula {
-        (
-            Some("formula".to_string()),
+    let formula = change.data.formula.clone();
+    let (value_type, value_number, value_string, value_json) = match &change.data.value {
+        CellValue::Empty => (None, None, None, None),
+        CellValue::Number(n) => (Some("number".to_string()), Some(*n), None, None),
+        CellValue::String(s) => (Some("string".to_string()), None, Some(s.to_string()), None),
+        CellValue::Boolean(b) => (
+            Some("boolean".to_string()),
+            Some(if *b { 1.0 } else { 0.0 }),
             None,
             None,
-            Some(formula.to_string()),
-        )
-    } else {
-        match &change.data.value {
-            CellValue::Empty => (None, None, None, None),
-            CellValue::Number(n) => (Some("number".to_string()), Some(*n), None, None),
-            CellValue::Text(s) => (Some("string".to_string()), None, Some(s.to_string()), None),
-            CellValue::Boolean(b) => (
-                Some("boolean".to_string()),
-                Some(if *b { 1.0 } else { 0.0 }),
-                None,
-                None,
-            ),
-            CellValue::Error(e) => (Some("error".to_string()), None, Some(e.to_string()), None),
+        ),
+        CellValue::Error(err) => (
+            Some("error".to_string()),
+            None,
+            Some(err.as_str().to_string()),
+            None,
+        ),
+        value @ (CellValue::RichText(_) | CellValue::Array(_) | CellValue::Spill(_)) => {
+            (None, None, None, Some(serde_json::to_string(value)?))
         }
     };
 
     tx.execute(
         r#"
         INSERT INTO cells (
-          sheet_id, row, col, value_type, value_number, value_string, formula, style_id
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+          sheet_id, row, col, value_type, value_number, value_string, value_json, formula, style_id
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         ON CONFLICT(sheet_id, row, col) DO UPDATE SET
           value_type = excluded.value_type,
           value_number = excluded.value_number,
           value_string = excluded.value_string,
+          value_json = excluded.value_json,
           formula = excluded.formula,
           style_id = excluded.style_id
         "#,
@@ -835,18 +873,14 @@ fn apply_one_change(tx: &Transaction<'_>, change: &CellChange) -> Result<()> {
             value_type,
             value_number,
             value_string,
+            value_json,
             formula,
             style_id
         ],
     )?;
 
-    let snapshot_value = if change.data.formula.is_some() {
-        CellValue::Empty
-    } else {
-        change.data.value.clone()
-    };
     let new_snapshot = Some(CellSnapshot {
-        value: snapshot_value,
+        value: change.data.value.clone(),
         formula: change.data.formula.clone(),
         style_id,
     });
@@ -865,13 +899,20 @@ fn fetch_cell_snapshot_tx(
     let row_opt = tx
         .query_row(
             r#"
-            SELECT value_type, value_number, value_string, formula, style_id
+            SELECT value_type, value_number, value_string, value_json, formula, style_id
             FROM cells
             WHERE sheet_id = ?1 AND row = ?2 AND col = ?3
             "#,
             params![sheet_id.to_string(), row, col],
             |r| {
-                snapshot_from_row(r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)
+                snapshot_from_row(
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                )
             },
         )
         .optional()?;
@@ -920,7 +961,10 @@ fn touch_workbook_modified_at(tx: &Transaction<'_>, sheet_id: Uuid) -> Result<()
     Ok(())
 }
 
-fn touch_workbook_modified_at_by_workbook_id(tx: &Transaction<'_>, workbook_id: Uuid) -> Result<()> {
+fn touch_workbook_modified_at_by_workbook_id(
+    tx: &Transaction<'_>,
+    workbook_id: Uuid,
+) -> Result<()> {
     tx.execute(
         "UPDATE workbooks SET modified_at = CURRENT_TIMESTAMP WHERE id = ?1",
         params![workbook_id.to_string()],

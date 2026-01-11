@@ -1,10 +1,14 @@
+use formula_model::{ArrayValue, CellRef, ErrorValue, RichText, SpillValue};
+use formula_storage::storage::StorageError;
 use formula_storage::{
     AutoSaveConfig, AutoSaveManager, CellChange, CellData, CellRange, CellValue, SheetVisibility,
     Storage, Style,
 };
-use formula_storage::storage::StorageError;
+use rusqlite::Connection;
 use serde_json::json;
 use std::time::Duration;
+use tempfile::NamedTempFile;
+use uuid::Uuid;
 
 #[test]
 fn save_load_round_trip_shared_memory() {
@@ -38,7 +42,7 @@ fn save_load_round_trip_shared_memory() {
                 row: 1,
                 col: 1,
                 data: CellData {
-                    value: CellValue::Text("hello".to_string()),
+                    value: CellValue::String("hello".to_string()),
                     formula: None,
                     style: None,
                 },
@@ -61,7 +65,7 @@ fn save_load_round_trip_shared_memory() {
     assert_eq!(cells[0].0, (0, 0));
     assert_eq!(cells[0].1.value, CellValue::Number(42.0));
     assert_eq!(cells[1].0, (1, 1));
-    assert_eq!(cells[1].1.value, CellValue::Text("hello".to_string()));
+    assert_eq!(cells[1].1.value, CellValue::String("hello".to_string()));
 
     // Keep storage1 alive for the lifetime of the test to ensure the shared
     // in-memory DB isn't dropped.
@@ -71,7 +75,9 @@ fn save_load_round_trip_shared_memory() {
 #[test]
 fn sparse_storage_only_persists_non_empty_cells() {
     let storage = Storage::open_in_memory().expect("open storage");
-    let workbook = storage.create_workbook("Book", None).expect("create workbook");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
     let sheet = storage
         .create_sheet(workbook.id, "Sheet", 0, None)
         .expect("create sheet");
@@ -128,7 +134,7 @@ fn styles_are_deduplicated() {
         fill_id: None,
         border_id: None,
         number_format: Some("0.0".to_string()),
-        alignment: Some(json!({"b": 2, "a": 1})),
+        alignment: Some(json!({"outer": {"b": 2, "a": 1}, "a": 0})),
         protection: None,
     };
     let style_b = Style {
@@ -136,7 +142,7 @@ fn styles_are_deduplicated() {
         fill_id: None,
         border_id: None,
         number_format: Some("0.0".to_string()),
-        alignment: Some(json!({"a": 1, "b": 2})),
+        alignment: Some(json!({"a": 0, "outer": {"a": 1, "b": 2}})),
         protection: None,
     };
 
@@ -148,14 +154,18 @@ fn styles_are_deduplicated() {
         number_format: Some("0.00".to_string()),
         ..style_a
     };
-    let id_c = storage.get_or_insert_style(&style_c).expect("insert other style");
+    let id_c = storage
+        .get_or_insert_style(&style_c)
+        .expect("insert other style");
     assert_ne!(id_a, id_c);
 }
 
 #[test]
 fn change_log_records_cell_operations() {
     let storage = Storage::open_in_memory().expect("open storage");
-    let workbook = storage.create_workbook("Book", None).expect("create workbook");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
     let sheet = storage
         .create_sheet(workbook.id, "Sheet", 0, None)
         .expect("create sheet");
@@ -166,7 +176,7 @@ fn change_log_records_cell_operations() {
             row: 0,
             col: 0,
             data: CellData {
-                value: CellValue::Text("hello".to_string()),
+                value: CellValue::String("hello".to_string()),
                 formula: None,
                 style: None,
             },
@@ -198,7 +208,9 @@ fn change_log_records_cell_operations() {
 #[tokio::test(flavor = "current_thread")]
 async fn autosave_batches_changes() {
     let storage = Storage::open_in_memory().expect("open storage");
-    let workbook = storage.create_workbook("Book", None).expect("create workbook");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
     let sheet = storage
         .create_sheet(workbook.id, "Sheet", 0, None)
         .expect("create sheet");
@@ -251,9 +263,207 @@ async fn autosave_batches_changes() {
 }
 
 #[test]
+fn rich_cell_values_round_trip() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Sheet", 0, None)
+        .expect("create sheet");
+
+    let rich = RichText::from_segments(vec![
+        ("Hello ".to_string(), Default::default()),
+        (
+            "World".to_string(),
+            formula_model::rich_text::RichTextRunStyle {
+                bold: Some(true),
+                ..Default::default()
+            },
+        ),
+    ]);
+
+    let array = ArrayValue {
+        data: vec![
+            vec![CellValue::Number(1.0), CellValue::String("x".to_string())],
+            vec![CellValue::Boolean(true), CellValue::Error(ErrorValue::NA)],
+        ],
+    };
+
+    storage
+        .apply_cell_changes(&[
+            CellChange {
+                sheet_id: sheet.id,
+                row: 0,
+                col: 0,
+                data: CellData {
+                    value: CellValue::RichText(rich.clone()),
+                    formula: None,
+                    style: None,
+                },
+                user_id: None,
+            },
+            CellChange {
+                sheet_id: sheet.id,
+                row: 1,
+                col: 0,
+                data: CellData {
+                    value: CellValue::Array(array.clone()),
+                    formula: None,
+                    style: None,
+                },
+                user_id: None,
+            },
+            CellChange {
+                sheet_id: sheet.id,
+                row: 2,
+                col: 0,
+                data: CellData {
+                    value: CellValue::Spill(SpillValue {
+                        origin: CellRef::new(1, 0),
+                    }),
+                    formula: None,
+                    style: None,
+                },
+                user_id: None,
+            },
+            CellChange {
+                sheet_id: sheet.id,
+                row: 3,
+                col: 0,
+                data: CellData {
+                    value: CellValue::Error(ErrorValue::Div0),
+                    formula: None,
+                    style: None,
+                },
+                user_id: None,
+            },
+        ])
+        .expect("persist cells");
+
+    let cells = storage
+        .load_cells_in_range(sheet.id, CellRange::new(0, 10, 0, 10))
+        .expect("load cells");
+
+    let mut by_coord = std::collections::HashMap::new();
+    for (coord, snap) in cells {
+        by_coord.insert(coord, snap.value);
+    }
+
+    assert_eq!(by_coord.get(&(0, 0)), Some(&CellValue::RichText(rich)));
+    assert_eq!(by_coord.get(&(1, 0)), Some(&CellValue::Array(array)));
+    assert_eq!(
+        by_coord.get(&(2, 0)),
+        Some(&CellValue::Spill(SpillValue {
+            origin: CellRef::new(1, 0)
+        }))
+    );
+    assert_eq!(
+        by_coord.get(&(3, 0)),
+        Some(&CellValue::Error(ErrorValue::Div0))
+    );
+}
+
+#[test]
+fn opens_and_migrates_legacy_schema() {
+    let tmp = NamedTempFile::new().expect("tmpfile");
+    let path = tmp.path();
+
+    // Simulate a database created by the pre-versioned schema (no schema_version, no value_json).
+    let conn = Connection::open(path).expect("open legacy db");
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS workbooks (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          metadata JSON
+        );
+
+        CREATE TABLE IF NOT EXISTS sheets (
+          id TEXT PRIMARY KEY,
+          workbook_id TEXT REFERENCES workbooks(id),
+          name TEXT NOT NULL,
+          position INTEGER,
+          visibility TEXT NOT NULL DEFAULT 'visible' CHECK (visibility IN ('visible','hidden','veryHidden')),
+          tab_color TEXT,
+          xlsx_sheet_id INTEGER,
+          xlsx_rel_id TEXT,
+          frozen_rows INTEGER DEFAULT 0,
+          frozen_cols INTEGER DEFAULT 0,
+          zoom REAL DEFAULT 1.0,
+          metadata JSON
+        );
+
+        CREATE TABLE IF NOT EXISTS cells (
+          sheet_id TEXT REFERENCES sheets(id),
+          row INTEGER,
+          col INTEGER,
+          value_type TEXT,
+          value_number REAL,
+          value_string TEXT,
+          formula TEXT,
+          style_id INTEGER,
+          PRIMARY KEY (sheet_id, row, col)
+        );
+        "#,
+    )
+    .expect("create legacy schema");
+
+    let workbook_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+    let sheet_id = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
+
+    conn.execute(
+        "INSERT INTO workbooks (id, name) VALUES (?1, ?2)",
+        rusqlite::params![workbook_id.to_string(), "Book"],
+    )
+    .expect("insert workbook");
+    conn.execute(
+        "INSERT INTO sheets (id, workbook_id, name, position) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![
+            sheet_id.to_string(),
+            workbook_id.to_string(),
+            "Sheet1",
+            0i64
+        ],
+    )
+    .expect("insert sheet");
+    conn.execute(
+        "INSERT INTO cells (sheet_id, row, col, value_type, value_string) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![sheet_id.to_string(), 0i64, 0i64, "error", "#DIV/0!"],
+    )
+    .expect("insert cell");
+    drop(conn);
+
+    let storage = Storage::open_path(path).expect("open with migration");
+    let cells = storage
+        .load_cells_in_range(sheet_id, CellRange::new(0, 0, 0, 0))
+        .expect("load cells");
+    assert_eq!(cells.len(), 1);
+    assert_eq!(cells[0].1.value, CellValue::Error(ErrorValue::Div0));
+    drop(storage);
+
+    // Confirm the migration added the new column.
+    let conn = Connection::open(path).expect("reopen");
+    let mut stmt = conn.prepare("PRAGMA table_info(cells)").expect("pragma");
+    let cols = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("query pragma")
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .expect("collect pragma");
+    assert!(
+        cols.iter().any(|c| c == "value_json"),
+        "value_json column missing after migration"
+    );
+}
+
+#[test]
 fn sheet_metadata_persists_visibility_tab_color_and_xlsx_ids() {
     let storage = Storage::open_in_memory().expect("open storage");
-    let workbook = storage.create_workbook("Book", None).expect("create workbook");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
     let sheet = storage
         .create_sheet(workbook.id, "Sheet1", 0, None)
         .expect("create sheet");
@@ -280,7 +490,9 @@ fn sheet_metadata_persists_visibility_tab_color_and_xlsx_ids() {
 #[test]
 fn sheet_reorder_and_delete_renormalize_positions() {
     let storage = Storage::open_in_memory().expect("open storage");
-    let workbook = storage.create_workbook("Book", None).expect("create workbook");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
     let sheet_a = storage
         .create_sheet(workbook.id, "SheetA", 0, None)
         .expect("create sheet A");
@@ -293,19 +505,33 @@ fn sheet_reorder_and_delete_renormalize_positions() {
 
     storage.reorder_sheet(sheet_c.id, 0).expect("reorder");
     let sheets = storage.list_sheets(workbook.id).expect("list sheets");
-    assert_eq!(sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), vec!["SheetC", "SheetA", "SheetB"]);
-    assert_eq!(sheets.iter().map(|s| s.position).collect::<Vec<_>>(), vec![0, 1, 2]);
+    assert_eq!(
+        sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+        vec!["SheetC", "SheetA", "SheetB"]
+    );
+    assert_eq!(
+        sheets.iter().map(|s| s.position).collect::<Vec<_>>(),
+        vec![0, 1, 2]
+    );
 
     storage.delete_sheet(sheet_a.id).expect("delete");
     let sheets = storage.list_sheets(workbook.id).expect("list after delete");
-    assert_eq!(sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), vec!["SheetC", "SheetB"]);
-    assert_eq!(sheets.iter().map(|s| s.position).collect::<Vec<_>>(), vec![0, 1]);
+    assert_eq!(
+        sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+        vec!["SheetC", "SheetB"]
+    );
+    assert_eq!(
+        sheets.iter().map(|s| s.position).collect::<Vec<_>>(),
+        vec![0, 1]
+    );
 }
 
 #[test]
 fn sheet_names_are_unique_case_insensitive() {
     let storage = Storage::open_in_memory().expect("open storage");
-    let workbook = storage.create_workbook("Book", None).expect("create workbook");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
     storage
         .create_sheet(workbook.id, "Sheet1", 0, None)
         .expect("create sheet");

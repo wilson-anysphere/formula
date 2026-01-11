@@ -54,8 +54,35 @@ impl SheetData {
         for snapshot in self.cells.values() {
             bytes += 64;
             match &snapshot.value {
-                CellValue::Text(s) | CellValue::Error(s) => bytes += s.len(),
-                CellValue::Number(_) | CellValue::Boolean(_) | CellValue::Empty => {}
+                CellValue::String(s) => bytes += s.len(),
+                CellValue::RichText(rt) => {
+                    bytes += rt.text.len();
+                    bytes += rt.runs.len() * 32;
+                }
+                CellValue::Error(err) => bytes += err.as_str().len(),
+                CellValue::Array(arr) => {
+                    // Rough estimate: nested cell values.
+                    bytes += 64;
+                    for row in &arr.data {
+                        bytes += 16;
+                        for v in row {
+                            bytes += match v {
+                                CellValue::String(s) => s.len(),
+                                CellValue::RichText(rt) => rt.text.len() + rt.runs.len() * 32,
+                                CellValue::Error(err) => err.as_str().len(),
+                                CellValue::Array(_) => 64,
+                                CellValue::Spill(_) => 16,
+                                CellValue::Number(_) | CellValue::Boolean(_) | CellValue::Empty => {
+                                    0
+                                }
+                            };
+                        }
+                    }
+                }
+                CellValue::Spill(_)
+                | CellValue::Number(_)
+                | CellValue::Boolean(_)
+                | CellValue::Empty => {}
             }
             if let Some(formula) = &snapshot.formula {
                 bytes += formula.len();
@@ -97,11 +124,18 @@ impl MemoryManager {
     }
 
     pub fn estimated_usage_bytes(&self) -> usize {
-        self.inner.lock().expect("memory manager mutex poisoned").bytes
+        self.inner
+            .lock()
+            .expect("memory manager mutex poisoned")
+            .bytes
     }
 
     pub fn cached_sheet_count(&self) -> usize {
-        self.inner.lock().expect("memory manager mutex poisoned").cache.len()
+        self.inner
+            .lock()
+            .expect("memory manager mutex poisoned")
+            .cache
+            .len()
     }
 
     pub fn get_sheet(&self, sheet_id: Uuid) -> StorageResult<SheetMeta> {
@@ -165,15 +199,10 @@ impl MemoryManager {
             if change.data.is_truly_empty() {
                 sheet.cells.remove(&(change.row, change.col));
             } else {
-                let snapshot_value = if change.data.formula.is_some() {
-                    CellValue::Empty
-                } else {
-                    change.data.value.clone()
-                };
                 sheet.cells.insert(
                     (change.row, change.col),
                     CellSnapshot {
-                        value: snapshot_value,
+                        value: change.data.value.clone(),
                         formula: change.data.formula.clone(),
                         style_id: None,
                     },

@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+pub use formula_model::CellValue;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum SheetVisibility {
@@ -56,23 +58,6 @@ pub struct SheetMeta {
     pub frozen_cols: i64,
     pub zoom: f64,
     pub metadata: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", content = "value")]
-pub enum CellValue {
-    /// An empty cell.
-    Empty,
-    Number(f64),
-    Text(String),
-    Boolean(bool),
-    Error(String),
-}
-
-impl CellValue {
-    pub fn is_empty(&self) -> bool {
-        matches!(self, CellValue::Empty)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
