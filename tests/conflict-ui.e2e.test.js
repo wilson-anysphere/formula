@@ -37,6 +37,9 @@ function syncDocs(docA, docB) {
  */
 function createClient(userId, container, opts = {}) {
   const doc = new Y.Doc();
+  if (typeof opts.clientID === "number") {
+    doc.clientID = opts.clientID;
+  }
   const cells = doc.getMap("cells");
   const origin = { type: "local", userId };
   const undo = createUndoService({ mode: "collab", doc, scope: cells, origin, captureTimeoutMs: 10_000 });
@@ -211,6 +214,72 @@ test("E2E: concurrent same-cell value edit triggers conflict UI and converges af
     assert.equal(getValue(b.cells, "s:0:0"), conflict.localValue);
 
     assert.equal(chosenContainer.querySelector('[data-testid="conflict-toast"]'), null);
+  } finally {
+    globalThis.window = prevWindow;
+    globalThis.document = prevDocument;
+    globalThis.Event = prevEvent;
+  }
+});
+
+test("E2E: choosing remote value in a value conflict preserves concurrent formulas", () => {
+  const dom = new JSDOM('<div id="a"></div><div id="b"></div>', { url: "http://localhost" });
+
+  const prevWindow = globalThis.window;
+  const prevDocument = globalThis.document;
+  const prevEvent = globalThis.Event;
+
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.Event = dom.window.Event;
+
+  try {
+    const containerA = dom.window.document.getElementById("a");
+    const containerB = dom.window.document.getElementById("b");
+    assert.ok(containerA && containerB);
+
+    // Deterministic tie-break: higher clientID wins map entry overwrites.
+    const a = createClient("alice", containerA, { mode: "formula+value", clientID: 2 });
+    const b = createClient("bob", containerB, { mode: "formula+value", clientID: 1 });
+
+    // Establish a shared base cell map.
+    a.monitor.setLocalValue("s:0:0", "base");
+    syncDocs(a.doc, b.doc);
+
+    // Offline concurrent edits: alice writes a formula (sets value=null), bob writes a value.
+    a.monitor.setLocalFormula("s:0:0", "=1");
+    b.monitor.setLocalValue("s:0:0", "bob");
+    syncDocs(a.doc, b.doc);
+
+    // Expect a value conflict on bob (the value writer).
+    const toastB = containerB.querySelector('[data-testid="conflict-toast"]');
+    assert.ok(toastB, "expected value conflict toast on bob");
+
+    const conflict = b.conflicts[0];
+    assert.ok(conflict, "expected recorded conflict");
+    assert.equal(conflict.kind, "value");
+
+    // Concurrent formula should be present at conflict time.
+    assert.equal(getFormula(b.cells, "s:0:0"), "=1");
+
+    const openBtn = containerB.querySelector('[data-testid="conflict-toast-open"]');
+    assert.ok(openBtn);
+    openBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+
+    const dialog = containerB.querySelector('[data-testid="conflict-dialog"]');
+    assert.ok(dialog, "expected conflict dialog to open");
+
+    // Choose the remote value (which is already applied) - should not clobber the formula.
+    const useTheirsBtn = containerB.querySelector('[data-testid="conflict-choose-remote"]');
+    assert.ok(useTheirsBtn);
+    useTheirsBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+
+    syncDocs(a.doc, b.doc);
+
+    assert.equal(getFormula(a.cells, "s:0:0"), "=1");
+    assert.equal(getFormula(b.cells, "s:0:0"), "=1");
+
+    // Toast should be gone on the resolved client.
+    assert.equal(containerB.querySelector('[data-testid="conflict-toast"]'), null);
   } finally {
     globalThis.window = prevWindow;
     globalThis.document = prevDocument;
