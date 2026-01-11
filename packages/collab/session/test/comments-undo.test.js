@@ -227,3 +227,51 @@ test("CollabSession undo captures comment edits when comments root was created b
   session.destroy();
   doc.destroy();
 });
+
+test("CollabSession undo captures comment edits when comments root is a legacy array created by a different Yjs instance (CJS applyUpdate)", () => {
+  const require = createRequire(import.meta.url);
+  // eslint-disable-next-line import/no-named-as-default-member
+  const Ycjs = require("yjs");
+
+  const remote = new Ycjs.Doc();
+  const comments = remote.getArray("comments");
+  remote.transact(() => {
+    const comment = new Ycjs.Map();
+    comment.set("id", "c1");
+    comment.set("cellRef", "Sheet1:0:0");
+    comment.set("kind", "threaded");
+    comment.set("authorId", "u1");
+    comment.set("authorName", "Alice");
+    comment.set("createdAt", 1);
+    comment.set("updatedAt", 1);
+    comment.set("resolved", false);
+    comment.set("content", "from-cjs");
+    comment.set("mentions", []);
+    comment.set("replies", new Ycjs.Array());
+    comments.push([comment]);
+  });
+
+  const update = Ycjs.encodeStateAsUpdate(remote);
+
+  const doc = new Y.Doc();
+  // Apply update via the CJS build to simulate y-websocket applying updates.
+  Ycjs.applyUpdate(doc, update, REMOTE_ORIGIN);
+
+  assert.ok(doc.share.get("comments"));
+
+  const session = createCollabSession({ doc, undo: {} });
+  const commentsMgr = createCommentManagerForSession(session);
+
+  assert.deepEqual(commentsMgr.listAll().map((c) => c.id), ["c1"]);
+  assert.equal(commentsMgr.listAll()[0]?.content, "from-cjs");
+
+  commentsMgr.setCommentContent({ commentId: "c1", content: "edited", now: 2 });
+  assert.equal(commentsMgr.listAll()[0]?.content, "edited");
+  assert.equal(session.undo?.canUndo(), true);
+
+  session.undo?.undo();
+  assert.equal(commentsMgr.listAll()[0]?.content, "from-cjs");
+
+  session.destroy();
+  doc.destroy();
+});

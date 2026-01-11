@@ -148,24 +148,50 @@ function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
 export type DocumentRole = "owner" | "admin" | "editor" | "commenter" | "viewer";
 
 function normalizeCommentsForUndoScope(doc: Y.Doc, root: Y.AbstractType<any>): void {
-  if (!(root instanceof Y.Map)) return;
+  if (root instanceof Y.Map) {
+    /** @type {Array<[string, any]>} */
+    const foreignComments: Array<[string, any]> = [];
+    root.forEach((value, key) => {
+      const yComment = getYMap(value);
+      if (!yComment) return;
+      // Foreign Yjs instances fail `instanceof` checks, but we still want to
+      // normalize them to local constructors before UndoManager is created.
+      if (yComment instanceof Y.Map) return;
+      foreignComments.push([String(key), yComment]);
+    });
 
-  /** @type {Array<[string, any]>} */
-  const foreignComments: Array<[string, any]> = [];
-  root.forEach((value, key) => {
-    const yComment = getYMap(value);
-    if (!yComment) return;
-    // Foreign Yjs instances fail `instanceof` checks, but we still want to
-    // normalize them to local constructors before UndoManager is created.
-    if (yComment instanceof Y.Map) return;
-    foreignComments.push([String(key), yComment]);
-  });
+    if (foreignComments.length === 0) return;
 
-  if (foreignComments.length === 0) return;
+    doc.transact(() => {
+      for (const [key, yComment] of foreignComments) {
+        root.set(key, cloneForeignCommentToLocal(yComment));
+      }
+    });
+    return;
+  }
+
+  if (!(root instanceof Y.Array)) return;
+
+  const items = root.toArray();
+  /** @type {Array<{ index: number, yComment: any }>} */
+  const replacements: Array<{ index: number; yComment: any }> = [];
+  for (let i = 0; i < items.length; i += 1) {
+    const yComment = getYMap(items[i]);
+    if (!yComment) continue;
+    if (yComment instanceof Y.Map) continue;
+    replacements.push({ index: i, yComment });
+  }
+
+  if (replacements.length === 0) return;
 
   doc.transact(() => {
-    for (const [key, yComment] of foreignComments) {
-      root.set(key, cloneForeignCommentToLocal(yComment));
+    // Replace from back-to-front so indices remain stable.
+    for (let i = replacements.length - 1; i >= 0; i -= 1) {
+      const replacement = replacements[i];
+      if (!replacement) continue;
+      const cloned = cloneForeignCommentToLocal(replacement.yComment);
+      root.delete(replacement.index, 1);
+      root.insert(replacement.index, [cloned]);
     }
   });
 }
