@@ -78,3 +78,53 @@ test("range permissions: read allowlist masks values; edit allowlist blocks edit
   assert.equal(masked[0].value, "###");
 });
 
+test("range permissions: accepts API /docs/:docId/permissions shape", () => {
+  const restrictions = [
+    {
+      sheetName: "Sheet1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 0,
+      endCol: 0,
+      readAllowlist: ["u-allowed"],
+      editAllowlist: [],
+    },
+    {
+      sheetName: "Sheet1",
+      startRow: 0,
+      startCol: 1,
+      endRow: 0,
+      endCol: 1,
+      // The API always sends both allowlist arrays, but an empty array should
+      // mean "no restriction" (not "deny everyone").
+      readAllowlist: [],
+      editAllowlist: ["u-owner"],
+    },
+  ];
+
+  const readDenied = getCellPermissions({
+    role: "editor",
+    restrictions,
+    userId: "u-denied",
+    cell: { sheetId: "Sheet1", row: 0, col: 0 },
+  });
+  assert.deepEqual(readDenied, { canRead: false, canEdit: false });
+
+  const editDenied = getCellPermissions({
+    role: "editor",
+    restrictions,
+    userId: "u-editor",
+    cell: { sheetId: "Sheet1", row: 0, col: 1 },
+  });
+  assert.equal(editDenied.canRead, true);
+  assert.equal(editDenied.canEdit, false);
+
+  const editAllowed = getCellPermissions({
+    role: "editor",
+    restrictions,
+    userId: "u-owner",
+    cell: { sheetId: "Sheet1", row: 0, col: 1 },
+  });
+  assert.equal(editAllowed.canRead, true);
+  assert.equal(editAllowed.canEdit, true);
+});

@@ -80,14 +80,20 @@ export function normalizeRestriction(restriction) {
     throw new Error("restriction must be an object");
   }
 
-  const range = normalizeRange(restriction.range);
+  // The API returns a flattened shape for range restrictions:
+  // `{ sheetName, startRow, startCol, endRow, endCol, readAllowlist, editAllowlist }`
+  // while older clients may send `{ range: { ... }, readAllowlist, editAllowlist }`.
+  const range = normalizeRange(restriction.range ?? restriction);
 
   let readAllowlist = undefined;
   if (restriction.readAllowlist !== undefined) {
     if (!Array.isArray(restriction.readAllowlist)) {
       throw new Error("restriction.readAllowlist must be an array when provided");
     }
-    readAllowlist = Array.from(new Set(restriction.readAllowlist.map(String)));
+    const normalized = Array.from(new Set(restriction.readAllowlist.map(String)));
+    // API payloads always include allowlist arrays (often empty). Treat an empty
+    // list as "no restriction" so edit-only restrictions don't implicitly deny reads.
+    readAllowlist = normalized.length > 0 ? normalized : undefined;
   }
 
   let editAllowlist = undefined;
@@ -95,7 +101,8 @@ export function normalizeRestriction(restriction) {
     if (!Array.isArray(restriction.editAllowlist)) {
       throw new Error("restriction.editAllowlist must be an array when provided");
     }
-    editAllowlist = Array.from(new Set(restriction.editAllowlist.map(String)));
+    const normalized = Array.from(new Set(restriction.editAllowlist.map(String)));
+    editAllowlist = normalized.length > 0 ? normalized : undefined;
   }
 
   return {

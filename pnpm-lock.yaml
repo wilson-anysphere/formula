@@ -156,6 +156,15 @@ importers:
 
   packages/collab/presence: {}
 
+  packages/collab/session:
+    dependencies:
+      '@formula/collab-presence':
+        specifier: workspace:*
+        version: link:../presence
+      yjs:
+        specifier: ^13.6.27
+        version: 13.6.29
+
   packages/data-io:
     dependencies:
       apache-arrow:
