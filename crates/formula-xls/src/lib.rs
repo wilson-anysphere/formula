@@ -323,12 +323,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             }
         };
 
-        if sheet_needs_datetime_fallback
-            && date_time_styles.is_none()
-            && value_range
-                .as_ref()
-                .is_some_and(|range| range.used_cells().any(|(_, _, v)| matches!(v, Data::DateTime(_))))
-        {
+        if sheet_needs_datetime_fallback && date_time_styles.is_none() {
             date_time_styles = Some(DateTimeStyleIds::new(&mut out));
         }
 
