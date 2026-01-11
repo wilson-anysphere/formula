@@ -6,12 +6,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import "fake-indexeddb/auto";
-import { arrowTableFromColumns, arrowTableToParquet } from "../../../data-io/src/index.js";
+import { arrowTableFromColumns, arrowTableToIPC, arrowTableToParquet } from "../../../data-io/src/index.js";
 
 import { CacheManager } from "../../src/cache/cache.js";
 import { FileSystemCacheStore } from "../../src/cache/filesystem.js";
 import { IndexedDBCacheStore } from "../../src/cache/indexeddb.js";
 import { MemoryCacheStore } from "../../src/cache/memory.js";
+import { deserializeAnyTable } from "../../src/cache/serialize.js";
 import { ArrowTableAdapter } from "../../src/arrowTable.js";
 import { HttpConnector } from "../../src/connectors/http.js";
 import { QueryEngine } from "../../src/engine.js";
@@ -36,6 +37,22 @@ test("CacheManager: hit/miss, TTL, manual invalidation", async () => {
   assert.deepEqual(await cache.get("k1"), { value: 2 });
   await cache.delete("k1");
   assert.equal(await cache.get("k1"), null);
+});
+
+test("deserializeAnyTable: rejects Arrow payloads with mismatched column metadata", () => {
+  const table = arrowTableFromColumns({ id: [1], name: ["Alice"] });
+  const bytes = arrowTableToIPC(table);
+
+  assert.throws(
+    () =>
+      deserializeAnyTable({
+        kind: "arrow",
+        format: "ipc",
+        columns: [{ name: "id", type: "number" }],
+        bytes,
+      }),
+    /inconsistent/i,
+  );
 });
 
 test("QueryEngine: cache failures do not fail query execution", async () => {
