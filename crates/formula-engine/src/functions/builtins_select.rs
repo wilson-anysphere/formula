@@ -146,9 +146,6 @@ fn choose_array(ctx: &dyn FunctionContext, indices: &Array, choices: &[CompiledE
     let mut evaluated_values: HashMap<usize, Value> = HashMap::with_capacity(evaluated.len());
     for (idx, arg) in evaluated {
         let value = choose_value_from_arg(ctx, arg);
-        if !array_lift::broadcast_compatible(&value, shape) {
-            return Value::Error(ErrorKind::Value);
-        }
         evaluated_values.insert(idx, value);
     }
 
@@ -161,8 +158,18 @@ fn choose_array(ctx: &dyn FunctionContext, indices: &Array, choices: &[CompiledE
                     out_values.push(Value::Error(ErrorKind::Value));
                     continue;
                 };
-                let selected = array_lift::element_at(value, shape, pos);
-                out_values.push(selected.clone());
+                out_values.push(match value {
+                    Value::Array(arr) => {
+                        if arr.rows == 1 && arr.cols == 1 {
+                            arr.values[0].clone()
+                        } else if arr.rows == shape.rows && arr.cols == shape.cols {
+                            arr.values.get(pos).cloned().unwrap_or(Value::Error(ErrorKind::Value))
+                        } else {
+                            Value::Error(ErrorKind::Value)
+                        }
+                    }
+                    other => other.clone(),
+                });
             }
         }
     }

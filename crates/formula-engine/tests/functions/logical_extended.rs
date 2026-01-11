@@ -187,10 +187,11 @@ fn choose_ignores_unselected_choice_shape_mismatches() {
 #[test]
 fn choose_returns_value_error_for_incompatible_choice_shapes() {
     let mut sheet = TestSheet::new();
-    assert_eq!(
-        sheet.eval("=CHOOSE({1,2}, {10,20}, {30,40,50})"),
-        Value::Error(ErrorKind::Value)
-    );
+    sheet.set_formula("A1", "=CHOOSE({1,2}, {10,20}, {30,40,50})");
+    sheet.recalc();
+
+    assert_number(&sheet.get("A1"), 10.0);
+    assert_eq!(sheet.get("B1"), Value::Error(ErrorKind::Value));
 }
 
 #[test]
