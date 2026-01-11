@@ -32,6 +32,10 @@ function isValidProviderId(value: string): boolean {
   return /^[a-z0-9_-]{1,64}$/.test(value);
 }
 
+function isValidOrgId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 function pemFromBase64Certificate(base64: string): string {
   const cleaned = base64.replace(/\s+/g, "");
   if (!cleaned) throw new Error("invalid_certificate");
@@ -139,6 +143,10 @@ async function requireOrgAdmin(
   reply: FastifyReply,
   orgId: string
 ): Promise<{ role: OrgRole } | null> {
+  if (request.authOrgId && request.authOrgId !== orgId) {
+    reply.code(404).send({ error: "org_not_found" });
+    return null;
+  }
   const membership = await request.server.db.query<{ role: OrgRole }>(
     "SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2",
     [orgId, request.user!.id]
@@ -173,6 +181,7 @@ const PutProviderBody = z.object({
 export function registerSamlProviderRoutes(app: FastifyInstance): void {
   app.get("/orgs/:orgId/saml/providers", { preHandler: requireAuth }, async (request, reply) => {
     const orgId = (request.params as { orgId: string }).orgId;
+    if (!isValidOrgId(orgId)) return reply.code(400).send({ error: "invalid_request" });
     const member = await requireOrgAdmin(request, reply, orgId);
     if (!member) return;
     if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
@@ -215,10 +224,14 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
     async (request, reply) => {
       const orgId = (request.params as { orgId: string; providerId: string }).orgId;
       const providerId = (request.params as { orgId: string; providerId: string }).providerId;
+      if (!isValidOrgId(orgId)) return reply.code(400).send({ error: "invalid_request" });
       if (!isValidProviderId(providerId)) return reply.code(400).send({ error: "invalid_request" });
 
       const member = await requireOrgAdmin(request, reply, orgId);
       if (!member) return;
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
       const providerRes = await app.db.query<OrgSamlProviderRow>(
         `
@@ -260,6 +273,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
       const params = request.params as { orgId: string; providerId: string };
       const orgId = params.orgId;
       const providerId = params.providerId;
+      if (!isValidOrgId(orgId)) return reply.code(400).send({ error: "invalid_request" });
       if (!isValidProviderId(providerId)) return reply.code(400).send({ error: "invalid_request" });
 
       const member = await requireOrgAdmin(request, reply, orgId);
@@ -392,6 +406,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
       const params = request.params as { orgId: string; providerId: string };
       const orgId = params.orgId;
       const providerId = params.providerId;
+      if (!isValidOrgId(orgId)) return reply.code(400).send({ error: "invalid_request" });
       if (!isValidProviderId(providerId)) return reply.code(400).send({ error: "invalid_request" });
 
       const member = await requireOrgAdmin(request, reply, orgId);
