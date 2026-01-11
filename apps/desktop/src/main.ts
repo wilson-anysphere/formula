@@ -9,6 +9,7 @@ import { getPanelPlacement } from "./layout/layoutState.js";
 import { getPanelTitle, PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
 import { renderMacroRunner, TauriMacroBackend, WebMacroBackend, type MacroRunRequest } from "./macros";
+import { applyMacroCellUpdates } from "./macros/applyUpdates";
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
 import { DocumentWorkbookAdapter } from "./search/documentWorkbookAdapter.js";
@@ -261,37 +262,30 @@ if (
             try {
               const baseBackend = new TauriMacroBackend({ invoke: queuedInvoke ?? undefined });
               return {
-            listMacros: (id: string) => baseBackend.listMacros(id),
-            runMacro: async (request: MacroRunRequest) => {
-              // Allow any microtask-batched workbook edits to enqueue before the
-              // macro runs so backend state reflects the latest grid changes.
-              await new Promise<void>((resolve) => queueMicrotask(resolve));
-              await drainBackendSync();
-              return baseBackend.runMacro(request);
-            },
-          };
+                listMacros: (id: string) => baseBackend.listMacros(id),
+                runMacro: async (request: MacroRunRequest) => {
+                  // Allow any microtask-batched workbook edits to enqueue before the
+                  // macro runs so backend state reflects the latest grid changes.
+                  await new Promise<void>((resolve) => queueMicrotask(resolve));
+                  await drainBackendSync();
+                  return baseBackend.runMacro(request);
+                },
+              };
             } catch {
               return getMacrosBackend();
             }
           })();
           void renderMacroRunner(body, backend, workbookId, {
             onApplyUpdates: async (updates) => {
-              const document = app.getDocument();
-              document.beginBatch({ label: "Run macro" });
+              const doc = app.getDocument();
+              doc.beginBatch({ label: "Run macro" });
+              let committed = false;
               try {
-                for (const update of updates) {
-                  const sheetId = update.sheetId;
-                  const cell = { row: update.row, col: update.col };
-                  if (update.formula != null) {
-                    document.setCellFormula(sheetId, cell, update.formula);
-                  } else {
-                    document.setCellValue(sheetId, cell, update.value);
-                  }
-                }
-                document.endBatch();
-              } catch (err) {
-                document.cancelBatch();
-                throw err;
+                applyMacroCellUpdates(doc, updates);
+                committed = true;
+              } finally {
+                if (committed) doc.endBatch();
+                else doc.cancelBatch();
               }
               app.refresh();
               await app.whenIdle();

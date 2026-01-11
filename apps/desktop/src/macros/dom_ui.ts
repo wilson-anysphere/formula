@@ -54,11 +54,20 @@ export async function renderMacroRunner(
       if (result.output.length) {
         output.textContent += result.output.join("\n") + "\n";
       }
+      if (result.updates && result.updates.length) {
+        if (opts.onApplyUpdates) {
+          try {
+            await opts.onApplyUpdates(result.updates);
+            output.textContent += `Applied ${result.updates.length} updates.\n`;
+          } catch (err) {
+            output.textContent += `Error applying updates: ${String(err)}\n`;
+          }
+        } else {
+          output.textContent += `Macro returned ${result.updates.length} updates (not applied).\n`;
+        }
+      }
       if (!result.ok) {
         output.textContent += `Error: ${result.error?.message ?? "Unknown error"}\n`;
-      }
-      if (result.updates && result.updates.length > 0) {
-        await opts.onApplyUpdates?.(result.updates);
       }
     } catch (err) {
       output.textContent += `Error: ${String(err)}\n`;
