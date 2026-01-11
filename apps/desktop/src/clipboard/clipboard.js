@@ -16,6 +16,106 @@ import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
  * @typedef {import("../document/cell.js").CellState} CellState
  */
 
+function normalizeHexToCssColor(hex) {
+  const normalized = String(hex).trim().replace(/^#/, "");
+  if (!/^[0-9a-fA-F]+$/.test(normalized)) return null;
+
+  // #RRGGBB
+  if (normalized.length === 6) return `#${normalized}`;
+
+  // Excel/OOXML commonly stores colors as ARGB (AARRGGBB).
+  if (normalized.length === 8) {
+    const a = Number.parseInt(normalized.slice(0, 2), 16);
+    const r = Number.parseInt(normalized.slice(2, 4), 16);
+    const g = Number.parseInt(normalized.slice(4, 6), 16);
+    const b = Number.parseInt(normalized.slice(6, 8), 16);
+
+    if (![a, r, g, b].every((n) => Number.isFinite(n))) return null;
+
+    if (a >= 255) {
+      return `#${normalized.slice(2)}`;
+    }
+
+    const alpha = Math.max(0, Math.min(1, a / 255));
+    const rounded = Math.round(alpha * 1000) / 1000;
+    return `rgba(${r}, ${g}, ${b}, ${rounded})`;
+  }
+
+  return null;
+}
+
+function normalizeCssColor(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  // Accept plain CSS colors as-is.
+  if (!/^[0-9a-fA-F#]+$/.test(trimmed)) return trimmed;
+
+  return normalizeHexToCssColor(trimmed) ?? trimmed;
+}
+
+/**
+ * Convert a DocumentController style table entry to the clipboard's lightweight format.
+ *
+ * Clipboard HTML serialization expects flat keys like `bold`, `textColor`, `backgroundColor`,
+ * and `numberFormat`, whereas the DocumentController stores richer OOXML-ish styles
+ * (`font.bold`, `fill.fgColor`, ...).
+ *
+ * @param {any} style
+ * @returns {any | null}
+ */
+function styleToClipboardFormat(style) {
+  if (!style || typeof style !== "object") return null;
+
+  /** @type {any} */
+  const out = {};
+
+  const font = style.font;
+  if (font && typeof font === "object") {
+    if (typeof font.bold === "boolean") out.bold = font.bold;
+    if (typeof font.italic === "boolean") out.italic = font.italic;
+    if (typeof font.underline === "boolean") out.underline = font.underline;
+    if (typeof font.underline === "string") out.underline = font.underline !== "none";
+
+    const color = normalizeCssColor(font.color);
+    if (color) out.textColor = color;
+  }
+
+  const fill = style.fill;
+  if (fill && typeof fill === "object") {
+    const raw = fill.fgColor ?? fill.background ?? fill.bgColor;
+    const color = normalizeCssColor(raw);
+    if (color) out.backgroundColor = color;
+  }
+
+  const rawNumberFormat = style.numberFormat ?? style.number_format;
+  if (typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "") {
+    out.numberFormat = rawNumberFormat;
+  }
+
+  // Back-compat: allow flat clipboard-ish styles to round trip.
+  if (out.bold === undefined && typeof style.bold === "boolean") out.bold = style.bold;
+  if (out.italic === undefined && typeof style.italic === "boolean") out.italic = style.italic;
+  if (out.underline === undefined && typeof style.underline === "boolean") out.underline = style.underline;
+  if (out.textColor === undefined) {
+    const color = normalizeCssColor(style.textColor ?? style.text_color ?? style.fontColor ?? style.font_color);
+    if (color) out.textColor = color;
+  }
+  if (out.backgroundColor === undefined) {
+    const color = normalizeCssColor(
+      style.backgroundColor ?? style.background_color ?? style.fillColor ?? style.fill_color
+    );
+    if (color) out.backgroundColor = color;
+  }
+  if (out.numberFormat === undefined) {
+    const nf = style.numberFormat ?? style.number_format;
+    if (typeof nf === "string" && nf.trim() !== "") out.numberFormat = nf;
+  }
+
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 /**
  * @param {CellGrid} grid
  * @returns {ClipboardWritePayload}
@@ -63,7 +163,14 @@ export function getCellGridFromRange(doc, sheetId, range) {
     /** @type {CellState[]} */
     const outRow = [];
     for (let col = r.start.col; col <= r.end.col; col++) {
-      outRow.push(doc.getCell(sheetId, { row, col }));
+      const cell = doc.getCell(sheetId, { row, col });
+      const styleId = typeof cell?.styleId === "number" ? cell.styleId : 0;
+      const style =
+        styleId !== 0 && doc?.styleTable?.get && typeof doc.styleTable.get === "function"
+          ? doc.styleTable.get(styleId)
+          : null;
+      const format = styleToClipboardFormat(style);
+      outRow.push({ value: cell.value, formula: cell.formula, format });
     }
     grid.push(outRow);
   }

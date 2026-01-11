@@ -18,6 +18,12 @@ function cellValueToPlainText(cell) {
   const value = cell.value;
   if (value == null) return "";
 
+  // DocumentController stores rich text as `{ text, runs }`. Clipboard payloads should
+  // round-trip as plain text (like Excel/Sheets) rather than `[object Object]`.
+  if (typeof value === "object" && typeof value.text === "string") {
+    return value.text;
+  }
+
   const numberFormat = cell.format?.numberFormat;
   if (typeof value === "number" && isLikelyDateNumberFormat(numberFormat)) {
     const date = excelSerialToDate(value);

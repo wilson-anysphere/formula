@@ -39,6 +39,11 @@ function cellValueToHtml(cell) {
   const value = cell.value;
   if (value == null) return "";
 
+  // DocumentController rich text values should copy as plain text.
+  if (typeof value === "object" && typeof value.text === "string") {
+    return escapeHtml(value.text).replaceAll("\n", "<br>");
+  }
+
   const numberFormat = cell.format?.numberFormat;
   if (typeof value === "number" && isLikelyDateNumberFormat(numberFormat)) {
     const date = excelSerialToDate(value);
@@ -303,4 +308,3 @@ function parseHtmlToCellGridFallback(html) {
 
   return grid;
 }
-

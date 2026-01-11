@@ -391,7 +391,7 @@ export class DocumentController {
     for (const [key, cell] of sheet.cells.entries()) {
       if (!cell) continue;
       const hasContent = includeFormat
-        ? cell.value != null || cell.formula != null || cell.format != null
+        ? cell.value != null || cell.formula != null || cell.styleId !== 0
         : cell.value != null || cell.formula != null;
       if (!hasContent) continue;
 

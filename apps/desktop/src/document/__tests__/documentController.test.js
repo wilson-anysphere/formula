@@ -105,6 +105,20 @@ test("setRangeFormat is undoable (formatting changes)", () => {
   assert.equal(doc.getCell("Sheet1", "A1").value, 1);
 });
 
+test("getUsedRange can include format-only cells", () => {
+  const doc = new DocumentController();
+
+  doc.setRangeFormat("Sheet1", "B2", { font: { bold: true } });
+
+  assert.equal(doc.getUsedRange("Sheet1"), null);
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 1,
+    endRow: 1,
+    startCol: 1,
+    endCol: 1,
+  });
+});
+
 test("mergeKey collapses consecutive edits into one history entry, but saving stops merging", () => {
   const doc = new DocumentController({ mergeWindowMs: 10_000 });
 
