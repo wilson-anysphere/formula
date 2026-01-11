@@ -134,17 +134,23 @@ export class MemoryCacheStore {
    * @param {{ nowMs: number, maxEntries?: number, maxBytes?: number }} options
    */
   async prune(options) {
-    await this.pruneExpired(options.nowMs);
-
     const maxEntries = options.maxEntries;
     const maxBytes = options.maxBytes;
-    if (maxEntries == null && maxBytes == null) return;
+    if (maxEntries == null && maxBytes == null) {
+      await this.pruneExpired(options.nowMs);
+      return;
+    }
 
     /** @type {Array<{ key: string, sizeBytes: number, lastAccessMs: number }>} */
     const items = [];
     let totalBytes = 0;
 
     for (const [key, entry] of this.map.entries()) {
+      if (entry?.expiresAtMs != null && entry.expiresAtMs <= options.nowMs) {
+        this.map.delete(key);
+        this._meta.delete(key);
+        continue;
+      }
       let meta = this._meta.get(key);
       if (!meta || typeof meta.sizeBytes !== "number" || typeof meta.lastAccessMs !== "number") {
         meta = {

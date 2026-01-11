@@ -506,9 +506,10 @@ export class FileSystemCacheStore {
     const maxEntries = options.maxEntries;
     const maxBytes = options.maxBytes;
 
-    await this.pruneExpired(options.nowMs);
-
-    if (maxEntries == null && maxBytes == null) return;
+    if (maxEntries == null && maxBytes == null) {
+      await this.pruneExpired(options.nowMs);
+      return;
+    }
 
     await this.ensureDir();
     const { fs, path } = await this.deps();
@@ -600,4 +601,3 @@ export class FileSystemCacheStore {
     }
   }
 }
-
