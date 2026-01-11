@@ -73,6 +73,20 @@ describe("EngineGridProvider", () => {
     expect(updates).toEqual([{ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 2 } }]);
   });
 
+  it("passes the configured sheet name through to engine range calls", async () => {
+    const values = new Map<string, CellScalar>();
+    values.set("Sheet2!A1", 99);
+
+    const engine = new FakeEngine(values) as any;
+    const cache = new EngineCellCache(engine);
+    const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10, sheet: "Sheet2" });
+
+    await provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+
+    expect(engine.calls).toEqual([{ range: "A1", sheet: "Sheet2" }]);
+    expect(provider.getCell(0, 0)?.value).toBe(99);
+  });
+
   it("does not re-fetch or emit updates for cached ranges", async () => {
     const values = new Map<string, CellScalar>();
     values.set("Sheet1!A1", 1);
