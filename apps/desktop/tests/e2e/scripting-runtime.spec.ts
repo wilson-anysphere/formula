@@ -76,6 +76,24 @@ export default async function main(ctx) {
 await import("https://example.com");
 `);
 
+    const subworkerDenied = await runtime.run(`
+export default async function main(ctx) {
+  ctx.ui.log("WorkerType", typeof Worker);
+  if (typeof Worker === "undefined") return;
+
+  let url = null;
+  if (typeof Blob !== "undefined" && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+    url = URL.createObjectURL(new Blob(["self.onmessage = () => {};"], { type: "text/javascript" }));
+  } else if (self.location?.href) {
+    url = self.location.href;
+  }
+
+  const w = new Worker(url);
+  ctx.ui.log("created");
+  w.terminate?.();
+}
+`);
+
     return {
       mainRun,
       computed,
@@ -86,6 +104,7 @@ await import("https://example.com");
       allowlistDenied,
       allowlistWebSocketDenied,
       dynamicImportDenied,
+      subworkerDenied,
     };
   };
 
@@ -122,6 +141,14 @@ await import("https://example.com");
   expect(result.allowlistWebSocketDenied.error?.message).toContain("example.com");
   expect(result.dynamicImportDenied.error?.message).toContain("dynamic import");
   expect(result.dynamicImportDenied.error?.message).toContain("example.com");
+
+  const workerTypeEntry = result.subworkerDenied.logs.find((entry) => entry.message.includes("WorkerType"));
+  const workerType = workerTypeEntry?.message ?? "";
+  if (workerType.includes("undefined")) {
+    expect(result.subworkerDenied.error).toBeUndefined();
+  } else {
+    expect(result.subworkerDenied.error?.message).toContain("Workers are not permitted");
+  }
 });
 
 test("scripting: times out hung scripts and ignores spoofed worker messages", async ({ page }) => {

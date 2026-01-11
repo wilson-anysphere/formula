@@ -20,6 +20,8 @@ export default async function main(ctx: ScriptContext) {
 ```
 
 > Note: runtime imports are not supported yet (including `import ... from "..."` and dynamic `import(...)`).
+> Subworkers (`new Worker(...)`) are also blocked in `network: "none"` / `network: "allowlist"` modes to prevent
+> bypassing the network sandbox.
 > Prefer using the global script types (via `FORMULA_API_DTS`) instead of importing.
 
 ### Legacy: script-body form (top-level await)

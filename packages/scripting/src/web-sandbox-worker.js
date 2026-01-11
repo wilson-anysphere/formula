@@ -20,6 +20,8 @@ const postMessageToHost = self.postMessage.bind(self);
 
 const originalFetch = self.fetch?.bind(self);
 const OriginalWebSocket = self.WebSocket;
+const OriginalWorker = self.Worker;
+const OriginalSharedWorker = self.SharedWorker;
 
 function postControlMessage(message) {
   if (!runToken) return;
@@ -77,6 +79,24 @@ const safeConsole = {
 function applyNetworkSandbox(permissions) {
   const mode = permissions?.network ?? "none";
 
+  const blockWorkers = () => {
+    if (OriginalWorker) {
+      self.Worker = class BlockedWorker {
+        constructor(url) {
+          throw new Error(`Workers are not permitted in scripts (attempted to create worker: ${String(url)})`);
+        }
+      };
+    }
+
+    if (OriginalSharedWorker) {
+      self.SharedWorker = class BlockedSharedWorker {
+        constructor(url) {
+          throw new Error(`Workers are not permitted in scripts (attempted to create shared worker: ${String(url)})`);
+        }
+      };
+    }
+  };
+
   if (mode === "none") {
     self.fetch = async () => {
       throw new Error("Network access is not permitted");
@@ -87,6 +107,8 @@ function applyNetworkSandbox(permissions) {
         throw new Error("Network access is not permitted");
       }
     };
+
+    blockWorkers();
     return;
   }
 
@@ -116,6 +138,8 @@ function applyNetworkSandbox(permissions) {
         return new OriginalWebSocket(url, protocols);
       }
     };
+
+    blockWorkers();
     return;
   }
 
@@ -125,6 +149,12 @@ function applyNetworkSandbox(permissions) {
   }
   if (OriginalWebSocket) {
     self.WebSocket = OriginalWebSocket;
+  }
+  if (OriginalWorker) {
+    self.Worker = OriginalWorker;
+  }
+  if (OriginalSharedWorker) {
+    self.SharedWorker = OriginalSharedWorker;
   }
 }
 
