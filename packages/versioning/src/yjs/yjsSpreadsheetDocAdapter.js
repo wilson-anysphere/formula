@@ -55,7 +55,7 @@ function isYAbstractType(value) {
  * @returns {string | null}
  */
 function coerceString(value) {
-  if (value instanceof Y.Text) return value.toString();
+  if (isYText(value)) return value.toString();
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);
@@ -81,7 +81,7 @@ function legacyListItemsFromMapRoot(mapType) {
     if (!item.deleted && item.parentSub === null) {
       const content = item.content?.getContent?.() ?? [];
       for (const value of content) {
-        if (value instanceof Y.Map) out.push(value);
+        if (isYMap(value)) out.push(value);
       }
     }
     item = item.right;
@@ -121,6 +121,53 @@ function deleteMapEntriesFromArrayRoot(transaction, arrayType) {
   for (const item of map.values()) {
     if (!item?.deleted) item.delete(transaction);
   }
+}
+
+/**
+ * Safely access a root type without relying on `doc.getMap/getArray/getText`
+ * `instanceof` checks that can fail when the document contains types created by
+ * a different Yjs module instance (ESM vs CJS).
+ *
+ * @param {Y.Doc} doc
+ * @param {string} name
+ */
+function getMapRoot(doc, name) {
+  const existing = doc.share.get(name);
+  if (isYMap(existing)) return existing;
+  if (existing == null) return doc.getMap(name);
+  // Placeholder root types should be coerced via Yjs' own constructors.
+  if (isYAbstractType(existing)) return doc.getMap(name);
+  throw new Error(
+    `Unsupported Yjs root type for "${name}" in current doc: ${existing?.constructor?.name ?? typeof existing}`,
+  );
+}
+
+/**
+ * @param {Y.Doc} doc
+ * @param {string} name
+ */
+function getArrayRoot(doc, name) {
+  const existing = doc.share.get(name);
+  if (isYArray(existing)) return existing;
+  if (existing == null) return doc.getArray(name);
+  if (isYAbstractType(existing)) return doc.getArray(name);
+  throw new Error(
+    `Unsupported Yjs root type for "${name}" in current doc: ${existing?.constructor?.name ?? typeof existing}`,
+  );
+}
+
+/**
+ * @param {Y.Doc} doc
+ * @param {string} name
+ */
+function getTextRoot(doc, name) {
+  const existing = doc.share.get(name);
+  if (isYText(existing)) return existing;
+  if (existing == null) return doc.getText(name);
+  if (isYAbstractType(existing)) return doc.getText(name);
+  throw new Error(
+    `Unsupported Yjs root type for "${name}" in current doc: ${existing?.constructor?.name ?? typeof existing}`,
+  );
 }
 
 /**
@@ -248,7 +295,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
 
       for (const [name, { kind }] of roots.entries()) {
         if (kind === "map") {
-          const source = doc.getMap(name);
+          const source = getMapRoot(doc, name);
           const target = snapshotDoc.getMap(name);
           source.forEach((value, key) => {
             target.set(key, cloneYjsValue(value));
@@ -257,7 +304,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
         }
 
         if (kind === "array") {
-          const source = doc.getArray(name);
+          const source = getArrayRoot(doc, name);
           const target = snapshotDoc.getArray(name);
           for (const value of source.toArray()) {
             target.push([cloneYjsValue(value)]);
@@ -266,7 +313,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
         }
 
         if (kind === "text") {
-          const source = doc.getText(name);
+          const source = getTextRoot(doc, name);
           const target = snapshotDoc.getText(name);
           target.applyDelta(structuredClone(source.toDelta()));
           continue;
@@ -344,8 +391,8 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
       doc.transact((transaction) => {
         for (const [name, { kind }] of roots.entries()) {
           if (kind === "map") {
-            const target = doc.getMap(name);
-            const source = restored.getMap(name);
+            const target = getMapRoot(doc, name);
+            const source = getMapRoot(restored, name);
        
 
             for (const key of Array.from(target.keys())) {
@@ -378,8 +425,8 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
           }
 
           if (kind === "array") {
-            const target = doc.getArray(name);
-            const source = restored.getArray(name);
+            const target = getArrayRoot(doc, name);
+            const source = getArrayRoot(restored, name);
 
             if (name === "comments") {
               // Clear any clobbered map entries stored on the array root.
@@ -396,8 +443,8 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
           }
 
           if (kind === "text") {
-            const target = doc.getText(name);
-            const source = restored.getText(name);
+            const target = getTextRoot(doc, name);
+            const source = getTextRoot(restored, name);
             if (target.length > 0) target.delete(0, target.length);
             target.applyDelta(structuredClone(source.toDelta()));
             continue;
