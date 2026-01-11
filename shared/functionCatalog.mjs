@@ -22,6 +22,20 @@ export default {
       ]
     },
     {
+      "name": "ADDRESS",
+      "min_args": 2,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool",
+        "text"
+      ]
+    },
+    {
       "name": "AGGREGATE",
       "min_args": 3,
       "max_args": 255,
@@ -201,6 +215,26 @@ export default {
       "return_type": "text",
       "arg_types": [
         "text"
+      ]
+    },
+    {
+      "name": "COLUMN",
+      "min_args": 0,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "COLUMNS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
       ]
     },
     {
@@ -1276,6 +1310,26 @@ export default {
       "arg_types": [
         "number",
         "number"
+      ]
+    },
+    {
+      "name": "ROW",
+      "min_args": 0,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "ROWS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
       ]
     },
     {

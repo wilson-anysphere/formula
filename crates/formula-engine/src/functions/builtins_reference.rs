@@ -1,9 +1,10 @@
-use crate::eval::{CompiledExpr, SheetReference};
+use crate::eval::{CompiledExpr, Expr, SheetReference};
+use crate::functions::array_lift;
 use crate::functions::{
     eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, ThreadSafety,
     ValueType, Volatility,
 };
-use crate::value::{ErrorKind, Value};
+use crate::value::{Array, ErrorKind, Value};
 
 inventory::submit! {
     FunctionSpec {
@@ -88,6 +89,359 @@ fn offset_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             col: end_col as u32,
         },
     })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "ROW",
+        min_args: 0,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: row_fn,
+    }
+}
+
+fn row_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    if args.is_empty() {
+        return Value::Number((ctx.current_cell_addr().row + 1) as f64);
+    }
+
+    let reference = match reference_from_arg(ctx.eval_arg(&args[0])) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let reference = reference.normalized();
+
+    if reference.is_single_cell() {
+        return Value::Number((reference.start.row + 1) as f64);
+    }
+
+    let rows = (reference.end.row - reference.start.row + 1) as usize;
+    let cols = (reference.end.col - reference.start.col + 1) as usize;
+
+    let spans_all_cols = reference.start.col == 0
+        && reference.end.col == formula_model::EXCEL_MAX_COLS.saturating_sub(1);
+    let spans_all_rows = reference.start.row == 0
+        && reference.end.row == formula_model::EXCEL_MAX_ROWS.saturating_sub(1);
+
+    if spans_all_cols || spans_all_rows {
+        let mut values = Vec::with_capacity(rows);
+        for row in reference.start.row..=reference.end.row {
+            values.push(Value::Number((row + 1) as f64));
+        }
+        if rows == 1 {
+            return values.first().cloned().unwrap_or(Value::Blank);
+        }
+        return Value::Array(Array::new(rows, 1, values));
+    }
+
+    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    for row in reference.start.row..=reference.end.row {
+        let n = Value::Number((row + 1) as f64);
+        for _ in reference.start.col..=reference.end.col {
+            values.push(n.clone());
+        }
+    }
+    Value::Array(Array::new(rows, cols, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "COLUMN",
+        min_args: 0,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: column_fn,
+    }
+}
+
+fn column_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    if args.is_empty() {
+        return Value::Number((ctx.current_cell_addr().col + 1) as f64);
+    }
+
+    let reference = match reference_from_arg(ctx.eval_arg(&args[0])) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let reference = reference.normalized();
+
+    if reference.is_single_cell() {
+        return Value::Number((reference.start.col + 1) as f64);
+    }
+
+    let rows = (reference.end.row - reference.start.row + 1) as usize;
+    let cols = (reference.end.col - reference.start.col + 1) as usize;
+
+    let spans_all_cols = reference.start.col == 0
+        && reference.end.col == formula_model::EXCEL_MAX_COLS.saturating_sub(1);
+    let spans_all_rows = reference.start.row == 0
+        && reference.end.row == formula_model::EXCEL_MAX_ROWS.saturating_sub(1);
+
+    if spans_all_cols || spans_all_rows {
+        let mut values = Vec::with_capacity(cols);
+        for col in reference.start.col..=reference.end.col {
+            values.push(Value::Number((col + 1) as f64));
+        }
+        if cols == 1 {
+            return values.first().cloned().unwrap_or(Value::Blank);
+        }
+        return Value::Array(Array::new(1, cols, values));
+    }
+
+    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let mut row_values = Vec::with_capacity(cols);
+    for col in reference.start.col..=reference.end.col {
+        row_values.push(Value::Number((col + 1) as f64));
+    }
+    for _ in 0..rows {
+        values.extend(row_values.iter().cloned());
+    }
+    Value::Array(Array::new(rows, cols, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "ROWS",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: rows_fn,
+    }
+}
+
+fn rows_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    match ctx.eval_arg(&args[0]) {
+        ArgValue::Reference(r) => {
+            let r = r.normalized();
+            let rows = r.end.row - r.start.row + 1;
+            Value::Number(rows as f64)
+        }
+        ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
+        ArgValue::Scalar(Value::Reference(r)) => {
+            let r = r.normalized();
+            let rows = r.end.row - r.start.row + 1;
+            Value::Number(rows as f64)
+        }
+        ArgValue::Scalar(Value::Array(arr)) => Value::Number(arr.rows as f64),
+        ArgValue::Scalar(Value::Error(e)) => Value::Error(e),
+        ArgValue::Scalar(_) => Value::Error(ErrorKind::Value),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "COLUMNS",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: columns_fn,
+    }
+}
+
+fn columns_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    match ctx.eval_arg(&args[0]) {
+        ArgValue::Reference(r) => {
+            let r = r.normalized();
+            let cols = r.end.col - r.start.col + 1;
+            Value::Number(cols as f64)
+        }
+        ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
+        ArgValue::Scalar(Value::Reference(r)) => {
+            let r = r.normalized();
+            let cols = r.end.col - r.start.col + 1;
+            Value::Number(cols as f64)
+        }
+        ArgValue::Scalar(Value::Array(arr)) => Value::Number(arr.cols as f64),
+        ArgValue::Scalar(Value::Error(e)) => Value::Error(e),
+        ArgValue::Scalar(_) => Value::Error(ErrorKind::Value),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "ADDRESS",
+        min_args: 2,
+        max_args: 5,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Text,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number, ValueType::Bool, ValueType::Text],
+        implementation: address_fn,
+    }
+}
+
+fn address_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let row_num = array_lift::eval_arg(ctx, &args[0]);
+    let col_num = array_lift::eval_arg(ctx, &args[1]);
+    let abs_num = if args.len() >= 3 && !matches!(args[2], Expr::Blank) {
+        array_lift::eval_arg(ctx, &args[2])
+    } else {
+        Value::Number(1.0)
+    };
+    let a1 = if args.len() >= 4 && !matches!(args[3], Expr::Blank) {
+        array_lift::eval_arg(ctx, &args[3])
+    } else {
+        Value::Bool(true)
+    };
+
+    let sheet_prefix = if args.len() >= 5 && !matches!(args[4], Expr::Blank) {
+        match eval_scalar_arg(ctx, &args[4]) {
+            Value::Error(e) => return Value::Error(e),
+            Value::Array(_) | Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
+                return Value::Error(ErrorKind::Value)
+            }
+            other => {
+                let raw = match other.coerce_to_string() {
+                    Ok(s) => s,
+                    Err(e) => return Value::Error(e),
+                };
+                if raw.is_empty() {
+                    None
+                } else {
+                    Some(format!("{}!", quote_sheet_name(&raw)))
+                }
+            }
+        }
+    } else {
+        None
+    };
+
+    let base = array_lift::lift4(row_num, col_num, abs_num, a1, |row, col, abs, a1| {
+        let row_num = row.coerce_to_i64()?;
+        let col_num = col.coerce_to_i64()?;
+        if row_num < 1 || row_num > formula_model::EXCEL_MAX_ROWS as i64 {
+            return Err(ErrorKind::Value);
+        }
+        if col_num < 1 || col_num > formula_model::EXCEL_MAX_COLS as i64 {
+            return Err(ErrorKind::Value);
+        }
+
+        let abs_num = abs.coerce_to_i64()?;
+        let (col_abs, row_abs) = match abs_num {
+            1 => (true, true),
+            2 => (false, true),
+            3 => (true, false),
+            4 => (false, false),
+            _ => return Err(ErrorKind::Value),
+        };
+
+        let a1 = a1.coerce_to_bool()?;
+        let address = if a1 {
+            format_a1_address(row_num as u32, col_num as u32, row_abs, col_abs)
+        } else {
+            format_r1c1_address(row_num as i64, col_num as i64, row_abs, col_abs)
+        };
+        Ok(Value::Text(address))
+    });
+
+    let Some(prefix) = sheet_prefix else {
+        return base;
+    };
+
+    array_lift::lift1(base, |v| match v {
+        Value::Error(e) => Ok(Value::Error(*e)),
+        Value::Text(s) => Ok(Value::Text(format!("{prefix}{s}"))),
+        _ => Err(ErrorKind::Value),
+    })
+}
+
+fn reference_from_arg(arg: ArgValue) -> Result<crate::functions::Reference, Value> {
+    match arg {
+        ArgValue::Reference(r) => Ok(r),
+        ArgValue::ReferenceUnion(_) => Err(Value::Error(ErrorKind::Value)),
+        ArgValue::Scalar(Value::Reference(r)) => Ok(r),
+        ArgValue::Scalar(Value::ReferenceUnion(_)) => Err(Value::Error(ErrorKind::Value)),
+        ArgValue::Scalar(Value::Error(e)) => Err(Value::Error(e)),
+        ArgValue::Scalar(_) => Err(Value::Error(ErrorKind::Value)),
+    }
+}
+
+fn is_ident_cont_char(c: char) -> bool {
+    matches!(c, '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9')
+}
+
+fn quote_sheet_name(name: &str) -> String {
+    if name.is_empty() {
+        return String::new();
+    }
+
+    let starts_like_number = matches!(name.chars().next(), Some('0'..='9' | '.'));
+    let starts_like_r1c1 = matches!(name.chars().next(), Some('R' | 'r' | 'C' | 'c'))
+        && matches!(name.chars().nth(1), Some('0'..='9' | '['));
+    let looks_like_a1 = crate::eval::parse_a1(name).is_ok();
+    let needs_quote =
+        starts_like_number || starts_like_r1c1 || looks_like_a1 || name.chars().any(|c| !is_ident_cont_char(c));
+
+    if !needs_quote {
+        return name.to_string();
+    }
+
+    let escaped = name.replace('\'', "''");
+    format!("'{escaped}'")
+}
+
+fn col_to_name(col: u32) -> String {
+    let mut n = col;
+    let mut out = Vec::<u8>::new();
+    while n > 0 {
+        let rem = (n - 1) % 26;
+        out.push(b'A' + rem as u8);
+        n = (n - 1) / 26;
+    }
+    out.reverse();
+    String::from_utf8(out).expect("column letters are always valid UTF-8")
+}
+
+fn format_a1_address(row_num: u32, col_num: u32, row_abs: bool, col_abs: bool) -> String {
+    let mut out = String::new();
+    if col_abs {
+        out.push('$');
+    }
+    out.push_str(&col_to_name(col_num));
+    if row_abs {
+        out.push('$');
+    }
+    out.push_str(&row_num.to_string());
+    out
+}
+
+fn format_r1c1_address(row_num: i64, col_num: i64, row_abs: bool, col_abs: bool) -> String {
+    let mut out = String::new();
+    if row_abs {
+        out.push('R');
+        out.push_str(&row_num.to_string());
+    } else {
+        out.push_str("R[");
+        out.push_str(&row_num.to_string());
+        out.push(']');
+    }
+    if col_abs {
+        out.push('C');
+        out.push_str(&col_num.to_string());
+    } else {
+        out.push_str("C[");
+        out.push_str(&col_num.to_string());
+        out.push(']');
+    }
+    out
 }
 
 inventory::submit! {
