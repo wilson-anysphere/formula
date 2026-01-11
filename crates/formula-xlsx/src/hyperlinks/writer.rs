@@ -12,6 +12,31 @@ const NS_OFFICE_REL: &str = "http://schemas.openxmlformats.org/officeDocument/20
 const REL_TYPE_HYPERLINK: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 
+fn insert_before_tag(name: &[u8]) -> bool {
+    matches!(
+        name,
+        // Elements that come after <hyperlinks> in the SpreadsheetML schema.
+        b"printOptions"
+            | b"pageMargins"
+            | b"pageSetup"
+            | b"headerFooter"
+            | b"rowBreaks"
+            | b"colBreaks"
+            | b"customProperties"
+            | b"cellWatches"
+            | b"ignoredErrors"
+            | b"smartTags"
+            | b"drawing"
+            | b"drawingHF"
+            | b"picture"
+            | b"oleObjects"
+            | b"controls"
+            | b"webPublishItems"
+            | b"tableParts"
+            | b"extLst"
+    )
+}
+
 #[derive(Clone, Debug)]
 struct Relationship {
     id: String,
@@ -68,8 +93,8 @@ fn parse_relationships(rels_xml: &str) -> Result<Vec<Relationship>, XlsxError> {
 ///
 /// If the worksheet already contains `<hyperlinks>`, it is replaced. If it does not
 /// and `hyperlinks` is non-empty, the element is inserted before the end of the worksheet
-/// (preferably before late elements like `<tableParts>` / `<extLst>` to match Excel's
-/// expected element ordering).
+/// (preferably before elements that are required to come after it, e.g. `<printOptions>`,
+/// `<pageMargins>`, `<drawing>`, `<tableParts>`, `<extLst>`).
 pub fn update_worksheet_xml(sheet_xml: &str, hyperlinks: &[Hyperlink]) -> Result<String, XlsxError> {
     let mut reader = Reader::from_str(sheet_xml);
     reader.config_mut().trim_text(false);
@@ -108,7 +133,7 @@ pub fn update_worksheet_xml(sheet_xml: &str, hyperlinks: &[Hyperlink]) -> Result
             Event::Start(ref e) | Event::Empty(ref e)
                 if !replaced
                     && !hyperlinks.is_empty()
-                    && matches!(e.local_name().as_ref(), b"tableParts" | b"extLst") =>
+                    && insert_before_tag(e.local_name().as_ref()) =>
             {
                 write_hyperlinks_block(&mut writer, hyperlinks)?;
                 replaced = true;
@@ -300,6 +325,30 @@ mod tests {
         assert!(
             links_pos < table_pos,
             "expected hyperlinks before tableParts, got:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn update_inserts_before_page_margins_when_missing() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>"#;
+        let links = vec![Hyperlink {
+            range: Range::from_a1("A1").unwrap(),
+            target: HyperlinkTarget::Internal {
+                sheet: "Sheet1".to_string(),
+                cell: CellRef::new(0, 0),
+            },
+            display: None,
+            tooltip: None,
+            rel_id: None,
+        }];
+
+        let updated = update_worksheet_xml(xml, &links).unwrap();
+
+        let links_pos = updated.find("<hyperlinks").expect("hyperlinks inserted");
+        let margins_pos = updated.find("<pageMargins").expect("pageMargins exists");
+        assert!(
+            links_pos < margins_pos,
+            "expected hyperlinks before pageMargins, got:\n{updated}"
         );
     }
 }

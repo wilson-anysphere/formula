@@ -6,6 +6,35 @@ use quick_xml::{Reader, Writer};
 
 use crate::XlsxError;
 
+fn insert_before_tag(name: &[u8]) -> bool {
+    matches!(
+        name,
+        // Elements that come after <mergeCells> in the SpreadsheetML schema.
+        b"phoneticPr"
+            | b"conditionalFormatting"
+            | b"dataValidations"
+            | b"hyperlinks"
+            | b"printOptions"
+            | b"pageMargins"
+            | b"pageSetup"
+            | b"headerFooter"
+            | b"rowBreaks"
+            | b"colBreaks"
+            | b"customProperties"
+            | b"cellWatches"
+            | b"ignoredErrors"
+            | b"smartTags"
+            | b"drawing"
+            | b"drawingHF"
+            | b"picture"
+            | b"oleObjects"
+            | b"controls"
+            | b"webPublishItems"
+            | b"tableParts"
+            | b"extLst"
+    )
+}
+
 #[must_use]
 pub fn write_merge_cells_section(merges: &[Range]) -> String {
     if merges.is_empty() {
@@ -56,8 +85,8 @@ pub fn write_worksheet_xml(merges: &[Range]) -> String {
 ///
 /// If the worksheet already contains `<mergeCells>`, it is replaced. If it does not
 /// and `merges` is non-empty, the block is inserted before the end of the worksheet
-/// (preferably before late elements like `<tableParts>` / `<extLst>` to match Excel's
-/// expected element ordering).
+/// (preferably before elements that are required to come after it, e.g.
+/// `<conditionalFormatting>`, `<hyperlinks>`, `<pageMargins>`, `<tableParts>`, `<extLst>`).
 pub fn update_worksheet_xml(sheet_xml: &str, merges: &[Range]) -> Result<String, XlsxError> {
     let mut reader = Reader::from_str(sheet_xml);
     reader.config_mut().trim_text(false);
@@ -94,7 +123,7 @@ pub fn update_worksheet_xml(sheet_xml: &str, merges: &[Range]) -> Result<String,
             Event::Start(ref e) | Event::Empty(ref e)
                 if !replaced
                     && !merges.is_empty()
-                    && matches!(e.local_name().as_ref(), b"tableParts" | b"extLst") =>
+                    && insert_before_tag(e.local_name().as_ref()) =>
             {
                 write_merge_cells_block(&mut writer, merges)?;
                 replaced = true;
@@ -152,6 +181,20 @@ mod tests {
         assert!(
             merge_pos < table_pos,
             "expected mergeCells before tableParts, got:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn update_inserts_before_page_margins_when_missing() {
+        let xml = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>"#;
+        let merges = vec![Range::from_a1("A1:B2").unwrap()];
+        let updated = update_worksheet_xml(xml, &merges).unwrap();
+
+        let merge_pos = updated.find("<mergeCells").expect("mergeCells inserted");
+        let margins_pos = updated.find("<pageMargins").expect("pageMargins exists");
+        assert!(
+            merge_pos < margins_pos,
+            "expected mergeCells before pageMargins, got:\n{updated}"
         );
     }
 }
