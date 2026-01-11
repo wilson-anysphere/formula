@@ -284,11 +284,39 @@ export class OpenAIClient {
       const toolCallsByIndex = new Map();
       /** @type {Set<string>} */
       const openToolCallIds = new Set();
+      let nextToolCallIndexToStart = 0;
 
       function closeOpenToolCalls() {
         const ids = Array.from(openToolCallIds);
         openToolCallIds.clear();
         return ids;
+      }
+
+      /**
+       * OpenAI tool calls are logically ordered by the numeric `index` field.
+       * Some backends can emit tool call chunks out of order; only emit tool call
+       * start events once we've seen contiguous indexes starting from 0 so the
+       * downstream tool loop executes calls in a deterministic order.
+       */
+      function* startToolCallsInOrder() {
+        while (true) {
+          const state = toolCallsByIndex.get(nextToolCallIndexToStart);
+          if (!state) break;
+          if (state.started) {
+            nextToolCallIndexToStart += 1;
+            continue;
+          }
+          if (!state.id || !state.name) break;
+
+          state.started = true;
+          openToolCallIds.add(state.id);
+          yield { type: "tool_call_start", id: state.id, name: state.name };
+          if (state.pendingArgs) {
+            yield { type: "tool_call_delta", id: state.id, delta: state.pendingArgs };
+            state.pendingArgs = "";
+          }
+          nextToolCallIndexToStart += 1;
+        }
       }
 
       function* flushPendingToolCalls() {
@@ -367,15 +395,8 @@ export class OpenAIClient {
               if (idFromDelta) state.id = idFromDelta;
               if (nameFromDelta) state.name = nameFromDelta;
 
-              if (!state.started && state.id && state.name) {
-                state.started = true;
-                openToolCallIds.add(state.id);
-                yield { type: "tool_call_start", id: state.id, name: state.name };
-                if (state.pendingArgs) {
-                  yield { type: "tool_call_delta", id: state.id, delta: state.pendingArgs };
-                  state.pendingArgs = "";
-                }
-              }
+              toolCallsByIndex.set(index, state);
+              for (const event of startToolCallsInOrder()) yield event;
 
               if (argsFragment) {
                 // Best-effort diffing: tolerate backends that repeatedly send the
@@ -396,8 +417,6 @@ export class OpenAIClient {
                   }
                 }
               }
-
-              toolCallsByIndex.set(index, state);
             }
           }
 
