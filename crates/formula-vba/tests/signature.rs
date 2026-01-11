@@ -89,7 +89,8 @@ fn make_pkcs7_detached_signature(data: &[u8]) -> Vec<u8> {
         &pkey,
         &extra_certs,
         data,
-        Pkcs7Flags::BINARY | Pkcs7Flags::DETACHED,
+        // NOATTR keeps the output deterministic (avoids adding a SigningTime attribute).
+        Pkcs7Flags::BINARY | Pkcs7Flags::DETACHED | Pkcs7Flags::NOATTR,
     )
     .expect("pkcs7 sign");
     pkcs7.to_der().expect("pkcs7 DER")
