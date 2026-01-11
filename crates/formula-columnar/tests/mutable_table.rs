@@ -208,6 +208,19 @@ fn delete_rows_rebuilds_and_shifts_indices() {
     assert_eq!(table.get_cell(3, 0), Value::Number(100.0)); // old row 5
     assert_eq!(table.get_cell(4, 0), Value::Number(6.0));
     assert_eq!(table.get_cell(5, 0), Value::Number(7.0));
+
+    // Ensure we can still append after deletion without corrupting page boundaries.
+    table.append_row(&[
+        Value::Number(8.0),
+        Value::String(Arc::<str>::from("C")),
+    ]);
+    table.append_row(&[
+        Value::Number(9.0),
+        Value::String(Arc::<str>::from("D")),
+    ]);
+    assert_eq!(table.row_count(), 8);
+    assert_eq!(table.get_cell(6, 0), Value::Number(8.0));
+    assert_eq!(table.get_cell(7, 0), Value::Number(9.0));
 }
 
 #[test]
@@ -280,4 +293,34 @@ fn freeze_merges_overlays_across_flushed_and_current_pages() {
     assert_eq!(frozen.get_cell(1, 1), Value::String(Arc::<str>::from("Z")));
     assert_eq!(frozen.get_cell(5, 0), Value::Number(200.0));
     assert_eq!(frozen.get_cell(5, 1), Value::String(Arc::<str>::from("Y")));
+}
+
+#[test]
+fn append_after_compact_keeps_tail_buffer_readable() {
+    let schema = vec![ColumnSchema {
+        name: "x".to_owned(),
+        column_type: ColumnType::Number,
+    }];
+    let options = TableOptions {
+        page_size_rows: 4,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+
+    let mut table = MutableColumnarTable::new(schema, options);
+    for v in 0..6 {
+        table.append_row(&[Value::Number(v as f64)]);
+    }
+
+    let snapshot = table.compact();
+    assert_eq!(snapshot.row_count(), 6);
+    assert_eq!(snapshot.get_cell(5, 0), Value::Number(5.0));
+
+    // Append more after compact; new rows should be readable and should not corrupt earlier rows.
+    table.append_row(&[Value::Number(6.0)]);
+    table.append_row(&[Value::Number(7.0)]);
+    assert_eq!(table.row_count(), 8);
+    assert_eq!(table.get_cell(0, 0), Value::Number(0.0));
+    assert_eq!(table.get_cell(5, 0), Value::Number(5.0));
+    assert_eq!(table.get_cell(6, 0), Value::Number(6.0));
+    assert_eq!(table.get_cell(7, 0), Value::Number(7.0));
 }

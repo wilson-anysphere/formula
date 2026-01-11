@@ -777,7 +777,6 @@ impl MutableColumnarTable {
             }
             rebuilt.append_row(&row_buf);
         }
-        rebuilt.flush_all();
         *self = rebuilt;
 
         delete_count
@@ -922,7 +921,6 @@ impl MutableColumnarTable {
     /// remove all overlay/delta state from `self`.
     pub fn compact(&mut self) -> ColumnarTable {
         self.compact_in_place();
-        self.flush_all();
         self.to_columnar_table()
     }
 
@@ -934,7 +932,11 @@ impl MutableColumnarTable {
     }
 
     fn to_columnar_table(&self) -> ColumnarTable {
-        let columns = self.columns.iter().map(|c| c.as_column()).collect();
+        let columns = self
+            .columns
+            .iter()
+            .map(|c| c.as_column_snapshot())
+            .collect();
         ColumnarTable {
             schema: self.schema.clone(),
             columns,
@@ -1179,6 +1181,15 @@ impl MutableColumn {
             MutableColumn::Float(c) => c.apply_overlays_to_current(updates),
             MutableColumn::Bool(c) => c.apply_overlays_to_current(updates),
             MutableColumn::Dict(c) => c.apply_overlays_to_current(updates),
+        }
+    }
+
+    fn as_column_snapshot(&self) -> Column {
+        match self {
+            MutableColumn::Int(c) => c.as_column_snapshot(),
+            MutableColumn::Float(c) => c.as_column_snapshot(),
+            MutableColumn::Bool(c) => c.as_column_snapshot(),
+            MutableColumn::Dict(c) => c.as_column_snapshot(),
         }
     }
 
@@ -1490,6 +1501,63 @@ impl MutableIntColumn {
         }
     }
 
+    fn encoded_current_chunk(&self) -> Option<EncodedChunk> {
+        if self.current.is_empty() {
+            return None;
+        }
+
+        let len = self.current.len();
+        let mut min_valid: Option<i64> = None;
+        for (idx, v) in self.current.iter().enumerate() {
+            if self.validity.get(idx) {
+                min_valid = Some(min_valid.map(|m| m.min(*v)).unwrap_or(*v));
+            }
+        }
+        let min = min_valid.unwrap_or(0);
+
+        let offsets: Vec<u64> = self
+            .current
+            .iter()
+            .enumerate()
+            .map(|(idx, v)| {
+                if self.validity.get(idx) {
+                    (*v as i128 - min as i128) as u64
+                } else {
+                    0
+                }
+            })
+            .collect();
+        let offsets = U64SequenceEncoding::encode(&offsets);
+
+        let validity = if self.validity.all_true() {
+            None
+        } else {
+            Some(self.validity.clone())
+        };
+
+        Some(EncodedChunk::Int(ValueEncodedChunk {
+            min,
+            len,
+            offsets,
+            validity,
+        }))
+    }
+
+    fn as_column_snapshot(&self) -> Column {
+        let mut chunks = self.chunks.clone();
+        if let Some(chunk) = self.encoded_current_chunk() {
+            chunks.push(chunk);
+        }
+        let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
+        Column {
+            schema: self.schema.clone(),
+            chunks,
+            stats: self.stats(),
+            dictionary: None,
+            distinct,
+        }
+    }
+
     fn as_column(&self) -> Column {
         let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
         Column {
@@ -1742,6 +1810,38 @@ impl MutableFloatColumn {
         }
     }
 
+    fn encoded_current_chunk(&self) -> Option<EncodedChunk> {
+        if self.current.is_empty() {
+            return None;
+        }
+
+        let validity = if self.validity.all_true() {
+            None
+        } else {
+            Some(self.validity.clone())
+        };
+
+        Some(EncodedChunk::Float(FloatChunk {
+            values: self.current.clone(),
+            validity,
+        }))
+    }
+
+    fn as_column_snapshot(&self) -> Column {
+        let mut chunks = self.chunks.clone();
+        if let Some(chunk) = self.encoded_current_chunk() {
+            chunks.push(chunk);
+        }
+        let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
+        Column {
+            schema: self.schema.clone(),
+            chunks,
+            stats: self.stats(),
+            dictionary: None,
+            distinct,
+        }
+    }
+
     fn as_column(&self) -> Column {
         let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
         Column {
@@ -1988,6 +2088,42 @@ impl MutableBoolColumn {
                 self.current.set(*in_chunk, false);
                 self.validity.set(*in_chunk, false);
             }
+        }
+    }
+
+    fn encoded_current_chunk(&self) -> Option<EncodedChunk> {
+        if self.current.is_empty() {
+            return None;
+        }
+
+        let len = self.current.len();
+        let mut data = vec![0u8; (len + 7) / 8];
+        for i in 0..len {
+            if self.current.get(i) {
+                data[i / 8] |= 1u8 << (i % 8);
+            }
+        }
+
+        let validity = if self.validity.all_true() {
+            None
+        } else {
+            Some(self.validity.clone())
+        };
+
+        Some(EncodedChunk::Bool(BoolChunk { len, data, validity }))
+    }
+
+    fn as_column_snapshot(&self) -> Column {
+        let mut chunks = self.chunks.clone();
+        if let Some(chunk) = self.encoded_current_chunk() {
+            chunks.push(chunk);
+        }
+        Column {
+            schema: self.schema.clone(),
+            chunks,
+            stats: self.stats(),
+            dictionary: None,
+            distinct: None,
         }
     }
 
@@ -2292,6 +2428,36 @@ impl MutableDictColumn {
                 self.current[*in_chunk] = 0;
                 self.validity.set(*in_chunk, false);
             }
+        }
+    }
+
+    fn encoded_current_chunk(&self) -> Option<EncodedChunk> {
+        if self.current.is_empty() {
+            return None;
+        }
+
+        let len = self.current.len();
+        let indices = U32SequenceEncoding::encode(&self.current);
+        let validity = if self.validity.all_true() {
+            None
+        } else {
+            Some(self.validity.clone())
+        };
+
+        Some(EncodedChunk::Dict(DictionaryEncodedChunk { len, indices, validity }))
+    }
+
+    fn as_column_snapshot(&self) -> Column {
+        let mut chunks = self.chunks.clone();
+        if let Some(chunk) = self.encoded_current_chunk() {
+            chunks.push(chunk);
+        }
+        Column {
+            schema: self.schema.clone(),
+            chunks,
+            stats: self.stats(),
+            dictionary: Some(self.dictionary.clone()),
+            distinct: None,
         }
     }
 
