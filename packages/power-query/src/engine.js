@@ -221,6 +221,53 @@ function throwIfAborted(signal) {
 }
 
 /**
+ * Push a top-level row limit into a SQL Server query.
+ *
+ * The folding engine emits `?` placeholders; this helper rewrites the SQL (and
+ * parameter ordering) while keeping the placeholder style intact. Placeholder
+ * normalization to `@p1..@pn` happens later in the SQL execution path.
+ *
+ * @param {string} sql
+ * @param {unknown[]} params
+ * @param {number} limit
+ * @returns {{ sql: string, params: unknown[] }}
+ */
+function applySqlServerLimit(sql, params, limit) {
+  const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.trunc(limit)) : 0;
+  const inputParams = Array.isArray(params) ? params : [];
+
+  const trimmed = sql.trimStart();
+  const prefix = sql.slice(0, sql.length - trimmed.length);
+
+  // If this query already starts with `SELECT TOP (?)`, clamp the existing TOP
+  // value (the folding engine places TOP's param first).
+  if (/^SELECT\s+TOP\s*\(\s*\?\s*\)/i.test(trimmed)) {
+    if (typeof inputParams[0] === "number" && Number.isFinite(inputParams[0])) {
+      const existingTop = Math.max(0, Math.trunc(inputParams[0]));
+      if (existingTop <= normalizedLimit) return { sql, params: inputParams };
+      const nextParams = inputParams.slice();
+      nextParams[0] = normalizedLimit;
+      return { sql, params: nextParams };
+    }
+    return { sql, params: inputParams };
+  }
+
+  // Common folding shape for sorted SQL Server queries (see `finalizeSqlForDialect`):
+  //   SELECT * FROM (<inner>) AS t ORDER BY ...
+  // Push TOP into the existing outer SELECT so the ORDER BY remains valid.
+  if (/^SELECT\s+\*\s+FROM\s*\(/i.test(trimmed)) {
+    const nextSql = trimmed.replace(/^SELECT\s+\*\s+FROM\s*\(/i, "SELECT TOP (?) * FROM (");
+    return { sql: `${prefix}${nextSql}`, params: [normalizedLimit, ...inputParams] };
+  }
+
+  // Otherwise, wrap with a TOP query.
+  return {
+    sql: `${prefix}SELECT TOP (?) * FROM (${trimmed}) AS t`,
+    params: [normalizedLimit, ...inputParams],
+  };
+}
+
+/**
  * @param {{ id: string, getCacheKey: (request: any) => unknown }} connector
  * @param {any} request
  */
@@ -911,15 +958,19 @@ export class QueryEngine {
       foldedDialect
     ) {
       const dialectName = typeof foldedDialect === "string" ? foldedDialect : foldedDialect.name;
-      // For historical/backwards compatibility we push `ExecuteOptions.limit` down
-      // via `LIMIT ?`. SQL Server does not support `LIMIT`, and also rejects
-      // nested `ORDER BY` in derived tables (which this wrapper would create).
-      //
-      // Until we have a dedicated SQL Server top/offset wrapper that preserves
-      // parameter ordering and ORDER BY semantics, keep limits local.
-      const canPushDownLimit = foldedPlan.type === "sql" && options.limit != null && dialectName !== "sqlserver";
-      const sqlToRun = canPushDownLimit ? `SELECT * FROM (${foldedPlan.sql}) AS t LIMIT ?` : foldedPlan.sql;
-      const paramsToRun = canPushDownLimit ? [...foldedPlan.params, options.limit] : foldedPlan.params;
+      let sqlToRun = foldedPlan.sql;
+      let paramsToRun = foldedPlan.params;
+      if (foldedPlan.type === "sql" && options.limit != null) {
+        if (dialectName === "sqlserver") {
+          ({ sql: sqlToRun, params: paramsToRun } = applySqlServerLimit(sqlToRun, paramsToRun, options.limit));
+        } else {
+          // For backwards compatibility we push `ExecuteOptions.limit` down via `LIMIT ?`.
+          // Note that if the inner query has an `ORDER BY`, that ordering is not guaranteed
+          // to be preserved by the derived table wrapper.
+          sqlToRun = `SELECT * FROM (${sqlToRun}) AS t LIMIT ?`;
+          paramsToRun = [...paramsToRun, options.limit];
+        }
+      }
       executedSql =
         dialectName === "postgres"
           ? normalizePostgresPlaceholders(sqlToRun, paramsToRun.length)
