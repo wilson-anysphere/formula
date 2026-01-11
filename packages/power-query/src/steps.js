@@ -153,7 +153,7 @@ function distinctRows(table, columns) {
     const outColumns = table.columns.map(() => []);
 
     for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
-      const keyValues = indices.map((idx) => distinctKey(normalizeMissing(vectors[idx].get(rowIndex))));
+      const keyValues = indices.map((idx) => valueKey(normalizeMissing(vectors[idx].get(rowIndex))));
       const key = JSON.stringify(keyValues);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -170,7 +170,7 @@ function distinctRows(table, columns) {
   const rows = materialized.rows;
   const outRows = [];
   for (const row of rows) {
-    const keyValues = indices.map((idx) => distinctKey(normalizeMissing(row[idx])));
+    const keyValues = indices.map((idx) => valueKey(normalizeMissing(row[idx])));
     const key = JSON.stringify(keyValues);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -359,10 +359,6 @@ function toNumberOrNull(value) {
   return null;
 }
 
-/**
- * @param {unknown} value
- * @returns {unknown}
- */
 /**
  * @param {ITable} table
  * @param {string[]} groupColumns
