@@ -322,8 +322,8 @@ This document tracks every Excel feature and our implementation status. Features
 | PEARSON | ✅ | |
 | PERCENTILE.EXC | ✅ | |
 | PERCENTILE.INC | ✅ | |
-| PERCENTRANK.EXC | ⬜ | |
-| PERCENTRANK.INC | ⬜ | |
+| PERCENTRANK.EXC | ✅ | |
+| PERCENTRANK.INC | ✅ | |
 | PERMUT | ⬜ | |
 | PERMUTATIONA | ⬜ | |
 | PHI | ⬜ | |

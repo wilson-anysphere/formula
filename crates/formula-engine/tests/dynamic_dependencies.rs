@@ -309,7 +309,7 @@ fn hlookup_updates_range_precedents_and_dependents_for_offset_table_array() {
 }
 
 #[test]
-fn index_updates_range_precedents_and_dependents_for_offset_array() {
+fn index_updates_precedents_and_dependents_for_offset_array() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
     engine.set_cell_value("Sheet1", "B2", 2.0).unwrap();
@@ -332,10 +332,9 @@ fn index_updates_range_precedents_and_dependents_for_offset_array() {
                 sheet: 0,
                 addr: CellAddr { row: 0, col: 0 }, // A1
             },
-            PrecedentNode::Range {
+            PrecedentNode::Cell {
                 sheet: 0,
-                start: CellAddr { row: 1, col: 0 }, // A2
-                end: CellAddr { row: 3, col: 1 },   // B4
+                addr: CellAddr { row: 2, col: 1 }, // B3
             },
         ]
     );

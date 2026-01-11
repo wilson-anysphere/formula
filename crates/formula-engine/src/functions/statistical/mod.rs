@@ -438,6 +438,103 @@ pub fn quartile_exc(values: &[f64], quart: i64) -> Result<f64, ErrorKind> {
     percentile_exc(values, k)
 }
 
+pub fn percentrank_inc(values: &[f64], x: f64) -> Result<f64, ErrorKind> {
+    if values.is_empty() {
+        return Err(ErrorKind::Num);
+    }
+    if values.len() < 2 {
+        return Err(ErrorKind::Div0);
+    }
+    if !x.is_finite() || values.iter().any(|v| !v.is_finite()) {
+        return Err(ErrorKind::Num);
+    }
+
+    let mut sorted = values.to_vec();
+    sort_numbers(&mut sorted);
+    let n = sorted.len();
+    debug_assert!(n >= 2);
+
+    let min = sorted[0];
+    let max = sorted[n - 1];
+    if x < min || x > max {
+        return Err(ErrorKind::NA);
+    }
+
+    let idx = sorted.partition_point(|v| *v < x);
+    if idx < n && sorted[idx] == x {
+        let out = (idx as f64) / ((n - 1) as f64);
+        if out.is_finite() {
+            Ok(out)
+        } else {
+            Err(ErrorKind::Num)
+        }
+    } else {
+        debug_assert!(idx > 0 && idx < n);
+        let lo = idx - 1;
+        let hi = idx;
+        let a = sorted[lo];
+        let b = sorted[hi];
+        let denom = b - a;
+        if denom == 0.0 {
+            return Err(ErrorKind::Num);
+        }
+        let frac = (x - a) / denom;
+        let out = ((lo as f64) + frac) / ((n - 1) as f64);
+        if out.is_finite() {
+            Ok(out)
+        } else {
+            Err(ErrorKind::Num)
+        }
+    }
+}
+
+pub fn percentrank_exc(values: &[f64], x: f64) -> Result<f64, ErrorKind> {
+    if values.is_empty() {
+        return Err(ErrorKind::Num);
+    }
+    if !x.is_finite() || values.iter().any(|v| !v.is_finite()) {
+        return Err(ErrorKind::Num);
+    }
+
+    let mut sorted = values.to_vec();
+    sort_numbers(&mut sorted);
+    let n = sorted.len();
+
+    let min = sorted[0];
+    let max = sorted[n - 1];
+    if x < min || x > max {
+        return Err(ErrorKind::NA);
+    }
+
+    let idx = sorted.partition_point(|v| *v < x);
+    let denom = (n + 1) as f64;
+    if idx < n && sorted[idx] == x {
+        let out = ((idx + 1) as f64) / denom;
+        if out.is_finite() {
+            Ok(out)
+        } else {
+            Err(ErrorKind::Num)
+        }
+    } else {
+        debug_assert!(idx > 0 && idx < n);
+        let lo = idx - 1;
+        let hi = idx;
+        let a = sorted[lo];
+        let b = sorted[hi];
+        let denom_values = b - a;
+        if denom_values == 0.0 {
+            return Err(ErrorKind::Num);
+        }
+        let frac = (x - a) / denom_values;
+        let out = ((lo + 1) as f64 + frac) / denom;
+        if out.is_finite() {
+            Ok(out)
+        } else {
+            Err(ErrorKind::Num)
+        }
+    }
+}
+
 pub fn rank(number: f64, values: &[f64], order: RankOrder, method: RankMethod) -> Result<f64, ErrorKind> {
     if values.is_empty() {
         return Err(ErrorKind::NA);

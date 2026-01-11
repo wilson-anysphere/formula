@@ -1399,6 +1399,42 @@ export default {
       ]
     },
     {
+      "name": "PERCENTRANK",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "PERCENTRANK.EXC",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "PERCENTRANK.INC",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "PI",
       "min_args": 0,
       "max_args": 0,

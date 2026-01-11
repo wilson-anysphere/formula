@@ -109,6 +109,38 @@ fn percentile_exc_errors_outside_open_interval() {
 }
 
 #[test]
+fn percentrank_inc_and_exc_match_expected_ranks() {
+    let mut sheet = TestSheet::new();
+
+    // Default significance rounds to 3 decimal places.
+    assert_number(&sheet.eval("=PERCENTRANK.INC({1,2,3,4},2)"), 0.333);
+    assert_number(&sheet.eval("=PERCENTRANK({1,2,3,4},2)"), 0.333);
+    assert_number(&sheet.eval("=PERCENTRANK.INC({1,2,3,4},2,2)"), 0.33);
+
+    assert_number(&sheet.eval("=PERCENTRANK.EXC({1,2,3,4},2)"), 0.4);
+}
+
+#[test]
+fn percentrank_errors_on_out_of_range_x_and_invalid_significance() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=PERCENTRANK.INC({1,2,3},0)"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        sheet.eval("=PERCENTRANK.EXC({1,2,3},0)"),
+        Value::Error(ErrorKind::NA)
+    );
+
+    assert_eq!(
+        sheet.eval("=PERCENTRANK.INC({1,2,3},1,0)"),
+        Value::Error(ErrorKind::Num)
+    );
+
+    assert_eq!(sheet.eval("=PERCENTRANK.INC({1},1)"), Value::Error(ErrorKind::Div0));
+}
+
+#[test]
 fn correl_matches_perfect_positive_relationship() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=CORREL({1,2,3},{1,2,3})"), 1.0);

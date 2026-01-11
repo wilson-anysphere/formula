@@ -1211,6 +1211,107 @@ fn quartile_exc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "PERCENTRANK.INC",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: percentrank_inc_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "PERCENTRANK",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: percentrank_inc_fn,
+    }
+}
+
+fn percentrank_inc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    percentrank_impl(ctx, args, PercentrankVariant::Inclusive)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "PERCENTRANK.EXC",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: percentrank_exc_fn,
+    }
+}
+
+fn percentrank_exc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    percentrank_impl(ctx, args, PercentrankVariant::Exclusive)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PercentrankVariant {
+    Inclusive,
+    Exclusive,
+}
+
+fn percentrank_impl(ctx: &dyn FunctionContext, args: &[CompiledExpr], variant: PercentrankVariant) -> Value {
+    let mut values = Vec::new();
+    if let Err(e) = push_numbers_from_arg(ctx, &mut values, ctx.eval_arg(&args[0])) {
+        return Value::Error(e);
+    }
+
+    let x = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let significance = if args.len() == 3 {
+        match eval_scalar_arg(ctx, &args[2]).coerce_to_i64() {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        3
+    };
+    if !(1..=15).contains(&significance) {
+        return Value::Error(ErrorKind::Num);
+    }
+
+    let raw = match variant {
+        PercentrankVariant::Inclusive => crate::functions::statistical::percentrank_inc(&values, x),
+        PercentrankVariant::Exclusive => crate::functions::statistical::percentrank_exc(&values, x),
+    };
+    let raw = match raw {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let digits = significance as i32;
+    let factor = 10f64.powi(digits);
+    if !factor.is_finite() || factor == 0.0 || !raw.is_finite() {
+        return Value::Error(ErrorKind::Num);
+    }
+    let out = (raw * factor).round() / factor;
+    if out.is_finite() {
+        Value::Number(out)
+    } else {
+        Value::Error(ErrorKind::Num)
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "CORREL",
         min_args: 2,
         max_args: 2,
