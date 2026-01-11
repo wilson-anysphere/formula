@@ -1267,6 +1267,16 @@ impl<'a> Executor<'a> {
             });
             return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(sel))));
         }
+        if name_lc == "rows" {
+            return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
+                range: sheet_entire_range(self.sheet.active_sheet()),
+            })));
+        }
+        if name_lc == "columns" {
+            return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
+                range: sheet_entire_range(self.sheet.active_sheet()),
+            })));
+        }
 
         // VBA allows calling some 0-argument functions without parentheses (e.g. `Now`, `Date`).
         if matches!(name_lc.as_str(), "now" | "date" | "time") {
@@ -2197,6 +2207,12 @@ impl<'a> Executor<'a> {
                 "name" => Ok(VbaValue::String(
                     self.sheet.sheet_name(*sheet).unwrap_or("").to_string(),
                 )),
+                "rows" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
+                    range: sheet_entire_range(*sheet),
+                }))),
+                "columns" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
+                    range: sheet_entire_range(*sheet),
+                }))),
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Worksheet member `{member}`"
                 ))),
@@ -2874,6 +2890,16 @@ fn expand_single_cell_destination(dest: VbaRangeRef, template: VbaRangeRef) -> V
         start_col: dest.start_col,
         end_row: dest.start_row + rows - 1,
         end_col: dest.start_col + cols - 1,
+    }
+}
+
+fn sheet_entire_range(sheet: usize) -> VbaRangeRef {
+    VbaRangeRef {
+        sheet,
+        start_row: 1,
+        start_col: 1,
+        end_row: 1_048_576,
+        end_col: 16_384,
     }
 }
 

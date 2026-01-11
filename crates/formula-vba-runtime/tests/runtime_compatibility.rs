@@ -187,6 +187,41 @@ End Sub
 }
 
 #[test]
+fn rows_and_columns_count_match_excel_limits() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Range("A1") = Rows.Count
+    Range("A2") = Columns.Count
+    Range("A3") = ActiveSheet.Rows.Count
+    Range("A4") = ActiveSheet.Columns.Count
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "A1").unwrap(),
+        VbaValue::Double(1_048_576.0)
+    );
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "A2").unwrap(),
+        VbaValue::Double(16_384.0)
+    );
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "A3").unwrap(),
+        VbaValue::Double(1_048_576.0)
+    );
+    assert_eq!(
+        wb.get_value_a1("Sheet1", "A4").unwrap(),
+        VbaValue::Double(16_384.0)
+    );
+}
+
+#[test]
 fn selection_variable_tracks_last_select() {
     let code = r#"
 Option Explicit
