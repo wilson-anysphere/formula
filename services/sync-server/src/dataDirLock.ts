@@ -73,8 +73,23 @@ export async function acquireDataDirLock(dataDir: string): Promise<DataDirLockHa
 
   const createLockFile = async (): Promise<FileHandle> => {
     const fd = await fs.open(lockPath, "wx");
-    await fd.writeFile(`${JSON.stringify(metadata)}\n`, "utf8");
-    return fd;
+    try {
+      await fd.writeFile(`${JSON.stringify(metadata)}\n`, "utf8");
+      return fd;
+    } catch (err) {
+      // Best-effort cleanup: if we fail to write lock metadata, don't leave a
+      // zero-byte/partial lock file behind that would block subsequent startups.
+      try {
+        await fd.close();
+      } catch {
+        // ignore
+      }
+      await fs.unlink(lockPath).catch((unlinkErr) => {
+        const code = (unlinkErr as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") throw unlinkErr;
+      });
+      throw err;
+    }
   };
 
   try {
