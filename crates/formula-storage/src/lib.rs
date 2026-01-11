@@ -9,6 +9,10 @@
 //! - Batched transactional writes
 //! - Autosave debouncing
 //! - A viewport-driven, page-based LRU cache for memory management
+//!
+//! For large sheets, prefer [`MemoryManager::load_viewport`] over full-range
+//! scans. It pages in fixed-size tiles (configured via [`MemoryManagerConfig`])
+//! and keeps the cache bounded with LRU eviction + dirty-page writeback.
 //! - Optional encryption-at-rest for persisted workbooks (AES-256-GCM)
 
 mod autosave;

@@ -70,18 +70,22 @@ pub struct ViewportData {
 }
 
 impl ViewportData {
+    /// The viewport range (inclusive).
     pub fn range(&self) -> CellRange {
         self.range
     }
 
+    /// Return the snapshot for a single cell inside the viewport (if non-empty).
     pub fn get(&self, row: i64, col: i64) -> Option<&CellSnapshot> {
         self.cells.get(&(row, col))
     }
 
+    /// Iterate over the non-empty cells contained in this viewport.
     pub fn non_empty_cells(&self) -> impl Iterator<Item = (&(i64, i64), &CellSnapshot)> {
         self.cells.iter()
     }
 
+    /// Consume the viewport into its sparse cell map.
     pub fn into_cells(self) -> HashMap<(i64, i64), CellSnapshot> {
         self.cells
     }
@@ -205,8 +209,19 @@ impl MemoryManager {
         Ok(meta)
     }
 
-    /// Load a cell viewport (inclusive range) and return the cached values for
+    /// Load a cell viewport (inclusive range) and return a sparse snapshot for
     /// just the requested range.
+    ///
+    /// This loads any missing pages from SQLite and inserts them into the
+    /// in-memory page cache. Only *non-empty* cells are returned in
+    /// [`ViewportData`].
+    ///
+    /// Notes:
+    /// - Ranges are inclusive of start/end row/col.
+    /// - Returned snapshots include in-memory edits recorded via
+    ///   [`MemoryManager::record_change`].
+    /// - This call may trigger eviction (and therefore dirty-page writeback) if
+    ///   the cache exceeds the configured memory watermark.
     pub fn load_viewport(&self, sheet_id: Uuid, viewport: CellRange) -> StorageResult<ViewportData> {
         self.get_sheet(sheet_id)?;
 
