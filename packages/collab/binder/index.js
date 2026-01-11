@@ -210,6 +210,7 @@ export function bindYjsToDocumentController(options) {
   let cache = new Map();
 
   let applyingRemote = false;
+  let hasEncryptedCells = false;
 
   const readGuard = typeof canReadCell === "function" ? canReadCell : null;
   const editGuard = typeof canEditCell === "function" ? canEditCell : null;
@@ -453,6 +454,14 @@ export function bindYjsToDocumentController(options) {
       if (!canonicalKey) return;
       trackRawKey(canonicalKey, rawKey);
       changedKeys.add(canonicalKey);
+
+      const cell = getYMapCell(_cellData);
+      if (cell) {
+        const encRaw = typeof cell.has === "function" ? (cell.has("enc") ? cell.get("enc") : undefined) : cell.get("enc");
+        if (encRaw !== undefined) {
+          hasEncryptedCells = true;
+        }
+      }
     });
 
     enqueueApply(changedKeys);
@@ -485,6 +494,7 @@ export function bindYjsToDocumentController(options) {
         const canonicalKey = canonicalKeyFromRawKey(rawKey);
         if (!canonicalKey) continue;
         trackRawKey(canonicalKey, rawKey);
+        if (changes?.has("enc")) hasEncryptedCells = true;
         changed.add(canonicalKey);
         continue;
       }
@@ -501,6 +511,11 @@ export function bindYjsToDocumentController(options) {
           untrackRawKey(canonicalKey, rawKey);
         } else {
           trackRawKey(canonicalKey, rawKey);
+          const cellData = cells.get(rawKey);
+          const cell = getYMapCell(cellData);
+          const encRaw =
+            cell && (typeof cell.has === "function" ? (cell.has("enc") ? cell.get("enc") : undefined) : cell.get("enc"));
+          if (encRaw !== undefined) hasEncryptedCells = true;
         }
 
         changed.add(canonicalKey);
@@ -652,6 +667,51 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * Determine whether a local DocumentController change should be allowed to propagate
+   * into Yjs when encryption is enabled (or encrypted cells exist in the doc).
+   *
+   * This prevents cases where a collaborator without the relevant key edits an
+   * encrypted cell locally (or where `shouldEncryptCell` requires encryption but
+   * no key is available). In those cases we revert the local edit, similar to the
+   * permissions `canEditCell` guard.
+   *
+   * @param {{ sheetId: string, row: number, col: number }} cellRef
+   */
+  function canWriteCellWithEncryption(cellRef) {
+    const canonicalKey = makeCellKey(cellRef);
+    const rawKeys = yjsKeysByCell.get(canonicalKey);
+    const targets = rawKeys && rawKeys.size > 0 ? Array.from(rawKeys) : [canonicalKey];
+
+    let existingEnc = false;
+    for (const rawKey of targets) {
+      const cellData = cells.get(rawKey);
+      const cell = getYMapCell(cellData);
+      if (!cell) continue;
+      const encRaw = typeof cell.has === "function" ? (cell.has("enc") ? cell.get("enc") : undefined) : cell.get("enc");
+      if (encRaw !== undefined) {
+        existingEnc = true;
+        break;
+      }
+    }
+
+    const key = encryption?.keyForCell?.(cellRef) ?? null;
+    const shouldEncryptByConfig = encryption
+      ? typeof encryption.shouldEncryptCell === "function"
+        ? encryption.shouldEncryptCell(cellRef)
+        : key != null
+      : false;
+
+    const wantsEncryption = existingEnc || shouldEncryptByConfig;
+    if (!wantsEncryption) return true;
+
+    // If the cell is encrypted (or must be encrypted by config) we need a key to
+    // avoid writing plaintext into the shared CRDT.
+    if (!key) return false;
+
+    return true;
+  }
+
+  /**
    * @param {any} payload
    */
   const handleDocumentChange = (payload) => {
@@ -659,7 +719,8 @@ export function bindYjsToDocumentController(options) {
     const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
     if (deltas.length === 0) return;
 
-    if (!editGuard) {
+    const needsEncryptionGuard = Boolean(encryption || hasEncryptedCells);
+    if (!editGuard && !needsEncryptionGuard) {
       enqueueWrite(deltas);
       return;
     }
@@ -670,7 +731,11 @@ export function bindYjsToDocumentController(options) {
     const deniedInverse = [];
 
     for (const delta of deltas) {
-      if (editGuard({ sheetId: delta.sheetId, row: delta.row, col: delta.col })) {
+      const cellRef = { sheetId: delta.sheetId, row: delta.row, col: delta.col };
+      const allowedByPermissions = editGuard ? editGuard(cellRef) : true;
+      const allowedByEncryption = needsEncryptionGuard ? canWriteCellWithEncryption(cellRef) : true;
+
+      if (allowedByPermissions && allowedByEncryption) {
         allowed.push(delta);
       } else {
         deniedInverse.push({
