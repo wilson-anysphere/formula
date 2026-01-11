@@ -11,9 +11,9 @@ use formula_xlsx::drawingml::PreservedDrawingParts;
 use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
 };
-use formula_xlsx::{load_from_bytes, XlsxPackage};
+use formula_xlsx::{load_from_bytes, CellPatch as XlsxCellPatch, WorkbookCellPatches, XlsxPackage};
 use rust_xlsxwriter::{Workbook as XlsxWorkbook, XlsxError};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::BufReader;
 use std::path::Path;
 #[cfg(feature = "desktop")]
@@ -27,6 +27,7 @@ pub struct Sheet {
     pub id: String,
     pub name: String,
     pub(crate) cells: HashMap<(usize, usize), Cell>,
+    pub(crate) dirty_cells: HashSet<(usize, usize)>,
     pub(crate) columnar: Option<Arc<ColumnarTable>>,
 }
 
@@ -36,6 +37,7 @@ impl Sheet {
             id,
             name,
             cells: HashMap::new(),
+            dirty_cells: HashSet::new(),
             columnar: None,
         }
     }
@@ -65,6 +67,7 @@ impl Sheet {
     }
 
     pub fn set_cell(&mut self, row: usize, col: usize, cell: Cell) {
+        self.dirty_cells.insert((row, col));
         if cell.formula.is_none() && cell.input_value.is_none() {
             self.cells.remove(&(row, col));
         } else {
@@ -78,6 +81,10 @@ impl Sheet {
 
     pub fn set_columnar_table(&mut self, table: Arc<ColumnarTable>) {
         self.columnar = Some(table);
+    }
+
+    pub fn clear_dirty_cells(&mut self) {
+        self.dirty_cells.clear();
     }
 
     pub fn get_range_cells(
@@ -173,6 +180,9 @@ pub struct Workbook {
     /// Path the workbook was opened from, even if we later save under a different
     /// name/extension (e.g. opening legacy `.xls` defaults to saving as `.xlsx`).
     pub origin_path: Option<String>,
+    /// Raw bytes for the workbook we opened (XLSX/XLSM only). When present we use it as the base
+    /// package and patch only the edited worksheet cell XML (+ print settings) on save.
+    pub origin_xlsx_bytes: Option<Arc<[u8]>>,
     pub vba_project_bin: Option<Vec<u8>>,
     /// Stable identifier used for macro trust decisions (hash of workbook identity + `vbaProject.bin`).
     pub macro_fingerprint: Option<String>,
@@ -186,6 +196,7 @@ impl Workbook {
         Self {
             origin_path: path.clone(),
             path,
+            origin_xlsx_bytes: None,
             vba_project_bin: None,
             macro_fingerprint: None,
             preserved_drawing_parts: None,
@@ -286,17 +297,20 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     }
 
     if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {
-        let bytes =
-            std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?;
-        let document = load_from_bytes(&bytes).with_context(|| format!("parse xlsx {:?}", path))?;
+        let origin_xlsx_bytes = Arc::<[u8]>::from(
+            std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?,
+        );
+        let document = load_from_bytes(origin_xlsx_bytes.as_ref())
+            .with_context(|| format!("parse xlsx {:?}", path))?;
 
-        let print_settings = read_workbook_print_settings(&bytes)
+        let print_settings = read_workbook_print_settings(origin_xlsx_bytes.as_ref())
             .ok()
             .unwrap_or_default();
 
         let mut out = Workbook {
             path: Some(path.to_string_lossy().to_string()),
             origin_path: Some(path.to_string_lossy().to_string()),
+            origin_xlsx_bytes: Some(origin_xlsx_bytes.clone()),
             vba_project_bin: None,
             macro_fingerprint: None,
             preserved_drawing_parts: None,
@@ -308,9 +322,11 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         // `write_xlsx_blocking` can re-inject it when saving as `.xlsm`.
         //
         // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
-        if let Ok(pkg) = XlsxPackage::from_bytes(&bytes) {
+        if let Ok(pkg) = XlsxPackage::from_bytes(origin_xlsx_bytes.as_ref()) {
             out.vba_project_bin = pkg.vba_project_bin().map(|b| b.to_vec());
-            if let (Some(origin), Some(vba)) = (out.origin_path.as_deref(), out.vba_project_bin.as_deref()) {
+            if let (Some(origin), Some(vba)) =
+                (out.origin_path.as_deref(), out.vba_project_bin.as_deref())
+            {
                 out.macro_fingerprint = Some(compute_macro_fingerprint(origin, vba));
             }
             if let Ok(preserved) = pkg.preserve_drawing_parts() {
@@ -328,6 +344,9 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             .collect::<anyhow::Result<Vec<_>>>()?;
 
         out.ensure_sheet_ids();
+        for sheet in &mut out.sheets {
+            sheet.clear_dirty_cells();
+        }
         return Ok(out);
     }
 
@@ -338,6 +357,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     let mut out = Workbook {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
+        origin_xlsx_bytes: None,
         vba_project_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
@@ -416,6 +436,9 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     }
 
     out.ensure_sheet_ids();
+    for sheet in &mut out.sheets {
+        sheet.clear_dirty_cells();
+    }
     Ok(out)
 }
 
@@ -488,6 +511,7 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
     let mut out = Workbook {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
+        origin_xlsx_bytes: None,
         vba_project_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
@@ -495,6 +519,9 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         print_settings: WorkbookPrintSettings::default(),
     };
     out.ensure_sheet_ids();
+    for sheet in &mut out.sheets {
+        sheet.clear_dirty_cells();
+    }
     Ok(out)
 }
 
@@ -504,6 +531,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
     let mut out = Workbook {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
+        origin_xlsx_bytes: None,
         vba_project_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
@@ -590,6 +618,9 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
     }
 
     out.ensure_sheet_ids();
+    for sheet in &mut out.sheets {
+        sheet.clear_dirty_cells();
+    }
     Ok(out)
 }
 
@@ -671,6 +702,69 @@ pub async fn write_xlsx(
 }
 
 pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<()> {
+    let extension = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase());
+
+    if let Some(origin_bytes) = workbook.origin_xlsx_bytes.as_deref() {
+        let mut pkg =
+            XlsxPackage::from_bytes(origin_bytes).context("parse original workbook package")?;
+
+        let mut patches = WorkbookCellPatches::default();
+        for sheet in &workbook.sheets {
+            for (row, col) in &sheet.dirty_cells {
+                let cell_ref = formula_model::CellRef::new(*row as u32, *col as u32);
+                let Some(cell) = sheet.cells.get(&(*row, *col)) else {
+                    patches.set_cell(sheet.name.clone(), cell_ref, XlsxCellPatch::clear());
+                    continue;
+                };
+
+                let (formula, scalar) = match (&cell.formula, &cell.input_value) {
+                    (Some(f), _) => (Some(f.clone()), cell.computed_value.clone()),
+                    (None, Some(v)) => (None, v.clone()),
+                    (None, None) => (None, CellScalar::Empty),
+                };
+
+                let patch = match formula {
+                    Some(formula) => XlsxCellPatch::set_value_with_formula(
+                        scalar_to_model_value(&scalar),
+                        formula,
+                    ),
+                    None => XlsxCellPatch::set_value(scalar_to_model_value(&scalar)),
+                };
+
+                patches.set_cell(sheet.name.clone(), cell_ref, patch);
+            }
+        }
+
+        if !patches.is_empty() {
+            pkg.apply_cell_patches(&patches)
+                .context("apply worksheet cell patches")?;
+        }
+
+        // Drop macros when saving as `.xlsx`.
+        if matches!(extension.as_deref(), Some("xlsx")) && pkg.vba_project_bin().is_some() {
+            pkg.remove_vba_project().context("remove VBA parts for .xlsx")?;
+        }
+
+        let mut bytes = pkg
+            .write_to_bytes()
+            .context("write patched workbook package")?;
+
+        if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {
+            let origin_print_settings =
+                read_workbook_print_settings(origin_bytes).ok().unwrap_or_default();
+            if origin_print_settings != workbook.print_settings {
+                bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            }
+        }
+
+        std::fs::write(path, bytes).with_context(|| format!("write workbook {:?}", path))?;
+        return Ok(());
+    }
+
     let mut out = XlsxWorkbook::new();
 
     for sheet in &workbook.sheets {
@@ -718,11 +812,6 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<(
         .map_err(|e| anyhow::anyhow!(xlsx_err(e)))
         .with_context(|| "serialize workbook to buffer")?;
 
-    let extension = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_ascii_lowercase());
-
     let wants_vba =
         workbook.vba_project_bin.is_some() && matches!(extension.as_deref(), Some("xlsm"));
     let wants_preserved_drawings = workbook.preserved_drawing_parts.is_some();
@@ -757,6 +846,19 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<(
     Ok(())
 }
 
+fn scalar_to_model_value(value: &CellScalar) -> formula_model::CellValue {
+    match value {
+        CellScalar::Empty => formula_model::CellValue::Empty,
+        CellScalar::Number(n) => formula_model::CellValue::Number(*n),
+        CellScalar::Text(s) => formula_model::CellValue::String(s.clone()),
+        CellScalar::Bool(b) => formula_model::CellValue::Boolean(*b),
+        CellScalar::Error(e) => formula_model::CellValue::Error(
+            e.parse::<formula_model::ErrorValue>()
+                .unwrap_or(formula_model::ErrorValue::Unknown),
+        ),
+    }
+}
+
 fn xlsx_err(err: XlsxError) -> String {
     format!("{err:?}")
 }
@@ -765,6 +867,7 @@ fn xlsx_err(err: XlsxError) -> String {
 mod tests {
     use super::*;
     use rust_xlsxwriter::{Chart, ChartType};
+    use xlsx_diff::Severity;
 
     #[test]
     fn reads_xlsb_fixture() {
@@ -970,5 +1073,135 @@ mod tests {
         assert_eq!(src_charts[0].rel_id, dst_charts[0].rel_id);
         assert_eq!(src_charts[0].chart_part, dst_charts[0].chart_part);
         assert_eq!(src_charts[0].drawing_part, dst_charts[0].drawing_part);
+    }
+
+    #[test]
+    fn roundtrip_preserves_fixture_parts_when_unmodified() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/styles/styles.xlsx"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("roundtrip.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let report = xlsx_diff::diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
+        if report.has_at_least(Severity::Critical) {
+            for diff in report
+                .differences
+                .iter()
+                .filter(|d| d.severity == Severity::Critical)
+            {
+                eprintln!("{diff}");
+            }
+        }
+        assert_eq!(report.count(Severity::Critical), 0);
+    }
+
+    #[test]
+    fn cell_edit_only_changes_worksheet_parts() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/styles/styles.xlsx"
+        ));
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("edited.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let report = xlsx_diff::diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
+        assert!(
+            !report.differences.iter().any(|d| d.kind == "missing_part"),
+            "unexpected missing parts: {:?}",
+            report
+                .differences
+                .iter()
+                .filter(|d| d.kind == "missing_part")
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !report.differences.iter().any(|d| d.kind == "extra_part"),
+            "unexpected extra parts: {:?}",
+            report
+                .differences
+                .iter()
+                .filter(|d| d.kind == "extra_part")
+                .collect::<Vec<_>>()
+        );
+
+        let unexpected = report
+            .differences
+            .iter()
+            .filter(|d| {
+                d.severity != Severity::Info
+                    && !d.part.starts_with("xl/worksheets/")
+                    && d.part != "xl/sharedStrings.xml"
+            })
+            .collect::<Vec<_>>();
+        assert!(unexpected.is_empty(), "unexpected diffs: {unexpected:?}");
+
+        let written = read_xlsx_blocking(&out_path).expect("read edited workbook");
+        assert_eq!(
+            written.sheets[0].get_cell(0, 0).computed_value,
+            CellScalar::Number(123.0)
+        );
+    }
+
+    #[test]
+    fn xlsm_cell_edit_preserves_vba_parts() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        ));
+
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture xlsm");
+        let original_pkg = XlsxPackage::from_bytes(&original_bytes).expect("parse fixture package");
+        let original_vba = original_pkg
+            .vba_project_bin()
+            .expect("fixture has vbaProject.bin")
+            .to_vec();
+
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(7.0))));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("edited.xlsm");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read written xlsm");
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+        let written_vba = written_pkg
+            .vba_project_bin()
+            .expect("written workbook should contain vbaProject.bin");
+        assert_eq!(original_vba, written_vba);
+
+        let report = xlsx_diff::diff_workbooks(fixture_path, &out_path).expect("diff workbooks");
+        assert!(
+            !report.differences.iter().any(|d| d.kind == "missing_part"),
+            "unexpected missing parts"
+        );
+        let unexpected = report
+            .differences
+            .iter()
+            .filter(|d| {
+                d.severity != Severity::Info
+                    && !d.part.starts_with("xl/worksheets/")
+                    && d.part != "xl/sharedStrings.xml"
+            })
+            .collect::<Vec<_>>();
+        assert!(unexpected.is_empty(), "unexpected diffs: {unexpected:?}");
     }
 }

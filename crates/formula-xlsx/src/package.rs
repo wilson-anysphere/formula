@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
 
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
 use thiserror::Error;
 
 use crate::patch::{apply_cell_patches_to_package, WorkbookCellPatches};
@@ -186,6 +188,113 @@ impl XlsxPackage {
     pub fn apply_cell_patches(&mut self, patches: &WorkbookCellPatches) -> Result<(), XlsxError> {
         apply_cell_patches_to_package(self, patches)
     }
+
+    /// Remove macro-related parts and relationships from the package.
+    ///
+    /// This is used when saving a macro-enabled workbook (`.xlsm`) as `.xlsx`.
+    pub fn remove_vba_project(&mut self) -> Result<(), XlsxError> {
+        self.parts.remove("xl/vbaProject.bin");
+        self.parts.remove("xl/_rels/vbaProject.bin.rels");
+
+        // Drop the VBA relationship from workbook.xml.rels (if present).
+        if let Some(rels_bytes) = self.parts.get("xl/_rels/workbook.xml.rels").cloned() {
+            let updated = remove_relationship_type(
+                &rels_bytes,
+                "http://schemas.microsoft.com/office/2006/relationships/vbaProject",
+            )?;
+            self.set_part("xl/_rels/workbook.xml.rels", updated);
+        }
+
+        // Remove the content type override for vbaProject.bin and convert the workbook content
+        // type back to a standard `.xlsx`.
+        if let Some(ct_bytes) = self.parts.get("[Content_Types].xml").cloned() {
+            let updated = remove_vba_content_types(&ct_bytes)?;
+            self.set_part("[Content_Types].xml", updated);
+        }
+
+        Ok(())
+    }
+}
+
+fn remove_relationship_type(xml: &[u8], rel_type: &str) -> Result<Vec<u8>, XlsxError> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Empty(e) if e.name().as_ref() == b"Relationship" => {
+                let mut type_match = false;
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"Type" && attr.unescape_value()?.as_ref() == rel_type {
+                        type_match = true;
+                        break;
+                    }
+                }
+                if !type_match {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+            }
+            ev => writer.write_event(ev.into_owned())?,
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn remove_vba_content_types(xml: &[u8]) -> Result<Vec<u8>, XlsxError> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Empty(e) if e.name().as_ref() == b"Override" => {
+                let mut part_name: Option<String> = None;
+                let mut content_type: Option<String> = None;
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"PartName" => part_name = Some(attr.unescape_value()?.into_owned()),
+                        b"ContentType" => content_type = Some(attr.unescape_value()?.into_owned()),
+                        _ => {}
+                    }
+                }
+
+                if part_name.as_deref() == Some("/xl/vbaProject.bin") {
+                    continue;
+                }
+
+                // Convert macro-enabled workbook content type back to `.xlsx`.
+                if part_name.as_deref() == Some("/xl/workbook.xml")
+                    && content_type
+                        .as_deref()
+                        .is_some_and(|ct| ct.contains("macroEnabled.main+xml"))
+                {
+                    let mut updated = BytesStart::new("Override");
+                    updated.push_attribute(("PartName", "/xl/workbook.xml"));
+                    updated.push_attribute((
+                        "ContentType",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                    ));
+                    writer.write_event(Event::Empty(updated))?;
+                    continue;
+                }
+
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            ev => writer.write_event(ev.into_owned())?,
+        }
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
 }
 
 fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
@@ -395,5 +504,26 @@ mod tests {
                 .expect("parse tab color"),
             None
         );
+    }
+
+    #[test]
+    fn remove_vba_project_strips_vba_parts() {
+        let fixture = load_fixture();
+        let mut pkg = XlsxPackage::from_bytes(&fixture).expect("read pkg");
+
+        assert!(pkg.vba_project_bin().is_some());
+        pkg.remove_vba_project().expect("remove vba project");
+
+        let written = pkg.write_to_bytes().expect("write pkg");
+        let pkg2 = XlsxPackage::from_bytes(&written).expect("read pkg2");
+
+        assert!(pkg2.vba_project_bin().is_none());
+
+        let ct = std::str::from_utf8(pkg2.part("[Content_Types].xml").unwrap()).unwrap();
+        assert!(!ct.contains("vbaProject.bin"));
+        assert!(!ct.contains("macroEnabled.main+xml"));
+
+        let rels = std::str::from_utf8(pkg2.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
+        assert!(!rels.contains("relationships/vbaProject"));
     }
 }

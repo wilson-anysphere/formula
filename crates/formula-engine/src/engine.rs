@@ -2688,21 +2688,34 @@ impl BytecodeColumnCache {
                 let mut values: Vec<f64> = vec![f64::NAN; len];
                 let mut blocked_rows: Vec<i32> = Vec::new();
 
+                let sheet_name = snapshot.sheet_names_by_id.get(sheet_id).map(String::as_str);
+                let provider = snapshot.external_value_provider.as_ref();
+
                 for row in 0..=*max_row {
                     let addr = CellAddr {
                         row: row as u32,
                         col: (*col) as u32,
                     };
-                    let v = snapshot
-                        .values
-                        .get(&CellKey { sheet: sheet_id, addr })
-                        .unwrap_or(&Value::Blank);
-                    match v {
-                        Value::Number(n) => values[row as usize] = *n,
-                        Value::Blank => {}
-                        // Conservative: only expose SIMD slices for dense numeric columns
-                        // (numbers + blanks). Errors/text/bools require per-cell semantics.
-                        _ => blocked_rows.push(row),
+
+                    if let Some(v) = snapshot.values.get(&CellKey { sheet: sheet_id, addr }) {
+                        match v {
+                            Value::Number(n) => values[row as usize] = *n,
+                            Value::Blank => {}
+                            // Conservative: only expose SIMD slices for dense numeric columns
+                            // (numbers + blanks). Errors/text/bools require per-cell semantics.
+                            _ => blocked_rows.push(row),
+                        }
+                        continue;
+                    }
+
+                    if let (Some(provider), Some(sheet_name)) = (provider, sheet_name) {
+                        if let Some(v) = provider.get(sheet_name, addr) {
+                            match v {
+                                Value::Number(n) => values[row as usize] = n,
+                                Value::Blank => {}
+                                _ => blocked_rows.push(row),
+                            }
+                        }
                     }
                 }
 
@@ -2754,6 +2767,14 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
                 addr,
             })
             .map(engine_value_to_bytecode)
+            .or_else(|| {
+                let provider = self.snapshot.external_value_provider.as_ref()?;
+                let sheet_name = self.snapshot.sheet_names_by_id.get(self.sheet)?;
+                provider
+                    .get(sheet_name, addr)
+                    .as_ref()
+                    .map(engine_value_to_bytecode)
+            })
             .unwrap_or(bytecode::Value::Empty)
     }
 
