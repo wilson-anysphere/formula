@@ -106,7 +106,7 @@ This document tracks every Excel feature and our implementation status. Features
 |----------|--------|-------|
 | ADDRESS | ⬜ | |
 | AREAS | ⬜ | |
-| CHOOSE | ⬜ | |
+| CHOOSE | ✅ | Supports arrays and range unions |
 | CHOOSECOLS | ⬜ | Dynamic array |
 | CHOOSEROWS | ⬜ | Dynamic array |
 | COLUMN | ⬜ | |
@@ -115,14 +115,14 @@ This document tracks every Excel feature and our implementation status. Features
 | EXPAND | ⬜ | Dynamic array |
 | FILTER | ⬜ | Dynamic array, critical |
 | FORMULATEXT | ⬜ | |
-| GETPIVOTDATA | ⬜ | Pivot integration |
-| HLOOKUP | ⬜ | Legacy but common |
+| GETPIVOTDATA | ✅ | MVP: supports tabular pivot outputs (limited layouts) |
+| HLOOKUP | ✅ | Includes wildcard exact match + approximate modes |
 | HSTACK | ⬜ | Dynamic array |
 | HYPERLINK | ⬜ | |
-| INDEX | ⬜ | Critical function |
+| INDEX | ✅ | |
 | INDIRECT | ⬜ | Volatile, complex |
 | LOOKUP | ⬜ | Legacy |
-| MATCH | ⬜ | Critical function |
+| MATCH | ✅ | Includes wildcard exact match + approximate modes |
 | OFFSET | ⬜ | Volatile |
 | ROW | ⬜ | |
 | ROWS | ⬜ | |
@@ -134,12 +134,12 @@ This document tracks every Excel feature and our implementation status. Features
 | TOROW | ⬜ | Dynamic array |
 | TRANSPOSE | ⬜ | |
 | UNIQUE | ⬜ | Dynamic array, critical |
-| VLOOKUP | ⬜ | Most used lookup |
+| VLOOKUP | ✅ | Includes wildcard exact match + approximate modes |
 | VSTACK | ⬜ | Dynamic array |
 | WRAPCOLS | ⬜ | Dynamic array |
 | WRAPROWS | ⬜ | Dynamic array |
-| XLOOKUP | ⬜ | Modern lookup, critical |
-| XMATCH | ⬜ | Modern match |
+| XLOOKUP | ✅ | Supports match_mode/search_mode + 2D return_array spilling |
+| XMATCH | ✅ | Supports match_mode/search_mode + binary search modes |
 
 ### Text Functions (P0)
 
