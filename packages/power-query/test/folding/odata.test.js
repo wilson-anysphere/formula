@@ -189,3 +189,49 @@ test("OData folding: combines source URL $filter with folded filterRows", () => 
   assert.ok(explained.plan.url.includes("Price%20gt%2020"));
   assert.ok(explained.plan.url.includes("Price%20gt%2030"));
 });
+
+test("OData folding: does not fold filterRows after take (preserves local semantics)", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_take_then_filter",
+    name: "OData take then filter",
+    source: { type: "odata", url: "https://example.com/odata/Products" },
+    steps: [
+      { id: "s1", name: "Take", operation: { type: "take", count: 5 } },
+      {
+        id: "s2",
+        name: "Filter",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "Price", operator: "greaterThan", value: 20 } },
+      },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "hybrid");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$top=5");
+  assert.deepEqual(
+    explained.steps.map((s) => s.status),
+    ["folded", "local"],
+  );
+});
+
+test("OData folding: does not fold filterRows when source URL includes $top", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_base_top_filter",
+    name: "OData base top then filter",
+    source: { type: "odata", url: "https://example.com/odata/Products?$top=5" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "Price", operator: "greaterThan", value: 20 } },
+      },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "local");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$top=5");
+  assert.deepEqual(explained.steps.map((s) => s.status), ["local"]);
+});

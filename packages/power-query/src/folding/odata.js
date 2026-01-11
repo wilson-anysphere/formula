@@ -397,6 +397,13 @@ function applyODataStep(current, operation) {
       return { ...current, select: operation.columns.slice() };
     }
     case "filterRows": {
+      // OData query options apply `$filter` *before* `$top`. If a `$top` limit is
+      // already in play (either from a previous `take` or embedded in the source
+      // URL), folding a later `filterRows` step would change semantics:
+      //   - local: take N rows, then filter
+      //   - folded: filter all rows, then take N
+      // Keep filtering local once `$top` has been introduced.
+      if (typeof current.top === "number" && Number.isFinite(current.top)) return null;
       if (Array.isArray(current.select) && current.select.length > 0) {
         const available = new Set(current.select);
         for (const col of collectPredicateColumns(operation.predicate)) {
@@ -412,6 +419,9 @@ function applyODataStep(current, operation) {
     case "sortRows": {
       if (!Array.isArray(operation.sortBy)) return null;
       if (operation.sortBy.length === 0) return { ...current };
+      // Similar to `$filter`, `$orderby` is applied before `$top` in OData.
+      // Sorting after a `take` must stay local to preserve semantics.
+      if (typeof current.top === "number" && Number.isFinite(current.top)) return null;
       if (Array.isArray(current.select) && current.select.length > 0) {
         const available = new Set(current.select);
         for (const spec of operation.sortBy) {
