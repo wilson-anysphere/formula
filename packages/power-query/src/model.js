@@ -50,22 +50,26 @@
  */
 
 /**
-  * @typedef {{
-  *   type: "database";
-  *   /**
-  *    * Optional stable identifier for the database connection.
-  *    *
-  *    * This value must be stable across refreshes (and JSON-serializable) so it
-  *    * can be used for deterministic cache keys and to decide whether folding
-  *    * can safely `merge`/`append` across queries.
-  *    *
-  *    * If omitted, callers should provide a `SqlConnector.getConnectionIdentity`
-  *    * implementation so the engine can derive a stable identity from the
-  *    * `connection` descriptor.
-  *    */
-  *   connectionId?: string;
-  *   connection: unknown;
-  *   query: string;
+ * @typedef {{
+ *   type: "database";
+ *   /**
+ *    * Optional stable identifier for the database connection.
+ *    *
+ *    * This must be stable across refreshes (and JSON-serializable) so it can be
+ *    * used for deterministic cache keys and to decide whether folding can safely
+ *    * `merge`/`append` across queries.
+ *    *
+ *    * If omitted, the engine will try to derive an identity from the connection
+ *    * descriptor:
+ *    * - Prefer `SqlConnector.getConnectionIdentity(connection)` when available.
+ *    * - Fall back to `connection.id` when present.
+ *    *
+ *    * When no stable identity is available, database sources are treated as
+ *    * non-cacheable to avoid incorrect reuse across connections.
+ *    */
+ *   connectionId?: string;
+ *   connection: unknown;
+ *   query: string;
  *   /**
  *    * SQL dialect name used for query folding / compilation.
  *    *
@@ -74,18 +78,18 @@
  *    * known to avoid generating incompatible SQL.
  *    */
  *   dialect?: "postgres" | "mysql" | "sqlite";
-  *   /**
-  *    * Optional column names for the query result.
-  *    *
-  *    * Some folding operations (e.g. `renameColumn`, `changeType`) require an
+ *   /**
+ *    * Optional column names for the query result.
+ *    *
+ *    * Some folding operations (e.g. `renameColumn`, `changeType`) require an
  *    * explicit projection list to avoid duplicate output columns. When this
-  *    * metadata is available, the folding engine can push those operations down.
-  *    *
-  *    * When omitted and SQL folding is enabled, the engine will attempt to
-  *    * discover the schema via an optional `SqlConnector.getSchema` hook.
-  *    */
-  *   columns?: string[];
-  }} DatabaseQuerySource
+ *    * metadata is available, the folding engine can push those operations down.
+ *    *
+ *    * When omitted and SQL folding is enabled, the engine may attempt to discover
+ *    * the schema via an optional `SqlConnector.getSchema` hook.
+ *    */
+ *   columns?: string[];
+ * }} DatabaseQuerySource
  */
 
 /**
