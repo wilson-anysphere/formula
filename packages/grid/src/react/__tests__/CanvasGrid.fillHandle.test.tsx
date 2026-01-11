@@ -275,4 +275,35 @@ describe("CanvasGrid fill handle", () => {
     });
     host.remove();
   });
+
+  it("hides the fill handle when interactionMode is rangeSelection", async () => {
+    const apiRef = React.createRef<GridApi>();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
+          rowCount={20}
+          colCount={10}
+          interactionMode="rangeSelection"
+          apiRef={apiRef}
+        />
+      );
+    });
+
+    await act(async () => {
+      apiRef.current?.setSelectionRange({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+    });
+
+    expect(apiRef.current?.getFillHandleRect()).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
 });

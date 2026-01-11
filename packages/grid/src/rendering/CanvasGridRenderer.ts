@@ -230,6 +230,7 @@ export class CanvasGridRenderer {
   private activeSelectionIndex = 0;
   private rangeSelection: CellRange | null = null;
   private fillPreviewRange: CellRange | null = null;
+  private fillHandleEnabled = true;
   private referenceHighlights: Array<{ range: CellRange; color: string; active: boolean }> = [];
 
   private remotePresences: GridPresence[] = [];
@@ -611,13 +612,22 @@ export class CanvasGridRenderer {
    * Returns the fill-handle rectangle for the current selection range, in viewport
    * coordinates (relative to the grid canvases).
    *
-   * The returned rectangle is clipped to the visible viewport.
+   * The returned rectangle is clipped to the visible viewport and is `null` when
+   * the handle is disabled or not visible.
    */
   getFillHandleRect(): Rect | null {
+    if (!this.fillHandleEnabled) return null;
     if (this.selectionRanges.length === 0) return null;
     const range = this.selectionRanges[this.activeSelectionIndex];
     const viewport = this.scroll.getViewportState();
     return this.fillHandleRectInViewport(range, viewport);
+  }
+
+  setFillHandleEnabled(enabled: boolean): void {
+    const next = Boolean(enabled);
+    if (next === this.fillHandleEnabled) return;
+    this.fillHandleEnabled = next;
+    this.markSelectionDirty();
   }
 
   getSelection(): Selection | null {
@@ -3041,21 +3051,23 @@ export class CanvasGridRenderer {
 
       drawRange(activeRange, { fillAlpha: 1, strokeAlpha: 1, strokeWidth: 2 });
 
-      const handleSize = 8 * this.zoom;
-      const handleRow = activeRange.endRow - 1;
-      const handleCol = activeRange.endCol - 1;
-      const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport, { clampToViewport: false });
-      if (handleCellRect && handleCellRect.width >= handleSize && handleCellRect.height >= handleSize) {
-        const handleRect: Rect = {
-          x: handleCellRect.x + handleCellRect.width - handleSize / 2,
-          y: handleCellRect.y + handleCellRect.height - handleSize / 2,
-          width: handleSize,
-          height: handleSize
-        };
-        const handleClipped = intersectRect(handleRect, intersection);
-        if (handleClipped) {
-          ctx.fillStyle = this.theme.selectionHandle;
-          ctx.fillRect(handleClipped.x, handleClipped.y, handleClipped.width, handleClipped.height);
+      if (this.fillHandleEnabled) {
+        const handleSize = 8 * this.zoom;
+        const handleRow = activeRange.endRow - 1;
+        const handleCol = activeRange.endCol - 1;
+        const handleCellRect = this.cellRectInViewport(handleRow, handleCol, viewport, { clampToViewport: false });
+        if (handleCellRect && handleCellRect.width >= handleSize && handleCellRect.height >= handleSize) {
+          const handleRect: Rect = {
+            x: handleCellRect.x + handleCellRect.width - handleSize / 2,
+            y: handleCellRect.y + handleCellRect.height - handleSize / 2,
+            width: handleSize,
+            height: handleSize
+          };
+          const handleClipped = intersectRect(handleRect, intersection);
+          if (handleClipped) {
+            ctx.fillStyle = this.theme.selectionHandle;
+            ctx.fillRect(handleClipped.x, handleClipped.y, handleClipped.width, handleClipped.height);
+          }
         }
       }
 

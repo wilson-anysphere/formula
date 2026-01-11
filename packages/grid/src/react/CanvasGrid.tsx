@@ -36,7 +36,13 @@ export interface GridApi {
   setPerfStatsEnabled(enabled: boolean): void;
   scrollToCell(row: number, col: number, opts?: { align?: ScrollToCellAlign; padding?: number }): void;
   getCellRect(row: number, col: number): { x: number; y: number; width: number; height: number } | null;
-  /** Returns the fill-handle rect for the active selection range, in viewport coordinates (clipped to the visible viewport). */
+  /**
+   * Returns the fill-handle rect for the active selection range, in viewport coordinates
+   * (clipped to the visible viewport).
+   *
+   * Returns `null` when the handle is not visible, e.g. offscreen, behind frozen
+   * rows/cols, or when `interactionMode !== "default"`.
+   */
   getFillHandleRect(): { x: number; y: number; width: number; height: number } | null;
   getViewportState(): GridViewportState | null;
   /**
@@ -653,6 +659,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
     renderer.setFrozen(frozenRows, frozenCols);
+    renderer.setFillHandleEnabled(interactionModeRef.current === "default");
     renderer.setZoom(zoomRef.current);
 
     const resize = () => {
@@ -1802,6 +1809,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       rendererRef.current?.setRangeSelection(null);
       transientRangeRef.current = null;
     }
+
+    rendererRef.current?.setFillHandleEnabled(interactionMode === "default");
   }, [interactionMode]);
 
   useEffect(() => {
