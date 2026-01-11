@@ -12,6 +12,7 @@ use formula_desktop_tauri::macro_trust::{compute_macro_fingerprint, MacroTrustSt
 use formula_desktop_tauri::macros::MacroExecutionOptions;
 use formula_desktop_tauri::state::{AppState, CellUpdateData, SharedAppState};
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Listener, Manager};
 use tokio::sync::oneshot;
@@ -19,6 +20,8 @@ use tokio::time::{timeout, Duration};
 use uuid::Uuid;
 
 const WORKBOOK_ID: &str = "local-workbook";
+
+static CLOSE_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Serialize)]
 struct CloseRequestedPayload {
@@ -192,6 +195,12 @@ fn main() {
                 // Keep the process alive so the tray icon stays available.
                 api.prevent_close();
 
+                // Avoid running multiple overlapping close flows / macros if the user triggers
+                // repeated close requests while a close prompt is still in flight.
+                if CLOSE_REQUEST_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+
                 let window = window.clone();
                 let shared_state = window.state::<SharedAppState>().inner().clone();
                 let shared_trust = window.state::<SharedMacroTrustStore>().inner().clone();
@@ -290,6 +299,7 @@ fn main() {
                     // Delegate the rest of close-handling to the frontend (unsaved changes prompt
                     // + deciding whether to hide the window or keep it open).
                     let _ = window.emit("close-requested", payload);
+                    CLOSE_REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
                 });
             }
             tauri::WindowEvent::DragDrop(drag_drop) => {
