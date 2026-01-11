@@ -34,6 +34,8 @@ MIIC...
 -----END CERTIFICATE-----
 ```
 
+For convenience, the admin API also accepts a raw base64-encoded certificate string and normalizes it to PEM. Invalid certificates are rejected with `error: "invalid_certificate"`.
+
 ## Admin APIs
 
 All endpoints require an authenticated **org admin**.

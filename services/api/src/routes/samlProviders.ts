@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import crypto from "node:crypto";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { requireOrgMfaSatisfied } from "../auth/mfa";
@@ -29,6 +30,29 @@ type AttributeMapping = {
 
 function isValidProviderId(value: string): boolean {
   return /^[a-z0-9_-]{1,64}$/.test(value);
+}
+
+function normalizeCertificatePem(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error("invalid_certificate");
+
+  let pem = trimmed;
+  if (!trimmed.includes("-----BEGIN")) {
+    const cleaned = trimmed.replace(/\s+/g, "");
+    if (!cleaned) throw new Error("invalid_certificate");
+    const lines = cleaned.match(/.{1,64}/g);
+    if (!lines) throw new Error("invalid_certificate");
+    pem = `-----BEGIN CERTIFICATE-----\n${lines.join("\n")}\n-----END CERTIFICATE-----`;
+  }
+
+  try {
+    // Throws if invalid.
+    new crypto.X509Certificate(pem);
+  } catch {
+    throw new Error("invalid_certificate");
+  }
+
+  return pem;
 }
 
 function parseAttributeMapping(value: unknown): AttributeMapping | null {
@@ -229,12 +253,14 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
       let entryPoint: string;
       let issuer: string;
       let idpIssuer: string | null = null;
+      let idpCertPem: string;
       try {
         entryPoint = validateHttpsUrl(parsed.data.entryPoint, requireHttps);
         issuer = validateIssuer(parsed.data.issuer, requireHttps);
         if (parsed.data.idpIssuer !== undefined) {
           idpIssuer = validateIssuer(parsed.data.idpIssuer, requireHttps);
         }
+        idpCertPem = normalizeCertificatePem(parsed.data.idpCertPem);
       } catch (err) {
         const code = err instanceof Error ? err.message : "invalid_request";
         return reply.code(400).send({ error: code });
@@ -288,7 +314,7 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
           entryPoint,
           issuer,
           idpIssuer,
-          parsed.data.idpCertPem,
+          idpCertPem,
           wantAssertionsSigned,
           wantResponseSigned,
           JSON.stringify(attributeMapping),

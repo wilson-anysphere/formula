@@ -239,6 +239,24 @@ describe("SAML provider admin APIs", () => {
       expect(listEmpty.statusCode).toBe(200);
       expect((listEmpty.json() as any).providers).toEqual([]);
 
+      const invalidCert = await app.inject({
+        method: "PUT",
+        url: `/orgs/${orgId}/saml/providers/badcert`,
+        headers: { cookie },
+        payload: {
+          entryPoint: "http://idp.example.test/sso",
+          issuer: "http://sp.example.test/metadata",
+          idpIssuer: "https://idp.example.test/metadata",
+          idpCertPem: "not a cert",
+          wantAssertionsSigned: true,
+          wantResponseSigned: false,
+          attributeMapping: { email: "email", name: "name" },
+          enabled: true
+        }
+      });
+      expect(invalidCert.statusCode).toBe(400);
+      expect((invalidCert.json() as any).error).toBe("invalid_certificate");
+
       const putRes = await app.inject({
         method: "PUT",
         url: `/orgs/${orgId}/saml/providers/okta`,
