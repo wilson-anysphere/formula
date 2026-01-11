@@ -352,7 +352,9 @@ fn ensure_workbook_xml_has_pivot_caches(
         .map_err(|e| ChartExtractionError::XmlNonUtf8("pivotCaches".to_string(), e))?;
 
     if pivot_caches_str.contains("r:id")
-        && !xml.contains("xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"")
+        && !xml.contains(
+            "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"",
+        )
     {
         let workbook_start = xml.find("<workbook").ok_or_else(|| {
             ChartExtractionError::XmlStructure(format!("{part_name}: missing <workbook"))
@@ -371,7 +373,17 @@ fn ensure_workbook_xml_has_pivot_caches(
     Ok(xml.into_bytes())
 }
 
-fn ensure_sheet_xml_has_pivot_tables(
+/// Merge (or insert) a `<pivotTables>` block into a worksheet XML string.
+///
+/// Ordering rules (best-effort):
+/// - If inserting a new `<pivotTables>`, place it before `<extLst>` when present.
+/// - Otherwise insert before `</worksheet>`.
+/// - Never insert inside `<sheetData>`.
+///
+/// If the worksheet already contains `<pivotTables>`, merge instead of inserting
+/// a second `<pivotTables>` section by unioning `<pivotTable r:id="..."/>`
+/// children by relationship ID.
+pub fn ensure_sheet_xml_has_pivot_tables(
     sheet_xml: &[u8],
     part_name: &str,
     pivot_tables_xml: &[u8],
@@ -380,15 +392,20 @@ fn ensure_sheet_xml_has_pivot_tables(
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?
         .to_string();
 
-    if xml.contains("<pivotTables") {
-        return Ok(sheet_xml.to_vec());
-    }
-
     let pivot_tables_str = std::str::from_utf8(pivot_tables_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8("pivotTables".to_string(), e))?;
 
-    if pivot_tables_str.contains("r:id")
-        && !xml.contains("xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"")
+    let desired_rids = extract_pivot_table_rids(pivot_tables_str, "pivotTables")?;
+    if desired_rids.is_empty() {
+        return Ok(sheet_xml.to_vec());
+    }
+
+    // Ensure the `r` namespace exists when we insert `r:id` attributes.
+    let needs_r_namespace = pivot_tables_str.contains("r:id") || xml.contains("<pivotTables");
+    if needs_r_namespace
+        && !xml.contains(
+            "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"",
+        )
     {
         let worksheet_start = xml.find("<worksheet").ok_or_else(|| {
             ChartExtractionError::XmlStructure(format!("{part_name}: missing <worksheet"))
@@ -400,14 +417,45 @@ fn ensure_sheet_xml_has_pivot_tables(
         xml.insert_str(insert_pos, &format!(" xmlns:r=\"{REL_NS}\""));
     }
 
-    let close_idx = xml.rfind("</worksheet>").ok_or_else(|| {
-        ChartExtractionError::XmlStructure(format!("{part_name}: missing </worksheet>"))
-    })?;
-    let insert_idx = xml
-        .rfind("<extLst")
-        .filter(|idx| *idx < close_idx)
-        .unwrap_or(close_idx);
-    xml.insert_str(insert_idx, pivot_tables_str);
+    let blocks = find_pivot_tables_blocks(&xml);
+    if blocks.is_empty() {
+        let insert_idx = pivot_tables_insertion_index(&xml, part_name)?;
+        xml.insert_str(insert_idx, pivot_tables_str);
+        return Ok(xml.into_bytes());
+    }
+
+    // Merge all existing `<pivotTables>` blocks (in case the worksheet is already malformed)
+    // plus the preserved block.
+    let mut merged_rids: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    for (start, end) in &blocks {
+        let block = &xml[*start..*end];
+        for rid in extract_pivot_table_rids(block, part_name)? {
+            if seen.insert(rid.clone()) {
+                merged_rids.push(rid);
+            }
+        }
+    }
+
+    for rid in desired_rids {
+        if seen.insert(rid.clone()) {
+            merged_rids.push(rid);
+        }
+    }
+
+    let merged_block = build_pivot_tables_xml(&merged_rids);
+
+    // Remove all but the first `<pivotTables>` block, then replace the first with the merged one.
+    let first = blocks[0];
+    for (start, end) in blocks.iter().rev() {
+        if (*start, *end) == first {
+            continue;
+        }
+        xml.replace_range(*start..*end, "");
+    }
+    xml.replace_range(first.0..first.1, &merged_block);
+
     Ok(xml.into_bytes())
 }
 
@@ -527,6 +575,109 @@ fn ensure_rels_has_relationships(
     }
 
     Ok((xml.into_bytes(), id_map))
+}
+
+fn xml_escape(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn sheet_data_end_idx(xml: &str) -> Option<usize> {
+    if let Some(idx) = xml.rfind("</sheetData>") {
+        return Some(idx + "</sheetData>".len());
+    }
+
+    let start = xml.find("<sheetData")?;
+    let gt_rel = xml[start..].find('>')?;
+    let gt = start + gt_rel;
+    let tag = &xml[start..=gt];
+    if tag.trim_end().ends_with("/>") {
+        return Some(gt + 1);
+    }
+
+    None
+}
+
+fn pivot_tables_insertion_index(xml: &str, part_name: &str) -> Result<usize, ChartExtractionError> {
+    let close_idx = xml.rfind("</worksheet>").ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: missing </worksheet>"))
+    })?;
+
+    let sheet_data_end = sheet_data_end_idx(xml).unwrap_or(0);
+
+    let ext_idx = xml.rfind("<extLst").filter(|idx| *idx < close_idx);
+    if let Some(ext_idx) = ext_idx {
+        if ext_idx >= sheet_data_end {
+            return Ok(ext_idx);
+        }
+    }
+
+    Ok(close_idx.max(sheet_data_end))
+}
+
+fn find_pivot_tables_blocks(xml: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut search = 0usize;
+
+    while let Some(start_rel) = xml[search..].find("<pivotTables") {
+        let start = search + start_rel;
+        let gt_rel = match xml[start..].find('>') {
+            Some(idx) => idx,
+            None => break,
+        };
+        let gt = start + gt_rel;
+        let open_tag = &xml[start..=gt];
+        let is_self_closing = open_tag.trim_end().ends_with("/>");
+        if is_self_closing {
+            out.push((start, gt + 1));
+            search = gt + 1;
+            continue;
+        }
+
+        let close_tag = "</pivotTables>";
+        let close_rel = match xml[gt + 1..].find(close_tag) {
+            Some(idx) => idx,
+            None => break,
+        };
+        let end = gt + 1 + close_rel + close_tag.len();
+        out.push((start, end));
+        search = end;
+    }
+
+    out
+}
+
+fn extract_pivot_table_rids(fragment: &str, context: &str) -> Result<Vec<String>, ChartExtractionError> {
+    let wrapped = format!("<worksheet xmlns:r=\"{REL_NS}\">{fragment}</worksheet>");
+    let doc = Document::parse(&wrapped)
+        .map_err(|e| ChartExtractionError::XmlParse(context.to_string(), e))?;
+
+    Ok(doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "pivotTable")
+        .filter_map(|n| {
+            n.attribute((REL_NS, "id"))
+                .or_else(|| n.attribute("r:id"))
+                .or_else(|| n.attribute("id"))
+        })
+        .map(|s| s.to_string())
+        .collect())
+}
+
+fn build_pivot_tables_xml(rids: &[String]) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(r#"<pivotTables count="{}">"#, rids.len()));
+    for rid in rids {
+        out.push_str(r#"<pivotTable r:id=""#);
+        out.push_str(&xml_escape(rid));
+        out.push_str(r#""/>"#);
+    }
+    out.push_str("</pivotTables>");
+    out
 }
 
 fn xml_escape(input: &str) -> String {
