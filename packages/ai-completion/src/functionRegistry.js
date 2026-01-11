@@ -6,7 +6,7 @@
  * both numbers and ranges, VLOOKUP's 4th arg is optional, etc.).
  */
 
-import FUNCTION_CATALOG from "../../../shared/functionCatalog.json" with { type: "json" };
+import FUNCTION_CATALOG from "../../../shared/functionCatalog.mjs";
 
 /**
  * @typedef {{

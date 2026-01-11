@@ -1,3 +1,5 @@
+import FUNCTION_CATALOG from "../../../../../shared/functionCatalog.mjs";
+
 export type FunctionParam = { name: string; optional?: boolean };
 
 export type FunctionSignature = {
@@ -5,8 +7,6 @@ export type FunctionSignature = {
   params: FunctionParam[];
   summary: string;
 };
-
-import FUNCTION_CATALOG from "../../../../../shared/functionCatalog.json" with { type: "json" };
 
 type CatalogFunction = {
   name: string;
