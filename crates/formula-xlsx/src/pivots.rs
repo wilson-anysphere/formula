@@ -8,6 +8,7 @@ use crate::XlsxError;
 
 pub mod cache_definition;
 pub mod cache_records;
+pub mod engine_bridge;
 pub mod graph;
 pub mod pivot_charts;
 pub mod preserve;
@@ -16,6 +17,7 @@ pub mod slicers;
 pub mod table_definition;
 
 pub use cache_definition::{PivotCacheDefinition, PivotCacheField, PivotCacheSourceType};
+pub use cache_records::{PivotCacheRecordsReader, PivotCacheValue};
 pub use graph::{PivotTableInstance, XlsxPivotGraph};
 pub use preserve::{PreservedPivotParts, RelationshipStub};
 pub use table_definition::{
