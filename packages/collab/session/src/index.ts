@@ -24,6 +24,26 @@ import {
   parseCellKey as parseCellKeyImpl,
 } from "./cell-key.js";
 
+function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
+  // Yjs root types are schema-defined: you must know whether a key is a Map or
+  // Array. When applying updates into a fresh Doc, root types can temporarily
+  // appear as a generic `AbstractType` until a constructor is chosen.
+  //
+  // Importantly, calling `doc.getMap("comments")` on an Array-backed root can
+  // define it as a Map and make the array content inaccessible. To support both
+  // historical schemas (Map or Array) we peek at the underlying state before
+  // choosing a constructor.
+  const existing = doc.share.get("comments");
+  if (!existing) return doc.getMap("comments");
+  if (existing instanceof Y.Map) return existing;
+  if (existing instanceof Y.Array) return existing;
+  const placeholder = existing as any;
+  const hasStart = placeholder?._start != null; // sequence item => likely array
+  const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
+  const kind = hasStart && mapSize === 0 ? "array" : "map";
+  return kind === "array" ? doc.getArray("comments") : doc.getMap("comments");
+}
+
 export type DocumentRole = "owner" | "admin" | "editor" | "commenter" | "viewer";
 
 export interface CellAddress {
@@ -325,7 +345,7 @@ export class CollabSession {
       // Callers typically create the comments root lazily (e.g. via
       // `doc.getMap("comments")` in CommentManager). If the session builds its
       // undo scope before that happens, comment edits won't be undoable.
-      scope.add(this.doc.getMap("comments"));
+      scope.add(getCommentsRootForUndoScope(this.doc));
 
       const builtInScopeNames = new Set(["cells", "sheets", "metadata", "namedRanges", "comments"]);
       for (const name of options.undo.scopeNames ?? []) {
