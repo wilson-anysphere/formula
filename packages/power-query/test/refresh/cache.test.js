@@ -271,6 +271,51 @@ test("QueryEngine: caches Arrow-backed Parquet results and avoids re-reading the
   assert.deepEqual(second.table.toGrid(), firstGrid);
 });
 
+test("QueryEngine: Arrow cache preserves renamed columns", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store });
+
+  const parquetPath = path.join(__dirname, "..", "..", "..", "data-io", "test", "fixtures", "simple.parquet");
+
+  let readCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readBinary: async (p) => {
+        readCount += 1;
+        return new Uint8Array(await readFile(p));
+      },
+    },
+  });
+
+  const query = {
+    id: "q_parquet_rename_cache",
+    name: "Parquet rename cache",
+    source: { type: "parquet", path: parquetPath },
+    steps: [
+      { id: "s_rename", name: "Rename", operation: { type: "renameColumn", oldName: "name", newName: "full_name" } },
+      { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id", "full_name"] } },
+    ],
+  };
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(readCount, 1);
+  assert.ok(first.table instanceof ArrowTableAdapter);
+  assert.deepEqual(first.table.toGrid(), [
+    ["id", "full_name"],
+    [1, "Alice"],
+    [2, "Bob"],
+    [3, "Carla"],
+  ]);
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, true);
+  assert.equal(readCount, 1, "cache hit should not re-read the Parquet bytes");
+  assert.ok(second.table instanceof ArrowTableAdapter);
+  assert.deepEqual(second.table.toGrid(), first.table.toGrid());
+});
+
 test("FileSystemCacheStore: persists Arrow cache blobs and avoids re-reading Parquet on cache hit", async () => {
   const cacheDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-arrow-"));
 
