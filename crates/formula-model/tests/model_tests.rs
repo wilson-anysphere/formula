@@ -1,5 +1,6 @@
 use formula_model::{
-    CellKey, CellRef, CellValue, ErrorValue, Range, Workbook, Worksheet, EXCEL_MAX_COLS,
+    CellKey, CellRef, CellValue, ErrorValue, Range, Table, TableColumn, Workbook, Worksheet,
+    EXCEL_MAX_COLS,
     EXCEL_MAX_ROWS, SCHEMA_VERSION,
 };
 
@@ -197,6 +198,42 @@ fn cell_key_encoding_round_trips() {
         assert_eq!(key.col(), col);
         assert_eq!(CellKey::from_ref(key.to_ref()).as_u64(), key.as_u64());
     }
+}
+
+#[test]
+fn workbook_sheet_by_name_is_case_insensitive() {
+    let mut workbook = Workbook::new();
+    workbook.add_sheet("Sheet1");
+    assert!(workbook.sheet_by_name("sheet1").is_some());
+    assert!(workbook.sheet_by_name("SHEET1").is_some());
+}
+
+#[test]
+fn workbook_find_table_is_case_insensitive() {
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1");
+    let sheet = workbook.sheet_mut(sheet_id).unwrap();
+    sheet.tables.push(Table {
+        id: 1,
+        name: "Table1".into(),
+        display_name: "Table1".into(),
+        range: Range::from_a1("A1:A2").unwrap(),
+        header_row_count: 1,
+        totals_row_count: 0,
+        columns: vec![TableColumn {
+            id: 1,
+            name: "Col".into(),
+            formula: None,
+            totals_formula: None,
+        }],
+        style: None,
+        auto_filter: None,
+        relationship_id: None,
+        part_path: None,
+    });
+
+    assert!(workbook.find_table("table1").is_some());
+    assert!(workbook.find_table("TABLE1").is_some());
 }
 
 #[test]

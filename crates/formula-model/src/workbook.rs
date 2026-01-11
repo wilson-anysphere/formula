@@ -180,15 +180,19 @@ impl Workbook {
         self.sheets.iter_mut().find(|s| s.id == id)
     }
 
-    /// Find a sheet by name (case sensitive, like Excel).
+    /// Find a sheet by name (case-insensitive, like Excel).
     pub fn sheet_by_name(&self, name: &str) -> Option<&Worksheet> {
-        self.sheets.iter().find(|s| s.name == name)
+        self.sheets.iter().find(|s| s.name.eq_ignore_ascii_case(name))
     }
 
     /// Find a table by its workbook-scoped name.
     pub fn find_table(&self, table_name: &str) -> Option<(&Worksheet, &Table)> {
         for sheet in &self.sheets {
-            if let Some(table) = sheet.tables.iter().find(|t| t.name == table_name) {
+            if let Some(table) = sheet
+                .tables
+                .iter()
+                .find(|t| t.name.eq_ignore_ascii_case(table_name) || t.display_name.eq_ignore_ascii_case(table_name))
+            {
                 return Some((sheet, table));
             }
         }
