@@ -83,7 +83,17 @@ function renderVerification(entry: AIAuditEntry): HTMLElement | null {
 function formatToolCall(call: AIAuditEntry["tool_calls"][number]): string {
   const approved = call.approved === undefined ? "—" : String(call.approved);
   const ok = call.ok === undefined ? "—" : String(call.ok);
-  return `${call.name} (approved: ${approved}, ok: ${ok})`;
+  const requiresApproval = call.requires_approval === undefined ? "—" : String(call.requires_approval);
+  const duration = typeof call.duration_ms === "number" && Number.isFinite(call.duration_ms) ? Math.round(call.duration_ms) : null;
+  const error =
+    typeof call.error === "string" && call.error.trim().length > 0 ? truncate(call.error.trim(), 120) : null;
+
+  const parts = [`approved: ${approved}`, `ok: ${ok}`];
+  if (requiresApproval !== "—") parts.push(`requires_approval: ${requiresApproval}`);
+  if (duration != null) parts.push(`duration: ${duration}ms`);
+  if (error) parts.push(`error: ${error}`);
+
+  return `${call.name} (${parts.join(", ")})`;
 }
 
 function extractWorkbookId(entry: AIAuditEntry): string | null {
@@ -92,6 +102,26 @@ function extractWorkbookId(entry: AIAuditEntry): string | null {
   const obj = input as Record<string, unknown>;
   const workbookId = obj.workbook_id ?? obj.workbookId;
   return typeof workbookId === "string" ? workbookId : null;
+}
+
+function truncate(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars - 1)}…`;
+}
+
+function sanitizeFileNameComponent(value: string): string {
+  // Replace characters that are problematic across filesystems (slashes, colons,
+  // etc). This is only used for download names, not for storage keys.
+  return value.replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "unknown";
+}
+
+function buildExportFileName(filters: { workbookId?: string; sessionId?: string }): string {
+  const stamp = new Date().toISOString().replaceAll(":", "-");
+  const parts: string[] = [];
+  if (filters.workbookId) parts.push(`workbook-${sanitizeFileNameComponent(filters.workbookId)}`);
+  if (filters.sessionId) parts.push(`session-${sanitizeFileNameComponent(filters.sessionId)}`);
+  const suffix = parts.length ? `-${parts.join("_")}` : "";
+  return `ai-audit-log-${stamp}${suffix}.json`;
 }
 
 export interface CreateAIAuditPanelOptions {
@@ -228,7 +258,14 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       type: "button",
       "data-testid": "ai-audit-export-json",
       onClick: () => {
-        const exp = createAuditLogExport(currentEntries);
+        const sessionId = sessionInput.value.trim();
+        const workbookId = workbookInput.value.trim();
+        const exp = createAuditLogExport(currentEntries, {
+          fileName: buildExportFileName({
+            workbookId: workbookId || undefined,
+            sessionId: sessionId || undefined,
+          }),
+        });
         downloadAuditLogExport(exp);
       },
     },
