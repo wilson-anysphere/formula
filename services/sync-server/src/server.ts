@@ -37,6 +37,7 @@ import {
   LeveldbRetentionManager,
   type LeveldbPersistenceLike,
 } from "./retention.js";
+import { requireLevelForYLeveldb } from "./leveldbLevel.js";
 import { TombstoneStore, docKeyFromDocName } from "./tombstones.js";
 import { Y } from "./yjs.js";
 import { installYwsSecurity } from "./ywsSecurity.js";
@@ -492,15 +493,7 @@ export function createSyncServer(
             ? createEncryptedLevelAdapter({
                 keyRing: config.persistence.encryption.keyRing,
                 strict: config.persistence.encryption.strict,
-              })(
-                // `level` is a transitive dependency of `y-leveldb` and won't be
-                // resolvable from the sync-server package when using pnpm's
-                // isolated node_modules layout. Resolve it relative to y-leveldb
-                // to ensure the adapter works in production installs.
-                createRequire(require.resolve("y-leveldb/package.json"))(
-                  "level"
-                ) as any
-              )
+              })(requireLevelForYLeveldb())
             : undefined;
 
         const ldb = new LeveldbPersistenceCtor(
