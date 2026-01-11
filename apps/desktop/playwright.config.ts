@@ -10,6 +10,11 @@ function withEnv(overrides: Record<string, string>): Record<string, string> {
   return { ...env, ...overrides };
 }
 
+const parsedBasePort = Number.parseInt(process.env.FORMULA_E2E_PORT ?? "4174", 10);
+const basePort = Number.isFinite(parsedBasePort) ? parsedBasePort : 4174;
+const cspPort = basePort + 1;
+const desktopPort = basePort + 2;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
@@ -24,25 +29,26 @@ export default defineConfig({
       // (No CSP header emulation here so existing network-related tests can
       // exercise the permission gating layer.)
       testIgnore: ["csp.spec.ts"],
-      use: { baseURL: "http://localhost:4176" }
+      use: { baseURL: `http://localhost:${desktopPort}` }
     },
     {
       name: "csp",
       // Run CSP/WASM/Worker checks against a dedicated server instance that
       // injects the Tauri CSP header via `FORMULA_E2E=1`.
       testMatch: ["csp.spec.ts"],
-      use: { baseURL: "http://localhost:4175" }
+      use: { baseURL: `http://localhost:${cspPort}` }
     }
   ],
   webServer: [
     {
-      command: "pnpm exec vite --port 4176 --strictPort",
-      port: 4176,
-      reuseExistingServer: false
+      command: `pnpm exec vite --port ${desktopPort} --strictPort`,
+      port: desktopPort,
+      reuseExistingServer: false,
+      env: withEnv({ FORMULA_E2E: "0" })
     },
     {
-      command: "pnpm exec vite --port 4175 --strictPort",
-      port: 4175,
+      command: `pnpm exec vite --port ${cspPort} --strictPort`,
+      port: cspPort,
       reuseExistingServer: false,
       env: withEnv({ FORMULA_E2E: "1" })
     }
