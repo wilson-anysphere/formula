@@ -51,6 +51,7 @@ Several protections depend on the derived client IP (`request.ip`):
 
 - auth rate limiting (brute-force protection)
 - org `ip_allowlist` enforcement (enterprise)
+- OIDC redirect URI derivation (when deployed behind a reverse proxy)
 
 If the API is deployed behind a trusted reverse proxy / load balancer, set:
 
