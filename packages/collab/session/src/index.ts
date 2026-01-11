@@ -11,7 +11,7 @@ import {
   type CellStructuralConflict,
   type FormulaConflict,
 } from "@formula/collab-conflicts";
-import { ensureWorkbookSchema } from "@formula/collab-workbook";
+import { ensureWorkbookSchema, getWorkbookRoots } from "@formula/collab-workbook";
 import {
   decryptCellPlaintext,
   encryptCellPlaintext,
@@ -706,10 +706,11 @@ export class CollabSession {
     const schemaDefaultSheetName = options.schema?.defaultSheetName ?? schemaDefaultSheetId;
     this.defaultSheetId = schemaDefaultSheetId;
 
-    this.cells = this.doc.getMap<unknown>("cells");
-    this.sheets = this.doc.getArray<Y.Map<unknown>>("sheets");
-    this.metadata = this.doc.getMap<unknown>("metadata");
-    this.namedRanges = this.doc.getMap<unknown>("namedRanges");
+    const roots = getWorkbookRoots(this.doc);
+    this.cells = roots.cells;
+    this.sheets = roots.sheets;
+    this.metadata = roots.metadata;
+    this.namedRanges = roots.namedRanges;
 
     this.encryption = options.encryption ?? null;
     // Bind AAD to the document id so ciphertext cannot be replayed between docs.

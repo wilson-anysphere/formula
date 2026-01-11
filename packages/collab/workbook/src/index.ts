@@ -17,11 +17,128 @@ export type WorkbookSchemaRoots = {
   namedRanges: Y.Map<unknown>;
 };
 
+function getYMap(value: unknown): any | null {
+  if (value instanceof Y.Map) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (maybe.constructor?.name !== "YMap") return null;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.set !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.keys !== "function") return null;
+  if (typeof maybe.forEach !== "function") return null;
+  return maybe;
+}
+
+function getYArray(value: unknown): any | null {
+  if (value instanceof Y.Array) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (maybe.constructor?.name !== "YArray") return null;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.toArray !== "function") return null;
+  if (typeof maybe.push !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  return maybe;
+}
+
+function isYAbstractType(value: unknown): value is Y.AbstractType<any> {
+  if (value instanceof Y.AbstractType) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = value as any;
+  if (maybe.constructor?.name === "AbstractType") return true;
+  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
+}
+
+function replaceForeignRootType<T extends Y.AbstractType<any>>(params: {
+  doc: Y.Doc;
+  name: string;
+  existing: any;
+  create: () => T;
+}): T {
+  const { doc, name, existing, create } = params;
+  const t = create();
+
+  // Mirror Yjs' own Doc.get conversion logic for AbstractType placeholders, but
+  // also support roots instantiated by a different Yjs module instance (e.g.
+  // CJS `require("yjs")`).
+  (t as any)._map = existing?._map;
+  (t as any)._start = existing?._start;
+  (t as any)._length = existing?._length;
+
+  const map = existing?._map;
+  if (map instanceof Map) {
+    map.forEach((item: any) => {
+      for (let n = item; n !== null; n = n.left) {
+        n.parent = t;
+      }
+    });
+  }
+
+  for (let n = existing?._start ?? null; n !== null; n = n.right) {
+    n.parent = t;
+  }
+
+  doc.share.set(name, t as any);
+  (t as any)._integrate(doc as any, null);
+  return t;
+}
+
+function getMapRoot<T>(doc: Y.Doc, name: string): Y.Map<T> {
+  const existing = doc.share.get(name);
+  if (!existing) return doc.getMap<T>(name);
+
+  const map = getYMap(existing);
+  if (map) {
+    return map instanceof Y.Map
+      ? (map as Y.Map<T>)
+      : (replaceForeignRootType({ doc, name, existing: map, create: () => new Y.Map() }) as any);
+  }
+
+  if (existing instanceof Y.AbstractType) {
+    return doc.getMap<T>(name);
+  }
+
+  if (isYAbstractType(existing)) {
+    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() }) as any;
+  }
+
+  throw new Error(`Unsupported Yjs root type for "${name}": ${existing?.constructor?.name ?? typeof existing}`);
+}
+
+function getArrayRoot<T>(doc: Y.Doc, name: string): Y.Array<T> {
+  const existing = doc.share.get(name);
+  if (!existing) return doc.getArray<T>(name);
+
+  const arr = getYArray(existing);
+  if (arr) {
+    return arr instanceof Y.Array
+      ? (arr as Y.Array<T>)
+      : (replaceForeignRootType({ doc, name, existing: arr, create: () => new Y.Array() }) as any);
+  }
+
+  if (existing instanceof Y.AbstractType) {
+    return doc.getArray<T>(name);
+  }
+
+  if (isYAbstractType(existing)) {
+    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Array() }) as any;
+  }
+
+  throw new Error(`Unsupported Yjs root type for "${name}": ${existing?.constructor?.name ?? typeof existing}`);
+}
+
+export function getWorkbookRoots(doc: Y.Doc): WorkbookSchemaRoots {
+  return {
+    cells: getMapRoot<unknown>(doc, "cells"),
+    sheets: getArrayRoot<Y.Map<unknown>>(doc, "sheets") as Y.Array<Y.Map<unknown>>,
+    metadata: getMapRoot<unknown>(doc, "metadata"),
+    namedRanges: getMapRoot<unknown>(doc, "namedRanges"),
+  };
+}
+
 export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions = {}): WorkbookSchemaRoots {
-  const cells = doc.getMap<unknown>("cells");
-  const sheets = doc.getArray<Y.Map<unknown>>("sheets");
-  const metadata = doc.getMap<unknown>("metadata");
-  const namedRanges = doc.getMap<unknown>("namedRanges");
+  const { cells, sheets, metadata, namedRanges } = getWorkbookRoots(doc);
   const YMapCtor = cells.constructor as unknown as { new (): Y.Map<unknown> };
 
   const defaultSheetId = options.defaultSheetId ?? "Sheet1";
@@ -215,9 +332,10 @@ export class SheetManager {
   private readonly YTextCtor: { new (): Y.Text };
 
   constructor(opts: { doc: Y.Doc; transact?: WorkbookTransact }) {
-    this.sheets = opts.doc.getArray<Y.Map<unknown>>("sheets");
+    const cells = getMapRoot<unknown>(opts.doc, "cells");
+    this.sheets = getArrayRoot<Y.Map<unknown>>(opts.doc, "sheets") as Y.Array<Y.Map<unknown>>;
     this.transact = opts.transact ?? defaultTransact(opts.doc);
-    this.YMapCtor = opts.doc.getMap("cells").constructor as unknown as { new (): Y.Map<unknown> };
+    this.YMapCtor = cells.constructor as unknown as { new (): Y.Map<unknown> };
     this.YArrayCtor = this.sheets.constructor as unknown as { new (): Y.Array<any> };
     this.YTextCtor = getDocTextConstructor(opts.doc) as unknown as { new (): Y.Text };
   }
@@ -328,7 +446,7 @@ export class NamedRangeManager {
   private readonly transact: WorkbookTransact;
 
   constructor(opts: { doc: Y.Doc; transact?: WorkbookTransact }) {
-    this.namedRanges = opts.doc.getMap<unknown>("namedRanges");
+    this.namedRanges = getMapRoot<unknown>(opts.doc, "namedRanges");
     this.transact = opts.transact ?? defaultTransact(opts.doc);
   }
 
@@ -354,7 +472,7 @@ export class MetadataManager {
   private readonly transact: WorkbookTransact;
 
   constructor(opts: { doc: Y.Doc; transact?: WorkbookTransact }) {
-    this.metadata = opts.doc.getMap<unknown>("metadata");
+    this.metadata = getMapRoot<unknown>(opts.doc, "metadata");
     this.transact = opts.transact ?? defaultTransact(opts.doc);
   }
 

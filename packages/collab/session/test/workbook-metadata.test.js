@@ -164,6 +164,38 @@ test("CollabSession SheetManager.moveSheet works with sheets created by a differ
   remote.destroy();
 });
 
+test("CollabSession initializes when workbook roots were created by a different Yjs instance (CJS getArray/getMap)", () => {
+  const require = createRequire(import.meta.url);
+  // eslint-disable-next-line import/no-named-as-default-member
+  const Ycjs = require("yjs");
+
+  const doc = new Y.Doc();
+
+  // Simulate a mixed module loader environment where another Yjs instance eagerly
+  // instantiates the workbook roots before CollabSession is constructed.
+  Ycjs.Doc.prototype.getMap.call(doc, "cells");
+  Ycjs.Doc.prototype.getArray.call(doc, "sheets");
+  Ycjs.Doc.prototype.getMap.call(doc, "metadata");
+  Ycjs.Doc.prototype.getMap.call(doc, "namedRanges");
+
+  const session = createCollabSession({ doc, undo: {} });
+
+  assert.ok(doc.share.get("cells") instanceof Y.Map);
+  assert.ok(doc.share.get("sheets") instanceof Y.Array);
+  assert.ok(doc.share.get("metadata") instanceof Y.Map);
+  assert.ok(doc.share.get("namedRanges") instanceof Y.Map);
+
+  assert.ok(session.sheets.length >= 1);
+
+  const sheetsMgr = createSheetManagerForSession(session);
+  sheetsMgr.addSheet({ id: "Sheet2", name: "Sheet2" });
+  session.undo?.stopCapturing();
+  assert.deepEqual(snapshotSheets(session).map((s) => s.id), ["Sheet1", "Sheet2"]);
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession schema normalizes duplicate sheet ids when docs merge (in-memory)", () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
