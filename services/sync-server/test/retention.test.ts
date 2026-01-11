@@ -86,10 +86,16 @@ function createConfig(ttlMs: number): SyncServerConfig {
     trustProxy: false,
     gc: true,
     dataDir: ":memory:",
-    persistence: { backend: "leveldb", compactAfterUpdates: 10 },
+    disableDataDirLock: true,
+    persistence: {
+      backend: "leveldb",
+      compactAfterUpdates: 10,
+      leveldbDocNameHashing: false,
+      encryption: { mode: "off" },
+    },
     auth: { mode: "opaque", token: "test-token" },
     internalAdminToken: "admin-token",
-    retention: { ttlMs, sweepIntervalMs: 0 },
+    retention: { ttlMs, sweepIntervalMs: 0, tombstoneTtlMs: 7 * 24 * 60 * 60 * 1000 },
     limits: {
       maxConnections: 100,
       maxConnectionsPerIp: 25,

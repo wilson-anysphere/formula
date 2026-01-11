@@ -71,6 +71,43 @@ function yjsFilePathForDoc(dataDir: string, docName: string): string {
   return path.join(dataDir, `${id}.yjs`);
 }
 
+async function expectWsUpgradeStatus(
+  url: string,
+  expectedStatusCode: number
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const ws = new WebSocket(url);
+    let finished = false;
+
+    const finish = (cb: () => void) => {
+      if (finished) return;
+      finished = true;
+      try {
+        ws.terminate();
+      } catch {
+        // ignore
+      }
+      cb();
+    };
+
+    ws.on("open", () => {
+      finish(() => reject(new Error("Expected WebSocket upgrade rejection")));
+    });
+    ws.on("unexpected-response", (_req, res) => {
+      try {
+        assert.equal(res.statusCode, expectedStatusCode);
+        finish(resolve);
+      } catch (err) {
+        finish(() => reject(err));
+      }
+    });
+    ws.on("error", (err) => {
+      if (finished) return;
+      reject(err);
+    });
+  });
+}
+
 function encodeVarUint(value: number): Uint8Array {
   const bytes: number[] = [];
   let v = value;
@@ -361,23 +398,10 @@ test("purges persisted documents via internal admin API", async (t) => {
     },
   });
 
-  const doc4 = new Y.Doc();
-  const provider4 = new WebsocketProvider(wsUrl, docName, doc4, {
-    WebSocketPolyfill: WebSocket,
-    disableBc: true,
-    params: { token: "test-token" },
-  });
-
-  t.after(() => {
-    provider4.destroy();
-    doc4.destroy();
-  });
-
-  await waitForProviderSync(provider4);
-  assert.equal(doc4.getText("t").toString(), "");
-
-  provider4.destroy();
-  doc4.destroy();
+  await expectWsUpgradeStatus(
+    `${wsUrl}/${encodeURIComponent(docName)}?token=test-token`,
+    410
+  );
 
   await server.stop();
   server = await startSyncServer({

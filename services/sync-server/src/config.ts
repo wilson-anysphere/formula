@@ -53,14 +53,12 @@ export type SyncServerConfig = {
    * Optional shared secret for internal admin endpoints (purge, retention ops, etc).
    *
    * Disabled by default. To enable, set `SYNC_SERVER_INTERNAL_ADMIN_TOKEN`.
-   * For convenience in multi-service deployments, `INTERNAL_ADMIN_TOKEN` is also
-   * accepted as a fallback unless `SYNC_SERVER_INTERNAL_ADMIN_TOKEN` is set
-   * (even to an empty string).
    */
   internalAdminToken: string | null;
   retention: {
     ttlMs: number;
     sweepIntervalMs: number;
+    tombstoneTtlMs: number;
   };
 
   limits: {
@@ -180,12 +178,6 @@ export function loadConfigFromEnv(): SyncServerConfig {
     process.env.SYNC_SERVER_LEVELDB_DOCNAME_HASHING,
     false
   );
-
-  const internalAdminToken =
-    process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN !== undefined
-      ? process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN || null
-      : process.env.INTERNAL_ADMIN_TOKEN || null;
-
   const retentionTtlMs = envInt(process.env.SYNC_SERVER_RETENTION_TTL_MS, 0);
   const retentionSweepIntervalMs = envInt(
     process.env.SYNC_SERVER_RETENTION_SWEEP_INTERVAL_MS,
@@ -194,6 +186,21 @@ export function loadConfigFromEnv(): SyncServerConfig {
 
   const opaqueToken = process.env.SYNC_SERVER_AUTH_TOKEN;
   const jwtSecret = process.env.SYNC_SERVER_JWT_SECRET;
+
+  const internalAdminTokenEnv = process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN;
+  const internalAdminToken =
+    internalAdminTokenEnv && internalAdminTokenEnv.length > 0
+      ? internalAdminTokenEnv
+      : null;
+
+  const defaultTombstoneTtlMs = 7 * 24 * 60 * 60 * 1000;
+  const tombstoneTtlMs =
+    process.env.SYNC_SERVER_TOMBSTONE_TTL_MS !== undefined &&
+    process.env.SYNC_SERVER_TOMBSTONE_TTL_MS !== ""
+      ? envInt(process.env.SYNC_SERVER_TOMBSTONE_TTL_MS, defaultTombstoneTtlMs)
+      : retentionTtlMs > 0
+        ? retentionTtlMs
+        : defaultTombstoneTtlMs;
 
   let auth: AuthMode;
   if (opaqueToken) {
@@ -234,6 +241,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
     retention: {
       ttlMs: retentionTtlMs,
       sweepIntervalMs: retentionSweepIntervalMs,
+      tombstoneTtlMs,
     },
     limits: {
       maxConnections: envInt(process.env.SYNC_SERVER_MAX_CONNECTIONS, 1000),

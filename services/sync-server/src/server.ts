@@ -1,12 +1,13 @@
 import http from "node:http";
+import type { IncomingMessage } from "node:http";
 import { promises as fs } from "node:fs";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
+import path from "node:path";
 import type { Duplex } from "node:stream";
 
 import type { Logger } from "pino";
 import WebSocket, { WebSocketServer } from "ws";
-import type { IncomingMessage } from "node:http";
 
 // y-websocket ships its server utilities as a CommonJS file under bin/.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -36,6 +37,7 @@ import {
   LeveldbRetentionManager,
   type LeveldbPersistenceLike,
 } from "./retention.js";
+import { TombstoneStore, docKeyFromDocName } from "./tombstones.js";
 import { Y } from "./yjs.js";
 import { installYwsSecurity } from "./ywsSecurity.js";
 
@@ -79,6 +81,53 @@ function sendUpgradeRejection(
   socket.destroy();
 }
 
+function sendJson(
+  res: http.ServerResponse,
+  statusCode: number,
+  body: unknown
+): void {
+  res.writeHead(statusCode, { "content-type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
+async function countPersistedDocBlobsOnDisk(dir: string): Promise<number> {
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    return entries.filter((e) => e.isFile() && e.name.endsWith(".yjs")).length;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return 0;
+    throw err;
+  }
+}
+
+async function getDirectoryStats(dir: string): Promise<{
+  fileCount: number;
+  sizeBytes: number;
+}> {
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    let fileCount = 0;
+    let sizeBytes = 0;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      fileCount += 1;
+      const st = await fs.stat(path.join(dir, entry.name));
+      sizeBytes += st.size;
+    }
+    return { fileCount, sizeBytes };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { fileCount: 0, sizeBytes: 0 };
+    throw err;
+  }
+}
+
+function toErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return typeof err === "string" ? err : JSON.stringify(err);
+}
+
 export type SyncServerHandle = {
   start: () => Promise<{ port: number }>;
   stop: () => Promise<void>;
@@ -115,66 +164,19 @@ export function createSyncServer(
 
   const activeSocketsByDoc = new Map<string, Set<WebSocket>>();
 
-  // When a document is purged while clients are connected, y-websocket can
-  // re-persist it via in-flight updates and `writeState()` on last disconnect.
-  // Tombstoning prevents persistence until all connections are closed.
-  const tombstonedDocs = new Set<string>();
-  const tombstoneForceTimers = new Map<string, NodeJS.Timeout>();
-  const tombstoneGraceTimers = new Map<string, NodeJS.Timeout>();
-  const tombstoneGraceMs = 500;
-  const tombstoneMaxMs = 30_000;
+  const tombstones = new TombstoneStore(config.dataDir, logger);
+  const shouldPersist = (docName: string) => !tombstones.has(docKeyFromDocName(docName));
 
-  const shouldPersist = (docName: string) => !tombstonedDocs.has(docName);
-
-  const tombstoneDoc = (docName: string) => {
-    tombstonedDocs.add(docName);
-
-    const grace = tombstoneGraceTimers.get(docName);
-    if (grace) {
-      clearTimeout(grace);
-      tombstoneGraceTimers.delete(docName);
-    }
-
-    if (!tombstoneForceTimers.has(docName)) {
-      const forceTimer = setTimeout(() => {
-        tombstonedDocs.delete(docName);
-        tombstoneForceTimers.delete(docName);
-        const pendingGrace = tombstoneGraceTimers.get(docName);
-        if (pendingGrace) {
-          clearTimeout(pendingGrace);
-          tombstoneGraceTimers.delete(docName);
-        }
-        logger.warn({ docName }, "internal_doc_tombstone_force_cleared");
-      }, tombstoneMaxMs);
-      forceTimer.unref();
-      tombstoneForceTimers.set(docName, forceTimer);
-    }
+  type TombstoneSweepResult = {
+    expiredTombstonesRemoved: number;
+    tombstonesProcessed: number;
+    docBlobsDeleted: number;
+    errors: Array<{ docKey: string; error: string }>;
   };
 
-  const maybeClearTombstone = (docName: string) => {
-    if (!tombstonedDocs.has(docName)) return;
-    const active = activeSocketsByDoc.get(docName);
-    if (active && active.size > 0) return;
-    if (tombstoneGraceTimers.has(docName)) return;
-
-    const graceTimer = setTimeout(() => {
-      const stillActive = activeSocketsByDoc.get(docName);
-      if (stillActive && stillActive.size > 0) {
-        tombstoneGraceTimers.delete(docName);
-        return;
-      }
-
-      tombstonedDocs.delete(docName);
-      const force = tombstoneForceTimers.get(docName);
-      if (force) {
-        clearTimeout(force);
-        tombstoneForceTimers.delete(docName);
-      }
-      tombstoneGraceTimers.delete(docName);
-    }, tombstoneGraceMs);
-    graceTimer.unref();
-    tombstoneGraceTimers.set(docName, graceTimer);
-  };
+  let tombstoneSweepTimer: NodeJS.Timeout | null = null;
+  let tombstoneSweepInFlight: Promise<TombstoneSweepResult> | null = null;
+  let tombstoneSweepCursor = 0;
 
   let dataDirLock: DataDirLockHandle | null = null;
   let persistenceInitialized = false;
@@ -223,6 +225,7 @@ export function createSyncServer(
 
     const nodeEnv = process.env.NODE_ENV ?? "development";
     const leveldbEncryption = config.persistence.leveldbEncryption ?? null;
+    await tombstones.init();
 
     if (config.persistence.backend === "file") {
       if (config.persistence.encryption.mode === "keyring") {
@@ -257,8 +260,7 @@ export function createSyncServer(
         shouldPersist
       );
       setPersistence(persistence);
-      clearPersistedDocument = (docName: string) =>
-        persistence.clearDocument(docName);
+      clearPersistedDocument = (docName: string) => persistence.clearDocument(docName);
       logger.info(
         {
           dir: config.dataDir,
@@ -479,8 +481,7 @@ export function createSyncServer(
           shouldPersist
         );
         setPersistence(persistence);
-        clearPersistedDocument = (docName: string) =>
-          persistence.clearDocument(docName);
+        clearPersistedDocument = (docName: string) => persistence.clearDocument(docName);
         return;
       }
 
@@ -710,10 +711,7 @@ export function createSyncServer(
       } catch (err) {
         if (attempt < maxAttempts && isLockError(err)) {
           const delayMs = 50 * Math.pow(2, attempt - 1);
-          logger.warn(
-            { err, attempt, delayMs },
-            "leveldb_locked_retrying_open"
-          );
+          logger.warn({ err, attempt, delayMs }, "leveldb_locked_retrying_open");
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
         }
@@ -722,14 +720,68 @@ export function createSyncServer(
     }
   };
 
-  const sendJson = (
-    res: http.ServerResponse,
-    statusCode: number,
-    body: any
-  ) => {
-    res.writeHead(statusCode, { "content-type": "application/json" });
-    res.end(JSON.stringify(body));
+  const sweepTombstonesOnce = async (): Promise<TombstoneSweepResult> => {
+    await initPersistence();
+
+    const { expiredDocKeys } = await tombstones.sweepExpired(
+      config.retention.tombstoneTtlMs
+    );
+
+    const errors: Array<{ docKey: string; error: string }> = [];
+
+    if (persistenceBackend !== "file") {
+      tombstoneSweepCursor = 0;
+      return {
+        expiredTombstonesRemoved: expiredDocKeys.length,
+        tombstonesProcessed: 0,
+        docBlobsDeleted: 0,
+        errors,
+      };
+    }
+
+    const docKeys = tombstones
+      .entries()
+      .map(([docKey]) => docKey)
+      .sort((a, b) => a.localeCompare(b));
+
+    const SWEEP_DOC_LIMIT = 100;
+    const limit = Math.min(SWEEP_DOC_LIMIT, docKeys.length);
+
+    let processed = 0;
+    let deleted = 0;
+
+    if (limit > 0) {
+      const start = tombstoneSweepCursor % docKeys.length;
+      for (let i = 0; i < limit; i += 1) {
+        const docKey = docKeys[(start + i) % docKeys.length]!;
+        processed += 1;
+        try {
+          await fs.rm(path.join(config.dataDir, `${docKey}.yjs`), { force: true });
+          deleted += 1;
+        } catch (err) {
+          errors.push({ docKey, error: toErrorMessage(err) });
+        }
+      }
+      tombstoneSweepCursor = (start + processed) % docKeys.length;
+    }
+
+    return {
+      expiredTombstonesRemoved: expiredDocKeys.length,
+      tombstonesProcessed: processed,
+      docBlobsDeleted: deleted,
+      errors,
+    };
   };
+
+  const triggerTombstoneSweep = async (): Promise<TombstoneSweepResult> => {
+    if (tombstoneSweepInFlight) return await tombstoneSweepInFlight;
+    tombstoneSweepInFlight = sweepTombstonesOnce().finally(() => {
+      tombstoneSweepInFlight = null;
+    });
+    return await tombstoneSweepInFlight;
+  };
+
+  const wss = new WebSocketServer({ noServer: true });
 
   const server = http.createServer((req, res) => {
     void (async () => {
@@ -739,15 +791,6 @@ export function createSyncServer(
       }
 
       const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
-      if (req.method === "GET" && url.pathname === "/healthz") {
-        const snapshot = connectionTracker.snapshot();
-        sendJson(res, 200, {
-          status: "ok",
-          uptimeSec: Math.round(process.uptime()),
-          connections: snapshot,
-        });
-        return;
-      }
 
       if (req.method === "GET" && url.pathname === "/readyz") {
         if (!dataDirLock) {
@@ -760,11 +803,25 @@ export function createSyncServer(
           return;
         }
 
-        sendJson(res, 200, { status: "ok" });
+        const ready = persistenceInitialized && tombstones.isInitialized();
+        sendJson(res, ready ? 200 : 503, { status: ready ? "ready" : "not_ready" });
         return;
       }
 
-      if (req.method === "POST" && url.pathname === "/internal/retention/sweep") {
+      if (req.method === "GET" && url.pathname === "/healthz") {
+        const snapshot = connectionTracker.snapshot();
+        sendJson(res, 200, {
+          status: "ok",
+          uptimeSec: Math.round(process.uptime()),
+          connections: snapshot,
+          backend: persistenceBackend ?? config.persistence.backend,
+          encryptionEnabled: config.persistence.encryption.mode !== "off",
+          tombstonesCount: tombstones.count(),
+        });
+        return;
+      }
+
+      if (url.pathname.startsWith("/internal/")) {
         req.resume();
 
         if (!config.internalAdminToken) {
@@ -773,89 +830,92 @@ export function createSyncServer(
         }
 
         const header = req.headers["x-internal-admin-token"];
-        const provided = Array.isArray(header) ? header[0] : header;
+        const provided =
+          typeof header === "string"
+            ? header
+            : Array.isArray(header)
+              ? header[0]
+              : undefined;
         if (provided !== config.internalAdminToken) {
           sendJson(res, 403, { error: "forbidden" });
           return;
         }
 
-        if (config.retention.ttlMs <= 0) {
-          sendJson(res, 400, {
-            error: "retention_disabled",
-            message:
-              "Retention is disabled. Set SYNC_SERVER_RETENTION_TTL_MS to a positive integer (milliseconds).",
+        if (req.method === "GET" && url.pathname === "/internal/stats") {
+          const backend = persistenceBackend ?? config.persistence.backend;
+          const persistedDocBlobsCount =
+            backend === "file"
+              ? await countPersistedDocBlobsOnDisk(config.dataDir)
+              : null;
+          const leveldbStats =
+            backend === "leveldb" ? await getDirectoryStats(config.dataDir) : null;
+
+          const topDocs = [...activeSocketsByDoc.entries()]
+            .map(([docName, sockets]) => ({ docName, connections: sockets.size }))
+            .filter((d) => d.connections > 0)
+            .sort((a, b) => b.connections - a.connections)
+            .slice(0, 10);
+
+          sendJson(res, 200, {
+            ok: true,
+            persistence: {
+              backend,
+              dataDir: config.dataDir,
+              persistedDocBlobsCount,
+              leveldbStats,
+            },
+            encryptionEnabled: config.persistence.encryption.mode !== "off",
+            tombstonesCount: tombstones.count(),
+            connections: {
+              ...connectionTracker.snapshot(),
+              wsTotal: wss.clients.size,
+              topDocs,
+            },
           });
           return;
         }
 
-        if (!retentionManager) {
-          sendJson(res, 400, {
-            error: "retention_not_supported",
-            message:
-              "Retention is only supported when SYNC_SERVER_PERSISTENCE_BACKEND=leveldb and y-leveldb is installed.",
-          });
-          return;
-        }
-
-        const result = await retentionManager.sweep();
-        sendJson(res, 200, { ok: true, ...result });
-        return;
-      }
-
-      const internalPrefix = "/internal/docs";
-      if (
-        url.pathname === internalPrefix ||
-        url.pathname.startsWith(`${internalPrefix}/`)
-      ) {
-        const ip = pickIp(req, config.trustProxy);
-        if (!config.internalAdminToken) {
-          logger.warn(
-            { ip, path: url.pathname, reason: "disabled" },
-            "internal_doc_purge_rejected"
-          );
-          sendJson(res, 404, { error: "not_found" });
-          return;
-        }
-
-        const header = req.headers["x-internal-admin-token"];
-        const provided = Array.isArray(header) ? header[0] : header;
-        if (provided !== config.internalAdminToken) {
-          logger.warn(
-            { ip, path: url.pathname, reason: "forbidden" },
-            "internal_doc_purge_rejected"
-          );
-          sendJson(res, 403, { error: "forbidden" });
-          return;
-        }
-
-        if (req.method === "DELETE") {
-          let docName = "";
-          if (url.pathname.startsWith(`${internalPrefix}/`)) {
-            try {
-              docName = decodeURIComponent(
-                url.pathname.slice(`${internalPrefix}/`.length)
-              );
-            } catch {
-              logger.warn(
-                { ip, reason: "invalid_doc_name" },
-                "internal_doc_purge_rejected"
-              );
-              sendJson(res, 400, { error: "bad_request" });
+        if (req.method === "POST" && url.pathname === "/internal/retention/sweep") {
+          if (retentionManager) {
+            if (config.retention.ttlMs <= 0) {
+              sendJson(res, 400, {
+                error: "retention_disabled",
+                message:
+                  "Retention is disabled. Set SYNC_SERVER_RETENTION_TTL_MS to a positive integer (milliseconds).",
+              });
               return;
             }
+
+            const result = await retentionManager.sweep();
+            sendJson(res, 200, { ok: true, ...result });
+            return;
           }
-          if (!docName) {
-            logger.warn(
-              { ip, reason: "missing_doc_name" },
-              "internal_doc_purge_rejected"
+
+          const result = await triggerTombstoneSweep();
+          sendJson(res, 200, { ok: true, ...result });
+          return;
+        }
+
+        if (req.method === "DELETE" && url.pathname.startsWith("/internal/docs/")) {
+          const ip = pickIp(req, config.trustProxy);
+          let docName: string;
+          try {
+            docName = decodeURIComponent(
+              url.pathname.slice("/internal/docs/".length)
             );
+          } catch {
+            logger.warn({ ip, reason: "invalid_doc_name" }, "internal_doc_purge_rejected");
             sendJson(res, 400, { error: "bad_request" });
             return;
           }
 
-          logger.info({ ip, docName }, "internal_doc_purge_requested");
+          if (!docName) {
+            sendJson(res, 400, { error: "missing_doc_id" });
+            return;
+          }
 
-          tombstoneDoc(docName);
+          const docKey = docKeyFromDocName(docName);
+          await tombstones.set(docKey);
 
           const sockets = activeSocketsByDoc.get(docName);
           const socketCount = sockets?.size ?? 0;
@@ -868,10 +928,9 @@ export function createSyncServer(
           }
 
           await clearPersistedDocument(docName);
-          maybeClearTombstone(docName);
 
           logger.info(
-            { docName, backend: persistenceBackend, terminated: socketCount },
+            { ip, docName, docKey, backend: persistenceBackend, terminated: socketCount },
             "internal_doc_purge_completed"
           );
           sendJson(res, 200, { ok: true });
@@ -892,8 +951,6 @@ export function createSyncServer(
       sendJson(res, 500, { error: "internal_error" });
     });
   });
-
-  const wss = new WebSocketServer({ noServer: true });
 
   wss.on("connection", (ws, req) => {
     const ip = pickIp(req, config.trustProxy);
@@ -943,11 +1000,7 @@ export function createSyncServer(
         sockets.delete(ws);
         if (sockets.size === 0) activeSocketsByDoc.delete(docName);
       }
-      maybeClearTombstone(docName);
-      logger.info(
-        { ip, docName, userId: authCtx?.userId },
-        "ws_connection_closed"
-      );
+      logger.info({ ip, docName, userId: authCtx?.userId }, "ws_connection_closed");
     });
 
     ws.on("error", (err) => {
@@ -997,11 +1050,6 @@ export function createSyncServer(
         sendUpgradeRejection(socket, 400, "Missing document id");
         return;
       }
-      if (tombstonedDocs.has(docName)) {
-        sendUpgradeRejection(socket, 503, "Document is being purged");
-        logger.warn({ ip, docName }, "ws_connection_rejected_doc_tombstoned");
-        return;
-      }
 
       const persistedName = persistedDocNameForLeveldb(docName);
 
@@ -1020,6 +1068,12 @@ export function createSyncServer(
           return;
         }
         throw err;
+      }
+
+      const docKey = docKeyFromDocName(docName);
+      if (tombstones.has(docKey)) {
+        sendUpgradeRejection(socket, 410, "Gone");
+        return;
       }
 
       const connResult = connectionTracker.tryRegister(ip);
@@ -1106,6 +1160,16 @@ export function createSyncServer(
       }
       const addr = server.address() as AddressInfo | null;
       const port = addr?.port ?? config.port;
+
+      if (config.retention.sweepIntervalMs > 0) {
+        tombstoneSweepTimer = setInterval(() => {
+          void triggerTombstoneSweep().catch((err) =>
+            logger.error({ err }, "tombstone_sweep_failed")
+          );
+        }, config.retention.sweepIntervalMs);
+        tombstoneSweepTimer.unref();
+      }
+
       logger.info(
         {
           host: config.host,
@@ -1119,6 +1183,12 @@ export function createSyncServer(
     },
 
     async stop() {
+      if (tombstoneSweepTimer) {
+        clearInterval(tombstoneSweepTimer);
+        tombstoneSweepTimer = null;
+      }
+      if (tombstoneSweepInFlight) await tombstoneSweepInFlight;
+
       for (const ws of wss.clients) ws.terminate();
 
       await new Promise<void>((resolve) => wss.close(() => resolve()));
