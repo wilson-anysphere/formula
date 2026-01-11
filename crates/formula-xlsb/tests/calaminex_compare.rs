@@ -113,6 +113,45 @@ fn formulas_match_calamine_for_generated_fixture() {
         ],
     );
 
+    builder.set_cell_formula_bool(
+        3,
+        0,
+        true,
+        // `TRUE`
+        vec![0x1D, 0x01],
+    );
+
+    let mut ptg_num_plus_int = Vec::new();
+    ptg_num_plus_int.push(0x1F);
+    ptg_num_plus_int.extend_from_slice(&1.5f64.to_le_bytes());
+    ptg_num_plus_int.extend_from_slice(&[0x1E, 0x02, 0x00, 0x03]); // 2, +
+    builder.set_cell_formula_num(3, 1, 3.5, ptg_num_plus_int, Vec::new());
+
+    builder.set_cell_formula_err(
+        3,
+        2,
+        0x00, // #NULL!
+        // `A1 B1` (intersection)
+        vec![
+            0x24, 0, 0, 0, 0, 0x00, 0xC0, // A1
+            0x24, 0, 0, 0, 0, 0x01, 0xC0, // B1
+            0x0F, // intersection
+        ],
+    );
+
+    builder.set_cell_formula_num(
+        3,
+        3,
+        3.0,
+        // `$A$1+$B1`
+        vec![
+            0x24, 0, 0, 0, 0, 0x00, 0x00, // $A$1
+            0x24, 0, 0, 0, 0, 0x01, 0x40, // $B1
+            0x03, // +
+        ],
+        Vec::new(),
+    );
+
     let bytes = builder.build_bytes();
     let mut tmp = tempfile::Builder::new()
         .prefix("formula_xlsb_generated_")
@@ -404,4 +443,29 @@ fn col_label(mut col: u32) -> String {
         col = (col - 1) / 26;
     }
     buf.iter().rev().collect()
+}
+
+#[test]
+fn normalize_formula_preserves_intersection_space() {
+    assert_eq!(normalize_formula_for_compare("=A1   B1"), "=A1 B1");
+}
+
+#[test]
+fn normalize_formula_drops_trivial_whitespace() {
+    assert_eq!(normalize_formula_for_compare("= A1 +  B1 "), "=A1+B1");
+    assert_eq!(normalize_formula_for_compare("=A1 , B1"), "=A1,B1");
+    assert_eq!(normalize_formula_for_compare("=A1 : B1"), "=A1:B1");
+    assert_eq!(normalize_formula_for_compare("=A1 ! B1"), "=A1!B1");
+}
+
+#[test]
+fn normalize_formula_preserves_string_literals_and_quoted_identifiers() {
+    assert_eq!(
+        normalize_formula_for_compare("= \"a  b\" & \"C\""),
+        "=\"a  b\"&\"C\""
+    );
+    assert_eq!(
+        normalize_formula_for_compare("='My Sheet' ! a1"),
+        "='My Sheet'!A1"
+    );
 }
