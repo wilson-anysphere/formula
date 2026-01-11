@@ -280,7 +280,7 @@ function createPreviewEvaluator(params: {
       if (!name) return null;
       const entry = namedRanges.get(name.trim().toUpperCase());
       if (!entry) return null;
-      if (entry.sheetName && entry.sheetName.toLowerCase() !== sheetId.toLowerCase()) return null;
+      if (entry.sheetName) return `${entry.sheetName}!${entry.ref}`;
       return entry.ref;
     };
 
