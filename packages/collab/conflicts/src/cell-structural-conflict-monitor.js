@@ -44,10 +44,12 @@ export class CellStructuralConflictMonitor {
    * @param {Y.Doc} opts.doc
    * @param {Y.Map<any>} [opts.cells]
    * @param {string} opts.localUserId
-   * @param {any} [opts.origin]
-   * @param {Set<any>} [opts.localOrigins]
-   * @param {(conflict: CellStructuralConflict) => void} opts.onConflict
-   */
+ * @param {any} [opts.origin]
+ * @param {Set<any>} [opts.localOrigins]
+ * @param {(conflict: CellStructuralConflict) => void} opts.onConflict
+ * @param {number} [opts.maxOpRecordsPerUser] Maximum number of structural op
+ *   records to retain per user in the shared `cellStructuralOps` log.
+ */
   constructor(opts) {
     this._maxOpRecordsPerUser = opts.maxOpRecordsPerUser ?? 2000;
     this.doc = opts.doc;
@@ -833,8 +835,11 @@ export class CellStructuralConflictMonitor {
   }
  
   /**
-   * @param {any} cellData
-   * @returns {NormalizedCell | null}
+   * Best-effort recovery of values from a deleted Y.Map.
+   *
+   * @param {any} map
+   * @param {string} key
+   * @returns {any}
    */
   function readDeletedYMapValue(map, key) {
     // When a nested Y.Map is removed from its parent (e.g. `cells.delete(cellKey)`),
