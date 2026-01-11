@@ -376,7 +376,17 @@ async function queryCandidatesForCell(
   return res.rows as CellResolutionCandidateRow[];
 }
 
-async function queryContainingRangesForRange(
+type RangeResolutionCandidateRow = {
+  scope: string;
+  selector_key: string;
+  classification: unknown;
+  start_row: number | null;
+  start_col: number | null;
+  end_row: number | null;
+  end_col: number | null;
+};
+
+async function queryCandidatesForRange(
   db: DbClient,
   docId: string,
   sheetId: string,
@@ -384,10 +394,10 @@ async function queryContainingRangesForRange(
   startCol: number,
   endRow: number,
   endCol: number
-): Promise<ClassificationResolutionResult | null> {
+) : Promise<RangeResolutionCandidateRow[]> {
   const res = await db.query(
     `
-      SELECT selector_key, classification, start_row, start_col, end_row, end_col
+      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
       FROM document_classifications
       WHERE
         document_id = $1
@@ -395,20 +405,28 @@ async function queryContainingRangesForRange(
         AND sheet_id = $2
         AND start_row <= $3 AND end_row >= $4
         AND start_col <= $5 AND end_col >= $6
+      UNION ALL
+      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      FROM document_classifications
+      WHERE
+        document_id = $1
+        AND scope = 'column'
+        AND sheet_id = $2
+        AND table_id IS NULL
+        AND column_index = $5
+      UNION ALL
+      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      FROM document_classifications
+      WHERE document_id = $1 AND scope = 'sheet' AND sheet_id = $2
+      UNION ALL
+      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      FROM document_classifications
+      WHERE document_id = $1 AND scope = 'document'
     `,
     [docId, sheetId, startRow, endRow, startCol, endCol]
   );
 
-  const rows = res.rows.map((r) => ({
-    selector_key: r.selector_key as string,
-    classification: r.classification,
-    start_row: r.start_row as number,
-    start_col: r.start_col as number,
-    end_row: r.end_row as number,
-    end_col: r.end_col as number
-  }));
-
-  return resolveFromContainingRanges(rows);
+  return res.rows as RangeResolutionCandidateRow[];
 }
 
 /**
@@ -516,28 +534,48 @@ export async function getEffectiveClassificationForSelector(
       }
 
       const columnFallback = normalized.startCol === normalized.endCol;
-      const result =
-        (await queryContainingRangesForRange(
-          db,
-          docId,
-          normalized.sheetId!,
-          normalized.startRow!,
-          normalized.startCol!,
-          normalized.endRow!,
-          normalized.endCol!
-        )) ??
-        (columnFallback
-          ? await queryColumn({
-              db,
-              docId,
-              sheetId: normalized.sheetId!,
-              columnIndex: normalized.startCol!,
-              allowTableColumns: false
-            })
-          : null) ??
-        (await querySheet(db, docId, normalized.sheetId!)) ??
-        (await queryDocument(db, docId));
-      return result ?? DEFAULT_RESOLUTION;
+      const candidateRows = await queryCandidatesForRange(
+        db,
+        docId,
+        normalized.sheetId!,
+        normalized.startRow!,
+        normalized.startCol!,
+        normalized.endRow!,
+        normalized.endCol!
+      );
+
+      const rangeRows = candidateRows
+        .filter((row) => row.scope === "range")
+        .map((row) => ({
+          selector_key: row.selector_key,
+          classification: row.classification,
+          start_row: row.start_row as number,
+          start_col: row.start_col as number,
+          end_row: row.end_row as number,
+          end_col: row.end_col as number
+        }));
+      const rangeResolved = resolveFromContainingRanges(rangeRows);
+      if (rangeResolved) return rangeResolved;
+
+      if (columnFallback) {
+        const columnRows = candidateRows
+          .filter((row) => row.scope === "column")
+          .map((row) => ({ selector_key: row.selector_key, classification: row.classification, scope: "column" }));
+        const columnResolved = resolveFromExactRows(columnRows);
+        if (columnResolved) return columnResolved;
+      }
+
+      const sheetRows = candidateRows
+        .filter((row) => row.scope === "sheet")
+        .map((row) => ({ selector_key: row.selector_key, classification: row.classification, scope: "sheet" }));
+      const sheetResolved = resolveFromExactRows(sheetRows);
+      if (sheetResolved) return sheetResolved;
+
+      const docRows = candidateRows
+        .filter((row) => row.scope === "document")
+        .map((row) => ({ selector_key: row.selector_key, classification: row.classification, scope: "document" }));
+      const docResolved = resolveFromExactRows(docRows);
+      return docResolved ?? DEFAULT_RESOLUTION;
     }
     default:
       throw new Error(`Unknown selector scope: ${normalized.scope}`);
