@@ -4,10 +4,14 @@ export function registerSecurityHeaders(app: FastifyInstance): void {
   const enableHsts = app.config.cookieSecure || process.env.NODE_ENV === "production";
 
   app.addHook("onSend", (request, reply, payload, done) => {
+    // Avoid advertising implementation details.
+    if (reply.hasHeader("server")) reply.removeHeader("server");
+
     // Only set headers when missing so individual endpoints can deliberately override them.
     if (!reply.hasHeader("x-content-type-options")) reply.header("x-content-type-options", "nosniff");
     if (!reply.hasHeader("x-frame-options")) reply.header("x-frame-options", "DENY");
     if (!reply.hasHeader("referrer-policy")) reply.header("referrer-policy", "no-referrer");
+    if (!reply.hasHeader("cache-control")) reply.header("cache-control", "no-store");
     if (!reply.hasHeader("permissions-policy")) {
       reply.header(
         "permissions-policy",
@@ -34,4 +38,3 @@ export function registerSecurityHeaders(app: FastifyInstance): void {
     done(null, payload);
   });
 }
-
