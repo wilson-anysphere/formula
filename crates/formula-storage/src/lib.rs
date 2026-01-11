@@ -9,6 +9,7 @@
 //! - Batched transactional writes
 //! - Autosave debouncing
 //! - A viewport-driven, page-based LRU cache for memory management
+//! - Optional encryption-at-rest for persisted workbooks (AES-256-GCM)
 
 mod autosave;
 mod cache;
