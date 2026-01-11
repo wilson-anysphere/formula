@@ -2,41 +2,92 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
+import { authenticateApiKey } from "../auth/apiKeys";
 import { generateTotpSecret, buildOtpAuthUrl, verifyTotpCode } from "../auth/mfa";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { createSession, lookupSessionByToken, revokeSession } from "../auth/sessions";
 import { withTransaction } from "../db/tx";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 
-function extractSessionToken(request: FastifyRequest): string | null {
+type AuthCredentials =
+  | { kind: "session"; token: string }
+  | { kind: "api_key"; token: string };
+
+function extractAuthCredentials(request: FastifyRequest): AuthCredentials | null {
   const cookieName = request.server.config.sessionCookieName;
   const cookieToken = request.cookies?.[cookieName];
-  if (cookieToken && typeof cookieToken === "string") return cookieToken;
+  if (cookieToken && typeof cookieToken === "string") return { kind: "session", token: cookieToken };
+
+  const xApiKey = request.headers["x-api-key"];
+  if (typeof xApiKey === "string" && xApiKey.trim().length > 0) {
+    const raw = xApiKey.trim();
+    return { kind: "api_key", token: raw.startsWith("api_") ? raw : `api_${raw}` };
+  }
 
   const auth = request.headers.authorization;
   if (!auth || typeof auth !== "string") return null;
   const [kind, token] = auth.split(" ");
   if (kind?.toLowerCase() !== "bearer") return null;
-  return token ?? null;
+  if (!token) return null;
+  if (token.startsWith("api_")) return { kind: "api_key", token };
+  return { kind: "session", token };
 }
 
 async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const token = extractSessionToken(request);
-  if (!token) {
+  const credentials = extractAuthCredentials(request);
+  if (!credentials) {
     request.server.metrics.authFailuresTotal.inc({ reason: "missing_token" });
     reply.code(401).send({ error: "unauthorized" });
     return;
   }
 
-  const found = await lookupSessionByToken(request.server.db, token);
-  if (!found) {
-    request.server.metrics.authFailuresTotal.inc({ reason: "invalid_token" });
-    reply.code(401).send({ error: "unauthorized" });
+  if (credentials.kind === "session") {
+    const found = await lookupSessionByToken(request.server.db, credentials.token);
+    if (!found) {
+      request.server.metrics.authFailuresTotal.inc({ reason: "invalid_token" });
+      reply.code(401).send({ error: "unauthorized" });
+      return;
+    }
+
+    request.user = found.user;
+    request.session = found.session;
+    request.apiKey = undefined;
+    request.authMethod = "session";
+    request.authOrgId = undefined;
     return;
   }
 
-  request.user = found.user;
-  request.session = found.session;
+  const apiKeyResult = await authenticateApiKey(request.server.db, credentials.token, {
+    clientIp: getClientIp(request)
+  });
+
+  if (!apiKeyResult.ok) {
+    request.server.metrics.authFailuresTotal.inc({ reason: apiKeyResult.value.error });
+    reply.code(apiKeyResult.value.statusCode).send({ error: apiKeyResult.value.error });
+    return;
+  }
+
+  request.user = apiKeyResult.value.user;
+  request.session = undefined;
+  request.apiKey = apiKeyResult.value.apiKey;
+  request.authMethod = "api_key";
+  request.authOrgId = apiKeyResult.value.apiKey.orgId;
+
+  await writeAuditEvent(
+    request.server.db,
+    createAuditEvent({
+      eventType: "auth.api_key_used",
+      actor: { type: "api_key", id: apiKeyResult.value.apiKey.id },
+      context: {
+        orgId: apiKeyResult.value.apiKey.orgId,
+        ipAddress: getClientIp(request),
+        userAgent: getUserAgent(request)
+      },
+      resource: { type: "api_key", id: apiKeyResult.value.apiKey.id, name: apiKeyResult.value.apiKey.name },
+      success: true,
+      details: { createdBy: apiKeyResult.value.apiKey.createdBy }
+    })
+  );
 }
 
 export function registerAuthRoutes(app: FastifyInstance): void {
@@ -330,19 +381,29 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   });
 
   app.get("/me", { preHandler: requireAuth }, async (request) => {
+    const orgFilter = request.authOrgId ? "AND o.id = $2" : "";
+    const params = request.authOrgId ? [request.user!.id, request.authOrgId] : [request.user!.id];
     const orgs = await app.db.query(
       `
         SELECT o.id, o.name, om.role
         FROM organizations o
         JOIN org_members om ON om.org_id = o.id
         WHERE om.user_id = $1
+          ${orgFilter}
         ORDER BY o.created_at ASC
       `,
-      [request.user!.id]
+      params
     );
 
     return {
       user: request.user,
+      apiKey: request.apiKey
+        ? {
+            id: request.apiKey.id,
+            orgId: request.apiKey.orgId,
+            name: request.apiKey.name
+          }
+        : null,
       organizations: orgs.rows.map((row) => ({
         id: row.id as string,
         name: row.name as string,

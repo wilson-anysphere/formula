@@ -8,6 +8,7 @@ import { createMetrics, instrumentDb, registerMetrics } from "./observability/me
 import { genRequestId, registerRequestId } from "./observability/request-id";
 import { registerAuditRoutes } from "./routes/audit";
 import { registerAuthRoutes } from "./routes/auth";
+import { registerApiKeyRoutes } from "./routes/apiKeys";
 import { registerDocRoutes } from "./routes/docs";
 import { registerInternalRoutes } from "./routes/internal";
 import { registerOrgRoutes } from "./routes/orgs";
@@ -45,6 +46,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   registerAuthRoutes(app);
   registerOrgRoutes(app);
+  registerApiKeyRoutes(app);
   registerDocRoutes(app);
   registerAuditRoutes(app);
   registerInternalRoutes(app);
