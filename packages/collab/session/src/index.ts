@@ -3,6 +3,7 @@ import { WebsocketProvider } from "y-websocket";
 import { PresenceManager } from "@formula/collab-presence";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
 import { FormulaConflictMonitor, type FormulaConflict } from "@formula/collab-conflicts";
+import { ensureWorkbookSchema } from "@formula/collab-workbook";
 
 import { assertValidRole, getCellPermissions, maskCellValue } from "../../permissions/index.js";
 
@@ -74,6 +75,13 @@ export interface CollabSessionOptions {
    * Default sheet id used when parsing cell keys that omit a sheet identifier.
    */
   defaultSheetId?: string;
+  /**
+   * Workbook schema initialization options.
+   *
+   * When enabled (default), the session ensures the workbook schema roots exist
+   * and creates a default sheet when the document has no sheets.
+   */
+  schema?: { autoInit?: boolean; defaultSheetId?: string; defaultSheetName?: string };
   /**
    * When enabled, the session tracks local edits using Yjs' UndoManager so undo/redo
    * only affects this client's changes (never remote users' edits).
@@ -154,6 +162,9 @@ function getYMapCell(cellData: unknown): Y.Map<unknown> | null {
 export class CollabSession {
   readonly doc: Y.Doc;
   readonly cells: Y.Map<unknown>;
+  readonly sheets: Y.Array<Y.Map<unknown>>;
+  readonly metadata: Y.Map<unknown>;
+  readonly namedRanges: Y.Map<unknown>;
 
   readonly provider: CollabSessionProvider | null;
   readonly awareness: unknown;
@@ -183,7 +194,6 @@ export class CollabSession {
 
   constructor(options: CollabSessionOptions = {}) {
     this.doc = options.doc ?? new Y.Doc();
-    this.cells = this.doc.getMap("cells");
 
     if (options.connection && options.provider) {
       throw new Error("CollabSession cannot be constructed with both `connection` and `provider` options");
@@ -202,7 +212,16 @@ export class CollabSession {
           })
         : null);
     this.awareness = options.awareness ?? this.provider?.awareness ?? null;
-    this.defaultSheetId = options.defaultSheetId ?? "Sheet1";
+
+    const schemaAutoInit = options.schema?.autoInit ?? true;
+    const schemaDefaultSheetId = options.schema?.defaultSheetId ?? options.defaultSheetId ?? "Sheet1";
+    const schemaDefaultSheetName = options.schema?.defaultSheetName ?? schemaDefaultSheetId;
+    this.defaultSheetId = options.defaultSheetId ?? options.schema?.defaultSheetId ?? "Sheet1";
+
+    this.cells = this.doc.getMap<unknown>("cells");
+    this.sheets = this.doc.getArray<Y.Map<unknown>>("sheets");
+    this.metadata = this.doc.getMap<unknown>("metadata");
+    this.namedRanges = this.doc.getMap<unknown>("namedRanges");
 
     // Stable origin token for local edits. This must be unique per-session; if
     // multiple clients share an origin, collaborative undo would treat all edits
@@ -212,8 +231,30 @@ export class CollabSession {
     this.undo = null;
     this.formulaConflictMonitor = null;
 
+    if (schemaAutoInit) {
+      const initSchema = () => {
+        ensureWorkbookSchema(this.doc, {
+          defaultSheetId: schemaDefaultSheetId,
+          defaultSheetName: schemaDefaultSheetName,
+        });
+      };
+
+      const provider = this.provider;
+      if (provider && !provider.synced && typeof provider.on === "function") {
+        const handler = (isSynced: boolean) => {
+          if (!isSynced) return;
+          if (typeof provider.off === "function") provider.off("sync", handler);
+          initSchema();
+        };
+        provider.on("sync", handler);
+        if (provider.synced) handler(true);
+      } else {
+        initSchema();
+      }
+    }
+
     if (options.undo) {
-      const scope = [this.cells] as Array<Y.AbstractType<any>>;
+      const scope = [this.cells, this.sheets, this.metadata, this.namedRanges] as Array<Y.AbstractType<any>>;
       // Include comments in the undo scope when present (don't create it eagerly).
       const comments = this.doc.share.get("comments");
       if (comments) scope.push(comments as any);

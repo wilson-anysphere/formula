@@ -195,6 +195,9 @@ importers:
       '@formula/collab-undo':
         specifier: workspace:*
         version: link:../undo
+      '@formula/collab-workbook':
+        specifier: workspace:*
+        version: link:../workbook
       y-websocket:
         specifier: ^2.1.0
         version: 2.1.0(yjs@13.6.29)
@@ -205,6 +208,12 @@ importers:
       ws:
         specifier: ^8.18.0
         version: 8.19.0
+
+  packages/collab/workbook:
+    dependencies:
+      yjs:
+        specifier: ^13.6.27
+        version: 13.6.29
 
   packages/collab/undo:
     dependencies:

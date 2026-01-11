@@ -1,0 +1,109 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import * as Y from "yjs";
+
+import { REMOTE_ORIGIN } from "@formula/collab-undo";
+import { NamedRangeManager, SheetManager } from "@formula/collab-workbook";
+
+import { createCollabSession } from "../src/index.ts";
+
+/**
+ * @param {Y.Doc} docA
+ * @param {Y.Doc} docB
+ */
+function connectDocs(docA, docB) {
+  const forwardA = (update, origin) => {
+    if (origin === REMOTE_ORIGIN) return;
+    Y.applyUpdate(docB, update, REMOTE_ORIGIN);
+  };
+  const forwardB = (update, origin) => {
+    if (origin === REMOTE_ORIGIN) return;
+    Y.applyUpdate(docA, update, REMOTE_ORIGIN);
+  };
+
+  docA.on("update", forwardA);
+  docB.on("update", forwardB);
+
+  Y.applyUpdate(docA, Y.encodeStateAsUpdate(docB), REMOTE_ORIGIN);
+  Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA), REMOTE_ORIGIN);
+
+  return () => {
+    docA.off("update", forwardA);
+    docB.off("update", forwardB);
+  };
+}
+
+/**
+ * @param {import("../src/index.ts").CollabSession} session
+ */
+function snapshotSheets(session) {
+  return session.sheets.toArray().map((sheet) => ({
+    id: String(sheet.get("id") ?? ""),
+    name: sheet.get("name") == null ? null : String(sheet.get("name")),
+  }));
+}
+
+test("CollabSession workbook metadata: sheets + namedRanges sync and local undo (in-memory)", () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  const disconnect = connectDocs(docA, docB);
+
+  const sessionA = createCollabSession({ doc: docA, undo: {} });
+  const sessionB = createCollabSession({ doc: docB, undo: {} });
+
+  const sheetsA = new SheetManager({ doc: docA, transact: sessionA.undo?.transact });
+  const namedRangesA = new NamedRangeManager({ doc: docA, transact: sessionA.undo?.transact });
+
+  // Default schema initialization should ensure at least one sheet.
+  assert.equal(sessionA.sheets.length >= 1, true);
+  assert.deepEqual(snapshotSheets(sessionA), snapshotSheets(sessionB));
+
+  sheetsA.addSheet({ id: "Sheet2", name: "Sheet2" });
+  sessionA.undo?.stopCapturing();
+  assert.deepEqual(snapshotSheets(sessionB).map((s) => s.id), ["Sheet1", "Sheet2"]);
+
+  sheetsA.renameSheet("Sheet2", "Budget");
+  sessionA.undo?.stopCapturing();
+  assert.deepEqual(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.name, "Budget");
+
+  sheetsA.moveSheet("Sheet2", 0);
+  sessionA.undo?.stopCapturing();
+  assert.deepEqual(snapshotSheets(sessionB).map((s) => s.id), ["Sheet2", "Sheet1"]);
+
+  namedRangesA.set("MyRange", { sheetId: "Sheet2", range: "A1:B2" });
+  sessionA.undo?.stopCapturing();
+  assert.deepEqual(sessionB.namedRanges.get("MyRange"), { sheetId: "Sheet2", range: "A1:B2" });
+
+  namedRangesA.set("MyRange", { sheetId: "Sheet2", range: "A1:C3" });
+  sessionA.undo?.stopCapturing();
+  assert.deepEqual(sessionB.namedRanges.get("MyRange"), { sheetId: "Sheet2", range: "A1:C3" });
+
+  // Undo should only revert local-origin changes (and sync that undo update to peers).
+  sessionA.undo?.undo();
+  assert.deepEqual(sessionA.namedRanges.get("MyRange"), { sheetId: "Sheet2", range: "A1:B2" });
+  assert.deepEqual(sessionB.namedRanges.get("MyRange"), { sheetId: "Sheet2", range: "A1:B2" });
+
+  sessionA.undo?.undo();
+  assert.equal(sessionA.namedRanges.has("MyRange"), false);
+  assert.equal(sessionB.namedRanges.has("MyRange"), false);
+
+  sessionA.undo?.undo();
+  assert.deepEqual(snapshotSheets(sessionA).map((s) => s.id), ["Sheet1", "Sheet2"]);
+  assert.deepEqual(snapshotSheets(sessionB).map((s) => s.id), ["Sheet1", "Sheet2"]);
+
+  sessionA.undo?.undo();
+  assert.equal(snapshotSheets(sessionA).find((s) => s.id === "Sheet2")?.name, "Sheet2");
+  assert.equal(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.name, "Sheet2");
+
+  sessionA.undo?.undo();
+  assert.deepEqual(snapshotSheets(sessionA).map((s) => s.id), ["Sheet1"]);
+  assert.deepEqual(snapshotSheets(sessionB).map((s) => s.id), ["Sheet1"]);
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
