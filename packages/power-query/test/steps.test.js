@@ -93,6 +93,35 @@ test("groupBy aggregates values per group", () => {
   ]);
 });
 
+test("addColumn evaluates formulas using the sandboxed expression engine", () => {
+  const table = sampleTable();
+  const result = applyOperation(table, { type: "addColumn", name: "Double", formula: "=[Sales] * 2" });
+  assert.deepEqual(result.toGrid(), [
+    ["Region", "Product", "Sales", "Double"],
+    ["East", "A", 100, 200],
+    ["East", "B", 150, 300],
+    ["West", "A", 200, 400],
+    ["West", "B", 250, 500],
+  ]);
+});
+
+test("addColumn rejects unsafe identifiers (no global access)", () => {
+  const table = sampleTable();
+  assert.throws(
+    () => applyOperation(table, { type: "addColumn", name: "Bad", formula: "=globalThis" }),
+    /Unsupported identifier 'globalThis'/,
+  );
+});
+
+test("transformColumns evaluates formulas against '_' and can coerce output types", () => {
+  const table = DataTable.fromGrid([["Value"], [null], [1]], { hasHeaders: true, inferTypes: false });
+  const result = applyOperation(table, {
+    type: "transformColumns",
+    transforms: [{ column: "Value", formula: "_ == null ? 0 : _ + 1", newType: "number" }],
+  });
+  assert.deepEqual(result.toGrid(), [["Value"], [0], [2]]);
+});
+
 test("changeType coerces values", () => {
   const table = DataTable.fromGrid(
     [
@@ -108,4 +137,3 @@ test("changeType coerces values", () => {
   const result = applyOperation(table, { type: "changeType", column: "Value", newType: "number" });
   assert.deepEqual(result.toGrid(), [["Value"], [1], [2.5], [null], [null]]);
 });
-
