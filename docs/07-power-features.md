@@ -397,6 +397,8 @@ Cache stores:
 Example (in-memory caching):
 
 ```js
+import { readFile, stat } from "node:fs/promises";
+
 import {
   QueryEngine,
   CacheManager,
@@ -410,9 +412,12 @@ const engine = new QueryEngine({
   defaultCacheTtlMs: 60_000,
   fileAdapter: {
     // Provide stat() to enable source-state validation for file sources.
-    stat: async (path) => ({ mtimeMs: (await fs.stat(path)).mtimeMs }),
-    readText: async (path) => fs.readFile(path, "utf8"),
-    readBinary: async (path) => new Uint8Array(await fs.readFile(path)),
+    stat: async (path) => ({ mtimeMs: (await stat(path)).mtimeMs }),
+    readText: async (path) => readFile(path, "utf8"),
+    readBinary: async (path) => {
+      const bytes = await readFile(path);
+      return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    },
   },
 });
 
