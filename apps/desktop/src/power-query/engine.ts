@@ -404,14 +404,15 @@ function createDefaultFileAdapter(): DesktopQueryEngineOptions["fileAdapter"] {
   };
 }
 
-function deleteIndexedDbDatabase(dbName: string): Promise<void> {
-  if (typeof indexedDB === "undefined") return Promise.resolve();
+function deleteIndexedDbDatabase(dbName: string): Promise<"success" | "blocked"> {
+  if (typeof indexedDB === "undefined") return Promise.resolve("success");
   return new Promise((resolve, reject) => {
     const req = indexedDB.deleteDatabase(dbName);
-    req.onsuccess = () => resolve();
+    req.onsuccess = () => resolve("success");
     req.onerror = () => reject(req.error ?? new Error(`IndexedDB deleteDatabase failed for ${dbName}`));
-    // If the delete is blocked (e.g. another open handle), treat it as best-effort.
-    req.onblocked = () => resolve();
+    // If the delete is blocked (e.g. another open handle), fall back to clearing the
+    // database contents so legacy plaintext cache entries don't linger on disk.
+    req.onblocked = () => resolve("blocked");
   });
 }
 
@@ -436,7 +437,13 @@ function createDesktopCacheCryptoProvider(): CacheCryptoProvider {
         return provider;
       })();
     }
-    return desktopCacheCryptoProviderPromise;
+    try {
+      return await desktopCacheCryptoProviderPromise;
+    } catch (err) {
+      // Allow retries if the keychain/WebCrypto lookup fails (best-effort).
+      desktopCacheCryptoProviderPromise = null;
+      throw err;
+    }
   };
 
   return {
@@ -452,6 +459,35 @@ function createDesktopCacheCryptoProvider(): CacheCryptoProvider {
       return provider.decryptBytes(payload, aad);
     },
   };
+}
+
+async function cleanupLegacyPowerQueryCache(dbName: string): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+
+  let outcome: "success" | "blocked" | null = null;
+  try {
+    outcome = await deleteIndexedDbDatabase(dbName);
+  } catch {
+    outcome = null;
+  }
+
+  // If the delete is blocked (or failed), best-effort clear the DB contents. This
+  // does not require closing other connections, unlike deleteDatabase.
+  if (outcome !== "success") {
+    try {
+      const legacyStore = new IndexedDBCacheStore({ dbName });
+      await legacyStore.clear();
+    } catch {
+      // ignore
+    }
+
+    // Try deleting again after clearing (still best-effort).
+    try {
+      await deleteIndexedDbDatabase(dbName);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 function createDefaultCacheManager(): CacheManager {
@@ -471,7 +507,7 @@ function createDefaultCacheManager(): CacheManager {
   const legacyDbName = "formula-power-query-cache";
   const dbName = "formula-power-query-cache-encrypted-v1";
 
-  deleteIndexedDbDatabase(legacyDbName).catch(() => {});
+  cleanupLegacyPowerQueryCache(legacyDbName).catch(() => {});
 
   const underlyingStore = new IndexedDBCacheStore({ dbName });
   const store = hasTauriInvoke()
