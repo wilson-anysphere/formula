@@ -58,7 +58,9 @@ inventory::submit! {
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Any,
-        arg_types: &[ValueType::Any],
+        // SEQUENCE expects numeric inputs; keep the metadata specific so editor
+        // tooling can provide better hints even before we ship full signatures.
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number, ValueType::Number],
         implementation: sequence_fn,
     }
 }

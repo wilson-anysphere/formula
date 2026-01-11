@@ -235,6 +235,9 @@ export class TabCompletionEngine {
     const input = context.currentInput ?? "";
     const cursor = clampCursor(input, context.cursorPosition);
     const cellRef = normalizeCellRef(context.cellRef);
+    const fnSpec = parsed.functionName ? this.functionRegistry.getFunction(parsed.functionName) : undefined;
+    const minArgs = fnSpec?.minArgs;
+    const argIndex = parsed.argIndex ?? 0;
 
     const rangeCandidates = suggestRanges({
       currentArgText: parsed.currentArg.text,
@@ -249,8 +252,12 @@ export class TabCompletionEngine {
       let newText = replaceSpan(input, parsed.currentArg.start, parsed.currentArg.end, candidate.range);
 
       // If the user is at the end of input and we still have unbalanced parens,
-      // auto-close them. This matches the common "type =SUM(A<tab>" workflow.
-      if (cursor === input.length) {
+      // auto-close them when the function could be syntactically complete. This
+      // matches the common "type =SUM(A<tab>" workflow without producing invalid
+      // suggestions for functions that require additional arguments (e.g. VLOOKUP).
+      const functionCouldBeComplete =
+        !Number.isInteger(minArgs) || (Number.isInteger(argIndex) && argIndex + 1 >= minArgs);
+      if (cursor === input.length && functionCouldBeComplete) {
         newText = closeUnbalancedParens(newText);
       }
 

@@ -82,6 +82,16 @@ export default {
       ]
     },
     {
+      "name": "COUNTIF",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "DATE",
       "min_args": 3,
       "max_args": 3,
@@ -221,7 +231,8 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
-        "any"
+        "any",
+        "number"
       ]
     },
     {
@@ -316,7 +327,9 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
-        "any"
+        "any",
+        "number",
+        "number"
       ]
     },
     {
@@ -383,6 +396,7 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
+        "number",
         "any"
       ]
     },
@@ -518,7 +532,10 @@ export default {
       "volatility": "non_volatile",
       "return_type": "any",
       "arg_types": [
-        "any"
+        "number",
+        "number",
+        "number",
+        "number"
       ]
     },
     {
@@ -558,6 +575,16 @@ export default {
       "name": "SUM",
       "min_args": 0,
       "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "SUMPRODUCT",
+      "min_args": 2,
+      "max_args": 2,
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
@@ -632,7 +659,9 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
-        "any"
+        "any",
+        "any",
+        "number"
       ]
     },
     {
@@ -642,7 +671,12 @@ export default {
       "volatility": "non_volatile",
       "return_type": "any",
       "arg_types": [
-        "any"
+        "any",
+        "any",
+        "any",
+        "any",
+        "number",
+        "number"
       ]
     },
     {
@@ -665,6 +699,8 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
+        "number",
+        "any",
         "any"
       ]
     },

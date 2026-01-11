@@ -555,7 +555,7 @@ inventory::submit! {
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
-        arg_types: &[ValueType::Any],
+        arg_types: &[ValueType::Number, ValueType::Any],
         implementation: npv_fn,
     }
 }
@@ -586,7 +586,7 @@ inventory::submit! {
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
-        arg_types: &[ValueType::Any],
+        arg_types: &[ValueType::Any, ValueType::Number],
         implementation: irr_fn,
     }
 }
@@ -614,7 +614,7 @@ inventory::submit! {
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
-        arg_types: &[ValueType::Any],
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Number],
         implementation: mirr_fn,
     }
 }
@@ -646,7 +646,7 @@ inventory::submit! {
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
-        arg_types: &[ValueType::Any],
+        arg_types: &[ValueType::Number, ValueType::Any, ValueType::Any],
         implementation: xnpv_fn,
     }
 }
@@ -678,7 +678,7 @@ inventory::submit! {
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
-        arg_types: &[ValueType::Any],
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number],
         implementation: xirr_fn,
     }
 }

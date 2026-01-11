@@ -81,6 +81,16 @@
       ]
     },
     {
+      "name": "COUNTIF",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "DATE",
       "min_args": 3,
       "max_args": 3,
@@ -220,7 +230,8 @@
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
-        "any"
+        "any",
+        "number"
       ]
     },
     {
@@ -315,7 +326,9 @@
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
-        "any"
+        "any",
+        "number",
+        "number"
       ]
     },
     {
@@ -382,6 +395,7 @@
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
+        "number",
         "any"
       ]
     },
@@ -517,7 +531,10 @@
       "volatility": "non_volatile",
       "return_type": "any",
       "arg_types": [
-        "any"
+        "number",
+        "number",
+        "number",
+        "number"
       ]
     },
     {
@@ -557,6 +574,16 @@
       "name": "SUM",
       "min_args": 0,
       "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "SUMPRODUCT",
+      "min_args": 2,
+      "max_args": 2,
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
@@ -631,7 +658,9 @@
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
-        "any"
+        "any",
+        "any",
+        "number"
       ]
     },
     {
@@ -641,7 +670,12 @@
       "volatility": "non_volatile",
       "return_type": "any",
       "arg_types": [
-        "any"
+        "any",
+        "any",
+        "any",
+        "any",
+        "number",
+        "number"
       ]
     },
     {
@@ -664,6 +698,8 @@
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
+        "number",
+        "any",
         "any"
       ]
     },

@@ -307,7 +307,16 @@ inventory::submit! {
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Any,
-        arg_types: &[ValueType::Any],
+        // XLOOKUP's optional match/search modes are numeric, so expose them in
+        // the lightweight metadata consumed by editor tooling.
+        arg_types: &[
+            ValueType::Any,
+            ValueType::Any,
+            ValueType::Any,
+            ValueType::Any,
+            ValueType::Number,
+            ValueType::Number,
+        ],
         implementation: xlookup_fn,
     }
 }
