@@ -356,19 +356,6 @@ export class NodeFsOfflineAuditQueue {
         for (const segment of segments) {
           if (segment.state === SEGMENT_STATES.ACKED) continue;
 
-          if (segment.state === SEGMENT_STATES.OPEN) {
-            // Left behind by a crash; seal it so we can flush.
-            const pendingPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.PENDING));
-            try {
-              await rename(segment.path, pendingPath);
-              segment.state = SEGMENT_STATES.PENDING;
-              segment.path = pendingPath;
-            } catch (error) {
-              if (error?.code !== "ENOENT") throw error;
-              continue;
-            }
-          }
-
           if (segment.state === SEGMENT_STATES.PENDING) {
             const inflightPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.INFLIGHT));
             try {
@@ -381,13 +368,14 @@ export class NodeFsOfflineAuditQueue {
             }
           }
 
-          if (segment.state !== SEGMENT_STATES.INFLIGHT) continue;
+          if (segment.state !== SEGMENT_STATES.INFLIGHT && segment.state !== SEGMENT_STATES.OPEN) continue;
 
           const { events, lineCount } = await readJsonlEvents(segment.path);
           let acked = await readCursor(segment.cursorPath);
           if (acked > lineCount) acked = lineCount;
 
           if (acked >= lineCount) {
+            if (segment.state === SEGMENT_STATES.OPEN) continue;
             const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
             try {
               await rename(segment.path, ackedPath);
@@ -409,6 +397,7 @@ export class NodeFsOfflineAuditQueue {
           }
 
           if (acked >= lineCount) {
+            if (segment.state === SEGMENT_STATES.OPEN) continue;
             const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
             await rename(segment.path, ackedPath);
             await safeUnlink(segment.cursorPath);

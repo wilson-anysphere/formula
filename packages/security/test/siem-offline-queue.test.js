@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -116,6 +116,74 @@ test("NodeFsOfflineAuditQueue enforces maxBytes backpressure", async () => {
   await queue.enqueue(makeEvent({ secret: "b" }));
 
   await assert.rejects(queue.enqueue(makeEvent({ secret: "c" })), (error) => error?.code === "EQUEUEFULL");
+});
+
+test("NodeFsOfflineAuditQueue does not lose events when flushing an open segment with a partial tail record", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-open-segment-"));
+  const queue = new NodeFsOfflineAuditQueue({
+    dirPath: dir,
+    flushBatchSize: 10,
+  });
+
+  await queue.ensureDir();
+
+  const segmentsDir = path.join(dir, "segments");
+  const baseName = `segment-${Date.now()}-partialtail`;
+  const openPath = path.join(segmentsDir, `${baseName}.open.jsonl`);
+
+  const event1 = {
+    id: randomUUID(),
+    timestamp: "2025-01-01T00:00:00.000Z",
+    orgId: "org_1",
+    eventType: "document.opened",
+    details: { token: "[REDACTED]" },
+  };
+  const event2 = {
+    id: randomUUID(),
+    timestamp: "2025-01-01T00:00:01.000Z",
+    orgId: "org_1",
+    eventType: "document.modified",
+    details: { token: "[REDACTED]" },
+  };
+
+  const event2Json = JSON.stringify(event2);
+  const partialEvent2 = event2Json.slice(0, -2); // missing closing braces to simulate an in-progress write
+  const remainderEvent2 = event2Json.slice(-2) + "\n";
+
+  await writeFile(openPath, `${JSON.stringify(event1)}\n${partialEvent2}`, "utf8");
+
+  const firstFlushSent = [];
+  let appended = false;
+  const exporter = {
+    async sendBatch(batch) {
+      firstFlushSent.push(...batch.map((evt) => evt.id));
+      if (!appended) {
+        appended = true;
+        await appendFile(openPath, remainderEvent2, "utf8");
+      }
+    },
+  };
+
+  const firstResult = await queue.flushToExporter(exporter);
+  assert.equal(firstResult.sent, 1);
+  assert.deepEqual(firstFlushSent, [event1.id]);
+
+  const pending = await queue.readAll();
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].id, event2.id);
+
+  const secondFlushSent = [];
+  const exporter2 = {
+    async sendBatch(batch) {
+      secondFlushSent.push(...batch.map((evt) => evt.id));
+    },
+  };
+
+  const secondResult = await queue.flushToExporter(exporter2);
+  assert.equal(secondResult.sent, 1);
+  assert.deepEqual(secondFlushSent, [event2.id]);
+
+  assert.deepEqual(await queue.readAll(), []);
 });
 
 test("IndexedDbOfflineAuditQueue redacts before persistence and flushes batches", async () => {
