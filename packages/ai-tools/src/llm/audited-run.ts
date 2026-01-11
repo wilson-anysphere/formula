@@ -359,12 +359,29 @@ function compactAuditValue(value: unknown, maxChars: number): unknown {
   const json = safeJsonStringify(value);
   if (json.length <= limit) return value;
 
-  // Keep a small preview plus metadata so the stored value is always bounded.
+  const attempts = [
+    { maxDepth: 6, maxArrayLength: 100, maxObjectKeys: 100, maxStringLength: 2_000 },
+    { maxDepth: 5, maxArrayLength: 50, maxObjectKeys: 50, maxStringLength: 1_000 },
+    { maxDepth: 4, maxArrayLength: 25, maxObjectKeys: 25, maxStringLength: 500 },
+    { maxDepth: 3, maxArrayLength: 10, maxObjectKeys: 10, maxStringLength: 200 }
+  ];
+
+  for (const attempt of attempts) {
+    const truncated = truncateUnknown(value, attempt);
+    const candidate = withAuditTruncationMetadata(truncated.value, {
+      truncated: true,
+      original_chars: json.length
+    });
+    const candidateJson = safeJsonStringify(candidate);
+    if (candidateJson.length <= limit) return candidate;
+  }
+
+  // Fallback: keep a small preview plus metadata so the stored value is always bounded.
   const previewChars = Math.min(1000, Math.max(0, limit - 200));
   return {
-    truncated: true,
-    original_chars: json.length,
-    preview: json.slice(0, previewChars)
+    audit_truncated: true,
+    audit_original_chars: json.length,
+    audit_preview: json.slice(0, previewChars)
   };
 }
 
@@ -379,4 +396,82 @@ function safeJsonStringify(value: unknown): string {
       return String(value);
     }
   }
+}
+
+function withAuditTruncationMetadata(value: unknown, meta: { truncated: boolean; original_chars: number }): unknown {
+  if (!meta.truncated) return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const obj = value as Record<string, unknown>;
+  return {
+    ...obj,
+    audit_truncated: true,
+    audit_original_chars: meta.original_chars
+  };
+}
+
+function truncateUnknown(
+  value: unknown,
+  options: { maxDepth: number; maxArrayLength: number; maxObjectKeys: number; maxStringLength: number }
+): { value: unknown; truncated: boolean } {
+  const seen = new WeakSet<object>();
+
+  const walk = (v: unknown, depth: number): { value: unknown; truncated: boolean } => {
+    if (typeof v === "string") {
+      const truncated = v.length > options.maxStringLength;
+      return { value: truncateString(v, options.maxStringLength), truncated };
+    }
+    if (typeof v === "number" || typeof v === "boolean" || v === null) return { value: v, truncated: false };
+    if (v === undefined) return { value: null, truncated: true };
+
+    if (depth >= options.maxDepth) {
+      return { value: "[truncated: max depth]", truncated: true };
+    }
+
+    if (Array.isArray(v)) {
+      const out: unknown[] = [];
+      let truncated = false;
+      const len = Math.min(v.length, options.maxArrayLength);
+      for (let i = 0; i < len; i++) {
+        const child = walk(v[i], depth + 1);
+        out.push(child.value);
+        truncated ||= child.truncated;
+      }
+      if (v.length > len) {
+        out.push(`[truncated: ${v.length - len} more items]`);
+        truncated = true;
+      }
+      return { value: out, truncated };
+    }
+
+    if (typeof v === "object") {
+      const obj = v as Record<string, unknown>;
+      if (seen.has(obj)) return { value: "[truncated: circular]", truncated: true };
+      seen.add(obj);
+
+      const out: Record<string, unknown> = {};
+      let truncated = false;
+      const keys = Object.keys(obj);
+      const len = Math.min(keys.length, options.maxObjectKeys);
+      for (let i = 0; i < len; i++) {
+        const key = keys[i]!;
+        const child = walk(obj[key], depth + 1);
+        out[key] = child.value;
+        truncated ||= child.truncated;
+      }
+      if (keys.length > len) {
+        out.__truncated_keys__ = keys.length - len;
+        truncated = true;
+      }
+      return { value: out, truncated };
+    }
+
+    return { value: truncateString(String(v), options.maxStringLength), truncated: true };
+  };
+
+  return walk(value, 0);
+}
+
+function truncateString(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength)}…[truncated ${value.length - maxLength} chars]`;
 }

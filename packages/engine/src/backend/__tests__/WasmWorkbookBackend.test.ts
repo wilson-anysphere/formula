@@ -44,6 +44,7 @@ describe("WasmWorkbookBackend", () => {
       init: vi.fn(async () => {}),
       newWorkbook: vi.fn(async () => {}),
       loadWorkbookFromJson: vi.fn(async () => {}),
+      loadWorkbookFromXlsxBytes: vi.fn(async () => {}),
       toJson: vi.fn(async () => "{}"),
       getCell: vi.fn(async () => ({ sheet: "Sheet1", address: "A1", input: null, value: null })),
       getRange: vi.fn(async () => []),
@@ -88,4 +89,3 @@ describe("WasmWorkbookBackend", () => {
     expect(engine.recalculate).toHaveBeenCalledWith("Sheet1");
   });
 });
-

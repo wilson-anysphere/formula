@@ -286,8 +286,10 @@ describe("runChatWithToolsAudited", () => {
     expect(entries.length).toBe(1);
     const toolCall = entries[0]!.tool_calls[0]!;
     const params = toolCall.parameters as any;
-    expect(params?.truncated).toBe(true);
-    expect(typeof params?.preview).toBe("string");
-    expect(params.preview.length).toBeLessThanOrEqual(1000);
+    expect(params?.audit_truncated).toBe(true);
+    expect(typeof params?.audit_original_chars).toBe("number");
+    expect(params?.range).toBe("Sheet1!A1");
+    expect(JSON.stringify(params).length).toBeLessThanOrEqual(1000);
+    expect(JSON.stringify(params)).not.toContain(huge);
   });
 });
