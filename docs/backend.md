@@ -56,6 +56,15 @@ In `docker-compose.yml`, the sync server is configured to reuse the API secret b
 SYNC_TOKEN_SECRET=my-local-sync-secret docker compose up --build
 ```
 
+## Secret store configuration
+
+The API includes a small database-backed encrypted secret store (`secrets` table). It is used for things like:
+
+- OIDC client secrets
+- SIEM auth configuration (see [`docs/siem.md`](./siem.md))
+
+Secrets are encrypted with `SECRET_STORE_KEY`. Keep this value stable for a given database; changing it makes previously stored secrets undecryptable.
+
 ## Persistence (local docker compose)
 
 The docker compose stack configures the sync server with:
