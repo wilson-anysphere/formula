@@ -617,9 +617,13 @@ export class SpreadsheetApp {
     try {
       // Ensure any in-flight sync operations finish before we replace the workbook.
       await this.wasmSyncPromise;
+      this.computedValues.clear();
       this.document.applyState(snapshot);
       if (this.wasmEngine) {
-        await this.enqueueWasmSync((engine) => engineHydrateFromDocument(engine, this.document));
+        await this.enqueueWasmSync(async (engine) => {
+          const changes = await engineHydrateFromDocument(engine, this.document);
+          this.applyComputedChanges(changes);
+        });
       }
     } finally {
       this.wasmSyncSuspended = false;
@@ -640,7 +644,8 @@ export class SpreadsheetApp {
     try {
       engine = createEngineClient({ wasmModuleUrl, wasmBinaryUrl });
       await engine.init();
-      await engineHydrateFromDocument(engine, this.document);
+      const changes = await engineHydrateFromDocument(engine, this.document);
+      this.applyComputedChanges(changes);
 
       this.wasmEngine = engine;
       this.wasmUnsubscribe = this.document.on(
@@ -649,18 +654,28 @@ export class SpreadsheetApp {
           if (!this.wasmEngine || this.wasmSyncSuspended) return;
 
           if (source === "applyState") {
-            void this.enqueueWasmSync((worker) => engineHydrateFromDocument(worker, this.document));
+            this.computedValues.clear();
+            void this.enqueueWasmSync(async (worker) => {
+              const changes = await engineHydrateFromDocument(worker, this.document);
+              this.applyComputedChanges(changes);
+            });
             return;
           }
 
           if (!Array.isArray(deltas) || deltas.length === 0) {
             if (recalc) {
-              void this.enqueueWasmSync((worker) => worker.recalculate());
+              void this.enqueueWasmSync(async (worker) => {
+                const changes = await worker.recalculate();
+                this.applyComputedChanges(changes);
+              });
             }
             return;
           }
 
-          void this.enqueueWasmSync((worker) => engineApplyDeltas(worker, deltas, { recalculate: recalc !== false }));
+          void this.enqueueWasmSync(async (worker) => {
+            const changes = await engineApplyDeltas(worker, deltas, { recalculate: recalc !== false });
+            this.applyComputedChanges(changes);
+          });
         }
       );
     } catch {
@@ -669,6 +684,7 @@ export class SpreadsheetApp {
       this.wasmEngine = null;
       this.wasmUnsubscribe?.();
       this.wasmUnsubscribe = null;
+      this.computedValues.clear();
     }
   }
 
@@ -1832,6 +1848,10 @@ export class SpreadsheetApp {
     stack: Set<string>
   ): SpreadsheetValue {
     const key = cellToA1(cell);
+    const computedKey = this.computedKey(this.sheetId, key);
+    if (this.computedValues.has(computedKey)) {
+      return this.computedValues.get(computedKey) ?? null;
+    }
     const cached = memo.get(key);
     if (cached !== undefined || memo.has(key)) return cached ?? null;
     if (stack.has(key)) return "#REF!";

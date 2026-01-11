@@ -114,17 +114,17 @@ export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson
   return { sheets };
 }
 
-export async function engineHydrateFromDocument(engine: EngineSyncTarget, doc: any): Promise<void> {
+export async function engineHydrateFromDocument(engine: EngineSyncTarget, doc: any): Promise<unknown> {
   const workbookJson = exportDocumentToEngineWorkbookJson(doc);
   await engine.loadWorkbookFromJson(JSON.stringify(workbookJson));
-  await engine.recalculate();
+  return await engine.recalculate();
 }
 
 export async function engineApplyDeltas(
   engine: EngineSyncTarget,
   deltas: readonly DocumentCellDelta[],
   options: { recalculate?: boolean } = {},
-): Promise<void> {
+): Promise<unknown> {
   const shouldRecalculate = options.recalculate ?? true;
   const updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }> = [];
 
@@ -146,7 +146,6 @@ export async function engineApplyDeltas(
   } else {
     await Promise.all(updates.map((u) => engine.setCell(u.address, u.value, u.sheet)));
   }
-  if (shouldRecalculate) {
-    await engine.recalculate();
-  }
+  if (!shouldRecalculate) return;
+  return await engine.recalculate();
 }
