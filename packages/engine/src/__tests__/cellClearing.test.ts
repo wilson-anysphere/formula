@@ -127,8 +127,12 @@ class WasmBackedWorker implements WorkerLike {
             result = this.workbook?.getCell(params.address, params.sheet);
             break;
           case "setCells":
-            for (const update of params.updates as Array<any>) {
-              this.workbook?.setCell(update.address, update.value, update.sheet);
+            if (typeof this.workbook?.setCells === "function") {
+              this.workbook?.setCells(params.updates);
+            } else {
+              for (const update of params.updates as Array<any>) {
+                this.workbook?.setCell(update.address, update.value, update.sheet);
+              }
             }
             result = null;
             break;
