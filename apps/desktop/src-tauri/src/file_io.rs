@@ -1263,7 +1263,9 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
                                 )
                             }),
                         };
-                        edit.with_context(|| format!("encode RGCE for formula cell at ({row}, {col})"))?
+                        edit.with_context(|| {
+                            format!("encode RGCE for formula cell at ({row}, {col})")
+                        })?
                     }
                     None => XlsbCellEdit {
                         row: row_u32,
