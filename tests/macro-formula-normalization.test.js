@@ -33,10 +33,9 @@ test("macro recorder normalizes DocumentController formulas to include '=' prefi
   assert.equal(result.error, undefined, result.error?.message);
 
   const cell = freshController.getCell("Sheet1", "A1");
-  assert.equal(cell.formula, "=A1+B1");
+  assert.equal(cell.formula, "A1+B1");
   assert.equal(cell.value, null);
 
   workbook.dispose();
   freshWorkbook.dispose();
 });
-

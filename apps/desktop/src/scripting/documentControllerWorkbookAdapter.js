@@ -1,4 +1,5 @@
-import { formatCellAddress, formatRangeAddress, parseRangeAddress, TypedEventEmitter } from "@formula/scripting";
+import { formatCellAddress, formatRangeAddress, parseRangeAddress } from "../../../../packages/scripting/src/a1.js";
+import { TypedEventEmitter } from "../../../../packages/scripting/src/events.js";
 
 function valueEquals(a, b) {
   if (a === b) return true;
@@ -53,6 +54,13 @@ function isFormulaString(input) {
   if (typeof input !== "string") return false;
   const trimmed = input.trimStart();
   return trimmed.startsWith("=") && trimmed.length > 1;
+}
+
+function stripLeadingEquals(formulaText) {
+  if (typeof formulaText !== "string") return formulaText;
+  const trimmed = formulaText.trimStart();
+  if (!trimmed.startsWith("=")) return formulaText;
+  return trimmed.slice(1);
 }
 
 function denseRectForDeltas(deltas) {
@@ -590,7 +598,16 @@ class DocumentControllerRangeAdapter {
       );
     }
 
-    this.sheet.workbook.documentController.setRangeValues(this.sheet.name, this.address, values, {
+    const normalized = values.map((row) =>
+      row.map((cell) => {
+        if (typeof cell !== "string") return cell;
+        if (cell.startsWith("'")) return cell;
+        if (!isFormulaString(cell)) return cell;
+        return { formula: stripLeadingEquals(cell) };
+      }),
+    );
+
+    this.sheet.workbook.documentController.setRangeValues(this.sheet.name, this.address, normalized, {
       label: "Script: set values",
     });
     this.sheet.workbook._notifyMutate();
@@ -621,7 +638,9 @@ class DocumentControllerRangeAdapter {
         return;
       }
       if (isFormulaString(value)) {
-        this.sheet.workbook.documentController.setCellFormula(this.sheet.name, coord, value, { label: "Script: set value" });
+        this.sheet.workbook.documentController.setCellFormula(this.sheet.name, coord, stripLeadingEquals(value), {
+          label: "Script: set value",
+        });
         this.sheet.workbook._notifyMutate();
         return;
       }
