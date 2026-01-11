@@ -629,19 +629,33 @@ export class QueryEngine {
       let sourceForFolding = query.source;
       if (dialect && query.source.columns == null && sqlConnector && typeof sqlConnector.getSchema === "function") {
         const connectionId = resolveDatabaseConnectionId(query.source, sqlConnector);
-        const schemaCacheKey = connectionId ? `pq:schema:v1:${hashValue({ connectionId, sql: query.source.query })}` : null;
-        let schemaPromise = schemaCacheKey ? this.databaseSchemaCache.get(schemaCacheKey) ?? null : null;
+        const request = {
+          connectionId: connectionId ?? undefined,
+          connection: query.source.connection,
+          sql: query.source.query,
+        };
 
-        if (!schemaPromise) {
-          const request = {
-            connectionId: connectionId ?? undefined,
-            connection: query.source.connection,
-            sql: query.source.query,
-          };
-          try {
-            throwIfAborted(options.signal);
-            await this.assertPermission(sqlConnector.permissionKind, { source: query.source, request }, state);
-            const credentials = await this.getCredentials("sql", request, state);
+        /** @type {string | null} */
+        let schemaCacheKey = null;
+        /** @type {Promise<{ columns: string[], types?: Record<string, import("./model.js").DataType> }> | null} */
+        let schemaPromise = null;
+        try {
+          throwIfAborted(options.signal);
+          await this.assertPermission(sqlConnector.permissionKind, { source: query.source, request }, state);
+          const credentials = await this.getCredentials("sql", request, state);
+          const credentialId = extractCredentialId(credentials);
+          const schemaCacheable = credentials == null || credentialId != null;
+
+          if (connectionId && schemaCacheable) {
+            schemaCacheKey = `pq:schema:v2:${hashValue({
+              connectionId,
+              sql: query.source.query,
+              credentialsHash: credentialId ? hashValue(credentialId) : null,
+            })}`;
+            schemaPromise = this.databaseSchemaCache.get(schemaCacheKey) ?? null;
+          }
+
+          if (!schemaPromise) {
             schemaPromise = Promise.resolve(sqlConnector.getSchema(request, { signal: options.signal, credentials }));
             if (schemaCacheKey) {
               schemaPromise = schemaPromise.catch((err) => {
@@ -650,9 +664,9 @@ export class QueryEngine {
               });
               this.databaseSchemaCache.set(schemaCacheKey, schemaPromise);
             }
-          } catch {
-            schemaPromise = null;
           }
+        } catch {
+          schemaPromise = null;
         }
 
         if (schemaPromise) {

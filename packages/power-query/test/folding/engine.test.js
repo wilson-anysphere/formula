@@ -351,6 +351,54 @@ test("QueryEngine: schema discovery enables folding renameColumn/changeType with
   assert.equal(schemaCalls, 1);
 });
 
+test("QueryEngine: schema discovery cache varies by credentialId", async () => {
+  let schemaCalls = 0;
+  let currentCredentialId = "cred-a";
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        getSchema: async () => {
+          schemaCalls += 1;
+          return { columns: ["Region", "Sales"], types: { Region: "string", Sales: "number" } };
+        },
+        querySql: async () =>
+          DataTable.fromGrid(
+            [
+              ["Region", "Amount"],
+              ["East", 100],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          ),
+      }),
+    },
+    onPermissionRequest: async () => true,
+    onCredentialRequest: async () => ({ credentialId: currentCredentialId }),
+  });
+
+  const query = {
+    id: "q_schema_cache_by_cred",
+    name: "Schema Cache by Credential",
+    source: { type: "database", connection: { id: "db1" }, query: "SELECT * FROM raw", dialect: "postgres" },
+    steps: [
+      { id: "s1", name: "Rename", operation: { type: "renameColumn", oldName: "Sales", newName: "Amount" } },
+      { id: "s2", name: "Type", operation: { type: "changeType", column: "Amount", newType: "number" } },
+    ],
+  };
+
+  await engine.executeQuery(query, { queries: {} }, {});
+  assert.equal(schemaCalls, 1);
+
+  // Same credentials -> should reuse schema cache entry.
+  await engine.executeQuery(query, { queries: {} }, {});
+  assert.equal(schemaCalls, 1);
+
+  // Different credentials -> should not reuse cached schema.
+  currentCredentialId = "cred-b";
+  await engine.executeQuery(query, { queries: {} }, {});
+  assert.equal(schemaCalls, 2);
+});
+
 test("QueryEngine: database credentials are requested once per execution when cache key generation runs", async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store, now: () => 0 });
