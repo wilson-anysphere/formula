@@ -438,6 +438,7 @@ fn plan_shared_strings<R: Read + Seek>(
         let mut file = archive.by_name(&shared_strings_part)?;
         file.read_to_end(&mut shared_strings_bytes)?;
     }
+    let existing_shared_indices = scan_existing_shared_string_indices(archive, patches_by_part)?;
     let mut shared_strings = SharedStringsState::from_part(&shared_strings_bytes)?;
 
     // Deterministic insertion order: sort by (worksheet part, row, col).
@@ -456,11 +457,42 @@ fn plan_shared_strings<R: Read + Seek>(
 
     let mut indices_by_part: HashMap<String, HashMap<(u32, u32), u32>> = HashMap::new();
     for (part, patch) in shared_patches {
-        let idx = match &patch.value {
+        let existing_t = existing_types
+            .get(part)
+            .and_then(|m| m.get(&(patch.cell.row, patch.cell.col)))
+            .and_then(|t| t.as_deref());
+        let existing_idx = existing_shared_indices
+            .get(part)
+            .and_then(|m| m.get(&(patch.cell.row, patch.cell.col)))
+            .copied()
+            .flatten();
+
+        let reuse_idx = if existing_t == Some("s") {
+            existing_idx.and_then(|idx| {
+                let matches = match &patch.value {
+                    CellValue::String(s) => shared_strings
+                        .editor
+                        .rich_at(idx)
+                        .map(|rt| rt.text.as_str() == s)
+                        .unwrap_or(false),
+                    CellValue::RichText(rich) => shared_strings
+                        .editor
+                        .rich_at(idx)
+                        .map(|rt| rt == rich)
+                        .unwrap_or(false),
+                    _ => false,
+                };
+                matches.then_some(idx)
+            })
+        } else {
+            None
+        };
+
+        let idx = reuse_idx.unwrap_or_else(|| match &patch.value {
             CellValue::String(s) => shared_strings.get_or_insert_plain(s),
             CellValue::RichText(rich) => shared_strings.get_or_insert_rich(rich),
-            _ => continue,
-        };
+            _ => 0,
+        });
         indices_by_part
             .entry(part.to_string())
             .or_default()
@@ -566,6 +598,127 @@ fn scan_worksheet_cell_types<R: Read>(
                             break;
                         }
                     }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+fn scan_existing_shared_string_indices<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    patches_by_part: &HashMap<String, Vec<WorksheetCellPatch>>,
+) -> Result<HashMap<String, HashMap<(u32, u32), Option<u32>>>, StreamingPatchError> {
+    let mut out: HashMap<String, HashMap<(u32, u32), Option<u32>>> = HashMap::new();
+
+    for (part, patches) in patches_by_part {
+        let mut targets: HashMap<String, (u32, u32)> = HashMap::new();
+        for patch in patches {
+            if matches!(patch.value, CellValue::String(_) | CellValue::RichText(_)) {
+                targets.insert(patch.cell.to_a1(), (patch.cell.row, patch.cell.col));
+            }
+        }
+        if targets.is_empty() {
+            continue;
+        }
+
+        let mut file = match archive.by_name(part) {
+            Ok(file) => file,
+            Err(zip::result::ZipError::FileNotFound) => {
+                return Err(StreamingPatchError::MissingWorksheetPart(part.clone()));
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        let found = scan_worksheet_shared_string_indices(&mut file, &targets)?;
+        out.insert(part.clone(), found);
+    }
+
+    Ok(out)
+}
+
+fn scan_worksheet_shared_string_indices<R: Read>(
+    input: R,
+    targets: &HashMap<String, (u32, u32)>,
+) -> Result<HashMap<(u32, u32), Option<u32>>, StreamingPatchError> {
+    let mut out: HashMap<(u32, u32), Option<u32>> = HashMap::new();
+    let mut remaining = targets.len();
+    if remaining == 0 {
+        return Ok(out);
+    }
+
+    let mut reader = Reader::from_reader(BufReader::new(input));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut current_target: Option<(u32, u32)> = None;
+    let mut current_t: Option<String> = None;
+    let mut in_v = false;
+    let mut current_idx: Option<u32> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(ref e) if e.name().as_ref() == b"c" => {
+                let mut r: Option<String> = None;
+                let mut t: Option<String> = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"r" => r = Some(attr.unescape_value()?.into_owned()),
+                        b"t" => t = Some(attr.unescape_value()?.into_owned()),
+                        _ => {}
+                    }
+                }
+                if let Some(r) = r {
+                    if let Some(&(row, col)) = targets.get(&r) {
+                        current_target = Some((row, col));
+                        current_t = t;
+                        current_idx = None;
+                    }
+                }
+            }
+            Event::Empty(ref e) if e.name().as_ref() == b"c" => {
+                let mut r: Option<String> = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"r" {
+                        r = Some(attr.unescape_value()?.into_owned());
+                    }
+                }
+                if let Some(r) = r {
+                    if let Some(&(row, col)) = targets.get(&r) {
+                        out.insert((row, col), None);
+                        remaining = remaining.saturating_sub(1);
+                        if remaining == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+            Event::Start(ref e) if current_target.is_some() && e.name().as_ref() == b"v" => {
+                in_v = true;
+            }
+            Event::End(ref e) if current_target.is_some() && e.name().as_ref() == b"v" => {
+                in_v = false;
+            }
+            Event::Text(e) if in_v && current_target.is_some() => {
+                if current_t.as_deref() == Some("s") {
+                    current_idx = e.unescape()?.trim().parse::<u32>().ok();
+                }
+            }
+            Event::End(ref e) if current_target.is_some() && e.name().as_ref() == b"c" => {
+                let coord = current_target.take().unwrap();
+                out.insert(coord, current_idx);
+                current_t = None;
+                in_v = false;
+                current_idx = None;
+                remaining = remaining.saturating_sub(1);
+                if remaining == 0 {
+                    break;
                 }
             }
             Event::Eof => break,

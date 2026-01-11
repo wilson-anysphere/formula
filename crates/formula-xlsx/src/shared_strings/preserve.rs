@@ -204,6 +204,16 @@ impl SharedStringsEditor {
         self.original_count
     }
 
+    pub(crate) fn rich_at(&self, idx: u32) -> Option<&RichText> {
+        let idx = idx as usize;
+        if idx < self.entries.len() {
+            return Some(&self.entries[idx].rich);
+        }
+        self.appended
+            .get(idx.saturating_sub(self.entries.len()))
+            .map(|entry| &entry.rich)
+    }
+
     pub(crate) fn get_or_insert_plain(&mut self, text: &str) -> u32 {
         if let Some(idx) = self.plain_index.get(text).copied() {
             return idx;
@@ -322,7 +332,7 @@ fn upsert_attr(tag: &mut String, name: &str, value: &str) {
 }
 
 fn find_attr_value_range(tag: &[u8], name: &[u8]) -> Option<(usize, usize)> {
-    // Scan for ` name="..."`
+    // Scan for ` name="..."`, allowing arbitrary whitespace around the `=`.
     let mut i = 0usize;
     while i + name.len() + 3 < tag.len() {
         if tag[i..].starts_with(name) {
@@ -332,17 +342,27 @@ fn find_attr_value_range(tag: &[u8], name: &[u8]) -> Option<(usize, usize)> {
                 i += 1;
                 continue;
             }
-            let after_name = i + name.len();
-            if tag.get(after_name) != Some(&b'=') {
+
+            let mut j = i + name.len();
+            while j < tag.len() && tag[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if tag.get(j) != Some(&b'=') {
                 i += 1;
                 continue;
             }
-            let quote = *tag.get(after_name + 1)?;
+            j += 1;
+            while j < tag.len() && tag[j].is_ascii_whitespace() {
+                j += 1;
+            }
+
+            let quote = *tag.get(j)?;
             if quote != b'"' && quote != b'\'' {
                 i += 1;
                 continue;
             }
-            let value_start = after_name + 2;
+
+            let value_start = j + 1;
             let mut j = value_start;
             while j < tag.len() && tag[j] != quote {
                 j += 1;

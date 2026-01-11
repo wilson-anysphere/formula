@@ -293,6 +293,10 @@ impl SharedStringsState {
         self.editor.get_or_insert_rich(rich)
     }
 
+    fn rich_at(&self, idx: u32) -> Option<&RichText> {
+        self.editor.rich_at(idx)
+    }
+
     fn note_shared_string_ref_delta(&mut self, old_uses_shared: bool, new_uses_shared: bool) {
         match (old_uses_shared, new_uses_shared) {
             (true, false) => self.count_delta -= 1,
@@ -706,6 +710,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                             patch,
                             None,
                             None,
+                            None,
                             shared_strings,
                             style_id_to_xf,
                         )?;
@@ -778,6 +783,7 @@ fn patch_row<R: std::io::BufRead>(
                         patch,
                         None,
                         None,
+                        None,
                         shared_strings,
                         style_id_to_xf,
                     )?;
@@ -789,12 +795,22 @@ fn patch_row<R: std::io::BufRead>(
                     patch_idx += 1;
 
                     let mut existing_formula = false;
+                    let mut existing_shared_idx: Option<u32> = None;
+                    let mut in_v = false;
                     let mut depth = 1usize;
                     loop {
                         match reader.read_event_into(&mut buf)? {
                             Event::Start(inner) => {
-                                if depth == 1 && local_name(inner.name().as_ref()) == b"f" {
-                                    existing_formula = true;
+                                if depth == 1 {
+                                    match local_name(inner.name().as_ref()) {
+                                        b"f" => existing_formula = true,
+                                        b"v" => {
+                                            if existing_t.as_deref() == Some("s") {
+                                                in_v = true;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
                                 }
                                 depth += 1;
                             }
@@ -803,7 +819,14 @@ fn patch_row<R: std::io::BufRead>(
                                     existing_formula = true;
                                 }
                             }
+                            Event::Text(e) if in_v => {
+                                existing_shared_idx =
+                                    e.unescape()?.trim().parse::<u32>().ok();
+                            }
                             Event::End(inner) => {
+                                if in_v && local_name(inner.name().as_ref()) == b"v" {
+                                    in_v = false;
+                                }
                                 depth = depth.saturating_sub(1);
                                 if depth == 0 && local_name(inner.name().as_ref()) == b"c" {
                                     break;
@@ -826,6 +849,7 @@ fn patch_row<R: std::io::BufRead>(
                         patch,
                         existing_t.as_deref(),
                         existing_s.as_deref(),
+                        existing_shared_idx,
                         shared_strings,
                         style_id_to_xf,
                     )?;
@@ -871,6 +895,7 @@ fn patch_row<R: std::io::BufRead>(
                         patch,
                         None,
                         None,
+                        None,
                         shared_strings,
                         style_id_to_xf,
                     )?;
@@ -897,6 +922,7 @@ fn patch_row<R: std::io::BufRead>(
                         patch,
                         existing_t.as_deref(),
                         existing_s.as_deref(),
+                        None,
                         shared_strings,
                         style_id_to_xf,
                     )?;
@@ -912,6 +938,7 @@ fn patch_row<R: std::io::BufRead>(
                         row_num,
                         col,
                         patch,
+                        None,
                         None,
                         None,
                         shared_strings,
@@ -953,6 +980,7 @@ fn write_new_row(
             patch,
             None,
             None,
+            None,
             shared_strings,
             style_id_to_xf,
         )?;
@@ -968,6 +996,7 @@ fn write_cell_patch(
     patch: &CellPatch,
     existing_t: Option<&str>,
     existing_s: Option<&str>,
+    existing_shared_idx: Option<u32>,
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
 ) -> Result<bool, XlsxError> {
@@ -1058,10 +1087,21 @@ fn write_cell_patch(
                                 value_xml.push_str("</v>");
                             }
                             (_, true) => {
-                                let idx = shared_strings
-                                    .as_deref_mut()
-                                    .map(|ss| ss.get_or_insert_plain(s))
-                                    .unwrap_or(0);
+                                let reuse_idx = existing_shared_idx.and_then(|idx| {
+                                    let matches = shared_strings
+                                        .as_deref()
+                                        .and_then(|ss| ss.rich_at(idx))
+                                        .map(|rt| rt.text.as_str() == s)
+                                        .unwrap_or(false);
+                                    matches.then_some(idx)
+                                });
+
+                                let idx = reuse_idx.unwrap_or_else(|| {
+                                    shared_strings
+                                        .as_deref_mut()
+                                        .map(|ss| ss.get_or_insert_plain(s))
+                                        .unwrap_or(0)
+                                });
                                 ty = Some("s");
                                 value_xml.push_str("<v>");
                                 value_xml.push_str(&idx.to_string());
@@ -1083,10 +1123,20 @@ fn write_cell_patch(
                     let prefer_shared = shared_strings.is_some();
 
                     if prefer_shared {
-                        let idx = shared_strings
-                            .as_deref_mut()
-                            .map(|ss| ss.get_or_insert_plain(s))
-                            .unwrap_or(0);
+                        let reuse_idx = existing_shared_idx.and_then(|idx| {
+                            let matches = shared_strings
+                                .as_deref()
+                                .and_then(|ss| ss.rich_at(idx))
+                                .map(|rt| rt.text.as_str() == s)
+                                .unwrap_or(false);
+                            matches.then_some(idx)
+                        });
+                        let idx = reuse_idx.unwrap_or_else(|| {
+                            shared_strings
+                                .as_deref_mut()
+                                .map(|ss| ss.get_or_insert_plain(s))
+                                .unwrap_or(0)
+                        });
                         ty = Some("s");
                         value_xml.push_str("<v>");
                         value_xml.push_str(&idx.to_string());
@@ -1106,10 +1156,20 @@ fn write_cell_patch(
             CellValue::RichText(rich) => {
                 let prefer_shared = shared_strings.is_some() && existing_t != Some("inlineStr");
                 if prefer_shared {
-                    let idx = shared_strings
-                        .as_deref_mut()
-                        .map(|ss| ss.get_or_insert_rich(rich))
-                        .unwrap_or(0);
+                    let reuse_idx = existing_shared_idx.and_then(|idx| {
+                        let matches = shared_strings
+                            .as_deref()
+                            .and_then(|ss| ss.rich_at(idx))
+                            .map(|rt| rt == rich)
+                            .unwrap_or(false);
+                        matches.then_some(idx)
+                    });
+                    let idx = reuse_idx.unwrap_or_else(|| {
+                        shared_strings
+                            .as_deref_mut()
+                            .map(|ss| ss.get_or_insert_rich(rich))
+                            .unwrap_or(0)
+                    });
                     ty = Some("s");
                     value_xml.push_str("<v>");
                     value_xml.push_str(&idx.to_string());
