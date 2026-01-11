@@ -1083,11 +1083,24 @@ impl ColumnarTable {
 impl From<ColumnarTable> for MutableColumnarTable {
     fn from(table: ColumnarTable) -> Self {
         let overlays = (0..table.columns.len()).map(|_| HashMap::new()).collect();
-        let columns = table
+        let page_size = table.options.page_size_rows;
+        let remainder = if page_size == 0 {
+            0
+        } else {
+            table.rows % page_size
+        };
+
+        let mut columns: Vec<MutableColumn> = table
             .columns
             .into_iter()
-            .map(|col| MutableColumn::from_column(col, table.options.page_size_rows))
+            .map(|col| MutableColumn::from_column(col, page_size))
             .collect();
+
+        if remainder != 0 {
+            for column in &mut columns {
+                column.take_tail_chunk_into_current(remainder);
+            }
+        }
 
         Self {
             schema: table.schema,
@@ -1188,6 +1201,19 @@ impl MutableColumn {
             MutableColumn::Float(c) => c.apply_overlays_to_current(updates),
             MutableColumn::Bool(c) => c.apply_overlays_to_current(updates),
             MutableColumn::Dict(c) => c.apply_overlays_to_current(updates),
+        }
+    }
+
+    fn take_tail_chunk_into_current(&mut self, expected_len: usize) {
+        if expected_len == 0 {
+            return;
+        }
+
+        match self {
+            MutableColumn::Int(c) => c.take_tail_chunk_into_current(expected_len),
+            MutableColumn::Float(c) => c.take_tail_chunk_into_current(expected_len),
+            MutableColumn::Bool(c) => c.take_tail_chunk_into_current(expected_len),
+            MutableColumn::Dict(c) => c.take_tail_chunk_into_current(expected_len),
         }
     }
 
@@ -1522,6 +1548,26 @@ impl MutableIntColumn {
         }
     }
 
+    fn take_tail_chunk_into_current(&mut self, expected_len: usize) {
+        let Some(last) = self.chunks.last() else {
+            return;
+        };
+        if last.len() != expected_len {
+            return;
+        }
+
+        let Some(EncodedChunk::Int(chunk)) = self.chunks.pop() else {
+            return;
+        };
+
+        let values = chunk.decode_i64();
+        let validity = chunk
+            .validity
+            .unwrap_or_else(|| BitVec::with_len_all_true(expected_len));
+        self.current = values;
+        self.validity = validity;
+    }
+
     fn encoded_current_chunk(&self) -> Option<EncodedChunk> {
         if self.current.is_empty() {
             return None;
@@ -1839,6 +1885,25 @@ impl MutableFloatColumn {
         }
     }
 
+    fn take_tail_chunk_into_current(&mut self, expected_len: usize) {
+        let Some(last) = self.chunks.last() else {
+            return;
+        };
+        if last.len() != expected_len {
+            return;
+        }
+
+        let Some(EncodedChunk::Float(chunk)) = self.chunks.pop() else {
+            return;
+        };
+
+        let validity = chunk
+            .validity
+            .unwrap_or_else(|| BitVec::with_len_all_true(expected_len));
+        self.current = chunk.values;
+        self.validity = validity;
+    }
+
     fn encoded_current_chunk(&self) -> Option<EncodedChunk> {
         if self.current.is_empty() {
             return None;
@@ -2107,6 +2172,26 @@ impl MutableBoolColumn {
                 self.validity.set(*in_chunk, false);
             }
         }
+    }
+
+    fn take_tail_chunk_into_current(&mut self, expected_len: usize) {
+        let Some(last) = self.chunks.last() else {
+            return;
+        };
+        if last.len() != expected_len {
+            return;
+        }
+
+        let Some(EncodedChunk::Bool(chunk)) = self.chunks.pop() else {
+            return;
+        };
+
+        let values = chunk.decode_bools();
+        let validity = chunk
+            .validity
+            .unwrap_or_else(|| BitVec::with_len_all_true(expected_len));
+        self.current = values;
+        self.validity = validity;
     }
 
     fn encoded_current_chunk(&self) -> Option<EncodedChunk> {
@@ -2437,6 +2522,26 @@ impl MutableDictColumn {
                 self.validity.set(*in_chunk, false);
             }
         }
+    }
+
+    fn take_tail_chunk_into_current(&mut self, expected_len: usize) {
+        let Some(last) = self.chunks.last() else {
+            return;
+        };
+        if last.len() != expected_len {
+            return;
+        }
+
+        let Some(EncodedChunk::Dict(chunk)) = self.chunks.pop() else {
+            return;
+        };
+
+        let values = chunk.decode_indices();
+        let validity = chunk
+            .validity
+            .unwrap_or_else(|| BitVec::with_len_all_true(expected_len));
+        self.current = values;
+        self.validity = validity;
     }
 
     fn encoded_current_chunk(&self) -> Option<EncodedChunk> {

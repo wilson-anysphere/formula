@@ -282,6 +282,37 @@ fn distinct_count_after_from_encoded_and_append() {
 }
 
 #[test]
+fn append_after_into_mutable_from_partial_last_page() {
+    let schema = vec![ColumnSchema {
+        name: "x".to_owned(),
+        column_type: ColumnType::Number,
+    }];
+    let options = TableOptions {
+        page_size_rows: 4,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+
+    let mut builder = ColumnarTableBuilder::new(schema.clone(), options);
+    for v in 0..6 {
+        builder.append_row(&[Value::Number(v as f64)]);
+    }
+    let table = builder.finalize();
+    assert_eq!(table.row_count(), 6);
+
+    // Immutable table has a partial last chunk (len=2). Ensure we can convert to mutable and
+    // append without corrupting the row/page mapping.
+    let mut mutable = table.into_mutable();
+    mutable.append_row(&[Value::Number(6.0)]);
+    mutable.append_row(&[Value::Number(7.0)]);
+
+    assert_eq!(mutable.row_count(), 8);
+    assert_eq!(mutable.get_cell(0, 0), Value::Number(0.0));
+    assert_eq!(mutable.get_cell(5, 0), Value::Number(5.0));
+    assert_eq!(mutable.get_cell(6, 0), Value::Number(6.0));
+    assert_eq!(mutable.get_cell(7, 0), Value::Number(7.0));
+}
+
+#[test]
 fn freeze_merges_overlays_across_flushed_and_current_pages() {
     let schema = vec![
         ColumnSchema {
