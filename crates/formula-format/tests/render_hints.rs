@@ -78,6 +78,10 @@ fn general_format_matches_excel_like_rules() {
         render_value(Value::Number(1e11), Some("General"), &options).text,
         "1E+11"
     );
+    assert_eq!(
+        render_value(Value::Number(99_999_999_999.0), Some("General"), &options).text,
+        "99999999999"
+    );
 }
 
 #[test]

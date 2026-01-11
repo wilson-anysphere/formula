@@ -496,7 +496,7 @@ fn render_tokens(tokens: &[Token], parts: &DateTimeParts, has_ampm: bool, option
             }
             Token::Second(count) => out.push_str(&format_two(parts.second, *count)),
             Token::FractionalSeconds(digits) => {
-                out.push('.');
+                out.push(options.locale.decimal_sep);
                 out.push_str(&format_fractional_seconds(parts, *digits));
             }
             Token::AmPmLong => out.push_str(if parts.hour < 12 { "AM" } else { "PM" }),

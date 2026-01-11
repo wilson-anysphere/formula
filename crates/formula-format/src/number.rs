@@ -112,9 +112,9 @@ fn format_general(value: f64, options: &FormatOptions) -> String {
     }
 
     let abs = rounded.abs();
-    let exponent = abs.log10().floor() as i32;
+    let exponent = decimal_exponent(abs);
     // Empirically Excel switches to scientific notation outside this exponent window.
-    let use_scientific = abs >= 1e11 || abs < 1e-9;
+    let use_scientific = exponent >= 11 || exponent <= -10;
     let mut s = if use_scientific {
         format_general_scientific(rounded, exponent)
     } else {
@@ -132,10 +132,48 @@ fn round_to_significant_digits(value: f64, digits: i32) -> f64 {
         return 0.0;
     }
     let abs = value.abs();
-    let exp = abs.log10().floor() as i32;
+    let exp = decimal_exponent(abs);
     let scale = digits - 1 - exp;
+    // For extreme exponents this scaling factor can overflow/underflow. In those cases return the
+    // value unchanged; further rounding isn't meaningful at f64 precision anyway.
+    if scale > 308 || scale < -308 {
+        return value;
+    }
     let factor = 10_f64.powi(scale);
     (value * factor).round() / factor
+}
+
+fn decimal_exponent(abs: f64) -> i32 {
+    if abs == 0.0 || !abs.is_finite() {
+        return 0;
+    }
+    // Using `log10` directly is prone to boundary errors near powers of 10 because of floating
+    // rounding. Adjust the initial estimate until 10^exp <= abs < 10^(exp+1).
+    let mut exp = abs.log10().floor() as i32;
+    let mut pow = 10_f64.powi(exp);
+
+    // Handle overflow/underflow from powi.
+    if pow.is_infinite() {
+        while pow.is_infinite() {
+            exp -= 1;
+            pow = 10_f64.powi(exp);
+        }
+    } else if pow == 0.0 {
+        while pow == 0.0 {
+            exp += 1;
+            pow = 10_f64.powi(exp);
+        }
+    }
+
+    while abs < pow {
+        exp -= 1;
+        pow /= 10.0;
+    }
+    while abs >= pow * 10.0 {
+        exp += 1;
+        pow *= 10.0;
+    }
+    exp
 }
 
 fn format_general_decimal(value: f64, exponent: i32) -> String {

@@ -179,6 +179,12 @@ fn locale_separators() {
         format_value(Value::Number(1.0), Some("m/d/yyyy"), &options).text,
         "1.1.1900"
     );
+
+    let serial = 1.234 / 86_400.0;
+    assert_eq!(
+        format_value(Value::Number(serial), Some("mm:ss.0"), &options).text,
+        "00:01,2"
+    );
 }
 
 #[test]
