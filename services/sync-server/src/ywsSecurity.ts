@@ -20,6 +20,10 @@ type MessageGuard = (
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
 
+const MAX_CELL_KEY_CHARS = 1024;
+const MAX_SHEET_ID_CHARS = 256;
+const MAX_CELL_INDEX_CHARS = 32;
+
 // Tracks which websocket "owns" an awareness clientID for a given doc.
 // Used to reject attempts to send awareness updates for another live connection.
 const awarenessClientIdOwnersByDoc = new Map<string, Map<number, WebSocket>>();
@@ -146,13 +150,13 @@ function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddre
   if (typeof key !== "string" || key.length === 0) return null;
   // Cell keys are short (e.g. `Sheet1:0:0`). Reject unusually large keys early to
   // avoid expensive parsing/allocation work on hostile updates.
-  if (key.length > 1024) return null;
+  if (key.length > MAX_CELL_KEY_CHARS) return null;
 
   const isValidIndex = (value: number): boolean => Number.isSafeInteger(value) && value >= 0;
 
   const parseIndex = (value: string): number | null => {
     if (value.length === 0) return null;
-    if (value.length > 32) return null;
+    if (value.length > MAX_CELL_INDEX_CHARS) return null;
 
     // Short-circuit extremely large values to avoid `Number("9".repeat(400))` -> Infinity
     // surprises and to keep parsing work bounded for hostile keys.
@@ -181,7 +185,7 @@ function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddre
       const rowLen = cIndex - 1;
       const colStart = cIndex + 1;
       const colLen = key.length - colStart;
-      if (rowLen > 32 || colLen > 32) return null;
+      if (rowLen > MAX_CELL_INDEX_CHARS || colLen > MAX_CELL_INDEX_CHARS) return null;
 
       const row = parseIndex(key.slice(1, cIndex));
       const col = parseIndex(key.slice(colStart));
@@ -194,7 +198,7 @@ function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddre
   const firstColon = key.indexOf(":");
   if (firstColon < 0) return null;
   // Sheet ids are expected to be small (uuid-ish). Bound work and allocations.
-  if (firstColon > 256) return null;
+  if (firstColon > MAX_SHEET_ID_CHARS) return null;
 
   const sheetId = (firstColon === 0 ? "" : key.slice(0, firstColon)) || defaultSheetId;
   const secondColon = key.indexOf(":", firstColon + 1);
@@ -211,7 +215,7 @@ function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddre
     const rowLen = commaIndex - rowStart;
     const colStart = commaIndex + 1;
     const colLen = key.length - colStart;
-    if (rowLen > 32 || colLen > 32) return null;
+    if (rowLen > MAX_CELL_INDEX_CHARS || colLen > MAX_CELL_INDEX_CHARS) return null;
 
     const row = parseIndex(key.slice(rowStart, commaIndex));
     const col = parseIndex(key.slice(colStart));
@@ -228,7 +232,7 @@ function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddre
   const colStart = secondColon + 1;
   const colLen = key.length - colStart;
   if (rowLen <= 0 || colLen <= 0) return null;
-  if (rowLen > 32 || colLen > 32) return null;
+  if (rowLen > MAX_CELL_INDEX_CHARS || colLen > MAX_CELL_INDEX_CHARS) return null;
 
   const row = parseIndex(key.slice(rowStart, secondColon));
   const col = parseIndex(key.slice(colStart));
@@ -618,6 +622,7 @@ export function installYwsSecurity(
 
         const preStateVector = Y.encodeStateVector(shadowDoc);
         const touchedCellKeys = new Set<string>();
+        let oversizedCellKeyLength: number | null = null;
 
         const store = (shadowDoc as any).store as {
           pendingStructs: unknown;
@@ -636,7 +641,13 @@ export function installYwsSecurity(
             const path = event?.path;
             const topCellKey =
               Array.isArray(path) && typeof path[0] === "string" ? path[0] : null;
-            if (topCellKey) touchedCellKeys.add(topCellKey);
+            if (topCellKey) {
+              if (topCellKey.length > MAX_CELL_KEY_CHARS) {
+                oversizedCellKeyLength = topCellKey.length;
+              } else {
+                touchedCellKeys.add(topCellKey);
+              }
+            }
 
             const keys = event?.changes?.keys;
             if (!keys) continue;
@@ -648,12 +659,20 @@ export function installYwsSecurity(
               if (typeof keys.entries === "function") {
                 for (const [key] of keys.entries()) {
                   if (typeof key !== "string") continue;
-                  touchedCellKeys.add(key);
+                  if (key.length > MAX_CELL_KEY_CHARS) {
+                    oversizedCellKeyLength = key.length;
+                  } else {
+                    touchedCellKeys.add(key);
+                  }
                 }
               } else if (typeof keys.keys === "function") {
                 for (const key of keys.keys()) {
                   if (typeof key === "string") {
-                    touchedCellKeys.add(key);
+                    if (key.length > MAX_CELL_KEY_CHARS) {
+                      oversizedCellKeyLength = key.length;
+                    } else {
+                      touchedCellKeys.add(key);
+                    }
                   }
                 }
               }
@@ -678,6 +697,14 @@ export function installYwsSecurity(
           // we cannot confidently determine which cells were affected. Fail closed.
           logRangeRestrictionOnce("range_restriction_update_pending");
           ws.close(1008, "range restrictions validation failed");
+          return { drop: true };
+        }
+
+        if (oversizedCellKeyLength !== null) {
+          logRangeRestrictionOnce("range_restriction_oversized_cell_key", {
+            cellKeyLength: oversizedCellKeyLength,
+          });
+          ws.close(1008, "unparseable cell key");
           return { drop: true };
         }
 
