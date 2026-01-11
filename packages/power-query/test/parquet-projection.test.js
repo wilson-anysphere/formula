@@ -55,6 +55,17 @@ test("computeParquetProjectionColumns supports groupBy + downstream references t
   assert.deepEqual(new Set(cols), new Set(["Region", "Sales"]));
 });
 
+test("computeParquetProjectionColumns supports addColumn and does not request derived columns from parquet", () => {
+  const steps = [
+    { id: "s_add", name: "Add", operation: { type: "addColumn", name: "Total", formula: "=[a] + [b]" } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["Total"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a", "b"]));
+});
+
 test("computeParquetProjectionColumns returns null when unsupported operations are present", () => {
   const steps = [
     { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id"] } },

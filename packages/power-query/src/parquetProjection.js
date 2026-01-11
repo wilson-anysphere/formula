@@ -20,9 +20,29 @@ const SUPPORTED_OPS = new Set([
   "sortRows",
   "groupBy",
   "changeType",
+  "addColumn",
   "renameColumn",
   "take",
 ]);
+
+/**
+ * Extract bracketed column references (`[Column Name]`) from an `addColumn` formula.
+ *
+ * This intentionally mirrors `compileRowFormula`'s very small supported surface area.
+ *
+ * @param {string} formula
+ * @returns {Set<string>}
+ */
+function parseFormulaColumnRefs(formula) {
+  const refs = new Set();
+  let expr = formula.trim();
+  if (expr.startsWith("=")) expr = expr.slice(1).trim();
+  for (const match of expr.matchAll(/\[([^\]]+)\]/g)) {
+    const name = String(match[1]).trim();
+    if (name) refs.add(name);
+  }
+  return refs;
+}
 
 /**
  * @param {FilterPredicate} predicate
@@ -69,7 +89,7 @@ export function computeParquetProjectionColumns(steps) {
     }
   }
 
-  /** @type {Map<string, string>} current column name -> parquet column name */
+  /** @type {Map<string, string | null>} current column name -> parquet column name (null means derived) */
   const mapping = new Map();
   /** @type {Set<string>} */
   const required = new Set();
@@ -77,13 +97,17 @@ export function computeParquetProjectionColumns(steps) {
   /**
    * @param {string} name
    */
-  const getSourceName = (name) => mapping.get(name) ?? name;
+  const getSourceName = (name) => {
+    if (!mapping.has(name)) return name;
+    return mapping.get(name) ?? null;
+  };
 
   /**
    * @param {string} name
    */
   const requireColumn = (name) => {
-    required.add(getSourceName(name));
+    const source = getSourceName(name);
+    if (source != null) required.add(source);
   };
 
   for (const step of steps) {
@@ -113,6 +137,9 @@ export function computeParquetProjectionColumns(steps) {
         break;
       case "changeType":
         requireColumn(op.column);
+        break;
+      case "addColumn":
+        parseFormulaColumnRefs(op.formula).forEach(requireColumn);
         break;
       case "renameColumn":
         requireColumn(op.oldName);
@@ -162,6 +189,9 @@ export function computeParquetProjectionColumns(steps) {
         for (const [k, v] of next) mapping.set(k, v);
         break;
       }
+      case "addColumn":
+        mapping.set(op.name, null);
+        break;
       default:
         break;
     }
