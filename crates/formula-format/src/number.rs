@@ -319,9 +319,15 @@ fn find_placeholder_span(s: &str) -> (Option<usize>, Option<usize>) {
 struct FixedSpec {
     int_placeholders: Vec<PlaceholderKind>,
     frac_placeholders: Vec<PlaceholderKind>,
-    grouping: bool,
+    grouping: Option<GroupingSpec>,
     scale_commas: usize,
     has_decimal_point: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GroupingSpec {
+    primary: usize,
+    secondary: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,7 +397,7 @@ fn parse_fixed(number_raw: &str) -> FixedSpec {
     }
     let int_pat = &int_pat_raw[..int_cut];
 
-    let grouping = int_pat.contains(',');
+    let grouping = parse_grouping(int_pat);
     let int_placeholders = parse_placeholders(int_pat);
     let frac_placeholders = parse_placeholders(frac_pat);
 
@@ -402,6 +408,61 @@ fn parse_fixed(number_raw: &str) -> FixedSpec {
         scale_commas,
         has_decimal_point: decimal_pos.is_some(),
     }
+}
+
+fn parse_grouping(int_pat: &str) -> Option<GroupingSpec> {
+    let mut in_quotes = false;
+    let mut escape = false;
+    let mut in_brackets = false;
+    let mut tokens = Vec::new();
+    for ch in int_pat.chars() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_quotes {
+            if ch == '"' {
+                in_quotes = false;
+            }
+            continue;
+        }
+        if in_brackets {
+            if ch == ']' {
+                in_brackets = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_quotes = true,
+            '\\' => escape = true,
+            '[' => in_brackets = true,
+            '0' | '#' | '?' => tokens.push(1u8),
+            ',' => tokens.push(0u8),
+            _ => {}
+        }
+    }
+
+    if !tokens.iter().any(|t| *t == 0) {
+        return None;
+    }
+
+    let mut group_sizes: Vec<usize> = Vec::new();
+    let mut count = 0usize;
+    for t in tokens.into_iter().rev() {
+        if t == 1 {
+            count += 1;
+        } else {
+            if count > 0 {
+                group_sizes.push(count);
+            }
+            count = 0;
+        }
+    }
+
+    let primary = group_sizes.first().copied()?;
+    let secondary = group_sizes.get(1).copied().unwrap_or(primary);
+    Some(GroupingSpec { primary, secondary })
 }
 
 fn parse_placeholders(pat: &str) -> Vec<PlaceholderKind> {
@@ -438,10 +499,15 @@ fn format_fixed(mut value: f64, spec: &FixedSpec, options: &FormatOptions) -> St
     };
 
     let int_part = apply_int_placeholders(&int_digits, &spec.int_placeholders, value.abs() < 1.0);
-    let int_part = if spec.grouping && !int_part.trim().is_empty() {
-        // Grouping should ignore leading spaces produced by `?`.
-        group_thousands_with_padding(&int_part, options.locale.thousands_sep)
+    let int_part = if let Some(grouping) = spec.grouping {
+        if !int_part.trim().is_empty() {
+            // Grouping should ignore leading spaces produced by `?`.
+            group_digits_with_padding(&int_part, options.locale.thousands_sep, grouping)
+        } else {
+            int_part
+        }
     } else {
+        // Grouping should ignore leading spaces produced by `?`.
         int_part
     };
 
@@ -474,27 +540,13 @@ fn round_to(value: f64, decimals: usize) -> f64 {
     (value * factor).round() / factor
 }
 
-fn group_thousands(int_part: &str, sep: char) -> String {
-    let mut out = String::new();
-    let bytes = int_part.as_bytes();
-    let len = bytes.len();
-    for (i, ch) in int_part.chars().enumerate() {
-        let pos_from_end = len - i;
-        out.push(ch);
-        if pos_from_end > 1 && pos_from_end % 3 == 1 {
-            out.push(sep);
-        }
-    }
-    out
-}
-
-fn group_thousands_with_padding(int_part: &str, sep: char) -> String {
+fn group_digits_with_padding(int_part: &str, sep: char, spec: GroupingSpec) -> String {
     let trimmed = int_part.trim_start_matches(' ');
     let pad_len = int_part.len() - trimmed.len();
     let mut grouped = if trimmed.is_empty() {
         String::new()
     } else {
-        group_thousands(trimmed, sep)
+        group_digits(trimmed, sep, spec)
     };
     if pad_len > 0 {
         let mut out = String::with_capacity(pad_len + grouped.len());
@@ -505,6 +557,36 @@ fn group_thousands_with_padding(int_part: &str, sep: char) -> String {
         grouped = out;
     }
     grouped
+}
+
+fn group_digits(int_part: &str, sep: char, spec: GroupingSpec) -> String {
+    let primary = spec.primary.max(1);
+    let secondary = spec.secondary.max(1);
+    let len = int_part.len();
+    if len <= primary {
+        return int_part.to_string();
+    }
+
+    let mut groups: Vec<&str> = Vec::new();
+    let mut idx = len;
+    let mut first = true;
+    while idx > 0 {
+        let size = if first { primary } else { secondary };
+        let start = idx.saturating_sub(size);
+        groups.push(&int_part[start..idx]);
+        idx = start;
+        first = false;
+    }
+    groups.reverse();
+
+    let mut out = String::with_capacity(len + groups.len().saturating_sub(1));
+    for (i, group) in groups.iter().enumerate() {
+        if i > 0 {
+            out.push(sep);
+        }
+        out.push_str(group);
+    }
+    out
 }
 
 fn apply_int_placeholders(digits: &str, placeholders: &[PlaceholderKind], is_less_than_one: bool) -> String {

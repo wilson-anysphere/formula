@@ -24,6 +24,8 @@ fn golden_corpus_numbers_and_datetime() {
         (Value::Number(1234567.0), "#,##0,", &en_1900, "1,235"),
         (Value::Number(1500.0), "0,.0", &en_1900, "1.5"),
         (Value::Number(1234567.0), "#,##0,.0", &en_1900, "1,234.6"),
+        // Non-3-digit grouping patterns (e.g. Indian numbering system).
+        (Value::Number(12345678.0), "#,##,##0", &en_1900, "1,23,45,678"),
         // Escaped literals: `\\%` renders a percent sign without scaling.
         (Value::Number(5.0), "0\\%", &en_1900, "5%"),
         // `?` placeholders render spaces for insignificant digits.
