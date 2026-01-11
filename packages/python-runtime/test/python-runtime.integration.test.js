@@ -206,3 +206,22 @@ s.connect(("127.0.0.1", ${address.port}))
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("native python sandbox blocks posix_spawn escape hatch", async () => {
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import os
+if hasattr(os, "posix_spawn"):
+    os.posix_spawn("/bin/echo", ["echo", "should-not-run"], os.environ)
+else:
+    os.system("echo should-not-run")
+`;
+
+  await assert.rejects(() => runtime.execute(script, { api: workbook }), /Process execution is not permitted/);
+});

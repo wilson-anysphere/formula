@@ -407,7 +407,10 @@ s.connect(("127.0.0.1", ${address.port}))
 
     const script = `
 import os
-os.system("echo should-not-run")
+if hasattr(os, "posix_spawn"):
+    os.posix_spawn("/bin/echo", ["echo", "should-not-run"], os.environ)
+else:
+    os.system("echo should-not-run")
 `;
 
     await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Process execution is not permitted/);
