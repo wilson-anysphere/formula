@@ -89,6 +89,14 @@ function tryReadSheetPrefix(input: string, start: number): { text: string; end: 
     return null;
   }
 
+  // Only treat `Sheet!A1` as a sheet-qualified ref when the `Sheet` token starts
+  // at a natural boundary. This avoids incorrectly highlighting the tail of an
+  // invalid unquoted sheet name that contains spaces (e.g. `My Sheet!A1` should
+  // not be tokenized as `Sheet!A1`).
+  let prev = start - 1;
+  while (prev >= 0 && isWhitespace(input[prev])) prev -= 1;
+  if (prev >= 0 && isIdentifierPart(input[prev])) return null;
+
   if (!isIdentifierStart(input[start] ?? "")) return null;
 
   let i = start + 1;

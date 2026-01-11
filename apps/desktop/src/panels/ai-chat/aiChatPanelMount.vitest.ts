@@ -14,11 +14,19 @@ const TEST_TIMEOUT_MS = 15_000;
 const mocks = vi.hoisted(() => {
   return {
     createAiChatOrchestrator: vi.fn(() => ({ sendMessage: vi.fn(), sessionId: "test-session" })),
+    getDesktopAIAuditStore: vi.fn(() => ({
+      logEntry: vi.fn(async () => {}),
+      listEntries: vi.fn(async () => []),
+    })),
   };
 });
 
 vi.mock("../../ai/chat/orchestrator.js", () => ({
   createAiChatOrchestrator: mocks.createAiChatOrchestrator,
+}));
+
+vi.mock("../../ai/audit/auditStore.js", () => ({
+  getDesktopAIAuditStore: mocks.getDesktopAIAuditStore,
 }));
 
 // React 18 relies on this flag to suppress act() warnings in test runners.
@@ -58,6 +66,7 @@ describe("AI chat panel", () => {
     document.body.innerHTML = "";
     clearAiStorage();
     mocks.createAiChatOrchestrator.mockClear();
+    mocks.getDesktopAIAuditStore.mockClear();
   });
 
   it(
@@ -127,6 +136,7 @@ describe("AI chat panel", () => {
     });
 
     expect(getDocumentController).toHaveBeenCalled();
+    expect(mocks.getDesktopAIAuditStore).toHaveBeenCalled();
     const chatTab = body.querySelector('[data-testid="ai-tab-chat"]');
     expect(chatTab).toBeInstanceOf(HTMLButtonElement);
 

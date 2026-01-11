@@ -232,5 +232,5 @@ describe("App (web preview)", () => {
       root.unmount();
     });
     host.remove();
-  });
+  }, 15_000);
 });

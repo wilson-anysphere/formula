@@ -5,7 +5,10 @@ export const LEGACY_OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
 export const LLM_PROVIDER_STORAGE_KEY = "formula:llm:provider";
 
 export const OPENAI_API_KEY_STORAGE_KEY = "formula:llm:openai:apiKey";
+export const OPENAI_BASE_URL_STORAGE_KEY = "formula:llm:openai:baseUrl";
+export const OPENAI_MODEL_STORAGE_KEY = "formula:llm:openai:model";
 export const ANTHROPIC_API_KEY_STORAGE_KEY = "formula:llm:anthropic:apiKey";
+export const ANTHROPIC_MODEL_STORAGE_KEY = "formula:llm:anthropic:model";
 
 export const OLLAMA_BASE_URL_STORAGE_KEY = "formula:llm:ollama:baseUrl";
 export const OLLAMA_MODEL_STORAGE_KEY = "formula:llm:ollama:model";
@@ -14,7 +17,7 @@ export const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 export const DEFAULT_OLLAMA_MODEL = "llama3.1";
 
 export type DesktopLLMConfig =
-  | { provider: "openai"; apiKey: string; model?: string }
+  | { provider: "openai"; apiKey: string; model?: string; baseUrl?: string }
   | { provider: "anthropic"; apiKey: string; model?: string }
   | { provider: "ollama"; baseUrl: string; model: string };
 
@@ -88,14 +91,15 @@ export function loadDesktopLLMConfig(): DesktopLLMConfig | null {
       safeGet(storage, LEGACY_OPENAI_API_KEY_STORAGE_KEY) ??
       readViteEnv("VITE_OPENAI_API_KEY");
     if (!apiKey) return null;
-    const model = safeGet(storage, "formula:llm:openai:model") ?? undefined;
-    return { provider: "openai", apiKey, model };
+    const model = safeGet(storage, OPENAI_MODEL_STORAGE_KEY) ?? undefined;
+    const baseUrl = safeGet(storage, OPENAI_BASE_URL_STORAGE_KEY) ?? readViteEnv("VITE_OPENAI_BASE_URL") ?? undefined;
+    return { provider: "openai", apiKey, model, baseUrl };
   }
 
   if (provider === "anthropic") {
     const apiKey = safeGet(storage, ANTHROPIC_API_KEY_STORAGE_KEY) ?? readViteEnv("VITE_ANTHROPIC_API_KEY");
     if (!apiKey) return null;
-    const model = safeGet(storage, "formula:llm:anthropic:model") ?? undefined;
+    const model = safeGet(storage, ANTHROPIC_MODEL_STORAGE_KEY) ?? undefined;
     return { provider: "anthropic", apiKey, model };
   }
 
@@ -139,13 +143,17 @@ export function saveDesktopLLMConfig(config: DesktopLLMConfig): void {
     safeSet(storage, OPENAI_API_KEY_STORAGE_KEY, config.apiKey);
     // Maintain backward compatibility for older builds/tests that only read the legacy key.
     safeSet(storage, LEGACY_OPENAI_API_KEY_STORAGE_KEY, config.apiKey);
-    if (config.model) safeSet(storage, "formula:llm:openai:model", config.model);
+    if (config.model) safeSet(storage, OPENAI_MODEL_STORAGE_KEY, config.model);
+    else safeRemove(storage, OPENAI_MODEL_STORAGE_KEY);
+    if (config.baseUrl) safeSet(storage, OPENAI_BASE_URL_STORAGE_KEY, config.baseUrl);
+    else safeRemove(storage, OPENAI_BASE_URL_STORAGE_KEY);
     return;
   }
 
   if (config.provider === "anthropic") {
     safeSet(storage, ANTHROPIC_API_KEY_STORAGE_KEY, config.apiKey);
-    if (config.model) safeSet(storage, "formula:llm:anthropic:model", config.model);
+    if (config.model) safeSet(storage, ANTHROPIC_MODEL_STORAGE_KEY, config.model);
+    else safeRemove(storage, ANTHROPIC_MODEL_STORAGE_KEY);
     return;
   }
 
@@ -158,7 +166,10 @@ export function clearDesktopLLMConfig(): void {
   safeRemove(storage, LLM_PROVIDER_STORAGE_KEY);
 
   safeRemove(storage, OPENAI_API_KEY_STORAGE_KEY);
+  safeRemove(storage, OPENAI_MODEL_STORAGE_KEY);
+  safeRemove(storage, OPENAI_BASE_URL_STORAGE_KEY);
   safeRemove(storage, ANTHROPIC_API_KEY_STORAGE_KEY);
+  safeRemove(storage, ANTHROPIC_MODEL_STORAGE_KEY);
 
   safeRemove(storage, OLLAMA_BASE_URL_STORAGE_KEY);
   safeRemove(storage, OLLAMA_MODEL_STORAGE_KEY);
@@ -166,4 +177,3 @@ export function clearDesktopLLMConfig(): void {
   // Keep legacy key clear to match user intent.
   safeRemove(storage, LEGACY_OPENAI_API_KEY_STORAGE_KEY);
 }
-
