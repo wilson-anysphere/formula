@@ -4,6 +4,9 @@ import { MemoryAIAuditStore } from "@formula/ai-audit";
 import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../../packages/ai-context/src/tokenBudget.js";
 
 import { DocumentController } from "../../../document/documentController.js";
+import { ContextManager } from "../../../../../../packages/ai-context/src/contextManager.js";
+import { HashEmbedder } from "../../../../../../packages/ai-rag/src/embedding/hashEmbedder.js";
+import { InMemoryVectorStore } from "../../../../../../packages/ai-rag/src/store/inMemoryVectorStore.js";
 import { runAgentTask } from "../agentOrchestrator.js";
 
 import { DLP_ACTION } from "../../../../../../packages/security/dlp/src/actions.js";
@@ -11,6 +14,7 @@ import { CLASSIFICATION_LEVEL } from "../../../../../../packages/security/dlp/sr
 import { LocalClassificationStore } from "../../../../../../packages/security/dlp/src/classificationStore.js";
 import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/policyStore.js";
 
+import { createDesktopRagService } from "../../rag/ragService.js";
 import { getAiDlpAuditLogger, resetAiDlpAuditLoggerForTests } from "../../dlp/aiDlp.js";
 
 function createInMemoryLocalStorage(): Storage {
@@ -34,6 +38,70 @@ function createInMemoryLocalStorage(): Storage {
 }
 
 describe("runAgentTask (agent mode orchestrator)", () => {
+  it("does not re-index workbook RAG when workbook has not changed", async () => {
+    const documentController = new DocumentController();
+    documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "seed");
+
+    const embedder = new HashEmbedder({ dimension: 32 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 32 });
+    const contextManager = new ContextManager({
+      tokenBudgetTokens: 800,
+      workbookRag: { vectorStore, embedder, topK: 3 }
+    });
+
+    const indexWorkbookSpy = vi.fn(async () => ({ totalChunks: 0, upserted: 0, skipped: 0, deleted: 0 }));
+    const ragService = createDesktopRagService({
+      documentController,
+      workbookId: "wb_agent_rag_incremental",
+      createRag: async () =>
+        ({
+          vectorStore,
+          embedder,
+          contextManager,
+          indexWorkbook: indexWorkbookSpy
+        }) as any
+    });
+
+    let callCount = 0;
+    const llmClient = {
+      chat: vi.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "read_range", arguments: { range: "Sheet1!A1:A1" } }]
+            },
+            usage: { promptTokens: 1, completionTokens: 1 }
+          };
+        }
+        return {
+          message: { role: "assistant", content: "done" },
+          usage: { promptTokens: 1, completionTokens: 1 }
+        };
+      })
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+    const result = await runAgentTask({
+      goal: "Read A1",
+      workbookId: "wb_agent_rag_incremental",
+      documentController,
+      llmClient: llmClient as any,
+      auditStore,
+      ragService,
+      maxIterations: 4,
+      maxDurationMs: 10_000,
+      model: "unit-test-model"
+    });
+
+    expect(result.status).toBe("complete");
+    // One index run for the first model call; subsequent iterations should skip re-indexing.
+    expect(indexWorkbookSpy).toHaveBeenCalledTimes(1);
+    await ragService.dispose();
+  });
+
   it("blocks before calling the LLM when DLP policy forbids cloud AI processing", async () => {
     resetAiDlpAuditLoggerForTests();
 
