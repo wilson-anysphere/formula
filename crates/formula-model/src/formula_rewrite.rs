@@ -128,7 +128,10 @@ fn format_sheet_reference(workbook_prefix: Option<&str>, start: &str, end: Optio
 }
 
 fn split_workbook_prefix(sheet_spec: &str) -> (Option<&str>, &str) {
-    let Some(open) = sheet_spec.find('[') else {
+    // External references can include a path component that itself contains `[` / `]` (e.g.
+    // `'C:\[foo]\[Book.xlsx]Sheet1'!A1`). The *workbook* delimiter is the last `[...]` pair in the
+    // spec, so search from the end.
+    let Some(open) = sheet_spec.rfind('[') else {
         return (None, sheet_spec);
     };
     let Some(close_rel) = sheet_spec[open..].find(']') else {
@@ -750,6 +753,18 @@ mod tests {
         assert_eq!(
             rewrite_sheet_names_in_formula("='C:\\path\\[Book1.xlsx]Sheet1'!A1", "Sheet1", "Data",),
             "='C:\\path\\[Book1.xlsx]Data'!A1"
+        );
+    }
+
+    #[test]
+    fn rewrite_external_reference_with_brackets_in_path() {
+        assert_eq!(
+            rewrite_sheet_names_in_formula(
+                "='C:\\[foo]\\[Book1.xlsx]Sheet1'!A1",
+                "Sheet1",
+                "Data",
+            ),
+            "='C:\\[foo]\\[Book1.xlsx]Data'!A1"
         );
     }
 
