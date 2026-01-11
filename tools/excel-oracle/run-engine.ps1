@@ -59,6 +59,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "../..")
+if ([string]::IsNullOrWhiteSpace($env:CARGO_HOME)) {
+  $env:CARGO_HOME = Join-Path $repoRoot "target/cargo-home"
+}
+New-Item -ItemType Directory -Force -Path $env:CARGO_HOME | Out-Null
+
 if (-not $EngineCommand) {
   $EngineCommand = $env:FORMULA_ENGINE_CMD
 }
