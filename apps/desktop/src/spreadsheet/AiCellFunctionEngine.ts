@@ -1,5 +1,5 @@
 import type { LLMClient, LLMMessage } from "../../../../packages/llm/src/types.js";
-import { OpenAIClient } from "../../../../packages/llm/src/openai.js";
+import { createLLMClient } from "../../../../packages/llm/src/createLLMClient.js";
 
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 import { AIAuditRecorder } from "../../../../packages/ai-audit/src/recorder.js";
@@ -11,6 +11,8 @@ import { DLP_DECISION, evaluatePolicy } from "../../../../packages/security/dlp/
 
 import type { AiFunctionEvaluator, CellValue, SpreadsheetValue } from "./evaluateFormula.js";
 import { getDesktopAIAuditStore } from "../ai/audit/auditStore.js";
+
+import { loadDesktopLLMConfig } from "../ai/llm/settings.js";
 
 export const AI_CELL_PLACEHOLDER = "#GETTING_DATA";
 export const AI_CELL_DLP_ERROR = "#DLP!";
@@ -81,7 +83,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
 
   constructor(options: AiCellFunctionEngineOptions = {}) {
     this.llmClient = options.llmClient ?? createDefaultClient();
-    this.model = options.model ?? "gpt-4o-mini";
+    this.model = options.model ?? (this.llmClient as any)?.model ?? "gpt-4o-mini";
     this.auditStore = options.auditStore ?? getDesktopAIAuditStore();
     this.workbookId = options.workbookId;
     this.sessionId = options.sessionId ?? createSessionId(options.workbookId ?? "workbook");
@@ -517,17 +519,19 @@ function hashText(text: string): string {
 
 function createDefaultClient(): LLMClient {
   try {
-    return new OpenAIClient();
+    const config = loadDesktopLLMConfig();
+    if (config) return createLLMClient(config as any) as any;
   } catch {
-    return {
-      async chat() {
-        return {
-          message: { role: "assistant", content: "AI is not configured." },
-          usage: { promptTokens: 0, completionTokens: 0 },
-        } as any;
-      },
-    };
+    // fall through to stub
   }
+  return {
+    async chat() {
+      return {
+        message: { role: "assistant", content: "AI is not configured." },
+        usage: { promptTokens: 0, completionTokens: 0 },
+      } as any;
+    },
+  };
 }
 
 function createSessionId(prefix: string): string {

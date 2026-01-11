@@ -230,6 +230,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
   });
 
   const CreateDocVersionBody = z.object({
+    id: z.string().uuid().optional(),
     description: z.string().max(1000).optional(),
     dataBase64: z.string()
   });
@@ -248,6 +249,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     if (!data) return reply.code(400).send({ error: "invalid_request" });
 
     const created = await createDocumentVersion(app.db, keyring, {
+      id: parsed.data.id,
       documentId: docId,
       createdBy: request.user!.id,
       description: parsed.data.description ?? null,

@@ -153,7 +153,8 @@ describe("AiCellFunctionEngine", () => {
     expect(llmClient.chat).not.toHaveBeenCalled();
 
     const events = dlpAudit.list();
-    expect(events.some((e: any) => e.type === "ai.cell_function")).toBe(true);
+    // InMemoryAuditLogger stores canonical audit events; the original payload lives under `details`.
+    expect(events.some((e: any) => e.details?.type === "ai.cell_function")).toBe(true);
   });
 
   it("DLP redacts inputs before sending to the LLM", async () => {
@@ -188,4 +189,3 @@ describe("AiCellFunctionEngine", () => {
     expect(userMessage).not.toContain("secret payload");
   });
 });
-

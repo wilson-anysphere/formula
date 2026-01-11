@@ -6,7 +6,8 @@ import { ToolExecutor, PreviewEngine, runChatWithToolsAudited } from "../../../.
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import { decideAllowedTools } from "../../../../../packages/ai-tools/src/llm/toolPolicy.js";
 
-import { OpenAIClient } from "../../../../../packages/llm/src/openai.js";
+import { createLLMClient } from "../../../../../packages/llm/src/createLLMClient.js";
+import { loadDesktopLLMConfig } from "../llm/settings.js";
 
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
 
@@ -23,8 +24,6 @@ import type { TokenEstimator } from "../../../../../packages/ai-context/src/toke
 import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
-
-const OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
 
 export interface InlineEditLLMClient {
   chat: (request: any) => Promise<any>;
@@ -101,7 +100,7 @@ export class InlineEditController {
     const model = this.options.model ?? (client as any)?.model ?? "gpt-4o-mini";
     if (!client) {
       this.overlay.showError(
-        "AI client is not configured. Open the AI panel to set an OpenAI API key (stored in localStorage)."
+        "AI client is not configured. Open the AI panel to choose a provider and configure API credentials."
       );
       return;
     }
@@ -335,28 +334,14 @@ function createSessionId(): string {
 }
 
 function createDefaultInlineEditClient(opts: { model?: string } = {}): InlineEditLLMClient | null {
-  const apiKey = loadOpenAIApiKeyFromRuntime();
-  if (!apiKey) return null;
+  const baseConfig = loadDesktopLLMConfig();
+  if (!baseConfig) return null;
+  const config = opts.model ? ({ ...baseConfig, model: opts.model } as any) : baseConfig;
   try {
-    return new OpenAIClient({ apiKey, model: opts.model });
+    return createLLMClient(config as any) as any;
   } catch {
     return null;
   }
-}
-
-function loadOpenAIApiKeyFromRuntime(): string | null {
-  try {
-    const stored = globalThis.localStorage?.getItem(OPENAI_API_KEY_STORAGE_KEY);
-    if (stored) return stored;
-  } catch {
-    // ignore (storage may be disabled)
-  }
-
-  // Allow Vite devs to inject a key without touching localStorage.
-  const envKey = (import.meta as any)?.env?.VITE_OPENAI_API_KEY;
-  if (typeof envKey === "string" && envKey.length > 0) return envKey;
-
-  return null;
 }
 
 function createAbortError(): Error {

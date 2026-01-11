@@ -6,6 +6,7 @@ import { canonicalJson } from "../crypto/utils";
 import { withTransaction } from "./tx";
 
 export type CreateDocumentVersionParams = {
+  id?: string;
   documentId: string;
   createdBy?: string | null;
   description?: string | null;
@@ -98,7 +99,7 @@ export async function createDocumentVersion(
   keyring: Keyring,
   params: CreateDocumentVersionParams
 ): Promise<{ id: string; createdAt: Date }> {
-  const versionId = crypto.randomUUID();
+  const versionId = params.id ?? crypto.randomUUID();
   let createdAt: Date | null = null;
 
   await withTransaction(pool, async (client) => {

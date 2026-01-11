@@ -14,6 +14,32 @@ function extractSystemPrompt(messages) {
 }
 
 /**
+ * @param {unknown} value
+ */
+function tryParseJson(value) {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Anthropic `tool_use.input` must be an object; if callers provide a JSON string
+ * (common for OpenAI-compatible tool calls) decode it.
+ *
+ * @param {unknown} value
+ */
+function toToolInput(value) {
+  if (value == null) return {};
+  if (typeof value === "object") return value;
+  const parsed = tryParseJson(value);
+  if (parsed && typeof parsed === "object") return parsed;
+  return { value: parsed };
+}
+
+/**
  * @param {import("./types.js").LLMMessage[]} messages
  */
 function toAnthropicMessages(messages) {
@@ -42,7 +68,7 @@ function toAnthropicMessages(messages) {
       const content = [];
       if (m.content) content.push({ type: "text", text: m.content });
       for (const c of m.toolCalls) {
-        content.push({ type: "tool_use", id: c.id, name: c.name, input: c.arguments ?? {} });
+        content.push({ type: "tool_use", id: c.id, name: c.name, input: toToolInput(c.arguments) });
       }
       out.push({ role: "assistant", content });
       continue;
@@ -103,13 +129,14 @@ function extractSSEData(sseEvent) {
 
 export class AnthropicClient {
   /**
-   * @param {{
-   *   apiKey?: string,
-   *   model?: string,
-   *   baseUrl?: string,
-   *   timeoutMs?: number
-   * }} [options]
-   */
+  * @param {{
+  *   apiKey?: string,
+  *   model?: string,
+  *   baseUrl?: string,
+  *   timeoutMs?: number,
+  *   maxTokens?: number
+  * }} [options]
+  */
   constructor(options = {}) {
     const envKey = globalThis.process?.env?.ANTHROPIC_API_KEY;
     const apiKey = options.apiKey ?? envKey;
@@ -121,8 +148,9 @@ export class AnthropicClient {
 
     this.apiKey = apiKey;
     this.model = options.model ?? "claude-3-5-sonnet-latest";
-    this.baseUrl = options.baseUrl ?? "https://api.anthropic.com/v1";
+    this.baseUrl = (options.baseUrl ?? "https://api.anthropic.com/v1").replace(/\/$/, "");
     this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.maxTokens = options.maxTokens ?? 1024;
   }
 
   /**
@@ -164,7 +192,7 @@ export class AnthropicClient {
               ? { type: "none" }
               : { type: "auto" }
             : undefined,
-          max_tokens: request.maxTokens ?? 1024,
+          max_tokens: request.maxTokens ?? this.maxTokens,
           temperature: request.temperature,
           stream: false,
         }),
@@ -250,7 +278,7 @@ export class AnthropicClient {
               ? { type: "none" }
               : { type: "auto" }
             : undefined,
-          max_tokens: request.maxTokens ?? 1024,
+          max_tokens: request.maxTokens ?? this.maxTokens,
           temperature: request.temperature,
           stream: true,
         }),

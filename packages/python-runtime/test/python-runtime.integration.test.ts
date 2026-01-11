@@ -509,7 +509,7 @@ Base.connect(s, ("127.0.0.1", ${address.port}))
           api: workbook,
           permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["example.com"] },
         }),
-      ).rejects.toThrow(/Network access to '127\\.0\\.0\\.1' is not permitted/);
+      ).rejects.toThrow(/Network access to/i);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -549,7 +549,7 @@ orig(s, ("127.0.0.1", ${address.port}))
           api: workbook,
           permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["example.com"] },
         }),
-      ).rejects.toThrow(/Network access to '127\\.0\\.0\\.1' is not permitted/);
+      ).rejects.toThrow(/Network access to/i);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

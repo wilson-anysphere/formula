@@ -84,7 +84,7 @@ export class OllamaChatClient {
    */
   constructor(options = {}) {
     this.model = options.model ?? "llama3.1";
-    this.baseUrl = options.baseUrl ?? "http://localhost:11434";
+    this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:11434").replace(/\/$/, "");
     this.timeoutMs = options.timeoutMs ?? 30_000;
   }
 
@@ -109,6 +109,14 @@ export class OllamaChatClient {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
+      /** @type {Record<string, any>} */
+      const options = {};
+      if (typeof request.temperature === "number") options.temperature = request.temperature;
+      if (typeof request.maxTokens === "number") options.num_predict = request.maxTokens;
+
+      const tools =
+        request.tools?.length && request.toolChoice !== "none" ? toOllamaTools(request.tools) : undefined;
+
       const response = await fetch(`${this.baseUrl}/api/chat`, {
         method: "POST",
         headers: {
@@ -117,11 +125,9 @@ export class OllamaChatClient {
         body: JSON.stringify({
           model: request.model ?? this.model,
           messages: toOllamaMessages(request.messages),
-          tools: request.tools?.length ? toOllamaTools(request.tools) : undefined,
+          tools,
           stream: false,
-          options: {
-            temperature: request.temperature,
-          },
+          options: Object.keys(options).length ? options : undefined,
         }),
         signal: controller.signal,
       });
@@ -132,22 +138,33 @@ export class OllamaChatClient {
       }
 
       const json = await response.json();
-      const message = json.message;
-      const toolCalls = (message?.tool_calls ?? []).map((c, index) => ({
-        id: typeof c.id === "string" ? c.id : `toolcall-${index}`,
-        name: c.function?.name,
-        arguments: tryParseJson(c.function?.arguments ?? "{}"),
-      }));
+      const message = json.message ?? {};
+      const rawToolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+      const toolCalls = rawToolCalls
+        .map((c, index) => {
+          const id = typeof c?.id === "string" ? c.id : `toolcall-${index}`;
+          const fn = c?.function;
+          const name = fn?.name;
+          const args = fn?.arguments;
+          return {
+            id,
+            name,
+            arguments: typeof args === "string" ? tryParseJson(args) : args ?? {},
+          };
+        })
+        .filter((c) => typeof c.name === "string" && c.name.length > 0);
 
-      const promptTokens =
-        typeof json.prompt_eval_count === "number" && Number.isFinite(json.prompt_eval_count) ? json.prompt_eval_count : null;
-      const completionTokens =
-        typeof json.eval_count === "number" && Number.isFinite(json.eval_count) ? json.eval_count : null;
+      const promptTokens = typeof json.prompt_eval_count === "number" && Number.isFinite(json.prompt_eval_count)
+        ? json.prompt_eval_count
+        : undefined;
+      const completionTokens = typeof json.eval_count === "number" && Number.isFinite(json.eval_count)
+        ? json.eval_count
+        : undefined;
 
       return {
         message: {
           role: "assistant",
-          content: message?.content ?? "",
+          content: message.content ?? "",
           toolCalls: toolCalls.length ? toolCalls : undefined,
         },
         usage:
@@ -155,7 +172,10 @@ export class OllamaChatClient {
             ? {
                 promptTokens: promptTokens ?? undefined,
                 completionTokens: completionTokens ?? undefined,
-                totalTokens: promptTokens != null && completionTokens != null ? promptTokens + completionTokens : undefined,
+                totalTokens:
+                  typeof promptTokens === "number" && typeof completionTokens === "number"
+                    ? promptTokens + completionTokens
+                    : undefined,
               }
             : undefined,
         raw: json,
@@ -187,6 +207,14 @@ export class OllamaChatClient {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
+      /** @type {Record<string, any>} */
+      const options = {};
+      if (typeof request.temperature === "number") options.temperature = request.temperature;
+      if (typeof request.maxTokens === "number") options.num_predict = request.maxTokens;
+
+      const tools =
+        request.tools?.length && request.toolChoice !== "none" ? toOllamaTools(request.tools) : undefined;
+
       const response = await fetch(`${this.baseUrl}/api/chat`, {
         method: "POST",
         headers: {
@@ -195,11 +223,9 @@ export class OllamaChatClient {
         body: JSON.stringify({
           model: request.model ?? this.model,
           messages: toOllamaMessages(request.messages),
-          tools: request.tools?.length ? toOllamaTools(request.tools) : undefined,
+          tools,
           stream: true,
-          options: {
-            temperature: request.temperature,
-          },
+          options: Object.keys(options).length ? options : undefined,
         }),
         signal: controller.signal,
       });

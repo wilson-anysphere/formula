@@ -68,6 +68,9 @@ describe("ApiVersionStore (integration): persists VersionManager history via ser
       cookieSecure: false,
       syncTokenSecret: "test-sync-secret",
       syncTokenTtlSeconds: 60,
+      secretStoreKey: "test-secret-store-key",
+      localKmsMasterKey: "test-local-kms-master-key",
+      awsKmsEnabled: false,
       retentionSweepIntervalMs: null
     };
 
@@ -155,4 +158,3 @@ describe("ApiVersionStore (integration): persists VersionManager history via ser
     expect(afterDelete.map((v) => v.id)).toEqual([checkpoint.id]);
   });
 });
-
