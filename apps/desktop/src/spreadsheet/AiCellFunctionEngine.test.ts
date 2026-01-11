@@ -219,6 +219,36 @@ describe("AiCellFunctionEngine", () => {
     expect(dlpEvent?.details?.prompt_hash).toBe(input?.prompt_hash);
   });
 
+  it("enforces DLP BLOCK decisions for all AI cell function variants", () => {
+    const variants = [
+      { fn: "AI", formula: '=AI("summarize", A1)' },
+      { fn: "AI.EXTRACT", formula: '=AI.EXTRACT("email", A1)' },
+      { fn: "AI.CLASSIFY", formula: '=AI.CLASSIFY("A/B", A1)' },
+      { fn: "AI.TRANSLATE", formula: '=AI.TRANSLATE("French", A1)' },
+    ] as const;
+
+    for (const variant of variants) {
+      const workbookId = `dlp-block-${variant.fn}`;
+      const llmClient = { chat: vi.fn() };
+
+      markCellRestricted({ workbookId, sheetId: "Sheet1", row: 0, col: 0 }); // A1
+      setBlockPolicy(workbookId);
+
+      const engine = new AiCellFunctionEngine({
+        llmClient: llmClient as any,
+        auditStore: new MemoryAIAuditStore(),
+        workbookId,
+      });
+
+      const value = evaluateFormula(variant.formula, (ref) => (ref === "A1" ? "top secret" : null), {
+        ai: engine,
+        cellAddress: "Sheet1!B1",
+      });
+      expect(value).toBe(AI_CELL_DLP_ERROR);
+      expect(llmClient.chat).not.toHaveBeenCalled();
+    }
+  });
+
   it("does not persist restricted prompt text in audit logs for blocked runs", async () => {
     const llmClient = { chat: vi.fn() };
     const workbookId = "dlp-blocked-prompt-workbook";
