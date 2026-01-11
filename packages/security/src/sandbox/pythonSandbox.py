@@ -194,6 +194,9 @@ def _main():
     principal = {"type": "python", "id": "unknown"}
     audit_events = []
 
+    host_stdout = sys.stdout
+    host_stderr = sys.stderr
+
     def audit(event_type: str, success: bool, metadata=None):
         audit_events.append(
             {
@@ -233,6 +236,20 @@ def _main():
     memory_mb = int(payload.get("memoryMb", 128))
     max_output_bytes = int(payload.get("maxOutputBytes", 128 * 1024))
     code = payload.get("code", "")
+
+    user_stdout = LimitedStringIO(max_output_bytes)
+    user_stderr = LimitedStringIO(max_output_bytes)
+
+    # Route all user-visible output to our capture buffers so the runner can emit a single
+    # JSON payload on stdout without being corrupted by user writes (including sys.__stdout__
+    # and os.write to duplicated file descriptors).
+    sys.stdout = user_stdout
+    sys.stderr = user_stderr
+    sys.__stdout__ = user_stdout  # type: ignore[attr-defined]
+    sys.__stderr__ = user_stderr  # type: ignore[attr-defined]
+
+    stdout_fds = {1}
+    stderr_fds = {2}
 
     # Never write __pycache__ (bytecode) files from inside the sandbox.
     sys.dont_write_bytecode = True
@@ -338,6 +355,107 @@ def _main():
     _builtin_io.open = guarded_open
     if _posix is not None and hasattr(_posix, "open"):
         _posix.open = guarded_os_open  # type: ignore[attr-defined]
+
+    # Prevent user code from corrupting the JSON result channel by writing directly to
+    # stdout/stderr file descriptors (or their dup()'d copies).
+    if hasattr(os, "dup"):
+        original_dup = os.dup
+
+        def guarded_dup(fd):
+            new_fd = original_dup(fd)
+            if fd in stdout_fds:
+                stdout_fds.add(new_fd)
+            if fd in stderr_fds:
+                stderr_fds.add(new_fd)
+            return new_fd
+
+        os.dup = guarded_dup
+        if _posix is not None and hasattr(_posix, "dup"):
+            _posix.dup = guarded_dup  # type: ignore[attr-defined]
+
+    if hasattr(os, "dup2"):
+        original_dup2 = os.dup2
+
+        def guarded_dup2(fd, fd2, *args, **kwargs):
+            stdout_fds.discard(fd2)
+            stderr_fds.discard(fd2)
+            result = original_dup2(fd, fd2, *args, **kwargs)
+            if fd in stdout_fds:
+                stdout_fds.add(fd2)
+            if fd in stderr_fds:
+                stderr_fds.add(fd2)
+            return result
+
+        os.dup2 = guarded_dup2
+        if _posix is not None and hasattr(_posix, "dup2"):
+            _posix.dup2 = guarded_dup2  # type: ignore[attr-defined]
+
+    if hasattr(os, "close"):
+        original_close = os.close
+
+        def guarded_close(fd):
+            stdout_fds.discard(fd)
+            stderr_fds.discard(fd)
+            return original_close(fd)
+
+        os.close = guarded_close
+        if _posix is not None and hasattr(_posix, "close"):
+            _posix.close = guarded_close  # type: ignore[attr-defined]
+
+    if hasattr(os, "write"):
+        original_write = os.write
+
+        def guarded_write(fd, data):
+            if fd in stdout_fds:
+                if isinstance(data, memoryview):
+                    data = data.tobytes()
+                if isinstance(data, (bytes, bytearray)):
+                    user_stdout.write(bytes(data).decode("utf-8", errors="replace"))
+                    return len(data)
+            if fd in stderr_fds:
+                if isinstance(data, memoryview):
+                    data = data.tobytes()
+                if isinstance(data, (bytes, bytearray)):
+                    user_stderr.write(bytes(data).decode("utf-8", errors="replace"))
+                    return len(data)
+            return original_write(fd, data)
+
+        os.write = guarded_write
+        if _posix is not None and hasattr(_posix, "write"):
+            _posix.write = guarded_write  # type: ignore[attr-defined]
+
+    if hasattr(os, "writev"):
+        original_writev = os.writev
+
+        def guarded_writev(fd, buffers):
+            if fd in stdout_fds:
+                total = 0
+                for buf in buffers:
+                    if isinstance(buf, memoryview):
+                        buf = buf.tobytes()
+                    if isinstance(buf, (bytes, bytearray)):
+                        user_stdout.write(bytes(buf).decode("utf-8", errors="replace"))
+                        total += len(buf)
+                    else:
+                        # Delegate to original for type checking/error behavior.
+                        return original_writev(fd, buffers)
+                return total
+            if fd in stderr_fds:
+                total = 0
+                for buf in buffers:
+                    if isinstance(buf, memoryview):
+                        buf = buf.tobytes()
+                    if isinstance(buf, (bytes, bytearray)):
+                        user_stderr.write(bytes(buf).decode("utf-8", errors="replace"))
+                        total += len(buf)
+                    else:
+                        return original_writev(fd, buffers)
+                return total
+            return original_writev(fd, buffers)
+
+        os.writev = guarded_writev
+        if _posix is not None and hasattr(_posix, "writev"):
+            _posix.writev = guarded_writev  # type: ignore[attr-defined]
 
     def guard_read_path(fn, path_arg_index=0):
         original = fn
@@ -605,17 +723,13 @@ def _main():
     if original_sendmsg is not None:
         _socket.socket.sendmsg = guarded_sendmsg  # type: ignore[assignment]
 
-    user_stdout = LimitedStringIO(max_output_bytes)
-    user_stderr = LimitedStringIO(max_output_bytes)
-
     ok = False
     result = None
     error_payload = None
 
     try:
         sandbox_globals = {"__name__": "__main__", "__package__": None}
-        with contextlib.redirect_stdout(user_stdout), contextlib.redirect_stderr(user_stderr):
-            exec(compile(code, "<formula-python-sandbox>", "exec"), sandbox_globals, sandbox_globals)
+        exec(compile(code, "<formula-python-sandbox>", "exec"), sandbox_globals, sandbox_globals)
         ok = True
         result = sandbox_globals.get("__result__", None)
     except PermissionDenied as e:
@@ -663,7 +777,15 @@ def _main():
         response["ok"] = False
         response["error"] = error_payload
 
-    sys.stdout.write(json.dumps(response))
+    payload_json = json.dumps(response)
+    try:
+        host_stdout.write(payload_json)
+        host_stdout.flush()
+    except Exception:
+        # If we cannot write output, exit anyway; the parent will treat this as a parse failure.
+        pass
+
+    os._exit(0 if response.get("ok") else 1)
 
 
 if __name__ == "__main__":
