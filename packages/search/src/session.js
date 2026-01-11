@@ -181,36 +181,41 @@ export class SearchSession {
             candidates = null;
           }
 
-          // Process each range in-order (important for multi-area selections).
-          const seenCandidateIds = Array.isArray(candidates) ? new Set() : null;
+          // Index candidates can be processed once for the union of ranges. This
+          // avoids duplicate work when selection ranges overlap.
+          if (Array.isArray(candidates)) {
+            for (const id of candidates) {
+              const { row, col } = decodeCellId(id);
+
+              let inAnyRange = false;
+              for (const r of segment.ranges) {
+                if (rangeContains(r, row, col)) {
+                  inAnyRange = true;
+                  break;
+                }
+              }
+              if (!inAnyRange) continue;
+
+              await slicer.checkpoint();
+              this.stats.cellsScanned++;
+
+              const cell = sheet.getCell(row, col);
+              const text = getCellText(cell, { lookIn, valueMode });
+              if (!re.test(text)) continue;
+
+              const posKey = positionKeyFor({ row, col }, searchOrder);
+              matches.push({
+                ...matchToResult(segment.sheetName, row, col, text),
+                _pos: { segmentIndex, ...posKey },
+              });
+            }
+            continue;
+          }
+
           const visited =
-            !seenCandidateIds && segment.ranges.length > 1 && rangesOverlap(segment.ranges) ? new Set() : null;
+            segment.ranges.length > 1 && rangesOverlap(segment.ranges) ? new Set() : null;
           for (const range of segment.ranges) {
             throwIfAborted(effectiveSignal);
-
-            if (Array.isArray(candidates)) {
-              // Filter candidates to the current range.
-              for (const id of candidates) {
-                const { row, col } = decodeCellId(id);
-                if (!rangeContains(range, row, col)) continue;
-                if (seenCandidateIds.has(id)) continue;
-                seenCandidateIds.add(id);
-
-                await slicer.checkpoint();
-                this.stats.cellsScanned++;
-
-                const cell = sheet.getCell(row, col);
-                const text = getCellText(cell, { lookIn, valueMode });
-                if (!re.test(text)) continue;
-
-                const posKey = positionKeyFor({ row, col }, searchOrder);
-                matches.push({
-                  ...matchToResult(segment.sheetName, row, col, text),
-                  _pos: { segmentIndex, ...posKey },
-                });
-              }
-              continue;
-            }
 
             // Fallback: scan the range.
             if (typeof sheet.iterateCells === "function") {
