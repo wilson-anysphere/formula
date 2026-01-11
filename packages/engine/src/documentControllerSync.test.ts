@@ -94,6 +94,29 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     expect(engine.setCells).toHaveBeenCalledWith([{ address: "A1", value: 1, sheet: "Sheet1" }]);
     expect(engine.recalculate).toHaveBeenCalledTimes(1);
   });
+
+  it("propagates cleared cells as null inputs (sparse clears)", async () => {
+    const engine = {
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      setCell: vi.fn(async () => {}),
+      setCells: vi.fn(async () => {}),
+      recalculate: vi.fn(async () => []),
+    };
+
+    await engineApplyDeltas(engine, [
+      {
+        sheetId: "Sheet1",
+        row: 0,
+        col: 0,
+        before: { value: 1, formula: null, styleId: 0 },
+        after: { value: null, formula: null, styleId: 0 },
+      },
+    ]);
+
+    expect(engine.setCells).toHaveBeenCalledTimes(1);
+    expect(engine.setCells).toHaveBeenCalledWith([{ address: "A1", value: null, sheet: "Sheet1" }]);
+    expect(engine.recalculate).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("engine sync helpers", () => {
