@@ -125,6 +125,17 @@ async function loadDataIoModule() {
  */
 
 /**
+ * Host-provided hooks used during query execution.
+ *
+ * `onCredentialRequest(connectorId, { request })` may return:
+ * - `undefined` / `null`: no credentials
+ * - an object understood by the target connector (e.g. `HttpConnector` supports
+ *   `{ headers }` and `{ oauth2: { providerId, scopes? } }`)
+ * - a credential handle with a `getSecret()` method (see `CredentialManager`)
+ *
+ * The engine memoizes the returned credentials per request within a single
+ * execution so repeated source calls don't repeatedly prompt the user.
+ *
  * @typedef {{
  *   onPermissionRequest?: (kind: string, details: unknown) => boolean | Promise<boolean>;
  *   onCredentialRequest?: (connectorId: string, details: unknown) => unknown | Promise<unknown>;
