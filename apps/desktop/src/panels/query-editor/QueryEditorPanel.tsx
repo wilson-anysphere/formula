@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-import type { Query, QueryOperation, QueryStep } from "../../../../packages/power-query/src/model.js";
-import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
-import type { DataTable } from "../../../../packages/power-query/src/table.js";
-import type { ArrowTableAdapter } from "../../../../packages/power-query/src/arrowTable.js";
+import type { Query, QueryOperation, QueryStep } from "../../../../../packages/power-query/src/model.js";
+import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
+import type { DataTable } from "../../../../../packages/power-query/src/table.js";
+import type { ArrowTableAdapter } from "../../../../../packages/power-query/src/arrowTable.js";
 
 import { StepsList } from "./components/StepsList";
 import { PreviewGrid } from "./components/PreviewGrid";
@@ -15,6 +15,9 @@ export type QueryEditorPanelProps = {
   engine: QueryEngine;
   context?: any;
   onQueryChange?: (next: Query) => void;
+  onLoadToSheet?: (query: Query) => void;
+  onRefreshNow?: (queryId: string) => void;
+  refreshEvent?: unknown;
   onAiSuggestNextSteps?: (
     intent: string,
     context: { query: Query; preview: DataTable | ArrowTableAdapter | null },
@@ -59,10 +62,45 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
     };
   }, [props.engine, props.query, props.context, stepsToExecute]);
 
+  const refreshStatus = useMemo(() => {
+    const evt: any = props.refreshEvent;
+    if (!evt) return null;
+    const jobQueryId = evt?.job?.queryId;
+    if (typeof jobQueryId === "string" && jobQueryId !== props.query.id) return null;
+    switch (evt.type) {
+      case "queued":
+        return "Refresh queued…";
+      case "started":
+        return "Refreshing…";
+      case "progress":
+        return `Refreshing… (${evt?.event?.type ?? "working"})`;
+      case "completed":
+        return "Refresh complete";
+      case "cancelled":
+        return "Refresh cancelled";
+      case "error":
+        return `Refresh failed: ${evt?.error?.message ?? String(evt?.error ?? "Unknown error")}`;
+      default:
+        return null;
+    }
+  }, [props.refreshEvent, props.query.id]);
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", height: "100%" }}>
       <div style={{ borderInlineEnd: "1px solid var(--border)", padding: 12, overflow: "auto" }}>
         <h3 style={{ marginTop: 0 }}>{props.query.name}</h3>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          {props.onLoadToSheet ? (
+            <button type="button" onClick={() => props.onLoadToSheet?.(props.query)}>
+              Load to sheet
+            </button>
+          ) : null}
+          {props.onRefreshNow ? (
+            <button type="button" onClick={() => props.onRefreshNow?.(props.query.id)}>
+              Refresh now
+            </button>
+          ) : null}
+        </div>
         <AddStepMenu
           onAddStep={(operation) => {
             const step: QueryStep = {
@@ -85,6 +123,7 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
       <div style={{ display: "grid", gridTemplateRows: "auto 1fr", overflow: "hidden" }}>
         <div style={{ borderBottom: "1px solid var(--border)", padding: 12 }}>
           <SchemaView table={preview} />
+          {refreshStatus ? <div style={{ marginTop: 8, color: "var(--text-muted)" }}>{refreshStatus}</div> : null}
           {error ? <div style={{ color: "var(--error)", marginTop: 8 }}>{error}</div> : null}
         </div>
         <div style={{ overflow: "auto" }}>

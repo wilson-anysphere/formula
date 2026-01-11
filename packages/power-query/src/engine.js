@@ -1175,17 +1175,19 @@ export class QueryEngine {
    * @param {QueryExecutionContext} [context]
    * @param {ExecuteOptions & {
    *   batchSize?: number;
+   *   includeHeader?: boolean;
    *   onBatch: (batch: { rowOffset: number; values: unknown[][] }) => Promise<void> | void;
    * }} options
    */
   async executeQueryStreaming(query, context = {}, options) {
     const batchSize = options.batchSize ?? 1024;
+    const includeHeader = options.includeHeader ?? true;
     const onBatch = options.onBatch;
 
-    const { batchSize: _batchSize, onBatch: _onBatch, ...executeOptions } = options;
+    const { batchSize: _batchSize, includeHeader: _includeHeader, onBatch: _onBatch, ...executeOptions } = options;
     const table = await this.executeQuery(query, context, executeOptions);
 
-    for await (const batch of tableToGridBatches(table, { batchSize, includeHeader: true })) {
+    for await (const batch of tableToGridBatches(table, { batchSize, includeHeader })) {
       await onBatch(batch);
     }
 

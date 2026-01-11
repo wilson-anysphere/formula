@@ -1,6 +1,6 @@
 import React from "react";
 
-import type { QueryStep } from "../../../../../packages/power-query/src/model.js";
+import type { QueryStep } from "../../../../../../packages/power-query/src/model.js";
 import { t } from "../../../i18n/index.js";
 
 export function StepsList(props: { steps: QueryStep[]; selectedIndex: number; onSelect: (idx: number) => void }) {

@@ -1,7 +1,7 @@
 import React from "react";
 
-import type { DataTable } from "../../../../../packages/power-query/src/table.js";
-import type { ArrowTableAdapter } from "../../../../../packages/power-query/src/arrowTable.js";
+import type { DataTable } from "../../../../../../packages/power-query/src/table.js";
+import type { ArrowTableAdapter } from "../../../../../../packages/power-query/src/arrowTable.js";
 import { t } from "../../../i18n/index.js";
 
 export function PreviewGrid(props: { table: DataTable | ArrowTableAdapter | null }) {
