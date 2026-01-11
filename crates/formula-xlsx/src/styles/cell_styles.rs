@@ -936,11 +936,10 @@ fn build_num_fmt_element(id: u16, code: &str) -> XmlElement {
 
 fn builtin_num_fmt_code(id: u16) -> Option<&'static str> {
     match id {
-        // Built-in currency format. Note that Excel's built-in table includes
-        // an underscore alignment token and a negative-section in parentheses.
-        7 => Some("$#,##0.00_);($#,##0.00)"),
-        9 => Some("0%"),
-        14 => Some("m/d/yyyy"),
+        // Only a small subset of built-ins are expanded to format codes during
+        // parse; the rest are preserved via `__builtin_numFmtId:<id>` so we can
+        // round-trip IDs exactly even when multiple ids share the same code.
+        7 | 9 | 14 => formula_format::builtin_format_code(id),
         _ => None,
     }
 }
