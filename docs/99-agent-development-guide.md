@@ -24,129 +24,117 @@ Per-agent:        ~7 GB soft target
 
 **7GB per agent is tight** for a full-stack TypeScript/Rust project. We must be disciplined.
 
+### How We Enforce Memory Limits
+
+We use **`RLIMIT_AS` (address space limit)** - a simple POSIX feature that:
+- Requires **no cgroups, no systemd, no special privileges**
+- Works on **any Linux** (and degrades gracefully on macOS)
+- **Kernel enforces it automatically** - processes die when they exceed the limit
+
+This is simpler and more robust than cgroups/systemd-run.
+
 ### Memory Limits by Operation
 
 
 | Operation           | Expected Peak | Limit | Notes                            |
 | ------------------- | ------------- | ----- | -------------------------------- |
 | Node.js process     | 512MB-2GB     | 4GB   | Use `--max-old-space-size`       |
-| Rust compilation    | 2-8GB         | 8GB   | Depends on parallelism           |
+| Rust compilation    | 2-8GB         | 12GB  | Use `scripts/cargo_agent.sh`     |
 | TypeScript check    | 500MB-2GB     | 2GB   | Can spike with large projects    |
 | npm install         | 500MB-1GB     | 2GB   | Transient                        |
 | Tests (unit)        | 200MB-1GB     | 2GB   |                                  |
 | Tests (e2e/browser) | 500MB-2GB     | 2GB   | Headless Chrome                  |
-| Total concurrent    | -             | 10GB  | Hard ceiling per agent workspace |
+| Total concurrent    | -             | 12GB  | Hard ceiling per agent workspace |
 
 
-### Required Environment Variables
+### Required: Always Use Wrapper Scripts for Cargo
 
-**Every agent MUST set these** in their shell before running commands:
+**MANDATORY** - use `scripts/cargo_agent.sh` for all cargo commands:
 
 ```bash
-# Recommended (sets all of the below, including repo-local CARGO_HOME):
-# - `source` works in bash/zsh
-# - POSIX shells (e.g. `/bin/sh`) use `.`
+# CORRECT:
+bash scripts/cargo_agent.sh build --release
+bash scripts/cargo_agent.sh test -p formula-engine
+bash scripts/cargo_agent.sh check
+
+# WRONG - can exhaust RAM:
+cargo build
+cargo test
+```
+
+The wrapper script:
+1. Enforces a **12GB address space limit** via `RLIMIT_AS`
+2. Limits parallelism to **-j4** by default
+3. Caps **RUST_TEST_THREADS** to avoid spawning hundreds of threads
+4. Uses a **repo-local CARGO_HOME** to avoid lock contention
+
+### Environment Setup (Optional but Recommended)
+
+```bash
+# Initialize safe defaults (sets NODE_OPTIONS, CARGO_BUILD_JOBS, etc.)
 source scripts/agent-init.sh  # or: . scripts/agent-init.sh
-
-# If you can't (or don't want to) source agent-init.sh, set the memory limits globally:
-# (These are safe to put in ~/.bashrc.)
-export NODE_OPTIONS="--max-old-space-size=3072"  # 3GB limit for Node
-export CARGO_BUILD_JOBS=4                         # Limit Rust parallelism
-export MAKEFLAGS="-j4"                            # Limit make parallelism
-export RUSTFLAGS="-C codegen-units=4"             # Reduce Rust memory per crate
-
-# CARGO_HOME must be set per-repo (run from repo root) to avoid cross-agent ~/.cargo locks:
-export CARGO_HOME="$(pwd)/target/cargo-home"
-mkdir -p "$CARGO_HOME"
-export PATH="$CARGO_HOME/bin:$PATH"              # So `cargo install` tools (wasm-pack, etc) are found
 ```
 
-#### Cargo Home Isolation (Why `CARGO_HOME` is repo-local)
+### Running Commands with Memory Limits
 
-By default, Cargo stores the registry index and git checkouts in `~/.cargo`. In this environment,
-**~200 agents build concurrently**, so sharing a single `~/.cargo` directory causes lock contention
-and flaky/slow builds.
+#### `scripts/run_limited.sh` - Universal Memory Cap
 
-To eliminate cross-agent contention we default to a **per-repo Cargo home** at:
+For **any** command that might use a lot of memory:
 
 ```bash
-target/cargo-home
+# Run any command with an 8GB address space limit
+bash scripts/run_limited.sh --as 8G -- npm run build
+bash scripts/run_limited.sh --as 4G -- node heavy-script.js
+
+# Environment variable alternative
+LIMIT_AS=8G bash scripts/run_limited.sh -- npm test
 ```
 
-**Tradeoffs:**
+#### `scripts/cargo_agent.sh` - Cargo Wrapper (Preferred)
 
-- **Pros**: Stable/fast parallel builds (no shared `~/.cargo` locks).
-- **Cons**: More disk usage and initial downloads (each repo has its own registry cache). This is
-  acceptable here because disk is abundant.
-- **Note**: Because the default lives under `target/`, deleting `target/` (or running `cargo clean`)
-  will also wipe the registry cache for that repo.
-- **Note**: `cargo install` will install binaries into `target/cargo-home/bin` (agent-init prepends
-  this directory to `PATH`).
-
-**Override (CI / shared caching):**
-
-Set `CARGO_HOME` before sourcing `scripts/agent-init.sh` or running cargo, e.g.:
+For **all cargo commands**, use the wrapper:
 
 ```bash
-export CARGO_HOME="$HOME/.cargo"   # or a CI cache directory
-# If running locally, allow agent-init to keep the global cargo home:
-export FORMULA_ALLOW_GLOBAL_CARGO_HOME=1
-source scripts/agent-init.sh
+bash scripts/cargo_agent.sh build --release
+bash scripts/cargo_agent.sh test -p formula-engine --lib
+bash scripts/cargo_agent.sh check -p formula-xlsx
+bash scripts/cargo_agent.sh bench --bench perf_regressions
 ```
 
-#### Note on `sccache` (Rust compiler wrapper)
-
-Some environments configure Cargo globally with `build.rustc-wrapper = "sccache"` (for example via
-`~/.cargo/config.toml`). If the shared `sccache` server crashes or becomes unreachable you may see
-errors like:
-
-```text
-sccache: error: failed to execute compile
-sccache: caused by: Failed to read response header
-```
-
-In that case, bypass the wrapper for the failing command:
-
-```bash
-CARGO_BUILD_RUSTC_WRAPPER= RUSTC_WRAPPER= cargo test -p formula-engine
-```
-
-### Memory-Safe Command Patterns
+Environment variables to tune behavior:
+- `FORMULA_CARGO_JOBS` - parallelism (default: 4)
+- `FORMULA_CARGO_LIMIT_AS` - address space limit (default: 12G)
+- `FORMULA_RUST_TEST_THREADS` - test parallelism (default: min(nproc, 16))
 
 #### npm/pnpm/yarn
 
 ```bash
-# GOOD: Memory-limited
-NODE_OPTIONS="--max-old-space-size=2048" npm install
+# GOOD: Memory-limited (NODE_OPTIONS set by agent-init.sh)
+source scripts/agent-init.sh
+npm install
+npm run build
+
+# Or explicitly:
 NODE_OPTIONS="--max-old-space-size=3072" npm run build
 
-# BAD: Unbounded
-npm install  # Without NODE_OPTIONS set
+# Or with run_limited.sh:
+bash scripts/run_limited.sh --as 4G -- npm run build
 ```
 
-#### Rust/Cargo
+### Cargo Home Isolation
+
+The wrapper scripts automatically use a **repo-local CARGO_HOME** at `target/cargo-home` to avoid
+lock contention when ~200 agents build concurrently. This means:
+
+- Each repo has its own registry cache (more disk, but disk is abundant)
+- `cargo clean` or deleting `target/` also clears the local registry cache
+- `cargo install` binaries go to `target/cargo-home/bin`
+
+To use a shared cache (CI), set `CARGO_HOME` before running:
 
 ```bash
-# GOOD: Limited parallelism (4 jobs uses ~4-6GB)
-cargo build -j4
-cargo test -j4
-
-# ACCEPTABLE: Let environment variable handle it
-cargo build  # If CARGO_BUILD_JOBS=4 is set
-
-# BAD: Full parallelism (could use 50GB+ with -j192)
-cargo build -j$(nproc)
-cargo build --jobs 192
-```
-
-#### TypeScript
-
-```bash
-# GOOD: Bounded memory
-NODE_OPTIONS="--max-old-space-size=2048" npx tsc
-
-# For very large projects, run incrementally
-npx tsc --incremental
+export CARGO_HOME="$HOME/.cargo"
+export FORMULA_ALLOW_GLOBAL_CARGO_HOME=1
 ```
 
 ---
@@ -381,114 +369,33 @@ export SCCACHE_CACHE_SIZE="50G"     # Shared cache limit
 
 ## Helper Scripts
 
-### scripts/agent-init.sh
+| Script | Purpose |
+|--------|---------|
+| `scripts/agent-init.sh` | Source at session start - sets NODE_OPTIONS, CARGO_HOME, etc. |
+| `scripts/cargo_agent.sh` | **Use for all cargo commands** - enforces memory limits |
+| `scripts/run_limited.sh` | Run any command with RLIMIT_AS cap |
+| `scripts/smart-jobs.sh` | Returns adaptive -j value based on free RAM |
+| `scripts/check-memory.sh` | Show memory status and recommendations |
 
-Run this at the start of each agent session:
+### How Memory Limits Work
 
-```bash
-#!/bin/bash
-# Initialize agent environment with safe defaults
-
-set -e
-
-# Memory limits
-export NODE_OPTIONS="--max-old-space-size=3072"
-export CARGO_BUILD_JOBS=4
-export MAKEFLAGS="-j4"
-export RUSTFLAGS="-C codegen-units=4"
-
-# Repo-local Cargo home (avoids cross-agent ~/.cargo lock contention)
-# Some runners pre-set `CARGO_HOME=$HOME/.cargo`; treat that as "unset" so we
-# still get per-repo isolation by default. In CI we respect `CARGO_HOME` even if
-# it points at `$HOME/.cargo` so CI can use shared caching. To explicitly keep
-# `CARGO_HOME=$HOME/.cargo` in local runs, set `FORMULA_ALLOW_GLOBAL_CARGO_HOME=1`.
-DEFAULT_GLOBAL_CARGO_HOME="${HOME:-/root}/.cargo"
-if [ -z "${CARGO_HOME:-}" ] || { [ -z "${CI:-}" ] && [ -z "${FORMULA_ALLOW_GLOBAL_CARGO_HOME:-}" ] && [ "${CARGO_HOME}" = "${DEFAULT_GLOBAL_CARGO_HOME}" ]; }; then
-  export CARGO_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/target/cargo-home"
-fi
-mkdir -p "$CARGO_HOME"
-export PATH="$CARGO_HOME/bin:$PATH"
-
-# Headless display (if not already set)
-if [ -z "$DISPLAY" ]; then
-  export DISPLAY=:99
-  if ! pgrep -x Xvfb > /dev/null; then
-    Xvfb :99 -screen 0 1920x1080x24 &
-    sleep 1
-  fi
-fi
-
-# Confirm settings
-echo "Agent environment initialized:"
-echo "  NODE_OPTIONS: $NODE_OPTIONS"
-echo "  CARGO_BUILD_JOBS: $CARGO_BUILD_JOBS"
-echo "  CARGO_HOME: $CARGO_HOME"
-echo "  DISPLAY: $DISPLAY"
-```
-
-### scripts/smart-jobs.sh
-
-Adaptive parallelism based on current memory:
+`scripts/run_limited.sh` uses `RLIMIT_AS` (via `prlimit` or `ulimit -v`):
 
 ```bash
-#!/bin/bash
-# Returns appropriate -j value based on memory pressure
-# Usage: cargo build -j$(./scripts/smart-jobs.sh)
+# This sets a hard 8GB address space limit
+# If the process tries to allocate more, the kernel kills it
+bash scripts/run_limited.sh --as 8G -- cargo build
 
-# Get available memory in GB
-AVAIL_GB=$(free -g | awk '/^Mem:/{print $7}')
-
-# Each compile job needs ~1.5GB headroom
-MAX_JOBS=$((AVAIL_GB / 2))
-
-# Clamp between 2 and 16
-if [ $MAX_JOBS -lt 2 ]; then
-  MAX_JOBS=2
-elif [ $MAX_JOBS -gt 16 ]; then
-  MAX_JOBS=16
-fi
-
-echo $MAX_JOBS
+# Equivalent to:
+prlimit --as=$((8*1024*1024*1024)) --pid $$ && cargo build
+# or (fallback):
+ulimit -v $((8*1024*1024)) && cargo build
 ```
 
-### scripts/check-memory.sh
-
-Quick memory status:
-
-```bash
-#!/bin/bash
-# Show current memory status
-
-echo "=== Memory Status ==="
-free -h
-echo ""
-echo "=== Top Memory Consumers ==="
-ps aux --sort=-%mem | head -15
-echo ""
-echo "=== Recommendation ==="
-AVAIL=$(free -g | awk '/^Mem:/{print $7}')
-if [ $AVAIL -lt 50 ]; then
-  echo "⚠️  LOW MEMORY: Only ${AVAIL}GB available. Use -j2 for builds."
-elif [ $AVAIL -lt 200 ]; then
-  echo "⚡ MODERATE: ${AVAIL}GB available. Use -j4 for builds."
-else
-  echo "✅ PLENTY: ${AVAIL}GB available. Use -j8 or higher."
-fi
-```
-
-### scripts/safe-cargo-build.sh
-
-Memory-aware Rust builds:
-
-```bash
-#!/bin/bash
-# Wrapper for cargo build with memory awareness
-# Usage: ./scripts/safe-cargo-build.sh [cargo args...]
-
-JOBS=$(./scripts/smart-jobs.sh 2>/dev/null || echo 4)
-echo "Building with -j$JOBS based on available memory..."
-cargo build -j$JOBS "$@"
-```
+This is **simpler and more reliable** than cgroups/systemd-run:
+- No special privileges needed
+- Works on any Linux
+- Kernel enforces it automatically
 
 ---
 
@@ -503,45 +410,51 @@ source scripts/agent-init.sh
 ### Safe Commands
 
 ```bash
-# Node/TypeScript
-npm install                           # OK with NODE_OPTIONS set
-npm run build                         # OK with NODE_OPTIONS set
-npm test                              # OK
-npx tsc --incremental                 # Preferred for large projects
+# Rust (ALWAYS use cargo_agent.sh)
+bash scripts/cargo_agent.sh build --release
+bash scripts/cargo_agent.sh test -p formula-engine
+bash scripts/cargo_agent.sh check
+bash scripts/cargo_agent.sh bench --bench perf_regressions
 
-# Rust
-cargo build -j4                       # Safe
-cargo test -j4                        # Safe
-./scripts/safe-cargo-build.sh        # Auto-detects
-./scripts/safe-cargo-check.sh        # Auto-detects
-./scripts/safe-cargo-test.sh         # Auto-detects
-./scripts/safe-cargo-run.sh --help   # Auto-detects (also used by perf benchmarks)
-./scripts/safe-cargo-bench.sh        # Auto-detects
+# Node/TypeScript (with agent-init.sh sourced)
+npm install
+npm run build
+npm test
+pnpm run typecheck
 
-# Testing with display
-xvfb-run npm run test:e2e            # For GUI tests
+# Heavy operations with explicit limit
+bash scripts/run_limited.sh --as 4G -- npm run build
+bash scripts/run_limited.sh --as 8G -- node heavy-script.js
+
+# GUI tests
+xvfb-run npm run test:e2e
 ```
 
-### Dangerous Commands (Avoid)
+### Dangerous Commands (NEVER USE)
 
 ```bash
+# WRONG - can exhaust RAM:
+cargo build                           # No memory limit!
+cargo test                            # No memory limit!
 cargo build -j$(nproc)               # 192 parallel rustc = OOM
 cargo build -j0                       # Unlimited = OOM
-npm run build & npm run build        # Concurrent builds from same agent
+
+# WRONG - kills OTHER agents' processes:
+pkill cargo                           # NEVER USE pkill
+killall rustc                         # NEVER USE killall
 ```
 
-### Emergency: System Under Memory Pressure
+### Emergency: Your Process is Stuck
 
 ```bash
-# Check what's using memory
+# Check memory status
 ./scripts/check-memory.sh
 
-# Wait for your own processes to finish, or cancel them via Ctrl+C
-# DO NOT use pkill - it kills processes across ALL agents!
+# Cancel via Ctrl+C (safest)
 
-# If your specific process is stuck, find its PID and kill only that:
+# If you must kill a specific process, find its PID first:
 ps aux | grep "your-specific-pattern"
-kill <specific-pid>
+kill <specific-pid>                   # Only YOUR process
 ```
 
 ---
