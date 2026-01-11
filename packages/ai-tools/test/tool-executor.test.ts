@@ -420,4 +420,69 @@ describe("ToolExecutor", () => {
     expect(result.error?.code).toBe("permission_denied");
     expect(result.error?.message).toMatch(/too large/i);
   });
+
+  it("fetch_external_data enforces max_external_bytes while streaming when content-length is missing", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, {
+      allow_external_data: true,
+      allowed_external_hosts: ["example.com"],
+      max_external_bytes: 5
+    });
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("hello"));
+        controller.enqueue(new TextEncoder().encode("world"));
+        controller.close();
+      }
+    });
+
+    const fetchMock = vi.fn(async () => {
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "content-type": "text/plain"
+        }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://example.com/stream",
+        destination: "Sheet1!A1",
+        transform: "raw_text"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+    expect(result.error?.message).toMatch(/too large/i);
+  });
+
+  it("fetch_external_data blocks non-http(s) URLs", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["example.com"] });
+
+    const fetchMock = vi.fn(async () => {
+      throw new Error("fetch should not be called for invalid protocols");
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "file:///etc/passwd",
+        destination: "Sheet1!A1"
+      }
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+  });
 });

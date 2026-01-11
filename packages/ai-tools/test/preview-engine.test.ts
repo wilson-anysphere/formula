@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PreviewEngine } from "../src/preview/preview-engine.js";
 import { InMemoryWorkbook } from "../src/spreadsheet/in-memory-workbook.js";
 import { parseA1Cell } from "../src/spreadsheet/a1.js";
@@ -71,5 +71,35 @@ describe("PreviewEngine", () => {
 
     expect(preview.requires_approval).toBe(true);
     expect(preview.approval_reasons).toContain("External data access requested");
+  });
+
+  it("never performs network access during preview, even when executor options enable it", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const previewEngine = new PreviewEngine();
+
+    const fetchMock = vi.fn(async () => {
+      throw new Error("fetch should not be called during preview");
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const preview = await previewEngine.generatePreview(
+      [
+        {
+          name: "fetch_external_data",
+          parameters: {
+            source_type: "api",
+            url: "https://example.com/data",
+            destination: "Sheet1!A1"
+          }
+        }
+      ],
+      workbook,
+      { allow_external_data: true, allowed_external_hosts: ["example.com"] }
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(preview.requires_approval).toBe(true);
+    expect(preview.tool_results[0]?.ok).toBe(false);
+    expect(preview.tool_results[0]?.error?.code).toBe("permission_denied");
   });
 });
