@@ -194,6 +194,25 @@ impl Table {
         }
     }
 
+    pub(crate) fn rewrite_sheet_references_internal_refs_only(&mut self, old_name: &str, new_name: &str) {
+        for column in &mut self.columns {
+            if let Some(formula) = column.formula.as_mut() {
+                *formula = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                    formula,
+                    old_name,
+                    new_name,
+                );
+            }
+            if let Some(formula) = column.totals_formula.as_mut() {
+                *formula = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                    formula,
+                    old_name,
+                    new_name,
+                );
+            }
+        }
+    }
+
     pub(crate) fn rewrite_table_references(&mut self, renames: &[(String, String)]) {
         for column in &mut self.columns {
             if let Some(formula) = column.formula.as_mut() {

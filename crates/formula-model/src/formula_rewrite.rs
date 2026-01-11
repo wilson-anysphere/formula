@@ -500,6 +500,28 @@ fn sheet_ref_tail_end(formula: &str, start: usize) -> usize {
 /// sheet references (`Sheet!A1`, `'My Sheet'!A1`, `Sheet1:Sheet3!A1`, etc) and it
 /// does not touch string literals.
 pub fn rewrite_sheet_names_in_formula(formula: &str, old_name: &str, new_name: &str) -> String {
+    rewrite_sheet_names_in_formula_impl(formula, old_name, new_name, true)
+}
+
+/// Rewrite sheet references inside `formula` that refer to the current workbook only.
+///
+/// This behaves like [`rewrite_sheet_names_in_formula`], but it does **not** rewrite references
+/// that include an explicit workbook prefix (e.g. `='[Book1.xlsx]Sheet1'!A1`), since those refer
+/// to an external workbook and should not change when copying/duplicating a worksheet.
+pub(crate) fn rewrite_sheet_names_in_formula_internal_refs_only(
+    formula: &str,
+    old_name: &str,
+    new_name: &str,
+) -> String {
+    rewrite_sheet_names_in_formula_impl(formula, old_name, new_name, false)
+}
+
+fn rewrite_sheet_names_in_formula_impl(
+    formula: &str,
+    old_name: &str,
+    new_name: &str,
+    rewrite_external_workbooks: bool,
+) -> String {
     let mut out = String::with_capacity(formula.len());
     let mut i = 0;
     let mut in_string = false;
@@ -541,6 +563,11 @@ pub fn rewrite_sheet_names_in_formula(formula: &str, old_name: &str, new_name: &
 
         if bytes[i] == b'\'' {
             if let Some((next, raw, sheet_spec)) = parse_quoted_sheet_spec(formula, i) {
+                if !rewrite_external_workbooks && split_workbook_prefix(&sheet_spec).0.is_some() {
+                    out.push_str(raw);
+                    i = next;
+                    continue;
+                }
                 if let Some(rewritten) = rewrite_sheet_spec(&sheet_spec, old_name, new_name) {
                     out.push_str(&rewritten);
                     out.push('!');
@@ -553,6 +580,11 @@ pub fn rewrite_sheet_names_in_formula(formula: &str, old_name: &str, new_name: &
         }
 
         if let Some((next, raw, sheet_spec)) = parse_unquoted_sheet_spec(formula, i) {
+            if !rewrite_external_workbooks && split_workbook_prefix(sheet_spec).0.is_some() {
+                out.push_str(raw);
+                i = next;
+                continue;
+            }
             if let Some(rewritten) = rewrite_sheet_spec(sheet_spec, old_name, new_name) {
                 out.push_str(&rewritten);
                 out.push('!');

@@ -345,17 +345,21 @@ impl Workbook {
             let Some(formula) = cell.formula.as_mut() else {
                 continue;
             };
-            let rewritten = rewrite_sheet_names_in_formula(formula, &source_name, &target_name);
+            let rewritten = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                formula,
+                &source_name,
+                &target_name,
+            );
             *formula = rewrite_table_names_in_formula(&rewritten, &table_renames);
         }
 
         for table in &mut new_sheet.tables {
-            table.rewrite_sheet_references(&source_name, &target_name);
+            table.rewrite_sheet_references_internal_refs_only(&source_name, &target_name);
             table.rewrite_table_references(&table_renames);
         }
 
         for rule in &mut new_sheet.conditional_formatting_rules {
-            rule.rewrite_sheet_references(&source_name, &target_name);
+            rule.rewrite_sheet_references_internal_refs_only(&source_name, &target_name);
             rule.rewrite_table_references(&table_renames);
         }
 
@@ -367,7 +371,7 @@ impl Workbook {
         for assignment in &mut new_sheet.data_validations {
             assignment
                 .validation
-                .rewrite_sheet_references(&source_name, &target_name);
+                .rewrite_sheet_references_internal_refs_only(&source_name, &target_name);
             assignment
                 .validation
                 .rewrite_table_references(&table_renames);
@@ -387,8 +391,11 @@ impl Workbook {
                 next_id = next_id.wrapping_add(1);
                 name.scope = DefinedNameScope::Sheet(new_sheet_id);
                 name.xlsx_local_sheet_id = None;
-                name.refers_to =
-                    rewrite_sheet_names_in_formula(&name.refers_to, &source_name, &target_name);
+                name.refers_to = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                    &name.refers_to,
+                    &source_name,
+                    &target_name,
+                );
                 name.refers_to = rewrite_table_names_in_formula(&name.refers_to, &table_renames);
                 duplicated.push(name);
             }

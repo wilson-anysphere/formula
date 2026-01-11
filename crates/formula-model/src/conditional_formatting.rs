@@ -57,6 +57,20 @@ impl Cfvo {
         *value = crate::rewrite_sheet_names_in_formula(value, old_name, new_name);
     }
 
+    fn rewrite_sheet_references_internal_refs_only(&mut self, old_name: &str, new_name: &str) {
+        if self.type_ != CfvoType::Formula {
+            return;
+        }
+        let Some(value) = self.value.as_mut() else {
+            return;
+        };
+        *value = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+            value,
+            old_name,
+            new_name,
+        );
+    }
+
     fn rewrite_table_references(&mut self, renames: &[(String, String)]) {
         if self.type_ != CfvoType::Formula {
             return;
@@ -144,6 +158,13 @@ impl DataBarRule {
         self.max.rewrite_sheet_references(old_name, new_name);
     }
 
+    fn rewrite_sheet_references_internal_refs_only(&mut self, old_name: &str, new_name: &str) {
+        self.min
+            .rewrite_sheet_references_internal_refs_only(old_name, new_name);
+        self.max
+            .rewrite_sheet_references_internal_refs_only(old_name, new_name);
+    }
+
     fn rewrite_table_references(&mut self, renames: &[(String, String)]) {
         self.min.rewrite_table_references(renames);
         self.max.rewrite_table_references(renames);
@@ -167,6 +188,12 @@ impl ColorScaleRule {
     fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
         for cfvo in &mut self.cfvos {
             cfvo.rewrite_sheet_references(old_name, new_name);
+        }
+    }
+
+    fn rewrite_sheet_references_internal_refs_only(&mut self, old_name: &str, new_name: &str) {
+        for cfvo in &mut self.cfvos {
+            cfvo.rewrite_sheet_references_internal_refs_only(old_name, new_name);
         }
     }
 
@@ -225,6 +252,12 @@ impl IconSetRule {
     fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
         for cfvo in &mut self.cfvos {
             cfvo.rewrite_sheet_references(old_name, new_name);
+        }
+    }
+
+    fn rewrite_sheet_references_internal_refs_only(&mut self, old_name: &str, new_name: &str) {
+        for cfvo in &mut self.cfvos {
+            cfvo.rewrite_sheet_references_internal_refs_only(old_name, new_name);
         }
     }
 
@@ -293,6 +326,33 @@ impl CfRuleKind {
             CfRuleKind::DataBar(rule) => rule.rewrite_sheet_references(old_name, new_name),
             CfRuleKind::ColorScale(rule) => rule.rewrite_sheet_references(old_name, new_name),
             CfRuleKind::IconSet(rule) => rule.rewrite_sheet_references(old_name, new_name),
+            CfRuleKind::TopBottom(_)
+            | CfRuleKind::UniqueDuplicate(_)
+            | CfRuleKind::Unsupported { .. } => {}
+        }
+    }
+
+    pub(crate) fn rewrite_sheet_references_internal_refs_only(&mut self, old_name: &str, new_name: &str) {
+        match self {
+            CfRuleKind::CellIs { formulas, .. } => {
+                for formula in formulas {
+                    *formula = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                        formula,
+                        old_name,
+                        new_name,
+                    );
+                }
+            }
+            CfRuleKind::Expression { formula } => {
+                *formula = crate::formula_rewrite::rewrite_sheet_names_in_formula_internal_refs_only(
+                    formula,
+                    old_name,
+                    new_name,
+                );
+            }
+            CfRuleKind::DataBar(rule) => rule.rewrite_sheet_references_internal_refs_only(old_name, new_name),
+            CfRuleKind::ColorScale(rule) => rule.rewrite_sheet_references_internal_refs_only(old_name, new_name),
+            CfRuleKind::IconSet(rule) => rule.rewrite_sheet_references_internal_refs_only(old_name, new_name),
             CfRuleKind::TopBottom(_)
             | CfRuleKind::UniqueDuplicate(_)
             | CfRuleKind::Unsupported { .. } => {}
@@ -374,6 +434,11 @@ impl CfRule {
 
     pub(crate) fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
         self.kind.rewrite_sheet_references(old_name, new_name);
+    }
+
+    pub(crate) fn rewrite_sheet_references_internal_refs_only(&mut self, old_name: &str, new_name: &str) {
+        self.kind
+            .rewrite_sheet_references_internal_refs_only(old_name, new_name);
     }
 
     pub(crate) fn rewrite_table_references(&mut self, renames: &[(String, String)]) {

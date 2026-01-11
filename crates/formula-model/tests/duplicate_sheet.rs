@@ -38,6 +38,25 @@ fn duplicate_sheet_rewrites_explicit_self_references() {
 }
 
 #[test]
+fn duplicate_sheet_does_not_rewrite_external_workbook_references() {
+    let mut wb = Workbook::new();
+    let sheet1 = wb.add_sheet("Sheet1").unwrap();
+
+    wb.sheet_mut(sheet1)
+        .unwrap()
+        .set_formula_a1("B2", Some("='[Book1.xlsx]Sheet1'!A1".to_string()))
+        .unwrap();
+
+    let copied = wb.duplicate_sheet(sheet1, None).unwrap();
+    let copied_sheet = wb.sheet(copied).unwrap();
+
+    assert_eq!(
+        copied_sheet.formula(CellRef::from_a1("B2").unwrap()),
+        Some("'[Book1.xlsx]Sheet1'!A1")
+    );
+}
+
+#[test]
 fn duplicate_sheet_renames_tables_and_updates_structured_refs() {
     let mut wb = Workbook::new();
     let sheet1 = wb.add_sheet("Sheet1").unwrap();
