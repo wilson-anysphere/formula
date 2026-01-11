@@ -138,3 +138,19 @@ fn find_and_search() {
     assert_eq!(sheet.eval("=SEARCH(\"b\",\"abc\",3)"), Value::Error(ErrorKind::Value));
 }
 
+#[test]
+fn substitute_worksheet_function_replaces_all_or_nth_instance() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=SUBSTITUTE(\"foo bar foo\",\"foo\",\"x\")"),
+        Value::Text("x bar x".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=SUBSTITUTE(\"abab\",\"ab\",\"X\",2)"),
+        Value::Text("abX".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=SUBSTITUTE(\"abab\",\"ab\",\"X\",0)"),
+        Value::Error(ErrorKind::Value)
+    );
+}

@@ -1,4 +1,5 @@
 use crate::eval::CompiledExpr;
+use crate::error::ExcelError;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
@@ -326,6 +327,57 @@ fn search_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     find_impl(&needle, &haystack, start, true)
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "SUBSTITUTE",
+        min_args: 3,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Text,
+        arg_types: &[ValueType::Text, ValueType::Text, ValueType::Text, ValueType::Number],
+        implementation: substitute_fn,
+    }
+}
+
+fn substitute_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+        Ok(s) => s,
+        Err(e) => return Value::Error(e),
+    };
+    let old_text = match eval_scalar_arg(ctx, &args[1]).coerce_to_string() {
+        Ok(s) => s,
+        Err(e) => return Value::Error(e),
+    };
+    let new_text = match eval_scalar_arg(ctx, &args[2]).coerce_to_string() {
+        Ok(s) => s,
+        Err(e) => return Value::Error(e),
+    };
+
+    let instance_num = if args.len() == 4 {
+        let raw = match eval_scalar_arg(ctx, &args[3]).coerce_to_i64() {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        match i32::try_from(raw) {
+            Ok(n) => Some(n),
+            Err(_) => return Value::Error(ErrorKind::Value),
+        }
+    } else {
+        None
+    };
+
+    match crate::functions::text::substitute(&text, &old_text, &new_text, instance_num) {
+        Ok(s) => Value::Text(s),
+        Err(e) => Value::Error(match e {
+            ExcelError::Div0 => ErrorKind::Div0,
+            ExcelError::Value => ErrorKind::Value,
+            ExcelError::Num => ErrorKind::Num,
+        }),
+    }
+}
+
 fn slice_chars(text: &str, start: usize, len: usize) -> String {
     let chars: Vec<char> = text.chars().collect();
     if start >= chars.len() {
@@ -492,4 +544,3 @@ fn fold_case(ch: char) -> char {
         ch
     }
 }
-
