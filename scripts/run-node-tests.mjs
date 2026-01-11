@@ -71,10 +71,11 @@ function supportsTypeStripping() {
 async function filterTypeScriptImportTests(files) {
   /** @type {string[]} */
   const out = [];
+  const tsImportRe = /from\s+["'][^"']+\.(ts|tsx)["']|import\(\s*["'][^"']+\.(ts|tsx)["']\s*\)/;
   for (const file of files) {
     const text = await readFile(file, "utf8").catch(() => "");
     // Heuristic: skip tests that import .ts modules when the runtime can't strip types.
-    if (text.includes(".ts\"") || text.includes(".ts'")) continue;
+    if (tsImportRe.test(text)) continue;
     out.push(file);
   }
   return out;
