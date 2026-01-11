@@ -11,7 +11,7 @@ use formula_xlsb::{Formula, XlsbWorkbook};
 use pretty_assertions::assert_eq;
 
 mod fixture_builder;
-use fixture_builder::XlsbFixtureBuilder;
+use fixture_builder::{rgce, XlsbFixtureBuilder};
 
 type CellCoord = (u32, u32);
 type SheetFormulas<T> = HashMap<String, HashMap<CellCoord, T>>;
@@ -40,31 +40,29 @@ fn formulas_match_calamine_for_generated_fixture() {
 
     builder.set_cell_number(0, 0, 1.0);
     builder.set_cell_number(0, 1, 2.0);
+
+    let mut a1_plus_b1 = Vec::new();
+    rgce::push_ref(&mut a1_plus_b1, 0, 0, false, false); // A1
+    rgce::push_ref(&mut a1_plus_b1, 0, 1, false, false); // B1
+    rgce::push_add(&mut a1_plus_b1);
+
     builder.set_cell_formula_num(
         0,
         2,
         3.0,
-        // `A1+B1`
-        vec![
-            0x24, 0, 0, 0, 0, 0x00, 0xC0, // A1
-            0x24, 0, 0, 0, 0, 0x01, 0xC0, // B1
-            0x03, // +
-        ],
+        a1_plus_b1.clone(),
         Vec::new(),
     );
+
+    let mut negated = a1_plus_b1;
+    rgce::push_paren(&mut negated);
+    rgce::push_unary_minus(&mut negated);
 
     builder.set_cell_formula_num(
         1,
         0,
         -3.0,
-        // `-(A1+B1)`
-        vec![
-            0x24, 0, 0, 0, 0, 0x00, 0xC0, // A1
-            0x24, 0, 0, 0, 0, 0x01, 0xC0, // B1
-            0x03, // +
-            0x15, // (..)
-            0x13, // unary -
-        ],
+        negated,
         Vec::new(),
     );
 

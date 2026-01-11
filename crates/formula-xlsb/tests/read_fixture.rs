@@ -5,7 +5,7 @@ use tempfile::NamedTempFile;
 
 mod fixture_builder;
 
-use fixture_builder::XlsbFixtureBuilder;
+use fixture_builder::{rgce, XlsbFixtureBuilder};
 
 fn write_temp_xlsb(bytes: &[u8]) -> NamedTempFile {
     let mut file = tempfile::Builder::new()
@@ -55,12 +55,17 @@ fn generated_fixture_reads_number_and_formula_cells() {
     let mut builder = XlsbFixtureBuilder::new();
     builder.set_sheet_name("Sheet1");
     builder.set_cell_number(0, 1, 42.5);
+
+    let mut rgce_bytes = Vec::new();
+    rgce::push_ref(&mut rgce_bytes, 0, 1, false, false); // B1
+    rgce::push_int(&mut rgce_bytes, 2);
+    rgce::push_mul(&mut rgce_bytes);
+
     builder.set_cell_formula_num(
         0,
         2,
         85.0,
-        // Same token stream as `tests/fixtures/simple.xlsb` (`B1*2`).
-        vec![0x24, 0, 0, 0, 0, 0x01, 0xC0, 0x1E, 0x02, 0x00, 0x05],
+        rgce_bytes.clone(),
         Vec::new(),
     );
 
@@ -87,10 +92,7 @@ fn generated_fixture_reads_number_and_formula_cells() {
     assert_eq!(formula_cell.value, CellValue::Number(85.0));
     let formula = formula_cell.formula.as_ref().expect("formula payload preserved");
     assert_eq!(formula.text.as_deref(), Some("B1*2"));
-    assert_eq!(
-        formula.rgce,
-        vec![0x24, 0, 0, 0, 0, 0x01, 0xC0, 0x1E, 0x02, 0x00, 0x05]
-    );
+    assert_eq!(formula.rgce, rgce_bytes);
 
 }
 
@@ -104,16 +106,17 @@ fn generated_fixture_supports_shared_strings_and_absolute_refs() {
 
     builder.set_cell_number(0, 0, 1.0);
     builder.set_cell_number(0, 1, 2.0);
+
+    let mut rgce_bytes = Vec::new();
+    rgce::push_ref(&mut rgce_bytes, 0, 0, true, true); // $A$1
+    rgce::push_ref(&mut rgce_bytes, 0, 1, false, true); // $B1
+    rgce::push_add(&mut rgce_bytes);
+
     builder.set_cell_formula_num(
         0,
         2,
         3.0,
-        // `$A$1+$B1`
-        vec![
-            0x24, 0, 0, 0, 0, 0x00, 0x00, // $A$1
-            0x24, 0, 0, 0, 0, 0x01, 0x40, // $B1
-            0x03, // +
-        ],
+        rgce_bytes,
         Vec::new(),
     );
 
@@ -153,7 +156,7 @@ fn generated_fixture_preserves_formula_extra_bytes_for_array_constants() {
     // after `rgce` (the `rgcb` stream) to describe the constant array. Our decoder
     // doesn't understand it yet, but the reader should still preserve `rgce` and
     // successfully load the sheet.
-    let rgce = vec![0x20, 0, 0, 0, 0, 0, 0, 0];
+    let rgce = rgce::array_placeholder();
     let extra = vec![0xDE, 0xAD, 0xBE, 0xEF];
 
     builder.set_cell_formula_num(0, 0, 1.0, rgce.clone(), extra);

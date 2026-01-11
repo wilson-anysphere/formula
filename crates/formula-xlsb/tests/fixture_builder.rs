@@ -212,6 +212,73 @@ impl XlsbFixtureBuilder {
     }
 }
 
+/// Helpers for building small `rgce` token streams in tests.
+///
+/// These helpers operate on the *zero-based* row/col indices used by XLSB.
+pub mod rgce {
+    /// PtgRef (`0x24`) encoded using the BIFF12 cell-address layout:
+    /// `[row: u32][col: u16-with-relative-flags]`.
+    pub fn push_ref(out: &mut Vec<u8>, row: u32, col: u32, abs_row: bool, abs_col: bool) {
+        assert!(col <= 0x3FFF, "column index out of range for BIFF12 (max 16383)");
+        out.push(0x24);
+        out.extend_from_slice(&row.to_le_bytes());
+
+        let col_u16 = col as u16;
+        let low = (col_u16 & 0x00FF) as u8;
+        let mut high = ((col_u16 >> 8) as u8) & 0x3F;
+
+        // Our decoder interprets bit=1 as "relative" (no `$`).
+        if !abs_row {
+            high |= 0x40;
+        }
+        if !abs_col {
+            high |= 0x80;
+        }
+
+        out.push(low);
+        out.push(high);
+    }
+
+    /// PtgInt (`0x1E`) literal.
+    pub fn push_int(out: &mut Vec<u8>, n: u16) {
+        out.push(0x1E);
+        out.extend_from_slice(&n.to_le_bytes());
+    }
+
+    /// PtgNum (`0x1F`) literal.
+    pub fn push_num(out: &mut Vec<u8>, n: f64) {
+        out.push(0x1F);
+        out.extend_from_slice(&n.to_le_bytes());
+    }
+
+    /// PtgAdd (`0x03`)
+    pub fn push_add(out: &mut Vec<u8>) {
+        out.push(0x03);
+    }
+
+    /// PtgMul (`0x05`)
+    pub fn push_mul(out: &mut Vec<u8>) {
+        out.push(0x05);
+    }
+
+    /// PtgParen (`0x15`)
+    pub fn push_paren(out: &mut Vec<u8>) {
+        out.push(0x15);
+    }
+
+    /// PtgUminus (`0x13`)
+    pub fn push_unary_minus(out: &mut Vec<u8>) {
+        out.push(0x13);
+    }
+
+    /// PtgArray (`0x20`) placeholder token.
+    ///
+    /// In real files this is typically followed by an `rgcb` payload after the `rgce` stream.
+    pub fn array_placeholder() -> Vec<u8> {
+        vec![0x20, 0, 0, 0, 0, 0, 0, 0]
+    }
+}
+
 // -- OPC (ZIP plumbing) --------------------------------------------------------
 
 fn build_content_types_xml(has_shared_strings: bool) -> String {

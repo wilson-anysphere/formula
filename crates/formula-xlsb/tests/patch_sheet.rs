@@ -8,7 +8,7 @@ use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 
 mod fixture_builder;
-use fixture_builder::XlsbFixtureBuilder;
+use fixture_builder::{rgce, XlsbFixtureBuilder};
 
 fn read_zip_part(path: &str, part_path: &str) -> Vec<u8> {
     let file = File::open(path).expect("open xlsb fixture");
@@ -274,7 +274,7 @@ fn patch_sheet_bin_preserves_formula_trailing_bytes() {
     builder.set_sheet_name("Arrayy");
 
     // `PtgArray` placeholder token, followed by extra bytes (rgcb) describing the array constant.
-    let rgce = vec![0x20, 0, 0, 0, 0, 0, 0, 0];
+    let rgce = rgce::array_placeholder();
     let extra = vec![0xDE, 0xAD, 0xBE, 0xEF];
     builder.set_cell_formula_num(0, 0, 1.0, rgce, extra);
 
