@@ -259,6 +259,33 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("reports formula edits that clear a previously displayed value", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setCell("A1", "=1");
+      await engine.recalculate();
+      expect((await engine.getCell("A1")).value).toBe(1);
+
+      // Edit formula to reference a blank cell; the new result is blank so the recalc delta must
+      // still report {A1: null} to clear the old cached value.
+      await engine.setCell("A1", "=A2");
+      const changes = await engine.recalculate();
+      expect(changes).toEqual([{ sheet: "Sheet1", address: "A1", value: null }]);
+      expect((await engine.getCell("A1")).value).toBeNull();
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("treats explicit null cells in JSON as absent and omits them on export", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
