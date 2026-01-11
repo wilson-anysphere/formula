@@ -1,8 +1,8 @@
 use crate::eval::CompiledExpr;
 use crate::functions::array_lift;
+use crate::functions::math::criteria::Criteria;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::simd::{CmpOp, NumericCriteria};
 use crate::value::{ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
@@ -111,18 +111,18 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Number(n) => acc += n,
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Lambda(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
-                        }
-                    }
-                }
-                Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Blank
+                             | Value::Array(_)
+                             | Value::Lambda(_)
+                             | Value::Spill { .. }
+                             | Value::Reference(_)
+                             | Value::ReferenceUnion(_) => {}
+                         }
+                     }
+                 }
+                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
                 Value::Reference(_) | Value::ReferenceUnion(_) => {
                     return Value::Error(ErrorKind::Value)
@@ -136,18 +136,18 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => acc += n,
                         // Excel quirk: logicals/text in references are ignored by SUM.
-                        Value::Bool(_)
-                        | Value::Text(_)
-                        | Value::Blank
-                        | Value::Array(_)
-                        | Value::Lambda(_)
-                        | Value::Spill { .. }
-                        | Value::Reference(_)
-                        | Value::ReferenceUnion(_) => {}
-                    }
-                }
-            }
-            ArgValue::ReferenceUnion(ranges) => {
+                         Value::Bool(_)
+                         | Value::Text(_)
+                         | Value::Blank
+                         | Value::Array(_)
+                         | Value::Lambda(_)
+                         | Value::Spill { .. }
+                         | Value::Reference(_)
+                         | Value::ReferenceUnion(_) => {}
+                     }
+                 }
+             }
+             ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = std::collections::HashSet::new();
                 for r in ranges {
                     let sheet_id = r.sheet_id;
@@ -160,19 +160,19 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => acc += n,
                             // Excel quirk: logicals/text in references are ignored by SUM.
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Lambda(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
-                        }
-                    }
-                }
-            }
-        }
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Blank
+                             | Value::Array(_)
+                             | Value::Lambda(_)
+                             | Value::Spill { .. }
+                             | Value::Reference(_)
+                             | Value::ReferenceUnion(_) => {}
+                         }
+                     }
+                 }
+             }
+         }
     }
 
     Value::Number(acc)
@@ -224,18 +224,18 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 acc += n;
                                 count += 1;
                             }
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Lambda(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
-                        }
-                    }
-                }
-                Value::Lambda(_) => return Value::Error(ErrorKind::Value),
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Blank
+                             | Value::Array(_)
+                             | Value::Lambda(_)
+                             | Value::Spill { .. }
+                             | Value::Reference(_)
+                             | Value::ReferenceUnion(_) => {}
+                         }
+                     }
+                 }
+                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
                 Value::Reference(_) | Value::ReferenceUnion(_) => {
                     return Value::Error(ErrorKind::Value)
@@ -252,18 +252,18 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             count += 1;
                         }
                         // Ignore logical/text/blank in references.
-                        Value::Bool(_)
-                        | Value::Text(_)
-                        | Value::Blank
-                        | Value::Array(_)
-                        | Value::Lambda(_)
-                        | Value::Spill { .. }
-                        | Value::Reference(_)
-                        | Value::ReferenceUnion(_) => {}
-                    }
-                }
-            }
-            ArgValue::ReferenceUnion(ranges) => {
+                         Value::Bool(_)
+                         | Value::Text(_)
+                         | Value::Blank
+                         | Value::Array(_)
+                         | Value::Lambda(_)
+                         | Value::Spill { .. }
+                         | Value::Reference(_)
+                         | Value::ReferenceUnion(_) => {}
+                     }
+                 }
+             }
+             ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = std::collections::HashSet::new();
                 for r in ranges {
                     let sheet_id = r.sheet_id;
@@ -279,19 +279,19 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 count += 1;
                             }
                             // Ignore logical/text/blank in references.
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Lambda(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
-                        }
-                    }
-                }
-            }
-        }
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Blank
+                             | Value::Array(_)
+                             | Value::Lambda(_)
+                             | Value::Spill { .. }
+                             | Value::Reference(_)
+                             | Value::ReferenceUnion(_) => {}
+                         }
+                     }
+                 }
+             }
+         }
     }
 
     if count == 0 {
@@ -325,19 +325,19 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Number(n) => best = Some(best.map(|b| b.min(*n)).unwrap_or(*n)),
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Lambda(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
-                        }
-                    }
-                }
-                other => {
-                    let n = match other.coerce_to_number() {
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Blank
+                             | Value::Array(_)
+                             | Value::Lambda(_)
+                             | Value::Spill { .. }
+                             | Value::Reference(_)
+                             | Value::ReferenceUnion(_) => {}
+                         }
+                     }
+                 }
+                 other => {
+                     let n = match other.coerce_to_number() {
                         Ok(n) => n,
                         Err(e) => return Value::Error(e),
                     };
@@ -374,19 +374,19 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => best = Some(best.map(|b| b.min(n)).unwrap_or(n)),
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Lambda(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
-                        }
-                    }
-                }
-            }
-        }
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Blank
+                             | Value::Array(_)
+                             | Value::Lambda(_)
+                             | Value::Spill { .. }
+                             | Value::Reference(_)
+                             | Value::ReferenceUnion(_) => {}
+                         }
+                     }
+                 }
+             }
+         }
     }
 
     Value::Number(best.unwrap_or(0.0))
@@ -417,19 +417,19 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Number(n) => best = Some(best.map(|b| b.max(*n)).unwrap_or(*n)),
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Lambda(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
-                        }
-                    }
-                }
-                other => {
-                    let n = match other.coerce_to_number() {
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Blank
+                             | Value::Array(_)
+                             | Value::Lambda(_)
+                             | Value::Spill { .. }
+                             | Value::Reference(_)
+                             | Value::ReferenceUnion(_) => {}
+                         }
+                     }
+                 }
+                 other => {
+                     let n = match other.coerce_to_number() {
                         Ok(n) => n,
                         Err(e) => return Value::Error(e),
                     };
@@ -466,19 +466,19 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => best = Some(best.map(|b| b.max(n)).unwrap_or(n)),
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Lambda(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
-                        }
-                    }
-                }
-            }
-        }
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Blank
+                             | Value::Array(_)
+                             | Value::Lambda(_)
+                             | Value::Spill { .. }
+                             | Value::Reference(_)
+                             | Value::ReferenceUnion(_) => {}
+                         }
+                     }
+                 }
+             }
+         }
     }
 
     Value::Number(best.unwrap_or(0.0))
@@ -560,43 +560,50 @@ inventory::submit! {
 }
 
 fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let values: Vec<Value> = match ctx.eval_arg(&args[0]) {
-        ArgValue::Reference(r) => {
-            let mut values = Vec::new();
-            for addr in r.iter_cells() {
-                values.push(ctx.get_cell_value(r.sheet_id, addr));
-            }
-            values
-        }
-        ArgValue::ReferenceUnion(ranges) => {
-            let mut values = Vec::new();
-            for r in ranges {
-                for addr in r.iter_cells() {
-                    values.push(ctx.get_cell_value(r.sheet_id, addr));
-                }
-            }
-            values
-        }
-        ArgValue::Scalar(Value::Array(arr)) => arr.values,
-        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
-        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
-    };
-
     let criteria_value = eval_scalar_arg(ctx, &args[1]);
     if let Value::Error(e) = criteria_value {
         return Value::Error(e);
     }
-    let Some(criteria) = parse_numeric_criteria(&criteria_value) else {
-        return Value::Error(ErrorKind::Value);
+    let criteria = match Criteria::parse_with_date_system(&criteria_value, ctx.date_system()) {
+        Ok(c) => c,
+        Err(e) => return Value::Error(e),
     };
 
     let mut count = 0u64;
-    for v in values {
-        if let Value::Number(n) = v {
-            if matches_numeric_criteria(n, criteria) {
-                count += 1;
+    match ctx.eval_arg(&args[0]) {
+        ArgValue::Reference(r) => {
+            let sheet_id = r.sheet_id;
+            for addr in r.iter_cells() {
+                let v = ctx.get_cell_value(sheet_id, addr);
+                if criteria.matches(&v) {
+                    count += 1;
+                }
             }
         }
+        ArgValue::ReferenceUnion(ranges) => {
+            let mut seen = std::collections::HashSet::new();
+            for r in ranges {
+                let sheet_id = r.sheet_id;
+                for addr in r.iter_cells() {
+                    if !seen.insert((sheet_id, addr)) {
+                        continue;
+                    }
+                    let v = ctx.get_cell_value(sheet_id, addr);
+                    if criteria.matches(&v) {
+                        count += 1;
+                    }
+                }
+            }
+        }
+        ArgValue::Scalar(Value::Array(arr)) => {
+            for v in arr.iter() {
+                if criteria.matches(v) {
+                    count += 1;
+                }
+            }
+        }
+        ArgValue::Scalar(Value::Error(e)) => return Value::Error(e),
+        ArgValue::Scalar(_) => return Value::Error(ErrorKind::Value),
     }
     Value::Number(count as f64)
 }
@@ -656,48 +663,6 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match crate::functions::math::sumproduct(&[&va, &vb]) {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
-    }
-}
-
-fn parse_numeric_criteria(value: &Value) -> Option<NumericCriteria> {
-    match value {
-        Value::Number(n) => Some(NumericCriteria::new(CmpOp::Eq, *n)),
-        Value::Bool(b) => Some(NumericCriteria::new(CmpOp::Eq, if *b { 1.0 } else { 0.0 })),
-        Value::Text(s) => parse_numeric_criteria_str(s),
-        _ => None,
-    }
-}
-
-fn parse_numeric_criteria_str(raw: &str) -> Option<NumericCriteria> {
-    let s = raw.trim();
-    let (op, rest) = if let Some(r) = s.strip_prefix(">=") {
-        (CmpOp::Ge, r)
-    } else if let Some(r) = s.strip_prefix("<=") {
-        (CmpOp::Le, r)
-    } else if let Some(r) = s.strip_prefix("<>") {
-        (CmpOp::Ne, r)
-    } else if let Some(r) = s.strip_prefix('>') {
-        (CmpOp::Gt, r)
-    } else if let Some(r) = s.strip_prefix('<') {
-        (CmpOp::Lt, r)
-    } else if let Some(r) = s.strip_prefix('=') {
-        (CmpOp::Eq, r)
-    } else {
-        (CmpOp::Eq, s)
-    };
-
-    let rhs: f64 = rest.trim().parse().ok()?;
-    Some(NumericCriteria::new(op, rhs))
-}
-
-fn matches_numeric_criteria(value: f64, criteria: NumericCriteria) -> bool {
-    match criteria.op {
-        CmpOp::Eq => value == criteria.rhs,
-        CmpOp::Ne => value != criteria.rhs,
-        CmpOp::Lt => value < criteria.rhs,
-        CmpOp::Le => value <= criteria.rhs,
-        CmpOp::Gt => value > criteria.rhs,
-        CmpOp::Ge => value >= criteria.rhs,
     }
 }
 

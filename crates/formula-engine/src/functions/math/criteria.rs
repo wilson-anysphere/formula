@@ -1,8 +1,11 @@
+use crate::date::ExcelDateSystem;
+use crate::functions::date_time::{datevalue, timevalue};
+use crate::simd::{CmpOp, NumericCriteria};
+use crate::value::{parse_number, NumberLocale};
 use crate::{ErrorKind, Value};
-use crate::functions::wildcard::wildcard_match;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CriteriaOp {
+enum CriteriaOp {
     Eq,
     Ne,
     Lt,
@@ -12,22 +15,63 @@ pub(crate) enum CriteriaOp {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum CriteriaRhs {
+enum CriteriaRhs {
     Blank,
     Number(f64),
     Bool(bool),
     Error(ErrorKind),
-    Text(String),
+    Text(TextCriteria),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Criteria {
-    pub(crate) op: CriteriaOp,
-    pub(crate) rhs: CriteriaRhs,
+struct TextCriteria {
+    /// Case-folded pattern used for `>`/`<` comparisons (wildcards treated as literals).
+    literal_folded: String,
+    /// Case-folded wildcard tokens used for `=`/`<>` matching.
+    tokens: Vec<Token>,
+    /// Whether the token list contains wildcard operators (`*` or `?`).
+    has_wildcards: bool,
+}
+
+impl TextCriteria {
+    fn new(raw: &str) -> Self {
+        let folded = fold_case(raw);
+        let tokens = tokenize_pattern(&folded);
+        let has_wildcards = tokens
+            .iter()
+            .any(|t| matches!(t, Token::Star | Token::QMark));
+        let literal_folded = tokens
+            .iter()
+            .map(|t| match t {
+                Token::Star => '*',
+                Token::QMark => '?',
+                Token::Literal(c) => *c,
+            })
+            .collect();
+
+        Self {
+            literal_folded,
+            tokens,
+            has_wildcards,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Criteria {
+    op: CriteriaOp,
+    rhs: CriteriaRhs,
 }
 
 impl Criteria {
-    pub(crate) fn parse(input: &Value) -> Result<Self, ErrorKind> {
+    /// Parse an Excel criteria value using Excel's default 1900 date system (with Lotus compat).
+    pub fn parse(input: &Value) -> Result<Self, ErrorKind> {
+        Self::parse_with_date_system(input, ExcelDateSystem::EXCEL_1900)
+    }
+
+    /// Parse an Excel criteria value, resolving date/time strings using the supplied workbook
+    /// date system.
+    pub fn parse_with_date_system(input: &Value, system: ExcelDateSystem) -> Result<Self, ErrorKind> {
         match input {
             Value::Number(n) => Ok(Criteria {
                 op: CriteriaOp::Eq,
@@ -45,7 +89,7 @@ impl Criteria {
                 op: CriteriaOp::Eq,
                 rhs: CriteriaRhs::Blank,
             }),
-            Value::Text(s) => parse_criteria_string(s),
+            Value::Text(s) => parse_criteria_string(s, system),
             Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
@@ -54,65 +98,109 @@ impl Criteria {
         }
     }
 
-    pub(crate) fn matches(&self, value: &Value) -> bool {
+    /// If this criteria can be represented as a simple numeric comparator, return the SIMD
+    /// kernel representation.
+    pub fn as_numeric_criteria(&self) -> Option<NumericCriteria> {
+        let op = match self.op {
+            CriteriaOp::Eq => CmpOp::Eq,
+            CriteriaOp::Ne => CmpOp::Ne,
+            CriteriaOp::Lt => CmpOp::Lt,
+            CriteriaOp::Lte => CmpOp::Le,
+            CriteriaOp::Gt => CmpOp::Gt,
+            CriteriaOp::Gte => CmpOp::Ge,
+        };
+
+        match &self.rhs {
+            CriteriaRhs::Number(n) => Some(NumericCriteria::new(op, *n)),
+            CriteriaRhs::Bool(b) => Some(NumericCriteria::new(op, if *b { 1.0 } else { 0.0 })),
+            _ => None,
+        }
+    }
+
+    pub fn matches(&self, value: &Value) -> bool {
+        // Criteria functions never propagate errors from candidate cells. Errors only match
+        // error criteria.
+        match value {
+            Value::Error(_) | Value::Spill { .. } => {
+                return matches_error_criteria(&self.op, &self.rhs, value);
+            }
+            _ => {}
+        }
+
         match &self.rhs {
             CriteriaRhs::Blank => match self.op {
                 CriteriaOp::Eq => is_blank_value(value),
                 CriteriaOp::Ne => !is_blank_value(value),
                 _ => false,
             },
-            CriteriaRhs::Error(err) => match self.op {
-                CriteriaOp::Eq => matches!(value, Value::Error(e) if e == err),
-                CriteriaOp::Ne => !matches!(value, Value::Error(e) if e == err),
-                _ => false,
-            },
-            CriteriaRhs::Bool(b) => {
-                let Some(value_bool) = coerce_to_bool(value) else {
-                    return false;
-                };
-                match self.op {
-                    CriteriaOp::Eq => value_bool == *b,
-                    CriteriaOp::Ne => value_bool != *b,
-                    _ => false,
-                }
-            }
-            CriteriaRhs::Number(n) => {
-                let Some(value_num) = coerce_to_number(value) else {
-                    return false;
-                };
-                match self.op {
-                    CriteriaOp::Eq => value_num == *n,
-                    CriteriaOp::Ne => value_num != *n,
-                    CriteriaOp::Lt => value_num < *n,
-                    CriteriaOp::Lte => value_num <= *n,
-                    CriteriaOp::Gt => value_num > *n,
-                    CriteriaOp::Gte => value_num >= *n,
-                }
-            }
-            CriteriaRhs::Text(pattern) => {
-                let value_text = coerce_to_text(value);
-                match self.op {
-                    CriteriaOp::Eq => wildcard_match(pattern, &value_text),
-                    CriteriaOp::Ne => !wildcard_match(pattern, &value_text),
-                    CriteriaOp::Lt => {
-                        value_text.to_ascii_uppercase() < pattern.to_ascii_uppercase()
-                    }
-                    CriteriaOp::Lte => {
-                        value_text.to_ascii_uppercase() <= pattern.to_ascii_uppercase()
-                    }
-                    CriteriaOp::Gt => {
-                        value_text.to_ascii_uppercase() > pattern.to_ascii_uppercase()
-                    }
-                    CriteriaOp::Gte => {
-                        value_text.to_ascii_uppercase() >= pattern.to_ascii_uppercase()
-                    }
-                }
-            }
+            CriteriaRhs::Error(_) => matches_error_criteria(&self.op, &self.rhs, value),
+            CriteriaRhs::Bool(b) => matches_numeric_criteria(self.op, if *b { 1.0 } else { 0.0 }, value),
+            CriteriaRhs::Number(n) => matches_numeric_criteria(self.op, *n, value),
+            CriteriaRhs::Text(pattern) => matches_text_criteria(self.op, pattern, value),
         }
     }
 }
 
-fn parse_criteria_string(raw: &str) -> Result<Criteria, ErrorKind> {
+fn matches_error_criteria(op: &CriteriaOp, rhs: &CriteriaRhs, value: &Value) -> bool {
+    let CriteriaRhs::Error(err) = rhs else {
+        return false;
+    };
+
+    let candidate = match value {
+        Value::Error(e) => Some(*e),
+        Value::Spill { .. } => Some(ErrorKind::Spill),
+        _ => None,
+    };
+    let is_target_error = candidate == Some(*err);
+    match op {
+        CriteriaOp::Eq => is_target_error,
+        CriteriaOp::Ne => !is_target_error,
+        _ => false,
+    }
+}
+
+fn matches_numeric_criteria(op: CriteriaOp, rhs: f64, value: &Value) -> bool {
+    let Some(value_num) = coerce_to_number(value) else {
+        return false;
+    };
+
+    match op {
+        CriteriaOp::Eq => value_num == rhs,
+        CriteriaOp::Ne => value_num != rhs,
+        CriteriaOp::Lt => value_num < rhs,
+        CriteriaOp::Lte => value_num <= rhs,
+        CriteriaOp::Gt => value_num > rhs,
+        CriteriaOp::Gte => value_num >= rhs,
+    }
+}
+
+fn matches_text_criteria(op: CriteriaOp, pattern: &TextCriteria, value: &Value) -> bool {
+    let Some(value_text) = coerce_to_text(value) else {
+        return false;
+    };
+    let value_folded = fold_case(&value_text);
+
+    match op {
+        CriteriaOp::Eq => {
+            if !pattern.has_wildcards {
+                return value_folded == pattern.literal_folded;
+            }
+            wildcard_match_tokens(&pattern.tokens, &value_folded)
+        }
+        CriteriaOp::Ne => {
+            if !pattern.has_wildcards {
+                return value_folded != pattern.literal_folded;
+            }
+            !wildcard_match_tokens(&pattern.tokens, &value_folded)
+        }
+        CriteriaOp::Lt => value_folded < pattern.literal_folded,
+        CriteriaOp::Lte => value_folded <= pattern.literal_folded,
+        CriteriaOp::Gt => value_folded > pattern.literal_folded,
+        CriteriaOp::Gte => value_folded >= pattern.literal_folded,
+    }
+}
+
+fn parse_criteria_string(raw: &str, system: ExcelDateSystem) -> Result<Criteria, ErrorKind> {
     let (op, rhs_str) = split_op(raw);
     let rhs_str = rhs_str.trim();
 
@@ -146,16 +234,23 @@ fn parse_criteria_string(raw: &str) -> Result<Criteria, ErrorKind> {
         });
     }
 
-    if let Ok(num) = rhs_str.parse::<f64>() {
+    if let Ok(num) = parse_number(rhs_str, NumberLocale::en_us()) {
         return Ok(Criteria {
             op,
             rhs: CriteriaRhs::Number(num),
         });
     }
 
+    if let Some(serial) = parse_date_time_criteria(rhs_str, system) {
+        return Ok(Criteria {
+            op,
+            rhs: CriteriaRhs::Number(serial),
+        });
+    }
+
     Ok(Criteria {
         op,
-        rhs: CriteriaRhs::Text(rhs_str.to_string()),
+        rhs: CriteriaRhs::Text(TextCriteria::new(rhs_str)),
     })
 }
 
@@ -189,56 +284,22 @@ fn coerce_to_number(value: &Value) -> Option<f64> {
         Value::Number(n) => Some(*n),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Blank => Some(0.0),
-        Value::Text(s) => s.trim().parse::<f64>().ok(),
+        Value::Text(s) => parse_number(s, NumberLocale::en_us()).ok(),
+        Value::Array(arr) => coerce_to_number(&arr.top_left()),
         Value::Error(_)
         | Value::Reference(_)
         | Value::ReferenceUnion(_)
-        | Value::Array(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => None,
     }
 }
 
-fn coerce_to_bool(value: &Value) -> Option<bool> {
+fn coerce_to_text(value: &Value) -> Option<String> {
     match value {
-        Value::Bool(b) => Some(*b),
-        Value::Number(n) => Some(*n != 0.0),
-        Value::Text(s) => {
-            if s.eq_ignore_ascii_case("TRUE") {
-                Some(true)
-            } else if s.eq_ignore_ascii_case("FALSE") {
-                Some(false)
-            } else {
-                None
-            }
-        }
-        Value::Blank => Some(false),
-        Value::Error(_)
-        | Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Array(_)
-        | Value::Lambda(_)
-        | Value::Spill { .. } => None,
-    }
-}
-
-fn coerce_to_text(value: &Value) -> String {
-    match value {
-        Value::Blank => String::new(),
-        Value::Number(n) => n.to_string(),
-        Value::Text(s) => s.clone(),
-        Value::Bool(b) => {
-            if *b {
-                "TRUE".to_string()
-            } else {
-                "FALSE".to_string()
-            }
-        }
-        Value::Error(e) => e.to_string(),
-        Value::Reference(_) | Value::ReferenceUnion(_) => ErrorKind::Value.to_string(),
-        Value::Array(arr) => arr.top_left().to_string(),
-        Value::Lambda(_) => "<LAMBDA>".to_string(),
-        Value::Spill { .. } => ErrorKind::Spill.to_string(),
+        Value::Blank => Some(String::new()),
+        Value::Number(_) | Value::Text(_) | Value::Bool(_) => value.coerce_to_string().ok(),
+        Value::Error(_) | Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => None,
+        Value::Array(arr) => coerce_to_text(&arr.top_left()),
     }
 }
 
@@ -258,4 +319,97 @@ fn parse_error_kind(raw: &str) -> Option<ErrorKind> {
     }
 }
 
-// Wildcard matching is shared with lookup functions (XLOOKUP/XMATCH).
+fn parse_date_time_criteria(raw: &str, system: ExcelDateSystem) -> Option<f64> {
+    let date = datevalue(raw, system).ok().map(|d| d as f64);
+    let time = timevalue(raw).ok();
+    match (date, time) {
+        (Some(d), Some(t)) => Some(d + t),
+        (Some(d), None) => Some(d),
+        (None, Some(t)) => Some(t),
+        (None, None) => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Token {
+    Star,
+    QMark,
+    Literal(char),
+}
+
+fn tokenize_pattern(pattern: &str) -> Vec<Token> {
+    let mut tokens = Vec::new();
+    let mut chars = pattern.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '~' => {
+                let Some(&next) = chars.peek() else {
+                    tokens.push(Token::Literal('~'));
+                    continue;
+                };
+
+                if matches!(next, '*' | '?' | '~') {
+                    let _ = chars.next();
+                    tokens.push(Token::Literal(next));
+                } else {
+                    tokens.push(Token::Literal('~'));
+                }
+            }
+            '*' => tokens.push(Token::Star),
+            '?' => tokens.push(Token::QMark),
+            other => tokens.push(Token::Literal(other)),
+        }
+    }
+    tokens
+}
+
+fn wildcard_match_tokens(pattern: &[Token], text: &str) -> bool {
+    let text = text.chars().collect::<Vec<_>>();
+
+    let mut pi = 0usize;
+    let mut ti = 0usize;
+    let mut star: Option<usize> = None;
+    let mut star_text = 0usize;
+
+    while ti < text.len() {
+        if pi < pattern.len() {
+            match pattern[pi] {
+                Token::Literal(c) if c == text[ti] => {
+                    pi += 1;
+                    ti += 1;
+                    continue;
+                }
+                Token::QMark => {
+                    pi += 1;
+                    ti += 1;
+                    continue;
+                }
+                Token::Star => {
+                    star = Some(pi);
+                    pi += 1;
+                    star_text = ti;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(star_pos) = star {
+            pi = star_pos + 1;
+            star_text += 1;
+            ti = star_text;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < pattern.len() && pattern[pi] == Token::Star {
+        pi += 1;
+    }
+
+    pi == pattern.len()
+}
+
+fn fold_case(input: &str) -> String {
+    input.chars().flat_map(|c| c.to_uppercase()).collect()
+}
