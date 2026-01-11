@@ -173,6 +173,20 @@ function parseJwtExpMs(token: string): number | null {
   }
 }
 
+function statusCodeForIntrospectionInactive(reason: string | undefined): 401 | 403 {
+  switch (reason) {
+    case "invalid_token":
+    case "token_expired":
+    case "session_not_found":
+    case "session_revoked":
+    case "session_expired":
+    case "session_user_mismatch":
+      return 401;
+    default:
+      return 403;
+  }
+}
+
 async function introspectTokenWithRetry(
   auth: Extract<AuthMode, { mode: "introspect" }>,
   token: string,
@@ -200,8 +214,8 @@ async function introspectTokenWithRetry(
         signal: AbortSignal.timeout(timeoutMs),
       });
 
-      if (res.status === 403) {
-        throw new AuthError("Invalid token", 403);
+      if (res.status === 401 || res.status === 403) {
+        throw new AuthError("Invalid token", res.status === 401 ? 401 : 403);
       }
 
       if (!res.ok) {
@@ -223,8 +237,31 @@ async function introspectTokenWithRetry(
         throw new AuthError("Authentication service unavailable", 503);
       }
 
-      if (!body || typeof body !== "object" || body.ok !== true) {
-        throw new AuthError("Invalid token", 403);
+      if (!body || typeof body !== "object") {
+        throw new AuthError("Authentication service unavailable", 503);
+      }
+
+      const active =
+        typeof body.active === "boolean"
+          ? body.active
+          : typeof body.ok === "boolean"
+            ? body.ok
+            : null;
+      if (active === null) {
+        throw new AuthError("Authentication service unavailable", 503);
+      }
+
+      if (!active) {
+        const reason =
+          typeof body.reason === "string" && body.reason.length > 0
+            ? body.reason
+            : typeof body.error === "string" && body.error.length > 0
+              ? body.error
+              : undefined;
+        throw new AuthError(
+          reason ? `Token inactive: ${reason}` : "Invalid token",
+          statusCodeForIntrospectionInactive(reason)
+        );
       }
 
       const userId = body.userId;
@@ -340,7 +377,9 @@ export async function authenticateRequest(
 
       return ctx;
     } catch (err) {
-      if (auth.failOpen && !(err instanceof AuthError && err.statusCode === 403)) {
+      const invalidToken =
+        err instanceof AuthError && (err.statusCode === 401 || err.statusCode === 403);
+      if (auth.failOpen && !invalidToken) {
         return {
           userId: "introspect-fail-open",
           tokenType: "introspect",

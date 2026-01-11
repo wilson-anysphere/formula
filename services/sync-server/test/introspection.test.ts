@@ -120,29 +120,15 @@ test("sync-server rejects connections when introspection marks token inactive", 
 
       let body: any;
       if (parsed.token === okToken) {
-        body = { ok: true, active: true, userId: "u-ok", orgId: "o1", role: "editor" };
+        // Exercise compatibility: allow `ok` responses without `active`.
+        body = { ok: true, userId: "u-ok", orgId: "o1", role: "editor" };
       } else if (parsed.token === revokedToken) {
-        body = {
-          ok: false,
-          active: false,
-          error: "forbidden",
-          reason: "session_revoked",
-          userId: "u-revoked",
-          orgId: "o1",
-          role: "editor",
-        };
+        // Exercise compatibility: allow `error` responses without `reason` and without `active`.
+        body = { ok: false, error: "session_revoked", userId: "u-revoked", orgId: "o1", role: "editor" };
       } else if (parsed.token === notMemberToken) {
-        body = {
-          ok: false,
-          active: false,
-          error: "forbidden",
-          reason: "not_member",
-          userId: "u-removed",
-          orgId: "o1",
-          role: "editor",
-        };
+        body = { active: false, reason: "not_member", userId: "u-removed", orgId: "o1", role: "editor" };
       } else {
-        body = { ok: false, active: false, error: "forbidden", reason: "unknown_token" };
+        body = { active: false, reason: "unknown_token" };
       }
 
       res.writeHead(200, { "content-type": "application/json" });

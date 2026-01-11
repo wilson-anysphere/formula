@@ -98,7 +98,11 @@ test("auth:introspect enforces roles and caches introspection results", async (t
     }
 
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, userId, orgId: "o1", role }));
+    const successBody =
+      token === "editor-token"
+        ? { active: true, userId, orgId: "o1", role }
+        : { ok: true, userId, orgId: "o1", role };
+    res.end(JSON.stringify(successBody));
   });
 
   await new Promise<void>((resolve) => {

@@ -34,13 +34,15 @@ function parseIntrospectionResult(value: unknown): SyncTokenIntrospectionResult 
         ? obj.ok
         : null;
   if (active === null) {
-    throw new Error('Invalid introspection response (missing boolean "active")');
+    throw new Error('Invalid introspection response (missing boolean "active"/"ok")');
   }
 
   const reason =
     typeof obj.reason === "string" && obj.reason.length > 0
       ? obj.reason
-      : undefined;
+      : typeof obj.error === "string" && obj.error.length > 0
+        ? obj.error
+        : undefined;
   const userId = typeof obj.userId === "string" && obj.userId.length > 0 ? obj.userId : undefined;
   const orgId = typeof obj.orgId === "string" && obj.orgId.length > 0 ? obj.orgId : undefined;
   const role = parseRole(obj.role);
@@ -50,7 +52,7 @@ function parseIntrospectionResult(value: unknown): SyncTokenIntrospectionResult 
     reason,
     userId,
     orgId,
-    role
+    role,
   };
 }
 
@@ -112,11 +114,31 @@ export function createSyncTokenIntrospectionClient(config: {
         signal: AbortSignal.timeout(5_000)
       });
 
+      const json = (await res.json().catch(() => null)) as unknown;
+
+      if (res.status === 401 || res.status === 403) {
+        // Token is inactive/invalid (or the introspection endpoint rejected our request).
+        const fallbackReason =
+          json && typeof json === "object"
+            ? typeof (json as any).error === "string" && (json as any).error.length > 0
+              ? ((json as any).error as string)
+              : typeof (json as any).reason === "string" && (json as any).reason.length > 0
+                ? ((json as any).reason as string)
+                : "forbidden"
+            : "forbidden";
+
+        if (!json) return { active: false, reason: fallbackReason };
+        try {
+          return parseIntrospectionResult(json);
+        } catch {
+          return { active: false, reason: fallbackReason };
+        }
+      }
+
       if (!res.ok) {
         throw new Error(`Introspection request failed (${res.status})`);
       }
 
-      const json = (await res.json()) as unknown;
       return parseIntrospectionResult(json);
     })();
 

@@ -85,7 +85,22 @@ Optional claims:
   - `sheetName` is also accepted as an alias for `sheetId`.
   - Older clients may send `{ "range": { ... }, "editAllowlist": [...] }`, which is also accepted.
 
-### Token introspection
+#### Optional JWT session revalidation (introspection)
+
+When using JWT auth, the sync-server can optionally call the API internal introspection endpoint
+on each websocket upgrade to ensure the issuing session is still active and permissions haven't
+been revoked.
+
+Set:
+
+- `SYNC_SERVER_INTROSPECTION_URL` (base URL like `https://api.internal.example.com` **or** full URL
+  to `/internal/sync/introspect`)
+- `SYNC_SERVER_INTROSPECTION_TOKEN` (sent as `x-internal-admin-token`)
+- Optional: `SYNC_SERVER_INTROSPECTION_CACHE_TTL_MS` (default: `15000`; set to `0` to disable caching)
+
+The request/response format is the same as the token introspection auth mode described below.
+
+### Token introspection (auth mode)
 
 Set:
 
@@ -111,6 +126,11 @@ Expected response:
 ```json
 { "ok": true, "userId": "u1", "orgId": "o1", "role": "editor", "sessionId": "..." }
 ```
+
+For compatibility, `{ "active": true, ... }` is also accepted (and `active: false` is treated as
+inactive). When returning an inactive response, provide a string `reason` (or `error`) so the
+sync-server can map it to an HTTP status code (`401` for invalid/expired sessions, `403` for access
+denied).
 
 Introspection results are cached in-memory for `SYNC_SERVER_INTROSPECT_CACHE_MS`, so token revocation
 may not take effect immediately.
