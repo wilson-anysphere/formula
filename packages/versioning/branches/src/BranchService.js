@@ -80,6 +80,27 @@ export class BranchService {
   }
 
   /**
+   * Set the local "current branch" pointer.
+   *
+   * This does not mutate document history; it only affects which branch future
+   * `commit`/`merge` operations target. This is useful for collaborative
+   * workflows where the checked-out branch is stored externally (e.g. in a Yjs
+   * document meta field).
+   *
+   * @param {string} name
+   */
+  setCurrentBranchName(name) {
+    this.#currentBranchName = name;
+  }
+
+  /**
+   * @returns {string}
+   */
+  getCurrentBranchName() {
+    return this.#currentBranchName;
+  }
+
+  /**
    * @returns {Promise<Branch>}
    */
   async getCurrentBranch() {

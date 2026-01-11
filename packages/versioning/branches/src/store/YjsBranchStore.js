@@ -100,6 +100,7 @@ export class YjsBranchStore {
       this.#branches.set("main", main);
 
       this.#meta.set("rootCommitId", rootCommitId);
+      this.#meta.set("currentBranchName", "main");
     });
   }
 

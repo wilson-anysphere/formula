@@ -103,6 +103,10 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   const branchService = new BranchService({ docId, store });
   const workflow = new CollabBranchingWorkflow({ session: sessionA, branchService });
 
+  const storeB = new YjsBranchStore({ ydoc: sessionB.doc });
+  const branchServiceB = new BranchService({ docId, store: storeB });
+  const workflowB = new CollabBranchingWorkflow({ session: sessionB, branchService: branchServiceB });
+
   // Init creates the root commit + main branch in the shared Y.Doc.
   await branchService.init(owner, { sheets: {} });
 
@@ -114,6 +118,24 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   // --- Branch + divergent edits ---
   await branchService.createBranch(owner, { name: "feature" });
   await workflow.checkoutBranch(owner, { name: "feature" });
+
+  // Editor can commit on the globally checked-out branch without being allowed to checkout.
+  const editor = { userId: "u-b", role: "editor" };
+  await waitForCondition(
+    () => sessionB.doc.getMap("branching:meta").get("currentBranchName") === "feature",
+    10_000
+  );
+  sessionB.setCellValue("Sheet1:0:2", 99);
+  const editorCommit = await workflowB.commitCurrentState(editor, "editor: add C1");
+
+  // Ensure client A observes the branch head moving before making further commits.
+  await waitForCondition(() => {
+    const branches = sessionA.doc.getMap("branching:branches");
+    const feature = getYMap(branches.get("feature"));
+    return feature?.get("headCommitId") === editorCommit.id;
+  }, 10_000);
+  await waitForCondition(() => sessionA.getCell("Sheet1:0:2")?.value === 99, 10_000);
+
   sessionA.setCellValue("Sheet1:0:0", "feature");
   sessionA.doc.transact(() => {
     const cell = getYMap(sessionA.cells.get("Sheet1:0:1"));
@@ -156,6 +178,8 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   assert.equal(sessionB.getCell("Sheet1:0:0")?.value, "feature");
   await waitForCondition(() => sessionB.getCell("Sheet1:0:1")?.formula === "=1+1", 10_000);
   assert.equal(sessionB.getCell("Sheet1:0:1")?.formula, "=1+1");
+  await waitForCondition(() => sessionB.getCell("Sheet1:0:2")?.value === 99, 10_000);
+  assert.equal(sessionB.getCell("Sheet1:0:2")?.value, 99);
   await waitForCondition(() => {
     const cell = getYMap(sessionB.cells.get("Sheet1:0:1"));
     return cell?.get("format")?.numberFormat === "percent";
@@ -168,12 +192,10 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   await waitForCondition(() => {
     const branches = sessionB.doc.getMap("branching:branches");
     const commits = sessionB.doc.getMap("branching:commits");
-    return branches.has("main") && branches.has("feature") && commits.size >= 5;
+    return branches.has("main") && branches.has("feature") && commits.size >= 6;
   }, 10_000);
 
   // Validate metadata via BranchService on another client.
-  const storeB = new YjsBranchStore({ ydoc: sessionB.doc });
-  const branchServiceB = new BranchService({ docId, store: storeB });
   const branchesB = await branchServiceB.listBranches();
   assert.deepEqual(
     branchesB.map((b) => b.name).sort(),
@@ -224,6 +246,7 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   // --- Workbook state persisted ---
   assert.equal(sessionC.getCell("Sheet1:0:0")?.value, "feature");
   assert.equal(sessionC.getCell("Sheet1:0:1")?.formula, "=1+1");
+  assert.equal(sessionC.getCell("Sheet1:0:2")?.value, 99);
   assert.deepEqual(getYMap(sessionC.cells.get("Sheet1:0:1"))?.get("format"), {
     numberFormat: "percent",
   });
@@ -236,7 +259,7 @@ test("sync-server + collab branching: Yjs-backed branches/commits + checkout/mer
   assert.ok(branches.has("main"));
   assert.ok(branches.has("feature"));
   assert.ok(typeof meta.get("rootCommitId") === "string");
-  assert.ok(commits.size >= 5);
+  assert.ok(commits.size >= 6);
 
   // Validate persisted metadata via store API too.
   const storeC = new YjsBranchStore({ ydoc: sessionC.doc });

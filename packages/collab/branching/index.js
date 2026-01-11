@@ -15,13 +15,42 @@ export class CollabBranchingWorkflow {
   #session;
   /** @type {BranchService} */
   #branchService;
+  /** @type {string} */
+  #rootName;
 
   /**
-   * @param {{ session: CollabSession, branchService: BranchService }} input
+   * @param {{ session: CollabSession, branchService: BranchService, rootName?: string }} input
    */
-  constructor({ session, branchService }) {
+  constructor({ session, branchService, rootName }) {
     this.#session = session;
     this.#branchService = branchService;
+    this.#rootName = rootName ?? "branching";
+  }
+
+  /**
+   * @returns {string}
+   */
+  #getGlobalCurrentBranchName() {
+    const meta = this.#session.doc.getMap(`${this.#rootName}:meta`);
+    const name = meta.get("currentBranchName");
+    return typeof name === "string" && name.length > 0 ? name : "main";
+  }
+
+  /**
+   * @param {string} name
+   */
+  #setGlobalCurrentBranchName(name) {
+    const meta = this.#session.doc.getMap(`${this.#rootName}:meta`);
+    this.#session.doc.transact(() => {
+      meta.set("currentBranchName", name);
+    }, this.#session.origin);
+  }
+
+  #syncBranchServiceToGlobalBranch() {
+    const name = this.#getGlobalCurrentBranchName();
+    if (this.#branchService.getCurrentBranchName?.() !== name) {
+      this.#branchService.setCurrentBranchName?.(name);
+    }
   }
 
   /**
@@ -31,6 +60,7 @@ export class CollabBranchingWorkflow {
    * @param {string} [message]
    */
   async commitCurrentState(actor, message) {
+    this.#syncBranchServiceToGlobalBranch();
     const nextState = yjsDocToDocumentState(this.#session.doc);
     return this.#branchService.commit(actor, { nextState, message });
   }
@@ -41,6 +71,7 @@ export class CollabBranchingWorkflow {
    */
   async checkoutBranch(actor, { name }) {
     const state = await this.#branchService.checkoutBranch(actor, { name });
+    this.#setGlobalCurrentBranchName(name);
     applyDocumentStateToYjsDoc(this.#session.doc, state, { origin: this.#session.origin });
     return state;
   }
@@ -50,6 +81,7 @@ export class CollabBranchingWorkflow {
    * @param {{ sourceBranch: string }} input
    */
   async previewMerge(actor, { sourceBranch }) {
+    this.#syncBranchServiceToGlobalBranch();
     return this.#branchService.previewMerge(actor, { sourceBranch });
   }
 
@@ -58,9 +90,9 @@ export class CollabBranchingWorkflow {
    * @param {{ sourceBranch: string, resolutions: ConflictResolution[], message?: string }} input
    */
   async merge(actor, { sourceBranch, resolutions, message }) {
+    this.#syncBranchServiceToGlobalBranch();
     const result = await this.#branchService.merge(actor, { sourceBranch, resolutions, message });
     applyDocumentStateToYjsDoc(this.#session.doc, result.state, { origin: this.#session.origin });
     return result;
   }
 }
-
