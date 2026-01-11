@@ -32,7 +32,7 @@ export interface BrowserExtensionHostLike {
     manifest: Record<string, any>;
     mainUrl: string;
   }): Promise<string>;
-  unloadExtension?(extensionId: string): Promise<void> | void;
+  unloadExtension?(extensionId: string): Promise<void | boolean> | void | boolean;
   listExtensions(): Array<{ id: string }>;
 }
 
@@ -64,7 +64,13 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   if (!subtle?.digest) {
     throw new Error("WebExtensionManager requires crypto.subtle.digest() to verify downloads");
   }
-  const hash = new Uint8Array(await subtle.digest("SHA-256", bytes));
+  // `crypto.subtle.digest` expects a BufferSource backed by an `ArrayBuffer`. TypeScript models
+  // `Uint8Array` as potentially backed by a `SharedArrayBuffer` (`ArrayBufferLike`), so normalize
+  // to an `ArrayBuffer`-backed view for type safety.
+  const normalized: Uint8Array<ArrayBuffer> =
+    bytes.buffer instanceof ArrayBuffer ? (bytes as Uint8Array<ArrayBuffer>) : new Uint8Array(bytes);
+
+  const hash = new Uint8Array(await subtle.digest("SHA-256", normalized));
   let out = "";
   for (const b of hash) out += b.toString(16).padStart(2, "0");
   return out;
@@ -187,16 +193,19 @@ function createModuleUrl(bytes: Uint8Array, mime = "text/javascript"): { url: st
   const isNodeRuntime =
     typeof process !== "undefined" && typeof (process as any)?.versions?.node === "string";
 
+  const normalized: Uint8Array<ArrayBuffer> =
+    bytes.buffer instanceof ArrayBuffer ? (bytes as Uint8Array<ArrayBuffer>) : new Uint8Array(bytes);
+
   if (
     !isNodeRuntime &&
     typeof URL !== "undefined" &&
     typeof URL.createObjectURL === "function" &&
     typeof Blob !== "undefined"
   ) {
-    const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    const url = URL.createObjectURL(new Blob([normalized], { type: mime }));
     return { url, revoke: () => URL.revokeObjectURL(url) };
   }
-  const url = bytesToDataUrl(bytes, mime);
+  const url = bytesToDataUrl(normalized, mime);
   return { url, revoke: () => {} };
 }
 

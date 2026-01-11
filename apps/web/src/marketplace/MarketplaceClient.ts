@@ -50,7 +50,8 @@ export interface MarketplaceExtensionDetails extends MarketplaceExtensionSummary
 }
 
 export interface MarketplaceDownloadResult {
-  bytes: Uint8Array;
+  // Downloads are materialized via `Response.arrayBuffer()`, so bytes are always backed by an `ArrayBuffer`.
+  bytes: Uint8Array<ArrayBuffer>;
   signatureBase64: string | null;
   sha256: string | null;
   formatVersion: number | null;
@@ -84,7 +85,13 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
     throw new Error("Marketplace client requires crypto.subtle.digest() to verify downloads");
   }
 
-  const hash = new Uint8Array(await subtle.digest("SHA-256", bytes));
+  // `crypto.subtle.digest` expects a BufferSource backed by an `ArrayBuffer`. TypeScript models
+  // `Uint8Array` as potentially backed by a `SharedArrayBuffer` (`ArrayBufferLike`), so normalize
+  // to an `ArrayBuffer`-backed view for type safety.
+  const normalized: Uint8Array<ArrayBuffer> =
+    bytes.buffer instanceof ArrayBuffer ? (bytes as Uint8Array<ArrayBuffer>) : new Uint8Array(bytes);
+
+  const hash = new Uint8Array(await subtle.digest("SHA-256", normalized));
   let out = "";
   for (const b of hash) out += b.toString(16).padStart(2, "0");
   return out;
@@ -148,7 +155,7 @@ export class MarketplaceClient {
     }
 
     const buf = await res.arrayBuffer();
-    const bytes = new Uint8Array(buf);
+    const bytes: Uint8Array<ArrayBuffer> = new Uint8Array(buf);
 
     const signatureBase64 = res.headers.get("x-package-signature");
     const sha256 = res.headers.get("x-package-sha256");
