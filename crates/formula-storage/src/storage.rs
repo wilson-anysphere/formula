@@ -72,6 +72,7 @@ pub struct Storage {
 struct EncryptedStorageContext {
     path: PathBuf,
     key_provider: Arc<dyn KeyProvider>,
+    persist_lock: Mutex<()>,
 }
 
 impl std::fmt::Debug for EncryptedStorageContext {
@@ -213,7 +214,11 @@ impl Storage {
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
-            encrypted: Some(Arc::new(EncryptedStorageContext { path, key_provider })),
+            encrypted: Some(Arc::new(EncryptedStorageContext {
+                path,
+                key_provider,
+                persist_lock: Mutex::new(()),
+            })),
         })
     }
 
@@ -225,6 +230,7 @@ impl Storage {
         let Some(ctx) = self.encrypted.as_ref() else {
             return Ok(());
         };
+        let _persist_guard = ctx.persist_lock.lock().expect("storage persist mutex poisoned");
 
         let sqlite_bytes = {
             let conn = self.conn.lock().expect("storage mutex poisoned");
