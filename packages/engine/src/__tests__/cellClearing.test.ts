@@ -322,6 +322,24 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("rejects sheet-scoped recalculate calls for missing sheets", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await expect(engine.recalculate("MissingSheet")).rejects.toThrow(/missing sheet/i);
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("filters recalc changes by sheet name (case-insensitive)", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);

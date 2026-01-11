@@ -251,6 +251,14 @@ fn recalculate_reports_formula_edit_to_blank_value() {
 }
 
 #[wasm_bindgen_test]
+fn recalculate_errors_on_missing_sheet() {
+    let mut wb = WasmWorkbook::new();
+    let err = wb.recalculate(Some("MissingSheet".to_string())).unwrap_err();
+    let msg = err.as_string().unwrap_or_default();
+    assert!(msg.contains("missing sheet"), "unexpected error: {msg}");
+}
+
+#[wasm_bindgen_test]
 fn recalculate_reports_cleared_spill_outputs_after_edit() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell(
