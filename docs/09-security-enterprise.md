@@ -450,7 +450,8 @@ interface EnvelopeKmsProvider {
   - Legacy support: `LOCAL_KMS_MASTER_KEY` is only required to decrypt **envelope schema v1** rows
 - **AWS (optional):** `kms_provider = 'aws'`
   - Canonical implementation: `packages/security/crypto/kms/providers.js` (`AwsKmsProvider`)
-  - Requires `AWS_KMS_ENABLED=true`, `AWS_REGION`, and installing `@aws-sdk/client-kms`
+  - Requires `AWS_KMS_ENABLED=true`, `AWS_REGION`, and installing `@aws-sdk/client-kms` in the runtime image
+    (typically as a dependency of the service using the provider, e.g. `services/api`)
   - The AWS SDK is loaded lazily; if the dependency is missing, a clear runtime error is thrown
 - **GCP / Azure:** stubs exist under the same provider interface but are not implemented in this reference repo
 
