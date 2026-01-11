@@ -35,14 +35,16 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
   const shouldNormalize = (() => {
     if (sheets.length === 0) return createDefaultSheet;
     const seen = new Set<string>();
+    let hasSheetWithId = false;
     for (const entry of sheets.toArray()) {
       const maybe = entry as any;
       const id = coerceString(maybe?.get?.("id") ?? maybe?.id);
       if (!id) continue;
+      hasSheetWithId = true;
       if (seen.has(id)) return true;
       seen.add(id);
     }
-    return false;
+    return createDefaultSheet && !hasSheetWithId;
   })();
 
   if (shouldNormalize) {
@@ -70,6 +72,27 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
         sheet.set("id", defaultSheetId);
         sheet.set("name", defaultSheetName);
         sheets.push([sheet]);
+        return;
+      }
+
+      // If the workbook has sheets but none are valid (no `id` field), salvage
+      // the first entry by assigning it the default sheet id/name. This keeps
+      // the sheet list stable even if a client created the first sheet in
+      // multiple transactions (e.g. insert map, then set id later).
+      if (createDefaultSheet && seen.size === 0 && sheets.length > 0) {
+        const first: any = sheets.get(0);
+        if (first && typeof first.get === "function" && typeof first.set === "function") {
+          const existingId = coerceString(first.get("id"));
+          if (!existingId) first.set("id", defaultSheetId);
+          const existingName = coerceString(first.get("name"));
+          if (!existingName) first.set("name", defaultSheetName);
+          return;
+        }
+
+        const sheet = new YMapCtor();
+        sheet.set("id", defaultSheetId);
+        sheet.set("name", defaultSheetName);
+        sheets.insert(0, [sheet]);
       }
     });
   }

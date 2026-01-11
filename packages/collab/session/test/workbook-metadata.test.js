@@ -177,6 +177,26 @@ test("CollabSession schema does not delete sheets that are populated across mult
   docB.destroy();
 });
 
+test("CollabSession schema assigns default id/name when sheets contain an entry without an id", () => {
+  const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
+
+  // Malformed sheet entry (missing id/name). The schema initializer should
+  // salvage this by assigning it the default sheet id/name.
+  sheets.push([new Y.Map()]);
+
+  const session = createCollabSession({ doc });
+
+  assert.equal(session.sheets.length, 1);
+  const sheet = session.sheets.get(0);
+  assert.ok(sheet);
+  assert.equal(sheet.get("id"), "Sheet1");
+  assert.equal(sheet.get("name"), "Sheet1");
+
+  session.destroy();
+  doc.destroy();
+});
+
 test("CollabSession workbook metadata undo never reverts other users' overwrites (in-memory)", () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
