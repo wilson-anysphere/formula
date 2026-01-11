@@ -7,6 +7,7 @@ import type { DocumentController } from "../document/documentController.js";
 // Use `.ts` extension so Node's `--experimental-strip-types` test runner can resolve
 // the module without relying on bundler-specific `.js`→`.ts` mapping.
 import { applyTableToDocument, type QuerySheetDestination } from "./applyToDocument.ts";
+import { enqueueApplyForDocument } from "./applyQueue.ts";
 import type { DesktopPowerQueryEvent } from "./refresh.ts";
 
 // `packages/power-query` is authored in JS; in the desktop layer we treat refresh graph
@@ -112,7 +113,6 @@ export class DesktopPowerQueryRefreshOrchestrator {
   emitter = new Emitter<DesktopPowerQueryEvent>();
   queries = new Map<string, Query>();
   applyControllers = new Map<string, ApplyControllerEntry>();
-  applyQueue: Promise<void> = Promise.resolve();
   cancelledSessions = new Set<string>();
   cancelledQueriesBySession = new Map<string, Set<string>>();
   activeSessions = new Map<string, () => void>();
@@ -252,37 +252,35 @@ export class DesktopPowerQueryRefreshOrchestrator {
     // Serialize apply operations. The DocumentController batching model is global
     // (single `activeBatch`), so overlapping apply operations can corrupt undo
     // grouping and prevent cancellation from reverting partial writes.
-    this.applyQueue = this.applyQueue
-      .then(async () => {
-        try {
-          const result = await applyTableToDocument(this.doc, table, destination, {
-            batchSize: this.batchSize,
-            signal: controller.signal,
-            label: `Refresh query: ${query.name}`,
-            queryId,
-            onProgress: async (progress) => {
-              if (progress.type === "batch") {
-                this.emitter.emit({
-                  type: "apply:progress",
-                  jobId,
-                  queryId,
-                  rowsWritten: progress.totalRowsWritten,
-                  sessionId,
-                });
-              }
-            },
-          });
-          this.emitter.emit({ type: "apply:completed", jobId, queryId, result, sessionId });
-        } catch (error) {
-          if (controller.signal.aborted || isAbortError(error)) {
-            this.emitter.emit({ type: "apply:cancelled", jobId, queryId, sessionId });
-          } else {
-            this.emitter.emit({ type: "apply:error", jobId, queryId, error, sessionId });
-          }
-        } finally {
-          this.applyControllers.delete(applyKey);
+    enqueueApplyForDocument(this.doc, async () => {
+      try {
+        const result = await applyTableToDocument(this.doc, table, destination, {
+          batchSize: this.batchSize,
+          signal: controller.signal,
+          label: `Refresh query: ${query.name}`,
+          queryId,
+          onProgress: async (progress) => {
+            if (progress.type === "batch") {
+              this.emitter.emit({
+                type: "apply:progress",
+                jobId,
+                queryId,
+                rowsWritten: progress.totalRowsWritten,
+                sessionId,
+              });
+            }
+          },
+        });
+        this.emitter.emit({ type: "apply:completed", jobId, queryId, result, sessionId });
+      } catch (error) {
+        if (controller.signal.aborted || isAbortError(error)) {
+          this.emitter.emit({ type: "apply:cancelled", jobId, queryId, sessionId });
+        } else {
+          this.emitter.emit({ type: "apply:error", jobId, queryId, error, sessionId });
         }
-      })
-      .catch(() => {});
+      } finally {
+        this.applyControllers.delete(applyKey);
+      }
+    });
   }
 }
