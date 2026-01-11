@@ -20,9 +20,12 @@ const SUPPORTED_OPS = new Set([
   "removeColumns",
   "filterRows",
   "sortRows",
+  "distinctRows",
+  "removeRowsWithErrors",
   "groupBy",
   "changeType",
   "addColumn",
+  "transformColumns",
   "renameColumn",
   "take",
   "fillDown",
@@ -78,6 +81,8 @@ export function computeParquetProjectionColumns(steps) {
   const mapping = new Map();
   /** @type {Set<string>} */
   const required = new Set();
+  /** @type {Set<string> | null} */
+  let schema = null;
 
   /**
    * @param {string} name
@@ -123,12 +128,27 @@ export function computeParquetProjectionColumns(steps) {
       case "changeType":
         requireColumn(op.column);
         break;
+      case "distinctRows":
+      case "removeRowsWithErrors": {
+        if (op.columns && op.columns.length > 0) {
+          op.columns.forEach(requireColumn);
+        } else {
+          // All-columns distinct/error checks are only safe to project when we
+          // already have a known schema from an earlier explicit projection.
+          if (!schema) return null;
+          schema.forEach(requireColumn);
+        }
+        break;
+      }
       case "addColumn":
         try {
           collectExprColumnRefs(parseFormula(op.formula)).forEach(requireColumn);
         } catch {
           return null;
         }
+        break;
+      case "transformColumns":
+        op.transforms.forEach((t) => requireColumn(t.column));
         break;
       case "renameColumn":
         requireColumn(op.oldName);
@@ -154,6 +174,10 @@ export function computeParquetProjectionColumns(steps) {
         const sourceName = getSourceName(op.oldName);
         mapping.delete(op.oldName);
         mapping.set(op.newName, sourceName);
+        if (schema) {
+          schema.delete(op.oldName);
+          schema.add(op.newName);
+        }
         break;
       }
       case "selectColumns": {
@@ -163,11 +187,13 @@ export function computeParquetProjectionColumns(steps) {
         }
         mapping.clear();
         for (const [k, v] of next) mapping.set(k, v);
+        schema = new Set(op.columns);
         break;
       }
       case "removeColumns": {
         for (const name of op.columns) {
           mapping.delete(name);
+          schema?.delete(name);
         }
         break;
       }
@@ -182,10 +208,12 @@ export function computeParquetProjectionColumns(steps) {
         }
         mapping.clear();
         for (const [k, v] of next) mapping.set(k, v);
+        schema = new Set(next.keys());
         break;
       }
       case "addColumn":
         mapping.set(op.name, null);
+        schema?.add(op.name);
         break;
       default:
         break;

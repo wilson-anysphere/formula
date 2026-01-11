@@ -66,6 +66,43 @@ test("computeParquetProjectionColumns supports addColumn and does not request de
   assert.deepEqual(new Set(cols), new Set(["a", "b"]));
 });
 
+test("computeParquetProjectionColumns supports transformColumns", () => {
+  const steps = [
+    {
+      id: "s_transform",
+      name: "Transform",
+      operation: { type: "transformColumns", transforms: [{ column: "a", formula: "_ + 1", newType: null }] },
+    },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["a"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a"]));
+});
+
+test("computeParquetProjectionColumns supports distinctRows + removeRowsWithErrors on an explicit schema", () => {
+  const steps = [
+    { id: "s_select1", name: "Select", operation: { type: "selectColumns", columns: ["a", "b"] } },
+    { id: "s_distinct", name: "Distinct", operation: { type: "distinctRows", columns: null } },
+    { id: "s_remove_errors", name: "Remove errors", operation: { type: "removeRowsWithErrors", columns: null } },
+    { id: "s_select2", name: "Select2", operation: { type: "selectColumns", columns: ["a"] } },
+  ];
+
+  const cols = computeParquetProjectionColumns(steps);
+  assert.ok(cols);
+  assert.deepEqual(new Set(cols), new Set(["a", "b"]));
+});
+
+test("computeParquetProjectionColumns refuses distinctRows over unknown schema", () => {
+  const steps = [
+    { id: "s_distinct", name: "Distinct", operation: { type: "distinctRows", columns: null } },
+    { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["a"] } },
+  ];
+
+  assert.equal(computeParquetProjectionColumns(steps), null);
+});
+
 test("computeParquetProjectionColumns supports fillDown and replaceValues", () => {
   const steps = [
     { id: "s_fill", name: "Fill", operation: { type: "fillDown", columns: ["a"] } },
@@ -117,4 +154,15 @@ test("computeParquetRowLimit refuses to push down for filter/sort/group", () => 
     { id: "s_filter", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "x", operator: "isNotNull" } } },
   ];
   assert.equal(computeParquetRowLimit(steps, 100), null);
+});
+
+test("computeParquetRowLimit refuses to push down for distinctRows/removeRowsWithErrors", () => {
+  assert.equal(
+    computeParquetRowLimit([{ id: "s1", name: "Distinct", operation: { type: "distinctRows", columns: ["a"] } }], 100),
+    null,
+  );
+  assert.equal(
+    computeParquetRowLimit([{ id: "s1", name: "Errors", operation: { type: "removeRowsWithErrors", columns: ["a"] } }], 100),
+    null,
+  );
 });
