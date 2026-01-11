@@ -22,6 +22,10 @@ fn loads_table_and_evaluates_structured_refs() {
     for (cell_ref, cell) in sheet.iter_cells() {
         let a1 = cell_ref.to_a1();
         if let Some(formula) = &cell.formula {
+            assert!(
+                !formula.starts_with('='),
+                "formula_model::Cell.formula should be stored without leading '='"
+            );
             formulas.push((a1, formula.clone()));
             continue;
         }
