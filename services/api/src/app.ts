@@ -16,6 +16,7 @@ import { registerDlpRoutes } from "./routes/dlp";
 import { registerInternalRoutes } from "./routes/internal";
 import { registerOidcProviderRoutes } from "./routes/oidcProviders";
 import { registerOrgRoutes } from "./routes/orgs";
+import { AuditStreamHub } from "./audit/streamHub";
 import { registerSamlProviderRoutes } from "./routes/samlProviders";
 import { registerScimAdminRoutes } from "./routes/scimAdmin";
 import { registerScimRoutes } from "./routes/scim";
@@ -41,6 +42,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   app.decorate("db", options.db);
   app.decorate("config", options.config);
   app.decorate("metrics", metrics);
+  app.decorate("auditStreamHub", new AuditStreamHub(options.db, app.log));
 
   registerRequestId(app);
   registerMetrics(app, metrics);
@@ -85,6 +87,13 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   registerSiemRoutes(app);
   registerInternalRoutes(app);
   registerOidcProviderRoutes(app);
+
+  app.addHook("onReady", async () => {
+    await app.auditStreamHub.start();
+  });
+  app.addHook("onClose", async () => {
+    await app.auditStreamHub.stop();
+  });
 
   return app;
 }

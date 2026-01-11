@@ -11,6 +11,11 @@ import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
 
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string): boolean {
+  return UUID_REGEX.test(value);
+}
 
 type AuditStreamCursor = {
   lastCreatedAt: Date;
@@ -145,7 +150,7 @@ export function registerAuditRoutes(app: FastifyInstance): void {
     { preHandler: [requireAuth, enforceOrgIpAllowlistFromParams] },
     async (request, reply) => {
       const orgId = (request.params as { orgId: string }).orgId;
-      const role = await requireOrgRole(request, reply, orgId);
+      const role = await requireOrgAdminRole(request, reply, orgId);
       if (!role) return;
       if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
         return reply.code(403).send({ error: "mfa_required" });
@@ -184,6 +189,7 @@ export function registerAuditRoutes(app: FastifyInstance): void {
       });
 
       await writeAuditEvent(app.db, event);
+      app.auditStreamHub.publish(event);
       return reply.code(202).send({ id: event.id });
     }
   );
@@ -211,8 +217,33 @@ export function registerAuditRoutes(app: FastifyInstance): void {
       const afterHeader = typeof lastEventIdHeader === "string" ? lastEventIdHeader : undefined;
 
       const cursorInput = afterParam ?? afterHeader;
-      const decodedCursor = cursorInput ? decodeStreamCursor(cursorInput) : null;
-      if (cursorInput && !decodedCursor) return reply.code(400).send({ error: "invalid_request" });
+      let decodedCursor: AuditStreamCursor | null = null;
+      if (cursorInput) {
+        decodedCursor = decodeStreamCursor(cursorInput);
+        if (!decodedCursor) {
+          const trimmed = cursorInput.trim();
+          if (!isUuid(trimmed)) return reply.code(400).send({ error: "invalid_request" });
+
+          const createdAtResult = await app.db.query<{ created_at: unknown }>(
+            `
+              SELECT created_at
+              FROM (
+                SELECT created_at
+                FROM audit_log
+                WHERE org_id = $1 AND id = $2
+                UNION ALL
+                SELECT created_at
+                FROM audit_log_archive
+                WHERE org_id = $1 AND id = $2
+              ) AS audit_events
+              LIMIT 1
+            `,
+            [orgId, trimmed]
+          );
+          if (createdAtResult.rowCount !== 1) return reply.code(400).send({ error: "invalid_request" });
+          decodedCursor = { lastCreatedAt: toDate(createdAtResult.rows[0]!.created_at), lastEventId: trimmed };
+        }
+      }
 
       let cursor: AuditStreamCursor =
         decodedCursor ??
@@ -231,86 +262,130 @@ export function registerAuditRoutes(app: FastifyInstance): void {
       // Emit an initial comment to ensure clients treat the connection as established.
       stream.write(":ok\n\n");
 
-      let timer: NodeJS.Timeout | null = null;
-      let pollInFlight = false;
+      app.metrics.auditStreamClients.inc();
+
+      let keepaliveTimer: NodeJS.Timeout | null = null;
+      let drainInFlight = false;
+      let drainQueued = false;
       let closed = false;
+      let backpressured = false;
+      let unsubscribe = () => {};
 
       const close = () => {
         if (closed) return;
         closed = true;
-        if (timer) clearInterval(timer);
-        timer = null;
+        if (keepaliveTimer) clearInterval(keepaliveTimer);
+        keepaliveTimer = null;
+        unsubscribe();
+        app.metrics.auditStreamClients.dec();
         stream.end();
       };
 
       request.raw.on("close", close);
       request.raw.on("aborted", close);
 
-      const poll = async () => {
-        if (closed || pollInFlight) return;
-        pollInFlight = true;
+      stream.on("drain", () => {
+        backpressured = false;
+        if (drainQueued) {
+          drainQueued = false;
+          void drain();
+        }
+      });
+
+      const drain = async () => {
+        if (closed) return;
+        if (backpressured) {
+          drainQueued = true;
+          return;
+        }
+        if (drainInFlight) {
+          drainQueued = true;
+          return;
+        }
+
+        drainInFlight = true;
         try {
-          const columns =
-            "id, org_id, user_id, user_email, event_type, resource_type, resource_id, ip_address, user_agent, session_id, success, error_code, error_message, details, created_at";
-          const values: unknown[] = [orgId, cursor.lastCreatedAt, cursor.lastEventId, 100];
+          while (!closed && !backpressured) {
+            const columns =
+              "id, org_id, user_id, user_email, event_type, resource_type, resource_id, ip_address, user_agent, session_id, success, error_code, error_message, details, created_at";
+            const values: unknown[] = [orgId, cursor.lastCreatedAt, cursor.lastEventId, 100];
 
-          const result = await app.db.query(
-            `
-              SELECT ${columns}
-              FROM (
+            const result = await app.db.query(
+              `
                 SELECT ${columns}
-                FROM audit_log
-                WHERE org_id = $1
-                UNION ALL
-                SELECT ${columns}
-                FROM audit_log_archive
-                WHERE org_id = $1
-              ) AS audit_events
-              WHERE (
-                audit_events.created_at > $2::timestamptz
-                OR (
-                  audit_events.created_at = $2::timestamptz
-                  AND audit_events.id > $3::uuid
+                FROM (
+                  SELECT ${columns}
+                  FROM audit_log
+                  WHERE org_id = $1
+                  UNION ALL
+                  SELECT ${columns}
+                  FROM audit_log_archive
+                  WHERE org_id = $1
+                ) AS audit_events
+                WHERE (
+                  audit_events.created_at > $2::timestamptz
+                  OR (
+                    audit_events.created_at = $2::timestamptz
+                    AND audit_events.id > $3::uuid
+                  )
                 )
-              )
-              ORDER BY audit_events.created_at ASC, audit_events.id ASC
-              LIMIT $4
-            `,
-            values
-          );
+                ORDER BY audit_events.created_at ASC, audit_events.id ASC
+                LIMIT $4
+              `,
+              values
+            );
 
-          if (result.rows.length === 0) {
-            stream.write(":keep-alive\n\n");
-            return;
-          }
+            if (result.rows.length === 0) break;
 
-          for (const row of result.rows) {
-            const createdAt = toDate((row as PostgresAuditLogRow).created_at);
-            const id = String((row as PostgresAuditLogRow).id);
-            cursor = { lastCreatedAt: createdAt, lastEventId: id };
+            for (const row of result.rows) {
+              if (closed) break;
 
-            const event = redactAuditEvent(auditLogRowToAuditEvent(row as PostgresAuditLogRow));
-            const eventCursor = encodeStreamCursor(cursor);
-            stream.write(`id: ${eventCursor}\n`);
-            stream.write("event: audit\n");
-            stream.write(`data: ${JSON.stringify(event)}\n\n`);
+              const createdAt = toDate((row as PostgresAuditLogRow).created_at);
+              const id = String((row as PostgresAuditLogRow).id);
+              const nextCursor = { lastCreatedAt: createdAt, lastEventId: id };
+
+              const event = redactAuditEvent(auditLogRowToAuditEvent(row as PostgresAuditLogRow));
+              const eventCursor = encodeStreamCursor(nextCursor);
+              const payload = `id: ${eventCursor}\nevent: audit\ndata: ${JSON.stringify(event)}\n\n`;
+
+              const ok = stream.write(payload);
+              app.metrics.auditStreamEventsTotal.inc();
+              cursor = nextCursor;
+
+              if (!ok) {
+                backpressured = true;
+                drainQueued = true;
+                app.metrics.auditStreamBackpressureDropsTotal.inc();
+                break;
+              }
+            }
           }
         } catch (err) {
           stream.write("event: error\n");
           stream.write(`data: ${JSON.stringify({ error: "stream_error" })}\n\n`);
           close();
         } finally {
-          pollInFlight = false;
+          drainInFlight = false;
+          if (drainQueued && !closed && !backpressured) {
+            drainQueued = false;
+            void drain();
+          }
         }
       };
 
-      timer = setInterval(() => {
-        void poll();
-      }, 2_000);
-      timer.unref?.();
+      unsubscribe = app.auditStreamHub.subscribe(orgId, () => {
+        void drain();
+      });
 
-      // Kick off an initial poll so events written immediately after connect are not delayed.
-      void poll();
+      keepaliveTimer = setInterval(() => {
+        if (closed) return;
+        stream.write(":keep-alive\n\n");
+        void drain();
+      }, 15_000);
+      keepaliveTimer.unref?.();
+
+      // Kick off an initial drain so resume cursors replay immediately.
+      void drain();
 
       return reply.send(stream);
     }

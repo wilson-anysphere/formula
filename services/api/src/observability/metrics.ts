@@ -13,6 +13,9 @@ export type ApiMetrics = {
   rateLimitedTotal: Counter<"route" | "reason">;
   dataResidencyBlockedTotal: Counter<"operation">;
   syncTokenIntrospectFailuresTotal: Counter;
+  auditStreamClients: Gauge;
+  auditStreamEventsTotal: Counter;
+  auditStreamBackpressureDropsTotal: Counter;
   siemBatchesTotal: Counter<"status">;
   siemEventsTotal: Counter<"status">;
   siemBatchDurationSeconds: Histogram;
@@ -104,6 +107,24 @@ export function createMetrics(): ApiMetrics {
     registers: [registry]
   });
 
+  const auditStreamClients = new Gauge({
+    name: "audit_stream_clients",
+    help: "Number of connected audit SSE clients",
+    registers: [registry]
+  });
+
+  const auditStreamEventsTotal = new Counter({
+    name: "audit_stream_events_total",
+    help: "Audit events streamed over SSE",
+    registers: [registry]
+  });
+
+  const auditStreamBackpressureDropsTotal = new Counter({
+    name: "audit_stream_backpressure_drops_total",
+    help: "Audit SSE events dropped due to backpressure",
+    registers: [registry]
+  });
+
   const siemBatchesTotal = new Counter({
     name: "siem_batches_total",
     help: "SIEM export batches processed",
@@ -141,6 +162,9 @@ export function createMetrics(): ApiMetrics {
     rateLimitedTotal,
     dataResidencyBlockedTotal,
     syncTokenIntrospectFailuresTotal,
+    auditStreamClients,
+    auditStreamEventsTotal,
+    auditStreamBackpressureDropsTotal,
     siemBatchesTotal,
     siemEventsTotal,
     siemBatchDurationSeconds,

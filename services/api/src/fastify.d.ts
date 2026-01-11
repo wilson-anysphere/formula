@@ -5,12 +5,14 @@ import type { AuthenticatedUser, SessionInfo } from "./auth/sessions";
 import type { ApiKeyInfo } from "./auth/apiKeys";
 import type { ScimTokenInfo } from "./auth/scim";
 import type { ApiMetrics } from "./observability/metrics";
+import type { AuditStreamHub } from "./audit/streamHub";
 
 declare module "fastify" {
   interface FastifyInstance {
     db: Pool;
     config: AppConfig;
     metrics: ApiMetrics;
+    auditStreamHub: AuditStreamHub;
   }
 
   interface FastifyRequest {
