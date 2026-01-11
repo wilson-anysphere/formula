@@ -19,6 +19,32 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
   /** @type {RootTypeSpec[] | null} */
   const configuredRoots = opts.roots ?? null;
 
+  /**
+   * Best-effort kind detection for non-default roots when restoring snapshots.
+   *
+   * Note: after `Y.applyUpdate` into a fresh doc, root types can exist as a
+   * generic `AbstractType` until a constructor is chosen via `getMap/getArray`.
+   * For roots with content we can infer Map vs Array by inspecting the internal
+   * state.
+   *
+   * @param {Y.Doc} snapshotDoc
+   * @param {string} name
+   * @returns {"map" | "array" | null}
+   */
+  function detectSnapshotRootKind(snapshotDoc, name) {
+    const placeholder = snapshotDoc.share.get(name);
+    if (!placeholder) return null;
+    if (placeholder instanceof Y.Map) return "map";
+    if (placeholder instanceof Y.Array) return "array";
+
+    const hasStart = placeholder?._start != null;
+    const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
+
+    if (mapSize > 0) return "map";
+    if (hasStart) return "array";
+    return null;
+  }
+
   /** @returns {RootTypeSpec[]} */
   function resolveRoots() {
     if (configuredRoots) return configuredRoots;
@@ -58,8 +84,21 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
       const restored = new Y.Doc();
       Y.applyUpdate(restored, snapshot);
 
+      const roots = resolveRoots();
+
+      // Best-effort: if the snapshot contains collaboration roots (like
+      // comments) that haven't been instantiated in the current doc yet, add
+      // them so restoration doesn't silently drop data.
+      if (!configuredRoots) {
+        const names = new Set(roots.map((root) => root.name));
+        if (!names.has("comments") && restored.share.has("comments")) {
+          const kind = detectSnapshotRootKind(restored, "comments");
+          if (kind) roots.push({ name: "comments", kind });
+        }
+      }
+
       doc.transact(() => {
-        for (const root of resolveRoots()) {
+        for (const root of roots) {
           if (root.kind === "map") {
             const target = doc.getMap(root.name);
             const source = restored.getMap(root.name);
