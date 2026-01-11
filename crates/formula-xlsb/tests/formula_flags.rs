@@ -479,3 +479,49 @@ fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_bool_with_existing
     assert_eq!(formula.rgce, new_rgce);
     assert_eq!(formula.extra, extra.to_vec());
 }
+
+#[test]
+fn patcher_requires_new_rgcb_when_replacing_rgce_for_brt_fmla_error_with_existing_extra() {
+    let flags = 0x2222;
+    let extra = [0xAA, 0xBB];
+    let sheet_bin = synthetic_sheet_brt_fmla_error(flags, 0x07, &extra);
+    let new_rgce = vec![0x1C, 0x2A]; // PtgErr #N/A
+
+    let err = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Error(0x2A),
+            new_formula: Some(new_rgce.clone()),
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect_err("expected InvalidInput when changing rgce without supplying new_rgcb");
+    match err {
+        formula_xlsb::Error::Io(io_err) => assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput),
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Error(0x2A),
+            new_formula: Some(new_rgce.clone()),
+            new_rgcb: Some(extra.to_vec()),
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet bin with explicit rgcb");
+
+    let tmp = write_fixture_like_xlsb(&patched);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open patched xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+    let cell = &sheet.cells[0];
+    let formula = cell.formula.as_ref().expect("formula expected");
+    assert_eq!(formula.rgce, new_rgce);
+    assert_eq!(formula.extra, extra.to_vec());
+}
