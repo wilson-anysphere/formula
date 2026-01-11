@@ -54,11 +54,15 @@ export interface AppConfig {
    */
   syncServerInternalAdminToken?: string;
   /**
-   * Master secret for the LocalKmsProvider (dev/test).
-   *
-   * In production, set this to a high-entropy value and/or use a real KMS
-   * provider (aws/gcp/azure).
-   */
+    * Legacy secret used to decrypt historical (envelope schema v1) rows that were
+    * encrypted using the previous HKDF-based local KMS model.
+    *
+    * The canonical local KMS provider persists versioned KEKs in Postgres
+    * (`org_kms_local_state`) and does not require this secret for new writes.
+    *
+    * Note: This remains configurable so existing deployments can migrate without
+    * data loss.
+    */
   localKmsMasterKey: string;
   /**
    * Enable AWS KMS provider support (requires @aws-sdk/client-kms).

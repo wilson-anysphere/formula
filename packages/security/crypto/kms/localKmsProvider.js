@@ -49,7 +49,7 @@ export class LocalKmsProvider {
     return key;
   }
 
-  wrapKey({ plaintextKey, encryptionContext = null }) {
+  async wrapKey({ plaintextKey, encryptionContext = null }) {
     if (!Buffer.isBuffer(plaintextKey)) {
       throw new TypeError("plaintextKey must be a Buffer");
     }
@@ -68,7 +68,7 @@ export class LocalKmsProvider {
     };
   }
 
-  unwrapKey({ wrappedKey, encryptionContext = null }) {
+  async unwrapKey({ wrappedKey, encryptionContext = null }) {
     if (!wrappedKey || typeof wrappedKey !== "object") {
       throw new TypeError("wrappedKey must be an object");
     }

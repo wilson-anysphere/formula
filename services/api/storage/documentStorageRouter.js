@@ -35,7 +35,7 @@ class DocumentStorageRouter {
 
     const { encryptEnvelope } = await loadEnvelopeCrypto();
     const encryptionContext = { orgId, docId, purpose: "document" };
-    const encrypted = encryptEnvelope({
+    const encrypted = await encryptEnvelope({
       plaintext,
       kmsProvider: this.kmsProvider,
       encryptionContext
@@ -56,7 +56,7 @@ class DocumentStorageRouter {
     const encryptionContext = { orgId, docId, purpose: "document" };
 
     const { decryptEnvelope } = await loadEnvelopeCrypto();
-    return decryptEnvelope({
+    return await decryptEnvelope({
       encryptedEnvelope: encrypted,
       kmsProvider: this.kmsProvider,
       encryptionContext

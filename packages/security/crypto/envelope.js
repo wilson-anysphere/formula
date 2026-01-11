@@ -5,7 +5,7 @@ import { aadFromContext } from "./utils.js";
  * Encrypt data using a per-object DEK (data encryption key), wrapped via the
  * supplied KMS provider (envelope encryption).
  */
-export function encryptEnvelope({ plaintext, kmsProvider, encryptionContext = null }) {
+export async function encryptEnvelope({ plaintext, kmsProvider, encryptionContext = null }) {
   if (!kmsProvider || typeof kmsProvider.wrapKey !== "function") {
     throw new TypeError("kmsProvider must implement wrapKey()");
   }
@@ -22,7 +22,7 @@ export function encryptEnvelope({ plaintext, kmsProvider, encryptionContext = nu
     aad
   });
 
-  const wrappedDek = kmsProvider.wrapKey({
+  const wrappedDek = await kmsProvider.wrapKey({
     plaintextKey: dek,
     encryptionContext
   });
@@ -34,7 +34,7 @@ export function encryptEnvelope({ plaintext, kmsProvider, encryptionContext = nu
   };
 }
 
-export function decryptEnvelope({ encryptedEnvelope, kmsProvider, encryptionContext = null }) {
+export async function decryptEnvelope({ encryptedEnvelope, kmsProvider, encryptionContext = null }) {
   if (!kmsProvider || typeof kmsProvider.unwrapKey !== "function") {
     throw new TypeError("kmsProvider must implement unwrapKey()");
   }
@@ -42,7 +42,7 @@ export function decryptEnvelope({ encryptedEnvelope, kmsProvider, encryptionCont
     throw new TypeError("encryptedEnvelope must be an object");
   }
 
-  const dek = kmsProvider.unwrapKey({
+  const dek = await kmsProvider.unwrapKey({
     wrappedKey: encryptedEnvelope.wrappedDek,
     encryptionContext
   });
@@ -56,4 +56,3 @@ export function decryptEnvelope({ encryptedEnvelope, kmsProvider, encryptionCont
     aad
   });
 }
-

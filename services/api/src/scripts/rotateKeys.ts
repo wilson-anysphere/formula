@@ -1,13 +1,11 @@
 import { loadConfig } from "../config";
-import { createKeyring } from "../crypto/keyring";
-import { runKeyRotation } from "../crypto/rotation";
+import { runKmsRotationSweep } from "../crypto/kms";
 import { createPool } from "../db/pool";
 
 const config = loadConfig();
 const pool = createPool(config.databaseUrl);
-const keyring = createKeyring(config);
 
-runKeyRotation(pool, keyring)
+runKmsRotationSweep(pool)
   .then(async (result) => {
     await pool.end();
     // eslint-disable-next-line no-console
@@ -19,4 +17,3 @@ runKeyRotation(pool, keyring)
     await pool.end();
     process.exitCode = 1;
   });
-

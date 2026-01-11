@@ -422,23 +422,45 @@ The cloud backend implements **envelope encryption** for sensitive database blob
 - **Per-blob metadata (stored in Postgres):**
   - `document_versions.data_ciphertext`, `data_iv`, `data_tag`
   - `document_versions.data_encrypted_dek` (wrapped DEK)
-  - `document_versions.data_kms_provider`, `data_kms_key_id`
+    - **Envelope schema v1:** base64-encoded bytes (legacy)
+    - **Envelope schema v2:** JSON string (canonical `packages/security` wrapped-key object)
+  - `document_versions.data_kms_provider`, `data_kms_key_id` (provider + key identifier/version for debugging)
   - `document_versions.data_aad` (AAD includes `orgId`, `documentId`, `documentVersionId`, and `envelopeVersion`)
+  - `document_versions.data_envelope_version`
+    - `1`: legacy services/api envelope format (HKDF local KMS)
+    - `2`: canonical `packages/security/crypto/envelope.js` format
 
 ##### KMS providers
 
+The canonical KMS provider interface lives in `packages/security/crypto/envelope.js` and uses:
+
+```ts
+type EncryptionContext = Record<string, unknown> | null;
+
+interface EnvelopeKmsProvider {
+  provider: string; // e.g. "local", "aws"
+  wrapKey(args: { plaintextKey: Buffer; encryptionContext?: EncryptionContext }): Promise<unknown>;
+  unwrapKey(args: { wrappedKey: unknown; encryptionContext?: EncryptionContext }): Promise<Buffer>;
+}
+```
+
 - **Local (dev/test):** `kms_provider = 'local'`
-  - Uses `LOCAL_KMS_MASTER_KEY` to derive per-org wrapping keys via HKDF-SHA256
+  - Canonical implementation: `packages/security/crypto/kms/localKmsProvider.js`
+  - Per-org KEK material is persisted + versioned in Postgres (`org_kms_local_state`)
+  - Legacy support: `LOCAL_KMS_MASTER_KEY` is only required to decrypt **envelope schema v1** rows
 - **AWS (optional):** `kms_provider = 'aws'`
-  - Requires `AWS_KMS_ENABLED=true`, `AWS_REGION`, and adding `@aws-sdk/client-kms` to `services/api`
+  - Canonical implementation: `packages/security/crypto/kms/providers.js` (`AwsKmsProvider`)
+  - Requires `AWS_KMS_ENABLED=true`, `AWS_REGION`, and installing `@aws-sdk/client-kms`
+  - The AWS SDK is loaded lazily; if the dependency is missing, a clear runtime error is thrown
+- **GCP / Azure:** stubs exist under the same provider interface but are not implemented in this reference repo
 
 ##### Key rotation
 
-`services/api` includes a rotation script that:
+`services/api` includes a rotation script for `kms_provider = 'local'` that:
 
 1. Checks each org’s `org_settings.key_rotation_days` against `org_settings.kms_key_rotated_at`
-2. Updates `org_settings.kms_key_id` (local provider generates a new id)
-3. **Re-wraps DEKs** in `document_versions.data_encrypted_dek` to the latest `kms_key_id` without re-encrypting ciphertext
+2. Rotates the org’s local KEK version in `org_kms_local_state`
+3. **Re-wraps DEKs** in `document_versions.data_encrypted_dek` to the latest KEK version **without re-encrypting ciphertext**
 
 Run with:
 

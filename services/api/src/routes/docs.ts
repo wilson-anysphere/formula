@@ -7,11 +7,10 @@ import {
   enforceOrgIpAllowlistForSessionWithAllowlist
 } from "../auth/orgIpAllowlist";
 import { isMfaEnforcedForOrg } from "../auth/mfa";
-import { encryptEnvelope, ENVELOPE_VERSION } from "../crypto/envelope";
-import { createKeyring } from "../crypto/keyring";
+import { KmsProviderFactory } from "../crypto/kms";
 import { DLP_ACTION, DLP_DECISION, normalizeClassification, selectorKey, validateDlpPolicy } from "../dlp/dlp";
 import { evaluateDocumentDlpPolicy } from "../dlp/effective";
-import { createDocumentVersion, getDocumentVersionData } from "../db/documentVersions";
+import { createDocumentVersion, encryptDocumentVersionData, getDocumentVersionData } from "../db/documentVersions";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { canDocument, type DocumentRole } from "../rbac/roles";
 import { signSyncToken } from "../sync/token";
@@ -122,7 +121,10 @@ async function requireOrgMembership(request: FastifyRequest, orgId: string): Pro
 }
 
 export function registerDocRoutes(app: FastifyInstance): void {
-  const keyring = createKeyring(app.config);
+  const kmsFactory = new KmsProviderFactory(app.db, {
+    aws: { enabled: app.config.awsKmsEnabled, region: app.config.awsRegion ?? null }
+  });
+  const legacyLocalKmsMasterKey = app.config.localKmsMasterKey;
   const CreateDocBody = z.object({
     orgId: z.string().uuid(),
     title: z.string().min(1)
@@ -248,7 +250,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const data = decodeBase64Strict(parsed.data.dataBase64);
     if (!data) return reply.code(400).send({ error: "invalid_request" });
 
-    const created = await createDocumentVersion(app.db, keyring, {
+    const created = await createDocumentVersion(app.db, kmsFactory, {
       id: parsed.data.id,
       documentId: docId,
       createdBy: request.user!.id,
@@ -270,13 +272,13 @@ export function registerDocRoutes(app: FastifyInstance): void {
           userEmail: request.user!.email,
           sessionId: request.session?.id,
           ipAddress: getClientIp(request),
-            userAgent: getUserAgent(request)
-          },
-          resource: { type: "document", id: docId },
-          success: true,
-          details: { versionId: created.id, description: parsed.data.description ?? null, sizeBytes }
-        })
-      );
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "document", id: docId },
+        success: true,
+        details: { versionId: created.id, description: parsed.data.description ?? null, sizeBytes }
+      })
+    );
 
     return reply.send({
       version: {
@@ -308,7 +310,10 @@ export function registerDocRoutes(app: FastifyInstance): void {
       versions.rows.map(async (row: any) => {
         const plaintextBytes = row.data
           ? Buffer.from(row.data as any)
-          : await getDocumentVersionData(app.db, keyring, String(row.id), { documentId: docId });
+          : await getDocumentVersionData(app.db, kmsFactory, String(row.id), {
+              documentId: docId,
+              legacyLocalKmsMasterKey
+            });
         const sizeBytes = plaintextBytes ? plaintextBytes.length : 0;
 
         return {
@@ -346,7 +351,12 @@ export function registerDocRoutes(app: FastifyInstance): void {
 
     const row = res.rows[0] as any;
     const bytes =
-      row.data ? Buffer.from(row.data as any) : (await getDocumentVersionData(app.db, keyring, versionId, { documentId: docId })) ?? Buffer.alloc(0);
+      row.data
+        ? Buffer.from(row.data as any)
+        : (await getDocumentVersionData(app.db, kmsFactory, versionId, {
+            documentId: docId,
+            legacyLocalKmsMasterKey
+          })) ?? Buffer.alloc(0);
     return reply.send({
       version: {
         id: row.id as string,
@@ -669,7 +679,10 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const isEncrypted = Boolean(existingRow.data_ciphertext);
     const data = existingRow.data
       ? Buffer.from(existingRow.data as any)
-      : await getDocumentVersionData(app.db, keyring, versionId, { documentId: docId });
+      : await getDocumentVersionData(app.db, kmsFactory, versionId, {
+          documentId: docId,
+          legacyLocalKmsMasterKey
+        });
     if (!data) return reply.code(404).send({ error: "version_not_found" });
 
     let envelope: any;
@@ -693,25 +706,12 @@ export function registerDocRoutes(app: FastifyInstance): void {
       return reply.send({ ok: true });
     }
 
-    const kmsProvider = String(existingRow.data_kms_provider ?? "local");
-    const kmsKeyId = String(existingRow.data_kms_key_id);
-    if (!kmsKeyId) return reply.code(500).send({ error: "kms_key_id_missing" });
-
-    const kms = keyring.get(kmsProvider);
-    const aad = {
-      envelopeVersion: ENVELOPE_VERSION,
-      blob: "document_versions.data",
+    const encrypted = await encryptDocumentVersionData({
+      plaintext: updatedData,
+      kmsFactory,
       orgId: membership.orgId,
       documentId: docId,
       documentVersionId: versionId
-    };
-
-    const encrypted = await encryptEnvelope({
-      plaintext: updatedData,
-      kmsProvider: kms,
-      orgId: membership.orgId,
-      keyId: kmsKeyId,
-      aadContext: aad
     });
 
     await app.db.query(
@@ -734,10 +734,10 @@ export function registerDocRoutes(app: FastifyInstance): void {
         versionId,
         encrypted.envelopeVersion,
         encrypted.algorithm,
-        encrypted.ciphertext.toString("base64"),
-        encrypted.iv.toString("base64"),
-        encrypted.tag.toString("base64"),
-        encrypted.encryptedDek.toString("base64"),
+        encrypted.ciphertext,
+        encrypted.iv,
+        encrypted.tag,
+        encrypted.encryptedDek,
         encrypted.kmsProvider,
         encrypted.kmsKeyId,
         JSON.stringify(encrypted.aad)

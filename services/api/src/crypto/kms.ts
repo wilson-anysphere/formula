@@ -4,25 +4,20 @@ import type { Pool, PoolClient, QueryResult } from "pg";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { withTransaction } from "../db/tx";
 
-// Keep `./crypto/kms` (directory) exports working even though this file shadows it.
-export type { DecryptKeyParams, EncryptKeyParams, EncryptKeyResult, KmsProvider } from "./kms/types";
-export { AwsKmsProvider } from "./kms/awsKmsProvider";
-export { LocalKmsProvider } from "./kms/localKmsProvider";
-
 export type EncryptionContext = Record<string, unknown> | null;
 
 /**
  * KMS provider interface compatible with `packages/security/crypto/envelope.js`.
  */
 export interface EnvelopeKmsProvider {
-  wrapKey(args: { plaintextKey: Buffer; encryptionContext?: EncryptionContext }): unknown;
-  unwrapKey(args: { wrappedKey: unknown; encryptionContext?: EncryptionContext }): Buffer;
+  readonly provider: string;
+  wrapKey(args: { plaintextKey: Buffer; encryptionContext?: EncryptionContext }): Promise<unknown>;
+  unwrapKey(args: { wrappedKey: unknown; encryptionContext?: EncryptionContext }): Promise<Buffer>;
 }
 
 type DbClient = Pick<Pool, "query">;
 
 type SecurityLocalKmsProviderInstance = EnvelopeKmsProvider & {
-  provider: string;
   currentVersion: number;
   rotateKey(): number;
   toJSON(): unknown;
@@ -76,6 +71,44 @@ async function loadSecurityLocalKmsProvider(): Promise<SecurityLocalKmsProviderS
   return cachedSecurityLocalKmsProvider;
 }
 
+type SecurityAwsKmsProviderStatic = {
+  new (args: { region: string; keyId?: string | null }): EnvelopeKmsProvider;
+};
+
+let cachedSecurityAwsKmsProvider: Promise<SecurityAwsKmsProviderStatic> | null = null;
+
+async function loadSecurityAwsKmsProvider(): Promise<SecurityAwsKmsProviderStatic> {
+  if (cachedSecurityAwsKmsProvider) return cachedSecurityAwsKmsProvider;
+
+  cachedSecurityAwsKmsProvider = (async () => {
+    const candidates: string[] = [];
+    if (typeof __dirname === "string") {
+      candidates.push(
+        pathToFileURL(path.resolve(__dirname, "../../../../packages/security/crypto/kms/providers.js")).href
+      );
+    }
+
+    candidates.push(
+      pathToFileURL(path.resolve(process.cwd(), "packages/security/crypto/kms/providers.js")).href,
+      pathToFileURL(path.resolve(process.cwd(), "..", "..", "packages/security/crypto/kms/providers.js")).href
+    );
+
+    let lastError: unknown;
+    for (const specifier of candidates) {
+      try {
+        const mod = await importEsm(specifier);
+        return mod.AwsKmsProvider as SecurityAwsKmsProviderStatic;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error("Failed to load AwsKmsProvider");
+  })();
+
+  return cachedSecurityAwsKmsProvider;
+}
+
 function normalizeJsonValue<T>(value: unknown): T {
   if (typeof value === "string") return JSON.parse(value) as T;
   return value as T;
@@ -122,11 +155,21 @@ export async function getOrCreateLocalKmsProvider(
   return SecurityLocalKmsProvider.fromJSON(normalizeJsonValue(after.rows[0].provider));
 }
 
-export class KmsProviderFactory {
-  constructor(private readonly pool: Pool) {}
+export type KmsProviderFactoryOptions = {
+  aws?: {
+    enabled: boolean;
+    region?: string | null;
+  };
+};
 
-  async forOrg(orgId: string): Promise<EnvelopeKmsProvider> {
-    const settings = await this.pool.query<{ kms_provider: string; kms_key_id: string | null }>(
+export class KmsProviderFactory {
+  constructor(
+    private readonly pool: Pool,
+    private readonly options: KmsProviderFactoryOptions = { aws: { enabled: false, region: null } }
+  ) {}
+
+  async forOrg(orgId: string, db: DbClient = this.pool): Promise<EnvelopeKmsProvider> {
+    const settings = await db.query<{ kms_provider: string; kms_key_id: string | null }>(
       "SELECT kms_provider, kms_key_id FROM org_settings WHERE org_id = $1",
       [orgId]
     );
@@ -138,7 +181,7 @@ export class KmsProviderFactory {
     const kmsKeyId = settings.rows[0].kms_key_id;
 
     if (kmsProvider === "local") {
-      return getOrCreateLocalKmsProvider(this.pool, orgId);
+      return getOrCreateLocalKmsProvider(db, orgId);
     }
 
     if (!kmsKeyId) {
@@ -147,14 +190,65 @@ export class KmsProviderFactory {
       );
     }
 
+    if (kmsProvider === "aws") {
+      const aws = this.options.aws;
+      if (!aws?.enabled) {
+        throw new Error(
+          "AWS KMS provider requested but disabled (set AWS_KMS_ENABLED=true and configure AWS_REGION)"
+        );
+      }
+      if (!aws.region) {
+        throw new Error("AWS KMS provider requested but AWS_REGION is not set");
+      }
+
+      const AwsKmsProvider = await loadSecurityAwsKmsProvider();
+      return new AwsKmsProvider({ region: aws.region, keyId: kmsKeyId });
+    }
+
     return new UnimplementedExternalKmsProvider({ kmsProvider, kmsKeyId, orgId });
+  }
+
+  /**
+   * Resolve a provider by name for an org, regardless of current org_settings.kms_provider.
+   *
+   * This is used to decrypt historical data that may have been encrypted with a
+   * previous provider.
+   */
+  async forOrgProvider(orgId: string, kmsProvider: string, db: DbClient = this.pool): Promise<EnvelopeKmsProvider> {
+    if (kmsProvider === "local") {
+      return getOrCreateLocalKmsProvider(db, orgId);
+    }
+
+    if (kmsProvider === "aws") {
+      const aws = this.options.aws;
+      if (!aws?.enabled) {
+        throw new Error(
+          "AWS KMS provider requested but disabled (set AWS_KMS_ENABLED=true and configure AWS_REGION)"
+        );
+      }
+      if (!aws.region) {
+        throw new Error("AWS KMS provider requested but AWS_REGION is not set");
+      }
+
+      const settings = await db.query<{ kms_key_id: string | null }>(
+        "SELECT kms_key_id FROM org_settings WHERE org_id = $1",
+        [orgId]
+      );
+      const kmsKeyId = settings.rowCount === 1 ? settings.rows[0].kms_key_id : null;
+
+      const AwsKmsProvider = await loadSecurityAwsKmsProvider();
+      return new AwsKmsProvider({ region: aws.region, keyId: kmsKeyId });
+    }
+
+    throw new Error(`Unsupported kms provider: ${kmsProvider}`);
   }
 }
 
 class UnimplementedExternalKmsProvider implements EnvelopeKmsProvider {
   constructor(private readonly options: { kmsProvider: string; kmsKeyId: string; orgId: string }) {}
+  readonly provider = this.options.kmsProvider;
 
-  wrapKey(): unknown {
+  async wrapKey(): Promise<unknown> {
     const { kmsProvider, kmsKeyId, orgId } = this.options;
     throw new Error(
       `KMS provider "${kmsProvider}" is configured for org ${orgId} (kms_key_id=${kmsKeyId}), ` +
@@ -163,7 +257,7 @@ class UnimplementedExternalKmsProvider implements EnvelopeKmsProvider {
     );
   }
 
-  unwrapKey(): Buffer {
+  async unwrapKey(): Promise<Buffer> {
     const { kmsProvider, kmsKeyId, orgId } = this.options;
     throw new Error(
       `KMS provider "${kmsProvider}" is configured for org ${orgId} (kms_key_id=${kmsKeyId}), ` +
@@ -174,6 +268,62 @@ class UnimplementedExternalKmsProvider implements EnvelopeKmsProvider {
 }
 
 type LocalStateRow = { provider: unknown; updated_at: Date };
+
+const DOCUMENT_VERSIONS_ENVELOPE_SCHEMA_V2 = 2;
+
+async function rewrapDocumentVersionDeks(
+  client: PoolClient,
+  orgId: string,
+  provider: SecurityLocalKmsProviderInstance
+): Promise<number> {
+  const rows = await client.query<{
+    id: string;
+    data_encrypted_dek: string;
+    data_aad: unknown;
+  }>(
+    `
+      SELECT v.id, v.data_encrypted_dek, v.data_aad
+      FROM document_versions v
+      JOIN documents d ON d.id = v.document_id
+      WHERE d.org_id = $1
+        AND v.data_envelope_version = $2
+        AND v.data_kms_provider = $3
+        AND v.data_encrypted_dek IS NOT NULL
+    `,
+    [orgId, DOCUMENT_VERSIONS_ENVELOPE_SCHEMA_V2, provider.provider]
+  );
+
+  let updated = 0;
+  for (const row of rows.rows) {
+    const wrappedDek = JSON.parse(String(row.data_encrypted_dek));
+    const wrappedDekAny = wrappedDek as any;
+    if (wrappedDekAny?.kmsKeyVersion === provider.currentVersion) {
+      continue;
+    }
+
+    const encryptionContext = row.data_aad == null ? null : normalizeJsonValue<EncryptionContext>(row.data_aad);
+    const dek = await provider.unwrapKey({ wrappedKey: wrappedDek, encryptionContext });
+    const rewrapped = await provider.wrapKey({ plaintextKey: dek, encryptionContext });
+    const rewrappedAny = rewrapped as any;
+
+    await client.query(
+      `
+        UPDATE document_versions
+        SET data_encrypted_dek = $2,
+            data_kms_key_id = $3
+        WHERE id = $1
+      `,
+      [
+        row.id,
+        JSON.stringify(rewrapped),
+        typeof rewrappedAny?.kmsKeyVersion === "number" ? String(rewrappedAny.kmsKeyVersion) : null
+      ]
+    );
+    updated += 1;
+  }
+
+  return updated;
+}
 
 async function lockLocalStateRow(
   client: PoolClient,
@@ -254,7 +404,7 @@ export async function rotateOrgKmsKey(
   pool: Pool,
   orgId: string,
   { now = new Date(), reason = "manual" }: { now?: Date; reason?: "manual" | "scheduled" } = {}
-): Promise<{ provider: string; previousVersion: number; currentVersion: number }> {
+): Promise<{ provider: string; previousVersion: number; currentVersion: number; documentVersionDeksRewrapped: number }> {
   return withTransaction(pool, async (client) => {
     const settings = await lockOrgSettingsRow(client, orgId);
     if (settings.kmsProvider !== "local") {
@@ -266,6 +416,7 @@ export async function rotateOrgKmsKey(
     const { provider, updatedAt } = await lockLocalStateRow(client, orgId, now);
     const previousVersion = provider.currentVersion;
     const currentVersion = provider.rotateKey();
+    const documentVersionDeksRewrapped = await rewrapDocumentVersionDeks(client, orgId, provider);
     await persistLocalState(client, orgId, provider, now);
 
     await client.query(
@@ -286,6 +437,7 @@ export async function rotateOrgKmsKey(
           kmsProvider: provider.provider,
           previousVersion,
           currentVersion,
+          documentVersionDeksRewrapped,
           reason,
           previousRotationAt: settings.rotatedAt.toISOString(),
           previousStateUpdatedAt: updatedAt.toISOString()
@@ -293,14 +445,14 @@ export async function rotateOrgKmsKey(
       })
     );
 
-    return { provider: provider.provider, previousVersion, currentVersion };
+    return { provider: provider.provider, previousVersion, currentVersion, documentVersionDeksRewrapped };
   });
 }
 
 export async function runKmsRotationSweep(
   pool: Pool,
   { now = new Date() }: { now?: Date } = {}
-): Promise<{ scanned: number; rotated: number; failed: number }> {
+): Promise<{ scanned: number; rotated: number; failed: number; documentVersionDeksRewrapped: number }> {
   const orgs = await pool.query<{
     org_id: string;
     key_rotation_days: number;
@@ -315,6 +467,7 @@ export async function runKmsRotationSweep(
 
   let rotated = 0;
   let failed = 0;
+  let documentVersionDeksRewrapped = 0;
 
   for (const org of orgs.rows) {
     const orgId = String(org.org_id);
@@ -326,7 +479,7 @@ export async function runKmsRotationSweep(
     if (!due) continue;
 
     try {
-      const didRotate = await withTransaction(pool, async (client) => {
+      const rewrappedForOrg = await withTransaction(pool, async (client) => {
         const settings = await lockOrgSettingsRow(client, orgId);
         if (settings.kmsProvider !== "local") return false;
 
@@ -337,6 +490,7 @@ export async function runKmsRotationSweep(
         const { provider } = await lockLocalStateRow(client, orgId, now);
         const previousVersion = provider.currentVersion;
         const currentVersion = provider.rotateKey();
+        const orgDocumentVersionDeksRewrapped = await rewrapDocumentVersionDeks(client, orgId, provider);
         await persistLocalState(client, orgId, provider, now);
 
         await client.query(
@@ -357,21 +511,24 @@ export async function runKmsRotationSweep(
               kmsProvider: provider.provider,
               previousVersion,
               currentVersion,
+              documentVersionDeksRewrapped: orgDocumentVersionDeksRewrapped,
               reason: "scheduled",
               previousRotationAt: settings.rotatedAt.toISOString()
             }
           })
         );
 
-        return true;
+        return orgDocumentVersionDeksRewrapped;
       });
 
-      if (didRotate) rotated += 1;
+      if (rewrappedForOrg !== false) {
+        rotated += 1;
+        documentVersionDeksRewrapped += rewrappedForOrg;
+      }
     } catch {
       failed += 1;
     }
   }
 
-  return { scanned: orgs.rows.length, rotated, failed };
+  return { scanned: orgs.rows.length, rotated, failed, documentVersionDeksRewrapped };
 }
-

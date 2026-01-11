@@ -16,10 +16,14 @@ ALTER TABLE org_settings
 -- Encrypted envelope columns for document_versions.data
 ALTER TABLE document_versions ADD COLUMN IF NOT EXISTS data_envelope_version integer;
 ALTER TABLE document_versions ADD COLUMN IF NOT EXISTS data_algorithm text;
--- NOTE: These are stored as base64-encoded text instead of bytea because our
--- unit tests use pg-mem, which does not preserve arbitrary bytea values. In a
--- real Postgres deployment, consider switching these to bytea for storage
+-- NOTE: These are stored as text instead of bytea because our unit tests use
+-- pg-mem, which does not preserve arbitrary bytea values. In a real Postgres
+-- deployment, consider switching ciphertext/iv/tag to bytea for storage
 -- efficiency.
+--
+-- `data_encrypted_dek` is text as well:
+-- - legacy envelope schema v1 stores base64-encoded bytes
+-- - canonical envelope schema v2 stores a JSON-serialized wrapped-key object
 ALTER TABLE document_versions ADD COLUMN IF NOT EXISTS data_ciphertext text;
 ALTER TABLE document_versions ADD COLUMN IF NOT EXISTS data_iv text;
 ALTER TABLE document_versions ADD COLUMN IF NOT EXISTS data_tag text;

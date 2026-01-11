@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { newDb } from "pg-mem";
 import type { Pool } from "pg";
-import { Keyring } from "../crypto/keyring";
+import { KmsProviderFactory } from "../crypto/kms";
 import { encryptPlaintextDocumentVersions, getDocumentVersionData } from "../db/documentVersions";
 import { runMigrations } from "../db/migrations";
 
@@ -50,7 +50,7 @@ describe("Cloud encryption-at-rest (DB): backfill plaintext document_versions.da
   it("encrypts existing plaintext rows when cloud_encryption_at_rest is enabled", async () => {
     const db = await setupDb();
     try {
-      const keyring = new Keyring({ localMasterKey: "test-master-key", awsKmsEnabled: false, awsRegion: null });
+      const kmsFactory = new KmsProviderFactory(db);
       const { orgId, docId } = await seedOrgAndDoc(db, { cloudEncryptionAtRest: true });
 
       const versionId = crypto.randomUUID();
@@ -60,7 +60,7 @@ describe("Cloud encryption-at-rest (DB): backfill plaintext document_versions.da
         Buffer.from("legacy-plaintext", "utf8")
       ]);
 
-      const result = await encryptPlaintextDocumentVersions(db, keyring, { orgId, batchSize: 10 });
+      const result = await encryptPlaintextDocumentVersions(db, kmsFactory, { orgId, batchSize: 10 });
       expect(result).toEqual({ orgsProcessed: 1, versionsEncrypted: 1 });
 
       const stored = await db.query(
@@ -71,14 +71,10 @@ describe("Cloud encryption-at-rest (DB): backfill plaintext document_versions.da
       expect(stored.rows[0].data_ciphertext).toBeTypeOf("string");
       expect(stored.rows[0].data_encrypted_dek).toBeTypeOf("string");
 
-      const orgSettings = await db.query("SELECT kms_key_id FROM org_settings WHERE org_id = $1", [orgId]);
-      expect(orgSettings.rows[0].kms_key_id).toBeTypeOf("string");
-      expect(stored.rows[0].data_kms_key_id).toBe(orgSettings.rows[0].kms_key_id);
-
-      const roundTripped = await getDocumentVersionData(db, keyring, versionId, { documentId: docId });
+      const roundTripped = await getDocumentVersionData(db, kmsFactory, versionId, { documentId: docId });
       expect(roundTripped?.toString("utf8")).toBe("legacy-plaintext");
 
-      const again = await encryptPlaintextDocumentVersions(db, keyring, { orgId, batchSize: 10 });
+      const again = await encryptPlaintextDocumentVersions(db, kmsFactory, { orgId, batchSize: 10 });
       expect(again).toEqual({ orgsProcessed: 1, versionsEncrypted: 0 });
     } finally {
       await db.end();
@@ -88,7 +84,7 @@ describe("Cloud encryption-at-rest (DB): backfill plaintext document_versions.da
   it("skips orgs with cloud_encryption_at_rest disabled", async () => {
     const db = await setupDb();
     try {
-      const keyring = new Keyring({ localMasterKey: "test-master-key", awsKmsEnabled: false, awsRegion: null });
+      const kmsFactory = new KmsProviderFactory(db);
       const { orgId, docId } = await seedOrgAndDoc(db, { cloudEncryptionAtRest: false });
 
       const versionId = crypto.randomUUID();
@@ -98,7 +94,7 @@ describe("Cloud encryption-at-rest (DB): backfill plaintext document_versions.da
         Buffer.from("legacy-plaintext", "utf8")
       ]);
 
-      const result = await encryptPlaintextDocumentVersions(db, keyring, { orgId, batchSize: 10 });
+      const result = await encryptPlaintextDocumentVersions(db, kmsFactory, { orgId, batchSize: 10 });
       expect(result).toEqual({ orgsProcessed: 0, versionsEncrypted: 0 });
 
       const stored = await db.query("SELECT data, data_ciphertext FROM document_versions WHERE id = $1", [versionId]);
@@ -109,4 +105,3 @@ describe("Cloud encryption-at-rest (DB): backfill plaintext document_versions.da
     }
   });
 });
-

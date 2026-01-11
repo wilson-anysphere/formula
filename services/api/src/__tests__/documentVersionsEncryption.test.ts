@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { newDb } from "pg-mem";
 import type { Pool } from "pg";
-import { decryptEnvelope, ENVELOPE_VERSION, type EncryptedEnvelope } from "../crypto/envelope";
-import { Keyring } from "../crypto/keyring";
-import { runKeyRotation } from "../crypto/rotation";
+import { decryptEnvelope } from "../../../../packages/security/crypto/envelope.js";
+import { KmsProviderFactory, runKmsRotationSweep } from "../crypto/kms";
+import { canonicalJson } from "../crypto/utils";
 import { createDocumentVersion, getDocumentVersionData } from "../db/documentVersions";
 import { runMigrations } from "../db/migrations";
 
@@ -71,11 +71,11 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
   it("encrypt→store→load→decrypt roundtrip", async () => {
     const db = await setupDb();
     try {
-      const keyring = new Keyring({ localMasterKey: "test-master-key", awsKmsEnabled: false, awsRegion: null });
+      const kmsFactory = new KmsProviderFactory(db);
       const { userId, docId } = await seedOrgAndDoc(db, { cloudEncryptionAtRest: true });
 
       const plaintext = Buffer.from("classified", "utf8");
-      const created = await createDocumentVersion(db, keyring, {
+      const created = await createDocumentVersion(db, kmsFactory, {
         documentId: docId,
         createdBy: userId,
         data: plaintext
@@ -91,7 +91,9 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
       expect(raw.rows[0].data_encrypted_dek).toBeTypeOf("string");
       expect(raw.rows[0].data_kms_key_id).toBeTypeOf("string");
 
-      const roundTripped = await getDocumentVersionData(db, keyring, created.id);
+      const roundTripped = await getDocumentVersionData(db, kmsFactory, created.id, {
+        legacyLocalKmsMasterKey: "test-master-key"
+      });
       expect(roundTripped?.toString("utf8")).toBe("classified");
     } finally {
       await db.end();
@@ -101,11 +103,11 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
   it("detects AAD mismatch (wrong documentId)", async () => {
     const db = await setupDb();
     try {
-      const keyring = new Keyring({ localMasterKey: "test-master-key", awsKmsEnabled: false, awsRegion: null });
+      const kmsFactory = new KmsProviderFactory(db);
       const { userId, orgId, docId } = await seedOrgAndDoc(db, { cloudEncryptionAtRest: true });
 
       const plaintext = Buffer.from("top-secret", "utf8");
-      const created = await createDocumentVersion(db, keyring, {
+      const created = await createDocumentVersion(db, kmsFactory, {
         documentId: docId,
         createdBy: userId,
         data: plaintext
@@ -116,27 +118,25 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
           `
             SELECT data_envelope_version, data_algorithm, data_ciphertext, data_iv, data_tag,
                    data_encrypted_dek, data_kms_provider, data_kms_key_id
-            FROM document_versions
-            WHERE id = $1
-          `,
+             FROM document_versions
+             WHERE id = $1
+           `,
           [created.id]
         )
       ).rows[0] as any;
 
-      const envelope: EncryptedEnvelope = {
-        envelopeVersion: Number(row.data_envelope_version),
+      const wrappedDek = JSON.parse(String(row.data_encrypted_dek));
+      const encryptedEnvelope = {
+        schemaVersion: 1,
+        wrappedDek,
         algorithm: String(row.data_algorithm),
-        ciphertext: Buffer.from(String(row.data_ciphertext), "base64"),
-        iv: Buffer.from(String(row.data_iv), "base64"),
-        tag: Buffer.from(String(row.data_tag), "base64"),
-        encryptedDek: Buffer.from(String(row.data_encrypted_dek), "base64"),
-        kmsProvider: String(row.data_kms_provider),
-        kmsKeyId: String(row.data_kms_key_id),
-        aad: {}
-      } as EncryptedEnvelope;
+        ciphertext: String(row.data_ciphertext),
+        iv: String(row.data_iv),
+        tag: String(row.data_tag)
+      };
 
       const correctAad = {
-        envelopeVersion: ENVELOPE_VERSION,
+        envelopeVersion: 1,
         blob: "document_versions.data",
         orgId,
         documentId: docId,
@@ -144,11 +144,13 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
       };
       const wrongAad = { ...correctAad, documentId: crypto.randomUUID() };
 
-      const kms = keyring.get(envelope.kmsProvider);
-      const ok = await decryptEnvelope({ envelope, kmsProvider: kms, orgId, aadContext: correctAad });
+      const kms = await kmsFactory.forOrgProvider(orgId, "local");
+      const ok = await decryptEnvelope({ encryptedEnvelope, kmsProvider: kms, encryptionContext: correctAad });
       expect(ok.toString("utf8")).toBe("top-secret");
 
-      await expect(decryptEnvelope({ envelope, kmsProvider: kms, orgId, aadContext: wrongAad })).rejects.toThrow();
+      await expect(
+        decryptEnvelope({ encryptedEnvelope, kmsProvider: kms, encryptionContext: wrongAad })
+      ).rejects.toThrow();
     } finally {
       await db.end();
     }
@@ -157,21 +159,18 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
   it("rotates keys by re-wrapping DEKs (ciphertext unchanged)", async () => {
     const db = await setupDb();
     try {
-      const keyring = new Keyring({ localMasterKey: "test-master-key", awsKmsEnabled: false, awsRegion: null });
-
-      const oldKmsKeyId = "local-test-key";
+      const kmsFactory = new KmsProviderFactory(db);
       const rotatedAt = new Date("2026-01-01T00:00:00.000Z");
       const now = new Date("2026-02-10T00:00:00.000Z");
 
       const { userId, orgId, docId } = await seedOrgAndDoc(db, {
         cloudEncryptionAtRest: true,
-        kmsKeyId: oldKmsKeyId,
         keyRotationDays: 1,
         kmsKeyRotatedAt: rotatedAt
       });
 
       const plaintext = Buffer.from("rotate-me", "utf8");
-      const created = await createDocumentVersion(db, keyring, {
+      const created = await createDocumentVersion(db, kmsFactory, {
         documentId: docId,
         createdBy: userId,
         data: plaintext
@@ -188,10 +187,10 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
         )
       ).rows[0] as any;
 
-      expect(before.data_kms_key_id).toBe(oldKmsKeyId);
+      expect(before.data_kms_key_id).toBe("1");
 
-      const rotation = await runKeyRotation(db, keyring, { now });
-      expect(rotation.orgsRotated).toBe(1);
+      const rotation = await runKmsRotationSweep(db, { now });
+      expect(rotation.rotated).toBe(1);
       expect(rotation.documentVersionDeksRewrapped).toBe(1);
 
       const after = (
@@ -209,16 +208,101 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
       expect(after.data_iv).toBe(before.data_iv);
       expect(after.data_tag).toBe(before.data_tag);
 
-      expect(after.data_kms_key_id).not.toBe(oldKmsKeyId);
+      expect(after.data_kms_key_id).toBe("2");
       expect(after.data_encrypted_dek).not.toBe(before.data_encrypted_dek);
 
-      const roundTripped = await getDocumentVersionData(db, keyring, created.id);
+      const roundTripped = await getDocumentVersionData(db, kmsFactory, created.id);
       expect(roundTripped?.toString("utf8")).toBe("rotate-me");
 
-      const orgSettings = await db.query("SELECT kms_key_id, kms_key_rotated_at FROM org_settings WHERE org_id = $1", [
+      const orgSettings = await db.query("SELECT kms_key_rotated_at FROM org_settings WHERE org_id = $1", [
         orgId
       ]);
-      expect(orgSettings.rows[0].kms_key_id).toBe(after.data_kms_key_id);
+      expect(new Date(orgSettings.rows[0].kms_key_rotated_at as string).getTime()).toBe(now.getTime());
+    } finally {
+      await db.end();
+    }
+  });
+
+  it("keeps legacy v1 encrypted rows decryptable after migrating to envelope schema v2", async () => {
+    const db = await setupDb();
+    try {
+      const kmsFactory = new KmsProviderFactory(db);
+      const { orgId, docId } = await seedOrgAndDoc(db, { cloudEncryptionAtRest: true });
+
+      const versionId = crypto.randomUUID();
+      const aad = {
+        envelopeVersion: 1,
+        blob: "document_versions.data",
+        orgId,
+        documentId: docId,
+        documentVersionId: versionId
+      };
+
+      const dek = crypto.randomBytes(32);
+      const payloadAad = Buffer.from(canonicalJson(aad), "utf8");
+      const payloadIv = crypto.randomBytes(12);
+      const payloadCipher = crypto.createCipheriv("aes-256-gcm", dek, payloadIv, { authTagLength: 16 });
+      payloadCipher.setAAD(payloadAad);
+      const payloadCiphertext = Buffer.concat([
+        payloadCipher.update(Buffer.from("legacy-ciphertext", "utf8")),
+        payloadCipher.final()
+      ]);
+      const payloadTag = payloadCipher.getAuthTag();
+
+      const kmsKeyId = "local-legacy-key";
+      const masterKey = crypto.createHash("sha256").update("test-master-key", "utf8").digest();
+      const salt = Buffer.from(`formula:local-kms:org:${orgId}`, "utf8");
+      const info = Buffer.from(`formula:local-kms:kmsKeyId:${kmsKeyId}`, "utf8");
+      const kekRaw = crypto.hkdfSync("sha256", masterKey, salt, info, 32);
+      const kek = Buffer.isBuffer(kekRaw) ? kekRaw : Buffer.from(kekRaw);
+
+      const wrapContext = { v: 1, purpose: "dek-wrap", orgId, kmsKeyId };
+      const wrapAad = Buffer.from(canonicalJson(wrapContext), "utf8");
+      const wrapIv = crypto.randomBytes(12);
+      const wrapCipher = crypto.createCipheriv("aes-256-gcm", kek, wrapIv, { authTagLength: 16 });
+      wrapCipher.setAAD(wrapAad);
+      const wrapCiphertext = Buffer.concat([wrapCipher.update(dek), wrapCipher.final()]);
+      const wrapTag = wrapCipher.getAuthTag();
+      const encryptedDek = Buffer.concat([Buffer.from([1]), wrapIv, wrapTag, wrapCiphertext]);
+
+      await db.query(
+        `
+          INSERT INTO document_versions (
+            id,
+            document_id,
+            data,
+            data_envelope_version,
+            data_algorithm,
+            data_ciphertext,
+            data_iv,
+            data_tag,
+            data_encrypted_dek,
+            data_kms_provider,
+            data_kms_key_id,
+            data_aad
+          )
+          VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        `,
+        [
+          versionId,
+          docId,
+          1,
+          "aes-256-gcm",
+          payloadCiphertext.toString("base64"),
+          payloadIv.toString("base64"),
+          payloadTag.toString("base64"),
+          encryptedDek.toString("base64"),
+          "local",
+          kmsKeyId,
+          JSON.stringify(aad)
+        ]
+      );
+
+      const roundTripped = await getDocumentVersionData(db, kmsFactory, versionId, {
+        documentId: docId,
+        legacyLocalKmsMasterKey: "test-master-key"
+      });
+      expect(roundTripped?.toString("utf8")).toBe("legacy-ciphertext");
     } finally {
       await db.end();
     }
@@ -227,11 +311,11 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
   it("supports mixed plaintext/encrypted rows when cloud_encryption_at_rest is toggled", async () => {
     const db = await setupDb();
     try {
-      const keyring = new Keyring({ localMasterKey: "test-master-key", awsKmsEnabled: false, awsRegion: null });
+      const kmsFactory = new KmsProviderFactory(db);
       const { userId, orgId, docId } = await seedOrgAndDoc(db, { cloudEncryptionAtRest: false });
 
       const plaintext1 = Buffer.from("plaintext-version", "utf8");
-      const v1 = await createDocumentVersion(db, keyring, {
+      const v1 = await createDocumentVersion(db, kmsFactory, {
         documentId: docId,
         createdBy: userId,
         data: plaintext1
@@ -244,7 +328,7 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
       await db.query("UPDATE org_settings SET cloud_encryption_at_rest = true WHERE org_id = $1", [orgId]);
 
       const plaintext2 = Buffer.from("encrypted-version", "utf8");
-      const v2 = await createDocumentVersion(db, keyring, {
+      const v2 = await createDocumentVersion(db, kmsFactory, {
         documentId: docId,
         createdBy: userId,
         data: plaintext2
@@ -254,12 +338,12 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
       expect(raw2.rows[0].data).toBeNull();
       expect(raw2.rows[0].data_ciphertext).toBeTypeOf("string");
 
-      expect((await getDocumentVersionData(db, keyring, v1.id))?.toString("utf8")).toBe("plaintext-version");
-      expect((await getDocumentVersionData(db, keyring, v2.id))?.toString("utf8")).toBe("encrypted-version");
+      expect((await getDocumentVersionData(db, kmsFactory, v1.id))?.toString("utf8")).toBe("plaintext-version");
+      expect((await getDocumentVersionData(db, kmsFactory, v2.id))?.toString("utf8")).toBe("encrypted-version");
 
       // Turning encryption back off must not break reads of already-encrypted rows.
       await db.query("UPDATE org_settings SET cloud_encryption_at_rest = false WHERE org_id = $1", [orgId]);
-      expect((await getDocumentVersionData(db, keyring, v2.id))?.toString("utf8")).toBe("encrypted-version");
+      expect((await getDocumentVersionData(db, kmsFactory, v2.id))?.toString("utf8")).toBe("encrypted-version");
     } finally {
       await db.end();
     }

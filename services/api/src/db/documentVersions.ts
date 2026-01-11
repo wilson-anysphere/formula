@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Pool, PoolClient } from "pg";
-import { decryptEnvelope, ENVELOPE_VERSION, encryptEnvelope, type EncryptedEnvelope } from "../crypto/envelope";
-import { Keyring } from "../crypto/keyring";
+import type { EnvelopeKmsProvider, KmsProviderFactory } from "../crypto/kms";
 import { canonicalJson } from "../crypto/utils";
 import { withTransaction } from "./tx";
 
@@ -15,9 +16,26 @@ export type CreateDocumentVersionParams = {
 
 type OrgEncryptionSettings = {
   cloudEncryptionAtRest: boolean;
-  kmsProvider: string;
-  kmsKeyId: string | null;
 };
+
+/**
+ * The envelope metadata schema version stored in `document_versions.data_envelope_version`.
+ *
+ * v1: Legacy services/api envelope encryption + HKDF-based local KMS (kms_key_id-derived).
+ * v2: Canonical packages/security envelope encryption + org_kms_local_state local KMS.
+ */
+const DOCUMENT_VERSION_ENVELOPE_SCHEMA_V1 = 1;
+const DOCUMENT_VERSION_ENVELOPE_SCHEMA_V2 = 2;
+
+/**
+ * AAD schema version embedded inside the AES-GCM AAD (JSON) for document_versions.data.
+ *
+ * NOTE: This intentionally remains stable across envelope schema migrations so
+ * ciphertext remains valid even if we change the wrapped-DEK metadata format.
+ */
+const DOCUMENT_VERSION_AAD_VERSION = 1;
+
+type DocumentVersionAad = Record<string, unknown>;
 
 function documentVersionDataAad({
   orgId,
@@ -27,9 +45,9 @@ function documentVersionDataAad({
   orgId: string;
   documentId: string;
   documentVersionId: string;
-}): Record<string, unknown> {
+}): DocumentVersionAad {
   return {
-    envelopeVersion: ENVELOPE_VERSION,
+    envelopeVersion: DOCUMENT_VERSION_AAD_VERSION,
     blob: "document_versions.data",
     orgId,
     documentId,
@@ -37,10 +55,208 @@ function documentVersionDataAad({
   };
 }
 
+type SecurityEncryptedEnvelope = {
+  schemaVersion: number;
+  wrappedDek: unknown;
+  algorithm: string;
+  iv: string;
+  ciphertext: string;
+  tag: string;
+};
+
+type SecurityEnvelopeCrypto = {
+  encryptEnvelope(args: {
+    plaintext: Buffer;
+    kmsProvider: EnvelopeKmsProvider;
+    encryptionContext?: DocumentVersionAad | null;
+  }): Promise<SecurityEncryptedEnvelope>;
+  decryptEnvelope(args: {
+    encryptedEnvelope: SecurityEncryptedEnvelope;
+    kmsProvider: EnvelopeKmsProvider;
+    encryptionContext?: DocumentVersionAad | null;
+  }): Promise<Buffer>;
+};
+
+const importEsm: (specifier: string) => Promise<any> = new Function(
+  "specifier",
+  "return import(specifier)"
+) as unknown as (specifier: string) => Promise<any>;
+
+let cachedEnvelopeCrypto: Promise<SecurityEnvelopeCrypto> | null = null;
+
+async function loadEnvelopeCrypto(): Promise<SecurityEnvelopeCrypto> {
+  if (cachedEnvelopeCrypto) return cachedEnvelopeCrypto;
+
+  cachedEnvelopeCrypto = (async () => {
+    const candidates: string[] = [];
+    if (typeof __dirname === "string") {
+      candidates.push(pathToFileURL(path.resolve(__dirname, "../../../../packages/security/crypto/envelope.js")).href);
+    }
+
+    candidates.push(
+      pathToFileURL(path.resolve(process.cwd(), "packages/security/crypto/envelope.js")).href,
+      pathToFileURL(path.resolve(process.cwd(), "..", "..", "packages/security/crypto/envelope.js")).href
+    );
+
+    let lastError: unknown;
+    for (const specifier of candidates) {
+      try {
+        const mod = await importEsm(specifier);
+        return { encryptEnvelope: mod.encryptEnvelope, decryptEnvelope: mod.decryptEnvelope } as SecurityEnvelopeCrypto;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error("Failed to load envelope crypto");
+  })();
+
+  return cachedEnvelopeCrypto;
+}
+
+function normalizeJsonValue<T>(value: unknown): T {
+  if (typeof value === "string") return JSON.parse(value) as T;
+  return value as T;
+}
+
+const AES_256_KEY_BYTES = 32;
+const AES_GCM_IV_BYTES = 12;
+const AES_GCM_TAG_BYTES = 16;
+
+function assertBufferLength(buf: Buffer, expected: number, name: string): void {
+  if (!Buffer.isBuffer(buf)) {
+    throw new TypeError(`${name} must be a Buffer`);
+  }
+  if (buf.length !== expected) {
+    throw new RangeError(`${name} must be ${expected} bytes (got ${buf.length})`);
+  }
+}
+
+function aadBytes(context: unknown | null | undefined): Buffer | null {
+  if (context === null || context === undefined) return null;
+  return Buffer.from(canonicalJson(context), "utf8");
+}
+
+function decryptAes256Gcm({
+  ciphertext,
+  key,
+  iv,
+  tag,
+  aad = null
+}: {
+  ciphertext: Buffer;
+  key: Buffer;
+  iv: Buffer;
+  tag: Buffer;
+  aad?: Buffer | null;
+}): Buffer {
+  assertBufferLength(key, AES_256_KEY_BYTES, "key");
+  assertBufferLength(iv, AES_GCM_IV_BYTES, "iv");
+  assertBufferLength(tag, AES_GCM_TAG_BYTES, "tag");
+  if (aad !== null && !Buffer.isBuffer(aad)) {
+    throw new TypeError("aad must be a Buffer when provided");
+  }
+
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv, { authTagLength: AES_GCM_TAG_BYTES });
+  decipher.setAuthTag(tag);
+  if (aad) {
+    decipher.setAAD(aad);
+  }
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+
+function deriveLegacyLocalMasterKey(secret: string): Buffer {
+  if (!secret) {
+    throw new Error("LOCAL_KMS_MASTER_KEY must be set to decrypt legacy local envelope rows");
+  }
+  return crypto.createHash("sha256").update(secret, "utf8").digest();
+}
+
+type LegacyWrappedDekV1 = { iv: Buffer; tag: Buffer; ciphertext: Buffer };
+
+function decodeLegacyWrappedDekV1(blob: Buffer): LegacyWrappedDekV1 {
+  if (!Buffer.isBuffer(blob)) {
+    throw new TypeError("encryptedDek must be a Buffer");
+  }
+  const minLength = 1 + AES_GCM_IV_BYTES + AES_GCM_TAG_BYTES + 1;
+  if (blob.length < minLength) {
+    throw new RangeError(`encryptedDek too short (got ${blob.length} bytes)`);
+  }
+
+  const version = blob.readUInt8(0);
+  if (version !== 1) {
+    throw new Error(`Unsupported wrapped DEK version: ${version}`);
+  }
+
+  const ivStart = 1;
+  const tagStart = ivStart + AES_GCM_IV_BYTES;
+  const ciphertextStart = tagStart + AES_GCM_TAG_BYTES;
+  return {
+    iv: blob.subarray(ivStart, tagStart),
+    tag: blob.subarray(tagStart, ciphertextStart),
+    ciphertext: blob.subarray(ciphertextStart)
+  };
+}
+
+function deriveLegacyLocalKek({
+  masterKey,
+  orgId,
+  kmsKeyId
+}: {
+  masterKey: Buffer;
+  orgId: string;
+  kmsKeyId: string;
+}): Buffer {
+  assertBufferLength(masterKey, AES_256_KEY_BYTES, "masterKey");
+  if (!orgId) throw new Error("orgId is required");
+  if (!kmsKeyId) throw new Error("kmsKeyId is required");
+
+  const salt = Buffer.from(`formula:local-kms:org:${orgId}`, "utf8");
+  const info = Buffer.from(`formula:local-kms:kmsKeyId:${kmsKeyId}`, "utf8");
+  const derived = crypto.hkdfSync("sha256", masterKey, salt, info, AES_256_KEY_BYTES);
+  const buf = Buffer.isBuffer(derived) ? derived : Buffer.from(derived);
+  assertBufferLength(buf, AES_256_KEY_BYTES, "kek");
+  return buf;
+}
+
+function legacyDekWrapAad(orgId: string, kmsKeyId: string): Buffer {
+  return aadBytes({
+    v: 1,
+    purpose: "dek-wrap",
+    orgId,
+    kmsKeyId
+  })!;
+}
+
+function unwrapLegacyLocalDek({
+  encryptedDek,
+  orgId,
+  kmsKeyId,
+  localKmsMasterKey
+}: {
+  encryptedDek: Buffer;
+  orgId: string;
+  kmsKeyId: string;
+  localKmsMasterKey: string;
+}): Buffer {
+  const masterKey = deriveLegacyLocalMasterKey(localKmsMasterKey);
+  const parsed = decodeLegacyWrappedDekV1(encryptedDek);
+  const kek = deriveLegacyLocalKek({ masterKey, orgId, kmsKeyId });
+  const plaintextDek = decryptAes256Gcm({
+    ciphertext: parsed.ciphertext,
+    key: kek,
+    iv: parsed.iv,
+    tag: parsed.tag,
+    aad: legacyDekWrapAad(orgId, kmsKeyId)
+  });
+  assertBufferLength(plaintextDek, AES_256_KEY_BYTES, "plaintextDek");
+  return plaintextDek;
+}
+
 async function loadOrgEncryptionSettings(client: PoolClient, orgId: string): Promise<OrgEncryptionSettings> {
   const res = await client.query(
     `
-      SELECT cloud_encryption_at_rest, kms_provider, kms_key_id
+      SELECT cloud_encryption_at_rest
       FROM org_settings
       WHERE org_id = $1
       LIMIT 1
@@ -56,47 +272,76 @@ async function loadOrgEncryptionSettings(client: PoolClient, orgId: string): Pro
 
   const row = res.rows[0] as any;
   return {
-    cloudEncryptionAtRest: Boolean(row.cloud_encryption_at_rest),
-    kmsProvider: String(row.kms_provider ?? "local"),
-    kmsKeyId: row.kms_key_id == null ? null : String(row.kms_key_id)
+    cloudEncryptionAtRest: Boolean(row.cloud_encryption_at_rest)
   };
 }
 
-async function ensureOrgKmsKeyId(
-  client: PoolClient,
-  {
-    orgId,
-    kmsProvider,
-    kmsKeyId
-  }: {
-    orgId: string;
-    kmsProvider: string;
-    kmsKeyId: string | null;
-  }
-): Promise<string> {
-  if (kmsKeyId) return kmsKeyId;
+export type EncryptedDocumentVersionData = {
+  envelopeVersion: typeof DOCUMENT_VERSION_ENVELOPE_SCHEMA_V2;
+  algorithm: string;
+  ciphertext: string;
+  iv: string;
+  tag: string;
+  encryptedDek: string;
+  kmsProvider: string;
+  kmsKeyId: string | null;
+  aad: DocumentVersionAad;
+};
 
-  if (kmsProvider !== "local") {
-    throw new Error(`kms_key_id is required for kms_provider=${kmsProvider}`);
-  }
+type DbClient = Pick<Pool, "query">;
 
-  const next = `local-${crypto.randomUUID()}`;
-  await client.query(
-    `
-      UPDATE org_settings
-      SET kms_key_id = $2,
-          kms_key_rotated_at = now(),
-          updated_at = now()
-      WHERE org_id = $1
-    `,
-    [orgId, next]
-  );
-  return next;
+export async function encryptDocumentVersionData({
+  plaintext,
+  kmsFactory,
+  orgId,
+  documentId,
+  documentVersionId,
+  db
+}: {
+  plaintext: Buffer;
+  kmsFactory: KmsProviderFactory;
+  orgId: string;
+  documentId: string;
+  documentVersionId: string;
+  /**
+   * Optional DB client used to resolve org_settings + local KMS state.
+   *
+   * Pass the current transaction client when encrypting inside a transaction to
+   * avoid read-after-write issues (e.g. when org_settings is inserted in the
+   * same transaction).
+   */
+  db?: DbClient;
+}): Promise<EncryptedDocumentVersionData> {
+  const kms = await kmsFactory.forOrg(orgId, db);
+  const { encryptEnvelope } = await loadEnvelopeCrypto();
+  const aad = documentVersionDataAad({ orgId, documentId, documentVersionId });
+  const envelope = await encryptEnvelope({ plaintext, kmsProvider: kms, encryptionContext: aad });
+
+  const wrappedDekAny = envelope.wrappedDek as any;
+  const dataKmsProvider = String(wrappedDekAny?.kmsProvider ?? kms.provider);
+  const dataKmsKeyId =
+    typeof wrappedDekAny?.kmsKeyId === "string"
+      ? wrappedDekAny.kmsKeyId
+      : typeof wrappedDekAny?.kmsKeyVersion === "number"
+        ? String(wrappedDekAny.kmsKeyVersion)
+        : null;
+
+  return {
+    envelopeVersion: DOCUMENT_VERSION_ENVELOPE_SCHEMA_V2,
+    algorithm: envelope.algorithm,
+    ciphertext: envelope.ciphertext,
+    iv: envelope.iv,
+    tag: envelope.tag,
+    encryptedDek: JSON.stringify(envelope.wrappedDek),
+    kmsProvider: dataKmsProvider,
+    kmsKeyId: dataKmsKeyId,
+    aad
+  };
 }
 
 export async function createDocumentVersion(
   pool: Pool,
-  keyring: Keyring,
+  kmsFactory: KmsProviderFactory,
   params: CreateDocumentVersionParams
 ): Promise<{ id: string; createdAt: Date }> {
   const versionId = params.id ?? crypto.randomUUID();
@@ -124,20 +369,13 @@ export async function createDocumentVersion(
       return;
     }
 
-    const kmsKeyId = await ensureOrgKmsKeyId(client, {
-      orgId,
-      kmsProvider: settings.kmsProvider,
-      kmsKeyId: settings.kmsKeyId
-    });
-
-    const kms = keyring.get(settings.kmsProvider);
-    const aad = documentVersionDataAad({ orgId, documentId: params.documentId, documentVersionId: versionId });
-    const envelope = await encryptEnvelope({
+    const encrypted = await encryptDocumentVersionData({
       plaintext: params.data,
-      kmsProvider: kms,
+      kmsFactory,
       orgId,
-      keyId: kmsKeyId,
-      aadContext: aad
+      documentId: params.documentId,
+      documentVersionId: versionId,
+      db: client
     });
 
     const inserted = await client.query(
@@ -147,38 +385,38 @@ export async function createDocumentVersion(
           document_id,
           created_by,
           description,
-          data,
-          data_envelope_version,
-          data_algorithm,
-          data_ciphertext,
-          data_iv,
-          data_tag,
-          data_encrypted_dek,
-          data_kms_provider,
-          data_kms_key_id,
-          data_aad
-        )
-        VALUES (
-          $1,$2,$3,$4,
-          NULL,
-          $5,$6,$7,$8,$9,$10,$11,$12,$13
-        )
-        RETURNING created_at
-      `,
+           data,
+           data_envelope_version,
+           data_algorithm,
+           data_ciphertext,
+           data_iv,
+           data_tag,
+           data_encrypted_dek,
+           data_kms_provider,
+           data_kms_key_id,
+           data_aad
+         )
+         VALUES (
+           $1,$2,$3,$4,
+           NULL,
+           $5,$6,$7,$8,$9,$10,$11,$12,$13
+         )
+         RETURNING created_at
+       `,
       [
         versionId,
         params.documentId,
         params.createdBy ?? null,
         params.description ?? null,
-        envelope.envelopeVersion,
-        envelope.algorithm,
-        envelope.ciphertext.toString("base64"),
-        envelope.iv.toString("base64"),
-        envelope.tag.toString("base64"),
-        envelope.encryptedDek.toString("base64"),
-        envelope.kmsProvider,
-        envelope.kmsKeyId,
-        JSON.stringify(envelope.aad)
+        encrypted.envelopeVersion,
+        encrypted.algorithm,
+        encrypted.ciphertext,
+        encrypted.iv,
+        encrypted.tag,
+        encrypted.encryptedDek,
+        encrypted.kmsProvider,
+        encrypted.kmsKeyId,
+        JSON.stringify(encrypted.aad)
       ]
     );
     createdAt = (inserted.rows[0] as any).created_at as Date;
@@ -193,9 +431,12 @@ export async function createDocumentVersion(
 
 export async function getDocumentVersionData(
   pool: Pool,
-  keyring: Keyring,
+  kmsFactory: KmsProviderFactory,
   versionId: string,
-  { documentId: expectedDocumentId }: { documentId?: string } = {}
+  {
+    documentId: expectedDocumentId,
+    legacyLocalKmsMasterKey
+  }: { documentId?: string; legacyLocalKmsMasterKey?: string } = {}
 ): Promise<Buffer | null> {
   const whereDoc = expectedDocumentId ? "AND v.document_id = $2" : "";
   const params = expectedDocumentId ? [versionId, expectedDocumentId] : [versionId];
@@ -236,32 +477,70 @@ export async function getDocumentVersionData(
 
   const orgId = String(row.org_id);
   const documentId = String(row.document_id);
-  const storedAad = row.data_aad as Record<string, unknown> | null;
+  const storedAad = row.data_aad == null ? null : normalizeJsonValue<Record<string, unknown>>(row.data_aad);
   const expectedAad = documentVersionDataAad({ orgId, documentId, documentVersionId: String(row.id) });
 
   if (storedAad && canonicalJson(storedAad) !== canonicalJson(expectedAad)) {
     throw new Error("aad_mismatch");
   }
 
-  const ciphertext = Buffer.from(ciphertextBase64, "base64");
+  const envelopeVersion = row.data_envelope_version == null ? null : Number(row.data_envelope_version);
+
+  if (envelopeVersion === DOCUMENT_VERSION_ENVELOPE_SCHEMA_V2) {
+    const wrappedDek = JSON.parse(String(row.data_encrypted_dek));
+    const encryptedEnvelope: SecurityEncryptedEnvelope = {
+      schemaVersion: 1,
+      wrappedDek,
+      algorithm: String(row.data_algorithm),
+      ciphertext: String(row.data_ciphertext),
+      iv: String(row.data_iv),
+      tag: String(row.data_tag)
+    };
+
+    const providerName = String((wrappedDek as any)?.kmsProvider ?? row.data_kms_provider ?? "local");
+    const kms = await kmsFactory.forOrgProvider(orgId, providerName);
+    const { decryptEnvelope } = await loadEnvelopeCrypto();
+    return decryptEnvelope({ encryptedEnvelope, kmsProvider: kms, encryptionContext: expectedAad });
+  }
+
+  // Legacy v1: data_encrypted_dek is base64 bytes; unwrap/decrypt locally.
+  if (envelopeVersion !== DOCUMENT_VERSION_ENVELOPE_SCHEMA_V1) {
+    throw new Error(`Unsupported document_versions envelope schema version: ${String(envelopeVersion)}`);
+  }
+
+  const ciphertext = Buffer.from(String(row.data_ciphertext), "base64");
   const iv = Buffer.from(String(row.data_iv), "base64");
   const tag = Buffer.from(String(row.data_tag), "base64");
   const encryptedDek = Buffer.from(String(row.data_encrypted_dek), "base64");
 
-  const envelope: EncryptedEnvelope = {
-    envelopeVersion: Number(row.data_envelope_version),
-    algorithm: String(row.data_algorithm),
+  const legacyProvider = String(row.data_kms_provider ?? "local");
+  const legacyKmsKeyId = String(row.data_kms_key_id ?? "");
+
+  let dek: Buffer;
+  if (legacyProvider === "local") {
+    dek = unwrapLegacyLocalDek({
+      encryptedDek,
+      orgId,
+      kmsKeyId: legacyKmsKeyId,
+      localKmsMasterKey: legacyLocalKmsMasterKey ?? ""
+    });
+  } else if (legacyProvider === "aws") {
+    const kms = await kmsFactory.forOrgProvider(orgId, "aws");
+    dek = await kms.unwrapKey({
+      wrappedKey: { kmsProvider: "aws", kmsKeyId: legacyKmsKeyId, ciphertext: encryptedDek.toString("base64") },
+      encryptionContext: expectedAad
+    });
+  } else {
+    throw new Error(`Unsupported legacy kms provider: ${legacyProvider}`);
+  }
+
+  return decryptAes256Gcm({
     ciphertext,
+    key: dek,
     iv,
     tag,
-    encryptedDek,
-    kmsProvider: String(row.data_kms_provider),
-    kmsKeyId: String(row.data_kms_key_id),
-    aad: storedAad ?? expectedAad
-  } as EncryptedEnvelope;
-
-  const kms = keyring.get(envelope.kmsProvider);
-  return decryptEnvelope({ envelope, kmsProvider: kms, orgId, aadContext: expectedAad });
+    aad: aadBytes(expectedAad)
+  });
 }
 
 export type EncryptPlaintextDocumentVersionsResult = {
@@ -277,7 +556,7 @@ export type EncryptPlaintextDocumentVersionsResult = {
  */
 export async function encryptPlaintextDocumentVersions(
   pool: Pool,
-  keyring: Keyring,
+  kmsFactory: KmsProviderFactory,
   {
     orgId,
     batchSize = 100
@@ -313,12 +592,6 @@ export async function encryptPlaintextDocumentVersions(
 
       orgsProcessed += 1;
 
-      const kmsKeyId = await ensureOrgKmsKeyId(client, {
-        orgId: orgIdValue,
-        kmsProvider: settings.kmsProvider,
-        kmsKeyId: settings.kmsKeyId
-      });
-
       const plaintextVersions = await client.query(
         `
           SELECT v.id, v.document_id, v.data
@@ -335,7 +608,6 @@ export async function encryptPlaintextDocumentVersions(
 
       if ((plaintextVersions.rowCount ?? 0) === 0) return 0;
 
-      const kms = keyring.get(settings.kmsProvider);
       let updated = 0;
 
       for (const version of plaintextVersions.rows as any[]) {
@@ -343,18 +615,13 @@ export async function encryptPlaintextDocumentVersions(
         const documentIdValue = String(version.document_id);
         const data = version.data as Buffer;
 
-        const aad = documentVersionDataAad({
+        const encrypted = await encryptDocumentVersionData({
+          plaintext: data,
+          kmsFactory,
           orgId: orgIdValue,
           documentId: documentIdValue,
-          documentVersionId: versionIdValue
-        });
-
-        const envelope = await encryptEnvelope({
-          plaintext: data,
-          kmsProvider: kms,
-          orgId: orgIdValue,
-          keyId: kmsKeyId,
-          aadContext: aad
+          documentVersionId: versionIdValue,
+          db: client
         });
 
         await client.query(
@@ -374,15 +641,15 @@ export async function encryptPlaintextDocumentVersions(
           `,
           [
             versionIdValue,
-            envelope.envelopeVersion,
-            envelope.algorithm,
-            envelope.ciphertext.toString("base64"),
-            envelope.iv.toString("base64"),
-            envelope.tag.toString("base64"),
-            envelope.encryptedDek.toString("base64"),
-            envelope.kmsProvider,
-            envelope.kmsKeyId,
-            JSON.stringify(envelope.aad)
+            encrypted.envelopeVersion,
+            encrypted.algorithm,
+            encrypted.ciphertext,
+            encrypted.iv,
+            encrypted.tag,
+            encrypted.encryptedDek,
+            encrypted.kmsProvider,
+            encrypted.kmsKeyId,
+            JSON.stringify(encrypted.aad)
           ]
         );
 
