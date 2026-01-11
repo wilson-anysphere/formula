@@ -202,6 +202,37 @@ s.sendto(b"hi", ("127.0.0.1", 9))
     await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/not permitted/i);
   });
 
+  it("prevents bypassing network=none by restoring the original import function", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import builtins
+import sys
+import __main__
+import formula
+
+# Best-effort: attempt to find the runner's sandbox module and restore its original
+# import implementation. The runtime should not expose this to user scripts.
+sandbox_mod = sys.modules.get("formula.runtime.sandbox")
+apply_sandbox_fn = getattr(__main__, "apply_sandbox", None)
+
+if sandbox_mod is not None:
+    builtins.__import__ = sandbox_mod._ORIGINAL_IMPORT
+elif apply_sandbox_fn is not None:
+    builtins.__import__ = apply_sandbox_fn.__globals__["_ORIGINAL_IMPORT"]
+
+import socket
+formula.active_sheet["A1"] = 1
+`;
+
+    await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Import of 'socket' is not permitted/);
+  });
+
   it("allows network access to allowlisted hosts (native allowlist sandbox)", async () => {
     const server = http.createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "text/plain" });

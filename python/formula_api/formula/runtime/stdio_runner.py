@@ -1,13 +1,34 @@
 from __future__ import annotations
 
+import builtins
 import json
 import sys
 import traceback
+import types
 from typing import Any, Dict
 
 import formula
 from formula._rpc_bridge import StdioRpcBridge
 from formula.runtime.sandbox import apply_cpu_time_limit, apply_memory_limit, apply_sandbox
+
+_ORIGINAL_IMPORT = builtins.__import__
+
+
+def _normalize_permission(value: Any, allowed: set[str], default: str) -> str:
+    if not isinstance(value, str):
+        return default
+    lowered = value.lower()
+    return lowered if lowered in allowed else default
+
+
+def _filesystem_permission(permissions: Dict[str, Any]) -> str:
+    raw = permissions.get("filesystem", permissions.get("fileSystem", "none"))
+    return _normalize_permission(raw, {"none", "read", "readwrite"}, "none")
+
+
+def _network_permission(permissions: Dict[str, Any]) -> str:
+    raw = permissions.get("network", "none")
+    return _normalize_permission(raw, {"none", "allowlist", "full"}, "none")
 
 
 def main() -> None:
@@ -41,7 +62,66 @@ def main() -> None:
     apply_sandbox(cmd.get("permissions", {}))
 
     try:
-        globals_dict: Dict[str, Any] = {"__name__": "__main__"}
+        permissions = cmd.get("permissions", {}) if isinstance(cmd.get("permissions", {}), dict) else {}
+        filesystem = _filesystem_permission(permissions)
+        network = _network_permission(permissions)
+
+        block_process_execution = not (filesystem == "readwrite" and network == "full")
+
+        blocked_import_roots = set()
+        if block_process_execution:
+            blocked_import_roots.add("subprocess")
+        if network == "none":
+            blocked_import_roots.update({"socket", "ssl", "http", "urllib", "requests"})
+
+        # This runner is executed as `__main__` (via `python -m`). If user code imports
+        # `__main__`, it should see its own module, not the stdio runner internals.
+        #
+        # Also, removing the runner + sandbox modules from `sys.modules` reduces the
+        # chance that a script can bypass restrictions by restoring captured original
+        # functions (best-effort; not a hardened security boundary).
+        user_main = types.ModuleType("__main__")
+        user_main.__dict__.update({"__name__": "__main__", "__file__": "<formula_script>", "__package__": None})
+        sys.modules["__main__"] = user_main
+
+        # Restore the builtin import function (avoid exposing the pre-sandbox import
+        # callable via `builtins.__import__.__globals__`) and block imports via a
+        # meta_path finder instead.
+        builtins.__import__ = _ORIGINAL_IMPORT  # type: ignore[assignment]
+
+        class _ImportBlocker:
+            def find_spec(self, fullname: str, path=None, target=None):  # type: ignore[no-untyped-def]
+                if fullname == "formula.runtime" or fullname.startswith("formula.runtime."):
+                    raise PermissionError("Import of 'formula.runtime' is not permitted")
+
+                root = fullname.split(".", 1)[0]
+                if root in blocked_import_roots:
+                    raise PermissionError(f"Import of {root!r} is not permitted")
+                return None
+
+        if blocked_import_roots:
+            # Purge already-imported modules so import statements consult meta_path.
+            for name in list(sys.modules.keys()):
+                root = name.split(".", 1)[0]
+                if root in blocked_import_roots:
+                    sys.modules.pop(name, None)
+
+            sys.meta_path.insert(0, _ImportBlocker())
+
+        # Drop references to the runner + sandbox modules so scripts can't fetch them
+        # directly from sys.modules (e.g. to restore original import/open functions).
+        for name in list(sys.modules.keys()):
+            if name == "formula.runtime" or name.startswith("formula.runtime."):
+                sys.modules.pop(name, None)
+
+        formula_mod = sys.modules.get("formula")
+        if formula_mod is not None and hasattr(formula_mod, "runtime"):
+            try:
+                delattr(formula_mod, "runtime")
+            except Exception:
+                pass
+
+        globals_dict: Dict[str, Any] = user_main.__dict__
         exec(cmd.get("code", ""), globals_dict, globals_dict)
         protocol_out.write(json.dumps({"type": "result", "success": True}) + "\n")
         protocol_out.flush()

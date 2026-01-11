@@ -85,3 +85,32 @@ with open("some_file.txt", "w") as f:
 
   await assert.rejects(() => runtime.execute(script, { api: workbook }), /Filesystem access is not permitted/);
 });
+
+test("native python sandbox blocks network bypass attempts via restored import (network=none)", async () => {
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import builtins
+import sys
+import __main__
+import formula
+
+sandbox_mod = sys.modules.get("formula.runtime.sandbox")
+apply_sandbox_fn = getattr(__main__, "apply_sandbox", None)
+
+if sandbox_mod is not None:
+    builtins.__import__ = sandbox_mod._ORIGINAL_IMPORT
+elif apply_sandbox_fn is not None:
+    builtins.__import__ = apply_sandbox_fn.__globals__["_ORIGINAL_IMPORT"]
+
+import socket
+formula.active_sheet["A1"] = 1
+`;
+
+  await assert.rejects(() => runtime.execute(script, { api: workbook }), /Import of 'socket' is not permitted/);
+});
