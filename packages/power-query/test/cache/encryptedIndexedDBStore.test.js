@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { createCipheriv, createDecipheriv } from "node:crypto";
 import test from "node:test";
 
-import "fake-indexeddb/auto";
+let indexedDbAvailable = true;
+try {
+  await import("fake-indexeddb/auto");
+} catch {
+  indexedDbAvailable = false;
+}
 
 import { CacheManager } from "../../src/cache/cache.js";
 import { EncryptedCacheStore } from "../../src/cache/encryptedStore.js";
@@ -37,7 +42,10 @@ function createTestCryptoProvider() {
   };
 }
 
-test("EncryptedCacheStore + IndexedDBCacheStore: stores ciphertext and roundtrips", async () => {
+test(
+  "EncryptedCacheStore + IndexedDBCacheStore: stores ciphertext and roundtrips",
+  { skip: !indexedDbAvailable },
+  async () => {
   const dbName = `pq-cache-encrypted-idb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const underlying = new IndexedDBCacheStore({ dbName });
   const store = new EncryptedCacheStore({ store: underlying, crypto: createTestCryptoProvider(), storeId: "unit-test" });
@@ -72,4 +80,5 @@ test("EncryptedCacheStore + IndexedDBCacheStore: stores ciphertext and roundtrip
     req.onerror = () => reject(req.error ?? new Error("IndexedDB deleteDatabase failed"));
     req.onblocked = () => resolve(undefined);
   });
-});
+  },
+);
