@@ -3,8 +3,7 @@ import {
   createLockedDownGrant,
   principalKey,
   normalizeScopePath,
-  isPathWithinScope,
-  isUrlAllowedByAllowlist
+  checkPermissionGrant
 } from "./permissions.js";
 
 function mergeUniqueStrings(into, values) {
@@ -91,47 +90,6 @@ function buildGrantForRequest(request) {
   }
 }
 
-function evaluateFilesystem(grant, request) {
-  if (!grant.filesystem) return { allowed: false, reason: "Filesystem access denied" };
-
-  const readScopes = new Set([
-    ...grant.filesystem.read.map(normalizeScopePath),
-    ...grant.filesystem.readwrite.map(normalizeScopePath)
-  ]);
-  const writeScopes = new Set(grant.filesystem.readwrite.map(normalizeScopePath));
-
-  const absPath = normalizeScopePath(request.path);
-
-  if (request.access === "readwrite") {
-    for (const scope of writeScopes) {
-      if (isPathWithinScope(absPath, scope)) return { allowed: true };
-    }
-    return { allowed: false, reason: `Filesystem write access denied for ${absPath}` };
-  }
-
-  for (const scope of readScopes) {
-    if (isPathWithinScope(absPath, scope)) return { allowed: true };
-  }
-  return { allowed: false, reason: `Filesystem read access denied for ${absPath}` };
-}
-
-function evaluateNetwork(grant, request) {
-  const mode = grant.network?.mode ?? "none";
-  if (mode === "full") return { allowed: true };
-  if (mode === "none") {
-    return { allowed: false, reason: `Network access denied for ${request.url}` };
-  }
-
-  const allowlist = grant.network?.allowlist ?? [];
-  if (isUrlAllowedByAllowlist(request.url, allowlist)) return { allowed: true };
-  return { allowed: false, reason: `Network access denied for ${request.url}` };
-}
-
-function evaluateBooleanFlag(grantFlag, requestName) {
-  if (grantFlag) return { allowed: true };
-  return { allowed: false, reason: `${requestName} permission denied` };
-}
-
 export class PermissionManager {
   /**
    * @param {object} options
@@ -176,20 +134,7 @@ export class PermissionManager {
 
   check(principal, request) {
     const grant = this.getGrant(principal);
-    switch (request.kind) {
-      case "filesystem":
-        return evaluateFilesystem(grant, request);
-      case "network":
-        return evaluateNetwork(grant, request);
-      case "clipboard":
-        return evaluateBooleanFlag(grant.clipboard, "Clipboard");
-      case "notifications":
-        return evaluateBooleanFlag(grant.notifications, "Notifications");
-      case "automation":
-        return evaluateBooleanFlag(grant.automation, "Automation");
-      default:
-        return { allowed: false, reason: `Unknown permission kind: ${String(request.kind)}` };
-    }
+    return checkPermissionGrant(grant, request);
   }
 
   /**
@@ -200,6 +145,15 @@ export class PermissionManager {
    */
   async ensure(principal, request, { promptIfDenied = false } = {}) {
     const decision = this.check(principal, request);
+    this.auditLogger?.log({
+      eventType: "security.permission.checked",
+      actor: principal,
+      success: decision.allowed,
+      metadata: {
+        request,
+        ...(decision.allowed ? {} : { reason: decision.reason })
+      }
+    });
     if (decision.allowed) return;
 
     if (promptIfDenied && this.onPrompt) {

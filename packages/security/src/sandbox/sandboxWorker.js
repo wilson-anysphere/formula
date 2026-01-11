@@ -1,123 +1,159 @@
-import fs from "node:fs/promises";
 import vm from "node:vm";
 import { parentPort } from "node:worker_threads";
 
-import { PermissionDeniedError } from "../errors.js";
-import { isPathWithinScope, isUrlAllowedByAllowlist, normalizeScopePath } from "../permissions.js";
+import { createSandboxSecureApis } from "../secureApis/createSecureApis.js";
 
 function serializeError(error) {
-  if (!error || typeof error !== "object") {
-    return { name: "Error", message: String(error) };
-  }
+  if (!error || typeof error !== "object") return { name: "Error", message: String(error) };
 
   return {
-    name: error.name,
-    message: error.message,
-    code: error.code,
-    stack: error.stack,
+    name: typeof error.name === "string" ? error.name : "Error",
+    message: typeof error.message === "string" ? error.message : String(error),
+    code: typeof error.code === "string" ? error.code : undefined,
+    stack: typeof error.stack === "string" ? error.stack : undefined,
     principal: error.principal,
     request: error.request,
     reason: error.reason
   };
 }
 
-function sendAudit(principal, eventType, success, metadata) {
+function sendAudit(event) {
   parentPort.postMessage({
     type: "audit",
-    event: { eventType, actor: principal, success: Boolean(success), metadata: metadata ?? {} }
+    event
   });
 }
 
-function assertNetworkAllowed({ permissions, principal, url }) {
-  const mode = permissions?.network?.mode ?? "none";
-  if (mode === "full") return;
+function formatConsoleArgs(args) {
+  return args
+    .map((value) => {
+      if (typeof value === "string") return value;
+      if (value instanceof Error) return value.stack ?? value.message;
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    })
+    .join(" ");
+}
 
-  if (mode === "allowlist") {
-    const allowlist = permissions?.network?.allowlist ?? [];
-    if (isUrlAllowedByAllowlist(url, allowlist)) return;
-  }
+function hardenFunction(fn) {
+  if (typeof fn !== "function") return fn;
+  Object.setPrototypeOf(fn, null);
+  return fn;
+}
 
-  const request = { kind: "network", url };
-  sendAudit(principal, "security.permission.denied", false, { request });
-  throw new PermissionDeniedError({
-    principal,
-    request,
-    reason: `Network access denied for ${url}`
+function hardenObject(obj) {
+  if (!obj || typeof obj !== "object") return obj;
+  Object.setPrototypeOf(obj, null);
+  return Object.freeze(obj);
+}
+
+function createSandboxConsole({ principal }) {
+  const make = (method, stream) =>
+    hardenFunction((...args) => {
+      parentPort.postMessage({
+        type: "output",
+        stream,
+        text: `${formatConsoleArgs(args)}\n`,
+        metadata: { method }
+      });
+    });
+
+  return hardenObject({
+    log: make("log", "stdout"),
+    info: make("info", "stdout"),
+    warn: make("warn", "stderr"),
+    error: make("error", "stderr")
   });
 }
 
-function resolvePath(p) {
-  return normalizeScopePath(p);
-}
+function createSandboxTimers() {
+  let nextId = 1;
+  const active = new Map();
 
-function assertFilesystemAllowed({ permissions, principal, access, filePath }) {
-  const absPath = resolvePath(filePath);
-  const readScopes = [
-    ...(permissions?.filesystem?.read ?? []),
-    ...(permissions?.filesystem?.readwrite ?? [])
-  ].map(resolvePath);
-
-  const writeScopes = (permissions?.filesystem?.readwrite ?? []).map(resolvePath);
-
-  if (access === "readwrite") {
-    for (const scope of writeScopes) {
-      if (isPathWithinScope(absPath, scope)) return;
-    }
-  } else {
-    for (const scope of readScopes) {
-      if (isPathWithinScope(absPath, scope)) return;
-    }
-  }
-
-  const request = { kind: "filesystem", access, path: absPath };
-  sendAudit(principal, "security.permission.denied", false, { request });
-  throw new PermissionDeniedError({
-    principal,
-    request,
-    reason: `Filesystem ${access} access denied for ${absPath}`
+  const setTimeoutSafe = hardenFunction((callback, delay, ...args) => {
+    const id = nextId++;
+    const handle = setTimeout(() => {
+      active.delete(id);
+      try {
+        callback(...args);
+      } catch {
+        // Timer callback errors are surfaced via the sandbox promise / parent timeout.
+      }
+    }, delay);
+    active.set(id, handle);
+    return id;
   });
+
+  const clearTimeoutSafe = hardenFunction((id) => {
+    const handle = active.get(id);
+    if (!handle) return;
+    active.delete(id);
+    clearTimeout(handle);
+  });
+
+  const cleanup = () => {
+    for (const handle of active.values()) clearTimeout(handle);
+    active.clear();
+  };
+
+  return { setTimeout: setTimeoutSafe, clearTimeout: clearTimeoutSafe, cleanup };
 }
 
 parentPort.on("message", async (message) => {
   if (!message || typeof message !== "object" || message.type !== "run") return;
 
-  const { principal, permissions, code, timeoutMs } = message;
+  const { principal, permissions, code, timeoutMs, memoryMb } = message;
 
-  const sandboxFetch = async (url, init) => {
-    const urlString = String(url);
-    assertNetworkAllowed({ permissions, principal, url: urlString });
-    sendAudit(principal, "security.network.request", true, { url: urlString, method: init?.method ?? "GET" });
-    return fetch(urlString, init);
-  };
-
-  const sandboxFs = {
-    readFile: async (filePath, options) => {
-      assertFilesystemAllowed({ permissions, principal, access: "read", filePath: String(filePath) });
-      sendAudit(principal, "security.filesystem.read", true, { path: String(filePath) });
-      return fs.readFile(filePath, options);
-    },
-    writeFile: async (filePath, data, options) => {
-      assertFilesystemAllowed({
-        permissions,
-        principal,
-        access: "readwrite",
-        filePath: String(filePath)
-      });
-      await fs.writeFile(filePath, data, options);
-      sendAudit(principal, "security.filesystem.write", true, { path: String(filePath) });
+  const auditLogger = {
+    log(event) {
+      sendAudit(event);
+      return "";
     }
   };
 
-  const sandbox = {
-    console,
-    fetch: sandboxFetch,
-    fs: sandboxFs,
-    URL,
-    TextEncoder,
-    TextDecoder,
-    setTimeout,
-    clearTimeout
-  };
+  const secureApis = createSandboxSecureApis({
+    principal,
+    permissionSnapshot: permissions,
+    auditLogger
+  });
+
+  const consoleShim = createSandboxConsole({ principal });
+  const timers = createSandboxTimers();
+
+  let memoryInterval = null;
+  let memoryLimitSent = false;
+  if (Number.isFinite(memoryMb) && memoryMb > 0) {
+    const memoryLimitBytes = memoryMb * 1024 * 1024;
+    const triggerBytes = Math.floor(memoryLimitBytes * 0.9);
+    memoryInterval = setInterval(() => {
+      if (memoryLimitSent) return;
+      const heapUsed = process.memoryUsage().heapUsed;
+      if (heapUsed > triggerBytes) {
+        memoryLimitSent = true;
+        parentPort.postMessage({
+          type: "limit",
+          limit: "memory",
+          memoryMb,
+          usedMb: Math.round(heapUsed / 1024 / 1024)
+        });
+      }
+    }, 25);
+    memoryInterval.unref();
+  }
+
+  const sandbox = Object.create(null);
+  sandbox.SecureApis = secureApis;
+  sandbox.fetch = secureApis.fetch;
+  sandbox.fs = secureApis.fs;
+  sandbox.console = consoleShim;
+  sandbox.setTimeout = timers.setTimeout;
+  sandbox.clearTimeout = timers.clearTimeout;
+  sandbox.process = undefined;
+  sandbox.require = undefined;
+  sandbox.module = undefined;
 
   const context = vm.createContext(sandbox, {
     name: "formula-sandbox",
@@ -135,5 +171,8 @@ parentPort.on("message", async (message) => {
     parentPort.postMessage({ type: "result", result });
   } catch (error) {
     parentPort.postMessage({ type: "error", error: serializeError(error) });
+  } finally {
+    timers.cleanup();
+    if (memoryInterval) clearInterval(memoryInterval);
   }
 });

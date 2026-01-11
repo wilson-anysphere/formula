@@ -1,8 +1,13 @@
 import { Worker } from "node:worker_threads";
 
-import { PermissionDeniedError, SandboxTimeoutError } from "../errors.js";
+import {
+  PermissionDeniedError,
+  SandboxMemoryLimitError,
+  SandboxOutputLimitError,
+  SandboxTimeoutError
+} from "../errors.js";
 
-function deserializeWorkerError(serialized) {
+function deserializeWorkerError(serialized, { timeoutMs } = {}) {
   if (!serialized || typeof serialized !== "object") return new Error("Unknown sandbox error");
 
   if (serialized.code === "PERMISSION_DENIED") {
@@ -13,6 +18,18 @@ function deserializeWorkerError(serialized) {
     });
     if (serialized.stack) err.stack = serialized.stack;
     return err;
+  }
+
+  if (serialized.code === "ERR_SCRIPT_EXECUTION_TIMEOUT" || serialized.code === "SANDBOX_TIMEOUT") {
+    return new SandboxTimeoutError({ timeoutMs: serialized.timeoutMs ?? timeoutMs ?? 0 });
+  }
+
+  if (serialized.code === "SANDBOX_OUTPUT_LIMIT") {
+    return new SandboxOutputLimitError({ maxBytes: serialized.maxBytes ?? 0 });
+  }
+
+  if (serialized.code === "SANDBOX_MEMORY_LIMIT") {
+    return new SandboxMemoryLimitError({ memoryMb: serialized.memoryMb ?? 0, usedMb: serialized.usedMb });
   }
 
   const err = new Error(serialized.message ?? "Sandbox error");
@@ -29,6 +46,7 @@ export async function runSandboxedJavaScript({
   auditLogger = null,
   timeoutMs = 5_000,
   memoryMb = 64,
+  maxOutputBytes = 128 * 1024,
   label = "script"
 }) {
   if (!principal || typeof principal.type !== "string" || typeof principal.id !== "string") {
@@ -51,11 +69,14 @@ export async function runSandboxedJavaScript({
     eventType: `security.${label}.run`,
     actor: principal,
     success: true,
-    metadata: { phase: "start" }
+    metadata: { phase: "start", language: "javascript" }
   });
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let outputBytes = 0;
+    let stdout = "";
+    let stderr = "";
 
     const timeout = setTimeout(() => {
       worker.terminate().catch(() => {});
@@ -65,7 +86,7 @@ export async function runSandboxedJavaScript({
         eventType: `security.${label}.run`,
         actor: principal,
         success: false,
-        metadata: { phase: "timeout", timeoutMs }
+        metadata: { phase: "timeout", timeoutMs, language: "javascript" }
       });
       reject(new SandboxTimeoutError({ timeoutMs }));
     }, timeoutMs);
@@ -94,13 +115,67 @@ export async function runSandboxedJavaScript({
         return;
       }
 
+      if (message.type === "output") {
+        const text = typeof message.text === "string" ? message.text : "";
+        const chunkBytes = Buffer.byteLength(text);
+        outputBytes += chunkBytes;
+
+        if (message.stream === "stderr") {
+          if (stderr.length < maxOutputBytes) stderr += text;
+        } else {
+          if (stdout.length < maxOutputBytes) stdout += text;
+        }
+
+        if (outputBytes > maxOutputBytes) {
+          finalize(() => {
+            const err = new SandboxOutputLimitError({ maxBytes: maxOutputBytes });
+            err.stdout = stdout;
+            err.stderr = stderr;
+          auditLogger?.log({
+            eventType: `security.${label}.run`,
+            actor: principal,
+            success: false,
+            metadata: { phase: "output_limit", maxOutputBytes, language: "javascript" }
+          });
+          reject(err);
+        });
+      }
+        return;
+      }
+
+      if (message.type === "limit") {
+        if (message.limit === "memory") {
+          finalize(() => {
+            const err = new SandboxMemoryLimitError({
+              memoryMb: message.memoryMb ?? memoryMb,
+              usedMb: message.usedMb ?? null
+            });
+            err.stdout = stdout;
+            err.stderr = stderr;
+            auditLogger?.log({
+              eventType: `security.${label}.run`,
+              actor: principal,
+              success: false,
+              metadata: {
+                phase: "memory_limit",
+                memoryMb: message.memoryMb ?? memoryMb,
+                usedMb: message.usedMb,
+                language: "javascript"
+              }
+            });
+            reject(err);
+          });
+        }
+        return;
+      }
+
       if (message.type === "result") {
         finalize(() => {
           auditLogger?.log({
             eventType: `security.${label}.run`,
             actor: principal,
             success: true,
-            metadata: { phase: "complete" }
+            metadata: { phase: "complete", language: "javascript" }
           });
           resolve(message.result);
         });
@@ -109,12 +184,15 @@ export async function runSandboxedJavaScript({
 
       if (message.type === "error") {
         finalize(() => {
-          const err = deserializeWorkerError(message.error);
+          const err = deserializeWorkerError(message.error, { timeoutMs });
+          err.stdout = stdout;
+          err.stderr = stderr;
+          const phase = err.code === "SANDBOX_TIMEOUT" ? "timeout" : "error";
           auditLogger?.log({
             eventType: `security.${label}.run`,
             actor: principal,
             success: false,
-            metadata: { phase: "error", name: err.name, message: err.message }
+            metadata: { phase, name: err.name, message: err.message, language: "javascript", code: err.code }
           });
           reject(err);
         });
@@ -125,11 +203,21 @@ export async function runSandboxedJavaScript({
       finalize(() => reject(err));
     });
 
+    worker.on("exit", (code) => {
+      if (settled) return;
+      finalize(() => {
+        const err = new Error(`Sandbox worker exited unexpectedly with code ${code}`);
+        err.code = "SANDBOX_WORKER_EXIT";
+        reject(err);
+      });
+    });
+
     worker.postMessage({
       type: "run",
       principal,
       permissions: permissionSnapshot,
       timeoutMs,
+      memoryMb,
       code
     });
   });

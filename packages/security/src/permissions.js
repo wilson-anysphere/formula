@@ -72,3 +72,66 @@ export function isUrlAllowedByAllowlist(urlString, allowlist) {
 
   return false;
 }
+
+/**
+ * Evaluates a permission grant snapshot (or locked-down default grant) against a request.
+ * Intended for deterministic checks inside sandboxes where we cannot share mutable state.
+ *
+ * @param {any} grant
+ * @param {any} request
+ * @returns {{allowed: true} | {allowed: false, reason: string}}
+ */
+export function checkPermissionGrant(grant, request) {
+  const effective = grant ?? createLockedDownGrant();
+
+  switch (request?.kind) {
+    case "filesystem": {
+      const readScopes = new Set([
+        ...(effective.filesystem?.read ?? []).map(normalizeScopePath),
+        ...(effective.filesystem?.readwrite ?? []).map(normalizeScopePath)
+      ]);
+      const writeScopes = new Set((effective.filesystem?.readwrite ?? []).map(normalizeScopePath));
+
+      const absPath = normalizeScopePath(request.path);
+      const access = request.access === "readwrite" ? "readwrite" : "read";
+
+      if (access === "readwrite") {
+        for (const scope of writeScopes) {
+          if (isPathWithinScope(absPath, scope)) return { allowed: true };
+        }
+        return { allowed: false, reason: `Filesystem write access denied for ${absPath}` };
+      }
+
+      for (const scope of readScopes) {
+        if (isPathWithinScope(absPath, scope)) return { allowed: true };
+      }
+      return { allowed: false, reason: `Filesystem read access denied for ${absPath}` };
+    }
+    case "network": {
+      const mode = effective.network?.mode ?? "none";
+      if (mode === "full") return { allowed: true };
+      if (mode === "none") {
+        return { allowed: false, reason: `Network access denied for ${request.url}` };
+      }
+
+      const allowlist = effective.network?.allowlist ?? [];
+      if (isUrlAllowedByAllowlist(request.url, allowlist)) return { allowed: true };
+      return { allowed: false, reason: `Network access denied for ${request.url}` };
+    }
+    case "clipboard":
+      return effective.clipboard ? { allowed: true } : { allowed: false, reason: "Clipboard permission denied" };
+    case "notifications":
+      return effective.notifications
+        ? { allowed: true }
+        : { allowed: false, reason: "Notifications permission denied" };
+    case "automation":
+      return effective.automation
+        ? { allowed: true }
+        : { allowed: false, reason: "Automation permission denied" };
+    default:
+      return {
+        allowed: false,
+        reason: `Unknown permission kind: ${String(request?.kind)}`
+      };
+  }
+}
