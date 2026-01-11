@@ -26,15 +26,16 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
   // initialize an empty workbook. Treat ids as unique and prune duplicates so
   // downstream sheet lookups remain deterministic.
   const shouldNormalize = (() => {
+    if (sheets.length === 0) return true;
     const seen = new Set<string>();
     for (const entry of sheets.toArray()) {
       const maybe = entry as any;
       const id = coerceString(maybe?.get?.("id") ?? maybe?.id);
-      if (!id) return true;
+      if (!id) continue;
       if (seen.has(id)) return true;
       seen.add(id);
     }
-    return sheets.length === 0;
+    return false;
   })();
 
   if (shouldNormalize) {
@@ -45,10 +46,7 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
       for (let i = 0; i < sheets.length; i++) {
         const entry = sheets.get(i) as any;
         const id = coerceString(entry?.get?.("id") ?? entry?.id);
-        if (!id) {
-          deleteIndices.push(i);
-          continue;
-        }
+        if (!id) continue;
         if (seen.has(id)) {
           deleteIndices.push(i);
           continue;

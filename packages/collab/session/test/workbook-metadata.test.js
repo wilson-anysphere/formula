@@ -144,6 +144,39 @@ test("CollabSession schema normalizes duplicate sheet ids when docs merge (in-me
   docB.destroy();
 });
 
+test("CollabSession schema does not delete sheets that are populated across multiple transactions", () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  const sessionA = createCollabSession({ doc: docA });
+  const sessionB = createCollabSession({ doc: docB });
+  const disconnect = connectDocs(docA, docB);
+
+  // Simulate a (sloppy but possible) sheet creation flow where the sheet map is
+  // inserted into the array and populated in a later transaction.
+  const sheetsB = sessionB.sheets;
+  const sheet = new Y.Map();
+  docB.transact(() => {
+    sheetsB.push([sheet]);
+  });
+
+  docB.transact(() => {
+    sheet.set("id", "Sheet2");
+    sheet.set("name", "Sheet2");
+  });
+
+  const sheetIdsA = snapshotSheets(sessionA).map((s) => s.id);
+  const sheetIdsB = snapshotSheets(sessionB).map((s) => s.id);
+
+  assert.ok(sheetIdsA.includes("Sheet2"));
+  assert.ok(sheetIdsB.includes("Sheet2"));
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession workbook metadata undo never reverts other users' overwrites (in-memory)", () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
