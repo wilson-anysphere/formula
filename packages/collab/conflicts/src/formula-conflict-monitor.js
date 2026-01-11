@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { normalizeFormula } from "../../../versioning/src/index.js";
 import { resolveFormulaConflict } from "./formula-conflict-resolver.js";
 import { cellRefFromKey } from "./cell-ref.js";
 import { tryEvaluateFormula } from "./formula-eval.js";
@@ -421,15 +422,7 @@ export class FormulaConflictMonitor {
  * @param {string} b
  */
 function formulasRoughlyEqual(a, b) {
-  return normalizeFormulaText(a) === normalizeFormulaText(b);
-}
-
-/**
- * @param {string} formula
- */
-function normalizeFormulaText(formula) {
-  const stripped = String(formula ?? "").trim().replace(/^\s*=\s*/, "");
-  return stripped.replaceAll(/\s+/g, "").toUpperCase();
+  return normalizeFormula(a) === normalizeFormula(b);
 }
 
 /**
