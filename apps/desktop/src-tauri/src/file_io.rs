@@ -17,6 +17,8 @@ use std::sync::Arc;
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
 
+use crate::macro_trust::compute_macro_fingerprint;
+
 #[derive(Clone, Debug)]
 pub struct Sheet {
     pub id: String,
@@ -169,6 +171,8 @@ pub struct Workbook {
     /// name/extension (e.g. opening legacy `.xls` defaults to saving as `.xlsx`).
     pub origin_path: Option<String>,
     pub vba_project_bin: Option<Vec<u8>>,
+    /// Stable identifier used for macro trust decisions (hash of workbook identity + `vbaProject.bin`).
+    pub macro_fingerprint: Option<String>,
     pub preserved_drawing_parts: Option<PreservedDrawingParts>,
     pub sheets: Vec<Sheet>,
     pub print_settings: WorkbookPrintSettings,
@@ -180,6 +184,7 @@ impl Workbook {
             origin_path: path.clone(),
             path,
             vba_project_bin: None,
+            macro_fingerprint: None,
             preserved_drawing_parts: None,
             sheets: Vec::new(),
             print_settings: WorkbookPrintSettings::default(),
@@ -295,6 +300,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
         vba_project_bin: None,
+        macro_fingerprint: None,
         preserved_drawing_parts: None,
         sheets: Vec::new(),
         print_settings,
@@ -312,6 +318,9 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?;
         if let Ok(pkg) = XlsxPackage::from_bytes(&bytes) {
             out.vba_project_bin = pkg.vba_project_bin().map(|b| b.to_vec());
+            if let (Some(origin), Some(vba)) = (out.origin_path.as_deref(), out.vba_project_bin.as_deref()) {
+                out.macro_fingerprint = Some(compute_macro_fingerprint(origin, vba));
+            }
             if let Ok(preserved) = pkg.preserve_drawing_parts() {
                 if !preserved.is_empty() {
                     out.preserved_drawing_parts = Some(preserved);
@@ -414,6 +423,7 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
         vba_project_bin: None,
+        macro_fingerprint: None,
         preserved_drawing_parts: None,
         sheets: vec![sheet],
         print_settings: WorkbookPrintSettings::default(),
@@ -429,6 +439,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
         vba_project_bin: None,
+        macro_fingerprint: None,
         preserved_drawing_parts: None,
         sheets: Vec::new(),
         print_settings: WorkbookPrintSettings::default(),

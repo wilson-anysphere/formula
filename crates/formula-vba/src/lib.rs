@@ -8,10 +8,14 @@
 mod compression;
 mod dir;
 mod ole;
+mod signature;
 
 pub use compression::{compress_container, decompress_container, CompressionError};
 pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
 pub use ole::{OleError, OleFile};
+pub use signature::{
+    parse_vba_digital_signature, SignatureError, VbaDigitalSignature, VbaSignatureVerification,
+};
 
 use std::collections::BTreeMap;
 

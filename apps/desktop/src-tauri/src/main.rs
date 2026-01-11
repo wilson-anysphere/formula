@@ -8,12 +8,19 @@ mod tray;
 mod updater;
 
 use formula_desktop_tauri::commands;
+use formula_desktop_tauri::macro_trust::{MacroTrustStore, SharedMacroTrustStore};
 use formula_desktop_tauri::state::{AppState, SharedAppState};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
 fn main() {
     let state: SharedAppState = Arc::new(Mutex::new(AppState::new()));
+    let macro_trust: SharedMacroTrustStore =
+        Arc::new(Mutex::new(MacroTrustStore::load_default().unwrap_or_else(|_| {
+            // Backend startup should not fail if the trust store is unreadable; fall back
+            // to an ephemeral store (macros will remain blocked by default).
+            MacroTrustStore::new_ephemeral()
+        })));
 
     tauri::Builder::default()
         .plugin(
@@ -33,6 +40,7 @@ fn main() {
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
+        .manage(macro_trust)
         .invoke_handler(tauri::generate_handler![
             commands::open_workbook,
             commands::save_workbook,
@@ -49,6 +57,8 @@ fn main() {
             commands::export_sheet_range_pdf,
             commands::get_vba_project,
             commands::list_macros,
+            commands::get_macro_security_status,
+            commands::set_macro_trust,
             commands::run_macro,
         ])
         .setup(|app| {

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use crate::macro_trust::MacroTrustDecision;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PrintCellRange {
     pub start_row: u32,
@@ -123,6 +125,11 @@ pub struct RangeCellEdit {
 use crate::file_io::{read_csv, read_xlsx, write_xlsx};
 #[cfg(feature = "desktop")]
 use crate::state::{AppState, AppStateError, CellUpdateData, SharedAppState};
+#[cfg(feature = "desktop")]
+use crate::{
+    macro_trust::{compute_macro_fingerprint, SharedMacroTrustStore},
+    file_io::Workbook,
+};
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
 #[cfg(feature = "desktop")]
@@ -631,8 +638,49 @@ pub enum MacroPermission {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum MacroSignatureStatus {
+    Unsigned,
+    SignedUnverified,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MacroSignatureInfo {
+    pub status: MacroSignatureStatus,
+    pub signer_subject: Option<String>,
+    /// Raw signature blob, base64 encoded. May be omitted in the future if it grows large.
+    pub signature_base64: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MacroSecurityStatus {
+    pub has_macros: bool,
+    pub origin_path: Option<String>,
+    pub workbook_fingerprint: Option<String>,
+    pub signature: Option<MacroSignatureInfo>,
+    pub trust: MacroTrustDecision,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum MacroBlockedReason {
+    NotTrusted,
+    SignatureRequired,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct MacroBlockedError {
+    pub reason: MacroBlockedReason,
+    pub status: MacroSecurityStatus,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MacroError {
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked: Option<MacroBlockedError>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -641,6 +689,82 @@ pub struct MacroRunResult {
     pub output: Vec<String>,
     pub updates: Vec<CellUpdate>,
     pub error: Option<MacroError>,
+}
+
+#[cfg(feature = "desktop")]
+fn workbook_identity_for_trust(workbook: &Workbook, workbook_id: Option<&str>) -> String {
+    workbook
+        .origin_path
+        .as_deref()
+        .or(workbook.path.as_deref())
+        .or(workbook_id)
+        .unwrap_or("untitled")
+        .to_string()
+}
+
+#[cfg(feature = "desktop")]
+fn compute_workbook_fingerprint(workbook: &mut Workbook, workbook_id: Option<&str>) -> Option<String> {
+    if workbook.vba_project_bin.is_none() {
+        return None;
+    }
+    if let Some(fp) = workbook.macro_fingerprint.as_deref() {
+        return Some(fp.to_string());
+    }
+    let id = workbook_identity_for_trust(workbook, workbook_id);
+    let vba = workbook
+        .vba_project_bin
+        .as_deref()
+        .expect("checked is_some above");
+    let fp = compute_macro_fingerprint(&id, vba);
+    workbook.macro_fingerprint = Some(fp.clone());
+    Some(fp)
+}
+
+#[cfg(feature = "desktop")]
+fn build_macro_security_status(
+    workbook: &mut Workbook,
+    workbook_id: Option<&str>,
+    trust_store: &crate::macro_trust::MacroTrustStore,
+) -> Result<MacroSecurityStatus, String> {
+    use base64::Engine as _;
+
+    let has_macros = workbook.vba_project_bin.is_some();
+    let fingerprint = compute_workbook_fingerprint(workbook, workbook_id);
+
+    let signature = if let Some(vba_bin) = workbook.vba_project_bin.as_deref() {
+        // Signature parsing is best-effort: failures should not prevent macro listing or
+        // execution (trust decisions are still enforced by the fingerprint).
+        let parsed = formula_vba::parse_vba_digital_signature(vba_bin).ok().flatten();
+        Some(match parsed {
+            Some(sig) => MacroSignatureInfo {
+                status: MacroSignatureStatus::SignedUnverified,
+                signer_subject: sig.signer_subject,
+                signature_base64: Some(
+                    base64::engine::general_purpose::STANDARD.encode(sig.signature),
+                ),
+            },
+            None => MacroSignatureInfo {
+                status: MacroSignatureStatus::Unsigned,
+                signer_subject: None,
+                signature_base64: None,
+            },
+        })
+    } else {
+        None
+    };
+
+    let trust = fingerprint
+        .as_deref()
+        .map(|fp| trust_store.trust_state(fp))
+        .unwrap_or(MacroTrustDecision::Blocked);
+
+    Ok(MacroSecurityStatus {
+        has_macros,
+        origin_path: workbook.origin_path.clone(),
+        workbook_fingerprint: fingerprint,
+        signature,
+        trust,
+    })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -666,6 +790,56 @@ pub struct VbaProjectSummary {
     pub constants: Option<String>,
     pub references: Vec<VbaReferenceSummary>,
     pub modules: Vec<VbaModuleSummary>,
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn get_macro_security_status(
+    workbook_id: Option<String>,
+    state: State<'_, SharedAppState>,
+    trust: State<'_, SharedMacroTrustStore>,
+) -> Result<MacroSecurityStatus, String> {
+    let workbook_id = workbook_id.as_deref();
+    let shared = state.inner().clone();
+    let trust_shared = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let mut trust_store = trust_shared.lock().unwrap();
+        let workbook = state.get_workbook_mut().map_err(app_error)?;
+        build_macro_security_status(workbook, workbook_id, &trust_store)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn set_macro_trust(
+    workbook_id: Option<String>,
+    decision: MacroTrustDecision,
+    state: State<'_, SharedAppState>,
+    trust: State<'_, SharedMacroTrustStore>,
+) -> Result<MacroSecurityStatus, String> {
+    let workbook_id = workbook_id.as_deref();
+    let shared = state.inner().clone();
+    let trust_shared = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let mut trust_store = trust_shared.lock().unwrap();
+
+        let workbook = state.get_workbook_mut().map_err(app_error)?;
+        let Some(fingerprint) = compute_workbook_fingerprint(workbook, workbook_id) else {
+            return Err("workbook has no macros to trust".to_string());
+        };
+
+        trust_store
+            .set_trust(fingerprint, decision)
+            .map_err(|e| e.to_string())?;
+
+        build_macro_security_status(workbook, workbook_id, &trust_store)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(feature = "desktop")]
@@ -987,13 +1161,50 @@ pub async fn run_macro(
     permissions: Option<Vec<MacroPermission>>,
     timeout_ms: Option<u64>,
     state: State<'_, SharedAppState>,
+    trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
     use std::time::Duration;
 
-    let _ = workbook_id;
+    let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
+    let trust_shared = trust.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
+        let trust_store = trust_shared.lock().unwrap();
+
+        let workbook_id = workbook_id_str.as_deref();
+        let workbook = state.get_workbook_mut().map_err(app_error)?;
+        let status = build_macro_security_status(workbook, workbook_id, &trust_store)?;
+        drop(trust_store);
+
+        if status.has_macros {
+            let is_signed = matches!(
+                status.signature.as_ref().map(|s| s.status),
+                Some(MacroSignatureStatus::SignedUnverified)
+            );
+            let allowed = match status.trust {
+                MacroTrustDecision::TrustedAlways | MacroTrustDecision::TrustedOnce => true,
+                MacroTrustDecision::TrustedSignedOnly => is_signed,
+                MacroTrustDecision::Blocked => false,
+            };
+
+            if !allowed {
+                let reason = match status.trust {
+                    MacroTrustDecision::TrustedSignedOnly => MacroBlockedReason::SignatureRequired,
+                    _ => MacroBlockedReason::NotTrusted,
+                };
+                return Ok(MacroRunResult {
+                    ok: false,
+                    output: Vec::new(),
+                    updates: Vec::new(),
+                    error: Some(MacroError {
+                        message: "Macros are blocked by Trust Center policy.".to_string(),
+                        code: Some("macro_blocked".to_string()),
+                        blocked: Some(MacroBlockedError { reason, status }),
+                    }),
+                });
+            }
+        }
 
         let program = build_vba_program(&state)?;
 
@@ -1035,6 +1246,8 @@ pub async fn run_macro(
                 updates,
                 error: Some(MacroError {
                     message: err.to_string(),
+                    code: None,
+                    blocked: None,
                 }),
             },
         })

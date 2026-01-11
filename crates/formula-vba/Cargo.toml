@@ -7,6 +7,7 @@ edition = "2021"
 cfb = "0.10"
 encoding_rs = "0.8"
 thiserror = "1"
+x509-parser = "0.17"
 
 [dev-dependencies]
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
