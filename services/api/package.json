@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "migrate": "tsx src/scripts/migrate.ts",
     "retention:sweep": "tsx src/scripts/retention.ts",
+    "keys:rotate": "tsx src/scripts/rotateKeys.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -56,6 +56,8 @@ describe("API e2e: DLP policy + classification endpoints", () => {
       cookieSecure: false,
       syncTokenSecret: "test-sync-secret",
       syncTokenTtlSeconds: 60,
+      localKmsMasterKey: "test-local-kms-master-key",
+      awsKmsEnabled: false,
       retentionSweepIntervalMs: null
     };
 
@@ -198,4 +200,3 @@ describe("API e2e: DLP policy + classification endpoints", () => {
     expect((listAfterDelete.json() as any).classifications).toHaveLength(0);
   });
 });
-

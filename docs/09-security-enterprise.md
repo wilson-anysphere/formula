@@ -403,6 +403,42 @@ class EncryptionService {
 }
 ```
 
+#### Cloud backend implementation (services/api)
+
+The cloud backend implements **envelope encryption** for sensitive database blobs starting with `document_versions.data`.
+
+- **Policy gate:** `org_settings.cloud_encryption_at_rest`
+  - `true`: new writes are encrypted; reads transparently decrypt
+  - `false`: plaintext writes are allowed; reads still decrypt encrypted rows (mixed-mode rollout)
+- **Algorithm:** AES-256-GCM for payload encryption
+- **Per-blob metadata (stored in Postgres):**
+  - `document_versions.data_ciphertext`, `data_iv`, `data_tag`
+  - `document_versions.data_encrypted_dek` (wrapped DEK)
+  - `document_versions.data_kms_provider`, `data_kms_key_id`
+  - `document_versions.data_aad` (AAD includes `orgId`, `documentId`, `documentVersionId`, and `envelopeVersion`)
+
+##### KMS providers
+
+- **Local (dev/test):** `kms_provider = 'local'`
+  - Uses `LOCAL_KMS_MASTER_KEY` to derive per-org wrapping keys via HKDF-SHA256
+- **AWS (optional):** `kms_provider = 'aws'`
+  - Requires `AWS_KMS_ENABLED=true`, `AWS_REGION`, and adding `@aws-sdk/client-kms` to `services/api`
+
+##### Key rotation
+
+`services/api` includes a rotation script that:
+
+1. Checks each org’s `org_settings.key_rotation_days` against `org_settings.kms_key_rotated_at`
+2. Updates `org_settings.kms_key_id` (local provider generates a new id)
+3. **Re-wraps DEKs** in `document_versions.data_encrypted_dek` to the latest `kms_key_id` without re-encrypting ciphertext
+
+Run with:
+
+```bash
+cd services/api
+npm run keys:rotate
+```
+
 ### Encryption in Transit
 
 ```typescript

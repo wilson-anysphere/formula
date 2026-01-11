@@ -22,6 +22,21 @@ export interface AppConfig {
    */
   syncServerInternalAdminToken?: string;
   /**
+   * Master secret for the LocalKmsProvider (dev/test).
+   *
+   * In production, set this to a high-entropy value and/or use a real KMS
+   * provider (aws/gcp/azure).
+   */
+  localKmsMasterKey: string;
+  /**
+   * Enable AWS KMS provider support (requires @aws-sdk/client-kms).
+   */
+  awsKmsEnabled: boolean;
+  /**
+   * AWS region to use for KMS operations when awsKmsEnabled=true.
+   */
+  awsRegion?: string;
+  /**
    * If null, retention sweeps are disabled.
    */
   retentionSweepIntervalMs: number | null;
@@ -49,6 +64,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const syncTokenTtlSeconds = parseIntEnv(env.SYNC_TOKEN_TTL_SECONDS, 60 * 5);
   const syncServerInternalUrl = env.SYNC_SERVER_INTERNAL_URL;
   const syncServerInternalAdminToken = env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN;
+  const localKmsMasterKey = env.LOCAL_KMS_MASTER_KEY ?? "dev-local-kms-master-key-change-me";
+  const awsKmsEnabled = env.AWS_KMS_ENABLED === "true";
+  const awsRegion = env.AWS_REGION;
   const retentionSweepIntervalMs =
     env.RETENTION_SWEEP_INTERVAL_MS === "0"
       ? null
@@ -65,6 +83,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     syncTokenTtlSeconds,
     syncServerInternalUrl,
     syncServerInternalAdminToken,
+    localKmsMasterKey,
+    awsKmsEnabled,
+    awsRegion,
     retentionSweepIntervalMs,
     internalAdminToken
   };

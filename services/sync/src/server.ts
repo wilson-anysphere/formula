@@ -1,7 +1,28 @@
 import http from "node:http";
+import { createRequire } from "node:module";
 import type { Duplex } from "node:stream";
-import jwt from "jsonwebtoken";
 import { WebSocketServer, type WebSocket, type RawData } from "ws";
+
+type JwtModule = typeof import("jsonwebtoken");
+
+function loadJwt(): JwtModule {
+  // Prefer resolving from this package's location (works for normal sync service
+  // builds where dependencies are installed in services/sync/node_modules).
+  // Fall back to resolving from the current working directory so this also works
+  // when the sync server is imported from sibling packages in tests (e.g.
+  // services/api) without installing dependencies in services/sync.
+  if (typeof __filename === "string") {
+    try {
+      const requireFromHere = createRequire(__filename);
+      return requireFromHere("jsonwebtoken") as JwtModule;
+    } catch {
+      // fall through
+    }
+  }
+
+  const requireFromCwd = createRequire(process.cwd() + "/");
+  return requireFromCwd("jsonwebtoken") as JwtModule;
+}
 
 export interface SyncServerConfig {
   port: number;
@@ -23,6 +44,7 @@ function unauthorized(socket: Duplex): void {
 }
 
 export function createSyncServer(config: SyncServerConfig): SyncServer {
+  const jwt = loadJwt();
   const server = http.createServer((req, res) => {
     if (req.method === "GET" && req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
