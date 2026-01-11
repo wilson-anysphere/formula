@@ -35,8 +35,15 @@ function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
+function normalizeFormulaText(formula) {
+  if (typeof formula !== "string") return formula;
+  const trimmed = formula.trimStart();
+  if (trimmed.startsWith("=")) return formula;
+  return `=${formula}`;
+}
+
 function cellInputFromState(state) {
-  if (state.formula != null) return state.formula;
+  if (state.formula != null) return normalizeFormulaText(state.formula);
   const value = state.value ?? null;
   // This scripting surface treats strings that start with "=" as formulas on write. To allow
   // round-tripping literal strings that start with "=", we re-add the leading apostrophe when
