@@ -129,7 +129,12 @@ export class CellStructuralConflictMonitor {
  
         if (!target) return false;
  
-        const chosenCell = resolution.choice === "theirs" ? theirsCell ?? oursCell : oursCell ?? theirsCell;
+        const chosenCell =
+          resolution.choice === "manual" && "cell" in resolution
+            ? resolution.cell
+            : resolution.choice === "theirs"
+              ? theirsCell ?? oursCell
+              : oursCell ?? theirsCell;
  
         this.doc.transact(() => {
           // Clear source + both destinations.
