@@ -1417,6 +1417,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         col: clampIndex(headerColsRef.current, 0, colCount - 1)
       };
     const ctrlOrMeta = event.ctrlKey || event.metaKey;
+    const dataStartRow = headerRowsRef.current >= rowCount ? 0 : headerRowsRef.current;
+    const dataStartCol = headerColsRef.current >= colCount ? 0 : headerColsRef.current;
 
     const applySelectionRange = (range: CellRange) => {
       keyboardAnchorRef.current = null;
@@ -1609,13 +1611,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     switch (event.key) {
       case "ArrowUp":
-        nextRow = ctrlOrMeta ? 0 : active.row - 1;
+        nextRow = ctrlOrMeta ? dataStartRow : active.row - 1;
         break;
       case "ArrowDown":
         nextRow = ctrlOrMeta ? rowCount - 1 : active.row + 1;
         break;
       case "ArrowLeft":
-        nextCol = ctrlOrMeta ? 0 : active.col - 1;
+        nextCol = ctrlOrMeta ? dataStartCol : active.col - 1;
         break;
       case "ArrowRight":
         nextCol = ctrlOrMeta ? colCount - 1 : active.col + 1;
@@ -1636,10 +1638,10 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         break;
       case "Home":
         if (ctrlOrMeta) {
-          nextRow = 0;
-          nextCol = 0;
+          nextRow = dataStartRow;
+          nextCol = dataStartCol;
         } else {
-          nextCol = 0;
+          nextCol = dataStartCol;
         }
         break;
       case "End":
@@ -1664,8 +1666,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     event.preventDefault();
 
-    nextRow = Math.max(0, Math.min(rowCount - 1, nextRow));
-    nextCol = Math.max(0, Math.min(colCount - 1, nextCol));
+    nextRow = Math.max(dataStartRow, Math.min(rowCount - 1, nextRow));
+    nextCol = Math.max(dataStartCol, Math.min(colCount - 1, nextCol));
 
     const extendSelection = event.shiftKey && event.key !== "Tab" && event.key !== "Enter";
 

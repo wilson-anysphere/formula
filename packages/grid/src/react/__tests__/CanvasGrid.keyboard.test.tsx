@@ -367,4 +367,68 @@ describe("CanvasGrid keyboard navigation", () => {
     });
     host.remove();
   });
+
+  it("treats frozen header rows/cols as the navigation origin", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onSelectionChange = vi.fn();
+    const onSelectionRangeChange = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
+          rowCount={20}
+          colCount={20}
+          frozenRows={1}
+          frozenCols={1}
+          apiRef={apiRef}
+          onSelectionChange={onSelectionChange}
+          onSelectionRangeChange={onSelectionRangeChange}
+        />
+      );
+    });
+
+    const container = host.querySelector('[data-testid="canvas-grid"]') as HTMLDivElement;
+    container.focus();
+
+    await act(async () => {
+      apiRef.current?.setSelection(5, 5);
+    });
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    await act(async () => {
+      container.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+    });
+
+    expect(apiRef.current?.getSelection()).toEqual({ row: 5, col: 1 });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 5, endRow: 6, startCol: 1, endCol: 2 });
+
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    await act(async () => {
+      apiRef.current?.setSelection(5, 5);
+    });
+    onSelectionChange.mockClear();
+    onSelectionRangeChange.mockClear();
+
+    await act(async () => {
+      container.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Home", ctrlKey: true, bubbles: true, cancelable: true })
+      );
+    });
+
+    expect(apiRef.current?.getSelection()).toEqual({ row: 1, col: 1 });
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 1, endRow: 2, startCol: 1, endCol: 2 });
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
 });
