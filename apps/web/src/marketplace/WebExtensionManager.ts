@@ -293,9 +293,7 @@ export class WebExtensionManager {
       throw new Error("Marketplace did not provide latestVersion");
     }
 
-    const rawPublisherKeys = Array.isArray((ext as any).publisherKeys)
-      ? ((ext as any).publisherKeys as Array<{ id: unknown; publicKeyPem: unknown; revoked?: unknown }>)
-      : [];
+    const rawPublisherKeys = Array.isArray(ext.publisherKeys) ? ext.publisherKeys : [];
     const hasPublisherKeySet = rawPublisherKeys.length > 0;
 
     let candidateKeys: Array<{ id: string | null; publicKeyPem: string }> = [];
