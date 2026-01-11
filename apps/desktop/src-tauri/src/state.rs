@@ -710,19 +710,18 @@ impl AppState {
                     "missing persistence mapping for sheet id {sheet_id}"
                 ))
             })?;
-            persistent
+            let viewport = persistent
                 .memory
-                .load_visible_range(
+                .load_viewport(
                     sheet_uuid,
                     StorageCellRange::new(row as i64, row as i64, col as i64, col as i64),
                 )
                 .map_err(|e| AppStateError::Persistence(e.to_string()))?;
-            let cached = persistent
-                .memory
-                .get_cached_cell(sheet_uuid, row as i64, col as i64)
-                .and_then(|c| c.formula)
+            let cached = viewport
+                .get(row as i64, col as i64)
+                .and_then(|c| c.formula.as_ref())
                 .and_then(|f| {
-                    let display = formula_model::display_formula_text(&f);
+                    let display = formula_model::display_formula_text(f);
                     if display.is_empty() {
                         None
                     } else {
@@ -768,15 +767,15 @@ impl AppState {
             .sheet(sheet_id)
             .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
 
-        let (persistent, sheet_uuid) = if let Some(persistent) = self.persistent.as_ref() {
+        let viewport = if let Some(persistent) = self.persistent.as_ref() {
             let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
                 AppStateError::Persistence(format!(
                     "missing persistence mapping for sheet id {sheet_id}"
                 ))
             })?;
-            persistent
+            let viewport = persistent
                 .memory
-                .load_visible_range(
+                .load_viewport(
                     sheet_uuid,
                     StorageCellRange::new(
                         start_row as i64,
@@ -786,9 +785,9 @@ impl AppState {
                     ),
                 )
                 .map_err(|e| AppStateError::Persistence(e.to_string()))?;
-            (Some(persistent), Some(sheet_uuid))
+            Some(viewport)
         } else {
-            (None, None)
+            None
         };
 
         let mut rows = Vec::with_capacity(end_row - start_row + 1);
@@ -800,13 +799,12 @@ impl AppState {
                 let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
                 let value = format_scalar_for_display(value, cell.number_format.as_deref());
 
-                 let formula = if let (Some(persistent), Some(sheet_uuid)) = (persistent, sheet_uuid) {
-                     let cached = persistent
-                         .memory
-                         .get_cached_cell(sheet_uuid, r as i64, c as i64)
-                         .and_then(|c| c.formula)
+                 let formula = if let Some(viewport) = viewport.as_ref() {
+                     let cached = viewport
+                         .get(r as i64, c as i64)
+                         .and_then(|c| c.formula.as_ref())
                          .and_then(|f| {
-                             let display = formula_model::display_formula_text(&f);
+                             let display = formula_model::display_formula_text(f);
                              if display.is_empty() {
                                  None
                              } else {
