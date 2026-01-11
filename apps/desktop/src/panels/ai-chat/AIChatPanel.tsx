@@ -135,7 +135,11 @@ export function AIChatPanel(props: AIChatPanelProps) {
       };
 
       const onToolResult = (call: ToolCall, result: unknown) => {
-        executedToolCalls.push({ name: call.name, ok: typeof (result as any)?.ok === "boolean" ? (result as any).ok : undefined });
+        // Many tool executors return domain objects without an explicit `{ ok }` field.
+        // If the tool loop reached `onToolResult`, we treat that as a success signal
+        // unless the result explicitly reports `{ ok: false }`.
+        const ok = typeof (result as any)?.ok === "boolean" ? (result as any).ok : true;
+        executedToolCalls.push({ name: call.name, ok });
         setMessages((prev) => [
           ...insertBeforePendingAssistant(prev, {
             id: messageId(),
