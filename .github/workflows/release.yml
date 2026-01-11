@@ -37,6 +37,13 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
+      # contention on shared ~/.cargo. In GitHub Actions we prefer the default
+      # CARGO_HOME so cargo installs/builds share the same cache.
+      - name: Use shared Cargo home for CI caching
+        shell: bash
+        run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-24.04'
         run: |
