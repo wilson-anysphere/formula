@@ -364,6 +364,13 @@ export class WorkbookSearchIndex {
    * remove old grams without storing per-cell state in the index.
    */
   updateCell(sheetName, row, col, { oldCell, newCell }) {
+    const sheet = getSheetByName(this.workbook, sheetName);
+    const master = getMergedMasterCell(sheet, row, col);
+    if (master) {
+      row = master.row;
+      col = master.col;
+    }
+
     const sheetMap = this._sheetIndexes.get(sheetName);
     if (!sheetMap) return;
 

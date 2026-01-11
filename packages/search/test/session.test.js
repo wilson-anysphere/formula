@@ -157,3 +157,35 @@ test("WorkbookSearchIndex: auto strategy does not build a full-sheet index for s
   assert.equal(m.address, "Sheet1!A1");
   assert.equal(index.getSheetModeIndex("Sheet1", "values:display"), null);
 });
+
+test("WorkbookSearchIndex: updateCell normalizes merged interior addresses to the master cell", async () => {
+  const wb = new InMemoryWorkbook();
+  const sheet = wb.addSheet("Sheet1");
+  sheet.mergeCells({ startRow: 0, endRow: 0, startCol: 0, endCol: 1 }); // A1:B1
+  sheet.setValue(0, 0, "foo");
+
+  const index = new WorkbookSearchIndex(wb, { autoThresholdCells: 0 });
+
+  // Build index.
+  const builder = new SearchSession(wb, "foo", {
+    scope: "sheet",
+    currentSheetName: "Sheet1",
+    index,
+    indexStrategy: "always",
+  });
+  await builder.findNext();
+
+  // Update via the interior cell address (B1) but with the master cell values.
+  sheet.setValue(0, 0, "bar");
+  index.updateCell("Sheet1", 0, 1, { oldCell: { value: "foo" }, newCell: { value: "bar" } });
+
+  const session = new SearchSession(wb, "bar", {
+    scope: "sheet",
+    currentSheetName: "Sheet1",
+    index,
+    indexStrategy: "always",
+  });
+  const match = await session.findNext();
+  assert.equal(match.address, "Sheet1!A1");
+  assert.equal(session.stats.indexCellsVisited, 0);
+});
