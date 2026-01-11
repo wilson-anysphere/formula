@@ -60,3 +60,53 @@ fn index_reference_errors() {
     assert_eq!(sheet.eval("=INDEX(A1:A3,4)"), Value::Error(ErrorKind::Ref));
 }
 
+#[test]
+fn index_truncates_fractional_indices_toward_zero() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 10.0);
+    sheet.set("A2", 20.0);
+    sheet.set("A3", 30.0);
+    sheet.set("B1", 1.0);
+    sheet.set("C1", 2.0);
+
+    // row_num/col_num are coerced via truncation toward 0.
+    assert_eq!(sheet.eval("=INDEX(A1:A3,2.9)"), Value::Number(20.0));
+    assert_eq!(sheet.eval("=INDEX(A1:C1,1,2.1)"), Value::Number(1.0));
+
+    // Negative indices become #VALUE! after truncation.
+    assert_eq!(sheet.eval("=INDEX(A1:A3,-1.1)"), Value::Error(ErrorKind::Value));
+    assert_eq!(sheet.eval("=INDEX(A1:C1,1,-2.9)"), Value::Error(ErrorKind::Value));
+}
+
+#[test]
+fn index_area_num_defaults_and_bounds() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 3.0);
+    sheet.set("C1", 10.0);
+    sheet.set("C2", 20.0);
+    sheet.set("C3", 30.0);
+
+    // Default area_num is 1.
+    assert_eq!(
+        sheet.eval("=INDEX((A1:A3,C1:C3),2,1)"),
+        Value::Number(2.0)
+    );
+
+    // Out of bounds area_num -> #REF!
+    assert_eq!(
+        sheet.eval("=INDEX((A1:A3,C1:C3),2,1,0)"),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        sheet.eval("=INDEX((A1:A3,C1:C3),2,1,3)"),
+        Value::Error(ErrorKind::Ref)
+    );
+
+    // Passing area_num for a single-area reference behaves like Excel and errors unless it's 1.
+    assert_eq!(
+        sheet.eval("=INDEX(A1:A3,2,1,2)"),
+        Value::Error(ErrorKind::Ref)
+    );
+}
