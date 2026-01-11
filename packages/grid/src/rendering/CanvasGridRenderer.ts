@@ -2215,8 +2215,9 @@ export class CanvasGridRenderer {
 
     if (this.selectionRanges.length === 0) return;
 
-    const activeRange = this.selectionRanges[this.activeSelectionIndex];
-    const inactiveRanges = this.selectionRanges.filter((_, idx) => idx !== this.activeSelectionIndex);
+    const selectionRanges = this.selectionRanges;
+    const activeIndex = this.activeSelectionIndex;
+    const activeRange = selectionRanges[activeIndex];
 
     const drawRange = (range: CellRange, options: { fillAlpha: number; strokeAlpha: number; strokeWidth: number }) => {
       const rects = this.rangeToViewportRects(range, viewport);
@@ -2245,8 +2246,9 @@ export class CanvasGridRenderer {
       ctx.restore();
     };
 
-    for (const range of inactiveRanges) {
-      drawRange(range, { fillAlpha: 2 / 3, strokeAlpha: 0.8, strokeWidth: 1 });
+    for (let i = 0; i < selectionRanges.length; i++) {
+      if (i === activeIndex) continue;
+      drawRange(selectionRanges[i], { fillAlpha: 2 / 3, strokeAlpha: 0.8, strokeWidth: 1 });
     }
 
     drawRange(activeRange, { fillAlpha: 1, strokeAlpha: 1, strokeWidth: 2 });
