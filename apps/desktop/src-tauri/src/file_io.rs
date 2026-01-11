@@ -1290,7 +1290,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
 
         if edits.len() == 1 {
             let (sheet_index, edits) = &edits[0];
-            xlsb.save_with_cell_edits(&final_out_path, *sheet_index, edits)
+            xlsb.save_with_cell_edits_streaming(&final_out_path, *sheet_index, edits)
                 .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
             return Ok(());
         }
@@ -1325,7 +1325,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
 
             let wb = XlsbWorkbook::open(&source_path)
                 .with_context(|| format!("open xlsb {:?}", source_path))?;
-            wb.save_with_cell_edits(&out_path, *sheet_index, sheet_edits)
+            wb.save_with_cell_edits_streaming(&out_path, *sheet_index, sheet_edits)
                 .with_context(|| format!("save edited xlsb {:?}", out_path))?;
 
             source_path = out_path;
