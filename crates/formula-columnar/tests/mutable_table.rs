@@ -235,3 +235,49 @@ fn distinct_count_survives_snapshot_and_append() {
     let stats = mutable.column_stats(0).unwrap();
     assert_eq!(stats.distinct_count, 4);
 }
+
+#[test]
+fn freeze_merges_overlays_across_flushed_and_current_pages() {
+    let schema = vec![
+        ColumnSchema {
+            name: "x".to_owned(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "cat".to_owned(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 4,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+
+    let mut table = MutableColumnarTable::new(schema, options);
+    for (x, cat) in [
+        (0.0, "A"),
+        (1.0, "B"),
+        (2.0, "C"),
+        (3.0, "D"),
+        (4.0, "E"),
+        (5.0, "F"),
+    ] {
+        table.append_row(&[
+            Value::Number(x),
+            Value::String(Arc::<str>::from(cat)),
+        ]);
+    }
+
+    // Update a value in a flushed page (row 1) and in the current append buffer (row 5).
+    assert!(table.update_cell(1, 0, Value::Number(100.0)));
+    assert!(table.update_cell(1, 1, Value::String(Arc::<str>::from("Z"))));
+    assert!(table.update_cell(5, 0, Value::Number(200.0)));
+    assert!(table.update_cell(5, 1, Value::String(Arc::<str>::from("Y"))));
+
+    let frozen = table.freeze();
+    assert_eq!(frozen.row_count(), 6);
+    assert_eq!(frozen.get_cell(1, 0), Value::Number(100.0));
+    assert_eq!(frozen.get_cell(1, 1), Value::String(Arc::<str>::from("Z")));
+    assert_eq!(frozen.get_cell(5, 0), Value::Number(200.0));
+    assert_eq!(frozen.get_cell(5, 1), Value::String(Arc::<str>::from("Y")));
+}
