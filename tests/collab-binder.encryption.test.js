@@ -5,6 +5,7 @@ import * as Y from "yjs";
 
 import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { bindYjsToDocumentController } from "../packages/collab/binder/index.js";
+import { encryptCellPlaintext } from "../packages/collab/encryption/src/index.node.js";
 
 const REMOTE_ORIGIN = Symbol("remote");
 
@@ -206,5 +207,75 @@ test("Yjs↔DocumentController binder uses maskCellValue hook when encrypted cel
   controllerA.setCellValue("Sheet1", "A1", "top-secret");
 
   await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value === "MASKED", 10_000);
+  assert.equal(controllerB.getCell("Sheet1", "A1").formula, null);
+});
+
+test("Yjs↔DocumentController binder prefers encrypted payloads over plaintext duplicates across legacy key encodings", async (t) => {
+  const docId = "collab-binder-encryption-test-doc-legacy-keys";
+  const docA = new Y.Doc({ guid: docId });
+  const docB = new Y.Doc({ guid: docId });
+  const disconnect = connectDocs(docA, docB);
+
+  const keyBytes = new Uint8Array(32).fill(5);
+  const keyForA1 = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-1", keyBytes };
+    }
+    return null;
+  };
+
+  const controllerA = new DocumentController();
+  const controllerB = new DocumentController();
+
+  const binderA = bindYjsToDocumentController({
+    ydoc: docA,
+    documentController: controllerA,
+    defaultSheetId: "Sheet1",
+    userId: "u-a",
+    encryption: { keyForCell: keyForA1 },
+  });
+
+  const binderB = bindYjsToDocumentController({
+    ydoc: docB,
+    documentController: controllerB,
+    defaultSheetId: "Sheet1",
+    userId: "u-b",
+    // No key on B.
+    maskCellValue: (value) => value,
+  });
+
+  t.after(() => {
+    binderA.destroy();
+    binderB.destroy();
+    disconnect();
+    docA.destroy();
+    docB.destroy();
+  });
+
+  const enc = await encryptCellPlaintext({
+    plaintext: { value: "top-secret", formula: null },
+    key: { keyId: "k-range-1", keyBytes },
+    context: { docId, sheetId: "Sheet1", row: 0, col: 0 },
+  });
+
+  // Simulate a doc with historical key encodings: encrypted content stored under the
+  // legacy `${sheetId}:${row},${col}` key while a plaintext duplicate exists under the
+  // canonical `${sheetId}:${row}:${col}` key.
+  docA.transact(() => {
+    const cells = docA.getMap("cells");
+
+    const encCell = new Y.Map();
+    encCell.set("enc", enc);
+    cells.set("Sheet1:0,0", encCell);
+
+    const plaintext = new Y.Map();
+    plaintext.set("value", "leaked");
+    cells.set("Sheet1:0:0", plaintext);
+  });
+
+  await waitForCondition(() => controllerA.getCell("Sheet1", "A1").value === "top-secret", 10_000);
+  await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value === "###", 10_000);
+
+  assert.equal(controllerB.getCell("Sheet1", "A1").value, "###");
   assert.equal(controllerB.getCell("Sheet1", "A1").formula, null);
 });

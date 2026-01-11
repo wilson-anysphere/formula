@@ -351,13 +351,50 @@ export function bindYjsToDocumentController(options) {
       candidates = [canonicalKey];
     }
 
+    /** @type {Array<{ rawKey: string, cell: any }>} */
+    const candidateCells = [];
     for (const rawKey of candidates) {
+      if (typeof rawKey !== "string") continue;
       const cellData = cells.get(rawKey);
       const cell = getYMapCell(cellData);
       if (!cell) continue;
+      candidateCells.push({ rawKey, cell });
+    }
+
+    if (candidateCells.length === 0) return null;
+
+    // If any representation of this cell is encrypted, treat the cell as encrypted
+    // and never fall back to plaintext duplicates (which could leak protected content
+    // when legacy key encodings are present).
+    const encryptedCandidates = candidateCells.filter(({ cell }) => {
+      const encRaw = typeof cell.has === "function" ? (cell.has("enc") ? cell.get("enc") : undefined) : cell.get("enc");
+      return encRaw !== undefined;
+    });
+
+    // Preserve format even if it's stored on a different key encoding.
+    let fallbackFormat = undefined;
+    let fallbackFormatKey = undefined;
+    for (const { cell } of candidateCells) {
+      if (typeof cell.has === "function" ? cell.has("format") : cell.get("format") !== undefined) {
+        fallbackFormat = cell.get("format") ?? null;
+        fallbackFormatKey = stableStringify(fallbackFormat);
+        break;
+      }
+    }
+
+    if (encryptedCandidates.length > 0) {
+      const chosen =
+        encryptedCandidates.find((entry) => entry.rawKey === canonicalKey) ?? encryptedCandidates[0];
+      const parsed = await readCellFromYjs(chosen.cell, cellRef, encryption, docIdForEncryption, maskFn);
+      if (parsed.formatKey === undefined && fallbackFormatKey !== undefined) {
+        return { ...parsed, format: fallbackFormat, formatKey: fallbackFormatKey };
+      }
+      return parsed;
+    }
+
+    for (const { cell } of candidateCells) {
       const parsed = await readCellFromYjs(cell, cellRef, encryption, docIdForEncryption, maskFn);
-      const hasData =
-        parsed.value != null || parsed.formula != null || parsed.formatKey !== undefined;
+      const hasData = parsed.value != null || parsed.formula != null || parsed.formatKey !== undefined;
       if (!hasData) continue;
       return parsed;
     }

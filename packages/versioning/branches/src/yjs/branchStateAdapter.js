@@ -358,7 +358,33 @@ export function branchStateFromYjsDoc(doc) {
 
     const addr = rowColToA1(parsed.row, parsed.col);
     const cell = cellFromYjsValue(cellData);
-    if (cell) cells[sheetId][addr] = cell;
+    if (!cell) return;
+
+    const existing = cells[sheetId][addr];
+
+    // If any representation of this cell is encrypted, treat it as encrypted and
+    // do not allow plaintext duplicates (e.g. from legacy key encodings) to
+    // overwrite the ciphertext in branch snapshots.
+    const canonicalKey = `${sheetId}:${parsed.row}:${parsed.col}`;
+    const isCanonical = rawKey === canonicalKey;
+
+    if (cell.enc != null) {
+      if (!existing || existing.enc == null || isCanonical) {
+        cells[sheetId][addr] = cell;
+      } else if (existing.enc != null && existing.format == null && cell.format != null) {
+        cells[sheetId][addr] = { ...existing, format: cell.format };
+      }
+      return;
+    }
+
+    if (existing && existing.enc != null) {
+      if (existing.format == null && cell.format != null) {
+        cells[sheetId][addr] = { ...existing, format: cell.format };
+      }
+      return;
+    }
+
+    cells[sheetId][addr] = cell;
   });
 
   // Ensure every sheet in metadata has a cell map (even empty).

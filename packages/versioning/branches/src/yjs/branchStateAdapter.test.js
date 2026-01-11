@@ -167,3 +167,37 @@ test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: preserves encrypted cell p
   assert.equal(cell2.get("value"), undefined);
   assert.equal(cell2.get("formula"), undefined);
 });
+
+test("branchStateFromYjsDoc: prefers encrypted payloads over plaintext duplicates across legacy cell keys", () => {
+  const enc = {
+    v: 1,
+    alg: "AES-256-GCM",
+    keyId: "k1",
+    ivBase64: "iv",
+    tagBase64: "tag",
+    ciphertextBase64: "ct",
+  };
+
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+
+    const cells = doc.getMap("cells");
+    const cellEnc = new Y.Map();
+    cellEnc.set("enc", enc);
+    // Encrypted payload stored under a legacy key encoding.
+    cells.set("Sheet1:0,0", cellEnc);
+
+    const cellPlain = new Y.Map();
+    cellPlain.set("value", "leaked");
+    // Plaintext duplicate stored under the canonical key.
+    cells.set("Sheet1:0:0", cellPlain);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.cells.Sheet1.A1, { enc });
+});
