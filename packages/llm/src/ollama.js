@@ -262,7 +262,7 @@ export class OllamaChatClient {
       /** @type {{ promptTokens?: number, completionTokens?: number, totalTokens?: number } | null} */
       let usage = null;
 
-      /** @type {Map<string, { name?: string, args: string, started: boolean }>} */
+      /** @type {Map<string, { name?: string, args: string, pendingArgs: string, started: boolean }>} */
       const toolCallsById = new Map();
       /** @type {Set<string>} */
       const openToolCalls = new Set();
@@ -276,7 +276,7 @@ export class OllamaChatClient {
       function getOrCreateToolCall(id) {
         const existing = toolCallsById.get(id);
         if (existing) return existing;
-        const next = { args: "", started: false };
+        const next = { args: "", pendingArgs: "", started: false };
         toolCallsById.set(id, next);
         return next;
       }
@@ -315,6 +315,10 @@ export class OllamaChatClient {
                 state.started = true;
                 openToolCalls.add(id);
                 yield { type: "tool_call_start", id, name: state.name };
+                if (state.pendingArgs) {
+                  yield { type: "tool_call_delta", id, delta: state.pendingArgs };
+                  state.pendingArgs = "";
+                }
               }
 
               if (typeof args === "string" && args.length > 0) {
@@ -322,7 +326,13 @@ export class OllamaChatClient {
                 // Best-effort diffing: Ollama may stream the full argument string repeatedly.
                 const delta = args.startsWith(prev) ? args.slice(prev.length) : args;
                 state.args = args;
-                if (delta) yield { type: "tool_call_delta", id, delta };
+                if (delta) {
+                  if (state.started) {
+                    yield { type: "tool_call_delta", id, delta };
+                  } else {
+                    state.pendingArgs += delta;
+                  }
+                }
               }
             }
           }

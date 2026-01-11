@@ -67,6 +67,54 @@ describe("OllamaChatClient.streamChat", () => {
     ]);
   });
 
+  it("buffers tool call argument deltas until the call name is known", async () => {
+    const chunks = [
+      `${JSON.stringify({
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [{ id: "call-1", function: { arguments: '{"range":"' } }],
+        },
+      })}\n`,
+      `${JSON.stringify({
+        done: true,
+        prompt_eval_count: 7,
+        eval_count: 4,
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [{ id: "call-1", function: { name: "getData", arguments: '{"range":"A1"}' } }],
+        },
+      })}\n`,
+    ];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(readableStreamFromChunks(chunks), { status: 200 });
+      }) as any,
+    );
+
+    const client = new OllamaChatClient({
+      baseUrl: "https://example.com",
+      model: "llama-test",
+      timeoutMs: 1_000,
+    });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const event of client.streamChat({ messages: [{ role: "user", content: "hi" }] as any })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "tool_call_start", id: "call-1", name: "getData" },
+      { type: "tool_call_delta", id: "call-1", delta: '{"range":"' },
+      { type: "tool_call_delta", id: "call-1", delta: 'A1"}' },
+      { type: "tool_call_end", id: "call-1" },
+      { type: "done", usage: { promptTokens: 7, completionTokens: 4, totalTokens: 11 } },
+    ]);
+  });
+
   it("falls back to chat() when response has no stream reader and preserves usage", async () => {
     let callCount = 0;
     vi.stubGlobal(
