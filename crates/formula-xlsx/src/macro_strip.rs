@@ -625,6 +625,7 @@ pub(crate) fn validate_opc_relationships(parts: &BTreeMap<String, Vec<u8>>) -> R
         let xml = parts
             .get(rels_part)
             .ok_or_else(|| XlsxError::MissingPart(rels_part.to_string()))?;
+        let ids = parse_relationship_ids(xml)?;
         let targets = parse_internal_relationship_targets(xml, &source_part)?;
         for target in targets {
             if !parts.contains_key(&target) {
@@ -633,7 +634,88 @@ pub(crate) fn validate_opc_relationships(parts: &BTreeMap<String, Vec<u8>>) -> R
                 )));
             }
         }
+
+        if !source_part.is_empty()
+            && (source_part.ends_with(".xml") || source_part.ends_with(".vml"))
+            && parts.contains_key(&source_part)
+        {
+            let source_xml = parts
+                .get(&source_part)
+                .ok_or_else(|| XlsxError::MissingPart(source_part.clone()))?;
+            let references = parse_relationship_id_references(source_xml)?;
+            for id in references {
+                if !ids.contains(&id) {
+                    return Err(XlsxError::Invalid(format!(
+                        "dangling relationship id {id} referenced from {source_part} (missing from {rels_part})"
+                    )));
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+fn parse_relationship_ids(xml: &[u8]) -> Result<BTreeSet<String>, XlsxError> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out = BTreeSet::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(ref e) | Event::Empty(ref e)
+                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"Id") {
+                        out.insert(attr.unescape_value()?.into_owned());
+                    }
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+#[cfg(test)]
+fn parse_relationship_id_references(xml: &[u8]) -> Result<BTreeSet<String>, XlsxError> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out = BTreeSet::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(ref e) | Event::Empty(ref e) => {
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    let key = attr.key.as_ref();
+                    if !key.contains(&b':') {
+                        continue;
+                    }
+                    let local = crate::openxml::local_name(key);
+                    if !local.eq_ignore_ascii_case(b"id")
+                        && !local.eq_ignore_ascii_case(b"embed")
+                        && !local.eq_ignore_ascii_case(b"relid")
+                        && !local.eq_ignore_ascii_case(b"link")
+                    {
+                        continue;
+                    }
+                    out.insert(attr.unescape_value()?.into_owned());
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
 }
