@@ -108,4 +108,38 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await expect(page.getByTestId("active-address")).toHaveText("B3");
   await expect(input).toHaveValue("=A3*2");
   await expect(page.getByTestId("formula-bar-value")).toHaveText("6");
+
+  // Horizontal series fill: C1=1, D1=2 -> fill right to F1.
+  const c1Center = await cellCenter(0, 2);
+  await page.mouse.click(c1Center.x, c1Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("C1");
+  await input.fill("1");
+  await input.press("Enter");
+
+  const d1Center = await cellCenter(0, 3);
+  await page.mouse.click(d1Center.x, d1Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("D1");
+  await input.fill("2");
+  await input.press("Enter");
+
+  await page.mouse.move(c1Center.x, c1Center.y);
+  await page.mouse.down();
+  await page.mouse.move(d1Center.x, d1Center.y);
+  await page.mouse.up();
+
+  const d1Handle = await fillHandlePoint(0, 3);
+  const f1Center = await cellCenter(0, 5);
+  await page.mouse.move(d1Handle.x, d1Handle.y);
+  await page.mouse.down();
+  await page.mouse.move(f1Center.x, d1Handle.y);
+  await page.mouse.up();
+
+  const e1Center = await cellCenter(0, 4);
+  await page.mouse.click(e1Center.x, e1Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("E1");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("3");
+
+  await page.mouse.click(f1Center.x, f1Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("F1");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("4");
 });

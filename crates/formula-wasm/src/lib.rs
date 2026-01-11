@@ -74,6 +74,11 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
             .map(JsonValue::Number)
             .unwrap_or_else(|| JsonValue::String(ErrorKind::Num.as_code().to_string())),
         EngineValue::Error(kind) => JsonValue::String(kind.as_code().to_string()),
+        // The JS worker protocol only supports scalar-ish values today.
+        // References are intermediate Excel values; surface them as #VALUE!.
+        EngineValue::Reference(_) | EngineValue::ReferenceUnion(_) => {
+            JsonValue::String(ErrorKind::Value.as_code().to_string())
+        }
         // LAMBDA values are valid Excel scalars but cannot be represented in the current
         // worker JSON protocol. Use a descriptive placeholder so the UI does not crash
         // when a formula returns a lambda.
