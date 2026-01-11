@@ -87,6 +87,55 @@ End Sub
 }
 
 #[test]
+fn range_copy_to_single_cell_destination_expands_to_source_size() {
+    let code = r#"
+Sub Test()
+    Range("A1") = 1
+    Range("B1") = 2
+    Range("A2") = 3
+    Range("B2") = 4
+
+    Range("A1:B2").Copy Destination:=Range("D1")
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+    assert_eq!(wb.get_value_a1("Sheet1", "D1").unwrap(), VbaValue::Double(1.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "E1").unwrap(), VbaValue::Double(2.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "D2").unwrap(), VbaValue::Double(3.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "E2").unwrap(), VbaValue::Double(4.0));
+}
+
+#[test]
+fn paste_special_expands_multi_cell_clipboard_when_destination_is_single_cell() {
+    let code = r#"
+Option Explicit
+
+Sub Test()
+    Range("A1") = 1
+    Range("B1") = 2
+    Range("A2") = 3
+    Range("B2") = 4
+
+    Range("A1:B2").Copy
+    Range("D1").PasteSpecial Paste:=xlPasteValues
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let runtime = VbaRuntime::new(program);
+    let mut wb = InMemoryWorkbook::new();
+
+    runtime.execute(&mut wb, "Test", &[]).unwrap();
+    assert_eq!(wb.get_value_a1("Sheet1", "D1").unwrap(), VbaValue::Double(1.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "E1").unwrap(), VbaValue::Double(2.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "D2").unwrap(), VbaValue::Double(3.0));
+    assert_eq!(wb.get_value_a1("Sheet1", "E2").unwrap(), VbaValue::Double(4.0));
+}
+
+#[test]
 fn paste_special_respects_xlpastevalues_constant_and_option_explicit() {
     let code = r#"
 Option Explicit
@@ -94,6 +143,7 @@ Option Explicit
 Sub Test()
     Range("A1").Copy
     Range("B1").PasteSpecial Paste:=xlPasteValues
+    Range("A2").Copy
     Range("C1").PasteSpecial
 End Sub
 "#;
@@ -101,7 +151,7 @@ End Sub
     let runtime = VbaRuntime::new(program);
     let mut wb = InMemoryWorkbook::new();
     wb.set_value_a1("Sheet1", "A1", VbaValue::Double(2.0)).unwrap();
-    wb.set_formula_a1("Sheet1", "A1", "=1+1").unwrap();
+    wb.set_formula_a1("Sheet1", "A2", "=1+1").unwrap();
 
     runtime.execute(&mut wb, "Test", &[]).unwrap();
 
@@ -134,6 +184,25 @@ End Sub
 
     assert_eq!(wb.get_value_a1("Sheet1", "B1").unwrap(), VbaValue::Double(3.0));
     assert_eq!(wb.get_value_a1("Sheet1", "B2").unwrap(), VbaValue::Double(1.0));
+}
+
+#[test]
+fn sandbox_step_limit_applies_to_range_copy() {
+    let code = r#"
+Sub Test()
+    Range("A1:J10").Copy Destination:=Range("K1")
+End Sub
+"#;
+    let program = parse_program(code).unwrap();
+    let sandbox = VbaSandboxPolicy {
+        max_execution_time: Duration::from_secs(5),
+        max_steps: 50,
+        ..VbaSandboxPolicy::default()
+    };
+    let runtime = VbaRuntime::new(program).with_sandbox_policy(sandbox);
+    let mut wb = InMemoryWorkbook::new();
+    let err = runtime.execute(&mut wb, "Test", &[]).unwrap_err();
+    assert!(matches!(err, VbaError::StepLimit));
 }
 
 #[test]

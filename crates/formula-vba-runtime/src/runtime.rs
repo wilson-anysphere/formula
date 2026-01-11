@@ -1771,7 +1771,9 @@ impl<'a> Executor<'a> {
                         self.clipboard = Some(self.snapshot_range(range)?);
                         return Ok(VbaValue::Empty);
                     }
-                    let dest = self.eval_expr(frame, &args[0].expr)?;
+                    let dest_arg = arg_named_or_pos(args, "destination", 0)
+                        .ok_or_else(|| VbaError::Runtime("Copy() missing destination".to_string()))?;
+                    let dest = self.eval_expr(frame, &dest_arg.expr)?;
                     let dest = dest.as_object().ok_or_else(|| {
                         VbaError::Runtime("Copy destination must be a Range".to_string())
                     })?;
@@ -1783,6 +1785,7 @@ impl<'a> Executor<'a> {
                             ))
                         }
                     };
+                    let dest_range = expand_single_cell_destination(dest_range, range);
                     self.copy_range(range, dest_range)?;
                     Ok(VbaValue::Empty)
                 }
@@ -2315,6 +2318,7 @@ impl<'a> Executor<'a> {
         let mut formulas = Vec::new();
         for r in 0..rows {
             for c in 0..cols {
+                self.tick()?;
                 let row = range.start_row + r;
                 let col = range.start_col + c;
                 values.push(self.sheet.get_cell_value(range.sheet, row, col)?);
@@ -2335,6 +2339,14 @@ impl<'a> Executor<'a> {
         dest: VbaRangeRef,
         include_formulas: bool,
     ) -> Result<(), VbaError> {
+        let mut dest = dest;
+        if dest.start_row == dest.end_row
+            && dest.start_col == dest.end_col
+            && (clip.rows > 1 || clip.cols > 1)
+        {
+            dest.end_row = dest.start_row + clip.rows - 1;
+            dest.end_col = dest.start_col + clip.cols - 1;
+        }
         let dest_rows = dest.end_row - dest.start_row + 1;
         let dest_cols = dest.end_col - dest.start_col + 1;
         for dr in 0..dest_rows {
@@ -2370,6 +2382,7 @@ impl<'a> Executor<'a> {
 
         for dr in 0..dest_rows {
             for dc in 0..dest_cols {
+                self.tick()?;
                 let sr = src.start_row + (dr % src_rows);
                 let sc = src.start_col + (dc % src_cols);
                 let value = self.sheet.get_cell_value(src.sheet, sr, sc)?;
@@ -2803,6 +2816,21 @@ fn arg_named_or_pos<'a>(
     args.iter()
         .find(|a| a.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(name)))
         .or_else(|| args.get(pos))
+}
+
+fn expand_single_cell_destination(dest: VbaRangeRef, template: VbaRangeRef) -> VbaRangeRef {
+    if dest.start_row != dest.end_row || dest.start_col != dest.end_col {
+        return dest;
+    }
+    let rows = template.end_row.saturating_sub(template.start_row) + 1;
+    let cols = template.end_col.saturating_sub(template.start_col) + 1;
+    VbaRangeRef {
+        sheet: dest.sheet,
+        start_row: dest.start_row,
+        start_col: dest.start_col,
+        end_row: dest.start_row + rows - 1,
+        end_col: dest.start_col + cols - 1,
+    }
 }
 
 fn offset_range(range: VbaRangeRef, row_off: i32, col_off: i32) -> Result<VbaRangeRef, VbaError> {
