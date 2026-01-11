@@ -57,12 +57,18 @@ function init(data) {
   workerData = {
     extensionId: String(data?.extensionId ?? ""),
     extensionPath: String(data?.extensionPath ?? ""),
+    extensionUri: String(data?.extensionUri ?? data?.extensionPath ?? ""),
+    globalStoragePath: String(data?.globalStoragePath ?? ""),
+    workspaceStoragePath: String(data?.workspaceStoragePath ?? ""),
     mainUrl: String(data?.mainUrl ?? "")
   };
 
   formulaApi.__setContext({
     extensionId: workerData.extensionId,
-    extensionPath: workerData.extensionPath
+    extensionPath: workerData.extensionPath,
+    extensionUri: workerData.extensionUri,
+    globalStoragePath: workerData.globalStoragePath,
+    workspaceStoragePath: workerData.workspaceStoragePath
   });
 }
 
@@ -288,6 +294,9 @@ async function activateExtension() {
     const context = {
       extensionId: workerData.extensionId,
       extensionPath: workerData.extensionPath,
+      extensionUri: workerData.extensionUri,
+      globalStoragePath: workerData.globalStoragePath,
+      workspaceStoragePath: workerData.workspaceStoragePath,
       subscriptions: []
     };
 

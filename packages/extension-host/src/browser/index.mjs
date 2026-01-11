@@ -267,7 +267,16 @@ class BrowserExtensionHost {
       active: false,
       registeredCommands: new Set(),
       pendingRequests: new Map(),
-      workerData: { extensionId, extensionPath, mainUrl }
+      workerData: {
+        extensionId,
+        extensionPath,
+        mainUrl,
+        extensionUri: extensionPath,
+        // Browser host has no filesystem; provide stable identifiers so extensions
+        // can key storage off these paths similarly to the desktop host.
+        globalStoragePath: `memory://formula/extensions/${extensionId}/globalStorage`,
+        workspaceStoragePath: `memory://formula/extensions/${extensionId}/workspaceStorage`
+      }
     };
 
     for (const cmd of manifest.contributes.commands ?? []) {

@@ -61,6 +61,58 @@ async function importBrowserHost() {
   return import(moduleUrl);
 }
 
+test("BrowserExtensionHost: init message includes context storage fields", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type !== "init") return;
+        assert.ok(typeof msg.extensionUri === "string" && msg.extensionUri.length > 0);
+        assert.ok(typeof msg.globalStoragePath === "string" && msg.globalStoragePath.includes("globalStorage"));
+        assert.ok(
+          typeof msg.workspaceStoragePath === "string" && msg.workspaceStoragePath.includes("workspaceStorage")
+        );
+      }
+    }
+  ];
+
+  const PrevWorker = globalThis.Worker;
+  globalThis.Worker = createWorkerCtor(scenarios);
+  t.after(() => {
+    globalThis.Worker = PrevWorker;
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async getSelection() {
+        return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] };
+      }
+    },
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension({
+    extensionId: "test.context",
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "context",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: []
+    }
+  });
+});
+
 test("BrowserExtensionHost: activation timeout terminates worker and allows restart", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
