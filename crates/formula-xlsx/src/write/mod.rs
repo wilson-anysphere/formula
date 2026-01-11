@@ -1019,7 +1019,6 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<(bool, Option<Range>), WriteErr
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
 
-    let mut has_dimension = false;
     let mut in_sheet_data = false;
     let mut min_cell: Option<CellRef> = None;
     let mut max_cell: Option<CellRef> = None;
@@ -1027,7 +1026,9 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<(bool, Option<Range>), WriteErr
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"dimension" => {
-                has_dimension = true;
+                // If the worksheet already has a <dimension> element, we don't need to scan the
+                // potentially-large <sheetData> section just to decide whether to insert one.
+                return Ok((true, None));
             }
             Event::Start(e) if e.name().as_ref() == b"sheetData" => in_sheet_data = true,
             Event::End(e) if e.name().as_ref() == b"sheetData" => in_sheet_data = false,
@@ -1066,7 +1067,7 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<(bool, Option<Range>), WriteErr
         (Some(start), Some(end)) => Some(Range::new(start, end)),
         _ => None,
     };
-    Ok((has_dimension, used_range))
+    Ok((false, used_range))
 }
 
 fn insert_dimension_element(writer: &mut Writer<Vec<u8>>, dimension_ref: &str) {
