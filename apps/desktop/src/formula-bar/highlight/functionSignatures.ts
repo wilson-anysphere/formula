@@ -110,6 +110,26 @@ export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
     ],
     summary: "Checks whether a condition is met, and returns one value if TRUE and another value if FALSE.",
   },
+  IFERROR: {
+    name: "IFERROR",
+    params: [{ name: "value" }, { name: "value_if_error" }],
+    summary: "Returns a value you specify if a formula evaluates to an error; otherwise returns the formula result.",
+  },
+  IFNA: {
+    name: "IFNA",
+    params: [{ name: "value" }, { name: "value_if_na" }],
+    summary: "Returns a value you specify if a formula evaluates to #N/A; otherwise returns the formula result.",
+  },
+  ISERROR: {
+    name: "ISERROR",
+    params: [{ name: "value" }],
+    summary: "Checks whether a value is an error.",
+  },
+  NA: {
+    name: "NA",
+    params: [],
+    summary: "Returns the #N/A error value.",
+  },
   VLOOKUP: {
     name: "VLOOKUP",
     params: [
@@ -194,6 +214,71 @@ export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
     name: "TRANSPOSE",
     params: [{ name: "array" }],
     summary: "Returns the transpose of an array or range.",
+  },
+  CONCAT: {
+    name: "CONCAT",
+    params: [{ name: "text1" }, { name: "text2", optional: true }],
+    summary: "Combines the text from multiple ranges and/or strings.",
+  },
+  CONCATENATE: {
+    name: "CONCATENATE",
+    params: [{ name: "text1" }, { name: "text2", optional: true }],
+    summary: "Combines several text strings into one text string.",
+  },
+  LEFT: {
+    name: "LEFT",
+    params: [{ name: "text" }, { name: "num_chars", optional: true }],
+    summary: "Returns the leftmost characters from a text string.",
+  },
+  RIGHT: {
+    name: "RIGHT",
+    params: [{ name: "text" }, { name: "num_chars", optional: true }],
+    summary: "Returns the rightmost characters from a text string.",
+  },
+  MID: {
+    name: "MID",
+    params: [{ name: "text" }, { name: "start_num" }, { name: "num_chars" }],
+    summary: "Returns a specific number of characters from a text string starting at the position you specify.",
+  },
+  LEN: {
+    name: "LEN",
+    params: [{ name: "text" }],
+    summary: "Returns the number of characters in a text string.",
+  },
+  TRIM: {
+    name: "TRIM",
+    params: [{ name: "text" }],
+    summary: "Removes leading/trailing spaces and reduces multiple internal spaces to a single space.",
+  },
+  UPPER: {
+    name: "UPPER",
+    params: [{ name: "text" }],
+    summary: "Converts text to uppercase.",
+  },
+  LOWER: {
+    name: "LOWER",
+    params: [{ name: "text" }],
+    summary: "Converts text to lowercase.",
+  },
+  FIND: {
+    name: "FIND",
+    params: [{ name: "find_text" }, { name: "within_text" }, { name: "start_num", optional: true }],
+    summary: "Finds one text string within another (case-sensitive).",
+  },
+  SEARCH: {
+    name: "SEARCH",
+    params: [{ name: "find_text" }, { name: "within_text" }, { name: "start_num", optional: true }],
+    summary: "Finds one text string within another (not case-sensitive).",
+  },
+  SUBSTITUTE: {
+    name: "SUBSTITUTE",
+    params: [
+      { name: "text" },
+      { name: "old_text" },
+      { name: "new_text" },
+      { name: "instance_num", optional: true },
+    ],
+    summary: "Substitutes new text for old text in a text string.",
   },
 };
 
