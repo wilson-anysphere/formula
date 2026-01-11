@@ -24,7 +24,7 @@ export function createEngineClient(): EngineClient {
   let nextId = 1;
   const pending = new Map<
     number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+    { resolve: (value: any) => void; reject: (error: any) => void }
   >();
 
   worker.onmessage = (event) => {
@@ -64,4 +64,3 @@ export function createEngineClient(): EngineClient {
     terminate: () => worker.terminate(),
   };
 }
-
