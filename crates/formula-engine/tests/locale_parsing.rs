@@ -133,6 +133,26 @@ fn engine_accepts_localized_formulas_and_persists_canonical() {
 }
 
 #[test]
+fn engine_accepts_localized_r1c1_formulas_and_persists_canonical_a1() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+
+    engine
+        .set_cell_formula_localized_r1c1(
+            "Sheet1",
+            "C5",
+            "=SUMME(R[-4]C[-2];R[-4]C[-1])",
+            &locale::DE_DE,
+        )
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C5"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_formula("Sheet1", "C5"), Some("=SUM(A1,B1)"));
+}
+
+#[test]
 fn engine_accepts_localized_spilling_formulas() {
     let mut engine = Engine::new();
     engine

@@ -14,14 +14,37 @@ use super::FormulaLocale;
 ///
 /// The input may include an optional leading `=`, which is preserved in the output.
 pub fn canonicalize_formula(formula: &str, locale: &FormulaLocale) -> Result<String, FormulaParseError> {
-    translate_formula(formula, locale, Direction::ToCanonical)
+    translate_formula_with_style(formula, locale, Direction::ToCanonical, ReferenceStyle::A1)
+}
+
+/// Convert a locale-specific formula into the canonical form we persist/evaluate, using the
+/// provided reference style for tokenization (A1 vs R1C1).
+///
+/// This is useful for UI workflows that allow users to edit formulas in R1C1 mode while still
+/// supporting localized function names and separators.
+pub fn canonicalize_formula_with_style(
+    formula: &str,
+    locale: &FormulaLocale,
+    reference_style: ReferenceStyle,
+) -> Result<String, FormulaParseError> {
+    translate_formula_with_style(formula, locale, Direction::ToCanonical, reference_style)
 }
 
 /// Convert a canonical (English) formula into its locale-specific display form.
 ///
 /// The input may include an optional leading `=`, which is preserved in the output.
 pub fn localize_formula(formula: &str, locale: &FormulaLocale) -> Result<String, FormulaParseError> {
-    translate_formula(formula, locale, Direction::ToLocalized)
+    translate_formula_with_style(formula, locale, Direction::ToLocalized, ReferenceStyle::A1)
+}
+
+/// Convert a canonical (English) formula into its locale-specific display form, using the provided
+/// reference style for tokenization (A1 vs R1C1).
+pub fn localize_formula_with_style(
+    formula: &str,
+    locale: &FormulaLocale,
+    reference_style: ReferenceStyle,
+) -> Result<String, FormulaParseError> {
+    translate_formula_with_style(formula, locale, Direction::ToLocalized, reference_style)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -34,10 +57,11 @@ fn bool_literal(value: bool) -> &'static str {
     if value { "TRUE" } else { "FALSE" }
 }
 
-fn translate_formula(
+fn translate_formula_with_style(
     formula: &str,
     locale: &FormulaLocale,
     dir: Direction,
+    reference_style: ReferenceStyle,
 ) -> Result<String, FormulaParseError> {
     // Match the previous implementation: accept leading whitespace and keep an optional leading `=`.
     let trimmed = formula.trim_start();
@@ -55,7 +79,7 @@ fn translate_formula(
 
     let parse_opts = ParseOptions {
         locale: src_config.clone(),
-        reference_style: ReferenceStyle::A1,
+        reference_style,
         normalize_relative_to: None,
     };
     let tokens = lex(expr_src, &parse_opts).map_err(map_lex_error)?;

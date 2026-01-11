@@ -10,7 +10,7 @@ use crate::editing::rewrite::{
     GridRange, RangeMapEdit, StructuralEdit,
 };
 use crate::graph::{CellDeps, DependencyGraph as CalcGraph, Precedent, SheetRange};
-use crate::locale::{canonicalize_formula, FormulaLocale};
+use crate::locale::{canonicalize_formula, canonicalize_formula_with_style, FormulaLocale};
 use crate::value::{Array, ErrorKind, Value};
 use crate::calc_settings::{CalcSettings, CalculationMode};
 use crate::iterative;
@@ -589,6 +589,26 @@ impl Engine {
     ) -> Result<(), EngineError> {
         let canonical = canonicalize_formula(localized_formula, locale)?;
         self.set_cell_formula(sheet, addr, &canonical)
+    }
+
+    /// Set a cell formula that was entered in a locale-specific display format using R1C1
+    /// reference style.
+    ///
+    /// This converts the incoming formula to canonical form before translating R1C1 references into
+    /// the persisted A1 representation.
+    pub fn set_cell_formula_localized_r1c1(
+        &mut self,
+        sheet: &str,
+        addr: &str,
+        localized_formula_r1c1: &str,
+        locale: &FormulaLocale,
+    ) -> Result<(), EngineError> {
+        let canonical = canonicalize_formula_with_style(
+            localized_formula_r1c1,
+            locale,
+            crate::ReferenceStyle::R1C1,
+        )?;
+        self.set_cell_formula_r1c1(sheet, addr, &canonical)
     }
 
     pub fn get_cell_value(&self, sheet: &str, addr: &str) -> Value {
