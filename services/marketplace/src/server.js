@@ -315,18 +315,18 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         }
 
         const tokenSha = sha256Hex(token);
+        const publisherRecord = await store.getPublisherByTokenSha256(tokenSha);
+        if (!publisherRecord) {
+          statusCode = 403;
+          return sendJson(res, 403, { error: "Invalid token" });
+        }
+
         const publisherRate = publishLimiter.take(tokenSha);
         if (!publisherRate.ok) {
           metrics.rateLimited += 1;
           res.setHeader("Retry-After", String(Math.ceil(publisherRate.retryAfterMs / 1000)));
           statusCode = 429;
           return sendJson(res, 429, { error: "Too Many Requests" });
-        }
-
-        const publisherRecord = await store.getPublisherByTokenSha256(tokenSha);
-        if (!publisherRecord) {
-          statusCode = 403;
-          return sendJson(res, 403, { error: "Invalid token" });
         }
 
         const body = await readJsonBody(req, { limitBytes: 20 * 1024 * 1024 });
