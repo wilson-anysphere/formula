@@ -275,18 +275,21 @@ pub async fn save_workbook(
 
     let save_path = coerce_save_path_to_xlsx(&save_path);
 
-    write_xlsx(save_path.clone(), workbook)
+    let written_bytes = write_xlsx(save_path.clone(), workbook)
         .await
         .map_err(|e| e.to_string())?;
 
-    let saved_origin_xlsx_bytes = std::fs::read(&save_path)
+    // Prefer the bytes we just wrote (returned from `write_xlsx`), but fall back to re-reading
+    // from disk if needed.
+    let new_origin_xlsx_bytes = std::fs::read(&save_path)
         .ok()
-        .map(Arc::<[u8]>::from);
+        .map(Arc::<[u8]>::from)
+        .or(Some(written_bytes));
 
     {
         let mut state = state.inner().lock().unwrap();
         state
-            .mark_saved(Some(save_path), saved_origin_xlsx_bytes)
+            .mark_saved(Some(save_path), new_origin_xlsx_bytes)
             .map_err(app_error)?;
     }
 

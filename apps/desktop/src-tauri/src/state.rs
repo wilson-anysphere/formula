@@ -248,7 +248,7 @@ impl AppState {
     pub fn mark_saved(
         &mut self,
         new_path: Option<String>,
-        new_origin_xlsx_bytes: Option<std::sync::Arc<[u8]>>,
+        new_origin_xlsx_bytes: Option<Arc<[u8]>>,
     ) -> Result<(), AppStateError> {
         let workbook = self
             .workbook
@@ -260,9 +260,11 @@ impl AppState {
         if let Some(bytes) = new_origin_xlsx_bytes {
             workbook.origin_xlsx_bytes = Some(bytes);
         }
-
-        // The workbook on disk now matches the in-memory model; clear per-sheet dirty tracking so
-        // subsequent saves can be no-ops unless new edits occur.
+        // Saving establishes a new baseline for "net" changes. Clear the per-cell baseline so
+        // subsequent edits are tracked against this saved state (not the previously opened or
+        // previously saved workbook bytes).
+        workbook.cell_input_baseline.clear();
+        workbook.original_print_settings = workbook.print_settings.clone();
         for sheet in &mut workbook.sheets {
             sheet.clear_dirty_cells();
         }
@@ -449,6 +451,15 @@ impl AppState {
             return Ok(Vec::new());
         }
 
+        if let Some(workbook) = self.workbook.as_mut() {
+            if workbook.origin_xlsx_bytes.is_some() {
+                workbook
+                    .cell_input_baseline
+                    .entry((before.sheet_id.clone(), before.row, before.col))
+                    .or_insert_with(|| (before.value.clone(), before.formula.clone()));
+            }
+        }
+
         self.apply_snapshots(&[after_cell.clone()])?;
         self.engine.recalculate();
         let mut updates = self.refresh_computed_values()?;
@@ -534,6 +545,17 @@ impl AppState {
 
         if changed.is_empty() {
             return Ok(Vec::new());
+        }
+
+        if let Some(workbook) = self.workbook.as_mut() {
+            if workbook.origin_xlsx_bytes.is_some() {
+                for snap in &before {
+                    workbook
+                        .cell_input_baseline
+                        .entry((snap.sheet_id.clone(), snap.row, snap.col))
+                        .or_insert_with(|| (snap.value.clone(), snap.formula.clone()));
+                }
+            }
         }
 
         self.apply_snapshots(&after)?;
@@ -793,6 +815,17 @@ impl AppState {
             return Ok(Vec::new());
         }
 
+        if let Some(workbook) = self.workbook.as_mut() {
+            if workbook.origin_xlsx_bytes.is_some() {
+                for snap in &before {
+                    workbook
+                        .cell_input_baseline
+                        .entry((snap.sheet_id.clone(), snap.row, snap.col))
+                        .or_insert_with(|| (snap.value.clone(), snap.formula.clone()));
+                }
+            }
+        }
+
         self.apply_snapshots(&after)?;
         self.engine.recalculate();
         let mut updates = self.refresh_computed_values()?;
@@ -867,6 +900,17 @@ impl AppState {
                 formula: None,
             });
             touched.push((resolved_sheet_id, row, col));
+        }
+
+        if let Some(workbook) = self.workbook.as_mut() {
+            if workbook.origin_xlsx_bytes.is_some() {
+                for snap in &before {
+                    workbook
+                        .cell_input_baseline
+                        .entry((snap.sheet_id.clone(), snap.row, snap.col))
+                        .or_insert_with(|| (snap.value.clone(), snap.formula.clone()));
+                }
+            }
         }
 
         self.apply_snapshots(&after)?;
