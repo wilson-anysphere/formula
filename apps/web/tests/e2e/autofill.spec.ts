@@ -26,11 +26,10 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
     return { x: box!.x + rect!.x + rect!.width / 2, y: box!.y + rect!.y + rect!.height / 2 };
   };
 
-  const fillHandlePoint = async (row0: number, col0: number) => {
-    const rect = await getCellRect(row0, col0);
+  const fillHandleCenter = async () => {
+    const rect = await page.evaluate(() => (window as any).__gridApi.getFillHandleRect());
     expect(rect).not.toBeNull();
-    // Slightly inside the 8x8 handle that straddles the cell bottom-right corner.
-    return { x: box!.x + rect!.x + rect!.width + 2, y: box!.y + rect!.y + rect!.height + 2 };
+    return { x: box!.x + rect!.x + rect!.width / 2, y: box!.y + rect!.y + rect!.height / 2 };
   };
 
   const input = page.getByTestId("formula-input");
@@ -55,7 +54,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await page.mouse.up();
 
   // Drag the fill handle down to A4.
-  const a2Handle = await fillHandlePoint(1, 0);
+  const a2Handle = await fillHandleCenter();
   const a4Center = await cellCenter(3, 0);
   await page.mouse.move(a2Handle.x, a2Handle.y);
   await page.mouse.down();
@@ -91,7 +90,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   // Re-select B1 so the fill handle is visible.
   await page.mouse.click(b1Center.x, b1Center.y);
 
-  const b1Handle = await fillHandlePoint(0, 1);
+  const b1Handle = await fillHandleCenter();
   const b3Center = await cellCenter(2, 1);
   await page.mouse.move(b1Handle.x, b1Handle.y);
   await page.mouse.down();
@@ -127,7 +126,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await page.mouse.move(d1Center.x, d1Center.y);
   await page.mouse.up();
 
-  const d1Handle = await fillHandlePoint(0, 3);
+  const d1Handle = await fillHandleCenter();
   const f1Center = await cellCenter(0, 5);
   await page.mouse.move(d1Handle.x, d1Handle.y);
   await page.mouse.down();
@@ -142,4 +141,38 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   await page.mouse.click(f1Center.x, f1Center.y);
   await expect(page.getByTestId("active-address")).toHaveText("F1");
   await expect(page.getByTestId("formula-bar-value")).toHaveText("4");
+
+  // Fill up: H5=10, H6=12 -> fill up to H3.
+  const h5Center = await cellCenter(4, 7);
+  await page.mouse.click(h5Center.x, h5Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("H5");
+  await input.fill("10");
+  await input.press("Enter");
+
+  const h6Center = await cellCenter(5, 7);
+  await page.mouse.click(h6Center.x, h6Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("H6");
+  await input.fill("12");
+  await input.press("Enter");
+
+  await page.mouse.move(h5Center.x, h5Center.y);
+  await page.mouse.down();
+  await page.mouse.move(h6Center.x, h6Center.y);
+  await page.mouse.up();
+
+  const h6Handle = await fillHandleCenter();
+  const h3Center = await cellCenter(2, 7);
+  await page.mouse.move(h6Handle.x, h6Handle.y);
+  await page.mouse.down();
+  await page.mouse.move(h6Handle.x, h3Center.y);
+  await page.mouse.up();
+
+  await page.mouse.click(h3Center.x, h3Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("H3");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("6");
+
+  const h4Center = await cellCenter(3, 7);
+  await page.mouse.click(h4Center.x, h4Center.y);
+  await expect(page.getByTestId("active-address")).toHaveText("H4");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("8");
 });
