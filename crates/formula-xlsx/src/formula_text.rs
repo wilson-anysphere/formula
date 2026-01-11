@@ -5,6 +5,7 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "BYROW",
     "EXPAND",
     "FILTER",
+    "ISOMITTED",
     "MAKEARRAY",
     "MAP",
     "REDUCE",
@@ -208,6 +209,13 @@ mod tests {
     fn add_xlfn_prefixes_handles_lambda_helpers() {
         let input = "MAP(SEQUENCE(3),LAMBDA(x,x))";
         let expected = "_xlfn.MAP(_xlfn.SEQUENCE(3),_xlfn.LAMBDA(x,x))";
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn add_xlfn_prefixes_handles_isomitted() {
+        let input = "ISOMITTED(x)";
+        let expected = "_xlfn.ISOMITTED(x)";
         assert_eq!(add_xlfn_prefixes(input), expected);
     }
 

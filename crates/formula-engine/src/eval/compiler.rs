@@ -102,9 +102,7 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
                 op: PostfixOp::Percent,
                 expr: Box::new(lower_expr(&p.expr, origin)),
             },
-            crate::PostfixOp::SpillRange => {
-                Expr::SpillRange(Box::new(lower_expr(&p.expr, origin)))
-            }
+            crate::PostfixOp::SpillRange => Expr::SpillRange(Box::new(lower_expr(&p.expr, origin))),
         },
         crate::Expr::Binary(b) => lower_binary(b, origin),
     }
@@ -187,7 +185,10 @@ fn lower_binary(b: &crate::BinaryExpr, origin: Option<crate::CellAddr>) -> Expr<
     }
 }
 
-fn lower_sheet_reference(workbook: &Option<String>, sheet: &Option<String>) -> SheetReference<String> {
+fn lower_sheet_reference(
+    workbook: &Option<String>,
+    sheet: &Option<String>,
+) -> SheetReference<String> {
     match (workbook.as_ref(), sheet.as_ref()) {
         (Some(book), Some(sheet)) => SheetReference::External(format!("[{book}]{sheet}")),
         (Some(book), None) => SheetReference::External(format!("[{book}]")),
@@ -436,7 +437,9 @@ fn compile_expr_inner(
                 _ => Expr::Error(ErrorKind::Name),
             }
         }
-        crate::Expr::Array(arr) => compile_array_literal(arr, current_sheet, current_cell, resolve_sheet),
+        crate::Expr::Array(arr) => {
+            compile_array_literal(arr, current_sheet, current_cell, resolve_sheet)
+        }
         crate::Expr::FunctionCall(call) => {
             let name = call.name.name_upper.clone();
             let original_name = call.name.original.clone();
@@ -515,7 +518,12 @@ fn compile_array_literal(
     let mut values = Vec::with_capacity(rows.saturating_mul(cols));
     for row in &arr.rows {
         for el in row {
-            values.push(compile_expr_inner(el, current_sheet, current_cell, resolve_sheet));
+            values.push(compile_expr_inner(
+                el,
+                current_sheet,
+                current_cell,
+                resolve_sheet,
+            ));
         }
     }
 
@@ -770,8 +778,10 @@ fn try_compile_static_range_ref(
     current_cell: CellAddr,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
 ) -> Option<RangeRef<usize>> {
-    let left_op = try_compile_static_range_operand(left, current_sheet, current_cell, resolve_sheet)?;
-    let right_op = try_compile_static_range_operand(right, current_sheet, current_cell, resolve_sheet)?;
+    let left_op =
+        try_compile_static_range_operand(left, current_sheet, current_cell, resolve_sheet)?;
+    let right_op =
+        try_compile_static_range_operand(right, current_sheet, current_cell, resolve_sheet)?;
     if left_op.sheet == right_op.sheet {
         let (start, end) = bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
         return Some(RangeRef {
@@ -793,8 +803,10 @@ fn try_compile_static_range_ref(
         None
     }?;
 
-    let left_op = try_compile_static_range_operand(left, merged_sheet, current_cell, resolve_sheet)?;
-    let right_op = try_compile_static_range_operand(right, merged_sheet, current_cell, resolve_sheet)?;
+    let left_op =
+        try_compile_static_range_operand(left, merged_sheet, current_cell, resolve_sheet)?;
+    let right_op =
+        try_compile_static_range_operand(right, merged_sheet, current_cell, resolve_sheet)?;
     if left_op.sheet != right_op.sheet {
         return None;
     }
@@ -876,7 +888,12 @@ fn explicit_internal_sheet_id(
     resolve_sheet(sheet)
 }
 
-fn bounding_rect(a_start: CellAddr, a_end: CellAddr, b_start: CellAddr, b_end: CellAddr) -> (CellAddr, CellAddr) {
+fn bounding_rect(
+    a_start: CellAddr,
+    a_end: CellAddr,
+    b_start: CellAddr,
+    b_end: CellAddr,
+) -> (CellAddr, CellAddr) {
     let min_row = a_start.row.min(a_end.row).min(b_start.row.min(b_end.row));
     let max_row = a_start.row.max(a_end.row).max(b_start.row.max(b_end.row));
     let min_col = a_start.col.min(a_end.col).min(b_start.col.min(b_end.col));

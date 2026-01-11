@@ -646,6 +646,16 @@ export default {
       ]
     },
     {
+      "name": "ISOMITTED",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "ISOWEEKNUM",
       "min_args": 1,
       "max_args": 1,

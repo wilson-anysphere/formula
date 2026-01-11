@@ -60,3 +60,30 @@ fn lambda_supports_recursion_and_depth_guard() {
         Value::Error(ErrorKind::Calc)
     );
 }
+
+#[test]
+fn lambda_supports_omitted_parameters_with_isomitted() {
+    let mut sheet = TestSheet::new();
+
+    // Calling a LAMBDA with fewer arguments should bind missing parameters as blank,
+    // while still allowing the body to detect omission via ISOMITTED.
+    assert_number(
+        &sheet.eval("=LET(f,LAMBDA(x,y,IF(ISOMITTED(y),x,x+y)),f(2))"),
+        2.0,
+    );
+    assert_number(
+        &sheet.eval("=LET(f,LAMBDA(x,y,IF(ISOMITTED(y),x,x+y)),f(2,3))"),
+        5.0,
+    );
+
+    assert_eq!(
+        sheet.eval("=LET(f,LAMBDA(x,y,ISOMITTED(y)),f(1))"),
+        Value::Bool(true)
+    );
+
+    // A blank placeholder is not the same as an omitted argument.
+    assert_eq!(
+        sheet.eval("=LET(f,LAMBDA(x,y,ISOMITTED(y)),f(1,))"),
+        Value::Bool(false)
+    );
+}

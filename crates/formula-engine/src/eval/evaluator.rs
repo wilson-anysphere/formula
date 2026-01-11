@@ -1,12 +1,14 @@
-use crate::eval::address::CellAddr;
-use crate::eval::ast::{BinaryOp, CompiledExpr, CompareOp, Expr, PostfixOp, SheetReference, UnaryOp};
 use crate::date::ExcelDateSystem;
 use crate::error::ExcelError;
+use crate::eval::address::CellAddr;
+use crate::eval::ast::{
+    BinaryOp, CompareOp, CompiledExpr, Expr, PostfixOp, SheetReference, UnaryOp,
+};
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference};
 use crate::value::{Array, ErrorKind, Value};
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
@@ -37,7 +39,10 @@ pub trait ValueResolver {
     ///
     /// For sparse backends, this should enumerate only populated addresses. Evaluators use this
     /// to implement sparse-aware aggregation over large ranges (e.g. `A:A`).
-    fn iter_sheet_cells(&self, _sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
+    fn iter_sheet_cells(
+        &self,
+        _sheet_id: usize,
+    ) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
         None
     }
     fn resolve_structured_ref(
@@ -254,12 +259,22 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 }
                 _ => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
             },
-            Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref) {
-                Some(ranges) if !ranges.is_empty() && ranges.iter().all(|(sheet_id, _, _)| self.resolver.sheet_exists(*sheet_id)) => {
+            Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref)
+            {
+                Some(ranges)
+                    if !ranges.is_empty()
+                        && ranges
+                            .iter()
+                            .all(|(sheet_id, _, _)| self.resolver.sheet_exists(*sheet_id)) =>
+                {
                     EvalValue::Reference(
                         ranges
                             .into_iter()
-                            .map(|(sheet_id, start, end)| ResolvedRange { sheet_id, start, end })
+                            .map(|(sheet_id, start, end)| ResolvedRange {
+                                sheet_id,
+                                start,
+                                end,
+                            })
                             .collect(),
                     )
                 }
@@ -275,17 +290,17 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         if ranges.len() != 1 {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Value));
                         }
-                        let range = ranges
-                            .pop()
-                            .expect("checked len() above");
+                        let range = ranges.pop().expect("checked len() above");
                         if !range.is_single_cell() {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Value));
                         }
 
-                        let Some(origin) = self.resolver.spill_origin(range.sheet_id, range.start) else {
+                        let Some(origin) = self.resolver.spill_origin(range.sheet_id, range.start)
+                        else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };
-                        let Some((start, end)) = self.resolver.spill_range(range.sheet_id, origin) else {
+                        let Some((start, end)) = self.resolver.spill_range(range.sheet_id, origin)
+                        else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };
 
@@ -368,7 +383,12 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
     }
 
-    fn call_value_as_function(&self, call_name: &str, value: Value, args: &[CompiledExpr]) -> Value {
+    fn call_value_as_function(
+        &self,
+        call_name: &str,
+        value: Value,
+        args: &[CompiledExpr],
+    ) -> Value {
         match value {
             Value::Lambda(lambda) => self.call_lambda(call_name, lambda, args),
             Value::Error(e) => Value::Error(e),
@@ -376,7 +396,12 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         }
     }
 
-    fn call_lambda(&self, call_name: &str, lambda: crate::value::Lambda, args: &[CompiledExpr]) -> Value {
+    fn call_lambda(
+        &self,
+        call_name: &str,
+        lambda: crate::value::Lambda,
+        args: &[CompiledExpr],
+    ) -> Value {
         const MAX_RECURSION_DEPTH: u32 = 256;
 
         let depth = self.lambda_depth.get();
@@ -400,7 +425,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             counter: Rc::clone(&self.lambda_depth),
         };
 
-        if args.len() != lambda.params.len() {
+        if args.len() > lambda.params.len() {
             return Value::Error(ErrorKind::Value);
         }
 
@@ -413,13 +438,22 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             evaluated_args.push(v);
         }
 
-        let mut call_scope = HashMap::with_capacity(lambda.params.len().saturating_add(1));
+        let mut call_scope =
+            HashMap::with_capacity(lambda.params.len().saturating_mul(2).saturating_add(1));
         call_scope.insert(
             call_name.trim().to_ascii_uppercase(),
             Value::Lambda(lambda.clone()),
         );
-        for (param, value) in lambda.params.iter().zip(evaluated_args) {
+        for (idx, param) in lambda.params.iter().enumerate() {
+            let value = evaluated_args.get(idx).cloned().unwrap_or(Value::Blank);
             call_scope.insert(param.to_ascii_uppercase(), value);
+
+            if idx >= args.len() {
+                call_scope.insert(
+                    format!("{}{}", crate::eval::LAMBDA_OMITTED_PREFIX, param),
+                    Value::Bool(true),
+                );
+            }
         }
 
         let mut scopes = Vec::new();
@@ -514,7 +548,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
     fn deref_reference_scalar(&self, ranges: &[ResolvedRange]) -> Value {
         match ranges {
-            [only] if only.is_single_cell() => self.resolver.get_cell_value(only.sheet_id, only.start),
+            [only] if only.is_single_cell() => {
+                self.resolver.get_cell_value(only.sheet_id, only.start)
+            }
             _ => {
                 // Multi-cell references used as scalars behave like a spill attempt.
                 Value::Error(ErrorKind::Spill)
@@ -541,7 +577,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         let mut values = Vec::with_capacity(rows.saturating_mul(cols));
         for row in range.start.row..=range.end.row {
             for col in range.start.col..=range.end.col {
-                values.push(self.resolver.get_cell_value(range.sheet_id, CellAddr { row, col }));
+                values.push(
+                    self.resolver
+                        .get_cell_value(range.sheet_id, CellAddr { row, col }),
+                );
             }
         }
         Value::Array(Array::new(rows, cols, values))
@@ -615,7 +654,12 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         Value::Error(ErrorKind::Value)
     }
 
-    fn eval_reference_binary(&self, op: BinaryOp, left: &CompiledExpr, right: &CompiledExpr) -> EvalValue {
+    fn eval_reference_binary(
+        &self,
+        op: BinaryOp,
+        left: &CompiledExpr,
+        right: &CompiledExpr,
+    ) -> EvalValue {
         let left = match self.eval_reference_operand(left) {
             Ok(r) => r,
             Err(v) => return EvalValue::Scalar(v),
@@ -630,7 +674,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 let Some(sheet_id) = left.first().map(|r| r.sheet_id) else {
                     return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                 };
-                if left.iter().any(|r| r.sheet_id != sheet_id) || right.iter().any(|r| r.sheet_id != sheet_id) {
+                if left.iter().any(|r| r.sheet_id != sheet_id)
+                    || right.iter().any(|r| r.sheet_id != sheet_id)
+                {
                     return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                 }
 
@@ -738,7 +784,8 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
             EvalValue::Reference(mut ranges) => {
                 // Ensure a stable order for deterministic function behavior (e.g. COUNT over a
                 // multi-area union).
-                ranges.sort_by_key(|r| (r.sheet_id, r.start.row, r.start.col, r.end.row, r.end.col));
+                ranges
+                    .sort_by_key(|r| (r.sheet_id, r.start.row, r.start.col, r.end.row, r.end.col));
                 match ranges.as_slice() {
                     [only] => FnArgValue::Reference(FnReference {
                         sheet_id: only.sheet_id,
@@ -768,7 +815,11 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         Evaluator::eval_formula(self, expr)
     }
 
-    fn eval_formula_with_bindings(&self, expr: &CompiledExpr, bindings: &HashMap<String, Value>) -> Value {
+    fn eval_formula_with_bindings(
+        &self,
+        expr: &CompiledExpr,
+        bindings: &HashMap<String, Value>,
+    ) -> Value {
         if bindings.is_empty() {
             return self.eval_formula(expr);
         }
@@ -786,18 +837,24 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     }
 
     fn apply_implicit_intersection(&self, reference: FnReference) -> Value {
-        Evaluator::apply_implicit_intersection(self, &[ResolvedRange {
-            sheet_id: reference.sheet_id,
-            start: reference.start,
-            end: reference.end,
-        }])
+        Evaluator::apply_implicit_intersection(
+            self,
+            &[ResolvedRange {
+                sheet_id: reference.sheet_id,
+                start: reference.start,
+                end: reference.end,
+            }],
+        )
     }
 
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value {
         self.resolver.get_cell_value(sheet_id, addr)
     }
 
-    fn iter_reference_cells(&self, reference: FnReference) -> Box<dyn Iterator<Item = CellAddr> + '_> {
+    fn iter_reference_cells(
+        &self,
+        reference: FnReference,
+    ) -> Box<dyn Iterator<Item = CellAddr> + '_> {
         if let Some(iter) = self.resolver.iter_sheet_cells(reference.sheet_id) {
             Box::new(iter.filter(move |addr| reference.contains(*addr)))
         } else {
@@ -851,9 +908,13 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     if let Value::Error(e) = right {
         return Err(*e);
     }
-    if matches!(left, Value::Array(_) | Value::Lambda(_) | Value::Spill { .. })
-        || matches!(right, Value::Array(_) | Value::Lambda(_) | Value::Spill { .. })
-    {
+    if matches!(
+        left,
+        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. }
+    ) || matches!(
+        right,
+        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. }
+    ) {
         return Err(ErrorKind::Value);
     }
 
@@ -989,11 +1050,9 @@ fn numeric_binary(op: BinaryOp, left: &Value, right: &Value) -> Value {
 
 fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
     match value {
-        Value::Array(arr) => Value::Array(Array::new(
-            arr.rows,
-            arr.cols,
-            arr.iter().map(f).collect(),
-        )),
+        Value::Array(arr) => {
+            Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect()))
+        }
         other => f(other),
     }
 }

@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::eval::{CompiledExpr, Expr, SheetReference};
-use crate::functions::{ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility};
+use crate::eval::{CompiledExpr, Expr, SheetReference, LAMBDA_OMITTED_PREFIX};
+use crate::functions::{
+    ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility,
+};
 use crate::value::{ErrorKind, Lambda, Value};
 
 const VAR_ARGS: usize = 255;
@@ -80,7 +82,8 @@ fn lambda_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let body = args.last().expect("checked args is non-empty");
-    let env = ctx.capture_lexical_env();
+    let mut env = ctx.capture_lexical_env();
+    env.retain(|k, _| !k.starts_with(LAMBDA_OMITTED_PREFIX));
 
     Value::Lambda(Lambda {
         params: params.into(),
@@ -89,10 +92,36 @@ fn lambda_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     })
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "ISOMITTED",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Bool,
+        arg_types: &[ValueType::Any],
+        implementation: isomitted_fn,
+    }
+}
+
+fn isomitted_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let Some(name) = bare_identifier(&args[0]) else {
+        return Value::Error(ErrorKind::Value);
+    };
+
+    let key = format!(
+        "{LAMBDA_OMITTED_PREFIX}{}",
+        name.trim().to_ascii_uppercase()
+    );
+    let env = ctx.capture_lexical_env();
+    Value::Bool(matches!(env.get(&key), Some(Value::Bool(true))))
+}
+
 fn bare_identifier(expr: &CompiledExpr) -> Option<&str> {
     match expr {
         Expr::NameRef(nref) if matches!(nref.sheet, SheetReference::Current) => Some(&nref.name),
         _ => None,
     }
 }
-

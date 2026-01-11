@@ -571,7 +571,10 @@ pub fn function_id_from_name(name: &str) -> Option<u16> {
         return Some(id);
     }
 
-    if had_xlfn_prefix || FUTURE_UDF_FUNCTIONS.contains(&normalized) || is_formula_engine_function(normalized) {
+    if had_xlfn_prefix
+        || FUTURE_UDF_FUNCTIONS.contains(&normalized)
+        || is_formula_engine_function(normalized)
+    {
         return Some(FTAB_USER_DEFINED);
     }
 
@@ -582,7 +585,7 @@ pub fn function_id_from_name(name: &str) -> Option<u16> {
 //
 // These are typically stored by Excel as `_xlfn.` functions and encoded in BIFF as
 // user-defined function calls (`iftab = 255`) with an accompanying name token.
-const FUTURE_UDF_FUNCTIONS: [&str; 41] = [
+const FUTURE_UDF_FUNCTIONS: [&str; 42] = [
     "AGGREGATE",
     "BYCOL",
     "BYROW",
@@ -598,6 +601,7 @@ const FUTURE_UDF_FUNCTIONS: [&str; 41] = [
     "FLOOR.PRECISE",
     "HSTACK",
     "IFNA",
+    "ISOMITTED",
     "ISO.CEILING",
     "ISO.WEEKNUM",
     "ISOWEEKNUM",

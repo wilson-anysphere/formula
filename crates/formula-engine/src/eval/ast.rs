@@ -135,7 +135,11 @@ impl<S: Clone> Expr<S> {
             Expr::ArrayLiteral { rows, cols, values } => Expr::ArrayLiteral {
                 rows: *rows,
                 cols: *cols,
-                values: values.iter().map(|v| v.map_sheets(f)).collect::<Vec<_>>().into(),
+                values: values
+                    .iter()
+                    .map(|v| v.map_sheets(f))
+                    .collect::<Vec<_>>()
+                    .into(),
             },
             Expr::NameRef(r) => Expr::NameRef(NameRef {
                 sheet: f(&r.sheet),

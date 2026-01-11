@@ -1,5 +1,5 @@
-use thiserror::Error;
 use formula_model::CellRef;
+use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CellAddr {

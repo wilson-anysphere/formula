@@ -60,18 +60,22 @@ fn lower_expr(expr: &crate::Expr) -> ParsedExpr {
         // Standalone row/col refs are uncommon in A1 formulas (Excel normally uses `A:A` / `1:1`),
         // but lower them to their full-row/full-column ranges for completeness.
         crate::Expr::ColRef(r) => rect_from_col_ref(r)
-            .map(|rect| Expr::RangeRef(RangeRef {
-                sheet: rect.sheet,
-                start: rect.start,
-                end: rect.end,
-            }))
+            .map(|rect| {
+                Expr::RangeRef(RangeRef {
+                    sheet: rect.sheet,
+                    start: rect.start,
+                    end: rect.end,
+                })
+            })
             .unwrap_or_else(|| Expr::Error(ErrorKind::Ref)),
         crate::Expr::RowRef(r) => rect_from_row_ref(r)
-            .map(|rect| Expr::RangeRef(RangeRef {
-                sheet: rect.sheet,
-                start: rect.start,
-                end: rect.end,
-            }))
+            .map(|rect| {
+                Expr::RangeRef(RangeRef {
+                    sheet: rect.sheet,
+                    start: rect.start,
+                    end: rect.end,
+                })
+            })
             .unwrap_or_else(|| Expr::Error(ErrorKind::Ref)),
 
         crate::Expr::StructuredRef(r) => lower_structured_ref(r),
