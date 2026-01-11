@@ -39,6 +39,12 @@ describe("Tauri CSP", () => {
     expect(workerSrc, "missing worker-src directive").not.toBeNull();
     expect(workerSrc).toContain("'self'");
     expect(workerSrc).toContain("blob:");
+
+    // Older WebKit versions (macOS 10.15 WKWebView / WebKitGTK) can gate Workers
+    // behind `child-src` instead of `worker-src`.
+    const childSrc = parseCspDirective(csp as string, "child-src");
+    expect(childSrc, "missing child-src directive").not.toBeNull();
+    expect(childSrc).toContain("'self'");
+    expect(childSrc).toContain("blob:");
   });
 });
-

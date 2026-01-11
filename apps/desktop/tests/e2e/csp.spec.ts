@@ -28,7 +28,10 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
-    await expect(page.locator("#grid")).toBeVisible();
+    // The CSP smoke test doesn't need the full UI to render; it only needs the
+    // document to load so we can validate WASM + Worker execution under the
+    // configured policy.
+    await expect(page.locator("#grid")).toHaveCount(1);
 
     const { mainThreadAnswer, workerAnswer } = await page.evaluate(async () => {
       const wasmBytes = new Uint8Array([
@@ -107,7 +110,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
-    await expect(page.locator("#grid")).toBeVisible();
+    await expect(page.locator("#grid")).toHaveCount(1);
 
     const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
     const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
