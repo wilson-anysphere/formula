@@ -737,9 +737,10 @@ class MarketplaceStore {
               `UPDATE extension_versions
                SET signing_key_id = ?, signing_public_key_pem = ?
                WHERE signing_key_id IS NULL
-                 AND extension_id IN (SELECT id FROM extensions WHERE publisher = ?)`,
+                  AND extension_id IN (SELECT id FROM extensions WHERE publisher = ?)`,
               [existingKeyId, existingPem, publisher]
             );
+            db.run(`UPDATE extensions SET updated_at = ? WHERE publisher = ?`, [now, publisher]);
           }
         }
       } else {
@@ -1051,6 +1052,7 @@ class MarketplaceStore {
                AND extension_id IN (SELECT id FROM extensions WHERE publisher = ?)`,
             [existingKeyId, existingPem, publisher]
           );
+          db.run(`UPDATE extensions SET updated_at = ? WHERE publisher = ?`, [now, publisher]);
         }
       }
 
@@ -1241,9 +1243,10 @@ class MarketplaceStore {
               `UPDATE extension_versions
                SET signing_key_id = ?, signing_public_key_pem = ?
                WHERE signing_key_id IS NULL
-                 AND extension_id IN (SELECT id FROM extensions WHERE publisher = ?)`,
+                  AND extension_id IN (SELECT id FROM extensions WHERE publisher = ?)`,
               [keyId, fallbackPem, publisher]
             );
+            db.run(`UPDATE extensions SET updated_at = ? WHERE publisher = ?`, [now, publisher]);
           });
           publisherKeys = await this.getPublisherKeys(publisher, { includeRevoked: false });
         }
