@@ -16,11 +16,14 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "CHOOSECOLS",
     "CHOOSEROWS",
     "CONCAT",
+    "COVARIANCE.P",
+    "COVARIANCE.S",
     "DROP",
     "EXPAND",
     "FILTER",
     "FLOOR.MATH",
     "FLOOR.PRECISE",
+    "FORECAST.LINEAR",
     "HSTACK",
     "IFNA",
     "IFS",
@@ -32,14 +35,24 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "LET",
     "MAKEARRAY",
     "MAP",
+    "MODE.MULT",
+    "MODE.SNGL",
     "NETWORKDAYS.INTL",
     "NUMBERVALUE",
+    "PERCENTILE.EXC",
+    "PERCENTILE.INC",
+    "QUARTILE.EXC",
+    "QUARTILE.INC",
     "RANDARRAY",
+    "RANK.AVG",
+    "RANK.EQ",
     "REDUCE",
     "SCAN",
     "SEQUENCE",
     "SORT",
     "SORTBY",
+    "STDEV.P",
+    "STDEV.S",
     "SWITCH",
     "TAKE",
     "TEXTJOIN",
@@ -47,6 +60,8 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "TOCOL",
     "TOROW",
     "UNIQUE",
+    "VAR.P",
+    "VAR.S",
     "VSTACK",
     "WORKDAY.INTL",
     "WRAPCOLS",
@@ -312,6 +327,13 @@ mod tests {
     fn add_xlfn_prefixes_handles_dotted_function_names() {
         let input = "ISO.WEEKNUM(1)+WORKDAY.INTL(1,2)";
         let expected = "_xlfn.ISO.WEEKNUM(1)+_xlfn.WORKDAY.INTL(1,2)";
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn add_xlfn_prefixes_handles_statistical_dot_functions() {
+        let input = "STDEV.S(A1:A3)+VAR.P(A1:A3)";
+        let expected = "_xlfn.STDEV.S(A1:A3)+_xlfn.VAR.P(A1:A3)";
         assert_eq!(add_xlfn_prefixes(input), expected);
     }
 
