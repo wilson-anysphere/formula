@@ -45,7 +45,7 @@ WORKDIR /app/services/sync-server
 
 # This image only copies the sync-server sources plus packages/security/crypto.
 # Avoid importing other monorepo packages unless you also copy them here.
-RUN node -e 'const fs=require("fs");const path=require("path");const bad=[];const deny=[/@formula\//,/packages\/security\/(?!crypto(?:\/|$))/];(function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(e.isFile()&&p.endsWith(".ts")){const t=fs.readFileSync(p,"utf8");if(deny.some(r=>r.test(t)))bad.push(p);}}})("src");if(bad.length){console.error("sync-server Docker build only includes services/sync-server and packages/security/crypto. Offending files:",bad);process.exit(1);}'
+RUN node -e 'const fs=require("fs");const path=require("path");const bad=[];const deny=[/@formula\//,/packages\/(?!security\/crypto(?:\/|$))/];(function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())walk(p);else if(e.isFile()&&p.endsWith(".ts")){const t=fs.readFileSync(p,"utf8");if(deny.some(r=>r.test(t)))bad.push(p);}}})("src");if(bad.length){console.error("sync-server Docker build only includes services/sync-server and packages/security/crypto. Offending files:",bad);process.exit(1);}'
 
 RUN npm run build
 RUN npm prune --omit=dev
