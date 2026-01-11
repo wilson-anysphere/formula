@@ -601,3 +601,39 @@ test("RefreshOrchestrator: dependency error rejects and cancels unscheduled depe
   await assert.rejects(handle.promise, /Boom/);
   assert.deepEqual(new Set(cancelled), new Set(["B", "C"]));
 });
+
+test("RefreshOrchestrator: dependency errors do not cancel independent targets", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "A" }));
+  orchestrator.registerQuery(makeQuery("D", { type: "range", range: { values: [["Value"], [4]], hasHeaders: true } }));
+
+  /** @type {string[]} */
+  const completed = [];
+  /** @type {string[]} */
+  const cancelled = [];
+  orchestrator.onEvent((evt) => {
+    if (evt.type === "completed") completed.push(evt.job.queryId);
+    if (evt.type === "cancelled") cancelled.push(evt.job.queryId);
+  });
+
+  const handle = orchestrator.refreshAll(["B", "D"]);
+  assert.equal(engine.calls.length, 2);
+  assert.deepEqual(new Set(engine.calls.map((c) => c.queryId)), new Set(["A", "D"]));
+
+  const callA = engine.calls.find((c) => c.queryId === "A");
+  const callD = engine.calls.find((c) => c.queryId === "D");
+  assert.ok(callA);
+  assert.ok(callD);
+
+  callA.deferred.reject(new Error("Boom"));
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(engine.calls.length, 2, "dependent query should not be started after dependency error");
+  assert.ok(cancelled.includes("B"), "dependent target should be cancelled");
+
+  callD.deferred.resolve(makeResult("D"));
+  await assert.rejects(handle.promise, /Boom/);
+  assert.ok(completed.includes("D"), "independent target should still complete");
+});

@@ -415,8 +415,8 @@ export class RefreshOrchestrator {
     const targetResults = {};
 
     let done = false;
-    let aborted = false;
-    let abortStarted = false;
+    let cancelled = false;
+    let cancelStarted = false;
     /** @type {unknown | null} */
     let terminalError = null;
 
@@ -442,39 +442,81 @@ export class RefreshOrchestrator {
       remainingJobs -= 1;
     };
 
-    const cancelUnscheduled = () => {
+    /**
+     * Emit a synthetic cancelled event for a query that will never be scheduled
+     * (e.g. because the session was cancelled, or a dependency failed).
+     *
+     * @param {string} id
+     */
+    const emitSyntheticCancelled = (id) => {
       const now = new Date();
+      const job = { id: `${sessionId}:cancel_${id}`, queryId: id, reason, queuedAt: now, completedAt: now };
+      const phase = targetSet.has(id) ? "target" : "dependency";
+      this.emitter.emit(
+        "event",
+        /** @type {RefreshGraphEvent} */ ({
+          type: "cancelled",
+          sessionId,
+          phase,
+          job,
+        }),
+      );
+    };
+
+    const cancelUnscheduledAll = () => {
       for (const id of closure) {
         if (scheduled.has(id)) continue;
         if (terminalIds.has(id)) continue;
-
-        const job = { id: `${sessionId}:cancel_${id}`, queryId: id, reason, queuedAt: now, completedAt: now };
-        const phase = targetSet.has(id) ? "target" : "dependency";
-        this.emitter.emit(
-          "event",
-          /** @type {RefreshGraphEvent} */ ({
-            type: "cancelled",
-            sessionId,
-            phase,
-            job,
-          }),
-        );
+        emitSyntheticCancelled(id);
         markTerminal(id);
       }
     };
 
     /**
-     * Ensure the session is aborted and all unscheduled queries are treated as cancelled.
+     * Cancel the downstream dependents of a failed/cancelled query.
+     *
+     * This keeps independent subgraphs running while ensuring dependents that can no
+     * longer succeed are marked cancelled and never scheduled.
+     *
+     * @param {string} rootId
+     */
+    const cancelDependents = (rootId) => {
+      /** @type {string[]} */
+      const queue = [...(dependents.get(rootId) ?? [])];
+      /** @type {Set<string>} */
+      const seen = new Set();
+
+      while (queue.length > 0) {
+        const id = queue.pop();
+        if (!id) continue;
+        if (seen.has(id)) continue;
+        seen.add(id);
+
+        if (terminalIds.has(id)) continue;
+
+        if (scheduled.has(id)) {
+          handles.get(id)?.cancel();
+        } else {
+          emitSyntheticCancelled(id);
+          markTerminal(id);
+        }
+
+        for (const next of dependents.get(id) ?? []) queue.push(next);
+      }
+    };
+
+    /**
+     * Cancel the entire refresh session (user cancellation).
      *
      * @param {unknown} error
      */
-    const ensureAbort = (error) => {
+    const cancelSession = (error) => {
       if (!terminalError) terminalError = error;
-      aborted = true;
-      if (abortStarted) return;
-      abortStarted = true;
+      cancelled = true;
+      if (cancelStarted) return;
+      cancelStarted = true;
       manager.dispose();
-      cancelUnscheduled();
+      cancelUnscheduledAll();
     };
 
     const finalize = () => {
@@ -491,8 +533,9 @@ export class RefreshOrchestrator {
     };
 
     const schedule = (id) => {
-      if (aborted || done) return;
+      if (cancelled || done) return;
       if (scheduled.has(id)) return;
+      if (terminalIds.has(id)) return;
       scheduled.add(id);
 
       const handle = manager.refresh(id, reason);
@@ -526,14 +569,16 @@ export class RefreshOrchestrator {
 
       if (evt.type === "error") {
         markTerminal(evt.job.queryId);
-        ensureAbort(evt.error);
+        if (!terminalError) terminalError = evt.error;
+        cancelDependents(evt.job.queryId);
         finalize();
         return;
       }
 
       if (evt.type === "cancelled") {
         markTerminal(evt.job.queryId);
-        ensureAbort(abortError("Aborted"));
+        if (!terminalError) terminalError = abortError("Aborted");
+        cancelDependents(evt.job.queryId);
         finalize();
       }
     });
@@ -556,7 +601,7 @@ export class RefreshOrchestrator {
       promise,
       cancel: () => {
         if (done) return;
-        ensureAbort(abortError("Aborted"));
+        cancelSession(abortError("Aborted"));
         finalize();
       },
     };
