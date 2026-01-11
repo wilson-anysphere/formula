@@ -707,15 +707,26 @@ guardrails:
 
 - Replace `fetch` and `WebSocket` with permission-gated wrappers and lock them down on `globalThis`
   (and the prototype chain when possible).
-- Disable other obvious network primitives such as `XMLHttpRequest`.
+- Disable other obvious network primitives such as `XMLHttpRequest`, `EventSource`, WebTransport, and
+  WebRTC (`RTCPeerConnection`).
 - Disable nested script-loading/execution primitives (`importScripts`, `Worker`, `SharedWorker`) to
   avoid spawning a fresh worker with pristine globals.
+- **Strict import policy (best-effort)**: before activating an extension, the worker fetches the
+  entrypoint module and its static dependency graph and rejects:
+  - any static import specifier that is not relative (`./` / `../`) or `@formula/extension-api`
+    (optionally `formula` if an import map/alias is provided)
+  - any dynamic `import(...)` usage
+  - implication: browser extensions must bundle third-party dependencies and reference any split
+    chunks via relative imports inside the extension package.
+- **Code generation lockdown (best-effort)**: `eval`, `Function` (and related constructors), and
+  string timer callbacks (`setTimeout("...")`) are disabled by default.
 
 Limitations:
 
-- The ESM loader in browsers can still fetch module graphs via `import`/`import()` in ways that are
-  not interceptable from inside a standard worker. Production deployments should pair the worker
-  guardrails with CSP / extension packaging policies that prevent loading untrusted remote scripts.
+- These guardrails are not a complete security boundary. Browsers do not expose a hardened `vm`
+  equivalent, and some escape hatches (and engine bugs) may still exist.
+- Production deployments should pair the worker guardrails with a restrictive CSP and extension
+  packaging policies that prevent loading untrusted remote scripts.
 
 ### Permission System
 

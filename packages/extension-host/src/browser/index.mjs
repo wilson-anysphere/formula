@@ -88,6 +88,14 @@ function createRequestId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function normalizeSandboxOptions(options) {
+  const value = options && typeof options === "object" ? options : {};
+  return {
+    strictImports: value.strictImports !== false,
+    disableEval: value.disableEval !== false
+  };
+}
+
 class InMemoryExtensionStorage {
   constructor() {
     this._data = {};
@@ -206,7 +214,8 @@ class BrowserExtensionHost {
     storageApi,
     activationTimeoutMs = 5000,
     commandTimeoutMs = 5000,
-    customFunctionTimeoutMs = 5000
+    customFunctionTimeoutMs = 5000,
+    sandbox
   } = {}) {
     if (!spreadsheetApi) {
       throw new Error("BrowserExtensionHost requires a spreadsheetApi implementation");
@@ -226,6 +235,8 @@ class BrowserExtensionHost {
     this._customFunctionTimeoutMs = Number.isFinite(customFunctionTimeoutMs)
       ? Math.max(0, customFunctionTimeoutMs)
       : 5000;
+
+    this._sandbox = normalizeSandboxOptions(sandbox);
 
     this._spreadsheet = spreadsheetApi;
     this._workbook = { name: "MockWorkbook", path: null };
@@ -403,6 +414,7 @@ class BrowserExtensionHost {
         extensionPath,
         mainUrl,
         extensionUri: extensionPath,
+        sandbox: { ...this._sandbox },
         // Browser host has no filesystem; provide stable identifiers so extensions
         // can key storage off these paths similarly to the desktop host.
         globalStoragePath: `memory://formula/extensions/${extensionId}/globalStorage`,

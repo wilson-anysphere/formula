@@ -4,10 +4,14 @@ formulaApi.__setTransport({
   postMessage: (message) => postMessage(message)
 });
 
+const nativeFetch = typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : null;
+
 let workerData = null;
 let extensionModule = null;
 let activated = false;
 let activationPromise = null;
+let sandboxGuardrailsApplied = false;
+let importPreflightPromise = null;
 
 let nextInternalRequestId = 1;
 const internalPending = new Map();
@@ -22,6 +26,14 @@ function deserializeError(payload) {
   const err = new Error(message);
   if (payload?.stack) err.stack = String(payload.stack);
   return err;
+}
+
+function normalizeSandboxOptions(options) {
+  const value = options && typeof options === "object" ? options : {};
+  return {
+    strictImports: value.strictImports !== false,
+    disableEval: value.disableEval !== false
+  };
 }
 
 function internalRpcCall(namespace, method, args) {
@@ -60,7 +72,8 @@ function init(data) {
     extensionUri: String(data?.extensionUri ?? data?.extensionPath ?? ""),
     globalStoragePath: String(data?.globalStoragePath ?? ""),
     workspaceStoragePath: String(data?.workspaceStoragePath ?? ""),
-    mainUrl: String(data?.mainUrl ?? "")
+    mainUrl: String(data?.mainUrl ?? ""),
+    sandbox: normalizeSandboxOptions(data?.sandbox)
   };
 
   formulaApi.__setContext({
@@ -70,6 +83,8 @@ function init(data) {
     globalStoragePath: workerData.globalStoragePath,
     workspaceStoragePath: workerData.workspaceStoragePath
   });
+
+  applySandboxGuardrails(workerData.sandbox);
 }
 
 function findPrototypeWithOwnProperty(obj, prop) {
@@ -107,6 +122,81 @@ function lockDownGlobal(prop, value) {
   const protoOwner = findPrototypeWithOwnProperty(globalThis, prop);
   if (protoOwner) {
     defineReadOnlyProperty(protoOwner, prop, value);
+  }
+}
+
+function lockDownProperty(target, prop, value) {
+  if (!target || (typeof target !== "object" && typeof target !== "function")) return;
+  defineReadOnlyProperty(target, prop, value);
+
+  const protoOwner = findPrototypeWithOwnProperty(target, prop);
+  if (protoOwner) {
+    defineReadOnlyProperty(protoOwner, prop, value);
+  }
+}
+
+function applySandboxGuardrails(sandbox) {
+  if (sandboxGuardrailsApplied) return;
+  sandboxGuardrailsApplied = true;
+
+  if (sandbox?.disableEval) {
+    const blocked = (name) => {
+      return function blockedCodegen() {
+        throw new Error(`${name} is not allowed in extensions`);
+      };
+    };
+
+    if (typeof globalThis.eval === "function") {
+      lockDownGlobal("eval", blocked("eval"));
+    }
+
+    if (typeof globalThis.Function === "function") {
+      const NativeFunction = globalThis.Function;
+      const DisabledFunction = blocked("Function");
+      lockDownGlobal("Function", DisabledFunction);
+      lockDownProperty(NativeFunction.prototype, "constructor", DisabledFunction);
+
+      try {
+        // AsyncFunction is not exposed as a global; harden the prototype chain so
+        // `Object.getPrototypeOf(async function(){}).constructor` cannot be used
+        // to create new functions from strings.
+        const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+        if (typeof AsyncFunction === "function") {
+          lockDownProperty(AsyncFunction.prototype, "constructor", DisabledFunction);
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        const GeneratorFunction = Object.getPrototypeOf(function* () {}).constructor;
+        if (typeof GeneratorFunction === "function") {
+          lockDownProperty(GeneratorFunction.prototype, "constructor", DisabledFunction);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (typeof globalThis.setTimeout === "function") {
+      const native = globalThis.setTimeout;
+      lockDownGlobal("setTimeout", (handler, timeout, ...args) => {
+        if (typeof handler === "string") {
+          throw new Error("setTimeout with a string callback is not allowed in extensions");
+        }
+        return native(handler, timeout, ...args);
+      });
+    }
+
+    if (typeof globalThis.setInterval === "function") {
+      const native = globalThis.setInterval;
+      lockDownGlobal("setInterval", (handler, timeout, ...args) => {
+        if (typeof handler === "string") {
+          throw new Error("setInterval with a string callback is not allowed in extensions");
+        }
+        return native(handler, timeout, ...args);
+      });
+    }
   }
 }
 
@@ -337,6 +427,42 @@ if (typeof globalThis.XMLHttpRequest === "function") {
   lockDownGlobal("XMLHttpRequest", PermissionedXMLHttpRequest);
 }
 
+if (typeof globalThis.EventSource === "function") {
+  class PermissionedEventSource {
+    constructor() {
+      throw new Error("EventSource is not allowed in extensions");
+    }
+  }
+
+  lockDownGlobal("EventSource", PermissionedEventSource);
+}
+
+if (typeof globalThis.WebTransport === "function") {
+  class PermissionedWebTransport {
+    constructor() {
+      throw new Error("WebTransport is not allowed in extensions");
+    }
+  }
+
+  lockDownGlobal("WebTransport", PermissionedWebTransport);
+}
+
+if (typeof globalThis.RTCPeerConnection === "function") {
+  class PermissionedRTCPeerConnection {
+    constructor() {
+      throw new Error("RTCPeerConnection is not allowed in extensions");
+    }
+  }
+
+  lockDownGlobal("RTCPeerConnection", PermissionedRTCPeerConnection);
+}
+
+if (globalThis.navigator && typeof globalThis.navigator.sendBeacon === "function") {
+  lockDownProperty(globalThis.navigator, "sendBeacon", () => {
+    throw new Error("navigator.sendBeacon is not allowed in extensions");
+  });
+}
+
 // Prevent bypassing the permission-gated network APIs by spawning nested workers
 // with pristine globals (native fetch/WebSocket/XHR).
 if (typeof globalThis.Worker === "function") {
@@ -363,6 +489,509 @@ if (typeof globalThis.importScripts === "function") {
   });
 }
 
+const IMPORT_PREFLIGHT_LIMITS = {
+  maxModules: 200,
+  maxTotalBytes: 5 * 1024 * 1024,
+  maxModuleBytes: 256 * 1024
+};
+
+function scanModuleImports(source, url) {
+  // Best-effort module graph validation. This intentionally ignores strings/comments so that
+  // JSDoc `import("...")` type references don't trigger dynamic import checks.
+  const src = String(source ?? "");
+  const len = src.length;
+  /** @type {string[]} */
+  const specifiers = [];
+
+  const isIdentifierStart = (ch) => /[A-Za-z_$]/.test(ch);
+  const isIdentifierChar = (ch) => /[A-Za-z0-9_$]/.test(ch);
+  const isDigit = (ch) => /[0-9]/.test(ch);
+  const isWhitespace = (ch) => /\s/.test(ch);
+
+  function skipWhitespaceAndComments(idx) {
+    let i = idx;
+    while (i < len) {
+      const ch = src[i];
+      if (isWhitespace(ch)) {
+        i += 1;
+        continue;
+      }
+      if (ch === "/" && src[i + 1] === "/") {
+        i += 2;
+        while (i < len && src[i] !== "\n") i += 1;
+        continue;
+      }
+      if (ch === "/" && src[i + 1] === "*") {
+        i += 2;
+        while (i < len && !(src[i] === "*" && src[i + 1] === "/")) i += 1;
+        if (i < len) i += 2;
+        continue;
+      }
+      break;
+    }
+    return i;
+  }
+
+  function parseStringLiteral(idx) {
+    const quote = src[idx];
+    let i = idx + 1;
+    let out = "";
+    while (i < len) {
+      const ch = src[i];
+      if (ch === "\\") {
+        i += 1;
+        if (i >= len) break;
+        out += src[i];
+        i += 1;
+        continue;
+      }
+      if (ch === quote) {
+        return { value: out, end: i + 1 };
+      }
+      out += ch;
+      i += 1;
+    }
+    return null;
+  }
+
+  function skipString(idx, quote) {
+    let i = idx;
+    while (i < len) {
+      const ch = src[i];
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (ch === quote) {
+        return i + 1;
+      }
+      i += 1;
+    }
+    return i;
+  }
+
+  function skipRegex(idx) {
+    let i = idx;
+    let inCharClass = false;
+    while (i < len) {
+      const ch = src[i];
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (ch === "[" && !inCharClass) {
+        inCharClass = true;
+        i += 1;
+        continue;
+      }
+      if (ch === "]" && inCharClass) {
+        inCharClass = false;
+        i += 1;
+        continue;
+      }
+      if (ch === "/" && !inCharClass) {
+        i += 1;
+        while (i < len && /[A-Za-z]/.test(src[i])) i += 1;
+        return i;
+      }
+      i += 1;
+    }
+    return i;
+  }
+
+  function tryParseImportSpecifier(idx) {
+    let i = skipWhitespaceAndComments(idx);
+    if (src[i] === "'" || src[i] === '"') {
+      const parsed = parseStringLiteral(i);
+      if (parsed) return parsed;
+      return null;
+    }
+
+    let braceDepth = 0;
+    while (i < len) {
+      const ch = src[i];
+      if (isWhitespace(ch)) {
+        i += 1;
+        continue;
+      }
+      if (ch === "/" && src[i + 1] === "/") {
+        i += 2;
+        while (i < len && src[i] !== "\n") i += 1;
+        continue;
+      }
+      if (ch === "/" && src[i + 1] === "*") {
+        i += 2;
+        while (i < len && !(src[i] === "*" && src[i + 1] === "/")) i += 1;
+        if (i < len) i += 2;
+        continue;
+      }
+      if (ch === "'" || ch === '"') {
+        i = skipString(i + 1, ch);
+        continue;
+      }
+      if (ch === "{") {
+        braceDepth += 1;
+        i += 1;
+        continue;
+      }
+      if (ch === "}") {
+        if (braceDepth > 0) braceDepth -= 1;
+        i += 1;
+        continue;
+      }
+      if (braceDepth === 0 && isIdentifierStart(ch)) {
+        let j = i + 1;
+        while (j < len && isIdentifierChar(src[j])) j += 1;
+        const ident = src.slice(i, j);
+        if (ident === "from") {
+          const afterFrom = skipWhitespaceAndComments(j);
+          if (src[afterFrom] === "'" || src[afterFrom] === '"') {
+            return parseStringLiteral(afterFrom);
+          }
+        }
+        i = j;
+        continue;
+      }
+      if (ch === ";" || ch === "\n") break;
+      i += 1;
+    }
+    return null;
+  }
+
+  function tryParseExportSpecifier(idx) {
+    return tryParseImportSpecifier(idx);
+  }
+
+  let i = 0;
+  let state = "code"; // code | template | lineComment | blockComment
+  let regexAllowed = true;
+  let afterPropertyDot = false;
+  const templateBraceStack = [];
+
+  while (i < len) {
+    const ch = src[i];
+
+    if (state === "code") {
+      if (ch === "{") {
+        if (templateBraceStack.length > 0) {
+          templateBraceStack[templateBraceStack.length - 1] += 1;
+        }
+        regexAllowed = true;
+        afterPropertyDot = false;
+        i += 1;
+        continue;
+      }
+
+      if (ch === "}" && templateBraceStack.length > 0) {
+        const depth = templateBraceStack[templateBraceStack.length - 1];
+        if (depth === 0) {
+          templateBraceStack.pop();
+          state = "template";
+          i += 1;
+          continue;
+        }
+        templateBraceStack[templateBraceStack.length - 1] -= 1;
+        regexAllowed = false;
+        afterPropertyDot = false;
+        i += 1;
+        continue;
+      }
+
+      if (isWhitespace(ch)) {
+        i += 1;
+        continue;
+      }
+
+      if (ch === "'" || ch === '"') {
+        i = skipString(i + 1, ch);
+        regexAllowed = false;
+        afterPropertyDot = false;
+        continue;
+      }
+
+      if (ch === "`") {
+        state = "template";
+        regexAllowed = false;
+        afterPropertyDot = false;
+        i += 1;
+        continue;
+      }
+
+      if (ch === "/" && src[i + 1] === "/") {
+        state = "lineComment";
+        i += 2;
+        continue;
+      }
+
+      if (ch === "/" && src[i + 1] === "*") {
+        state = "blockComment";
+        i += 2;
+        continue;
+      }
+
+      if (ch === ".") {
+        if (src[i + 1] === "." && src[i + 2] === ".") {
+          afterPropertyDot = false;
+          regexAllowed = true;
+          i += 3;
+          continue;
+        }
+
+        afterPropertyDot = true;
+        regexAllowed = true;
+        i += 1;
+        continue;
+      }
+
+      if (ch === "/") {
+        if (regexAllowed) {
+          i = skipRegex(i + 1);
+          regexAllowed = false;
+          afterPropertyDot = false;
+          continue;
+        }
+        regexAllowed = true;
+        afterPropertyDot = false;
+        i += 1;
+        continue;
+      }
+
+      if (ch === "(" || ch === "[" || ch === "," || ch === ";" || ch === ":" || ch === "?" || ch === "=") {
+        regexAllowed = true;
+        afterPropertyDot = false;
+        i += 1;
+        continue;
+      }
+
+      if (ch === ")" || ch === "]") {
+        regexAllowed = false;
+        afterPropertyDot = false;
+        i += 1;
+        continue;
+      }
+
+      if ((ch === "+" || ch === "-") && src[i + 1] === ch) {
+        regexAllowed = Boolean(regexAllowed);
+        afterPropertyDot = false;
+        i += 2;
+        continue;
+      }
+
+      if (
+        ch === "!" ||
+        ch === "~" ||
+        ch === "&" ||
+        ch === "|" ||
+        ch === "*" ||
+        ch === "%" ||
+        ch === "^" ||
+        ch === "<" ||
+        ch === ">" ||
+        ch === "+" ||
+        ch === "-"
+      ) {
+        regexAllowed = true;
+        afterPropertyDot = false;
+        i += 1;
+        continue;
+      }
+
+      if (isIdentifierStart(ch)) {
+        let j = i + 1;
+        while (j < len && isIdentifierChar(src[j])) j += 1;
+        const ident = src.slice(i, j);
+
+        if (!afterPropertyDot && ident === "import") {
+          const afterImport = skipWhitespaceAndComments(j);
+          if (src[afterImport] === "(") {
+            const argStart = skipWhitespaceAndComments(afterImport + 1);
+            let detail = "";
+            if (src[argStart] === "'" || src[argStart] === '"') {
+              const parsed = parseStringLiteral(argStart);
+              if (parsed) detail = ` (attempted to import '${parsed.value}')`;
+            }
+            throw new Error(`Dynamic import is not allowed in extensions${detail}${url ? ` (in ${url})` : ""}`);
+          }
+
+          if (src[afterImport] !== ".") {
+            const parsed = tryParseImportSpecifier(afterImport);
+            if (parsed?.value) {
+              specifiers.push(parsed.value);
+              if (parsed.end) {
+                i = parsed.end;
+                regexAllowed = false;
+                afterPropertyDot = false;
+                continue;
+              }
+            }
+          }
+        }
+
+        if (!afterPropertyDot && ident === "export") {
+          const parsed = tryParseExportSpecifier(j);
+          if (parsed?.value) {
+            specifiers.push(parsed.value);
+            if (parsed.end) {
+              i = parsed.end;
+              regexAllowed = false;
+              afterPropertyDot = false;
+              continue;
+            }
+          }
+        }
+
+        regexAllowed = false;
+        afterPropertyDot = false;
+        i = j;
+        continue;
+      }
+
+      if (isDigit(ch)) {
+        let j = i + 1;
+        while (j < len && /[0-9._xobA-Fa-f]/.test(src[j])) j += 1;
+        regexAllowed = false;
+        afterPropertyDot = false;
+        i = j;
+        continue;
+      }
+
+      afterPropertyDot = false;
+      i += 1;
+      continue;
+    }
+
+    if (state === "template") {
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (ch === "`") {
+        state = "code";
+        regexAllowed = false;
+        afterPropertyDot = false;
+        i += 1;
+        continue;
+      }
+      if (ch === "$" && src[i + 1] === "{") {
+        templateBraceStack.push(0);
+        state = "code";
+        regexAllowed = true;
+        afterPropertyDot = false;
+        i += 2;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (state === "lineComment") {
+      if (ch === "\n") {
+        state = "code";
+        regexAllowed = true;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (state === "blockComment") {
+      if (ch === "*" && src[i + 1] === "/") {
+        state = "code";
+        regexAllowed = true;
+        i += 2;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    i += 1;
+  }
+
+  return specifiers;
+}
+
+function assertAllowedStaticImport(specifier, parentUrl) {
+  const request = String(specifier ?? "");
+  if (request === "@formula/extension-api" || request === "formula") return { type: "virtual" };
+  if (request.startsWith("./") || request.startsWith("../")) return { type: "relative" };
+
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(request) || request.startsWith("//")) {
+    throw new Error(
+      `Disallowed import specifier '${request}' in ${parentUrl}: URL/protocol imports are not allowed; bundle dependencies instead`
+    );
+  }
+  if (request.startsWith("/")) {
+    throw new Error(
+      `Disallowed import specifier '${request}' in ${parentUrl}: absolute imports are not allowed; use a relative path instead`
+    );
+  }
+
+  throw new Error(
+    `Disallowed import specifier '${request}' in ${parentUrl}: only relative imports ('./' or '../') and '@formula/extension-api' are allowed`
+  );
+}
+
+async function fetchModuleSource(url) {
+  if (!nativeFetch) {
+    throw new Error("Strict import validation requires fetch support in this runtime");
+  }
+  const response = await nativeFetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch extension module: ${url} (${response.status})`);
+  }
+  const buffer = await response.arrayBuffer();
+  const size = buffer.byteLength;
+  return { source: new TextDecoder().decode(buffer), size };
+}
+
+async function validateModuleGraph(entryUrl, extensionRootUrl, limits = IMPORT_PREFLIGHT_LIMITS) {
+  const root = extensionRootUrl ? new URL("./", extensionRootUrl).href : null;
+  /** @type {string[]} */
+  const queue = [String(entryUrl)];
+  const visited = new Set();
+  let totalBytes = 0;
+
+  while (queue.length > 0) {
+    const url = queue.shift();
+    if (!url) continue;
+    if (visited.has(url)) continue;
+    if (visited.size >= limits.maxModules) {
+      throw new Error(
+        `Extension module graph exceeded limit of ${limits.maxModules} modules (starting from ${entryUrl})`
+      );
+    }
+
+    visited.add(url);
+    const { source, size } = await fetchModuleSource(url);
+
+    if (size > limits.maxModuleBytes) {
+      throw new Error(
+        `Extension module too large: ${url} (${size} bytes; max ${limits.maxModuleBytes} bytes)`
+      );
+    }
+    totalBytes += size;
+    if (totalBytes > limits.maxTotalBytes) {
+      throw new Error(
+        `Extension module graph too large: exceeded ${limits.maxTotalBytes} bytes (starting from ${entryUrl})`
+      );
+    }
+
+    const imports = scanModuleImports(source, url);
+    for (const specifier of imports) {
+      const kind = assertAllowedStaticImport(specifier, url);
+      if (kind.type !== "relative") continue;
+
+      const resolved = new URL(specifier, url).href;
+      if (root && !resolved.startsWith(root)) {
+        throw new Error(
+          `Disallowed import specifier '${specifier}' in ${url}: resolved outside the extension base URL (${resolved})`
+        );
+      }
+      queue.push(resolved);
+    }
+  }
+}
+
 async function activateExtension() {
   if (activated) return;
   if (activationPromise) return activationPromise;
@@ -370,6 +999,10 @@ async function activateExtension() {
 
   activationPromise = (async () => {
     if (!extensionModule) {
+      if (workerData.sandbox?.strictImports) {
+        importPreflightPromise ??= validateModuleGraph(workerData.mainUrl, workerData.extensionPath);
+        await importPreflightPromise;
+      }
       extensionModule = await import(workerData.mainUrl);
     }
 

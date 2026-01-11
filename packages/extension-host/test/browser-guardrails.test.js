@@ -3,58 +3,7 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-function createWorkerCtor(scenarios) {
-  return class FakeWorker {
-    constructor(_url, _options) {
-      this._listeners = new Map();
-      this._terminated = false;
-      this._scenario = scenarios.shift() ?? {};
-    }
-
-    addEventListener(type, listener) {
-      const key = String(type);
-      if (!this._listeners.has(key)) this._listeners.set(key, new Set());
-      this._listeners.get(key).add(listener);
-    }
-
-    removeEventListener(type, listener) {
-      const set = this._listeners.get(String(type));
-      if (!set) return;
-      set.delete(listener);
-      if (set.size === 0) this._listeners.delete(String(type));
-    }
-
-    postMessage(message) {
-      if (this._terminated) return;
-      try {
-        this._scenario.onPostMessage?.(message, this);
-      } catch (err) {
-        this._emit("error", { message: String(err?.message ?? err) });
-      }
-    }
-
-    terminate() {
-      this._terminated = true;
-    }
-
-    emitMessage(message) {
-      if (this._terminated) return;
-      this._emit("message", { data: message });
-    }
-
-    _emit(type, event) {
-      const set = this._listeners.get(String(type));
-      if (!set) return;
-      for (const listener of [...set]) {
-        try {
-          listener(event);
-        } catch {
-          // ignore
-        }
-      }
-    }
-  };
-}
+const { installFakeWorker } = require("./helpers/fake-browser-worker");
 
 async function importBrowserHost() {
   const moduleUrl = pathToFileURL(path.resolve(__dirname, "../src/browser/index.mjs")).href;
@@ -73,15 +22,13 @@ test("BrowserExtensionHost: init message includes context storage fields", async
         assert.ok(
           typeof msg.workspaceStoragePath === "string" && msg.workspaceStoragePath.includes("workspaceStorage")
         );
+        assert.equal(msg.sandbox?.strictImports, true);
+        assert.equal(msg.sandbox?.disableEval, true);
       }
     }
   ];
 
-  const PrevWorker = globalThis.Worker;
-  globalThis.Worker = createWorkerCtor(scenarios);
-  t.after(() => {
-    globalThis.Worker = PrevWorker;
-  });
+  installFakeWorker(t, scenarios);
 
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
@@ -113,6 +60,48 @@ test("BrowserExtensionHost: init message includes context storage fields", async
   });
 });
 
+test("BrowserExtensionHost: sandbox options are configurable", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type !== "init") return;
+        assert.equal(msg.sandbox?.strictImports, false);
+        assert.equal(msg.sandbox?.disableEval, false);
+      }
+    }
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true,
+    sandbox: { strictImports: false, disableEval: false }
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension({
+    extensionId: "test.sandbox-options",
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "sandbox-options",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: []
+    }
+  });
+});
+
 test("BrowserExtensionHost: terminating a worker clears runtime context menus", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
@@ -130,11 +119,7 @@ test("BrowserExtensionHost: terminating a worker clears runtime context menus", 
     }
   ];
 
-  const PrevWorker = globalThis.Worker;
-  globalThis.Worker = createWorkerCtor(scenarios);
-  t.after(() => {
-    globalThis.Worker = PrevWorker;
-  });
+  installFakeWorker(t, scenarios);
 
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
@@ -200,17 +185,20 @@ test("BrowserExtensionHost: startup broadcasts workbookOpened with default workb
         }
         if (msg?.type === "event" && msg.event === "workbookOpened") {
           sawWorkbookOpened = true;
-          assert.deepEqual(msg.data, { workbook: { name: "MockWorkbook", path: null } });
+          assert.deepEqual(msg.data, {
+            workbook: {
+              name: "MockWorkbook",
+              path: null,
+              sheets: [{ id: "sheet1", name: "Sheet1" }],
+              activeSheet: { id: "sheet1", name: "Sheet1" }
+            }
+          });
         }
       }
     }
   ];
 
-  const PrevWorker = globalThis.Worker;
-  globalThis.Worker = createWorkerCtor(scenarios);
-  t.after(() => {
-    globalThis.Worker = PrevWorker;
-  });
+  installFakeWorker(t, scenarios);
 
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
@@ -267,11 +255,7 @@ test("BrowserExtensionHost: activation timeout terminates worker and allows rest
     }
   ];
 
-  const PrevWorker = globalThis.Worker;
-  globalThis.Worker = createWorkerCtor(scenarios);
-  t.after(() => {
-    globalThis.Worker = PrevWorker;
-  });
+  installFakeWorker(t, scenarios);
 
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
@@ -350,11 +334,7 @@ test("BrowserExtensionHost: command timeout terminates worker, rejects in-flight
     }
   ];
 
-  const PrevWorker = globalThis.Worker;
-  globalThis.Worker = createWorkerCtor(scenarios);
-  t.after(() => {
-    globalThis.Worker = PrevWorker;
-  });
+  installFakeWorker(t, scenarios);
 
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
@@ -443,11 +423,7 @@ test("BrowserExtensionHost: custom function timeout terminates worker and allows
     }
   ];
 
-  const PrevWorker = globalThis.Worker;
-  globalThis.Worker = createWorkerCtor(scenarios);
-  t.after(() => {
-    globalThis.Worker = PrevWorker;
-  });
+  installFakeWorker(t, scenarios);
 
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
@@ -528,11 +504,7 @@ test("BrowserExtensionHost: worker termination removes extension-owned context m
     }
   ];
 
-  const PrevWorker = globalThis.Worker;
-  globalThis.Worker = createWorkerCtor(scenarios);
-  t.after(() => {
-    globalThis.Worker = PrevWorker;
-  });
+  installFakeWorker(t, scenarios);
 
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
