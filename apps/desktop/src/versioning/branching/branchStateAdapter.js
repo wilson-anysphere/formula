@@ -138,12 +138,4 @@ export function applyBranchStateToDocumentController(doc, state) {
         Buffer.from(JSON.stringify(snapshot), "utf8");
 
   doc.applyState(encoded);
-
-  // DocumentController lazily creates sheets on access. If a branch state includes
-  // an explicit empty sheet, ensure it is reflected in the controller model.
-  for (const sheet of sheets) {
-    if (sheet.cells.length > 0) continue;
-    doc.getCell(sheet.id, "A1");
-  }
 }
-

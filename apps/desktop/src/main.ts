@@ -818,11 +818,6 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     app.setChartTheme(chartThemeFromWorkbookPalette(null));
   }
 
-  // Ensure sheets exist even if they were empty (DocumentController lazily creates models).
-  for (const sheet of sheets) {
-    doc.getCell(sheet.id, { row: 0, col: 0 });
-  }
-
   doc.markSaved();
 
   const firstSheetId = sheets[0].id;
