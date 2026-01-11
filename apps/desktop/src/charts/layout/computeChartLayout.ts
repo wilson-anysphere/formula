@@ -261,7 +261,18 @@ function collectNumericValues(model: ChartModel, axis: ChartAxisModel, role: "x"
   const out: number[] = [];
   if (model.chartType.kind === "scatter") {
     for (const s of model.series) {
-      const vals = extractSeriesNumbers(s, role === "x" ? "xValues" : "yValues");
+      const key = role === "x" ? "xValues" : "yValues";
+      const vals = extractSeriesNumbers(s, key);
+      if (role === "x" && vals.length === 0) {
+        // Some producers (including our small fixtures) may serialize x values as strings.
+        // Excel treats non-numeric x values as sequential indices; mirror that so the
+        // layout engine can still derive a stable numeric domain for the value axis.
+        const len = Math.max(cacheLength(s.xValues), cacheLength(s.yValues));
+        if (len > 0) {
+          out.push(...Array.from({ length: len }, (_, i) => i + 1));
+        }
+        continue;
+      }
       out.push(...vals);
     }
     return out;
@@ -273,6 +284,15 @@ function collectNumericValues(model: ChartModel, axis: ChartAxisModel, role: "x"
   }
 
   return out;
+}
+
+function cacheLength(data: unknown): number {
+  if (!data) return 0;
+  if (Array.isArray(data)) return data.length;
+  if (typeof data === "object" && data !== null && "cache" in data && Array.isArray((data as any).cache)) {
+    return (data as any).cache.length;
+  }
+  return 0;
 }
 
 function computeValueAxisInfo(args: {
