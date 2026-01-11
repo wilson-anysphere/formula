@@ -321,7 +321,10 @@ test("CellStructuralConflictMonitor move conflict resolution applies the chosen 
 
   const expectedKey = conflict.remote.toCellKey;
   const expectedValue = conflict.remote.cell?.value ?? null;
+  const otherKey = conflict.local.toCellKey;
   assert.ok(typeof expectedKey === "string" && expectedKey.length > 0);
+  assert.ok(typeof otherKey === "string" && otherKey.length > 0);
+  assert.notEqual(expectedKey, otherKey);
 
   // Resolve by choosing "theirs" (remote side) and ensure that side's moved
   // content is the one that lands at the chosen destination.
@@ -331,6 +334,8 @@ test("CellStructuralConflictMonitor move conflict resolution applies the chosen 
   assert.equal(await sessionB.getCell("Sheet1:0:0"), null);
   assert.equal((await sessionA.getCell(expectedKey))?.value ?? null, expectedValue);
   assert.equal((await sessionB.getCell(expectedKey))?.value ?? null, expectedValue);
+  assert.equal(await sessionA.getCell(otherKey), null);
+  assert.equal(await sessionB.getCell(otherKey), null);
 
   sessionA.destroy();
   sessionB.destroy();
