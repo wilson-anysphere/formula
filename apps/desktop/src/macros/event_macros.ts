@@ -373,17 +373,10 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     runningEventMacro = true;
     currentEventMacroKind = kind;
     try {
-      // Allow microtask-batched edits (e.g. `startWorkbookSync`) to enqueue into the backend
-      // sync chain before we drain it, so event macros see the latest persisted workbook state.
-      //
-      // Selection changes are sourced from the UI (not the backend sync chain), so skipping the
-      // extra microtask turn keeps selection change macros responsive.
-      if (kind !== "selection_change") {
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-      }
+      // Sync any pending workbook changes (backend sync chain) and the current UI context before
+      // firing the macro. Selection changes are sourced from the UI (not the backend sync chain),
+      // so draining backend sync here only adds latency.
       if (kind === "selection_change") {
-        // Selection changes are emitted directly by the UI. Draining the backend sync chain here can
-        // add avoidable latency (and extra promise turns), so we only sync UI context.
         await setMacroUiContext(args);
       } else {
         await Promise.all([args.drainBackendSync(), setMacroUiContext(args)]);
@@ -559,7 +552,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (disposed) return;
     if (changeFlushScheduled) return;
     changeFlushScheduled = true;
-    queueMicrotask(() => {
+    Promise.resolve().then(() => {
       changeFlushScheduled = false;
       startFlushWorksheetChanges();
     });
@@ -688,7 +681,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
           return;
         }
 
-        queueMicrotask(() => startFlushSelectionChange());
+        Promise.resolve().then(() => startFlushSelectionChange());
       });
   }
 
@@ -803,7 +796,9 @@ export async function fireWorkbookBeforeCloseBestEffort(args: InstallVbaEventMac
     return;
   }
 
-  await new Promise<void>((resolve) => queueMicrotask(resolve));
+  // Use a Promise-based microtask yield instead of `queueMicrotask` so this stays compatible
+  // with Vitest fake timers (which may stub `queueMicrotask`).
+  await Promise.resolve();
   await args.drainBackendSync();
   await setMacroUiContext(args);
 

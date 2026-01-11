@@ -7,6 +7,10 @@ const { pathToFileURL } = require("node:url");
 
 const { ExtensionHost } = require("../src");
 
+// Worker thread startup can be slow when the node:test runner executes files in parallel.
+// Keep activation timeouts generous so these API surface tests do not flake under load.
+const ACTIVATION_TIMEOUT_MS = 10_000;
+
 async function writeExtensionFixture(extensionDir, manifest, entrypointCode) {
   await fs.mkdir(path.join(extensionDir, "dist"), { recursive: true });
   await fs.writeFile(path.join(extensionDir, "package.json"), JSON.stringify(manifest, null, 2), "utf8");
@@ -46,6 +50,7 @@ test("api surface: cells.getRange/setRange roundtrip uses A1 refs and serializes
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -119,6 +124,7 @@ test("api surface: cells.getRange/setRange support sheet-qualified A1 refs", asy
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -169,6 +175,7 @@ test("permissions: cells.getRange requires cells.read", async (t) => {
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async ({ permissions }) => !permissions.includes("cells.read")
@@ -216,6 +223,7 @@ test("permissions: cells.setRange requires cells.write and denial prevents write
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async ({ permissions }) => !permissions.includes("cells.write")
@@ -268,6 +276,7 @@ test("api surface: sheets.createSheet/renameSheet/getSheet manage workbook sheet
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -328,6 +337,7 @@ test("api surface: sheet objects include activate/rename helpers", async (t) => 
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -377,6 +387,7 @@ test("permissions: sheets.createSheet requires sheets.manage", async (t) => {
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async ({ permissions }) => !permissions.includes("sheets.manage")
@@ -423,6 +434,7 @@ test("permissions: sheets.activateSheet requires sheets.manage", async (t) => {
  
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async ({ permissions }) => !permissions.includes("sheets.manage")
@@ -477,6 +489,7 @@ test("api surface: sheets.deleteSheet removes sheets and cannot delete last shee
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -533,6 +546,7 @@ test("events: sheets.createSheet emits sheetActivated with stable payload", asyn
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -594,6 +608,7 @@ test("api surface: sheets.activateSheet switches active sheet and emits sheetAct
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -653,6 +668,7 @@ test("api surface: workbook.openWorkbook emits workbookOpened with stable payloa
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -707,6 +723,7 @@ test("permissions: workbook.openWorkbook requires workbook.manage", async (t) =>
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async ({ permissions }) => !permissions.includes("workbook.manage")
@@ -754,6 +771,7 @@ test("permissions: workbook.saveAs requires workbook.manage and denial prevents 
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async ({ permissions }) => !permissions.includes("workbook.manage")
@@ -815,6 +833,7 @@ test("events: workbook.save emits beforeSave with stable payload", async (t) => 
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -890,6 +909,7 @@ test("api surface: config.onDidChange fires after config.update and value persis
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -950,6 +970,7 @@ test("api surface: workbook.saveAs updates workbook path and emits beforeSave", 
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -1034,6 +1055,7 @@ test("api surface: workbook objects include save/saveAs/close helpers", async (t
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -1111,6 +1133,7 @@ test("api surface: workbook.close resets to default workbook and emits workbookO
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -1180,6 +1203,7 @@ test("api surface: ui.showInputBox/showQuickPick return deterministic placeholde
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -1245,6 +1269,7 @@ test("api surface: ui.registerContextMenu adds and removes runtime menu items", 
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
@@ -1308,6 +1333,7 @@ test("permissions: ui.registerContextMenu requires ui.menus", async (t) => {
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async ({ permissions }) => !permissions.includes("ui.menus")
@@ -1372,6 +1398,7 @@ test("api surface: formula.context and activation context expose storage paths",
 
   const host = new ExtensionHost({
     engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true
