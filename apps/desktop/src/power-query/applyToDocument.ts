@@ -234,8 +234,8 @@ export async function applyQueryToDocument(
         await options.onProgress?.({ type: "engine", queryId: query.id, event: evt });
       },
       onBatch: async (batch) => {
-        // `executeQueryStreaming` doesn't currently consult the signal between batches.
-        // Make cancellation responsive by explicitly checking before writing each batch.
+        // The engine consults the abort signal between batches, but we also check here so a
+        // cancellation can prevent partially-applied writes mid-refresh.
         throwIfAborted(options.signal);
 
         const values = gridToDocumentInputs(batch.values);
