@@ -44,6 +44,10 @@ function isValidProviderId(value: string): boolean {
   return /^[a-z0-9_-]{1,64}$/.test(value);
 }
 
+function isValidOrgId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 function oidcSecretName(orgId: string, providerId: string): string {
   return `oidc:${orgId}:${providerId}`;
 }
@@ -89,6 +93,10 @@ async function requireOrgAdminForOidcProviders(
   reply: FastifyReply,
   orgId: string
 ): Promise<{ role: OrgRole } | null> {
+  if (!isValidOrgId(orgId)) {
+    reply.code(400).send({ error: "invalid_request" });
+    return null;
+  }
   if (request.authOrgId && request.authOrgId !== orgId) {
     reply.code(404).send({ error: "org_not_found" });
     return null;

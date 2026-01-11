@@ -32,6 +32,10 @@ function decodeBase64Strict(input: string): Buffer | null {
   return decoded;
 }
 
+function isValidUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 function roleRank(role: DocumentRole): number {
   switch (role) {
     case "owner":
@@ -86,6 +90,10 @@ async function requireDocRole(
   reply: FastifyReply,
   docId: string
 ): Promise<{ orgId: string; deletedAt: Date | null; role: DocumentRole } | null> {
+  if (!isValidUuid(docId)) {
+    reply.code(404).send({ error: "doc_not_found" });
+    return null;
+  }
   const membership = await getDocMembership(request, docId);
   if (!membership.orgId) {
     reply.code(404).send({ error: "doc_not_found" });

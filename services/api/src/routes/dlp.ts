@@ -7,11 +7,19 @@ import { evaluateDocumentDlpPolicy } from "../dlp/effective";
 import { canDocument, type DocumentRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
 
+function isValidUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 async function requireDocRead(
   request: FastifyRequest,
   reply: FastifyReply,
   docId: string
 ): Promise<{ orgId: string; role: DocumentRole } | null> {
+  if (!isValidUuid(docId)) {
+    reply.code(404).send({ error: "doc_not_found" });
+    return null;
+  }
   const membership = await request.server.db.query(
     `
       SELECT d.org_id, dm.role, os.ip_allowlist

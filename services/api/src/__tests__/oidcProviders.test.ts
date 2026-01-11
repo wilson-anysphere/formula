@@ -241,4 +241,27 @@ describe("OIDC provider administration APIs", () => {
     },
     10_000
   );
+
+  it("rejects invalid orgId path params", async () => {
+    const registerRes = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "oidc-invalid-orgid@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "OIDC Invalid OrgId"
+      }
+    });
+    expect(registerRes.statusCode).toBe(200);
+    const cookie = extractCookie(registerRes.headers["set-cookie"]);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/orgs/not-a-uuid/oidc-providers",
+      headers: { cookie }
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as any).error).toBe("invalid_request");
+  });
 });

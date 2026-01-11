@@ -373,7 +373,7 @@ describe("security hardening", () => {
     expect(allowedWithTrustProxy.statusCode).toBe(200);
   });
 
-  it("rejects invalid orgId path params on org-scoped routes", async () => {
+  it("rejects invalid orgId/docId path params on org-scoped routes", async () => {
     const register = await app.inject({
       method: "POST",
       url: "/auth/register",
@@ -394,5 +394,22 @@ describe("security hardening", () => {
     });
     expect(res.statusCode).toBe(400);
     expect((res.json() as any).error).toBe("invalid_request");
+
+    const docRes = await app.inject({
+      method: "GET",
+      url: "/docs/not-a-uuid",
+      headers: { cookie }
+    });
+    expect(docRes.statusCode).toBe(404);
+    expect((docRes.json() as any).error).toBe("doc_not_found");
+
+    const dlpRes = await app.inject({
+      method: "POST",
+      url: "/docs/not-a-uuid/dlp/evaluate",
+      headers: { cookie },
+      payload: { action: "export.csv" }
+    });
+    expect(dlpRes.statusCode).toBe(404);
+    expect((dlpRes.json() as any).error).toBe("doc_not_found");
   });
 });
