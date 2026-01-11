@@ -133,7 +133,7 @@ class BrowserExtensionHost {
       : 5000;
 
     this._spreadsheet = spreadsheetApi;
-    this._workbook = { name: "Workbook", path: null };
+    this._workbook = { name: "MockWorkbook", path: null };
     this._sheets = [{ id: "sheet1", name: "Sheet1" }];
     this._nextSheetId = 2;
     this._activeSheetId = "sheet1";

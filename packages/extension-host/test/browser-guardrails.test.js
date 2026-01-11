@@ -185,6 +185,62 @@ test("BrowserExtensionHost: terminating a worker clears runtime context menus", 
   assert.equal(host._contextMenus.size, 0);
 });
 
+test("BrowserExtensionHost: startup broadcasts workbookOpened with default workbook payload", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let sawWorkbookOpened = false;
+
+  const scenarios = [
+    {
+      onPostMessage(msg, worker) {
+        if (msg?.type === "init") return;
+        if (msg?.type === "activate") {
+          worker.emitMessage({ type: "activate_result", id: msg.id });
+          return;
+        }
+        if (msg?.type === "event" && msg.event === "workbookOpened") {
+          sawWorkbookOpened = true;
+          assert.deepEqual(msg.data, { workbook: { name: "MockWorkbook", path: null } });
+        }
+      }
+    }
+  ];
+
+  const PrevWorker = globalThis.Worker;
+  globalThis.Worker = createWorkerCtor(scenarios);
+  t.after(() => {
+    globalThis.Worker = PrevWorker;
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension({
+    extensionId: "test.startup-workbook",
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "startup-workbook",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: ["onStartupFinished"],
+      permissions: []
+    }
+  });
+
+  await host.startup();
+  assert.equal(sawWorkbookOpened, true);
+});
+
 test("BrowserExtensionHost: activation timeout terminates worker and allows restart", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
