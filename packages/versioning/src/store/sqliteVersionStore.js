@@ -314,6 +314,18 @@ export class SQLiteVersionStore {
     await this._queuePersist();
   }
 
+  /**
+   * @param {string} versionId
+   * @returns {Promise<void>}
+   */
+  async deleteVersion(versionId) {
+    const db = await this._open();
+    const stmt = db.prepare(`DELETE FROM versions WHERE id = ?`);
+    stmt.run([versionId]);
+    stmt.free();
+    await this._queuePersist();
+  }
+
   close() {
     if (!this._db) return;
     this._db.close();

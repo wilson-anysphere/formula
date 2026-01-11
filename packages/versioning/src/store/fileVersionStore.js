@@ -160,5 +160,16 @@ export class FileVersionStore {
     };
     await this._write(data);
   }
-}
 
+  /**
+   * @param {string} versionId
+   * @returns {Promise<void>}
+   */
+  async deleteVersion(versionId) {
+    const data = await this._read();
+    const next = data.versions.filter((v) => v.id !== versionId);
+    if (next.length === data.versions.length) return;
+    data.versions = next;
+    await this._write(data);
+  }
+}

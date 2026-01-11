@@ -19,10 +19,18 @@ import { EventEmitter } from "node:events";
  * }} VersionRecord
  *
  * @typedef {{
+ *   maxSnapshots?: number;
+ *   maxAgeMs?: number;
+ *   keepRestores?: boolean;
+ *   keepCheckpoints?: boolean;
+ * }} VersionRetention
+ *
+ * @typedef {{
  *   saveVersion(version: VersionRecord): Promise<void>;
  *   getVersion(versionId: string): Promise<VersionRecord | null>;
  *   listVersions(): Promise<VersionRecord[]>;
  *   updateVersion(versionId: string, patch: { checkpointLocked?: boolean }): Promise<void>;
+ *   deleteVersion(versionId: string): Promise<void>;
  * }} VersionStore
  *
  * @typedef {{
@@ -48,6 +56,7 @@ export class VersionManager extends EventEmitter {
    *   autoSnapshotIntervalMs?: number;
    *   nowMs?: () => number;
    *   autoStart?: boolean;
+   *   retention?: VersionRetention;
    * }} opts
    */
   constructor(opts) {
@@ -60,6 +69,17 @@ export class VersionManager extends EventEmitter {
     this.nowMs = opts.nowMs ?? (() => Date.now());
     this.dirty = false;
     this._timer = null;
+    this._autoSnapshotInFlight = false;
+    /** @type {Promise<void>} */
+    this._pruneChain = Promise.resolve();
+    this.retention = opts.retention
+      ? {
+          maxSnapshots: opts.retention.maxSnapshots,
+          maxAgeMs: opts.retention.maxAgeMs,
+          keepRestores: opts.retention.keepRestores ?? true,
+          keepCheckpoints: opts.retention.keepCheckpoints ?? true,
+        }
+      : null;
 
     // Mark dirty on any document update.
     if (this.doc?.on) {
@@ -173,6 +193,7 @@ export class VersionManager extends EventEmitter {
     await this.store.saveVersion(head);
 
     this.emit("restored", { from: versionId, to: head.id });
+    await this._queueRetention();
     this.dirty = false;
     return head;
   }
@@ -180,7 +201,7 @@ export class VersionManager extends EventEmitter {
   startAutoSnapshot() {
     if (this._timer) return;
     this._timer = setInterval(() => {
-      void this.maybeSnapshot();
+      void this._autoSnapshotTick();
     }, this.autoSnapshotIntervalMs);
   }
 
@@ -188,6 +209,83 @@ export class VersionManager extends EventEmitter {
     if (!this._timer) return;
     clearInterval(this._timer);
     this._timer = null;
+  }
+
+  async _autoSnapshotTick() {
+    if (this._autoSnapshotInFlight) return;
+    this._autoSnapshotInFlight = true;
+    try {
+      const created = await this.maybeSnapshot();
+      // Prune on the autosnapshot cadence even when the document is idle.
+      if (!created) {
+        await this._queueRetention();
+      }
+    } finally {
+      this._autoSnapshotInFlight = false;
+    }
+  }
+
+  async _queueRetention() {
+    if (!this.retention) return;
+    const next = this._pruneChain.catch(() => {}).then(() => this._applyRetention());
+    this._pruneChain = next;
+    return next;
+  }
+
+  async _applyRetention() {
+    const retention = this.retention;
+    if (!retention) return;
+    if (retention.maxSnapshots == null && retention.maxAgeMs == null) return;
+
+    const versions = await this.store.listVersions();
+    const ordered = [...versions].sort((a, b) => b.timestampMs - a.timestampMs);
+
+    /** @type {Set<string>} */
+    const deleteIds = new Set();
+
+    const keepRestores = retention.keepRestores ?? true;
+    const keepCheckpoints = retention.keepCheckpoints ?? true;
+
+    /**
+     * @param {VersionRecord} v
+     */
+    const protectedFromDeletion = (v) => {
+      if (v.kind === "checkpoint") {
+        if (v.checkpointLocked === true) return true;
+        if (keepCheckpoints) return true;
+        return false;
+      }
+      if (v.kind === "restore") {
+        return keepRestores;
+      }
+      return false;
+    };
+
+    if (typeof retention.maxAgeMs === "number") {
+      const now = this.nowMs();
+      const cutoff = now - retention.maxAgeMs;
+      for (const v of ordered) {
+        if (protectedFromDeletion(v)) continue;
+        if (v.timestampMs < cutoff) {
+          deleteIds.add(v.id);
+        }
+      }
+    }
+
+    if (typeof retention.maxSnapshots === "number") {
+      const snapshots = ordered.filter((v) => v.kind === "snapshot");
+      for (let i = retention.maxSnapshots; i < snapshots.length; i += 1) {
+        deleteIds.add(snapshots[i].id);
+      }
+    }
+
+    if (deleteIds.size === 0) return;
+
+    const deletedIds = ordered.filter((v) => deleteIds.has(v.id)).map((v) => v.id);
+    for (const id of deletedIds) {
+      await this.store.deleteVersion(id);
+    }
+    this.emit("versionsPruned", { deletedIds });
   }
 
   /**
@@ -215,6 +313,7 @@ export class VersionManager extends EventEmitter {
     });
     await this.store.saveVersion(version);
     this.emit("versionCreated", version);
+    await this._queueRetention();
     return version;
   }
 }

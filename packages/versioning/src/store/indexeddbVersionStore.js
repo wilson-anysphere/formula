@@ -165,10 +165,21 @@ export class IndexedDBVersionStore {
     await transactionDone(tx);
   }
 
+  /**
+   * @param {string} versionId
+   * @returns {Promise<void>}
+   */
+  async deleteVersion(versionId) {
+    const db = await this._open();
+    const tx = db.transaction("versions", "readwrite");
+    const store = tx.objectStore("versions");
+    store.delete(versionId);
+    await transactionDone(tx);
+  }
+
   close() {
     if (!this._dbPromise) return;
     void this._dbPromise.then((db) => db.close()).catch(() => {});
     this._dbPromise = null;
   }
 }
-

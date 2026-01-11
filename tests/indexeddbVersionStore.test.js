@@ -65,3 +65,31 @@ test("IndexedDBVersionStore saves, lists, updates, and retrieves versions", asyn
   store.close();
 });
 
+test("IndexedDBVersionStore deleteVersion removes records", async () => {
+  const dbName = `formula-versioning-${crypto.randomUUID()}`;
+  const store = new IndexedDBVersionStore({ dbName });
+
+  const v1 = {
+    id: crypto.randomUUID(),
+    kind: "snapshot",
+    timestampMs: Date.now(),
+    userId: null,
+    userName: null,
+    description: "temp",
+    checkpointName: null,
+    checkpointLocked: null,
+    checkpointAnnotations: null,
+    snapshot: new Uint8Array([7, 8, 9]),
+  };
+
+  await store.saveVersion(v1);
+  assert.ok(await store.getVersion(v1.id));
+
+  await store.deleteVersion(v1.id);
+  assert.equal(await store.getVersion(v1.id), null);
+
+  const list = await store.listVersions();
+  assert.equal(list.length, 0);
+
+  store.close();
+});
