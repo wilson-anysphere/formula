@@ -25,6 +25,7 @@ export class FormulaBarView {
   #errorButton: HTMLButtonElement;
   #errorPanel: HTMLElement;
   #hoverOverride: RangeAddress | null = null;
+  #selectedReferenceIndex: number | null = null;
   #callbacks: FormulaBarViewCallbacks;
 
   constructor(root: HTMLElement, callbacks: FormulaBarViewCallbacks) {
@@ -125,7 +126,7 @@ export class FormulaBarView {
 
     textarea.addEventListener("focus", () => this.#beginEditFromFocus());
     textarea.addEventListener("input", () => this.#onInputOrSelection());
-    textarea.addEventListener("click", () => this.#onInputOrSelection());
+    textarea.addEventListener("click", () => this.#onTextareaClick());
     textarea.addEventListener("keyup", () => this.#onInputOrSelection());
     textarea.addEventListener("select", () => this.#onInputOrSelection());
     textarea.addEventListener("scroll", () => this.#syncScroll());
@@ -171,6 +172,7 @@ export class FormulaBarView {
     if (this.model.isEditing) return;
     this.model.setActiveCell(info);
     this.#hoverOverride = null;
+    this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
   }
 
@@ -205,6 +207,7 @@ export class FormulaBarView {
     if (this.model.isEditing) return;
     this.model.beginEdit();
     this.#callbacks.onBeginEdit?.(this.model.activeCell.address);
+    this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: true });
     this.#emitOverlays();
   }
@@ -215,6 +218,39 @@ export class FormulaBarView {
     const start = this.textarea.selectionStart ?? this.textarea.value.length;
     const end = this.textarea.selectionEnd ?? this.textarea.value.length;
     this.model.updateDraft(this.textarea.value, start, end);
+    this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
+    this.#render({ preserveTextareaValue: true });
+    this.#emitOverlays();
+  }
+
+  #onTextareaClick(): void {
+    if (!this.model.isEditing) return;
+
+    const prevSelectedReferenceIndex = this.#selectedReferenceIndex;
+    const start = this.textarea.selectionStart ?? this.textarea.value.length;
+    const end = this.textarea.selectionEnd ?? this.textarea.value.length;
+    this.model.updateDraft(this.textarea.value, start, end);
+    this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
+
+    const isFormulaEditing = this.model.draft.trim().startsWith("=");
+    if (isFormulaEditing && start === end) {
+      const activeIndex = this.model.activeReferenceIndex();
+      const active = activeIndex == null ? null : this.model.coloredReferences()[activeIndex] ?? null;
+
+      if (active) {
+        // Excel UX: clicking a reference selects the entire reference token so
+        // range dragging replaces it. A subsequent click on the same reference
+        // toggles back to a caret, allowing manual edits within the reference.
+        if (prevSelectedReferenceIndex === activeIndex) {
+          this.#selectedReferenceIndex = null;
+        } else {
+          this.textarea.setSelectionRange(active.start, active.end);
+          this.model.updateDraft(this.textarea.value, active.start, active.end);
+          this.#selectedReferenceIndex = activeIndex;
+        }
+      }
+    }
+
     this.#render({ preserveTextareaValue: true });
     this.#emitOverlays();
   }
@@ -226,6 +262,7 @@ export class FormulaBarView {
       const accepted = this.model.acceptAiSuggestion();
       if (accepted) {
         e.preventDefault();
+        this.#selectedReferenceIndex = null;
         this.#render({ preserveTextareaValue: false });
         this.#setTextareaSelectionFromModel();
         this.#emitOverlays();
@@ -238,6 +275,7 @@ export class FormulaBarView {
       this.textarea.blur();
       this.model.cancel();
       this.#hoverOverride = null;
+      this.#selectedReferenceIndex = null;
       this.#render({ preserveTextareaValue: false });
       this.#callbacks.onCancel?.();
       this.#emitOverlays();
@@ -250,6 +288,7 @@ export class FormulaBarView {
       this.textarea.blur();
       const committed = this.model.commit();
       this.#hoverOverride = null;
+      this.#selectedReferenceIndex = null;
       this.#render({ preserveTextareaValue: false });
       this.#callbacks.onCommit(committed);
       this.#emitOverlays();
@@ -258,6 +297,10 @@ export class FormulaBarView {
   }
 
   #render(opts: { preserveTextareaValue: boolean }): void {
+    if (!this.model.isEditing) {
+      this.#selectedReferenceIndex = null;
+    }
+
     if (document.activeElement !== this.#addressEl) {
       this.#addressEl.value = this.model.activeCell.address;
     }
@@ -447,6 +490,15 @@ export class FormulaBarView {
     if (this.#hoverOverride === null) return;
     this.#hoverOverride = null;
     this.#emitOverlays();
+  }
+
+  #inferSelectedReferenceIndex(start: number, end: number): number | null {
+    if (!this.model.isEditing || !this.model.draft.trim().startsWith("=")) return null;
+    if (start === end) return null;
+    for (const ref of this.model.coloredReferences()) {
+      if (ref.start === start && ref.end === end) return ref.index;
+    }
+    return null;
   }
 }
 

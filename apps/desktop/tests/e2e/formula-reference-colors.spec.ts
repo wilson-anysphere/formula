@@ -20,7 +20,24 @@ test.describe("formula reference colors", () => {
     const colors = await refs.evaluateAll((els) => els.map((el) => getComputedStyle(el).color));
     expect(colors[0]).not.toBe(colors[1]);
 
+    // Excel UX: clicking inside a reference selects that reference span.
+    await input.evaluate((el) => {
+      el.focus();
+      el.setSelectionRange(2, 2); // inside "A1"
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await expect(input).toHaveJSProperty("selectionStart", 1);
+    await expect(input).toHaveJSProperty("selectionEnd", 3);
+
+    // Clicking again on the same reference toggles back to a caret for manual edits.
+    await input.evaluate((el) => {
+      el.focus();
+      el.setSelectionRange(2, 2);
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await expect(input).toHaveJSProperty("selectionStart", 2);
+    await expect(input).toHaveJSProperty("selectionEnd", 2);
+
     await page.waitForFunction(() => (window as any).__formulaApp.getReferenceHighlightCount() === 2);
   });
 });
-
