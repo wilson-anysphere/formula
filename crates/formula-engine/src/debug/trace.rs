@@ -676,7 +676,13 @@ impl ParserImpl {
     fn parse_function_call(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
         let name_tok = self.next();
         let name = match name_tok.kind {
-            TokenKind::Ident(s) => s.to_ascii_uppercase(),
+            TokenKind::Ident(s) => {
+                let upper = s.to_ascii_uppercase();
+                upper
+                    .strip_prefix("_XLFN.")
+                    .unwrap_or(&upper)
+                    .to_string()
+            }
             other => {
                 return Err(FormulaParseError::Expected {
                     expected: "identifier".to_string(),
