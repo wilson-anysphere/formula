@@ -50,3 +50,27 @@ fn concat_flattens_array_results_from_operators() {
         Value::Text("102030".to_string())
     );
 }
+
+#[test]
+fn npv_accepts_array_results_from_operators() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=NPV(0.1, A1:A3*10)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let result = match engine.get_cell_value("Sheet1", "C1") {
+        Value::Number(n) => n,
+        other => panic!("expected NPV numeric result, got {other:?}"),
+    };
+
+    let expected = 10.0 / 1.1 + 20.0 / 1.1_f64.powi(2) + 30.0 / 1.1_f64.powi(3);
+    assert!(
+        (result - expected).abs() <= 1e-12,
+        "expected {expected}, got {result}"
+    );
+}
