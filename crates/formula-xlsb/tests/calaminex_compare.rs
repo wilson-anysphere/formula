@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook_auto, Reader};
-use formula_xlsb::format::format_hex;
+use formula_xlsb::format::{format_a1, format_hex};
 use formula_xlsb::rgce::decode_rgce;
 use formula_xlsb::{Formula, XlsbWorkbook};
 use pretty_assertions::assert_eq;
@@ -242,20 +242,20 @@ fn compare_fixture(path: &Path) {
         for ((row, col), cal_formula) in cal_sheet {
             let Some(decoded) = xlsb_sheet.get(&(row, col)) else {
                 panic!(
-                    "fixture {}: sheet {sheet_name:?} cell {} has a formula per calamine but formula-xlsb did not report one",
-                    path.display(),
-                    a1_notation(row, col)
-                );
-            };
+                "fixture {}: sheet {sheet_name:?} cell {} has a formula per calamine but formula-xlsb did not report one",
+                path.display(),
+                format_a1(row, col)
+            );
+        };
 
-            let decoded_text = match decoded.text.as_deref() {
-                Some(text) => text,
+        let decoded_text = match decoded.text.as_deref() {
+            Some(text) => text,
                 None => match decode_rgce(&decoded.rgce) {
                     Ok(unexpected) => {
                         panic!(
                             "fixture {}: sheet {sheet_name:?} cell {}: formula_xlsb returned Formula::text=None, but decode_rgce succeeded ({unexpected:?}); rgce={}",
                             path.display(),
-                            a1_notation(row, col),
+                            format_a1(row, col),
                             format_hex(&decoded.rgce)
                         );
                     }
@@ -263,7 +263,7 @@ fn compare_fixture(path: &Path) {
                         panic!(
                             "fixture {}: sheet {sheet_name:?} cell {}: formula-xlsb could not decode rgce (expected formula {cal_formula:?}): {err}; rgce={}",
                             path.display(),
-                            a1_notation(row, col),
+                            format_a1(row, col),
                             format_hex(&decoded.rgce)
                         );
                     }
@@ -277,7 +277,7 @@ fn compare_fixture(path: &Path) {
                 cal_norm,
                 "fixture {} sheet {sheet_name} cell {}\ncalamine: {cal_formula}\nformula-xlsb: {decoded_text}",
                 path.display(),
-                a1_notation(row, col)
+                format_a1(row, col)
             );
         }
     }
@@ -462,22 +462,6 @@ fn is_space_insensitive_delimiter(ch: char) -> bool {
         ch,
         '(' | ')' | ',' | '+' | '-' | '*' | '/' | '^' | '&' | '=' | '<' | '>' | ':' | '!' | '%' | '{' | '}' | '[' | ']' | '@'
     )
-}
-
-fn a1_notation(row: u32, col: u32) -> String {
-    format!("{}{}", col_label(col), row + 1)
-}
-
-fn col_label(mut col: u32) -> String {
-    col += 1; // Excel column labels are 1-based.
-
-    let mut buf = Vec::new();
-    while col > 0 {
-        let rem = ((col - 1) % 26) as u8;
-        buf.push((b'A' + rem) as char);
-        col = (col - 1) / 26;
-    }
-    buf.iter().rev().collect()
 }
 
 #[test]
