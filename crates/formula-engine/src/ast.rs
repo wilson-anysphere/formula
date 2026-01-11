@@ -308,11 +308,11 @@ impl Expr {
             }
             Expr::Boolean(v) => out.push_str(if *v { "TRUE" } else { "FALSE" }),
             Expr::Error(v) => out.push_str(v),
-            Expr::NameRef(name) => name.fmt(out),
+            Expr::NameRef(name) => name.fmt(out, opts),
             Expr::CellRef(r) => r.fmt(out, opts)?,
             Expr::ColRef(r) => r.fmt(out, opts)?,
             Expr::RowRef(r) => r.fmt(out, opts)?,
-            Expr::StructuredRef(r) => r.fmt(out)?,
+            Expr::StructuredRef(r) => r.fmt(out, opts)?,
             Expr::Array(arr) => arr.fmt(out, opts)?,
             Expr::FunctionCall(call) => call.fmt(out, opts)?,
             Expr::Unary(u) => {
@@ -623,7 +623,7 @@ impl CellRef {
     }
 
     fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
-        fmt_ref_prefix(out, &self.workbook, &self.sheet);
+        fmt_ref_prefix(out, &self.workbook, &self.sheet, opts.reference_style);
 
         match opts.reference_style {
             ReferenceStyle::A1 => {
@@ -657,8 +657,8 @@ pub struct NameRef {
 }
 
 impl NameRef {
-    fn fmt(&self, out: &mut String) {
-        fmt_ref_prefix(out, &self.workbook, &self.sheet);
+    fn fmt(&self, out: &mut String, opts: &SerializeOptions) {
+        fmt_ref_prefix(out, &self.workbook, &self.sheet, opts.reference_style);
         out.push_str(&self.name);
     }
 }
@@ -684,7 +684,7 @@ impl ColRef {
     }
 
     fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
-        fmt_ref_prefix(out, &self.workbook, &self.sheet);
+        fmt_ref_prefix(out, &self.workbook, &self.sheet, opts.reference_style);
         match opts.reference_style {
             ReferenceStyle::A1 => {
                 let (col_idx, col_abs) = self.col.to_a1_index(opts.origin.map(|o| o.col))?;
@@ -722,7 +722,7 @@ impl RowRef {
     }
 
     fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
-        fmt_ref_prefix(out, &self.workbook, &self.sheet);
+        fmt_ref_prefix(out, &self.workbook, &self.sheet, opts.reference_style);
         match opts.reference_style {
             ReferenceStyle::A1 => {
                 let (row_idx, row_abs) = self.row.to_a1_index(opts.origin.map(|o| o.row))?;
@@ -749,8 +749,8 @@ pub struct StructuredRef {
 }
 
 impl StructuredRef {
-    fn fmt(&self, out: &mut String) -> Result<(), SerializeError> {
-        fmt_ref_prefix(out, &self.workbook, &self.sheet);
+    fn fmt(&self, out: &mut String, opts: &SerializeOptions) -> Result<(), SerializeError> {
+        fmt_ref_prefix(out, &self.workbook, &self.sheet, opts.reference_style);
         if let Some(table) = &self.table {
             out.push_str(table);
         }
@@ -785,12 +785,12 @@ impl ArrayLiteral {
     }
 }
 
-fn fmt_sheet_name(out: &mut String, sheet: &str) {
+fn fmt_sheet_name(out: &mut String, sheet: &str, reference_style: ReferenceStyle) {
     // Be conservative: quoting is always accepted by Excel, but the unquoted form is only valid
-    // for a subset of ASCII identifier-like sheet names. This avoids producing formulas that the
+    // for a subset of identifier-like sheet names. This avoids producing formulas that the
     // canonical lexer cannot re-parse (e.g. non-ASCII names) and matches Excel's requirement to
     // quote sheet names that look like cell references (e.g. `A1` or `R1C1`).
-    let needs_quotes = needs_sheet_quotes(sheet);
+    let needs_quotes = sheet_name_needs_quotes(sheet, reference_style);
     if needs_quotes {
         out.push('\'');
         for ch in sheet.chars() {
@@ -807,115 +807,23 @@ fn fmt_sheet_name(out: &mut String, sheet: &str) {
     }
 }
 
-fn needs_sheet_quotes(sheet: &str) -> bool {
-    if sheet.is_empty() {
-        return true;
-    }
-
-    if is_reserved_unquoted_sheet_name(sheet) {
-        return true;
-    }
-
-    if looks_like_a1_cell_reference(sheet) || looks_like_r1c1_cell_reference(sheet) {
-        return true;
-    }
-
-    let mut chars = sheet.chars();
-    let Some(first) = chars.next() else {
-        return true;
-    };
-    if first.is_ascii_digit() {
-        return true;
-    }
-    if !(first == '_' || first.is_ascii_alphabetic()) {
-        return true;
-    }
-    if !chars.all(|ch| ch == '_' || ch == '.' || ch.is_ascii_alphanumeric()) {
-        return true;
-    }
-
-    false
-}
-
-fn is_reserved_unquoted_sheet_name(sheet: &str) -> bool {
-    sheet.eq_ignore_ascii_case("TRUE") || sheet.eq_ignore_ascii_case("FALSE")
-}
-
-fn looks_like_a1_cell_reference(name: &str) -> bool {
-    let bytes = name.as_bytes();
-    if bytes.is_empty() {
-        return false;
-    }
-
-    let mut i = 0;
-    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
-        i += 1;
-        if i > 3 {
-            return false;
-        }
-    }
-
-    if i == 0 || i >= bytes.len() {
-        return false;
-    }
-
-    let digit_start = i;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        i += 1;
-    }
-
-    if digit_start == i || i != bytes.len() {
-        return false;
-    }
-
-    // Reject impossible columns (beyond XFD). This mirrors the cheap check in
-    // `formula-model` to avoid quoting names like `SHEET1` where the letters segment
-    // is longer than 3 and already returned false above.
-    let col = name[..digit_start]
-        .chars()
-        .fold(0u32, |acc, c| acc * 26 + (c.to_ascii_uppercase() as u32 - 'A' as u32 + 1));
-    col <= 16_384
-}
-
-fn looks_like_r1c1_cell_reference(name: &str) -> bool {
-    if name.eq_ignore_ascii_case("r") || name.eq_ignore_ascii_case("c") {
-        return true;
-    }
-
-    let bytes = name.as_bytes();
-    if bytes.first().copied().map(|b| b.to_ascii_uppercase()) != Some(b'R') {
-        return false;
-    }
-
-    let mut i = 1;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        i += 1;
-    }
-
-    if i >= bytes.len() || bytes[i].to_ascii_uppercase() != b'C' {
-        return false;
-    }
-
-    i += 1;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        i += 1;
-    }
-
-    i == bytes.len()
-}
-
-fn fmt_ref_prefix(out: &mut String, workbook: &Option<String>, sheet: &Option<String>) {
+fn fmt_ref_prefix(
+    out: &mut String,
+    workbook: &Option<String>,
+    sheet: &Option<String>,
+    reference_style: ReferenceStyle,
+) {
     match (workbook.as_ref(), sheet.as_ref()) {
         (Some(book), Some(sheet)) => {
             // External references are written as `[Book.xlsx]Sheet1!A1`.
             // Excel uses a single quoted string for the combined `[book]sheet` prefix when it
             // contains spaces/special characters.
             let combined = format!("[{book}]{sheet}");
-            fmt_sheet_name(out, &combined);
+            fmt_sheet_name(out, &combined, reference_style);
             out.push('!');
         }
         (None, Some(sheet)) => {
-            fmt_sheet_name(out, sheet);
+            fmt_sheet_name(out, sheet, reference_style);
             out.push('!');
         }
         (Some(book), None) => {
@@ -925,6 +833,201 @@ fn fmt_ref_prefix(out: &mut String, workbook: &Option<String>, sheet: &Option<St
         }
         (None, None) => {}
     }
+}
+
+fn sheet_name_needs_quotes(sheet: &str, reference_style: ReferenceStyle) -> bool {
+    if sheet.is_empty() {
+        return true;
+    }
+    if sheet
+        .chars()
+        .any(|c| c.is_whitespace() || matches!(c, '!' | '\''))
+    {
+        return true;
+    }
+
+    sheet_part_needs_quotes(sheet, reference_style)
+}
+
+fn sheet_part_needs_quotes(sheet: &str, reference_style: ReferenceStyle) -> bool {
+    debug_assert!(!sheet.is_empty());
+
+    if sheet.eq_ignore_ascii_case("TRUE") || sheet.eq_ignore_ascii_case("FALSE") {
+        return true;
+    }
+
+    // A1-style cell references are tokenized as `Cell(...)` even when followed by additional
+    // identifier characters, so treat any sheet name starting with a valid cell reference as
+    // requiring quotes (e.g. `'A1B'!C1`).
+    if starts_like_a1_cell_ref(sheet) {
+        return true;
+    }
+
+    if reference_style == ReferenceStyle::R1C1 && starts_like_r1c1_ref(sheet) {
+        return true;
+    }
+
+    if !is_valid_ident(sheet) {
+        return true;
+    }
+
+    false
+}
+
+fn is_valid_ident(ident: &str) -> bool {
+    let mut chars = ident.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !matches!(first, '$' | '_' | '\\' | 'A'..='Z' | 'a'..='z') {
+        return false;
+    }
+    chars.all(is_ident_cont_char)
+}
+
+fn is_ident_cont_char(c: char) -> bool {
+    matches!(
+        c,
+        '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9'
+    )
+}
+
+fn starts_like_a1_cell_ref(s: &str) -> bool {
+    let mut chars = s.chars().peekable();
+    if chars.peek() == Some(&'$') {
+        chars.next();
+    }
+
+    let mut col_letters = String::new();
+    while let Some(&ch) = chars.peek() {
+        if ch.is_ascii_alphabetic() {
+            col_letters.push(ch);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if col_letters.is_empty() {
+        return false;
+    }
+
+    if chars.peek() == Some(&'$') {
+        chars.next();
+    }
+
+    let mut row_digits = String::new();
+    while let Some(&ch) = chars.peek() {
+        if ch.is_ascii_digit() {
+            row_digits.push(ch);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if row_digits.is_empty() {
+        return false;
+    }
+
+    if col_from_a1(&col_letters).is_none() {
+        return false;
+    }
+    matches!(row_digits.parse::<u32>(), Ok(v) if v != 0)
+}
+
+fn starts_like_r1c1_ref(s: &str) -> bool {
+    starts_like_r1c1_cell_ref(s) || starts_like_r1c1_row_ref(s) || starts_like_r1c1_col_ref(s)
+}
+
+fn starts_like_r1c1_cell_ref(s: &str) -> bool {
+    let mut chars = s.chars().peekable();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !matches!(first, 'R' | 'r') {
+        return false;
+    }
+
+    // Row part (optional).
+    if matches!(chars.peek(), Some(c) if c.is_ascii_digit()) {
+        let digits: String = chars.by_ref().take_while(|c| c.is_ascii_digit()).collect();
+        if matches!(digits.parse::<u32>(), Ok(v) if v == 0) || digits.parse::<u32>().is_err() {
+            return false;
+        }
+    }
+
+    let Some(ch) = chars.next() else {
+        return false;
+    };
+    if !matches!(ch, 'C' | 'c') {
+        return false;
+    }
+
+    // Col part (optional).
+    if matches!(chars.peek(), Some(c) if c.is_ascii_digit()) {
+        let digits: String = chars.by_ref().take_while(|c| c.is_ascii_digit()).collect();
+        if matches!(digits.parse::<u32>(), Ok(v) if v == 0) || digits.parse::<u32>().is_err() {
+            return false;
+        }
+    }
+
+    // A valid R1C1 cell reference is accepted as a prefix; any remaining characters would form
+    // additional tokens, so treat this as requiring quotes.
+    true
+}
+
+fn starts_like_r1c1_row_ref(s: &str) -> bool {
+    let mut chars = s.chars().peekable();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !matches!(first, 'R' | 'r') {
+        return false;
+    }
+
+    if matches!(chars.peek(), Some(c) if c.is_ascii_digit()) {
+        let digits: String = chars.by_ref().take_while(|c| c.is_ascii_digit()).collect();
+        if matches!(digits.parse::<u32>(), Ok(v) if v == 0) || digits.parse::<u32>().is_err() {
+            return false;
+        }
+    }
+
+    // Matches the lexer guard: treat as a row ref only if the next character does *not* continue
+    // an identifier.
+    !matches!(chars.peek(), Some(c) if is_ident_cont_char(*c) || *c == '(')
+}
+
+fn starts_like_r1c1_col_ref(s: &str) -> bool {
+    let mut chars = s.chars().peekable();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !matches!(first, 'C' | 'c') {
+        return false;
+    }
+
+    if matches!(chars.peek(), Some(c) if c.is_ascii_digit()) {
+        let digits: String = chars.by_ref().take_while(|c| c.is_ascii_digit()).collect();
+        if matches!(digits.parse::<u32>(), Ok(v) if v == 0) || digits.parse::<u32>().is_err() {
+            return false;
+        }
+    }
+
+    !matches!(chars.peek(), Some(c) if is_ident_cont_char(*c) || *c == '(')
+}
+
+fn col_from_a1(letters: &str) -> Option<u32> {
+    let mut col: u32 = 0;
+    for (i, ch) in letters.chars().enumerate() {
+        let v = (ch.to_ascii_uppercase() as u8).wrapping_sub(b'A') as u32;
+        if v >= 26 {
+            return None;
+        }
+        col = col * 26 + v + 1;
+        if i >= 3 {
+            return None;
+        }
+    }
+    Some(col - 1)
 }
 
 fn col_to_a1(mut col: u32) -> String {

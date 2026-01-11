@@ -57,6 +57,16 @@ fn r1c1_roundtrip_with_external_workbook_prefixes() {
 }
 
 #[test]
+fn r1c1_roundtrip_quotes_sheet_names_that_conflict_with_r1c1_tokens() {
+    let mut opts = ParseOptions::default();
+    opts.reference_style = ReferenceStyle::R1C1;
+    let mut ser = SerializeOptions::default();
+    ser.reference_style = ReferenceStyle::R1C1;
+    roundtrip("='R1C1'!R1C1+1", opts.clone(), ser.clone());
+    roundtrip("='R'!R1C1+1", opts, ser);
+}
+
+#[test]
 fn converts_r1c1_relative_to_a1_using_origin() {
     let mut opts = ParseOptions::default();
     opts.reference_style = ReferenceStyle::R1C1;

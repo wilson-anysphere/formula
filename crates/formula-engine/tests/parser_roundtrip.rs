@@ -36,6 +36,17 @@ fn roundtrip_with_quoted_external_ref() {
 }
 
 #[test]
+fn roundtrip_preserves_sheet_quoting_for_names_that_cannot_be_unquoted() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    // Sheet names that look like tokens (cell refs / booleans) or include non-identifier
+    // characters must remain quoted to round-trip.
+    roundtrip("='A1'!B2+1", opts.clone(), ser.clone());
+    roundtrip("='My-Sheet'!A1+1", opts.clone(), ser.clone());
+    roundtrip("='TRUE'!A1+1", opts, ser);
+}
+
+#[test]
 fn roundtrip_with_xlfn_prefix_in_file_mode() {
     let opts = ParseOptions::default();
     let mut ser = SerializeOptions::default();
