@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 const repoRoot = path.resolve(new URL(".", import.meta.url).pathname, "..");
@@ -32,14 +32,22 @@ const testFiles = [];
 await collect(repoRoot, testFiles);
 testFiles.sort();
 
-if (testFiles.length === 0) {
+const canStripTypes = supportsTypeStripping();
+const runnableTestFiles = canStripTypes ? testFiles : await filterTypeScriptImportTests(testFiles);
+
+if (runnableTestFiles.length !== testFiles.length) {
+  const skipped = testFiles.length - runnableTestFiles.length;
+  console.log(`Skipping ${skipped} node:test file(s) that import .ts modules (TypeScript stripping not available).`);
+}
+
+if (runnableTestFiles.length === 0) {
   console.log("No node:test files found.");
   process.exit(0);
 }
 
 const nodeArgs = ["--no-warnings"];
-if (supportsTypeStripping()) nodeArgs.push("--experimental-strip-types");
-nodeArgs.push("--test", ...testFiles);
+if (canStripTypes) nodeArgs.push("--experimental-strip-types");
+nodeArgs.push("--test", ...runnableTestFiles);
 
 const child = spawn(process.execPath, nodeArgs, {
   stdio: "inherit",
@@ -58,4 +66,16 @@ function supportsTypeStripping() {
     stdio: "ignore",
   });
   return probe.status === 0;
+}
+
+async function filterTypeScriptImportTests(files) {
+  /** @type {string[]} */
+  const out = [];
+  for (const file of files) {
+    const text = await readFile(file, "utf8").catch(() => "");
+    // Heuristic: skip tests that import .ts modules when the runtime can't strip types.
+    if (text.includes(".ts\"") || text.includes(".ts'")) continue;
+    out.push(file);
+  }
+  return out;
 }
