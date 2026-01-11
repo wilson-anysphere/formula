@@ -106,7 +106,6 @@ curl -s -X POST http://localhost:3000/docs/<doc-id>/sync-token \
 
 ```bash
 TOKEN=... DOC_ID=... pnpm -C services/sync-server exec node --input-type=module - <<'NODE'
-import WebSocket from "ws";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 
@@ -114,10 +113,13 @@ const token = process.env.TOKEN;
 const docId = process.env.DOC_ID;
 if (!token || !docId) throw new Error("Missing TOKEN or DOC_ID env var");
 
+// Prefer Node's built-in WebSocket (Node 20+). Fall back to the `ws` package if needed.
+const WebSocketPolyfill = globalThis.WebSocket ?? (await import("ws")).default;
+
 const ydoc = new Y.Doc();
 
 const provider = new WebsocketProvider("ws://localhost:1234", docId, ydoc, {
-  WebSocketPolyfill: WebSocket,
+  WebSocketPolyfill,
   disableBc: true,
   params: { token }
 });
