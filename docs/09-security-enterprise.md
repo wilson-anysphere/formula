@@ -352,6 +352,15 @@ class CellPermissionManager {
 
 ### Encryption at Rest
 
+#### Desktop (local) encryption
+
+Formula Desktop (Tauri) stores sensitive local state encrypted-at-rest using AES-256-GCM with keys persisted in the OS keychain.
+
+Examples:
+
+- **Power Query credentials** + refresh scheduling metadata: stored as encrypted blobs under the app data directory (key material in keychain).
+- **Power Query query-result cache**: persisted in IndexedDB and wrapped in `EncryptedCacheStore` so cached results (including Arrow IPC bytes) are never stored in plaintext.
+
 ```typescript
 interface EncryptionConfig {
   algorithm: "aes-256-gcm";
