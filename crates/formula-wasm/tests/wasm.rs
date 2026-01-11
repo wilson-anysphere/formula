@@ -229,6 +229,28 @@ fn sheet_scoped_recalculate_still_updates_cross_sheet_dependents() {
 }
 
 #[wasm_bindgen_test]
+fn recalculate_reports_formula_edit_to_blank_value() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell("A1".to_string(), JsValue::from_str("=1"), None)
+        .unwrap();
+    wb.recalculate(None).unwrap();
+
+    wb.set_cell("A1".to_string(), JsValue::from_str("=A2"), None)
+        .unwrap();
+
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert_eq!(
+        changes,
+        vec![CellChange {
+            sheet: formula_core::DEFAULT_SHEET.to_string(),
+            address: "A1".to_string(),
+            value: JsonValue::Null,
+        }]
+    );
+}
+
+#[wasm_bindgen_test]
 fn recalculate_reports_cleared_spill_outputs_after_edit() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell(
