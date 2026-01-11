@@ -260,6 +260,75 @@ describe("AIChatPanel tool-calling history", () => {
     });
   });
 
+  it("suppresses streamed text once tool calling begins", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    let resumeStream: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      resumeStream = resolve;
+    });
+
+    const sendMessage = vi.fn(async (args: any) => {
+      args.onStreamEvent?.({ type: "text", delta: "Hello" });
+      await gate;
+
+      args.onStreamEvent?.({ type: "tool_call_start", id: "call-1", name: "getData" });
+      // This text should be ignored by the UI (we only stream the final answer).
+      args.onStreamEvent?.({ type: "text", delta: "SHOULD_NOT_RENDER" });
+      args.onStreamEvent?.({ type: "done" });
+
+      return { messages: [], final: "Final" };
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+        }),
+      );
+    });
+
+    const input = container.querySelector("input");
+    const sendButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Send");
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(sendButton).toBeInstanceOf(HTMLButtonElement);
+
+    const inputEl = input as HTMLInputElement;
+    const sendEl = sendButton as HTMLButtonElement;
+
+    await act(async () => {
+      setNativeInputValue(inputEl, "Hi");
+      inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+      inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      sendEl.click();
+      await waitFor(() => sendMessage.mock.calls.length === 1);
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("Hello") ?? false);
+    });
+
+    await act(async () => {
+      resumeStream?.();
+      await waitFor(() => container.textContent?.includes("Final") ?? false);
+    });
+
+    expect(container.textContent).not.toContain("SHOULD_NOT_RENDER");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("can cancel an in-flight streaming response", async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
