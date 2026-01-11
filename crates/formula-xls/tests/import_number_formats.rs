@@ -157,6 +157,26 @@ fn warns_on_out_of_range_xf_indices_without_number_formats() {
 }
 
 #[test]
+fn imports_continued_format_records() {
+    let bytes = xls_fixture_builder::build_continued_format_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("ContinuedFmt")
+        .expect("ContinuedFmt missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let cell = sheet.cell(a1).expect("A1 missing");
+    let fmt = result
+        .workbook
+        .styles
+        .get(cell.style_id)
+        .and_then(|s| s.number_format.as_deref());
+    assert_eq!(fmt, Some("yyyy-mm-dd hh:mm:ss"));
+}
+
+#[test]
 fn chooses_deterministic_style_when_merged_anchor_is_missing() {
     let bytes = xls_fixture_builder::build_merged_non_anchor_conflicting_blank_formats_fixture_xls();
     let result = import_fixture(&bytes);
