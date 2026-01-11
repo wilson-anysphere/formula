@@ -1,8 +1,7 @@
 import crypto from "node:crypto";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import type { Pool, PoolClient } from "pg";
 import type { EnvelopeKmsProvider, KmsProviderFactory } from "../crypto/kms";
+import { importSecurityModule } from "../crypto/securityImport";
 import { canonicalJson } from "../crypto/utils";
 import { withTransaction } from "./tx";
 
@@ -77,38 +76,14 @@ type SecurityEnvelopeCrypto = {
   }): Promise<Buffer>;
 };
 
-const importEsm: (specifier: string) => Promise<any> = new Function(
-  "specifier",
-  "return import(specifier)"
-) as unknown as (specifier: string) => Promise<any>;
-
 let cachedEnvelopeCrypto: Promise<SecurityEnvelopeCrypto> | null = null;
 
 async function loadEnvelopeCrypto(): Promise<SecurityEnvelopeCrypto> {
   if (cachedEnvelopeCrypto) return cachedEnvelopeCrypto;
 
   cachedEnvelopeCrypto = (async () => {
-    const candidates: string[] = [];
-    if (typeof __dirname === "string") {
-      candidates.push(pathToFileURL(path.resolve(__dirname, "../../../../packages/security/crypto/envelope.js")).href);
-    }
-
-    candidates.push(
-      pathToFileURL(path.resolve(process.cwd(), "packages/security/crypto/envelope.js")).href,
-      pathToFileURL(path.resolve(process.cwd(), "..", "..", "packages/security/crypto/envelope.js")).href
-    );
-
-    let lastError: unknown;
-    for (const specifier of candidates) {
-      try {
-        const mod = await importEsm(specifier);
-        return { encryptEnvelope: mod.encryptEnvelope, decryptEnvelope: mod.decryptEnvelope } as SecurityEnvelopeCrypto;
-      } catch (err) {
-        lastError = err;
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error("Failed to load envelope crypto");
+    const mod = await importSecurityModule("packages/security/crypto/envelope.js");
+    return { encryptEnvelope: mod.encryptEnvelope, decryptEnvelope: mod.decryptEnvelope } as SecurityEnvelopeCrypto;
   })();
 
   return cachedEnvelopeCrypto;

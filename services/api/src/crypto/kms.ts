@@ -1,8 +1,7 @@
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import type { Pool, PoolClient, QueryResult } from "pg";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { withTransaction } from "../db/tx";
+import { importSecurityModule } from "./securityImport";
 
 export type EncryptionContext = Record<string, unknown> | null;
 
@@ -28,44 +27,14 @@ type SecurityLocalKmsProviderStatic = {
   fromJSON(value: unknown): SecurityLocalKmsProviderInstance;
 };
 
-const importEsm: (specifier: string) => Promise<any> = new Function(
-  "specifier",
-  "return import(specifier)"
-) as unknown as (specifier: string) => Promise<any>;
-
 let cachedSecurityLocalKmsProvider: Promise<SecurityLocalKmsProviderStatic> | null = null;
 
 async function loadSecurityLocalKmsProvider(): Promise<SecurityLocalKmsProviderStatic> {
   if (cachedSecurityLocalKmsProvider) return cachedSecurityLocalKmsProvider;
 
   cachedSecurityLocalKmsProvider = (async () => {
-    const candidates: string[] = [];
-    if (typeof __dirname === "string") {
-      candidates.push(
-        pathToFileURL(
-          path.resolve(__dirname, "../../../../packages/security/crypto/kms/localKmsProvider.js")
-        ).href
-      );
-    }
-
-    candidates.push(
-      pathToFileURL(path.resolve(process.cwd(), "packages/security/crypto/kms/localKmsProvider.js")).href,
-      pathToFileURL(
-        path.resolve(process.cwd(), "..", "..", "packages/security/crypto/kms/localKmsProvider.js")
-      ).href
-    );
-
-    let lastError: unknown;
-    for (const specifier of candidates) {
-      try {
-        const mod = await importEsm(specifier);
-        return mod.LocalKmsProvider as SecurityLocalKmsProviderStatic;
-      } catch (err) {
-        lastError = err;
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error("Failed to load LocalKmsProvider");
+    const mod = await importSecurityModule("packages/security/crypto/kms/localKmsProvider.js");
+    return mod.LocalKmsProvider as SecurityLocalKmsProviderStatic;
   })();
 
   return cachedSecurityLocalKmsProvider;
@@ -81,29 +50,8 @@ async function loadSecurityAwsKmsProvider(): Promise<SecurityAwsKmsProviderStati
   if (cachedSecurityAwsKmsProvider) return cachedSecurityAwsKmsProvider;
 
   cachedSecurityAwsKmsProvider = (async () => {
-    const candidates: string[] = [];
-    if (typeof __dirname === "string") {
-      candidates.push(
-        pathToFileURL(path.resolve(__dirname, "../../../../packages/security/crypto/kms/providers.js")).href
-      );
-    }
-
-    candidates.push(
-      pathToFileURL(path.resolve(process.cwd(), "packages/security/crypto/kms/providers.js")).href,
-      pathToFileURL(path.resolve(process.cwd(), "..", "..", "packages/security/crypto/kms/providers.js")).href
-    );
-
-    let lastError: unknown;
-    for (const specifier of candidates) {
-      try {
-        const mod = await importEsm(specifier);
-        return mod.AwsKmsProvider as SecurityAwsKmsProviderStatic;
-      } catch (err) {
-        lastError = err;
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error("Failed to load AwsKmsProvider");
+    const mod = await importSecurityModule("packages/security/crypto/kms/providers.js");
+    return mod.AwsKmsProvider as SecurityAwsKmsProviderStatic;
   })();
 
   return cachedSecurityAwsKmsProvider;
