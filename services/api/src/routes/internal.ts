@@ -87,8 +87,15 @@ export function registerInternalRoutes(app: FastifyInstance): void {
 
     if (!result.active) {
       app.metrics.syncTokenIntrospectFailuresTotal.inc();
+      return reply.code(403).send({ ok: false, error: "forbidden" });
     }
 
-    return reply.send({ ok: result.active, ...result });
+    return reply.send({
+      ok: true,
+      userId: result.userId,
+      orgId: result.orgId,
+      role: result.role,
+      sessionId: result.sessionId ?? null
+    });
   });
 }

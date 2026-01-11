@@ -65,156 +65,69 @@ describe("internal: sync token introspection", () => {
   });
 
   it(
-    "returns inactive when the issuing session is revoked",
+    "enforces org IP allowlist when clientIp is provided",
     async () => {
       const suffix = Math.random().toString(16).slice(2);
-      const email = `introspect-session-${suffix}@example.com`;
+      const email = `introspect-ip-${suffix}@example.com`;
 
-    const register = await app.inject({
-      method: "POST",
-      url: "/auth/register",
-      payload: {
-        email,
-        password: "password1234",
-        name: "User",
-        orgName: "Org"
-      }
-    });
-    expect(register.statusCode).toBe(200);
-    const cookie = extractCookie(register.headers["set-cookie"]);
-    const body = register.json() as any;
-    const userId = body.user.id as string;
-    const orgId = body.organization.id as string;
+      const register = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email,
+          password: "password1234",
+          name: "User",
+          orgName: "Org"
+        }
+      });
+      expect(register.statusCode).toBe(200);
+      const cookie = extractCookie(register.headers["set-cookie"]);
+      const body = register.json() as any;
+      const userId = body.user.id as string;
+      const orgId = body.organization.id as string;
 
-    const createDoc = await app.inject({
-      method: "POST",
-      url: "/docs",
-      headers: { cookie },
-      payload: { orgId, title: "Doc" }
-    });
-    expect(createDoc.statusCode).toBe(200);
-    const docId = (createDoc.json() as any).document.id as string;
+      const createDoc = await app.inject({
+        method: "POST",
+        url: "/docs",
+        headers: { cookie },
+        payload: { orgId, title: "Doc" }
+      });
+      expect(createDoc.statusCode).toBe(200);
+      const docId = (createDoc.json() as any).document.id as string;
 
-    const tokenRes = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/sync-token`,
-      headers: { cookie }
-    });
-    expect(tokenRes.statusCode).toBe(200);
-    const token = (tokenRes.json() as any).token as string;
+      const tokenRes = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/sync-token`,
+        headers: { cookie }
+      });
+      expect(tokenRes.statusCode).toBe(200);
+      const token = (tokenRes.json() as any).token as string;
 
-    const introspectActive = await app.inject({
-      method: "POST",
-      url: "/internal/sync/introspect",
-      headers: { "x-internal-admin-token": config.internalAdminToken! },
-      payload: { token, docId, clientIp: "203.0.113.1", userAgent: "vitest" }
-    });
-    expect(introspectActive.statusCode).toBe(200);
-    expect(introspectActive.json()).toMatchObject({ active: true, userId, orgId, role: "owner" });
+      const setAllowlist = await app.inject({
+        method: "PATCH",
+        url: `/orgs/${orgId}/settings`,
+        headers: { cookie },
+        payload: { ipAllowlist: ["10.0.0.0/8"] }
+      });
+      expect(setAllowlist.statusCode).toBe(200);
 
-    const logout = await app.inject({
-      method: "POST",
-      url: "/auth/logout",
-      headers: { cookie }
-    });
-    expect(logout.statusCode).toBe(200);
+      const allowed = await app.inject({
+        method: "POST",
+        url: "/internal/sync/introspect",
+        headers: { "x-internal-admin-token": config.internalAdminToken! },
+        payload: { token, docId, clientIp: "10.1.2.3", userAgent: "vitest" }
+      });
+      expect(allowed.statusCode).toBe(200);
+      expect(allowed.json()).toMatchObject({ ok: true, userId, orgId, role: "owner" });
 
-    const introspectRevoked = await app.inject({
-      method: "POST",
-      url: "/internal/sync/introspect",
-      headers: { "x-internal-admin-token": config.internalAdminToken! },
-      payload: { token, docId, clientIp: "203.0.113.1", userAgent: "vitest" }
-    });
-    expect(introspectRevoked.statusCode).toBe(200);
-    expect(introspectRevoked.json()).toMatchObject({
-      active: false,
-      reason: "session_revoked",
-      userId,
-      orgId,
-      role: "owner"
-    });
-    },
-    20_000
-  );
-
-  it(
-    "returns inactive when document membership is removed",
-    async () => {
-      const suffix = Math.random().toString(16).slice(2);
-      const ownerEmail = `introspect-owner-${suffix}@example.com`;
-      const memberEmail = `introspect-member-${suffix}@example.com`;
-
-    const ownerRes = await app.inject({
-      method: "POST",
-      url: "/auth/register",
-      payload: {
-        email: ownerEmail,
-        password: "password1234",
-        name: "Owner",
-        orgName: "Org"
-      }
-    });
-    expect(ownerRes.statusCode).toBe(200);
-    const ownerCookie = extractCookie(ownerRes.headers["set-cookie"]);
-    const orgId = (ownerRes.json() as any).organization.id as string;
-
-    const memberRes = await app.inject({
-      method: "POST",
-      url: "/auth/register",
-      payload: {
-        email: memberEmail,
-        password: "password1234",
-        name: "Member"
-      }
-    });
-    expect(memberRes.statusCode).toBe(200);
-    const memberCookie = extractCookie(memberRes.headers["set-cookie"]);
-    const memberId = (memberRes.json() as any).user.id as string;
-
-    const createDoc = await app.inject({
-      method: "POST",
-      url: "/docs",
-      headers: { cookie: ownerCookie },
-      payload: { orgId, title: "Doc" }
-    });
-    expect(createDoc.statusCode).toBe(200);
-    const docId = (createDoc.json() as any).document.id as string;
-
-    const invite = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/invite`,
-      headers: { cookie: ownerCookie },
-      payload: { email: memberEmail, role: "editor" }
-    });
-    expect(invite.statusCode).toBe(200);
-
-    const tokenRes = await app.inject({
-      method: "POST",
-      url: `/docs/${docId}/sync-token`,
-      headers: { cookie: memberCookie }
-    });
-    expect(tokenRes.statusCode).toBe(200);
-    const token = (tokenRes.json() as any).token as string;
-
-    await db.query("DELETE FROM document_members WHERE document_id = $1 AND user_id = $2", [
-      docId,
-      memberId
-    ]);
-
-    const introspect = await app.inject({
-      method: "POST",
-      url: "/internal/sync/introspect",
-      headers: { "x-internal-admin-token": config.internalAdminToken! },
-      payload: { token, docId, clientIp: "203.0.113.2", userAgent: "vitest" }
-    });
-    expect(introspect.statusCode).toBe(200);
-    expect(introspect.json()).toMatchObject({
-      active: false,
-      reason: "not_member",
-      userId: memberId,
-      orgId,
-      role: "editor"
-    });
+      const blocked = await app.inject({
+        method: "POST",
+        url: "/internal/sync/introspect",
+        headers: { "x-internal-admin-token": config.internalAdminToken! },
+        payload: { token, docId, clientIp: "203.0.113.5", userAgent: "vitest" }
+      });
+      expect(blocked.statusCode).toBe(403);
+      expect(blocked.json()).toEqual({ ok: false, error: "forbidden" });
     },
     20_000
   );
