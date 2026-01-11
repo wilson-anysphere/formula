@@ -1,9 +1,18 @@
 use thiserror::Error;
+use formula_model::CellRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CellAddr {
     pub row: u32,
     pub col: u32,
+}
+
+impl CellAddr {
+    /// Formats this 0-indexed address into an Excel-style A1 string (e.g. `A1`, `BC32`).
+    #[must_use]
+    pub fn to_a1(self) -> String {
+        CellRef::new(self.row, self.col).to_a1()
+    }
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -95,3 +104,13 @@ pub fn parse_a1(input: &str) -> Result<CellAddr, AddressParseError> {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cell_addr_formats_to_a1() {
+        assert_eq!(parse_a1("A1").unwrap().to_a1(), "A1");
+        assert_eq!(parse_a1("$BC$32").unwrap().to_a1(), "BC32");
+    }
+}
