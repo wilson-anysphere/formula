@@ -1467,15 +1467,18 @@ impl Storage {
                 params![sheet_id.to_string()],
                 |r| {
                     let sheet_id: String = r.get(1)?;
+                    let target_raw: Option<String> = r.get::<_, Option<String>>(4).ok().flatten();
+                    let old_value_raw: Option<String> = r.get::<_, Option<String>>(5).ok().flatten();
+                    let new_value_raw: Option<String> = r.get::<_, Option<String>>(6).ok().flatten();
                     Ok(ChangeLogEntry {
                         id: r.get(0)?,
                         sheet_id: Uuid::parse_str(&sheet_id)
                             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                        user_id: r.get(2)?,
-                        operation: r.get(3)?,
-                        target: r.get(4)?,
-                        old_value: r.get(5)?,
-                        new_value: r.get(6)?,
+                        user_id: r.get::<_, Option<String>>(2).ok().flatten(),
+                        operation: r.get::<_, String>(3).unwrap_or_default(),
+                        target: parse_optional_json_value(target_raw).unwrap_or(JsonValue::Null),
+                        old_value: parse_optional_json_value(old_value_raw).unwrap_or(JsonValue::Null),
+                        new_value: parse_optional_json_value(new_value_raw).unwrap_or(JsonValue::Null),
                     })
                 },
             )
