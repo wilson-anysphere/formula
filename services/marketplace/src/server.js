@@ -1,6 +1,7 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const { pipeline } = require("node:stream/promises");
 
 const { MarketplaceStore } = require("./store");
 
@@ -388,10 +389,17 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
             "X-Publisher": pkgMeta.publisher,
           });
 
-          const stream = fs.createReadStream(pkgMeta.packagePath);
-          res.on("close", () => stream.destroy());
-          stream.on("error", (error) => res.destroy(error));
-          stream.pipe(res);
+          try {
+            await pipeline(fs.createReadStream(pkgMeta.packagePath), res);
+          } catch (error) {
+            const code = String(error?.code || "");
+            if (code === "ERR_STREAM_PREMATURE_CLOSE") {
+              statusCode = 499;
+              return;
+            }
+            statusCode = 500;
+            return;
+          }
           return;
         }
 
