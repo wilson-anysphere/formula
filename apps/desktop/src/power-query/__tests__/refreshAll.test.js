@@ -306,6 +306,83 @@ test("DesktopPowerQueryRefreshOrchestrator cancelQuery aborts the apply phase fo
   orchestrator.dispose();
 });
 
+test("DesktopPowerQueryRefreshOrchestrator cancelQuery during refresh completion prevents apply from starting", async () => {
+  const bigTable = DataTable.fromGrid(
+    [["A"], ...Array.from({ length: 20 }, (_, i) => [i + 1])],
+    { hasHeaders: true, inferTypes: true },
+  );
+  const smallTable = DataTable.fromGrid([["B"], [1]], { hasHeaders: true, inferTypes: true });
+
+  const engine = new ScriptedEngine({
+    q1: { table: bigTable },
+    q2: { table: smallTable },
+  });
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const orchestrator = new DesktopPowerQueryRefreshOrchestrator({ engine, document: doc, concurrency: 2, batchSize: 1 });
+
+  orchestrator.registerQuery({
+    id: "q1",
+    name: "Q1",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  orchestrator.registerQuery({
+    id: "q2",
+    name: "Q2",
+    source: { type: "range", range: { values: [["X"], [2]], hasHeaders: true } },
+    steps: [],
+    destination: { sheetId: "Sheet2", start: { row: 0, col: 0 }, includeHeader: true, clearExisting: true },
+    refreshPolicy: { type: "manual" },
+  });
+
+  const handle = orchestrator.refreshAll(["q1", "q2"]);
+
+  let cancelled = false;
+  let q1ApplyCancelled = false;
+  let q2Applied = false;
+
+  const done = new Promise((resolve, reject) => {
+    const unsub = orchestrator.onEvent((evt) => {
+      if (evt.type === "apply:error") {
+        unsub();
+        reject(evt.error);
+        return;
+      }
+
+      if (evt.type === "completed" && evt?.job?.queryId === "q1" && !cancelled) {
+        cancelled = true;
+        handle.cancelQuery?.("q1");
+      }
+
+      if (evt.type === "apply:cancelled" && evt.queryId === "q1") {
+        q1ApplyCancelled = true;
+      }
+
+      if (evt.type === "apply:completed" && evt.queryId === "q2") {
+        q2Applied = true;
+      }
+
+      if (q1ApplyCancelled && q2Applied) {
+        unsub();
+        resolve(undefined);
+      }
+    });
+  });
+
+  await handle.promise;
+  await done;
+
+  assert.equal(doc.getUsedRange("Sheet1"), null);
+  assert.equal(doc.getCell("Sheet2", { row: 0, col: 0 }).value, "B");
+  assert.equal(doc.batchDepth, 0);
+
+  orchestrator.dispose();
+});
+
 test("DesktopPowerQueryRefreshOrchestrator cancels downstream targets on dependency error but continues independent branches", async () => {
   const tableOther = DataTable.fromGrid([["Other"], ["ok"]], { hasHeaders: true, inferTypes: true });
 

@@ -114,6 +114,7 @@ export class DesktopPowerQueryRefreshOrchestrator {
   applyControllers = new Map<string, ApplyControllerEntry>();
   applyQueue: Promise<void> = Promise.resolve();
   cancelledSessions = new Set<string>();
+  cancelledQueriesBySession = new Map<string, Set<string>>();
   activeSessions = new Map<string, () => void>();
 
   orchestrator: RefreshOrchestrator;
@@ -160,6 +161,9 @@ export class DesktopPowerQueryRefreshOrchestrator {
     const handle = this.orchestrator.refreshAll(queryIds, reason);
     const sessionId = handle.sessionId;
 
+    const cancelledQueries = new Set<string>();
+    this.cancelledQueriesBySession.set(sessionId, cancelledQueries);
+
     const cancel = () => {
       this.cancelledSessions.add(sessionId);
       handle.cancel();
@@ -170,6 +174,7 @@ export class DesktopPowerQueryRefreshOrchestrator {
 
     const cancelQuery = (queryId: string) => {
       (handle as any).cancelQuery?.(queryId);
+      cancelledQueries.add(queryId);
       for (const entry of this.applyControllers.values()) {
         if (entry.sessionId !== sessionId) continue;
         if (entry.queryId !== queryId) continue;
@@ -182,6 +187,7 @@ export class DesktopPowerQueryRefreshOrchestrator {
       .finally(() => {
         this.activeSessions.delete(sessionId);
         this.cancelledSessions.delete(sessionId);
+        this.cancelledQueriesBySession.delete(sessionId);
       })
       .catch(() => {});
 
@@ -198,6 +204,7 @@ export class DesktopPowerQueryRefreshOrchestrator {
     for (const entry of this.applyControllers.values()) entry.controller.abort();
     this.applyControllers.clear();
     this.cancelledSessions.clear();
+    this.cancelledQueriesBySession.clear();
   }
 
   emitApplyCancelled(evt: any): void {
@@ -228,7 +235,8 @@ export class DesktopPowerQueryRefreshOrchestrator {
     const table = evt?.result?.table;
     if (!table) return;
 
-    if (this.cancelledSessions.has(sessionId)) {
+    const cancelledQueries = this.cancelledQueriesBySession.get(sessionId);
+    if (this.cancelledSessions.has(sessionId) || cancelledQueries?.has(queryId)) {
       this.emitter.emit({ type: "apply:cancelled", jobId, queryId, sessionId } as any);
       return;
     }
