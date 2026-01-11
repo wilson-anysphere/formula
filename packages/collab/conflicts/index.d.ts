@@ -68,6 +68,7 @@ export class CellStructuralConflictMonitor {
     origin?: any;
     localOrigins?: Set<any>;
     onConflict: (conflict: CellStructuralConflict) => void;
+    maxOpRecordsPerUser?: number;
   });
 
   dispose(): void;

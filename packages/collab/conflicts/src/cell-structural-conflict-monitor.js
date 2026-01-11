@@ -49,6 +49,7 @@ export class CellStructuralConflictMonitor {
    * @param {(conflict: CellStructuralConflict) => void} opts.onConflict
    */
   constructor(opts) {
+    this._maxOpRecordsPerUser = opts.maxOpRecordsPerUser ?? 2000;
     this.doc = opts.doc;
     this.cells = opts.cells ?? this.doc.getMap("cells");
     this.localUserId = opts.localUserId;
@@ -67,9 +68,6 @@ export class CellStructuralConflictMonitor {
  
     /** @type {Map<string, any>} */
     this._opRecords = new Map();
- 
-    /** @type {Set<string>} */
-    this._seenPairs = new Set();
  
     this._isApplyingResolution = false;
  
@@ -171,6 +169,7 @@ export class CellStructuralConflictMonitor {
     const beforeState = encodeStateVector(transaction.beforeState);
     const afterState = encodeStateVector(transaction.afterState);
     const txId = crypto.randomUUID();
+    const createdAt = Date.now();
  
     /** @type {Array<any>} */
     const records = [];
@@ -181,6 +180,7 @@ export class CellStructuralConflictMonitor {
         txId,
         kind: "move",
         userId: this.localUserId,
+        createdAt,
         beforeState,
         afterState,
         touchedCells: tx.touchedCells,
@@ -197,6 +197,7 @@ export class CellStructuralConflictMonitor {
         txId,
         kind: "delete",
         userId: this.localUserId,
+        createdAt,
         beforeState,
         afterState,
         touchedCells: tx.touchedCells,
@@ -213,6 +214,7 @@ export class CellStructuralConflictMonitor {
         txId,
         kind: "edit",
         userId: this.localUserId,
+        createdAt,
         beforeState,
         afterState,
         touchedCells: tx.touchedCells,
@@ -235,6 +237,8 @@ export class CellStructuralConflictMonitor {
         this._ops.set(record.id, record);
       }
     }, this.origin);
+
+    this._pruneLocalOpLog();
   }
  
   /**
@@ -246,6 +250,11 @@ export class CellStructuralConflictMonitor {
     if (!event?.changes?.keys) return;
  
     for (const [opId, change] of event.changes.keys.entries()) {
+      if (change.action === "delete") {
+        this._opRecords.delete(opId);
+        continue;
+      }
+ 
       if (change.action !== "add") continue;
       const record = this._ops.get(opId);
       if (!record) continue;
@@ -273,17 +282,38 @@ export class CellStructuralConflictMonitor {
       const otherIsOurs = other.userId === this.localUserId;
       if (otherIsOurs === ours) continue;
  
-      const pairKey = makePairKey(id, String(other.id ?? ""));
-      if (this._seenPairs.has(pairKey)) continue;
-      this._seenPairs.add(pairKey);
- 
       const oursOp = ours ? record : other;
       const theirsOp = ours ? other : record;
  
       this._handleOpPair(oursOp, theirsOp);
     }
   }
- 
+
+  _pruneLocalOpLog() {
+    const limit = Number(this._maxOpRecordsPerUser);
+    if (!Number.isFinite(limit) || limit <= 0) return;
+
+    /** @type {Array<{ id: string, createdAt: number }>} */
+    const ours = [];
+    this._ops.forEach((record, id) => {
+      if (!record || typeof record !== "object") return;
+      if (record.userId !== this.localUserId) return;
+      ours.push({ id, createdAt: Number(record.createdAt ?? 0) });
+    });
+
+    if (ours.length <= limit) return;
+
+    ours.sort((a, b) => a.createdAt - b.createdAt);
+    const toDelete = ours.slice(0, ours.length - limit);
+    if (toDelete.length === 0) return;
+
+    this.doc.transact(() => {
+      for (const entry of toDelete) {
+        this._ops.delete(entry.id);
+      }
+    }, this.origin);
+  }
+  
   /**
    * @param {any} oursOp
    * @param {any} theirsOp
@@ -508,14 +538,6 @@ export class CellStructuralConflictMonitor {
     cellMap.set("modified", Date.now());
     cellMap.set("modifiedBy", this.localUserId);
   }
- }
- 
- /**
-  * @param {string} a
-  * @param {string} b
-  */
- function makePairKey(a, b) {
-   return a < b ? `${a}|${b}` : `${b}|${a}`;
  }
  
  /**
