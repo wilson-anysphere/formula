@@ -1,9 +1,9 @@
-# Backend (API + Sync) local development
+# Backend (API + Sync server) local development
 
 This repo contains a minimal-but-extensible **enterprise/cloud backend foundation**:
 
 - `services/api`: Fastify + Postgres API service (auth, orgs, docs, RBAC, audit, sync token issuance)
-- `services/sync`: WebSocket sync gateway that validates short-lived collaboration tokens
+- `services/sync-server`: y-websocket-based sync server that validates short-lived collaboration tokens (JWT)
 
 ## Quickstart
 
@@ -18,10 +18,19 @@ docker-compose up --build
 
 Services:
 - API: http://localhost:3000
-- Sync WS: ws://localhost:1234
+- Sync WS: ws://localhost:1234/<docId>?token=...
+- Sync health: http://localhost:1234/healthz
 - Postgres: localhost:5432 (user/pass/db = `postgres` / `postgres` / `formula`)
 
 The API automatically runs SQL migrations on startup.
+
+## Token configuration (API ↔ sync-server)
+
+The API issues short-lived JWT sync tokens via `POST /docs/:docId/sync-token`.
+
+- API signing secret: `SYNC_TOKEN_SECRET`
+- Sync-server verification secret: `SYNC_SERVER_JWT_SECRET` (must match `SYNC_TOKEN_SECRET`)
+- JWT audience: `SYNC_SERVER_JWT_AUDIENCE` (must match the token `aud`, default: `formula-sync`)
 
 ## API overview
 

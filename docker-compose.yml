@@ -28,12 +28,17 @@ services:
     depends_on:
       - db
 
-  sync:
+  sync-server:
     build:
-      context: ./services/sync
+      context: ./services/sync-server
     environment:
-      PORT: "1234"
-      SYNC_TOKEN_SECRET: dev-sync-token-secret-change-me
+      SYNC_SERVER_HOST: 0.0.0.0
+      SYNC_SERVER_PORT: "1234"
+      SYNC_SERVER_JWT_SECRET: dev-sync-token-secret-change-me
+      SYNC_SERVER_JWT_AUDIENCE: formula-sync
+      SYNC_SERVER_PERSISTENCE_BACKEND: file
+    volumes:
+      - sync_server_data:/app/.sync-server-data
     ports:
       - "1234:1234"
     depends_on:
@@ -41,4 +46,4 @@ services:
 
 volumes:
   postgres_data:
-
+  sync_server_data:
