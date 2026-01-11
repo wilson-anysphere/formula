@@ -1,9 +1,9 @@
 use crate::backend::{AggregationKind, AggregationSpec, TableBackend};
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
-use crate::parser::Expr;
+use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::{DaxEngine, DataModel, Value};
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// A group-by column used by the pivot engine.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -74,33 +74,248 @@ fn cmp_key(a: &[Value], b: &[Value]) -> Ordering {
     a.len().cmp(&b.len())
 }
 
-fn extract_aggregation(
+#[derive(Clone, Debug)]
+enum PlannedExpr {
+    Const(Value),
+    AggRef(usize),
+    Negate(Box<PlannedExpr>),
+    Binary {
+        op: BinaryOp,
+        left: Box<PlannedExpr>,
+        right: Box<PlannedExpr>,
+    },
+    Divide {
+        numerator: Box<PlannedExpr>,
+        denominator: Box<PlannedExpr>,
+        alternate: Option<Box<PlannedExpr>>,
+    },
+    Coalesce(Vec<PlannedExpr>),
+}
+
+fn eval_planned(expr: &PlannedExpr, agg_values: &[Value]) -> Value {
+    match expr {
+        PlannedExpr::Const(v) => v.clone(),
+        PlannedExpr::AggRef(idx) => agg_values.get(*idx).cloned().unwrap_or(Value::Blank),
+        PlannedExpr::Negate(inner) => {
+            let v = eval_planned(inner, agg_values);
+            Value::from(-v.as_f64().unwrap_or(0.0))
+        }
+        PlannedExpr::Binary { op, left, right } => {
+            let l = eval_planned(left, agg_values).as_f64().unwrap_or(0.0);
+            let r = eval_planned(right, agg_values).as_f64().unwrap_or(0.0);
+            let out = match op {
+                BinaryOp::Add => l + r,
+                BinaryOp::Subtract => l - r,
+                BinaryOp::Multiply => l * r,
+                BinaryOp::Divide => l / r,
+                _ => return Value::Blank,
+            };
+            Value::from(out)
+        }
+        PlannedExpr::Divide {
+            numerator,
+            denominator,
+            alternate,
+        } => {
+            let num = eval_planned(numerator, agg_values);
+            let denom = eval_planned(denominator, agg_values);
+            let denom = denom.as_f64().unwrap_or(0.0);
+            if denom == 0.0 {
+                alternate
+                    .as_ref()
+                    .map(|alt| eval_planned(alt, agg_values))
+                    .unwrap_or(Value::Blank)
+            } else {
+                let num = num.as_f64().unwrap_or(0.0);
+                Value::from(num / denom)
+            }
+        }
+        PlannedExpr::Coalesce(args) => {
+            for arg in args {
+                let value = eval_planned(arg, agg_values);
+                if !value.is_blank() {
+                    return value;
+                }
+            }
+            Value::Blank
+        }
+    }
+}
+
+fn ensure_agg(
+    kind: AggregationKind,
+    column_idx: Option<usize>,
+    agg_specs: &mut Vec<AggregationSpec>,
+    agg_map: &mut HashMap<(AggregationKind, Option<usize>), usize>,
+) -> usize {
+    let key = (kind, column_idx);
+    if let Some(&idx) = agg_map.get(&key) {
+        return idx;
+    }
+    let idx = agg_specs.len();
+    agg_specs.push(AggregationSpec { kind, column_idx });
+    agg_map.insert(key, idx);
+    idx
+}
+
+fn plan_pivot_expr(
     model: &DataModel,
     base_table: &crate::model::Table,
     base_table_name: &str,
     expr: &Expr,
     depth: usize,
-) -> DaxResult<Option<AggregationSpec>> {
-    if depth > 16 {
+    agg_specs: &mut Vec<AggregationSpec>,
+    agg_map: &mut HashMap<(AggregationKind, Option<usize>), usize>,
+) -> DaxResult<Option<PlannedExpr>> {
+    if depth > 32 {
         return Ok(None);
     }
 
     match expr {
+        Expr::Number(n) => Ok(Some(PlannedExpr::Const(Value::from(*n)))),
+        Expr::Text(s) => Ok(Some(PlannedExpr::Const(Value::from(s.clone())))),
+        Expr::Boolean(b) => Ok(Some(PlannedExpr::Const(Value::from(*b)))),
         Expr::Measure(name) => {
             let normalized = DataModel::normalize_measure_name(name);
             let measure = model
                 .measures()
                 .get(normalized)
                 .ok_or_else(|| DaxError::UnknownMeasure(name.clone()))?;
-            extract_aggregation(
+            plan_pivot_expr(
                 model,
                 base_table,
                 base_table_name,
                 &measure.parsed,
                 depth + 1,
+                agg_specs,
+                agg_map,
             )
         }
+        Expr::UnaryOp { op, expr } => match op {
+            UnaryOp::Negate => {
+                let planned = plan_pivot_expr(
+                    model,
+                    base_table,
+                    base_table_name,
+                    expr,
+                    depth + 1,
+                    agg_specs,
+                    agg_map,
+                )?;
+                Ok(planned.map(|inner| PlannedExpr::Negate(Box::new(inner))))
+            }
+        },
+        Expr::BinaryOp { op, left, right } => match op {
+            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+                let Some(left) = plan_pivot_expr(
+                    model,
+                    base_table,
+                    base_table_name,
+                    left,
+                    depth + 1,
+                    agg_specs,
+                    agg_map,
+                )?
+                else {
+                    return Ok(None);
+                };
+                let Some(right) = plan_pivot_expr(
+                    model,
+                    base_table,
+                    base_table_name,
+                    right,
+                    depth + 1,
+                    agg_specs,
+                    agg_map,
+                )?
+                else {
+                    return Ok(None);
+                };
+                Ok(Some(PlannedExpr::Binary {
+                    op: *op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }))
+            }
+            _ => Ok(None),
+        },
         Expr::Call { name, args } => match name.to_ascii_uppercase().as_str() {
+            "BLANK" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::Blank))),
+            "TRUE" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::from(true)))),
+            "FALSE" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::from(false)))),
+            "COALESCE" => {
+                if args.is_empty() {
+                    return Ok(None);
+                }
+                let mut planned_args = Vec::with_capacity(args.len());
+                for arg in args {
+                    let Some(planned) = plan_pivot_expr(
+                        model,
+                        base_table,
+                        base_table_name,
+                        arg,
+                        depth + 1,
+                        agg_specs,
+                        agg_map,
+                    )?
+                    else {
+                        return Ok(None);
+                    };
+                    planned_args.push(planned);
+                }
+                Ok(Some(PlannedExpr::Coalesce(planned_args)))
+            }
+            "DIVIDE" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return Ok(None);
+                }
+                let Some(numerator) = plan_pivot_expr(
+                    model,
+                    base_table,
+                    base_table_name,
+                    &args[0],
+                    depth + 1,
+                    agg_specs,
+                    agg_map,
+                )?
+                else {
+                    return Ok(None);
+                };
+                let Some(denominator) = plan_pivot_expr(
+                    model,
+                    base_table,
+                    base_table_name,
+                    &args[1],
+                    depth + 1,
+                    agg_specs,
+                    agg_map,
+                )?
+                else {
+                    return Ok(None);
+                };
+                let alternate = if args.len() == 3 {
+                    let Some(alt) = plan_pivot_expr(
+                        model,
+                        base_table,
+                        base_table_name,
+                        &args[2],
+                        depth + 1,
+                        agg_specs,
+                        agg_map,
+                    )?
+                    else {
+                        return Ok(None);
+                    };
+                    Some(Box::new(alt))
+                } else {
+                    None
+                };
+                Ok(Some(PlannedExpr::Divide {
+                    numerator: Box::new(numerator),
+                    denominator: Box::new(denominator),
+                    alternate,
+                }))
+            }
             "SUM" | "AVERAGE" | "MIN" | "MAX" | "DISTINCTCOUNT" => {
                 let [arg] = args.as_slice() else {
                     return Ok(None);
@@ -123,10 +338,8 @@ fn extract_aggregation(
                     "DISTINCTCOUNT" => AggregationKind::DistinctCount,
                     _ => unreachable!(),
                 };
-                Ok(Some(AggregationSpec {
-                    kind,
-                    column_idx: Some(idx),
-                }))
+                let agg_idx = ensure_agg(kind, Some(idx), agg_specs, agg_map);
+                Ok(Some(PlannedExpr::AggRef(agg_idx)))
             }
             "COUNTROWS" => {
                 let [arg] = args.as_slice() else {
@@ -138,10 +351,8 @@ fn extract_aggregation(
                 if table != base_table_name {
                     return Ok(None);
                 }
-                Ok(Some(AggregationSpec {
-                    kind: AggregationKind::CountRows,
-                    column_idx: None,
-                }))
+                let agg_idx = ensure_agg(AggregationKind::CountRows, None, agg_specs, agg_map);
+                Ok(Some(PlannedExpr::AggRef(agg_idx)))
             }
             _ => Ok(None),
         },
@@ -173,12 +384,23 @@ fn pivot_columnar_group_by(
         group_idxs.push(idx);
     }
 
-    let mut aggs = Vec::with_capacity(measures.len());
+    let mut agg_specs: Vec<AggregationSpec> = Vec::new();
+    let mut agg_map: HashMap<(AggregationKind, Option<usize>), usize> = HashMap::new();
+    let mut plans: Vec<PlannedExpr> = Vec::with_capacity(measures.len());
     for measure in measures {
-        match extract_aggregation(model, table_ref, base_table, &measure.parsed, 0)? {
-            Some(spec) => aggs.push(spec),
-            None => return Ok(None),
-        }
+        let Some(plan) = plan_pivot_expr(
+            model,
+            table_ref,
+            base_table,
+            &measure.parsed,
+            0,
+            &mut agg_specs,
+            &mut agg_map,
+        )?
+        else {
+            return Ok(None);
+        };
+        plans.push(plan);
     }
 
     let rows_buffer;
@@ -189,12 +411,24 @@ fn pivot_columnar_group_by(
         Some(rows_buffer.as_slice())
     };
 
-    let Some(mut grouped_rows) = table_ref.group_by_aggregations(&group_idxs, &aggs, rows) else {
+    let Some(grouped_rows) = table_ref.group_by_aggregations(&group_idxs, &agg_specs, rows) else {
         return Ok(None);
     };
 
     let key_len = group_idxs.len();
-    grouped_rows.sort_by(|a, b| cmp_key(&a[..key_len], &b[..key_len]));
+    let mut rows_out: Vec<Vec<Value>> = Vec::with_capacity(grouped_rows.len());
+    for mut row in grouped_rows {
+        let agg_values = row.get(key_len..).unwrap_or(&[]);
+        let mut measure_values = Vec::with_capacity(plans.len());
+        for plan in &plans {
+            measure_values.push(eval_planned(plan, agg_values));
+        }
+        row.truncate(key_len);
+        row.extend(measure_values);
+        rows_out.push(row);
+    }
+
+    rows_out.sort_by(|a, b| cmp_key(&a[..key_len], &b[..key_len]));
 
     let mut columns: Vec<String> = group_by
         .iter()
@@ -204,7 +438,7 @@ fn pivot_columnar_group_by(
 
     Ok(Some(PivotResult {
         columns,
-        rows: grouped_rows,
+        rows: rows_out,
     }))
 }
 

@@ -17,6 +17,7 @@ fn build_models(rows: usize) -> (DataModel, DataModel) {
     }
     vec_model.add_table(vec_fact).unwrap();
     vec_model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+    vec_model.add_measure("Double", "[Total] * 2").unwrap();
 
     let schema = vec![
         ColumnSchema {
@@ -46,6 +47,7 @@ fn build_models(rows: usize) -> (DataModel, DataModel) {
         .add_table(Table::from_columnar("Fact", builder.finalize()))
         .unwrap();
     col_model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+    col_model.add_measure("Double", "[Total] * 2").unwrap();
 
     (vec_model, col_model)
 }
@@ -57,6 +59,7 @@ fn pivot_matches_between_vec_and_columnar_backends() {
     let group_by = vec![GroupByColumn::new("Fact", "Group")];
     let measures = vec![
         PivotMeasure::new("Total", "[Total]").unwrap(),
+        PivotMeasure::new("Double", "[Double]").unwrap(),
         PivotMeasure::new("Rows", "COUNTROWS(Fact)").unwrap(),
         PivotMeasure::new("Avg", "AVERAGE(Fact[Amount])").unwrap(),
         PivotMeasure::new("Distinct Amount", "DISTINCTCOUNT(Fact[Amount])").unwrap(),
