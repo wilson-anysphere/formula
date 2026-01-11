@@ -6,6 +6,24 @@ export type ErrorExplanation = {
 };
 
 const ERROR_EXPLANATIONS: Record<string, Omit<ErrorExplanation, "code">> = {
+  "#GETTING_DATA": {
+    title: "Loading",
+    description: "This cell is waiting for an async result (for example, an AI function response).",
+    suggestions: ["Wait a moment for the result to arrive.", "If it never resolves, check your AI settings or network connection."],
+  },
+  "#DLP!": {
+    title: "Blocked by data loss prevention",
+    description: "This AI function call was blocked by your organization's DLP policy.",
+    suggestions: [
+      "Remove or change references to restricted cells/ranges.",
+      "If this should be allowed, ask an admin to adjust the document/org DLP policy.",
+    ],
+  },
+  "#AI!": {
+    title: "AI error",
+    description: "The AI function failed to run (model unavailable, network error, or unexpected response).",
+    suggestions: ["Check your AI provider/model settings.", "Try again in a moment."],
+  },
   "#DIV/0!": {
     title: "Division by zero",
     description: "The formula tried to divide by zero (or an empty cell).",
@@ -52,4 +70,3 @@ export function explainFormulaError(value: unknown): ErrorExplanation | null {
   if (!explanation) return null;
   return { code: value, ...explanation };
 }
-
