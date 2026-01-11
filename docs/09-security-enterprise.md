@@ -470,7 +470,7 @@ npm run keys:rotate
 ```
 
 ##### Backfilling existing plaintext versions
-
+ 
 During rollout you may have older `document_versions` rows that still have plaintext `data` populated.
 To encrypt those rows in-place for orgs with `cloud_encryption_at_rest = true`, run:
 
@@ -479,6 +479,22 @@ cd services/api
 # Optional: scope to a single org + limit rows per run
 ORG_ID="<org-uuid>" BATCH_SIZE=100 npm run versions:encrypt
 ```
+
+##### Migrating legacy envelope schema v1 rows
+
+Deployments that previously used the legacy (HKDF-based) local KMS model will have
+`document_versions` rows with `data_envelope_version = 1`. Those rows remain readable, but they still
+require `LOCAL_KMS_MASTER_KEY` for decryption.
+
+To upgrade those rows in-place to the canonical schema v2 representation **without re-encrypting
+ciphertext** (DEK re-wrap only), run:
+
+```bash
+cd services/api
+ORG_ID="<org-uuid>" BATCH_SIZE=100 npm run versions:migrate-legacy
+```
+
+Note: migrating rows that were encrypted with the legacy local KMS provider requires `LOCAL_KMS_MASTER_KEY` to be set.
 
 ### Encryption in Transit
 

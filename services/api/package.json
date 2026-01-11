@@ -12,6 +12,7 @@
     "keys:rotate": "tsx src/scripts/rotateKeys.ts",
     "secrets:rotate": "tsx src/scripts/secretsRotate.ts",
     "versions:encrypt": "tsx src/scripts/encryptDocumentVersions.ts",
+    "versions:migrate-legacy": "tsx src/scripts/migrateLegacyDocumentVersions.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -7,7 +7,11 @@ import type { Pool } from "pg";
 import { decryptEnvelope } from "../../../../packages/security/crypto/envelope.js";
 import { KmsProviderFactory, runKmsRotationSweep } from "../crypto/kms";
 import { canonicalJson } from "../crypto/utils";
-import { createDocumentVersion, getDocumentVersionData } from "../db/documentVersions";
+import {
+  createDocumentVersion,
+  getDocumentVersionData,
+  migrateLegacyEncryptedDocumentVersions
+} from "../db/documentVersions";
 import { runMigrations } from "../db/migrations";
 
 function getMigrationsDir(): string {
@@ -223,7 +227,7 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
     }
   });
 
-  it("keeps legacy v1 encrypted rows decryptable after migrating to envelope schema v2", async () => {
+  it("keeps legacy v1 encrypted rows decryptable", async () => {
     const db = await setupDb();
     try {
       const kmsFactory = new KmsProviderFactory(db);
@@ -303,6 +307,122 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
         legacyLocalKmsMasterKey: "test-master-key"
       });
       expect(roundTripped?.toString("utf8")).toBe("legacy-ciphertext");
+    } finally {
+      await db.end();
+    }
+  });
+
+  it("migrates legacy v1 encrypted rows to envelope schema v2 by re-wrapping the DEK", async () => {
+    const db = await setupDb();
+    try {
+      const kmsFactory = new KmsProviderFactory(db);
+      const { orgId, docId } = await seedOrgAndDoc(db, { cloudEncryptionAtRest: true });
+
+      const versionId = crypto.randomUUID();
+      const aad = {
+        envelopeVersion: 1,
+        blob: "document_versions.data",
+        orgId,
+        documentId: docId,
+        documentVersionId: versionId
+      };
+
+      const dek = crypto.randomBytes(32);
+      const payloadAad = Buffer.from(canonicalJson(aad), "utf8");
+      const payloadIv = crypto.randomBytes(12);
+      const payloadCipher = crypto.createCipheriv("aes-256-gcm", dek, payloadIv, { authTagLength: 16 });
+      payloadCipher.setAAD(payloadAad);
+      const payloadCiphertext = Buffer.concat([payloadCipher.update(Buffer.from("legacy-migrate", "utf8")), payloadCipher.final()]);
+      const payloadTag = payloadCipher.getAuthTag();
+
+      const kmsKeyId = "local-legacy-key";
+      const masterKey = crypto.createHash("sha256").update("test-master-key", "utf8").digest();
+      const salt = Buffer.from(`formula:local-kms:org:${orgId}`, "utf8");
+      const info = Buffer.from(`formula:local-kms:kmsKeyId:${kmsKeyId}`, "utf8");
+      const kekRaw = crypto.hkdfSync("sha256", masterKey, salt, info, 32);
+      const kek = Buffer.isBuffer(kekRaw) ? kekRaw : Buffer.from(kekRaw);
+
+      const wrapContext = { v: 1, purpose: "dek-wrap", orgId, kmsKeyId };
+      const wrapAad = Buffer.from(canonicalJson(wrapContext), "utf8");
+      const wrapIv = crypto.randomBytes(12);
+      const wrapCipher = crypto.createCipheriv("aes-256-gcm", kek, wrapIv, { authTagLength: 16 });
+      wrapCipher.setAAD(wrapAad);
+      const wrapCiphertext = Buffer.concat([wrapCipher.update(dek), wrapCipher.final()]);
+      const wrapTag = wrapCipher.getAuthTag();
+      const encryptedDek = Buffer.concat([Buffer.from([1]), wrapIv, wrapTag, wrapCiphertext]);
+
+      await db.query(
+        `
+          INSERT INTO document_versions (
+            id,
+            document_id,
+            data,
+            data_envelope_version,
+            data_algorithm,
+            data_ciphertext,
+            data_iv,
+            data_tag,
+            data_encrypted_dek,
+            data_kms_provider,
+            data_kms_key_id,
+            data_aad
+          )
+          VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        `,
+        [
+          versionId,
+          docId,
+          1,
+          "aes-256-gcm",
+          payloadCiphertext.toString("base64"),
+          payloadIv.toString("base64"),
+          payloadTag.toString("base64"),
+          encryptedDek.toString("base64"),
+          "local",
+          kmsKeyId,
+          JSON.stringify(aad)
+        ]
+      );
+
+      const before = (
+        await db.query(
+          `
+            SELECT data_ciphertext, data_iv, data_tag, data_envelope_version, data_encrypted_dek
+            FROM document_versions
+            WHERE id = $1
+          `,
+          [versionId]
+        )
+      ).rows[0] as any;
+      expect(before.data_envelope_version).toBe(1);
+
+      const migrated = await migrateLegacyEncryptedDocumentVersions(db, kmsFactory, {
+        orgId,
+        batchSize: 100,
+        legacyLocalKmsMasterKey: "test-master-key"
+      });
+      expect(migrated.versionsMigrated).toBe(1);
+
+      const after = (
+        await db.query(
+          `
+            SELECT data_ciphertext, data_iv, data_tag, data_envelope_version, data_encrypted_dek, data_kms_key_id
+            FROM document_versions
+            WHERE id = $1
+          `,
+          [versionId]
+        )
+      ).rows[0] as any;
+
+      expect(after.data_ciphertext).toBe(before.data_ciphertext);
+      expect(after.data_iv).toBe(before.data_iv);
+      expect(after.data_tag).toBe(before.data_tag);
+      expect(after.data_envelope_version).toBe(2);
+      expect(() => JSON.parse(String(after.data_encrypted_dek))).not.toThrow();
+      expect(after.data_kms_key_id).toBe("1");
+
+      const roundTripped = await getDocumentVersionData(db, kmsFactory, versionId, { documentId: docId });
+      expect(roundTripped?.toString("utf8")).toBe("legacy-migrate");
     } finally {
       await db.end();
     }

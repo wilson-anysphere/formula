@@ -664,3 +664,165 @@ export async function encryptPlaintextDocumentVersions(
 
   return { orgsProcessed, versionsEncrypted };
 }
+
+export type MigrateLegacyEncryptedDocumentVersionsResult = {
+  orgsProcessed: number;
+  versionsMigrated: number;
+};
+
+/**
+ * Upgrade legacy envelope schema v1 rows (HKDF local KMS + base64 wrapped DEK)
+ * to the canonical envelope schema v2 representation (JSON wrapped-key object).
+ *
+ * This migration re-wraps the existing DEK under the org's *current* KMS provider
+ * and does **not** re-encrypt the ciphertext payload.
+ */
+export async function migrateLegacyEncryptedDocumentVersions(
+  pool: Pool,
+  kmsFactory: KmsProviderFactory,
+  {
+    orgId,
+    batchSize = 100,
+    legacyLocalKmsMasterKey
+  }: {
+    orgId?: string;
+    batchSize?: number;
+    /**
+     * Required to migrate legacy v1 rows that were encrypted with the historical
+     * HKDF-based local KMS provider.
+     */
+    legacyLocalKmsMasterKey?: string;
+  } = {}
+): Promise<MigrateLegacyEncryptedDocumentVersionsResult> {
+  const limit = Number(batchSize ?? 100);
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error("batchSize must be a positive integer");
+  }
+
+  const orgs = await pool.query(
+    `
+      SELECT org_id
+      FROM org_settings
+      ${orgId ? "WHERE org_id = $1" : ""}
+      ORDER BY org_id ASC
+    `,
+    orgId ? [orgId] : []
+  );
+
+  let orgsProcessed = 0;
+  let versionsMigrated = 0;
+
+  for (const row of orgs.rows as any[]) {
+    const orgIdValue = String(row.org_id);
+
+    const migratedForOrg = await withTransaction(pool, async (client) => {
+      // Ensure org_settings exists (some tests insert org_settings manually).
+      await loadOrgEncryptionSettings(client, orgIdValue);
+
+      const legacyVersions = await client.query(
+        `
+          SELECT v.id, v.document_id, v.data_encrypted_dek, v.data_kms_provider, v.data_kms_key_id, v.data_aad
+          FROM document_versions v
+          JOIN documents d ON d.id = v.document_id
+          WHERE d.org_id = $1
+            AND v.data_ciphertext IS NOT NULL
+            AND v.data_envelope_version = $2
+            AND v.data_encrypted_dek IS NOT NULL
+          ORDER BY v.created_at ASC
+          LIMIT $3
+        `,
+        [orgIdValue, DOCUMENT_VERSION_ENVELOPE_SCHEMA_V1, limit]
+      );
+
+      if ((legacyVersions.rowCount ?? 0) === 0) return 0;
+
+      orgsProcessed += 1;
+
+      // Target provider for re-wrapping is whatever the org is currently
+      // configured to use.
+      const targetKms = await kmsFactory.forOrg(orgIdValue, client);
+
+      let updated = 0;
+
+      for (const version of legacyVersions.rows as any[]) {
+        const versionIdValue = String(version.id);
+        const documentIdValue = String(version.document_id);
+        const expectedAad = documentVersionDataAad({
+          orgId: orgIdValue,
+          documentId: documentIdValue,
+          documentVersionId: versionIdValue
+        });
+
+        const storedAad =
+          version.data_aad == null ? null : normalizeJsonValue<Record<string, unknown>>(version.data_aad);
+        if (storedAad && canonicalJson(storedAad) !== canonicalJson(expectedAad)) {
+          throw new Error("aad_mismatch");
+        }
+
+        const legacyProvider = String(version.data_kms_provider ?? "local");
+        const legacyKmsKeyId = String(version.data_kms_key_id ?? "");
+        const encryptedDekBytes = Buffer.from(String(version.data_encrypted_dek), "base64");
+
+        let dek: Buffer;
+        if (legacyProvider === "local") {
+          dek = unwrapLegacyLocalDek({
+            encryptedDek: encryptedDekBytes,
+            orgId: orgIdValue,
+            kmsKeyId: legacyKmsKeyId,
+            localKmsMasterKey: legacyLocalKmsMasterKey ?? ""
+          });
+        } else if (legacyProvider === "aws") {
+          const kms = await kmsFactory.forOrgProvider(orgIdValue, "aws", client);
+          dek = await kms.unwrapKey({
+            wrappedKey: {
+              kmsProvider: "aws",
+              kmsKeyId: legacyKmsKeyId,
+              ciphertext: encryptedDekBytes.toString("base64")
+            },
+            encryptionContext: expectedAad
+          });
+        } else {
+          throw new Error(`Unsupported legacy kms provider: ${legacyProvider}`);
+        }
+
+        const wrappedDek = await targetKms.wrapKey({ plaintextKey: dek, encryptionContext: expectedAad });
+        const wrappedDekAny = wrappedDek as any;
+        const dataKmsProvider = String(wrappedDekAny?.kmsProvider ?? targetKms.provider);
+        const dataKmsKeyId =
+          typeof wrappedDekAny?.kmsKeyId === "string"
+            ? wrappedDekAny.kmsKeyId
+            : typeof wrappedDekAny?.kmsKeyVersion === "number"
+              ? String(wrappedDekAny.kmsKeyVersion)
+              : null;
+
+        await client.query(
+          `
+            UPDATE document_versions
+            SET data_envelope_version = $2,
+                data_encrypted_dek = $3,
+                data_kms_provider = $4,
+                data_kms_key_id = $5,
+                data_aad = COALESCE(data_aad, $6::jsonb)
+            WHERE id = $1
+          `,
+          [
+            versionIdValue,
+            DOCUMENT_VERSION_ENVELOPE_SCHEMA_V2,
+            JSON.stringify(wrappedDek),
+            dataKmsProvider,
+            dataKmsKeyId,
+            JSON.stringify(expectedAad)
+          ]
+        );
+
+        updated += 1;
+      }
+
+      return updated;
+    });
+
+    versionsMigrated += migratedForOrg;
+  }
+
+  return { orgsProcessed, versionsMigrated };
+}
