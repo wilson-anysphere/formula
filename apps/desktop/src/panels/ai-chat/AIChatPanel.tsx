@@ -189,10 +189,18 @@ export function AIChatPanel(props: AIChatPanelProps) {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setMessages((prev) => [
-        ...prev,
-        { id: messageId(), role: "assistant", content: tWithVars("chat.errorWithMessage", { message }) },
-      ]);
+      const content = tWithVars("chat.errorWithMessage", { message });
+      setMessages((prev) => {
+        const next = prev.slice();
+        const lastAssistant = [...next].reverse().find((m) => m.role === "assistant" && m.pending);
+        if (lastAssistant) {
+          lastAssistant.content = content;
+          lastAssistant.pending = false;
+          return next;
+        }
+        next.push({ id: messageId(), role: "assistant", content });
+        return next;
+      });
     } finally {
       setSending(false);
     }
