@@ -55,6 +55,18 @@ Enterprise adoption requires meeting the highest bars for security, compliance, 
 
 See also: [docs/saml.md](./saml.md)
 
+#### OIDC SSO administration (services/api)
+
+OIDC providers are configured **per organization** via org-admin API endpoints. Client secrets are stored in the database-backed secret store (`secrets` table) and encrypted using `SECRET_STORE_KEYS_JSON` (preferred) or the legacy `SECRET_STORE_KEY`.
+
+Routes (org admin only; session or API key auth; session auth requires MFA):
+
+- `GET /orgs/:orgId/oidc/providers` (alias: `/orgs/:orgId/oidc-providers`) → list configured providers (no secrets)
+- `PUT /orgs/:orgId/oidc/providers/:providerId` (alias: `/orgs/:orgId/oidc-providers/:providerId`) → create/update a provider (optionally set `clientSecret`)
+- `DELETE /orgs/:orgId/oidc/providers/:providerId` (alias: `/orgs/:orgId/oidc-providers/:providerId`) → deletes the provider and removes the stored secret
+
+Production deployments **must** set `PUBLIC_BASE_URL` so the OIDC login flow can construct redirect URIs without trusting `Host` / `X-Forwarded-*` headers.
+
 ```typescript
 interface SSOConfig {
   provider: "saml" | "oidc";

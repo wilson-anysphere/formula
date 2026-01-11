@@ -17,6 +17,8 @@ type OrgOidcProviderRow = {
   created_at: Date;
 };
 
+const DEFAULT_SCOPES = ["openid", "email", "profile"] as const;
+
 function parseStringArray(value: unknown): string[] {
   if (!value) return [];
   if (Array.isArray(value)) return value.filter((v) => typeof v === "string");
@@ -33,8 +35,9 @@ function parseStringArray(value: unknown): string[] {
 
 function ensureOpenIdScope(scopes: string[]): string[] {
   const normalized = scopes.map((s) => s.trim()).filter((s) => s.length > 0);
-  if (!normalized.includes("openid")) normalized.unshift("openid");
-  return Array.from(new Set(normalized));
+  const unique = new Set(normalized);
+  unique.delete("openid");
+  return ["openid", ...Array.from(unique)];
 }
 
 function isValidProviderId(value: string): boolean {
@@ -45,15 +48,40 @@ function oidcSecretName(orgId: string, providerId: string): string {
   return `oidc:${orgId}:${providerId}`;
 }
 
-function validateIssuerUrl(value: string): boolean {
-  let parsed: URL;
+function normalizeIssuerUrl(value: string, options: { allowHttp: boolean; allowLocalhost: boolean }): string {
+  const raw = value.trim();
+  let url: URL;
   try {
-    parsed = new URL(value);
+    url = new URL(raw);
   } catch {
-    return false;
+    throw new Error("issuerUrl must be a valid URL");
   }
-  if (process.env.NODE_ENV === "production" && parsed.protocol !== "https:") return false;
-  return parsed.protocol === "https:" || parsed.protocol === "http:";
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("issuerUrl must start with https:// (or http:// in development)");
+  }
+  if (url.protocol === "http:" && !options.allowHttp) {
+    throw new Error("issuerUrl must use https:// in production");
+  }
+
+  if (url.username || url.password) {
+    throw new Error("issuerUrl must not include credentials");
+  }
+  if (url.search || url.hash) {
+    throw new Error("issuerUrl must not include query parameters or fragments");
+  }
+
+  const hostname = url.hostname.toLowerCase();
+  const isLocal =
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname.endsWith(".localhost");
+  if (isLocal && !options.allowLocalhost) {
+    throw new Error("issuerUrl must not use localhost in production");
+  }
+
+  // Strip trailing slashes for stability.
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  const pathname = url.pathname === "/" ? "" : url.pathname;
+  return `${url.origin}${pathname}`;
 }
 
 async function requireOrgAdminForOidcProviders(
@@ -85,12 +113,12 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
   const UpsertBody = z.object({
     issuerUrl: z.string().min(1),
     clientId: z.string().min(1),
-    scopes: z.array(z.string().min(1)).default([]),
-    enabled: z.boolean(),
+    scopes: z.array(z.string().min(1)).optional(),
+    enabled: z.boolean().optional(),
     clientSecret: z.string().min(1).optional()
   });
 
-  app.get("/orgs/:orgId/oidc/providers", { preHandler: requireAuth }, async (request, reply) => {
+  const listProviders = async (request: FastifyRequest, reply: FastifyReply) => {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgAdminForOidcProviders(request, reply, orgId);
     if (!member) return;
@@ -117,6 +145,7 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
     return reply.send({
       providers: providersRes.rows.map((row) => {
         const providerId = String(row.provider_id);
+        const secretConfigured = configured.has(`${prefix}${providerId}`);
         return {
           providerId,
           issuerUrl: String(row.issuer_url),
@@ -124,13 +153,17 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
           scopes: ensureOpenIdScope(parseStringArray(row.scopes)),
           enabled: Boolean(row.enabled),
           createdAt: (row.created_at as Date).toISOString(),
-          clientSecretConfigured: configured.has(`${prefix}${providerId}`)
+          clientSecretConfigured: secretConfigured,
+          secretConfigured
         };
       })
     });
-  });
+  };
 
-  app.get("/orgs/:orgId/oidc/providers/:providerId", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/orgs/:orgId/oidc/providers", { preHandler: requireAuth }, listProviders);
+  app.get("/orgs/:orgId/oidc-providers", { preHandler: requireAuth }, listProviders);
+
+  const getProvider = async (request: FastifyRequest, reply: FastifyReply) => {
     const orgId = (request.params as { orgId: string; providerId: string }).orgId;
     const providerId = (request.params as { orgId: string; providerId: string }).providerId;
     if (!isValidProviderId(providerId)) return reply.code(400).send({ error: "invalid_request" });
@@ -155,6 +188,7 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
 
     const secretName = oidcSecretName(orgId, providerId);
     const secretRes = await app.db.query("SELECT 1 FROM secrets WHERE name = $1", [secretName]);
+    const secretConfigured = secretRes.rowCount === 1;
 
     return reply.send({
       provider: {
@@ -165,11 +199,15 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
         enabled: Boolean(row.enabled),
         createdAt: (row.created_at as Date).toISOString()
       },
-      clientSecretConfigured: secretRes.rowCount === 1
+      clientSecretConfigured: secretConfigured,
+      secretConfigured
     });
-  });
+  };
 
-  app.put("/orgs/:orgId/oidc/providers/:providerId", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/orgs/:orgId/oidc/providers/:providerId", { preHandler: requireAuth }, getProvider);
+  app.get("/orgs/:orgId/oidc-providers/:providerId", { preHandler: requireAuth }, getProvider);
+
+  const putProvider = async (request: FastifyRequest, reply: FastifyReply) => {
     const orgId = (request.params as { orgId: string; providerId: string }).orgId;
     const providerId = (request.params as { orgId: string; providerId: string }).providerId;
     if (!isValidProviderId(providerId)) return reply.code(400).send({ error: "invalid_request" });
@@ -183,13 +221,20 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
     const parsedBody = UpsertBody.safeParse(request.body);
     if (!parsedBody.success) return reply.code(400).send({ error: "invalid_request" });
 
-    const issuerUrl = parsedBody.data.issuerUrl.trim();
-    if (!validateIssuerUrl(issuerUrl)) return reply.code(400).send({ error: "invalid_request" });
+    const isProd = process.env.NODE_ENV === "production";
+    let issuerUrl: string;
+    try {
+      issuerUrl = normalizeIssuerUrl(parsedBody.data.issuerUrl, {
+        allowHttp: !isProd,
+        allowLocalhost: !isProd
+      });
+    } catch {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
 
-    const scopes = ensureOpenIdScope(parsedBody.data.scopes);
     const clientId = parsedBody.data.clientId.trim();
     if (clientId.length === 0) return reply.code(400).send({ error: "invalid_request" });
-    const enabled = Boolean(parsedBody.data.enabled);
+
     const clientSecret = parsedBody.data.clientSecret?.trim();
     if (parsedBody.data.clientSecret !== undefined && (!clientSecret || clientSecret.length === 0)) {
       return reply.code(400).send({ error: "invalid_request" });
@@ -198,11 +243,19 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
     const secretName = oidcSecretName(orgId, providerId);
 
     const txResult = await withTransaction(app.db, async (client) => {
-      const existingRes = await client.query("SELECT 1 FROM org_oidc_providers WHERE org_id = $1 AND provider_id = $2", [
-        orgId,
-        providerId
-      ]);
+      const existingRes = await client.query<Pick<OrgOidcProviderRow, "scopes" | "enabled">>(
+        "SELECT scopes, enabled FROM org_oidc_providers WHERE org_id = $1 AND provider_id = $2",
+        [orgId, providerId]
+      );
+
       const existed = existingRes.rowCount === 1;
+      const existingRow = existed ? existingRes.rows[0]! : null;
+
+      const scopesInput =
+        parsedBody.data.scopes ?? (existingRow ? parseStringArray(existingRow.scopes) : [...DEFAULT_SCOPES]);
+      const scopes = ensureOpenIdScope(scopesInput);
+
+      const enabled = parsedBody.data.enabled ?? (existingRow ? Boolean(existingRow.enabled) : true);
 
       await client.query(
         `
@@ -214,11 +267,11 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
         [orgId, providerId, issuerUrl, clientId, JSON.stringify(scopes), enabled]
       );
 
-      if (clientSecret) {
-        await putSecret(client, request.server.config.secretStoreKeys, secretName, clientSecret);
+      if (parsedBody.data.clientSecret !== undefined) {
+        await putSecret(client, request.server.config.secretStoreKeys, secretName, clientSecret!);
       }
 
-      const secretConfigured = clientSecret
+      const secretConfigured = parsedBody.data.clientSecret !== undefined
         ? true
         : (await client.query("SELECT 1 FROM secrets WHERE name = $1", [secretName])).rowCount === 1;
 
@@ -249,12 +302,13 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
           ipAddress: getClientIp(request),
           userAgent: getUserAgent(request)
         },
-        resource: { type: "oidc_provider", id: providerId, name: providerId },
+        resource: { type: "integration", id: providerId, name: "oidc" },
         success: true,
         details: { type: "oidc", providerId }
       })
     );
 
+    const secretConfigured = txResult.secretConfigured;
     return reply.send({
       provider: {
         providerId,
@@ -264,58 +318,61 @@ export function registerOidcProviderRoutes(app: FastifyInstance): void {
         enabled: Boolean(txResult.row.enabled),
         createdAt: (txResult.row.created_at as Date).toISOString()
       },
-      clientSecretConfigured: txResult.secretConfigured
+      clientSecretConfigured: secretConfigured,
+      secretConfigured
     });
-  });
+  };
 
-  app.delete(
-    "/orgs/:orgId/oidc/providers/:providerId",
-    { preHandler: requireAuth },
-    async (request, reply) => {
-      const orgId = (request.params as { orgId: string; providerId: string }).orgId;
-      const providerId = (request.params as { orgId: string; providerId: string }).providerId;
-      if (!isValidProviderId(providerId)) return reply.code(400).send({ error: "invalid_request" });
+  app.put("/orgs/:orgId/oidc/providers/:providerId", { preHandler: requireAuth }, putProvider);
+  app.put("/orgs/:orgId/oidc-providers/:providerId", { preHandler: requireAuth }, putProvider);
 
-      const member = await requireOrgAdminForOidcProviders(request, reply, orgId);
-      if (!member) return;
-      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
-        return reply.code(403).send({ error: "mfa_required" });
-      }
+  const deleteProvider = async (request: FastifyRequest, reply: FastifyReply) => {
+    const orgId = (request.params as { orgId: string; providerId: string }).orgId;
+    const providerId = (request.params as { orgId: string; providerId: string }).providerId;
+    if (!isValidProviderId(providerId)) return reply.code(400).send({ error: "invalid_request" });
 
-      const secretName = oidcSecretName(orgId, providerId);
-
-      const deleted = await withTransaction(app.db, async (client) => {
-        const res = await client.query(
-          "DELETE FROM org_oidc_providers WHERE org_id = $1 AND provider_id = $2 RETURNING provider_id",
-          [orgId, providerId]
-        );
-        if (res.rowCount !== 1) return false;
-        await deleteSecret(client, secretName);
-        return true;
-      });
-
-      if (!deleted) return reply.code(404).send({ error: "provider_not_found" });
-
-      await writeAuditEvent(
-        app.db,
-        createAuditEvent({
-          eventType: "admin.integration_removed",
-          actor: { type: "user", id: request.user!.id },
-          context: {
-            orgId,
-            userId: request.user!.id,
-            userEmail: request.user!.email,
-            sessionId: request.session?.id ?? null,
-            ipAddress: getClientIp(request),
-            userAgent: getUserAgent(request)
-          },
-          resource: { type: "oidc_provider", id: providerId, name: providerId },
-          success: true,
-          details: { type: "oidc", providerId }
-        })
-      );
-
-      return reply.send({ ok: true });
+    const member = await requireOrgAdminForOidcProviders(request, reply, orgId);
+    if (!member) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
     }
-  );
+
+    const secretName = oidcSecretName(orgId, providerId);
+
+    const deleted = await withTransaction(app.db, async (client) => {
+      const res = await client.query(
+        "DELETE FROM org_oidc_providers WHERE org_id = $1 AND provider_id = $2 RETURNING provider_id",
+        [orgId, providerId]
+      );
+      if (res.rowCount !== 1) return false;
+      await deleteSecret(client, secretName);
+      return true;
+    });
+
+    if (!deleted) return reply.code(404).send({ error: "provider_not_found" });
+
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "admin.integration_removed",
+        actor: { type: "user", id: request.user!.id },
+        context: {
+          orgId,
+          userId: request.user!.id,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id ?? null,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "integration", id: providerId, name: "oidc" },
+        success: true,
+        details: { type: "oidc", providerId }
+      })
+    );
+
+    return reply.send({ ok: true });
+  };
+
+  app.delete("/orgs/:orgId/oidc/providers/:providerId", { preHandler: requireAuth }, deleteProvider);
+  app.delete("/orgs/:orgId/oidc-providers/:providerId", { preHandler: requireAuth }, deleteProvider);
 }

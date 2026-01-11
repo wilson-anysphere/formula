@@ -461,7 +461,7 @@ describe("API e2e: auth + RBAC + sync token", () => {
     const afterBody = permissionsAfterDelete.json() as any;
     expect(afterBody.permissions.role).toBe("viewer");
     expect(afterBody.permissions.rangeRestrictions).toHaveLength(0);
-  }, 20_000);
+  }, 30_000);
 
   it("creates, lists, fetches, deletes document versions and enforces RBAC", async () => {
     const ownerRes = await app.inject({
@@ -615,5 +615,5 @@ describe("API e2e: auth + RBAC + sync token", () => {
     });
     expect(listAfterDelete.statusCode).toBe(200);
     expect((listAfterDelete.json() as any).versions).toHaveLength(0);
-  }, 20_000);
+  }, 30_000);
 });

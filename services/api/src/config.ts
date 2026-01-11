@@ -13,7 +13,7 @@ export interface AppConfig {
    */
   trustProxy?: boolean;
   /**
-   * Canonical external base URL (origin) for the API (e.g. `https://api.example.com`).
+   * Publicly reachable base URL for this API service (scheme + host [+ optional path prefix]).
    *
    * This is used for security-sensitive flows that need to generate absolute URLs,
    * such as OIDC `redirect_uri`. Production deployments must set this explicitly
@@ -158,6 +158,34 @@ function parseHostAllowlist(value: string | undefined): string[] {
   return parsed.length > 0 ? parsed : ["localhost", "127.0.0.1", "[::1]"];
 }
 
+function normalizePublicBaseUrl(value: string): string {
+  const raw = value.trim();
+  if (raw.length === 0) throw new Error("PUBLIC_BASE_URL must be non-empty");
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("PUBLIC_BASE_URL must be a valid URL");
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("PUBLIC_BASE_URL must start with http:// or https://");
+  }
+  if (url.username || url.password) {
+    throw new Error("PUBLIC_BASE_URL must not include credentials");
+  }
+
+  // Avoid surprising redirects based on query parameters / fragments.
+  url.search = "";
+  url.hash = "";
+  // Strip trailing slashes so URL joining is stable.
+  url.pathname = url.pathname.replace(/\/+$/, "");
+
+  const pathname = url.pathname === "/" ? "" : url.pathname;
+  return `${url.origin}${pathname}`;
+}
+
 function loadSecretStoreKeys(env: NodeJS.ProcessEnv, legacySecret: string): SecretStoreKeyring {
   const rawJson = typeof env.SECRET_STORE_KEYS_JSON === "string" ? env.SECRET_STORE_KEYS_JSON.trim() : "";
   if (rawJson.length > 0) {
@@ -229,11 +257,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const publicBaseUrlEnv = readStringEnv(env.PUBLIC_BASE_URL ?? env.EXTERNAL_BASE_URL, "");
   const publicBaseUrl =
     publicBaseUrlEnv.length > 0
-      ? (() => {
-          const url = new URL(publicBaseUrlEnv);
-          if (url.origin === "null") throw new Error("PUBLIC_BASE_URL must not be null");
-          return url.origin;
-        })()
+      ? normalizePublicBaseUrl(publicBaseUrlEnv)
       : undefined;
   const publicBaseUrlHostAllowlist = parseHostAllowlist(env.PUBLIC_BASE_URL_HOST_ALLOWLIST);
 

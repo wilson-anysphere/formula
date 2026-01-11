@@ -213,16 +213,16 @@ describe("OIDC SSO", () => {
       try {
         const ownerRegister = await app.inject({
           method: "POST",
-        url: "/auth/register",
-        payload: {
-          email: "sso-owner@example.com",
-          password: "password1234",
-          name: "Owner",
-          orgName: "SSO Org"
-        }
-      });
-      expect(ownerRegister.statusCode).toBe(200);
-      const orgId = (ownerRegister.json() as any).organization.id as string;
+          url: "/auth/register",
+          payload: {
+            email: "sso-owner@example.com",
+            password: "password1234",
+            name: "Owner",
+            orgName: "SSO Org"
+          }
+        });
+        expect(ownerRegister.statusCode).toBe(200);
+        const orgId = (ownerRegister.json() as any).organization.id as string;
 
       await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb WHERE org_id = $1", [
         orgId,
@@ -241,12 +241,19 @@ describe("OIDC SSO", () => {
 
       const startRes = await app.inject({
         method: "GET",
-        url: `/auth/oidc/${orgId}/mock/start`
+        url: `/auth/oidc/${orgId}/mock/start`,
+        headers: {
+          // Ensure redirect URI construction does not trust forwarded host headers.
+          "x-forwarded-host": "evil.example.com"
+        }
       });
       expect(startRes.statusCode).toBe(302);
       const location = startRes.headers.location as string;
       const authUrl = new URL(location);
       expect(`${authUrl.origin}${authUrl.pathname}`).toBe(`${provider.issuerUrl}/authorize`);
+      expect(authUrl.searchParams.get("redirect_uri")).toBe(
+        `${config.publicBaseUrl}/auth/oidc/${encodeURIComponent(orgId)}/${encodeURIComponent("mock")}/callback`
+      );
 
       const state = authUrl.searchParams.get("state");
       const nonce = authUrl.searchParams.get("nonce");
@@ -473,7 +480,7 @@ describe("OIDC SSO", () => {
       await app.close();
       await db.end();
     }
-  });
+  }, 15_000);
 
   it("fails on invalid state", async () => {
     const { db, app } = await createTestApp();
@@ -501,6 +508,42 @@ describe("OIDC SSO", () => {
       await db.end();
     }
   }, 20_000);
+
+  it("rejects callback requests when the stored redirect_uri is not allowlisted", async () => {
+    const { db, app } = await createTestApp();
+    try {
+      const ownerRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "redirect-mismatch-owner@example.com",
+          password: "password1234",
+          name: "Owner",
+          orgName: "Redirect Mismatch Org"
+        }
+      });
+      expect(ownerRegister.statusCode).toBe(200);
+      const orgId = (ownerRegister.json() as any).organization.id as string;
+
+      await db.query(
+        `
+          INSERT INTO oidc_auth_states (state, org_id, provider_id, nonce, pkce_verifier, redirect_uri, created_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `,
+        ["mismatch-state", orgId, "mock", "nonce", "verifier", "https://evil.example.com/auth/oidc/mismatch/callback", new Date()]
+      );
+
+      const callbackRes = await app.inject({
+        method: "GET",
+        url: `/auth/oidc/${orgId}/mock/callback?code=whatever&state=mismatch-state`
+      });
+      expect(callbackRes.statusCode).toBe(401);
+      expect((callbackRes.json() as any).error).toBe("invalid_state");
+    } finally {
+      await app.close();
+      await db.end();
+    }
+  }, 10_000);
 
   it("fails on nonce mismatch", async () => {
     const { db, config, app } = await createTestApp();
@@ -555,7 +598,7 @@ describe("OIDC SSO", () => {
       await app.close();
       await db.end();
     }
-  });
+  }, 15_000);
 
   it("blocks disabled providers", async () => {
     const { db, config, app } = await createTestApp();
@@ -596,5 +639,65 @@ describe("OIDC SSO", () => {
       await app.close();
       await db.end();
     }
-  });
+  }, 10_000);
+
+  it("cleans up expired auth states on start", async () => {
+    const { db, config, app } = await createTestApp();
+    try {
+      const ownerRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "cleanup-owner@example.com",
+          password: "password1234",
+          name: "Owner",
+          orgName: "Cleanup Org"
+        }
+      });
+      expect(ownerRegister.statusCode).toBe(200);
+      const orgId = (ownerRegister.json() as any).organization.id as string;
+
+      await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb WHERE org_id = $1", [
+        orgId,
+        JSON.stringify(["password", "oidc"])
+      ]);
+
+      await db.query(
+        `
+          INSERT INTO org_oidc_providers (org_id, provider_id, issuer_url, client_id, scopes, enabled)
+          VALUES ($1,$2,$3,$4,$5::jsonb,$6)
+        `,
+        [orgId, "mock", provider.issuerUrl, provider.clientId, JSON.stringify(["openid", "email"]), true]
+      );
+
+      const staleCreatedAt = new Date(Date.now() - 11 * 60 * 1000);
+      await db.query(
+        `
+          INSERT INTO oidc_auth_states (state, org_id, provider_id, nonce, pkce_verifier, redirect_uri, created_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `,
+        [
+          "stale-state",
+          orgId,
+          "mock",
+          "nonce",
+          "verifier",
+          `${config.publicBaseUrl}/auth/oidc/${encodeURIComponent(orgId)}/mock/callback`,
+          staleCreatedAt
+        ]
+      );
+
+      const startRes = await app.inject({
+        method: "GET",
+        url: `/auth/oidc/${orgId}/mock/start`
+      });
+      expect(startRes.statusCode).toBe(302);
+
+      const stale = await db.query("SELECT 1 FROM oidc_auth_states WHERE state = 'stale-state'");
+      expect(stale.rowCount).toBe(0);
+    } finally {
+      await app.close();
+      await db.end();
+    }
+  }, 10_000);
 });

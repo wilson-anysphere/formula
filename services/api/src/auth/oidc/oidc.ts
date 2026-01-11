@@ -62,8 +62,9 @@ function parseStringArray(value: unknown): string[] {
 
 function ensureOpenIdScope(scopes: string[]): string[] {
   const normalized = scopes.map((s) => s.trim()).filter((s) => s.length > 0);
-  if (!normalized.includes("openid")) normalized.unshift("openid");
-  return Array.from(new Set(normalized));
+  const unique = new Set(normalized);
+  unique.delete("openid");
+  return ["openid", ...Array.from(unique)];
 }
 
 function extractEmail(claims: Record<string, unknown>): string | null {
@@ -164,6 +165,40 @@ function buildRedirectUri(baseUrl: string, pathname: string): string {
   if (!base.pathname.endsWith("/")) base.pathname = `${base.pathname}/`;
   const relative = pathname.startsWith("/") ? pathname.slice(1) : pathname;
   return new URL(relative, base).toString();
+}
+
+function oidcCallbackPath(orgId: string, providerId: string): string {
+  return `/auth/oidc/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`;
+}
+
+function redirectUriAllowed(request: FastifyRequest, redirectUri: string, orgId: string, providerId: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(redirectUri);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+
+  const callbackPath = oidcCallbackPath(orgId, providerId);
+  // Allow optional base path prefixes (e.g. https://example.com/api) by only checking
+  // that the callback suffix matches.
+  if (!parsed.pathname.endsWith(callbackPath)) return false;
+
+  const configured = request.server.config.publicBaseUrl;
+  if (typeof configured === "string" && configured.length > 0) {
+    try {
+      return redirectUri === buildRedirectUri(configured, callbackPath);
+    } catch {
+      return false;
+    }
+  }
+
+  // Dev/test fallback: without a configured base URL we only allow callback hosts
+  // that are explicitly allowlisted *and* the server is configured to trust the proxy.
+  if (!request.server.config.trustProxy) return false;
+  return isHostAllowed(parsed.host, request.server.config.publicBaseUrlHostAllowlist);
 }
 
 async function loadOrgSettings(
@@ -364,6 +399,13 @@ export async function oidcStart(request: FastifyRequest, reply: FastifyReply): P
   const orgId = params.orgId;
   const providerId = params.provider;
 
+  // Best-effort cleanup so `oidc_auth_states` does not grow unbounded when sweeps are disabled.
+  try {
+    await cleanupOidcAuthStates(request.server.db);
+  } catch (err) {
+    request.server.log.warn({ err }, "oidc_auth_state_cleanup_failed");
+  }
+
   const provider = await loadOrgProvider(request, orgId, providerId);
   if (!provider) {
     reply.code(404).send({ error: "provider_not_found" });
@@ -392,11 +434,9 @@ export async function oidcStart(request: FastifyRequest, reply: FastifyReply): P
   const pkceChallenge = sha256Base64Url(pkceVerifier);
 
   let redirectUri: string;
+  const callbackPath = oidcCallbackPath(orgId, providerId);
   try {
-    redirectUri = buildRedirectUri(
-      externalBaseUrl(request),
-      `/auth/oidc/${encodeURIComponent(orgId)}/${encodeURIComponent(providerId)}/callback`
-    );
+    redirectUri = buildRedirectUri(externalBaseUrl(request), callbackPath);
   } catch (err) {
     request.server.log.warn({ err }, "oidc_redirect_uri_base_url_invalid");
     reply.code(500).send({ error: "oidc_not_configured" });
@@ -485,6 +525,13 @@ export async function oidcCallback(request: FastifyRequest, reply: FastifyReply)
   if (!Number.isFinite(ageMs) || ageMs > OIDC_AUTH_STATE_TTL_MS) {
     request.server.metrics.authFailuresTotal.inc({ reason: "state_expired" });
     await writeOidcFailureAudit({ request, orgId, providerId, errorCode: "state_expired" });
+    reply.code(401).send({ error: "invalid_state" });
+    return;
+  }
+
+  if (!redirectUriAllowed(request, authState.redirect_uri, orgId, providerId)) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "invalid_redirect_uri" });
+    await writeOidcFailureAudit({ request, orgId, providerId, errorCode: "invalid_redirect_uri" });
     reply.code(401).send({ error: "invalid_state" });
     return;
   }
