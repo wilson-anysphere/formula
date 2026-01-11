@@ -122,7 +122,7 @@ The desktop application uses **Tauri** for a native shell with a Rust backend. T
     
     "security": {
       "dangerousDisableAssetCspModification": false,
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.formula.app wss://sync.formula.app"
+      "csp": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; worker-src 'self' blob:; child-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data: https:; connect-src 'self' https://api.formula.app wss://sync.formula.app"
     },
     
     "windows": [
@@ -148,6 +148,15 @@ The desktop application uses **Tauri** for a native shell with a Rust backend. T
   }
 }
 ```
+
+#### CSP notes (WASM engine + Workers)
+
+- The Rust engine runs as **WebAssembly inside a module Worker**, so CSP must allow:
+  - `script-src 'wasm-unsafe-eval'` for WASM compilation/instantiation.
+  - `worker-src 'self' blob:` for module workers (Vite may use `blob:` URLs for worker bootstrapping).
+- Some WebKit-based WebViews historically require `script-src 'unsafe-eval'` for WASM.
+  We also rely on `unsafe-eval` for the TypeScript scripting sandbox (it evaluates compiled code via `new Function` inside a Worker).
+- Older WebKit versions may still gate worker creation behind `child-src`, so we include `child-src 'self' blob:` as a fallback.
 
 ---
 
