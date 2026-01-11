@@ -328,3 +328,56 @@ test("sandbox: blocks arguments.callee.caller escape", async (t) => {
   assert.equal(result.escaped, false);
   assert.match(String(result.error ?? ""), /caller|callee|strict/i);
 });
+
+test("sandbox: does not treat obj.import(...) as dynamic import", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sandbox-import-prop-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir, { recursive: true });
+
+  await fs.writeFile(
+    path.join(extDir, "package.json"),
+    JSON.stringify(
+      {
+        name: "sandbox-import-prop",
+        displayName: "sandbox-import-prop",
+        version: "1.0.0",
+        publisher: "formula-test",
+        main: "./extension.js",
+        engines: { formula: "^1.0.0" },
+        activationEvents: ["onStartupFinished"],
+        contributes: { commands: [] },
+        permissions: []
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  await fs.writeFile(
+    path.join(extDir, "extension.js"),
+    `
+      module.exports.activate = async () => {
+        const obj = { import: (value) => String(value ?? "ok") };
+        if (obj.import("ok") !== "ok") {
+          throw new Error("import property call failed");
+        }
+      };
+    `,
+    "utf8"
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+  await host.startup();
+});
