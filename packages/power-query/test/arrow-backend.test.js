@@ -84,6 +84,49 @@ test("Arrow backend: changeType matches DataTable results", () => {
   assert.deepEqual(actual, expected);
 });
 
+test("Arrow backend: int64/BigInt values are normalized for aggregations", () => {
+  const dataTable = DataTable.fromGrid(
+    [
+      ["Group", "Value"],
+      ["A", 1],
+      ["A", 2],
+      ["B", 3],
+    ],
+    { hasHeaders: true, inferTypes: true },
+  );
+
+  const arrowTable = new ArrowTableAdapter(
+    arrowTableFromColumns({
+      Group: ["A", "A", "B"],
+      Value: [1n, 2n, 3n],
+    }),
+  );
+
+  const op = { type: "groupBy", groupColumns: ["Group"], aggregations: [{ column: "Value", op: "sum", as: "Total" }] };
+  assert.deepEqual(applyOperation(arrowTable, op).toGrid(), applyOperation(dataTable, op).toGrid());
+});
+
+test("Arrow backend: int64 group keys do not break JSON stringification", () => {
+  const dataTable = DataTable.fromGrid(
+    [
+      ["id", "value"],
+      ["9007199254740993", 1],
+      ["9007199254740994", 2],
+    ],
+    { hasHeaders: true, inferTypes: false },
+  );
+
+  const arrowTable = new ArrowTableAdapter(
+    arrowTableFromColumns({
+      id: [9007199254740993n, 9007199254740994n],
+      value: [1, 2],
+    }),
+  );
+
+  const op = { type: "groupBy", groupColumns: ["id"], aggregations: [{ column: "value", op: "count", as: "Count" }] };
+  assert.deepEqual(applyOperation(arrowTable, op).toGrid(), applyOperation(dataTable, op).toGrid());
+});
+
 test("QueryEngine: identical results across backends for a multi-step query", async () => {
   const engine = new QueryEngine();
   const dataTable = sampleDataTable();

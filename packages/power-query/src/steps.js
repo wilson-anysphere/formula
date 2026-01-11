@@ -140,7 +140,6 @@ function filterRows(table, predicate) {
     for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
       if (!fn(rowIndex)) continue;
       for (let colIndex = 0; colIndex < vectors.length; colIndex++) {
-        // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
         outColumns[colIndex].push(vectors[colIndex].get(rowIndex));
       }
     }
@@ -180,7 +179,6 @@ function sortRows(table, sortBy) {
     const indices = Array.from({ length: table.rowCount }, (_, i) => i);
     indices.sort((a, b) => {
       for (const spec of specs) {
-        // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
         const cmp = compareValues(vectors[spec.idx].get(a), vectors[spec.idx].get(b), spec);
         if (cmp !== 0) return cmp;
       }
@@ -192,7 +190,6 @@ function sortRows(table, sortBy) {
     for (let outRow = 0; outRow < indices.length; outRow++) {
       const srcRow = indices[outRow];
       for (let col = 0; col < vectors.length; col++) {
-        // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
         outColumns[col][outRow] = vectors[col].get(srcRow);
       }
     }
@@ -260,7 +257,6 @@ function groupBy(table, groupColumns, aggregations) {
 
   for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
     const keyValues = groupIdx.map((idx) => {
-      // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
       return vectors[idx].get(rowIndex);
     });
     const key = JSON.stringify(
@@ -297,7 +293,6 @@ function groupBy(table, groupColumns, aggregations) {
 
     entry.states.forEach((state, idx) => {
       const agg = aggSpecs[idx];
-      // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
       const value = normalizeMissing(vectors[agg.idx].get(rowIndex));
 
       switch (agg.op) {
@@ -453,7 +448,6 @@ function changeType(table, column, newType) {
     const outColumns = vectors.map((_v, i) => (i === idx ? new Array(table.rowCount) : null));
 
     for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
-      // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
       outColumns[idx][rowIndex] = coerceType(newType, vectors[idx].get(rowIndex));
     }
 
@@ -462,7 +456,6 @@ function changeType(table, column, newType) {
     for (let colIndex = 0; colIndex < vectors.length; colIndex++) {
       if (colIndex === idx) continue;
       const colValues = new Array(table.rowCount);
-      // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
       const vec = vectors[colIndex];
       for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
         colValues[rowIndex] = vec.get(rowIndex);

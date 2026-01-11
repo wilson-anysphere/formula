@@ -114,7 +114,10 @@ export class ArrowTableAdapter {
     if (!vector) {
       throw new Error(`Unknown column index ${index}`);
     }
-    return vector;
+    return {
+      length: this.rowCount,
+      get: (rowIndex) => arrowValueToCellValue(vector.get(rowIndex)),
+    };
   }
 
   /**
