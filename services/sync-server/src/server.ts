@@ -930,7 +930,16 @@ export function createSyncServer(
 
         if (req.method === "DELETE" && url.pathname.startsWith("/internal/docs/")) {
           const ip = pickIp(req, config.trustProxy);
-          const docName = url.pathname.slice("/internal/docs/".length);
+          let docName: string;
+          try {
+            docName = decodeURIComponent(
+              url.pathname.slice("/internal/docs/".length)
+            );
+          } catch {
+            logger.warn({ ip, reason: "invalid_doc_name" }, "internal_doc_purge_rejected");
+            sendJson(res, 400, { error: "bad_request" });
+            return;
+          }
 
           if (!docName) {
             sendJson(res, 400, { error: "missing_doc_id" });

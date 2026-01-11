@@ -187,3 +187,64 @@ test("purge creates tombstone and prevents doc resurrection", async (t) => {
     410
   );
 });
+
+test("purge decodes url-encoded doc ids", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const port = await getAvailablePort();
+  const server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "admin-token",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  // y-websocket uses the room name as the URL path verbatim; slashes are valid
+  // and must be handled by the internal purge endpoint via URL decoding.
+  const docName = "purge/doc";
+
+  const doc = new Y.Doc();
+  const provider = new WebsocketProvider(server.wsUrl, docName, doc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: "test-token" },
+  });
+
+  t.after(() => {
+    provider.destroy();
+    doc.destroy();
+  });
+
+  await waitForProviderSync(provider);
+  doc.getText("t").insert(0, "goodbye");
+  await new Promise((r) => setTimeout(r, 50));
+
+  provider.destroy();
+  doc.destroy();
+
+  const docKey = createHash("sha256").update(docName).digest("hex");
+  const persistedPath = path.join(dataDir, `${docKey}.yjs`);
+  await waitForCondition(() => fileExists(persistedPath), 10_000);
+
+  const purgeRes = await fetch(
+    `${server.httpUrl}/internal/docs/${encodeURIComponent(docName)}`,
+    {
+      method: "DELETE",
+      headers: { "x-internal-admin-token": "admin-token" },
+    }
+  );
+  assert.equal(purgeRes.status, 200);
+  assert.deepEqual(await purgeRes.json(), { ok: true });
+
+  await waitForCondition(async () => !(await fileExists(persistedPath)), 10_000);
+
+  await expectWsUpgradeStatus(`${server.wsUrl}/${docName}?token=test-token`, 410);
+});
