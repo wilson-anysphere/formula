@@ -67,6 +67,52 @@ fn formulas_match_calamine_for_generated_fixture() {
         Vec::new(),
     );
 
+    builder.set_cell_formula_num(
+        1,
+        1,
+        3.0,
+        // `1+2`
+        vec![0x1E, 0x01, 0x00, 0x1E, 0x02, 0x00, 0x03],
+        Vec::new(),
+    );
+
+    builder.set_cell_formula_num(
+        1,
+        2,
+        0.02,
+        // `2%`
+        vec![0x1E, 0x02, 0x00, 0x14],
+        Vec::new(),
+    );
+
+    builder.set_cell_formula_bool(
+        2,
+        0,
+        true,
+        // `1=1`
+        vec![0x1E, 0x01, 0x00, 0x1E, 0x01, 0x00, 0x0B],
+    );
+
+    builder.set_cell_formula_err(
+        2,
+        1,
+        0x07, // #DIV/0!
+        // `1/0`
+        vec![0x1E, 0x01, 0x00, 0x1E, 0x00, 0x00, 0x06],
+    );
+
+    builder.set_cell_formula_str(
+        2,
+        2,
+        "AB",
+        // `"A"&"B"`
+        vec![
+            0x17, 0x01, 0x00, 0x41, 0x00, // "A"
+            0x17, 0x01, 0x00, 0x42, 0x00, // "B"
+            0x08, // &
+        ],
+    );
+
     let bytes = builder.build_bytes();
     let mut tmp = tempfile::Builder::new()
         .prefix("formula_xlsb_generated_")

@@ -24,6 +24,9 @@ enum CellSpec {
     Sst(u32),
     InlineString(String),
     FormulaNum { cached: f64, rgce: Vec<u8>, extra: Vec<u8> },
+    FormulaStr { cached: String, rgce: Vec<u8> },
+    FormulaBool { cached: bool, rgce: Vec<u8> },
+    FormulaErr { cached: u8, rgce: Vec<u8> },
 }
 
 impl XlsbFixtureBuilder {
@@ -75,6 +78,27 @@ impl XlsbFixtureBuilder {
                 extra,
             },
         );
+    }
+
+    pub fn set_cell_formula_str(&mut self, row: u32, col: u32, cached: impl Into<String>, rgce: Vec<u8>) {
+        self.cells
+            .entry(row)
+            .or_default()
+            .insert(col, CellSpec::FormulaStr { cached: cached.into(), rgce });
+    }
+
+    pub fn set_cell_formula_bool(&mut self, row: u32, col: u32, cached: bool, rgce: Vec<u8>) {
+        self.cells
+            .entry(row)
+            .or_default()
+            .insert(col, CellSpec::FormulaBool { cached, rgce });
+    }
+
+    pub fn set_cell_formula_err(&mut self, row: u32, col: u32, cached: u8, rgce: Vec<u8>) {
+        self.cells
+            .entry(row)
+            .or_default()
+            .insert(col, CellSpec::FormulaErr { cached, rgce });
     }
 
     /// Build a full `.xlsb` (ZIP) into memory.
@@ -203,7 +227,10 @@ mod biff12 {
     pub const FLOAT: u32 = 0x0005;
     pub const STRING: u32 = 0x0007;
     pub const CELL_ST: u32 = 0x0006;
+    pub const FORMULA_STRING: u32 = 0x0008;
     pub const FORMULA_FLOAT: u32 = 0x0009;
+    pub const FORMULA_BOOL: u32 = 0x000A;
+    pub const FORMULA_BOOLERR: u32 = 0x000B;
 
     pub const SST: u32 = 0x019F;
     pub const SST_END: u32 = 0x01A0;
@@ -282,6 +309,40 @@ fn build_sheet_bin(cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>) -> Vec<u8> {
                     data.extend_from_slice(rgce);
                     data.extend_from_slice(extra);
                     write_record(&mut out, biff12::FORMULA_FLOAT, &data);
+                }
+                CellSpec::FormulaStr { cached, rgce } => {
+                    let mut data = Vec::<u8>::new();
+                    data.extend_from_slice(&col.to_le_bytes());
+                    data.extend_from_slice(&0u32.to_le_bytes()); // style
+                    let units: Vec<u16> = cached.encode_utf16().collect();
+                    data.extend_from_slice(&(units.len() as u32).to_le_bytes()); // cch
+                    data.extend_from_slice(&0u16.to_le_bytes()); // flags
+                    for u in units {
+                        data.extend_from_slice(&u.to_le_bytes());
+                    }
+                    data.extend_from_slice(&(rgce.len() as u32).to_le_bytes());
+                    data.extend_from_slice(rgce);
+                    write_record(&mut out, biff12::FORMULA_STRING, &data);
+                }
+                CellSpec::FormulaBool { cached, rgce } => {
+                    let mut data = Vec::<u8>::new();
+                    data.extend_from_slice(&col.to_le_bytes());
+                    data.extend_from_slice(&0u32.to_le_bytes()); // style
+                    data.push(if *cached { 1 } else { 0 });
+                    data.extend_from_slice(&0u16.to_le_bytes()); // flags
+                    data.extend_from_slice(&(rgce.len() as u32).to_le_bytes());
+                    data.extend_from_slice(rgce);
+                    write_record(&mut out, biff12::FORMULA_BOOL, &data);
+                }
+                CellSpec::FormulaErr { cached, rgce } => {
+                    let mut data = Vec::<u8>::new();
+                    data.extend_from_slice(&col.to_le_bytes());
+                    data.extend_from_slice(&0u32.to_le_bytes()); // style
+                    data.push(*cached);
+                    data.extend_from_slice(&0u16.to_le_bytes()); // flags
+                    data.extend_from_slice(&(rgce.len() as u32).to_le_bytes());
+                    data.extend_from_slice(rgce);
+                    write_record(&mut out, biff12::FORMULA_BOOLERR, &data);
                 }
             }
         }
