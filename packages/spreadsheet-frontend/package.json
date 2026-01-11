@@ -5,11 +5,13 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./a1": "./src/a1.ts",
+    "./cache": "./src/cache.ts",
+    "./grid": "./src/grid-provider.ts"
   },
   "dependencies": {
     "@formula/engine": "workspace:*",
     "@formula/grid": "workspace:*"
   }
 }
-
