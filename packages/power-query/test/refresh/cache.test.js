@@ -358,6 +358,57 @@ test("QueryEngine: Arrow cache preserves renamed columns", async () => {
   assert.deepEqual(second.table.toGrid(), first.table.toGrid());
 });
 
+test("QueryEngine: executeQueryStreaming uses cached Arrow results", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store });
+
+  const parquetPath = path.join(__dirname, "..", "..", "..", "data-io", "test", "fixtures", "simple.parquet");
+
+  let readCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readBinary: async (p) => {
+        readCount += 1;
+        return new Uint8Array(await readFile(p));
+      },
+    },
+  });
+
+  const query = {
+    id: "q_parquet_stream_cache",
+    name: "Parquet stream cache",
+    source: { type: "parquet", path: parquetPath },
+    steps: [{ id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id", "name"] } }],
+  };
+
+  const grid1 = [];
+  await engine.executeQueryStreaming(query, {}, {
+    batchSize: 2,
+    includeHeader: true,
+    onBatch: (batch) => {
+      for (let i = 0; i < batch.values.length; i++) {
+        grid1[batch.rowOffset + i] = batch.values[i];
+      }
+    },
+  });
+  assert.equal(readCount, 1);
+
+  const grid2 = [];
+  await engine.executeQueryStreaming(query, {}, {
+    batchSize: 2,
+    includeHeader: true,
+    onBatch: (batch) => {
+      for (let i = 0; i < batch.values.length; i++) {
+        grid2[batch.rowOffset + i] = batch.values[i];
+      }
+    },
+  });
+  assert.equal(readCount, 1, "cache hit should avoid re-reading Parquet bytes when streaming");
+
+  assert.deepEqual(grid2, grid1);
+});
+
 test("FileSystemCacheStore: persists Arrow cache blobs and avoids re-reading Parquet on cache hit", async () => {
   const cacheDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-arrow-"));
 
