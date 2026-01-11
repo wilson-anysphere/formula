@@ -101,6 +101,34 @@ test("RefreshOrchestrator: supports query ids like '__proto__' without prototype
   assert.equal(({}).polluted, undefined);
 });
 
+test("RefreshOrchestrator: supports getContext().queries as a Map", async () => {
+  /** @type {any[]} */
+  const contexts = [];
+  const engine = {
+    executeQueryWithMeta: async (query, context) => {
+      contexts.push(context);
+      return makeResult(query.id);
+    },
+  };
+
+  const extra = makeQuery("Extra", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } });
+  const orchestrator = new RefreshOrchestrator({
+    engine,
+    concurrency: 1,
+    getContext: () => ({ queries: new Map([["Extra", extra]]) }),
+  });
+  orchestrator.registerQuery(makeQuery("B", { type: "range", range: { values: [["Value"], [2]], hasHeaders: true } }));
+
+  await orchestrator.refreshAll(["B"]).promise;
+
+  assert.equal(contexts.length, 1);
+  const ctx = contexts[0];
+  assert.ok(ctx);
+  assert.equal(Object.getPrototypeOf(ctx.queries), null, "orchestrator should normalize queries to a null-prototype object");
+  assert.equal(ctx.queries["Extra"]?.id, "Extra");
+  assert.equal(ctx.queries["B"]?.id, "B");
+});
+
 test("RefreshOrchestrator: query references work when the dependency id is '__proto__'", async () => {
   let reads = 0;
   const engine = new QueryEngine({
