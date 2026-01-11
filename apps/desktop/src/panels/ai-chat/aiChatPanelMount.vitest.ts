@@ -10,14 +10,30 @@ import { PanelIds } from "../panelRegistry.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+function clearApiKeyStorage() {
+  // Node 25 ships an experimental `globalThis.localStorage` accessor that throws
+  // unless Node is started with `--localstorage-file`. Guard all access so our
+  // jsdom-based UI tests don't crash on newer Node versions.
+  try {
+    globalThis.localStorage?.removeItem("formula:openaiApiKey");
+  } catch {
+    // ignore
+  }
+  try {
+    globalThis.localStorage?.clear();
+  } catch {
+    // ignore
+  }
+}
+
 describe("AI chat panel", () => {
   afterEach(() => {
     document.body.innerHTML = "";
-    localStorage.clear();
+    clearApiKeyStorage();
   });
 
   it("mounts via renderPanelBody and shows setup state when no API key is set", async () => {
-    localStorage.removeItem("formula:openaiApiKey");
+    clearApiKeyStorage();
 
     const renderer = createPanelBodyRenderer({
       getDocumentController: () => {

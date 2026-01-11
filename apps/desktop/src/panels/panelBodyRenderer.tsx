@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 
 import { PanelIds } from "./panelRegistry.js";
 import { AIChatPanelContainer } from "./ai-chat/AIChatPanelContainer.js";
+import { createAIAuditPanel } from "./ai-audit/index.js";
 
 export interface PanelBodyRendererOptions {
   getDocumentController: () => unknown;
@@ -50,6 +51,11 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           workbookId={options.workbookId}
         />,
       );
+      return;
+    }
+
+    if (panelId === PanelIds.AI_AUDIT) {
+      createAIAuditPanel({ container: body });
       return;
     }
 

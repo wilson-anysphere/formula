@@ -2,6 +2,7 @@ import { t } from "../i18n/index.js";
 
 export const PanelIds = Object.freeze({
   AI_CHAT: "aiChat",
+  AI_AUDIT: "aiAudit",
   MACROS: "macros",
   VERSION_HISTORY: "versionHistory",
   FORMULA_DEBUGGER: "formulaDebugger",
@@ -21,6 +22,11 @@ export const PANEL_REGISTRY = Object.freeze({
     titleKey: "chat.title",
     defaultDock: "right",
     defaultFloatingRect: { x: 120, y: 120, width: 480, height: 640 },
+  },
+  [PanelIds.AI_AUDIT]: {
+    title: "Audit Log",
+    defaultDock: "right",
+    defaultFloatingRect: { x: 140, y: 140, width: 640, height: 720 },
   },
   [PanelIds.MACROS]: {
     title: "Macros",

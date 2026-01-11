@@ -42,7 +42,6 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
   private loadEntries(): AIAuditEntry[] {
     const storage = this.getLocalStorage();
     if (!storage) return this.memoryFallback.slice();
-
     try {
       const raw = storage.getItem(this.key);
       if (!raw) return [];
@@ -58,32 +57,51 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
 
   private saveEntries(entries: AIAuditEntry[]): void {
     const storage = this.getLocalStorage();
+    const snapshot = entries === this.memoryFallback ? entries.slice() : entries;
     if (!storage) {
       this.memoryFallback.length = 0;
-      this.memoryFallback.push(...entries);
+      this.memoryFallback.push(...snapshot);
       return;
     }
-
     try {
       storage.setItem(this.key, JSON.stringify(entries));
     } catch {
       // If persistence fails, at least keep the latest entries in memory.
       this.localStorageUnavailable = true;
       this.memoryFallback.length = 0;
-      this.memoryFallback.push(...entries);
+      this.memoryFallback.push(...snapshot);
     }
   }
 
   private getLocalStorage(): Storage | null {
     if (this.localStorageUnavailable) return null;
-    return getLocalStorageOrNull();
+    const storage = getLocalStorageOrNull();
+    // If localStorage exists but is inaccessible (e.g. Node's experimental webstorage
+    // without a file path), avoid retrying (and throwing) on every call.
+    if (!storage && typeof globalThis !== "undefined" && "localStorage" in globalThis) {
+      this.localStorageUnavailable = true;
+    }
+    return storage;
   }
 }
 
 function getLocalStorageOrNull(): Storage | null {
+  // Prefer `window.localStorage` when available (standard browser case).
+  if (typeof window !== "undefined") {
+    try {
+      const storage = window.localStorage;
+      if (!storage) return null;
+      if (typeof storage.getItem !== "function" || typeof storage.setItem !== "function") return null;
+      return storage;
+    } catch {
+      // ignore
+    }
+  }
+
   try {
     if (typeof globalThis === "undefined") return null;
-    const storage = globalThis.localStorage;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const storage = (globalThis as any).localStorage as Storage | undefined;
     if (!storage) return null;
     if (typeof storage.getItem !== "function" || typeof storage.setItem !== "function") return null;
     return storage;

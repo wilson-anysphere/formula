@@ -49,6 +49,7 @@ const gridSplit = document.getElementById("grid-split");
 const gridSecondary = document.getElementById("grid-secondary");
 const gridSplitter = document.getElementById("grid-splitter");
 const openAiPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-ai-panel"]');
+const openAiAuditPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-ai-audit-panel"]');
 const openMacrosPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-macros-panel"]');
 const splitVertical = document.querySelector<HTMLButtonElement>('[data-testid="split-vertical"]');
 const splitHorizontal = document.querySelector<HTMLButtonElement>('[data-testid="split-horizontal"]');
@@ -64,6 +65,7 @@ if (
   gridSecondary &&
   gridSplitter &&
   openAiPanel &&
+  openAiAuditPanel &&
   openMacrosPanel &&
   splitVertical &&
   splitHorizontal &&
@@ -336,6 +338,12 @@ if (
     const placement = getPanelPlacement(layoutController.layout, PanelIds.AI_CHAT);
     if (placement.kind === "closed") layoutController.openPanel(PanelIds.AI_CHAT);
     else layoutController.closePanel(PanelIds.AI_CHAT);
+  });
+
+  openAiAuditPanel.addEventListener("click", () => {
+    const placement = getPanelPlacement(layoutController.layout, PanelIds.AI_AUDIT);
+    if (placement.kind === "closed") layoutController.openPanel(PanelIds.AI_AUDIT);
+    else layoutController.closePanel(PanelIds.AI_AUDIT);
   });
 
   openMacrosPanel.addEventListener("click", () => {

@@ -22,8 +22,19 @@ export interface AuditedRunParams {
   audit: AuditedRunOptions;
   max_iterations?: number;
   require_approval?: (call: LLMToolCall) => Promise<boolean>;
+  /**
+   * Optional hooks for UI surfaces (e.g. chat panels) that still want to surface
+   * tool call + result events while relying on this helper for audit logging.
+   */
   on_tool_call?: (call: LLMToolCall, meta: { requiresApproval: boolean }) => void;
   on_tool_result?: (call: LLMToolCall, result: unknown) => void;
+  /**
+   * Optional LLM request parameters forwarded to `runChatWithTools`.
+   * If omitted, `audit.model` is used as the request model (providers may ignore it).
+   */
+  model?: string;
+  temperature?: number;
+  max_tokens?: number;
 }
 
 /**
@@ -59,6 +70,9 @@ export async function runChatWithToolsAudited(params: AuditedRunParams): Promise
       toolExecutor: params.tool_executor as any,
       messages: params.messages as any,
       maxIterations: params.max_iterations,
+      model: params.model ?? params.audit.model,
+      temperature: params.temperature,
+      maxTokens: params.max_tokens,
       onToolCall: (call: any, meta: any) => {
         recorder.recordToolCall({
           id: call.id,
