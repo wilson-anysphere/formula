@@ -124,3 +124,24 @@ test("OData folding: empty contains needle breaks folding (preserves local seman
   assert.equal(explained.steps[0].status, "local");
   assert.equal(explained.steps[0].reason, "unsupported_predicate");
 });
+
+test("OData folding: predicate columns must exist after selectColumns (preserves local errors)", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_missing_col",
+    name: "OData missing col",
+    source: { type: "odata", url: "https://example.com/odata/Products" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id"] } },
+      { id: "s2", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "Price", operator: "greaterThan", value: 0 } } },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "hybrid");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$select=Id");
+  assert.deepEqual(
+    explained.steps.map((s) => s.status),
+    ["folded", "local"],
+  );
+});
