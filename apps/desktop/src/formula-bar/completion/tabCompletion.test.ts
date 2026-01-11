@@ -38,5 +38,32 @@ describe("Formula bar tab completion", () => {
     expect(sheet.formulaBar.acceptAiSuggestion()).toBe(true);
     expect(sheet.formulaBar.draft).toBe("=SUM(A1:A10)");
   });
-});
 
+  it("suggests TODAY() for zero-arg functions", async () => {
+    const sheet = new SpreadsheetModel();
+
+    sheet.selectCell("A1");
+    sheet.beginFormulaEdit();
+    sheet.typeInFormulaBar("=TOD", 4);
+
+    await sheet.flushTabCompletion();
+
+    expect(sheet.formulaBar.aiSuggestion()).toBe("=TODAY()");
+    expect(sheet.formulaBar.acceptAiSuggestion()).toBe(true);
+    expect(sheet.formulaBar.draft).toBe("=TODAY()");
+  });
+
+  it("suggests _xlfn.XLOOKUP( when typing an _xlfn. function prefix", async () => {
+    const sheet = new SpreadsheetModel();
+
+    sheet.selectCell("A1");
+    sheet.beginFormulaEdit();
+    sheet.typeInFormulaBar("=_xlfn.XLO", 10);
+
+    await sheet.flushTabCompletion();
+
+    expect(sheet.formulaBar.aiSuggestion()).toBe("=_xlfn.XLOOKUP(");
+    expect(sheet.formulaBar.acceptAiSuggestion()).toBe(true);
+    expect(sheet.formulaBar.draft).toBe("=_xlfn.XLOOKUP(");
+  });
+});
