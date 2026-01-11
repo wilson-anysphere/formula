@@ -22,6 +22,27 @@ function getTauriInvoke(): TauriInvoke {
   return invoke;
 }
 
+function errorMessage(err: unknown): string {
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object" && "message" in err) {
+    try {
+      return String((err as any).message);
+    } catch {
+      return "Unknown error";
+    }
+  }
+  try {
+    return String(err);
+  } catch {
+    return "Unknown error";
+  }
+}
+
+function isNoWorkbookLoadedError(err: unknown): boolean {
+  return errorMessage(err).toLowerCase().includes("no workbook loaded");
+}
+
 function normalizeUpdates(raw: any[] | undefined): MacroCellUpdate[] | undefined {
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
   const out: MacroCellUpdate[] = [];
@@ -122,27 +143,50 @@ export class TauriMacroBackend implements MacroBackend {
   }
 
   async listMacros(workbookId: string): Promise<MacroInfo[]> {
-    const macros = await this.invoke("list_macros", { workbook_id: workbookId });
-    return macros as MacroInfo[];
+    try {
+      const macros = await this.invoke("list_macros", { workbook_id: workbookId });
+      return macros as MacroInfo[];
+    } catch (err) {
+      if (isNoWorkbookLoadedError(err)) return [];
+      throw err;
+    }
   }
 
   async getMacroSecurityStatus(workbookId: string): Promise<MacroSecurityStatus> {
-    const status = await this.invoke("get_macro_security_status", { workbook_id: workbookId });
-    return normalizeMacroSecurityStatus(status);
+    try {
+      const status = await this.invoke("get_macro_security_status", { workbook_id: workbookId });
+      return normalizeMacroSecurityStatus(status);
+    } catch (err) {
+      if (isNoWorkbookLoadedError(err)) return { hasMacros: false, trust: "blocked" };
+      throw err;
+    }
   }
 
   async setMacroTrust(workbookId: string, decision: MacroTrustDecision): Promise<MacroSecurityStatus> {
-    const status = await this.invoke("set_macro_trust", { workbook_id: workbookId, decision });
-    return normalizeMacroSecurityStatus(status);
+    try {
+      const status = await this.invoke("set_macro_trust", { workbook_id: workbookId, decision });
+      return normalizeMacroSecurityStatus(status);
+    } catch (err) {
+      if (isNoWorkbookLoadedError(err)) return { hasMacros: false, trust: "blocked" };
+      throw err;
+    }
   }
 
   async runMacro(request: MacroRunRequest): Promise<MacroRunResult> {
-    const result = await this.invoke("run_macro", {
-      workbook_id: request.workbookId,
-      macro_id: request.macroId,
-      permissions: request.permissions,
-      timeout_ms: request.timeoutMs,
-    });
+    let result: any;
+    try {
+      result = await this.invoke("run_macro", {
+        workbook_id: request.workbookId,
+        macro_id: request.macroId,
+        permissions: request.permissions,
+        timeout_ms: request.timeoutMs,
+      });
+    } catch (err) {
+      if (isNoWorkbookLoadedError(err)) {
+        return { ok: false, output: [], error: { message: "No workbook loaded." } };
+      }
+      throw err;
+    }
 
     return {
       ok: Boolean(result.ok),
@@ -170,13 +214,19 @@ export class TauriMacroBackend implements MacroBackend {
         }
       : null;
 
-    await this.invoke("set_macro_ui_context", {
-      workbook_id: options.workbookId,
-      sheet_id: options.sheetId,
-      active_row: options.activeRow,
-      active_col: options.activeCol,
-      selection,
-    });
+    try {
+      await this.invoke("set_macro_ui_context", {
+        workbook_id: options.workbookId,
+        sheet_id: options.sheetId,
+        active_row: options.activeRow,
+        active_col: options.activeCol,
+        selection,
+      });
+    } catch (err) {
+      if (isNoWorkbookLoadedError(err)) return;
+      // Older backends may not implement UI context sync; macro runs should still work.
+      console.warn("Failed to sync macro UI context:", err);
+    }
   }
 }
 

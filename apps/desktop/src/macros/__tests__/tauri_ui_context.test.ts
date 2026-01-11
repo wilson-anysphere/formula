@@ -67,4 +67,23 @@ describe("Tauri macro backend UI context", () => {
 
     container.remove();
   });
+
+  it("treats \"no workbook loaded\" as no VBA macros (so script macros can still run)", async () => {
+    const invoke = vi.fn(async (cmd: string) => {
+      if (cmd === "list_macros") {
+        throw "no workbook loaded";
+      }
+      if (cmd === "get_macro_security_status") {
+        throw "no workbook loaded";
+      }
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const backend = new TauriMacroBackend();
+    await expect(backend.listMacros("workbook-1")).resolves.toEqual([]);
+    await expect(backend.getMacroSecurityStatus("workbook-1")).resolves.toMatchObject({ hasMacros: false, trust: "blocked" });
+  });
 });
