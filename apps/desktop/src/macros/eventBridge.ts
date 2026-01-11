@@ -43,7 +43,9 @@ export type SelectionRect = {
 };
 
 function selectionKey(selection: SelectionRect): string {
-  return `${selection.sheetId}:${selection.startRow},${selection.startCol}-${selection.endRow},${selection.endCol}`;
+  const activeRow = selection.activeRow ?? selection.startRow;
+  const activeCol = selection.activeCol ?? selection.startCol;
+  return `${selection.sheetId}:${selection.startRow},${selection.startCol}-${selection.endRow},${selection.endCol}@${activeRow},${activeCol}`;
 }
 
 type CellState = { value: unknown; formula: string | null };

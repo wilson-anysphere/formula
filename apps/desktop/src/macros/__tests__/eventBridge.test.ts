@@ -119,6 +119,47 @@ describe("MacroEventBridge", () => {
     vi.useRealTimers();
   });
 
+  it("fires Worksheet_SelectionChange when only the active cell changes within a selection", async () => {
+    vi.useFakeTimers();
+
+    const calls: Array<{ cmd: string; args: any }> = [];
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "set_macro_ui_context") return null;
+      return { ok: true, output: [], updates: [] };
+    });
+
+    const doc = new DocumentController();
+    let selection = { sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 1, endCol: 1, activeRow: 0, activeCol: 0 };
+    const bridge = new MacroEventBridge({
+      workbookId: "local-workbook",
+      document: doc,
+      invoke,
+      drainBackendSync: async () => {},
+      getSelection: () => selection,
+      debounceSelectionMs: 100,
+    });
+    bridge.start();
+
+    // Move the active cell while keeping the selected range unchanged.
+    selection = { ...selection, activeRow: 1, activeCol: 0 };
+    bridge.notifySelectionChanged(selection);
+
+    await vi.advanceTimersByTimeAsync(150);
+    await bridge.whenIdle();
+
+    expect(calls.some((c) => c.cmd === "fire_selection_change")).toBe(true);
+    const ctxCall = calls.find((c) => c.cmd === "set_macro_ui_context");
+    expect(ctxCall?.args).toMatchObject({
+      sheet_id: "Sheet1",
+      active_row: 1,
+      active_col: 0,
+      selection: { start_row: 0, start_col: 0, end_row: 1, end_col: 1 },
+    });
+
+    vi.useRealTimers();
+  });
+
   it("suppresses Worksheet_Change while applying macro updates", async () => {
     vi.useFakeTimers();
 
