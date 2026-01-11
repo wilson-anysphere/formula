@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { builtinModules, createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -102,7 +103,11 @@ const envConcurrency = Number.parseInt(
   process.env.FORMULA_NODE_TEST_CONCURRENCY ?? process.env.NODE_TEST_CONCURRENCY ?? "",
   10,
 );
-const testConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 2;
+let testConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 2;
+// Clamp to something reasonable even if the env var is set to a huge value.
+// (In practice we don't want to spin up hundreds of node:test workers on a big host.)
+const maxTestConcurrency = Math.min(16, os.availableParallelism?.() ?? 4);
+testConcurrency = Math.max(1, Math.min(testConcurrency, maxTestConcurrency));
 nodeArgs.push(`--test-concurrency=${testConcurrency}`);
 nodeArgs.push("--test", ...runnableTestFiles);
 
