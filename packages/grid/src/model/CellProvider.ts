@@ -47,12 +47,35 @@ export interface CellRange {
   endCol: number;
 }
 
+/**
+ * A rectangular region of merged cells.
+ *
+ * The range uses the same exclusive-end semantics as {@link CellRange}. The
+ * merged cell "anchor" is always the top-left cell at `startRow/startCol`.
+ */
+export type MergedCellRange = CellRange;
+
 export type CellProviderUpdate =
   | { type: "cells"; range: CellRange }
   | { type: "invalidateAll" };
 
 export interface CellProvider {
   getCell(row: number, col: number): CellData | null;
+  /**
+   * Returns the merged range that contains the given cell, if any.
+   *
+   * The returned range must use exclusive end coordinates (endRow/endCol), and
+   * the anchor is assumed to be the top-left cell (startRow/startCol).
+   */
+  getMergedRangeAt?(row: number, col: number): MergedCellRange | null;
+  /**
+   * Returns merged ranges that intersect `range`.
+   *
+   * This is an optional bulk API used to build efficient per-viewport indexes.
+   * Implementations should include merged ranges whose anchor is outside the
+   * input range as long as they intersect it.
+   */
+  getMergedRangesInRange?(range: CellRange): MergedCellRange[];
   prefetch?(range: CellRange): void;
   subscribe?(listener: (update: CellProviderUpdate) => void): () => void;
 }

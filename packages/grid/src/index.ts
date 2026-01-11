@@ -1,4 +1,4 @@
-export type { CellProvider, CellProviderUpdate, CellRange, CellData, CellStyle } from "./model/CellProvider";
+export type { CellProvider, CellProviderUpdate, CellRange, MergedCellRange, CellData, CellStyle } from "./model/CellProvider";
 export { MockCellProvider } from "./model/MockCellProvider";
 
 export type { GridApi, CanvasGridProps, GridInteractionMode, ScrollToCellAlign } from "./react/CanvasGrid";
