@@ -42,6 +42,21 @@ function isNullish(value) {
 }
 
 /**
+ * Normalize values for distinct comparisons.
+ *
+ * Mirrors the materialized `distinctRows` implementation:
+ * - treat `undefined` as `null`
+ * - keep `Date` values distinct by timestamp
+ * - for other objects, `valueKey` provides stable equality semantics
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function distinctKey(value) {
+  return valueKey(normalizeMissing(value));
+}
+
+/**
  * @param {unknown} value
  * @returns {unknown}
  */
@@ -1220,6 +1235,7 @@ export const STREAMABLE_OPERATION_TYPES = new Set([
   "fillDown",
   "replaceValues",
   "removeRowsWithErrors",
+  "distinctRows",
 ]);
 
 /**
@@ -1433,6 +1449,24 @@ export function compileStreamingPipeline(operations, inputColumns) {
             : columns.map((_c, idx) => idx);
         transforms.push((rows) => ({
           rows: rows.filter((row) => !indices.some((idx) => row?.[idx] instanceof Error)),
+          done: false,
+        }));
+        break;
+      }
+      case "distinctRows": {
+        const indices =
+          op.columns && op.columns.length > 0
+            ? op.columns.map((name) => getColumnIndex(name))
+            : columns.map((_c, idx) => idx);
+        const seen = new Set();
+        transforms.push((rows) => ({
+          rows: rows.filter((row) => {
+            const keyValues = indices.map((idx) => distinctKey(row?.[idx]));
+            const key = JSON.stringify(keyValues);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          }),
           done: false,
         }));
         break;

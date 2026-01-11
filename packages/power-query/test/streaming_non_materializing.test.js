@@ -295,3 +295,34 @@ test("executeQueryStreaming(..., materialize:false) streams fillDown/replaceValu
   const expected = (await engine.executeQuery(query, {}, {})).toGrid();
   assert.deepEqual(streamed, expected);
 });
+
+test("executeQueryStreaming(..., materialize:false) streams distinctRows (with state across batches)", async () => {
+  const engine = new QueryEngine();
+
+  const query = {
+    id: "q_stream_distinct",
+    name: "Distinct",
+    source: {
+      type: "range",
+      range: {
+        values: [
+          ["A", "B"],
+          [1, "x"],
+          [1, "x"],
+          [2, "y"],
+          [2, "y"],
+          [1, "x"],
+        ],
+        hasHeaders: true,
+      },
+    },
+    steps: [{ id: "s_distinct", name: "Distinct", operation: { type: "distinctRows", columns: null } }],
+  };
+
+  const batches = [];
+  await engine.executeQueryStreaming(query, {}, { batchSize: 2, materialize: false, onBatch: (b) => batches.push(b) });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engine.executeQuery(query, {}, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
