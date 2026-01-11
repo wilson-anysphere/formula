@@ -143,25 +143,26 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
     use openssl::x509::store::X509StoreBuilder;
 
     #[cfg(not(target_arch = "wasm32"))]
-    let pkcs7 = {
+    let (pkcs7, pkcs7_offset) = {
         // Some producers include a small header before the DER-encoded PKCS#7
         // payload. Try parsing from the start first, then scan for an embedded
         // DER SEQUENCE that parses as PKCS#7.
-        let mut parsed = Pkcs7::from_der(signature).ok();
+        let mut parsed: Option<(Pkcs7, usize)> = Pkcs7::from_der(signature).ok().map(|p| (p, 0));
+
         if parsed.is_none() {
             for start in 0..signature.len() {
                 if signature[start] != 0x30 {
                     continue;
                 }
                 if let Ok(pkcs7) = Pkcs7::from_der(&signature[start..]) {
-                    parsed = Some(pkcs7);
+                    parsed = Some((pkcs7, start));
                     break;
                 }
             }
         }
 
         match parsed {
-            Some(pkcs7) => pkcs7,
+            Some(found) => found,
             None => return VbaSignatureVerification::SignedParseError,
         }
     };
@@ -182,10 +183,33 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
         // NOVERIFY skips certificate chain verification. We still validate the signature itself and
         // any messageDigest attributes over the embedded content.
         let flags = Pkcs7Flags::NOVERIFY;
-        match pkcs7.verify(&extra_certs, &store, None, None, flags) {
-            Ok(()) => VbaSignatureVerification::SignedVerified,
-            Err(_) => VbaSignatureVerification::SignedInvalid,
+
+        // First try verifying as a "normal" PKCS#7 blob with embedded content.
+        if pkcs7.verify(&extra_certs, &store, None, None, flags).is_ok() {
+            return VbaSignatureVerification::SignedVerified;
         }
+
+        // If the PKCS#7 blob was found after a prefix/header, try treating the prefix as detached
+        // content. This matches common patterns where the stream contains signed bytes followed by
+        // a detached PKCS#7 signature over those bytes.
+        if pkcs7_offset > 0 {
+            let prefix = &signature[..pkcs7_offset];
+            if pkcs7
+                .verify(
+                    &extra_certs,
+                    &store,
+                    Some(prefix),
+                    None,
+                    flags | Pkcs7Flags::DETACHED,
+                )
+                .is_ok()
+                || pkcs7.verify(&extra_certs, &store, Some(prefix), None, flags).is_ok()
+            {
+                return VbaSignatureVerification::SignedVerified;
+            }
+        }
+
+        VbaSignatureVerification::SignedInvalid
     }
 }
 

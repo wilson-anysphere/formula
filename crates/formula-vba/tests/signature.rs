@@ -72,6 +72,27 @@ fn make_pkcs7_signed_message(data: &[u8]) -> Vec<u8> {
     pkcs7.to_der().expect("pkcs7 DER")
 }
 
+fn make_pkcs7_detached_signature(data: &[u8]) -> Vec<u8> {
+    use openssl::pkcs7::{Pkcs7, Pkcs7Flags};
+    use openssl::pkey::PKey;
+    use openssl::stack::Stack;
+    use openssl::x509::X509;
+
+    let pkey = PKey::private_key_from_pem(TEST_KEY_PEM.as_bytes()).expect("parse private key");
+    let cert = X509::from_pem(TEST_CERT_PEM.as_bytes()).expect("parse certificate");
+    let extra_certs = Stack::new().expect("create cert stack");
+
+    let pkcs7 = Pkcs7::sign(
+        &cert,
+        &pkey,
+        &extra_certs,
+        data,
+        Pkcs7Flags::BINARY | Pkcs7Flags::DETACHED,
+    )
+    .expect("pkcs7 sign");
+    pkcs7.to_der().expect("pkcs7 DER")
+}
+
 fn build_vba_project_bin_with_signature(signature_blob: Option<&[u8]>) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
@@ -132,6 +153,21 @@ fn pkcs7_signature_with_prefix_is_still_verified() {
     let mut prefixed = b"VBA\0SIG\0".to_vec();
     prefixed.extend_from_slice(&pkcs7);
     let vba = build_vba_project_bin_with_signature(Some(&prefixed));
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+}
+
+#[test]
+fn detached_pkcs7_signature_with_prefixed_content_is_verified() {
+    let content = b"formula-vba-detached-test";
+    let pkcs7 = make_pkcs7_detached_signature(content);
+    let mut blob = content.to_vec();
+    blob.extend_from_slice(&pkcs7);
+    let vba = build_vba_project_bin_with_signature(Some(&blob));
 
     let sig = verify_vba_digital_signature(&vba)
         .expect("signature inspection should succeed")
