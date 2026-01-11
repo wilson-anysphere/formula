@@ -30,7 +30,13 @@ import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
 import { refreshDefinedNameSignaturesFromBackend, refreshTableSignaturesFromBackend } from "./power-query/tableSignatures";
-import { DesktopPowerQueryService, setDesktopPowerQueryService } from "./power-query/service.js";
+import {
+  DesktopPowerQueryService,
+  loadQueriesFromStorage,
+  saveQueriesToStorage,
+  setDesktopPowerQueryService,
+} from "./power-query/service.js";
+import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateStore.js";
 
 const workbookSheetNames = new Map<string, string>();
 
@@ -69,6 +75,10 @@ if (!openComments) {
 
 const workbookId = "local-workbook";
 const app = new SpreadsheetApp(gridRoot, { activeCell, selectionRange, activeValue }, { formulaBar: formulaBarRoot, workbookId });
+// Panels persist state keyed by a workbook/document identifier. For file-backed workbooks we use
+// their on-disk path; for unsaved sessions we generate a random session id so distinct new
+// workbooks don't collide.
+let activePanelWorkbookId = workbookId;
 // Treat the seeded demo workbook as an initial "saved" baseline so web reloads
 // and Playwright tests aren't blocked by unsaved-changes prompts.
 app.getDocument().markSaved();
@@ -78,7 +88,7 @@ let powerQueryService: DesktopPowerQueryService | null = null;
 let powerQueryServiceWorkbookId: string | null = null;
 
 function currentPowerQueryWorkbookId(): string {
-  return activeWorkbook?.path ?? activeWorkbook?.origin_path ?? workbookId;
+  return activePanelWorkbookId;
 }
 
 function startPowerQueryService(): void {
@@ -398,7 +408,7 @@ if (
     getDocumentController: () => app.getDocument(),
     getActiveSheetId: () => app.getCurrentSheetId(),
     workbookId,
-    getWorkbookId: () => activeWorkbook?.path ?? activeWorkbook?.origin_path ?? workbookId,
+    getWorkbookId: () => activePanelWorkbookId,
     createChart: (spec) => app.addChart(spec),
     renderMacrosPanel: (body) => {
       body.textContent = "Loading macros…";
@@ -425,7 +435,7 @@ if (
           body.appendChild(recorderPanel);
           body.appendChild(runnerPanel);
 
-          const scriptStorageId = activeWorkbook?.path ?? workbookId;
+          const scriptStorageId = activePanelWorkbookId;
 
           // Prefer a composite backend in desktop builds: run VBA via Tauri (when available),
           // and run modern scripts (TypeScript/Python) via the web backend + local storage.
@@ -1372,6 +1382,7 @@ async function openWorkbookFromPath(path: string): Promise<void> {
   if (!ok) return;
 
   const hadActiveWorkbook = activeWorkbook != null;
+  const previousPanelWorkbookId = activePanelWorkbookId;
   vbaEventMacros?.dispose();
   vbaEventMacros = null;
 
@@ -1399,6 +1410,7 @@ async function openWorkbookFromPath(path: string): Promise<void> {
 
     activeWorkbook = await tauriBackend.openWorkbook(path);
     await loadWorkbookIntoDocument(activeWorkbook);
+    activePanelWorkbookId = activeWorkbook.path ?? activeWorkbook.origin_path ?? path;
     startPowerQueryService();
     rerenderLayout?.();
 
@@ -1411,6 +1423,7 @@ async function openWorkbookFromPath(path: string): Promise<void> {
       vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
     }
   } catch (err) {
+    activePanelWorkbookId = previousPanelWorkbookId;
     // If we were unable to swap workbooks, restore syncing for the previously-active
     // workbook so edits remain persistable.
     if (hadActiveWorkbook) {
@@ -1444,6 +1457,32 @@ async function promptOpenWorkbook(): Promise<void> {
   await openWorkbookFromPath(path);
 }
 
+async function copyPowerQueryPersistence(fromWorkbookId: string, toWorkbookId: string): Promise<void> {
+  if (!fromWorkbookId || !toWorkbookId) return;
+  if (fromWorkbookId === toWorkbookId) return;
+
+  // Query definitions are currently persisted in LocalStorage for the desktop shell.
+  // Copy them when the workbook id changes (e.g. Save As from an unsaved session).
+  try {
+    const queries = loadQueriesFromStorage(fromWorkbookId);
+    if (queries.length > 0) saveQueriesToStorage(toWorkbookId, queries);
+  } catch {
+    // Ignore storage failures (disabled storage, quota, etc).
+  }
+
+  // Scheduled refresh metadata is persisted via the RefreshStateStore abstraction.
+  try {
+    const fromStore = createPowerQueryRefreshStateStore({ workbookId: fromWorkbookId });
+    const toStore = createPowerQueryRefreshStateStore({ workbookId: toWorkbookId });
+    const state = await fromStore.load();
+    if (state && Object.keys(state).length > 0) {
+      await toStore.save(state);
+    }
+  } catch {
+    // Best-effort: persistence should never block saving.
+  }
+}
+
 async function handleSave(): Promise<void> {
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
@@ -1461,6 +1500,7 @@ async function handleSaveAs(): Promise<void> {
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
 
+  const previousPanelWorkbookId = activePanelWorkbookId;
   const { save } = getTauriDialog();
   const path = await save({
     filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }],
@@ -1473,6 +1513,11 @@ async function handleSaveAs(): Promise<void> {
   await tauriBackend.saveWorkbook(path);
   activeWorkbook = { ...activeWorkbook, path };
   app.getDocument().markSaved();
+
+  await copyPowerQueryPersistence(previousPanelWorkbookId, path);
+  activePanelWorkbookId = path;
+  startPowerQueryService();
+  rerenderLayout?.();
 }
 
 async function handleNewWorkbook(): Promise<void> {
@@ -1481,6 +1526,8 @@ async function handleNewWorkbook(): Promise<void> {
   if (!ok) return;
 
   const hadActiveWorkbook = activeWorkbook != null;
+  const previousPanelWorkbookId = activePanelWorkbookId;
+  const nextPanelWorkbookId = randomSessionId("workbook");
   vbaEventMacros?.dispose();
   vbaEventMacros = null;
 
@@ -1506,6 +1553,7 @@ async function handleNewWorkbook(): Promise<void> {
 
     activeWorkbook = await tauriBackend.newWorkbook();
     await loadWorkbookIntoDocument(activeWorkbook);
+    activePanelWorkbookId = nextPanelWorkbookId;
     startPowerQueryService();
     rerenderLayout?.();
 
@@ -1518,6 +1566,7 @@ async function handleNewWorkbook(): Promise<void> {
       vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
     }
   } catch (err) {
+    activePanelWorkbookId = previousPanelWorkbookId;
     if (hadActiveWorkbook) {
       workbookSync = startWorkbookSync({
         document: app.getDocument(),
