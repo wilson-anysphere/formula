@@ -23,6 +23,17 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(controller.getCell("Sheet1", "A1").value).toBe(99);
   });
 
+  it("does not create a history entry when setCell is a no-op", () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", 1);
+    const before = controller.getStackDepths().undo;
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    api.setCell({ sheet: "Sheet1", row: 1, col: 1 }, { value: 1 });
+
+    expect(controller.getStackDepths().undo).toBe(before);
+  });
+
   it("roundtrips supported formatting between ai-tools CellFormat and DocumentController styles", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 1);

@@ -19,6 +19,20 @@ function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function cellValuesEqual(left: any, right: any): boolean {
+  if (left === right) return true;
+  if (left == null || right == null) return left === right;
+  if (typeof left !== typeof right) return false;
+  if (typeof left === "object") {
+    try {
+      return JSON.stringify(left) === JSON.stringify(right);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 function normalizeFormula(raw: string): string {
   const trimmed = raw.trimStart();
   if (!trimmed) return "=";
@@ -311,11 +325,21 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
 
   setCell(address: CellAddress, cell: CellData): void {
     const coord = toControllerCoord(address);
+    const beforeCell = this.getCell(address);
+    const desiredFormula = cell.formula ? normalizeFormula(String(cell.formula)) : undefined;
+    const desiredValue = desiredFormula ? null : (cell.value ?? null);
+    const shouldUpdateContent =
+      !cellValuesEqual(beforeCell.value, desiredValue) || (beforeCell.formula ?? undefined) !== desiredFormula;
+
+    if (!shouldUpdateContent && (!cell.format || Object.keys(cell.format).length === 0)) {
+      return;
+    }
+
     this.controller.beginBatch({ label: "AI write_cell" });
     try {
-      if (cell.formula) {
+      if (shouldUpdateContent && cell.formula) {
         this.controller.setCellFormula(address.sheet, coord, cell.formula, { label: "AI write_cell" });
-      } else {
+      } else if (shouldUpdateContent) {
         this.controller.setCellValue(address.sheet, coord, cell.value ?? null, { label: "AI write_cell" });
       }
 
