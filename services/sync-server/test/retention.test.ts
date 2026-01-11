@@ -35,6 +35,7 @@ function waitForProviderSync(provider: {
 class InMemoryLeveldbPersistence {
   private readonly docs = new Map<string, Y.Doc>();
   private readonly metas = new Map<string, Map<string, unknown>>();
+  beforeClearDocument?: (docName: string) => Promise<void> | void;
 
   async getYDoc(docName: string): Promise<Y.Doc> {
     return this.docs.get(docName) ?? new Y.Doc();
@@ -55,6 +56,7 @@ class InMemoryLeveldbPersistence {
   }
 
   async clearDocument(docName: string): Promise<void> {
+    await this.beforeClearDocument?.(docName);
     this.docs.delete(docName);
     this.metas.delete(docName);
   }
@@ -121,6 +123,45 @@ function waitForWebSocketOpen(ws: WebSocket): Promise<void> {
     };
     ws.once("error", onError);
     ws.once("open", onOpen);
+  });
+}
+
+function expectWebSocketUpgradeStatus(
+  url: string,
+  expectedStatusCode: number
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url);
+    let finished = false;
+
+    const finish = (cb: () => void) => {
+      if (finished) return;
+      finished = true;
+      try {
+        ws.terminate();
+      } catch {
+        // ignore
+      }
+      cb();
+    };
+
+    ws.on("open", () => {
+      finish(() => reject(new Error("Expected WebSocket upgrade rejection")));
+    });
+
+    ws.on("unexpected-response", (_req, res) => {
+      try {
+        assert.equal(res.statusCode, expectedStatusCode);
+        finish(resolve);
+      } catch (err) {
+        finish(() => reject(err));
+      }
+    });
+
+    ws.on("error", (err) => {
+      if (finished) return;
+      reject(err);
+    });
   });
 }
 
@@ -218,6 +259,70 @@ test("retention sweep skips docs with active websocket connections", async (t) =
   const remaining = await ldb.getAllDocNames();
   assert.deepEqual(remaining, ["active-doc"]);
 });
+
+test(
+  "rejects websocket upgrades while retention is purging a legacy (raw docName) document (leveldb hashing)",
+  async (t) => {
+    const docName = "legacy-doc";
+
+    const ldb = new InMemoryLeveldbPersistence();
+    await ldb.storeUpdate(docName, seedUpdate("hi"));
+    await ldb.setMeta(docName, LAST_SEEN_META_KEY, Date.now() - 10_000);
+
+    let clearStartedResolve: (() => void) | null = null;
+    const clearStarted = new Promise<void>((resolve) => {
+      clearStartedResolve = resolve;
+    });
+
+    let clearContinueResolve: (() => void) | null = null;
+    const clearContinue = new Promise<void>((resolve) => {
+      clearContinueResolve = resolve;
+    });
+
+    ldb.beforeClearDocument = async (name: string) => {
+      if (name !== docName) return;
+      clearStartedResolve?.();
+      await clearContinue;
+    };
+
+    const logger = createLogger("silent");
+    const baseConfig = createConfig(1_000);
+    const server = createSyncServer(
+      {
+        ...baseConfig,
+        persistence: {
+          ...baseConfig.persistence,
+          leveldbDocNameHashing: true,
+        },
+      },
+      logger,
+      { createLeveldbPersistence: () => ldb as any }
+    );
+
+    await server.start();
+    t.after(async () => {
+      await server.stop();
+    });
+
+    const sweepPromise = fetch(`${server.getHttpUrl()}/internal/retention/sweep`, {
+      method: "POST",
+      headers: {
+        "x-internal-admin-token": "admin-token",
+      },
+    });
+
+    await clearStarted;
+
+    await expectWebSocketUpgradeStatus(
+      `${server.getWsUrl()}/${docName}?token=test-token`,
+      503
+    );
+
+    clearContinueResolve?.();
+    const res = await sweepPromise;
+    assert.equal(res.status, 200);
+  }
+);
 
 test("pong-based lastSeen refresh uses persisted docName when docName hashing is enabled", async (t) => {
   const ldb = new InMemoryLeveldbPersistence();
