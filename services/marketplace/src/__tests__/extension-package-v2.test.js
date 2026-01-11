@@ -8,10 +8,12 @@ const path = require("node:path");
 const {
   createExtensionPackageV1,
   createExtensionPackageV2,
+  canonicalJsonBytes,
+  createSignaturePayloadBytes,
   readExtensionPackageV2,
   verifyExtensionPackageV2,
 } = require("../../../../shared/extension-package");
-const { generateEd25519KeyPair, signBytes } = require("../../../../shared/crypto/signing");
+const { generateEd25519KeyPair, sha256, signBytes } = require("../../../../shared/crypto/signing");
 const { MarketplaceStore } = require("../store");
 
 const UNIQUE_MARKER = "UNIQUE_PAYLOAD_MARKER_1b2e6b3a";
@@ -60,6 +62,47 @@ function updateTarChecksum(header) {
   header.write(checksumStr, 148, 6, "ascii");
   header[154] = 0;
   header[155] = 0x20;
+}
+
+function writeTarOctal(header, offset, length, value) {
+  const str = value.toString(8);
+  const maxDigits = length - 1;
+  header.fill(0, offset, offset + length);
+  header.write(str.padStart(maxDigits, "0"), offset, maxDigits, "ascii");
+  header[offset + length - 1] = 0;
+}
+
+function writeTarString(header, offset, length, value) {
+  header.fill(0, offset, offset + length);
+  if (!value) return;
+  const bytes = Buffer.from(String(value), "utf8");
+  bytes.copy(header, offset, 0, Math.min(bytes.length, length));
+}
+
+function createTarHeader(name, size) {
+  const header = Buffer.alloc(512, 0);
+  writeTarString(header, 0, 100, name);
+  writeTarOctal(header, 100, 8, 0o644);
+  writeTarOctal(header, 108, 8, 0);
+  writeTarOctal(header, 116, 8, 0);
+  writeTarOctal(header, 124, 12, size);
+  writeTarOctal(header, 136, 12, 0);
+  writeTarString(header, 156, 1, "0");
+  writeTarString(header, 257, 6, "ustar");
+  updateTarChecksum(header);
+  return header;
+}
+
+function createTarArchive(entries) {
+  const chunks = [];
+  for (const entry of entries) {
+    const data = entry.data ?? Buffer.alloc(0);
+    chunks.push(createTarHeader(entry.name, data.length), data);
+    const pad = (512 - (data.length % 512)) % 512;
+    if (pad) chunks.push(Buffer.alloc(pad, 0));
+  }
+  chunks.push(Buffer.alloc(1024, 0));
+  return Buffer.concat(chunks);
 }
 
 function findTarHeaderOffset(archive, predicate) {
@@ -138,6 +181,52 @@ test("v2 rejects path traversal entries", async () => {
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test("v2 rejects packages where files/package.json differs from manifest.json", () => {
+  const key = generateEd25519KeyPair();
+
+  const manifest = {
+    name: "temp-ext",
+    publisher: "temp-pub",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+  };
+
+  const packageJson = {
+    ...manifest,
+    name: "different-ext",
+  };
+
+  const jsBytes = Buffer.from("module.exports = { activate() {} };\n", "utf8");
+  const packageJsonBytes = canonicalJsonBytes(packageJson);
+
+  const checksums = {
+    algorithm: "sha256",
+    files: {
+      "dist/extension.js": { sha256: sha256(jsBytes), size: jsBytes.length },
+      "package.json": { sha256: sha256(packageJsonBytes), size: packageJsonBytes.length },
+    },
+  };
+
+  const signaturePayload = createSignaturePayloadBytes(manifest, checksums);
+  const signatureBase64 = signBytes(signaturePayload, key.privateKeyPem);
+  const signatureBytes = canonicalJsonBytes({
+    algorithm: "ed25519",
+    formatVersion: 2,
+    signatureBase64,
+  });
+
+  const archive = createTarArchive([
+    { name: "manifest.json", data: canonicalJsonBytes(manifest) },
+    { name: "checksums.json", data: canonicalJsonBytes(checksums) },
+    { name: "signature.json", data: signatureBytes },
+    { name: "files/dist/extension.js", data: jsBytes },
+    { name: "files/package.json", data: packageJsonBytes },
+  ]);
+
+  assert.throws(() => verifyExtensionPackageV2(archive, key.publicKeyPem), /does not match manifest/i);
 });
 
 test("marketplace store accepts v1 packages during transition", async (t) => {

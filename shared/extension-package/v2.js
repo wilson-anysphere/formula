@@ -375,6 +375,23 @@ function verifyExtensionPackageV2(packageBytes, publicKeyPem) {
   const fileRecords = [];
   let unpackedSize = 0;
 
+  const packageJsonBytes = files.get("package.json");
+  if (!packageJsonBytes) {
+    throw new Error("Invalid extension package: missing files/package.json");
+  }
+  let packageJson = null;
+  try {
+    packageJson = JSON.parse(packageJsonBytes.toString("utf8"));
+  } catch {
+    throw new Error("Invalid files/package.json (expected JSON)");
+  }
+  if (!isPlainObject(packageJson)) {
+    throw new Error("Invalid files/package.json (expected object)");
+  }
+  if (canonicalJsonString(packageJson) !== canonicalJsonString(manifest)) {
+    throw new Error("files/package.json does not match manifest.json");
+  }
+
   const expectedPaths = new Set(Object.keys(checksums.files));
 
   for (const [relPath, data] of files.entries()) {

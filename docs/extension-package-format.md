@@ -13,6 +13,10 @@ Formula extensions are distributed as a single binary “package” blob downloa
 - `signature.json` — Ed25519 signature over canonical `{ manifest, checksums }`
 - `files/<path>` — payload files (normalized POSIX-style paths)
 
+**Manifest consistency:**
+
+- `files/package.json` is required and must be JSON-identical to `manifest.json`.
+
 **Path safety rules (enforced by the Marketplace and clients):**
 
 - No absolute paths
@@ -36,4 +40,3 @@ Formula extensions are distributed as a single binary “package” blob downloa
 - `pnpm extension:pack <dir> --out <file> [--private-key <pem>]`
 - `pnpm extension:verify <file> --pubkey <pem>`
 - `pnpm extension:inspect <file>`
-
