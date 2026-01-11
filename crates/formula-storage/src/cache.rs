@@ -59,6 +59,14 @@ pub struct MemoryManagerMetrics {
     pub estimated_bytes: usize,
 }
 
+/// Paging-related helpers.
+impl MemoryManager {
+    /// Return the configured page size in rows/cols.
+    pub fn page_dimensions(&self) -> (usize, usize) {
+        (self.config.rows_per_page, self.config.cols_per_page)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FlushOutcome {
     /// Number of `CellChange`s applied to the live SQLite database.
@@ -272,6 +280,7 @@ impl MemoryManager {
         margin_rows: i64,
         margin_cols: i64,
     ) -> StorageResult<ViewportData> {
+        // Negative margins don't make sense; clamp to zero.
         let margin_rows = margin_rows.max(0);
         let margin_cols = margin_cols.max(0);
         let page_load_range = CellRange::new(

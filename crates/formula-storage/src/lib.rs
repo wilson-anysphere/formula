@@ -13,6 +13,8 @@
 //! For large sheets, prefer [`MemoryManager::load_viewport`] over full-range
 //! scans. It pages in fixed-size tiles (configured via [`MemoryManagerConfig`])
 //! and keeps the cache bounded with LRU eviction + dirty-page writeback.
+//! For smoother scrolling, [`MemoryManager::load_viewport_with_margin`] can be
+//! used to prefetch pages around the visible viewport.
 //! - Optional encryption-at-rest for persisted workbooks (AES-256-GCM)
 
 mod autosave;
