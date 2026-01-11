@@ -359,17 +359,17 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         continue;
                     };
 
+                    let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                     let Some((value, mut style_id)) = convert_value(value, date_time_styles) else {
                         continue;
                     };
 
                     if let Some(resolved) =
-                        style_id_for_cell_xf(xf_style_ids.as_deref(), sheet_cell_xfs, cell_ref)
+                        style_id_for_cell_xf(xf_style_ids.as_deref(), sheet_cell_xfs, anchor)
                     {
                         style_id = Some(resolved);
                     }
 
-                    let anchor = sheet.merged_regions.resolve_cell(cell_ref);
                     sheet.set_value(anchor, value);
                     if let Some(style_id) = style_id {
                         sheet.set_style_id(anchor, style_id);
@@ -400,7 +400,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                     sheet.set_formula(anchor, Some(normalized));
 
                     if let Some(resolved) =
-                        style_id_for_cell_xf(xf_style_ids.as_deref(), sheet_cell_xfs, cell_ref)
+                        style_id_for_cell_xf(xf_style_ids.as_deref(), sheet_cell_xfs, anchor)
                     {
                         sheet.set_style_id(anchor, resolved);
                     }
