@@ -1006,7 +1006,13 @@ export class CanvasGridRenderer {
         ctx.clearRect(region.x, region.y, region.width, region.height);
       }
 
-      this.renderQuadrants(layer, viewport, region);
+      if (layer === "selection") {
+        // Selection overlays are already expressed in viewport coordinates, so we can render
+        // them directly for the dirty region without re-walking grid quadrants.
+        this.renderSelectionQuadrant(region, viewport);
+      } else {
+        this.renderQuadrants(layer, viewport, region);
+      }
 
       ctx.restore();
     }
