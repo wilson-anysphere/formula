@@ -8,7 +8,10 @@ use crate::types::{
     canonical_json, CellData, CellSnapshot, CellValue, ImportModelWorkbookOptions, NamedRange,
     SheetMeta, SheetVisibility, Style as StorageStyle, WorkbookMeta,
 };
-use formula_model::{validate_sheet_name, DefinedName, DefinedNameScope, ErrorValue, SheetNameError};
+use formula_model::{
+    rewrite_sheet_names_in_formula, validate_sheet_name, DefinedName, DefinedNameScope, ErrorValue,
+    SheetNameError,
+};
 use rusqlite::{params, Connection, DatabaseName, OpenFlags, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value as JsonValue};
@@ -1110,6 +1113,7 @@ impl Storage {
         let tx = conn.transaction()?;
 
         let meta = self.get_sheet_meta_tx(&tx, sheet_id)?;
+        let old_name = meta.name.clone();
 
         // Enforce Excel-style uniqueness (Unicode-aware, case-insensitive) within the workbook.
         {
@@ -1125,10 +1129,14 @@ impl Storage {
             }
         }
 
+        if old_name != name {
+            rewrite_sheet_rename_references_tx(&tx, meta.workbook_id, &old_name, name)?;
+        }
+
         // Update any sheet-scoped named ranges that use the sheet name as their scope identifier.
         tx.execute(
             "UPDATE named_ranges SET scope = ?1 WHERE workbook_id = ?2 AND scope = ?3 COLLATE NOCASE",
-            params![name, meta.workbook_id.to_string(), meta.name],
+            params![name, meta.workbook_id.to_string(), &old_name],
         )?;
 
         tx.execute(
@@ -2110,6 +2118,129 @@ fn merge_named_ranges_into_defined_names(
             xlsx_local_sheet_id: None,
         });
         next_id = next_id.wrapping_add(1);
+    }
+
+    Ok(())
+}
+
+fn rewrite_sheet_rename_references_tx(
+    tx: &Transaction<'_>,
+    workbook_id: Uuid,
+    old_name: &str,
+    new_name: &str,
+) -> Result<()> {
+    let workbook_id_str = workbook_id.to_string();
+
+    // Update formulas stored in the cell grid (including formulas on other sheets that reference
+    // the renamed sheet).
+    {
+        let mut select_stmt = tx.prepare(
+            r#"
+            SELECT c.sheet_id, c.row, c.col, c.formula
+            FROM cells c
+            JOIN sheets s ON s.id = c.sheet_id
+            WHERE s.workbook_id = ?1
+              AND c.formula IS NOT NULL
+            "#,
+        )?;
+        let mut update_stmt =
+            tx.prepare("UPDATE cells SET formula = ?1 WHERE sheet_id = ?2 AND row = ?3 AND col = ?4")?;
+
+        let mut rows = select_stmt.query(params![&workbook_id_str])?;
+        while let Some(row) = rows.next()? {
+            let sheet_id: String = row.get(0)?;
+            let row_idx: i64 = row.get(1)?;
+            let col_idx: i64 = row.get(2)?;
+            let formula: String = row.get(3)?;
+            let rewritten = rewrite_sheet_names_in_formula(&formula, old_name, new_name);
+            if rewritten != formula {
+                update_stmt.execute(params![rewritten, sheet_id, row_idx, col_idx])?;
+            }
+        }
+    }
+
+    // Update named range references (legacy table) so `get_named_range` remains correct.
+    {
+        let mut select_stmt = tx.prepare(
+            r#"
+            SELECT name, scope, reference
+            FROM named_ranges
+            WHERE workbook_id = ?1
+            "#,
+        )?;
+        let mut update_stmt = tx.prepare(
+            "UPDATE named_ranges SET reference = ?1 WHERE workbook_id = ?2 AND name = ?3 AND scope = ?4",
+        )?;
+
+        let mut rows = select_stmt.query(params![&workbook_id_str])?;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(0)?;
+            let scope: String = row.get(1)?;
+            let reference: String = row.get(2)?;
+            let rewritten = rewrite_sheet_names_in_formula(&reference, old_name, new_name);
+            if rewritten != reference {
+                update_stmt.execute(params![rewritten, &workbook_id_str, name, scope])?;
+            }
+        }
+    }
+
+    // Keep workbook-level JSON columns in sync so `export_model_workbook` round-trips correctly.
+    {
+        let defined_names: Option<serde_json::Value> = tx.query_row(
+            "SELECT defined_names FROM workbooks WHERE id = ?1",
+            params![&workbook_id_str],
+            |r| r.get(0),
+        )?;
+        if let Some(raw) = defined_names {
+            if let Ok(mut names) = serde_json::from_value::<Vec<DefinedName>>(raw) {
+                let mut changed = false;
+                for name in &mut names {
+                    let rewritten =
+                        rewrite_sheet_names_in_formula(&name.refers_to, old_name, new_name);
+                    if rewritten != name.refers_to {
+                        name.refers_to = rewritten;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    let updated = (!names.is_empty())
+                        .then_some(serde_json::to_value(&names)?);
+                    tx.execute(
+                        "UPDATE workbooks SET defined_names = ?1 WHERE id = ?2",
+                        params![updated, &workbook_id_str],
+                    )?;
+                }
+            }
+        }
+    }
+
+    {
+        let print_settings: Option<serde_json::Value> = tx.query_row(
+            "SELECT print_settings FROM workbooks WHERE id = ?1",
+            params![&workbook_id_str],
+            |r| r.get(0),
+        )?;
+        if let Some(raw) = print_settings {
+            if let Ok(mut settings) =
+                serde_json::from_value::<formula_model::WorkbookPrintSettings>(raw)
+            {
+                let mut changed = false;
+                for sheet_settings in &mut settings.sheets {
+                    if sheet_name_eq_case_insensitive(&sheet_settings.sheet_name, old_name) {
+                        sheet_settings.sheet_name = new_name.to_string();
+                        changed = true;
+                    }
+                }
+                if changed {
+                    let updated = (!settings.is_empty())
+                        .then_some(serde_json::to_value(&settings)?);
+                    tx.execute(
+                        "UPDATE workbooks SET print_settings = ?1 WHERE id = ?2",
+                        params![updated, &workbook_id_str],
+                    )?;
+                }
+            }
+        }
     }
 
     Ok(())
