@@ -4,7 +4,7 @@ use std::io::{Cursor, Read};
 
 use formula_biff::encode_rgce;
 use formula_xlsb::rgce::{encode_rgce_with_context, CellCoord};
-use formula_xlsb::{patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
+use formula_xlsb::{biff12_varint, patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 
@@ -555,4 +555,121 @@ fn save_with_cell_edits_can_patch_formula_bool_string_error_cells() {
     assert_eq!(c1.value, CellValue::Error(0x2A));
     let c1_formula = c1.formula.as_ref().expect("C1 formula");
     assert_eq!(c1_formula.rgce, vec![0x1C, 0x2A]);
+}
+
+fn decode_rk_number(raw: u32) -> f64 {
+    let raw_i = raw as i32;
+    let mut v = if raw_i & 0x02 != 0 {
+        (raw_i >> 2) as f64
+    } else {
+        let shifted = raw & 0xFFFFFFFC;
+        f64::from_bits((shifted as u64) << 32)
+    };
+    if raw_i & 0x01 != 0 {
+        v /= 100.0;
+    }
+    v
+}
+
+fn find_cell_record(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Option<(u32, Vec<u8>)> {
+    const SHEETDATA: u32 = 0x0191;
+    const SHEETDATA_END: u32 = 0x0192;
+    const ROW: u32 = 0x0000;
+
+    let mut cursor = Cursor::new(sheet_bin);
+    let mut in_sheet_data = false;
+    let mut current_row = 0u32;
+
+    loop {
+        let id = match biff12_varint::read_record_id(&mut cursor).ok().flatten() {
+            Some(id) => id,
+            None => break,
+        };
+        let len = match biff12_varint::read_record_len(&mut cursor).ok().flatten() {
+            Some(len) => len as usize,
+            None => return None,
+        };
+        let mut payload = vec![0u8; len];
+        cursor.read_exact(&mut payload).ok()?;
+
+        match id {
+            SHEETDATA => in_sheet_data = true,
+            SHEETDATA_END => in_sheet_data = false,
+            ROW if in_sheet_data => {
+                if payload.len() >= 4 {
+                    current_row = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                }
+            }
+            _ if in_sheet_data => {
+                if payload.len() < 8 {
+                    continue;
+                }
+                let col = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                if current_row == target_row && col == target_col {
+                    return Some((id, payload));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+#[test]
+fn patch_sheet_bin_is_byte_identical_for_noop_rk_float_edit() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("RKFloat");
+    builder.set_cell_number_rk(0, 1, 0.125);
+
+    let xlsb_bytes = builder.build_bytes();
+    let mut zip = zip::ZipArchive::new(Cursor::new(xlsb_bytes)).expect("open in-memory xlsb zip");
+    let mut entry = zip
+        .by_name("xl/worksheets/sheet1.bin")
+        .expect("find sheet1.bin");
+    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
+
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Number(0.125),
+            new_formula: None,
+        }],
+    )
+    .expect("patch sheet bin");
+
+    assert_eq!(patched, sheet_bin);
+}
+
+#[test]
+fn patch_sheet_bin_keeps_rk_record_for_float_rk_values() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("RKFloat");
+    builder.set_cell_number_rk(0, 1, 0.0);
+
+    let xlsb_bytes = builder.build_bytes();
+    let mut zip = zip::ZipArchive::new(Cursor::new(xlsb_bytes)).expect("open in-memory xlsb zip");
+    let mut entry = zip
+        .by_name("xl/worksheets/sheet1.bin")
+        .expect("find sheet1.bin");
+    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
+
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Number(0.125),
+            new_formula: None,
+        }],
+    )
+    .expect("patch sheet bin");
+
+    let (id, payload) = find_cell_record(&patched, 0, 1).expect("patched cell record");
+    assert_eq!(id, 0x0002, "expected RK NUM record");
+    let rk = u32::from_le_bytes(payload[8..12].try_into().unwrap());
+    assert_eq!(decode_rk_number(rk), 0.125);
 }

@@ -595,5 +595,27 @@ fn encode_rk_number(value: f64) -> Option<u32> {
         return Some(((i as u32) << 2) | 0x03);
     }
 
+    // Non-integer RK numbers store the top 30 bits of the IEEE754 f64 (with the low
+    // 34 bits cleared) and set the low two bits to 0b00 (or 0b01 when scaled by 100).
+    const LOW_34_MASK: u64 = (1u64 << 34) - 1;
+    let bits = value.to_bits();
+    if bits & LOW_34_MASK == 0 {
+        let raw = (bits >> 32) as u32;
+        if raw & 0x03 == 0 {
+            return Some(raw);
+        }
+    }
+
+    let scaled = value * 100.0;
+    if scaled.is_finite() {
+        let bits = scaled.to_bits();
+        if bits & LOW_34_MASK == 0 {
+            let raw = (bits >> 32) as u32;
+            if raw & 0x03 == 0 {
+                return Some(raw | 0x01);
+            }
+        }
+    }
+
     None
 }
