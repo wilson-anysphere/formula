@@ -24,4 +24,5 @@ test("certificate pinning accepts matching fingerprint and rejects mismatch", ()
   const badCheck = createPinnedCheckServerIdentity({ pins: ["deadbeef"] });
   const err = badCheck("example.com", { raw, subjectaltname: "DNS:example.com" });
   assert.ok(err instanceof Error);
+  assert.equal(err.retriable, false);
 });

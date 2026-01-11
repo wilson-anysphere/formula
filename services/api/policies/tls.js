@@ -20,16 +20,21 @@ function createPinnedCheckServerIdentity({ pins }) {
   if (!Array.isArray(pins) || pins.length === 0) {
     throw new TypeError("pins must be a non-empty array");
   }
-  const normalizedPins = pins.map((pin) => {
-    if (typeof pin !== "string" || pin.length === 0) {
-      throw new TypeError("pin must be a non-empty string");
-    }
-    return normalizeFingerprintHex(pin);
-  });
+  const normalizedPins = new Set(
+    pins.map((pin) => {
+      if (typeof pin !== "string" || pin.length === 0) {
+        throw new TypeError("pin must be a non-empty string");
+      }
+      return normalizeFingerprintHex(pin);
+    })
+  );
 
   return function checkServerIdentity(hostname, cert) {
     const defaultError = tls.checkServerIdentity(hostname, cert);
-    if (defaultError) return defaultError;
+    if (defaultError) {
+      defaultError.retriable = false;
+      return defaultError;
+    }
 
     const fingerprint = cert?.raw
       ? sha256FingerprintHexFromCertRaw(cert.raw)
@@ -38,11 +43,15 @@ function createPinnedCheckServerIdentity({ pins }) {
         : null;
 
     if (!fingerprint) {
-      return new Error("Certificate pinning failed: certificate fingerprint not available");
+      const err = new Error("Certificate pinning failed: certificate fingerprint not available");
+      err.retriable = false;
+      return err;
     }
 
-    if (!normalizedPins.includes(normalizeFingerprintHex(fingerprint))) {
-      return new Error("Certificate pinning failed: server certificate fingerprint mismatch");
+    if (!normalizedPins.has(normalizeFingerprintHex(fingerprint))) {
+      const err = new Error("Certificate pinning failed: server certificate fingerprint mismatch");
+      err.retriable = false;
+      return err;
     }
 
     return undefined;
