@@ -17,6 +17,17 @@ export function cellKeyFromRef(ref) {
  * @returns {CellRef}
  */
 export function cellRefFromKey(key) {
+  // Unit-test convenience encoding (sheet resolved implicitly to "Sheet1").
+  // CollabSession's `parseCellKey` uses the same default.
+  const rc = key.match(/^r(\d+)c(\d+)$/);
+  if (rc) {
+    return {
+      sheetId: "Sheet1",
+      row: Number.parseInt(rc[1], 10),
+      col: Number.parseInt(rc[2], 10),
+    };
+  }
+
   const parts = key.split(":");
   if (parts.length === 3) {
     const [sheetId, rowStr, colStr] = parts;
