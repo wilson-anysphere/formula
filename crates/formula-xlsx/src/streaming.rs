@@ -410,9 +410,15 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             missing_parts.remove(&name);
             patch_worksheet_xml_streaming(&mut file, &mut zip, &name, patches)?;
         } else if let Some(bytes) = pre_read_parts.get(&name) {
-            zip.start_file(name.clone(), options)?;
-            let bytes = maybe_patch_recalc_part(&name, bytes, recalc_policy)?;
-            zip.write_all(&bytes)?;
+            if should_patch_recalc_part(&name, recalc_policy) {
+                zip.start_file(name.clone(), options)?;
+                let bytes = maybe_patch_recalc_part(&name, bytes, recalc_policy)?;
+                zip.write_all(&bytes)?;
+            } else {
+                // We buffered this part earlier for metadata resolution, but it doesn't need to be
+                // rewritten. Raw-copy it to avoid recompression.
+                zip.raw_copy_file(file)?;
+            }
         } else if let Some(updated) = patch_recalc_part_from_file(&name, &mut file, recalc_policy)?
         {
             zip.start_file(name.clone(), options)?;
@@ -465,7 +471,17 @@ fn patch_recalc_part_from_file<R: Read>(
     file: &mut R,
     recalc_policy: RecalcPolicy,
 ) -> Result<Option<Vec<u8>>, StreamingPatchError> {
-    let should_patch = match name {
+    if !should_patch_recalc_part(name, recalc_policy) {
+        return Ok(None);
+    }
+
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+    Ok(Some(maybe_patch_recalc_part(name, &buf, recalc_policy)?))
+}
+
+fn should_patch_recalc_part(name: &str, recalc_policy: RecalcPolicy) -> bool {
+    match name {
         "xl/workbook.xml" => matches!(
             recalc_policy,
             RecalcPolicy::ForceFullCalcOnLoad | RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad
@@ -475,15 +491,7 @@ fn patch_recalc_part_from_file<R: Read>(
         }
         "[Content_Types].xml" => recalc_policy == RecalcPolicy::DropCalcChainAndForceFullCalcOnLoad,
         _ => false,
-    };
-
-    if !should_patch {
-        return Ok(None);
     }
-
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
-    Ok(Some(maybe_patch_recalc_part(name, &buf, recalc_policy)?))
 }
 
 fn read_zip_part<R: Read + Seek>(
