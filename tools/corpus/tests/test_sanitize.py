@@ -5,6 +5,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from tools.corpus import sanitize as sanitize_mod
 from tools.corpus.sanitize import SanitizeOptions, sanitize_xlsx_bytes, scan_xlsx_bytes_for_leaks
 from tools.corpus.util import read_workbook_input
 
@@ -240,6 +241,31 @@ class SanitizeTests(unittest.TestCase):
         self.assertFalse(original_scan.ok)
         sanitized_scan = scan_xlsx_bytes_for_leaks(sanitized, plaintext_strings=sensitive_tokens)
         self.assertTrue(sanitized_scan.ok)
+
+    def test_hash_strings_is_deterministic_across_runs(self) -> None:
+        fixture_path = Path(__file__).parent / "fixtures" / "pii-surfaces.xlsx.b64"
+        wb = read_workbook_input(fixture_path)
+
+        options = SanitizeOptions(hash_strings=True, hash_salt="unit-test-salt")
+        sanitized_a, _ = sanitize_xlsx_bytes(wb.data, options=options)
+        sanitized_b, _ = sanitize_xlsx_bytes(wb.data, options=options)
+
+        with zipfile.ZipFile(io.BytesIO(sanitized_a), "r") as za, zipfile.ZipFile(
+            io.BytesIO(sanitized_b), "r"
+        ) as zb:
+            for part in (
+                "xl/sharedStrings.xml",
+                "xl/worksheets/sheet1.xml",
+                "xl/comments1.xml",
+                "xl/tables/table1.xml",
+                "xl/pivotCache/pivotCacheDefinition1.xml",
+            ):
+                self.assertEqual(za.read(part), zb.read(part), msg=f"{part} should be stable")
+
+            # Spot check: known plaintext string literal in a formula becomes a stable H_<digest> token.
+            expected = sanitize_mod._hash_text("alice@example.com", salt="unit-test-salt")
+            sheet_xml = za.read("xl/worksheets/sheet1.xml").decode("utf-8", errors="ignore")
+            self.assertIn(expected, sheet_xml)
 
 
 if __name__ == "__main__":
