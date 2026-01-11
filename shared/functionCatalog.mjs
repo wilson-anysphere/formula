@@ -1071,6 +1071,16 @@ export default {
       ]
     },
     {
+      "name": "MAXIFS",
+      "min_args": 3,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "MEDIAN",
       "min_args": 1,
       "max_args": 255,
@@ -1105,6 +1115,16 @@ export default {
     {
       "name": "MINA",
       "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "MINIFS",
+      "min_args": 3,
       "max_args": 255,
       "volatility": "non_volatile",
       "return_type": "number",

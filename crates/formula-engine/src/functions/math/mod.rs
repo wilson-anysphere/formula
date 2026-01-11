@@ -5,7 +5,7 @@ mod rounding;
 mod trig;
 
 pub use aggregates::{
-    aggregate, averageif, averageifs, countifs, subtotal, sumif, sumifs, sumproduct,
+    aggregate, averageif, averageifs, countifs, maxifs, minifs, subtotal, sumif, sumifs, sumproduct,
 };
 pub use random::{rand, randbetween};
 pub use rounding::{

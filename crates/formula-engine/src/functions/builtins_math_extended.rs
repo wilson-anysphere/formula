@@ -1155,6 +1155,98 @@ fn averageifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "MAXIFS",
+        min_args: 3,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: maxifs_fn,
+    }
+}
+
+fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let max_range = match values_from_range_arg(ctx, ctx.eval_arg(&args[0])) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let mut ranges: Vec<Vec<Value>> = Vec::new();
+    let mut criteria_values: Vec<Value> = Vec::new();
+    for pair in args[1..].chunks(2) {
+        let range_values = match values_from_range_arg(ctx, ctx.eval_arg(&pair[0])) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        ranges.push(range_values);
+        criteria_values.push(scalar_from_arg(ctx, ctx.eval_arg(&pair[1])));
+    }
+
+    let mut pairs: Vec<(&[Value], &Value)> = Vec::with_capacity(ranges.len());
+    for (range, crit) in ranges.iter().zip(criteria_values.iter()) {
+        pairs.push((range.as_slice(), crit));
+    }
+
+    match crate::functions::math::maxifs(&max_range, &pairs, ctx.date_system()) {
+        Ok(out) => Value::Number(out),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "MINIFS",
+        min_args: 3,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: minifs_fn,
+    }
+}
+
+fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let min_range = match values_from_range_arg(ctx, ctx.eval_arg(&args[0])) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let mut ranges: Vec<Vec<Value>> = Vec::new();
+    let mut criteria_values: Vec<Value> = Vec::new();
+    for pair in args[1..].chunks(2) {
+        let range_values = match values_from_range_arg(ctx, ctx.eval_arg(&pair[0])) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        ranges.push(range_values);
+        criteria_values.push(scalar_from_arg(ctx, ctx.eval_arg(&pair[1])));
+    }
+
+    let mut pairs: Vec<(&[Value], &Value)> = Vec::with_capacity(ranges.len());
+    for (range, crit) in ranges.iter().zip(criteria_values.iter()) {
+        pairs.push((range.as_slice(), crit));
+    }
+
+    match crate::functions::math::minifs(&min_range, &pairs, ctx.date_system()) {
+        Ok(out) => Value::Number(out),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "SUBTOTAL",
         min_args: 2,
         max_args: VAR_ARGS,

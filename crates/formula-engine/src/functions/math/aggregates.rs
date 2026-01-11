@@ -194,6 +194,86 @@ pub fn averageifs(
     Ok(sum / count as f64)
 }
 
+/// MAXIFS(max_range, criteria_range1, criteria1, ...)
+pub fn maxifs(
+    max_range: &[Value],
+    criteria_pairs: &[(&[Value], &Value)],
+    system: ExcelDateSystem,
+) -> Result<f64, ErrorKind> {
+    for (range, _) in criteria_pairs {
+        if range.len() != max_range.len() {
+            return Err(ErrorKind::Value);
+        }
+    }
+
+    let compiled = criteria_pairs
+        .iter()
+        .map(|(_, crit)| {
+            if let Value::Error(e) = *crit {
+                return Err(*e);
+            }
+            Criteria::parse_with_date_system(*crit, system)
+        })
+        .collect::<Result<Vec<_>, ErrorKind>>()?;
+
+    let mut best: Option<f64> = None;
+    'row: for idx in 0..max_range.len() {
+        for ((range, _), crit) in criteria_pairs.iter().zip(compiled.iter()) {
+            if !crit.matches(&range[idx]) {
+                continue 'row;
+            }
+        }
+
+        match &max_range[idx] {
+            Value::Number(n) => best = Some(best.map_or(*n, |b| b.max(*n))),
+            Value::Error(e) => return Err(*e),
+            _ => {}
+        }
+    }
+
+    Ok(best.unwrap_or(0.0))
+}
+
+/// MINIFS(min_range, criteria_range1, criteria1, ...)
+pub fn minifs(
+    min_range: &[Value],
+    criteria_pairs: &[(&[Value], &Value)],
+    system: ExcelDateSystem,
+) -> Result<f64, ErrorKind> {
+    for (range, _) in criteria_pairs {
+        if range.len() != min_range.len() {
+            return Err(ErrorKind::Value);
+        }
+    }
+
+    let compiled = criteria_pairs
+        .iter()
+        .map(|(_, crit)| {
+            if let Value::Error(e) = *crit {
+                return Err(*e);
+            }
+            Criteria::parse_with_date_system(*crit, system)
+        })
+        .collect::<Result<Vec<_>, ErrorKind>>()?;
+
+    let mut best: Option<f64> = None;
+    'row: for idx in 0..min_range.len() {
+        for ((range, _), crit) in criteria_pairs.iter().zip(compiled.iter()) {
+            if !crit.matches(&range[idx]) {
+                continue 'row;
+            }
+        }
+
+        match &min_range[idx] {
+            Value::Number(n) => best = Some(best.map_or(*n, |b| b.min(*n))),
+            Value::Error(e) => return Err(*e),
+            _ => {}
+        }
+    }
+
+    Ok(best.unwrap_or(0.0))
+}
+
 /// SUMPRODUCT(array1, [array2], ...)
 pub fn sumproduct(arrays: &[&[Value]]) -> Result<f64, ErrorKind> {
     if arrays.is_empty() {

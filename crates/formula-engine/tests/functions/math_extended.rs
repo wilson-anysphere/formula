@@ -106,9 +106,15 @@ fn criteria_aggregates_support_ranges_and_arrays() {
 
     assert_number(&sheet.eval("=SUMIF(A1:A4,\">2\",B1:B4)"), 70.0);
     assert_number(&sheet.eval("=AVERAGEIF(A1:A4,\">2\",B1:B4)"), 35.0);
+    assert_number(&sheet.eval("=MAXIFS(B1:B4,A1:A4,\">2\")"), 40.0);
+    assert_number(&sheet.eval("=MINIFS(B1:B4,A1:A4,\">2\")"), 30.0);
+    assert_number(&sheet.eval("=MAXIFS(B1:B4,A1:A4,\">10\")"), 0.0);
+    assert_number(&sheet.eval("=MINIFS(B1:B4,A1:A4,\">10\")"), 0.0);
 
     // Array-literal args.
     assert_number(&sheet.eval("=SUMIF({1,2,3,4},\">2\",{10,20,30,40})"), 70.0);
+    assert_number(&sheet.eval("=MAXIFS({10,20,30,40},{1,2,3,4},\">2\")"), 40.0);
+    assert_number(&sheet.eval("=MINIFS({10,20,30,40},{1,2,3,4},\">2\")"), 30.0);
     assert_number(
         &sheet.eval("=SUMIFS({10,20,30,40},{\"A\",\"A\",\"B\",\"B\"},\"A\",{1,2,3,4},\">1\")"),
         20.0,

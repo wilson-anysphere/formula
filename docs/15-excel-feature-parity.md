@@ -307,11 +307,11 @@ This document tracks every Excel feature and our implementation status. Features
 | LOGNORM.INV | ⬜ | |
 | MAX | ✅ | P0 |
 | MAXA | ✅ | |
-| MAXIFS | ⬜ | P0 |
+| MAXIFS | ✅ | P0 |
 | MEDIAN | ✅ | P0 |
 | MIN | ✅ | P0 |
 | MINA | ✅ | |
-| MINIFS | ⬜ | P0 |
+| MINIFS | ✅ | P0 |
 | MODE.MULT | ✅ | Array function |
 | MODE.SNGL | ✅ | |
 | NEGBINOM.DIST | ⬜ | |
