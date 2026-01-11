@@ -128,6 +128,25 @@ describe("EngineWorker RPC", () => {
     ]);
   });
 
+  it("sends loadFromXlsxBytes when loading workbook from xlsx bytes", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    await engine.loadWorkbookFromXlsxBytes(bytes);
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "loadFromXlsxBytes"
+    );
+
+    expect(requests).toHaveLength(1);
+    expect((requests[0].params as any).bytes).toEqual(bytes);
+  });
+
   it("supports request cancellation via AbortSignal", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({
@@ -177,4 +196,3 @@ describe("EngineWorker RPC", () => {
     vi.useRealTimers();
   });
 });
-

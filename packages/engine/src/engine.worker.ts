@@ -23,6 +23,7 @@ type WasmModule = {
   WasmWorkbook: {
     new (): WasmWorkbookInstance;
     fromJson(json: string): WasmWorkbookInstance;
+    fromXlsxBytes(bytes: Uint8Array): WasmWorkbookInstance;
   };
 };
 
@@ -223,6 +224,14 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
       case "loadFromJson":
         {
           const next = mod.WasmWorkbook.fromJson(params.json);
+          freeWorkbook(workbook);
+          workbook = next;
+        }
+        result = null;
+        break;
+      case "loadFromXlsxBytes":
+        {
+          const next = mod.WasmWorkbook.fromXlsxBytes(params.bytes);
           freeWorkbook(workbook);
           workbook = next;
         }

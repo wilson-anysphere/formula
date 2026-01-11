@@ -11,6 +11,10 @@ export interface EngineClient {
   init(): Promise<void>;
   newWorkbook(): Promise<void>;
   loadWorkbookFromJson(json: string): Promise<void>;
+  /**
+   * Load a workbook by passing raw `.xlsx` bytes directly to the WASM engine.
+   */
+  loadWorkbookFromXlsxBytes(bytes: Uint8Array, options?: RpcOptions): Promise<void>;
   toJson(): Promise<string>;
   getCell(address: string, sheet?: string, options?: RpcOptions): Promise<CellData>;
   getRange(range: string, sheet?: string, options?: RpcOptions): Promise<CellData[][]>;
@@ -110,6 +114,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     },
     newWorkbook: async () => await withEngine((connected) => connected.newWorkbook()),
     loadWorkbookFromJson: async (json) => await withEngine((connected) => connected.loadWorkbookFromJson(json)),
+    loadWorkbookFromXlsxBytes: async (bytes, rpcOptions) =>
+      await withEngine((connected) => connected.loadWorkbookFromXlsxBytes(bytes, rpcOptions)),
     toJson: async () => await withEngine((connected) => connected.toJson()),
     getCell: async (address, sheet, rpcOptions) =>
       await withEngine((connected) => connected.getCell(address, sheet, rpcOptions)),

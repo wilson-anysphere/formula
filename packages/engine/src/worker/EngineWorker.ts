@@ -119,6 +119,11 @@ export class EngineWorker {
     await this.invoke("loadFromJson", { json }, options);
   }
 
+  async loadWorkbookFromXlsxBytes(bytes: Uint8Array, options?: RpcOptions): Promise<void> {
+    await this.flush();
+    await this.invoke("loadFromXlsxBytes", { bytes }, options);
+  }
+
   async toJson(options?: RpcOptions): Promise<string> {
     await this.flush();
     return (await this.invoke("toJson", {}, options)) as string;
