@@ -452,7 +452,9 @@ class MarketplaceStore {
     });
 
     const envAllowlist = parseCsvSet(process.env.MARKETPLACE_SCAN_ALLOWLIST);
-    this.scanAllowlist = scanAllowlist ? new Set(scanAllowlist) : envAllowlist;
+    this.scanAllowlist = scanAllowlist
+      ? new Set(Array.from(scanAllowlist).map((id) => String(id).trim().toLowerCase()).filter(Boolean))
+      : envAllowlist;
     this.requireScanPassedForDownload =
       requireScanPassedForDownload !== null && requireScanPassedForDownload !== undefined
         ? Boolean(requireScanPassedForDownload)
