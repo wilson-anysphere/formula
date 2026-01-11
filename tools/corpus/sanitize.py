@@ -835,7 +835,8 @@ def scan_xlsx_bytes_for_leaks(
     # Keep URL matching fairly strict to avoid false positives on unrelated strings.
     email_re = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
     url_re = re.compile(r"\b(?:https?|file|ftp|ftps|smb)://[^\s\"'<>]+", re.IGNORECASE)
-    unc_re = re.compile(r"\\\\\\\\[^\\s\"'<>]+")
+    # UNC paths start with `\\server\share`; treat these as high-risk external URLs too.
+    unc_re = re.compile(r"\\\\[^\s\"'<>]+")
     aws_key_re = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
     jwt_re = re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")
 
