@@ -980,10 +980,12 @@ export class ToolExecutor {
 
       const location = response.headers.get("location");
       if (!location) {
+        await cancelResponseBody(response);
         throw toolError("runtime_error", `External fetch failed with HTTP ${response.status} (missing Location header)`);
       }
       const nextUrl = new URL(location, currentUrl);
       if (currentUrl.protocol === "https:" && nextUrl.protocol === "http:") {
+        await cancelResponseBody(response);
         throw toolError("permission_denied", "Redirect from https to http is not permitted for fetch_external_data.");
       }
       // Avoid leaking user-supplied headers (e.g. API keys) across redirect hops to a
@@ -991,6 +993,7 @@ export class ToolExecutor {
       if (nextUrl.host !== currentUrl.host) {
         requestHeaders = undefined;
       }
+      await cancelResponseBody(response);
       currentUrl = nextUrl;
     }
 
@@ -998,6 +1001,7 @@ export class ToolExecutor {
       throw toolError("runtime_error", "External fetch failed to produce a response.");
     }
     if (isRedirectStatus(response.status)) {
+      await cancelResponseBody(response);
       throw toolError("runtime_error", `External fetch exceeded maximum redirects (${maxRedirects}).`);
     }
 
@@ -1006,6 +1010,7 @@ export class ToolExecutor {
     const contentLengthHeader = response.headers.get("content-length");
     const declaredLength = contentLengthHeader ? Number(contentLengthHeader) : NaN;
     if (Number.isFinite(declaredLength) && declaredLength > this.options.max_external_bytes) {
+      await cancelResponseBody(response);
       throw toolError(
         "permission_denied",
         `External response too large (${declaredLength} bytes). Increase max_external_bytes to allow.`
@@ -1013,6 +1018,7 @@ export class ToolExecutor {
     }
 
     if (!response.ok) {
+      await cancelResponseBody(response);
       throw toolError("runtime_error", `External fetch failed with HTTP ${statusCode}`);
     }
 
@@ -1965,4 +1971,12 @@ function decodeUtf8(bytes: Uint8Array): string {
   if (typeof TextDecoder !== "undefined") return new TextDecoder().decode(bytes);
   // Fallback for environments without TextDecoder.
   return Buffer.from(bytes).toString("utf8");
+}
+
+async function cancelResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // ignore
+  }
 }
