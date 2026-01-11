@@ -78,10 +78,14 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
     let workbook_rels = read_zip_part_required(&mut archive, WORKBOOK_RELS_PART)?;
 
     let rels_info = parse_relationships(&workbook_rels)?;
-    let (_date_system, _calc_pr, sheets, defined_names) =
+    let (date_system, _calc_pr, sheets, defined_names) =
         parse_workbook_metadata(&workbook_xml, &rels_info.id_to_target)?;
 
     let mut workbook = Workbook::new();
+    workbook.date_system = match date_system {
+        DateSystem::V1900 => formula_model::DateSystem::Excel1900,
+        DateSystem::V1904 => formula_model::DateSystem::Excel1904,
+    };
 
     let styles_part_name = rels_info
         .styles_target
@@ -240,6 +244,10 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         parse_workbook_metadata(workbook_xml, &rels_info.id_to_target)?;
 
     let mut workbook = Workbook::new();
+    workbook.date_system = match date_system {
+        DateSystem::V1900 => formula_model::DateSystem::Excel1900,
+        DateSystem::V1904 => formula_model::DateSystem::Excel1904,
+    };
     let styles_part_name = rels_info
         .styles_target
         .as_deref()
