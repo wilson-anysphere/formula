@@ -7,6 +7,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Seek};
 use std::path::Path;
 
+use encoding_rs::{
+    Encoding, BIG5, EUC_KR, GBK, SHIFT_JIS, UTF_8, WINDOWS_1250, WINDOWS_1251, WINDOWS_1252,
+    WINDOWS_1253, WINDOWS_1254, WINDOWS_1255, WINDOWS_1256, WINDOWS_1257, WINDOWS_1258,
+    WINDOWS_874,
+};
 use formula_model::{CellRef, ColProperties, DateSystem, RowProperties};
 
 #[derive(Debug, Default)]
@@ -75,6 +80,63 @@ pub(crate) fn detect_biff_version(workbook_stream: &[u8]) -> BiffVersion {
         }
         _ => BiffVersion::Biff8,
     }
+}
+
+fn biff_codepage(workbook_stream: &[u8]) -> u16 {
+    let mut offset = 0usize;
+    loop {
+        let Some((record_id, data)) = read_biff_record(workbook_stream, offset) else {
+            break;
+        };
+        offset = match offset
+            .checked_add(4)
+            .and_then(|o| o.checked_add(data.len()))
+        {
+            Some(offset) => offset,
+            None => break,
+        };
+
+        match record_id {
+            // CODEPAGE [MS-XLS 2.4.52]
+            0x0042 => {
+                if data.len() >= 2 {
+                    return u16::from_le_bytes([data[0], data[1]]);
+                }
+            }
+            // EOF terminates the workbook global substream.
+            0x000A => break,
+            _ => {}
+        }
+    }
+
+    // Default "ANSI" codepage used by Excel on Windows.
+    1252
+}
+
+fn encoding_for_codepage(codepage: u16) -> &'static Encoding {
+    match codepage as u32 {
+        874 => WINDOWS_874,
+        932 => SHIFT_JIS,
+        936 => GBK,
+        949 => EUC_KR,
+        950 => BIG5,
+        1250 => WINDOWS_1250,
+        1251 => WINDOWS_1251,
+        1252 => WINDOWS_1252,
+        1253 => WINDOWS_1253,
+        1254 => WINDOWS_1254,
+        1255 => WINDOWS_1255,
+        1256 => WINDOWS_1256,
+        1257 => WINDOWS_1257,
+        1258 => WINDOWS_1258,
+        65001 => UTF_8,
+        _ => WINDOWS_1252,
+    }
+}
+
+fn decode_ansi(bytes: &[u8], encoding: &'static Encoding) -> String {
+    let (cow, _, _) = encoding.decode(bytes);
+    cow.into_owned()
 }
 
 /// Workbook-global BIFF records needed for stable number format and date system import.
@@ -147,6 +209,8 @@ pub(crate) fn parse_biff_workbook_globals(
     workbook_stream: &[u8],
     _biff: BiffVersion,
 ) -> Result<BiffWorkbookGlobals, String> {
+    let encoding = encoding_for_codepage(biff_codepage(workbook_stream));
+
     let mut out = BiffWorkbookGlobals::default();
 
     let mut offset = 0usize;
@@ -173,7 +237,7 @@ pub(crate) fn parse_biff_workbook_globals(
             }
             // FORMAT / FORMAT2 [MS-XLS 2.4.90]
             0x041E | 0x001E => {
-                let (num_fmt_id, code) = parse_biff_format_record(record_id, data)?;
+                let (num_fmt_id, code) = parse_biff_format_record(record_id, data, encoding)?;
                 out.formats.insert(num_fmt_id, code);
             }
             // XF [MS-XLS 2.4.353]
@@ -217,7 +281,11 @@ fn parse_biff_xf_record(data: &[u8]) -> Result<BiffXf, String> {
     Ok(BiffXf { num_fmt_id, kind })
 }
 
-fn parse_biff_format_record(record_id: u16, data: &[u8]) -> Result<(u16, String), String> {
+fn parse_biff_format_record(
+    record_id: u16,
+    data: &[u8],
+    encoding: &'static Encoding,
+) -> Result<(u16, String), String> {
     if data.len() < 2 {
         return Err("FORMAT record too short".to_string());
     }
@@ -226,9 +294,9 @@ fn parse_biff_format_record(record_id: u16, data: &[u8]) -> Result<(u16, String)
 
     let (mut code, _) = match record_id {
         // BIFF8 FORMAT uses `XLUnicodeString` (16-bit length).
-        0x041E => parse_biff8_unicode_string(rest)?,
+        0x041E => parse_biff8_unicode_string(rest, encoding)?,
         // BIFF5 FORMAT2 uses a short ANSI string (8-bit length).
-        0x001E => parse_biff5_short_string(rest)?,
+        0x001E => parse_biff5_short_string(rest, encoding)?,
         _ => return Err(format!("unexpected FORMAT record id 0x{record_id:04X}")),
     };
 
@@ -241,6 +309,8 @@ pub(crate) fn parse_biff_bound_sheets(
     workbook_stream: &[u8],
     biff: BiffVersion,
 ) -> Result<Vec<(String, usize)>, String> {
+    let encoding = encoding_for_codepage(biff_codepage(workbook_stream));
+
     let mut offset = 0usize;
     let mut out = Vec::new();
 
@@ -261,7 +331,7 @@ pub(crate) fn parse_biff_bound_sheets(
                 }
 
                 let sheet_offset = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
-                let (name, _) = parse_biff_short_string(&data[6..], biff)?;
+                let (name, _) = parse_biff_short_string(&data[6..], biff, encoding)?;
                 let name = name.replace('\0', "");
                 out.push((name, sheet_offset));
             }
@@ -461,14 +531,18 @@ pub(crate) fn read_biff_record(workbook_stream: &[u8], offset: usize) -> Option<
     Some((record_id, data))
 }
 
-fn parse_biff_short_string(input: &[u8], biff: BiffVersion) -> Result<(String, usize), String> {
+fn parse_biff_short_string(
+    input: &[u8],
+    biff: BiffVersion,
+    encoding: &'static Encoding,
+) -> Result<(String, usize), String> {
     match biff {
-        BiffVersion::Biff5 => parse_biff5_short_string(input),
-        BiffVersion::Biff8 => parse_biff8_short_string(input),
+        BiffVersion::Biff5 => parse_biff5_short_string(input, encoding),
+        BiffVersion::Biff8 => parse_biff8_short_string(input, encoding),
     }
 }
 
-fn parse_biff5_short_string(input: &[u8]) -> Result<(String, usize), String> {
+fn parse_biff5_short_string(input: &[u8], encoding: &'static Encoding) -> Result<(String, usize), String> {
     let Some((&len, rest)) = input.split_first() else {
         return Err("unexpected end of string".to_string());
     };
@@ -476,10 +550,10 @@ fn parse_biff5_short_string(input: &[u8]) -> Result<(String, usize), String> {
     let bytes = rest
         .get(0..len)
         .ok_or_else(|| "unexpected end of string".to_string())?;
-    Ok((String::from_utf8_lossy(bytes).into_owned(), 1 + len))
+    Ok((decode_ansi(bytes, encoding), 1 + len))
 }
 
-fn parse_biff8_short_string(input: &[u8]) -> Result<(String, usize), String> {
+fn parse_biff8_short_string(input: &[u8], encoding: &'static Encoding) -> Result<(String, usize), String> {
     if input.len() < 2 {
         return Err("unexpected end of string".to_string());
     }
@@ -534,7 +608,7 @@ fn parse_biff8_short_string(input: &[u8]) -> Result<(String, usize), String> {
         }
         String::from_utf16_lossy(&u16s)
     } else {
-        String::from_utf8_lossy(chars).into_owned()
+        decode_ansi(chars, encoding)
     };
 
     let richtext_bytes = richtext_runs
@@ -548,7 +622,10 @@ fn parse_biff8_short_string(input: &[u8]) -> Result<(String, usize), String> {
     Ok((name, offset))
 }
 
-fn parse_biff8_unicode_string(input: &[u8]) -> Result<(String, usize), String> {
+fn parse_biff8_unicode_string(
+    input: &[u8],
+    encoding: &'static Encoding,
+) -> Result<(String, usize), String> {
     if input.len() < 3 {
         return Err("unexpected end of string".to_string());
     }
@@ -604,7 +681,7 @@ fn parse_biff8_unicode_string(input: &[u8]) -> Result<(String, usize), String> {
         }
         String::from_utf16_lossy(&u16s)
     } else {
-        String::from_utf8_lossy(chars).into_owned()
+        decode_ansi(chars, encoding)
     };
 
     let richtext_bytes = richtext_runs
@@ -628,6 +705,49 @@ mod tests {
         out.extend_from_slice(&(data.len() as u16).to_le_bytes());
         out.extend_from_slice(data);
         out
+    }
+
+    #[test]
+    fn decodes_biff8_compressed_strings_using_codepage() {
+        // CODEPAGE=1251 (Windows Cyrillic).
+        let r_codepage = record(0x0042, &1251u16.to_le_bytes());
+
+        // FORMAT id=200, code = byte 0x80 in cp1251 => "Ђ".
+        let mut fmt_payload = Vec::new();
+        fmt_payload.extend_from_slice(&200u16.to_le_bytes());
+        fmt_payload.extend_from_slice(&1u16.to_le_bytes()); // cch
+        fmt_payload.push(0); // flags (compressed)
+        fmt_payload.push(0x80); // "Ђ" in cp1251
+        let r_fmt = record(0x041E, &fmt_payload);
+
+        let mut xf_payload = vec![0u8; 20];
+        xf_payload[2..4].copy_from_slice(&200u16.to_le_bytes());
+        let r_xf = record(0x00E0, &xf_payload);
+
+        let stream = [r_codepage, r_fmt, r_xf, record(0x000A, &[])].concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
+        assert_eq!(globals.resolve_number_format_code(0).as_deref(), Some("Ђ"));
+    }
+
+    #[test]
+    fn decodes_biff5_strings_using_codepage() {
+        // CODEPAGE=1251 (Windows Cyrillic).
+        let r_codepage = record(0x0042, &1251u16.to_le_bytes());
+
+        // FORMAT2 id=200, code = byte 0x80 in cp1251 => "Ђ".
+        let mut fmt_payload = Vec::new();
+        fmt_payload.extend_from_slice(&200u16.to_le_bytes());
+        fmt_payload.push(1); // cch
+        fmt_payload.push(0x80);
+        let r_fmt = record(0x001E, &fmt_payload);
+
+        let mut xf_payload = vec![0u8; 20];
+        xf_payload[2..4].copy_from_slice(&200u16.to_le_bytes());
+        let r_xf = record(0x00E0, &xf_payload);
+
+        let stream = [r_codepage, r_fmt, r_xf, record(0x000A, &[])].concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff5).expect("parse");
+        assert_eq!(globals.resolve_number_format_code(0).as_deref(), Some("Ђ"));
     }
 
     #[test]

@@ -1801,6 +1801,7 @@ version = "0.1.0"
 dependencies = [
  "calamine 0.32.0",
  "cfb 0.10.0",
+ "encoding_rs",
  "formula-format",
  "formula-model",
  "thiserror 2.0.17",
