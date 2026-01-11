@@ -209,6 +209,15 @@ impl XlsbWorkbook {
         &self.styles
     }
 
+    /// Parse `xl/styles.bin` using locale-aware built-in number formats.
+    ///
+    /// This is a convenience wrapper around [`Styles::parse_with_locale`] that
+    /// uses the preserved `xl/styles.bin` bytes from this workbook.
+    pub fn styles_with_locale(&self, locale: formula_format::Locale) -> Option<Result<Styles, ParseError>> {
+        let bytes = self.styles_bin()?;
+        Some(Styles::parse_with_locale(bytes, locale))
+    }
+
     /// Raw bytes for parts that should be preserved on round-trip.
     ///
     /// Depending on [`OpenOptions`], this can include:
