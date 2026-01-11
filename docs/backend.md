@@ -123,6 +123,12 @@ The preferred configuration is `SECRET_STORE_KEYS_JSON`, which enables key rotat
 }
 ```
 
+To generate a new 32-byte key value:
+
+```bash
+node -e 'console.log(require("crypto").randomBytes(32).toString("base64"))'
+```
+
 Key ids are application-defined (e.g. a date string), but must be non-empty and must not include `:` (the delimiter used in the on-disk encoding).
 
 If `SECRET_STORE_KEYS_JSON` is not set, the API falls back to legacy single-key mode using `SECRET_STORE_KEY` (compatible with older deployments).
