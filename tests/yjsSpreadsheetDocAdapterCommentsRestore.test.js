@@ -87,6 +87,49 @@ test("Yjs doc adapter restore preserves legacy list comments when comments root 
   assert.equal(restored.get("c2").get("content"), "New comment");
 });
 
+test("Yjs doc adapter restore clears legacy list comments from target when restoring a canonical comments map", () => {
+  const legacy = new Y.Doc();
+  const legacyComments = legacy.getArray("comments");
+  const legacyComment = new Y.Map();
+  legacyComment.set("id", "c1");
+  legacyComment.set("cellRef", "A1");
+  legacyComment.set("content", "Legacy comment");
+  legacyComments.push([legacyComment]);
+  const legacySnapshot = Y.encodeStateAsUpdate(legacy);
+
+  // Target doc starts in a clobbered state: comments is a map root, but contains
+  // a legacy list entry (parentSub === null).
+  const target = new Y.Doc();
+  Y.applyUpdate(target, legacySnapshot);
+  target.getMap("comments");
+
+  const canonical = new Y.Doc();
+  const canonicalComments = canonical.getMap("comments");
+  const canonicalComment = new Y.Map();
+  canonicalComment.set("id", "c2");
+  canonicalComment.set("cellRef", "A2");
+  canonicalComment.set("content", "Canonical comment");
+  canonicalComments.set("c2", canonicalComment);
+  const canonicalSnapshot = Y.encodeStateAsUpdate(canonical);
+
+  const adapter = createYjsSpreadsheetDocAdapter(target);
+  adapter.applyState(canonicalSnapshot);
+
+  const restored = target.getMap("comments");
+  assert.equal(restored.size, 1);
+  assert.equal(restored.has("c1"), false);
+  assert.equal(restored.has("c2"), true);
+
+  // Ensure the legacy list item is gone (no non-deleted items with parentSub null).
+  let item = restored._start;
+  while (item) {
+    if (!item.deleted && item.parentSub === null) {
+      assert.fail("expected restored comments map to have no legacy list items");
+    }
+    item = item.right;
+  }
+});
+
 test("Yjs doc adapter restore rehydrates additional map roots present only in the snapshot", () => {
   const source = new Y.Doc();
   const settings = source.getMap("settings");

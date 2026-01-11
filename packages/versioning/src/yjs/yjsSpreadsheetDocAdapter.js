@@ -90,6 +90,40 @@ function legacyListItemsFromMapRoot(mapType) {
 }
 
 /**
+ * Delete any legacy list items (sequence entries with `parentSub === null`) from
+ * an instantiated map root.
+ *
+ * @param {Y.Transaction} transaction
+ * @param {any} mapType
+ */
+function deleteLegacyListItemsFromMapRoot(transaction, mapType) {
+  let item = mapType?._start ?? null;
+  while (item) {
+    if (!item.deleted && item.parentSub === null) {
+      item.delete(transaction);
+    }
+    item = item.right;
+  }
+}
+
+/**
+ * Delete any map entries (keyed items) from an instantiated array root.
+ *
+ * This can happen if a map schema was instantiated as an Array: map entries are
+ * stored in `type._map` and are invisible to `array.toArray()`.
+ *
+ * @param {Y.Transaction} transaction
+ * @param {any} arrayType
+ */
+function deleteMapEntriesFromArrayRoot(transaction, arrayType) {
+  const map = arrayType?._map;
+  if (!(map instanceof Map)) return;
+  for (const item of map.values()) {
+    if (!item?.deleted) item.delete(transaction);
+  }
+}
+
+/**
  * Create a VersionManager-compatible adapter around a Y.Doc.
  *
  * Note: restoring a snapshot is implemented by mutating the current `doc` in
@@ -307,7 +341,7 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
         addRoot(name, kind, "snapshot");
       }
 
-      doc.transact(() => {
+      doc.transact((transaction) => {
         for (const [name, { kind }] of roots.entries()) {
           if (kind === "map") {
             const target = doc.getMap(name);
@@ -316,6 +350,11 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
 
             for (const key of Array.from(target.keys())) {
               target.delete(key);
+            }
+            // Clear any legacy list items on the target root so restore doesn't
+            // accidentally retain clobbered Array-schema content.
+            if (name === "comments") {
+              deleteLegacyListItemsFromMapRoot(transaction, target);
             }
 
             source.forEach((value, key) => {
@@ -342,6 +381,10 @@ export function createYjsSpreadsheetDocAdapter(doc, opts = {}) {
             const target = doc.getArray(name);
             const source = restored.getArray(name);
 
+            if (name === "comments") {
+              // Clear any clobbered map entries stored on the array root.
+              deleteMapEntriesFromArrayRoot(transaction, target);
+            }
             if (target.length > 0) {
               target.delete(0, target.length);
             }
