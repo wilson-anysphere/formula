@@ -1271,7 +1271,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
             });
             let has_shared_strings = !xlsb.shared_strings().is_empty();
             if has_text_edits && has_shared_strings {
-                xlsb.save_with_cell_edits_shared_strings(&final_out_path, *sheet_index, edits)
+                xlsb.save_with_cell_edits_streaming_shared_strings(&final_out_path, *sheet_index, edits)
                     .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
             } else {
                 xlsb.save_with_cell_edits_streaming(&final_out_path, *sheet_index, edits)
@@ -1322,7 +1322,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
             });
             let has_shared_strings = !wb.shared_strings().is_empty();
             if has_text_edits && has_shared_strings {
-                wb.save_with_cell_edits_shared_strings(&out_path, *sheet_index, sheet_edits)
+                wb.save_with_cell_edits_streaming_shared_strings(&out_path, *sheet_index, sheet_edits)
                     .with_context(|| format!("save edited xlsb {:?}", out_path))?;
             } else {
                 wb.save_with_cell_edits_streaming(&out_path, *sheet_index, sheet_edits)
