@@ -184,17 +184,17 @@ export class FormulaBarView {
     return this.model.isEditing && this.model.draft.trim().startsWith("=");
   }
 
-  beginRangeSelection(range: RangeAddress): void {
+  beginRangeSelection(range: RangeAddress, sheetId?: string): void {
     this.model.beginEdit();
-    this.model.beginRangeSelection(range);
+    this.model.beginRangeSelection(range, sheetId);
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
     this.#setTextareaSelectionFromModel();
     this.#emitOverlays();
   }
 
-  updateRangeSelection(range: RangeAddress): void {
-    this.model.updateRangeSelection(range);
+  updateRangeSelection(range: RangeAddress, sheetId?: string): void {
+    this.model.updateRangeSelection(range, sheetId);
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
     this.#setTextareaSelectionFromModel();

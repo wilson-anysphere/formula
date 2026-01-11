@@ -168,12 +168,12 @@ export class FormulaBarModel {
     return this.#activeReferenceIndex;
   }
 
-  beginRangeSelection(range: RangeAddress): void {
+  beginRangeSelection(range: RangeAddress, sheetId?: string): void {
     if (!this.#isEditing) return;
     const active =
       this.#activeReferenceIndex == null ? null : (this.#coloredReferences[this.#activeReferenceIndex] ?? null);
     this.#insertOrReplaceRange(
-      rangeToA1(range),
+      formatRangeReference(range, sheetId),
       true,
       active ? { start: active.start, end: active.end } : null
     );
@@ -183,9 +183,9 @@ export class FormulaBarModel {
     this.#updateHoverFromCursor();
   }
 
-  updateRangeSelection(range: RangeAddress): void {
+  updateRangeSelection(range: RangeAddress, sheetId?: string): void {
     if (!this.#isEditing) return;
-    this.#insertOrReplaceRange(rangeToA1(range), false);
+    this.#insertOrReplaceRange(formatRangeReference(range, sheetId), false);
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#updateReferenceHighlights();
@@ -330,4 +330,16 @@ export class FormulaBarModel {
     this.#coloredReferences = colored;
     this.#activeReferenceIndex = activeIndex;
   }
+}
+
+function formatRangeReference(range: RangeAddress, sheetId?: string): string {
+  const a1 = rangeToA1(range);
+  if (!sheetId) return a1;
+  return `${formatSheetPrefix(sheetId)}${a1}`;
+}
+
+function formatSheetPrefix(id: string): string {
+  const needsQuotes = !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(id);
+  if (!needsQuotes) return `${id}!`;
+  return `'${id.replaceAll("'", "''")}'!`;
 }

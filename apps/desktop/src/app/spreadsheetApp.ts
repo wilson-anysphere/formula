@@ -326,7 +326,7 @@ export class SpreadsheetApp {
   private editor: CellEditorOverlay;
   private formulaBar: FormulaBarView | null = null;
   private formulaBarCompletion: FormulaBarTabCompletionController | null = null;
-  private formulaEditCell: CellCoord | null = null;
+  private formulaEditCell: { sheetId: string; cell: CellCoord } | null = null;
   private referencePreview: { start: CellCoord; end: CellCoord } | null = null;
   private referenceHighlights: Array<{ start: CellCoord; end: CellCoord; color: string; active: boolean }> = [];
   private referenceHighlightsSource: Array<{
@@ -536,7 +536,7 @@ export class SpreadsheetApp {
 
     this.editor = new CellEditorOverlay(this.root, {
       onCommit: (commit) => {
-        this.applyEdit(commit.cell, commit.value);
+        this.applyEdit(this.sheetId, commit.cell, commit.value);
 
         const next = navigateSelectionByKey(
           this.selection,
@@ -657,7 +657,7 @@ export class SpreadsheetApp {
     if (opts.formulaBar) {
       this.formulaBar = new FormulaBarView(opts.formulaBar, {
         onBeginEdit: () => {
-          this.formulaEditCell = { ...this.selection.active };
+          this.formulaEditCell = { sheetId: this.sheetId, cell: { ...this.selection.active } };
         },
         onGoTo: (reference) => this.goTo(reference),
         onCommit: (text) => this.commitFormulaBar(text),
@@ -2662,10 +2662,15 @@ export class SpreadsheetApp {
         if (this.dragState.mode === "formula" && this.formulaBar) {
           const r = this.selection.ranges[0];
           if (r) {
-            this.formulaBar.updateRangeSelection({
-              start: { row: r.startRow, col: r.startCol },
-              end: { row: r.endRow, col: r.endCol }
-            });
+            const rangeSheetId =
+              this.formulaEditCell && this.formulaEditCell.sheetId !== this.sheetId ? this.sheetId : undefined;
+            this.formulaBar.updateRangeSelection(
+              {
+                start: { row: r.startRow, col: r.startCol },
+                end: { row: r.endRow, col: r.endCol }
+              },
+              rangeSheetId
+            );
           }
         }
       }
@@ -2737,10 +2742,15 @@ export class SpreadsheetApp {
       this.selection = setActiveCell(this.selection, cell, this.limits);
       this.renderSelection();
       this.updateStatus();
-      this.formulaBar.beginRangeSelection({
-        start: { row: cell.row, col: cell.col },
-        end: { row: cell.row, col: cell.col }
-      });
+      const rangeSheetId =
+        this.formulaEditCell && this.formulaEditCell.sheetId !== this.sheetId ? this.sheetId : undefined;
+      this.formulaBar.beginRangeSelection(
+        {
+          start: { row: cell.row, col: cell.col },
+          end: { row: cell.row, col: cell.col }
+        },
+        rangeSheetId
+      );
       return;
     }
 
@@ -2849,10 +2859,15 @@ export class SpreadsheetApp {
 
       if (this.dragState.mode === "formula" && this.formulaBar) {
         const r = this.selection.ranges[0];
-        this.formulaBar.updateRangeSelection({
-          start: { row: r.startRow, col: r.startCol },
-          end: { row: r.endRow, col: r.endCol }
-        });
+        const rangeSheetId =
+          this.formulaEditCell && this.formulaEditCell.sheetId !== this.sheetId ? this.sheetId : undefined;
+        this.formulaBar.updateRangeSelection(
+          {
+            start: { row: r.startRow, col: r.startCol },
+            end: { row: r.endRow, col: r.endCol }
+          },
+          rangeSheetId
+        );
       }
 
       this.maybeStartDragAutoScroll();
@@ -3656,10 +3671,10 @@ export class SpreadsheetApp {
     return value;
   }
 
-  private applyEdit(cell: CellCoord, rawValue: string): void {
-    const original = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+  private applyEdit(sheetId: string, cell: CellCoord, rawValue: string): void {
+    const original = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
     if (rawValue.trim() === "") {
-      this.document.clearCell(this.sheetId, cell, { label: "Clear cell" });
+      this.document.clearCell(sheetId, cell, { label: "Clear cell" });
       return;
     }
 
@@ -3672,43 +3687,45 @@ export class SpreadsheetApp {
         // No-op edit: keep rich runs without creating a history entry.
         return;
       }
-      this.document.setCellValue(this.sheetId, cell, updated, { label: "Edit cell" });
+      this.document.setCellValue(sheetId, cell, updated, { label: "Edit cell" });
       return;
     }
-
-    this.document.setCellInput(this.sheetId, cell, rawValue, { label: "Edit cell" });
+    this.document.setCellInput(sheetId, cell, rawValue, { label: "Edit cell" });
   }
 
   private commitFormulaBar(text: string): void {
-    const target = this.formulaEditCell ?? this.selection.active;
-    this.applyEdit(target, text);
+    const target = this.formulaEditCell ?? { sheetId: this.sheetId, cell: { ...this.selection.active } };
+    this.applyEdit(target.sheetId, target.cell, text);
 
-    this.selection = setActiveCell(this.selection, target, this.limits);
-    this.ensureActiveCellVisible();
-    this.scrollCellIntoView(this.selection.active);
     this.formulaEditCell = null;
     this.referencePreview = null;
     this.referenceHighlights = [];
     this.referenceHighlightsSource = [];
+
+    // Restore focus + selection to the original edit cell, even if the user
+    // navigated to another sheet while picking ranges.
+    this.activateCell({ sheetId: target.sheetId, row: target.cell.row, col: target.cell.col });
     this.refresh();
     this.focus();
   }
 
   private cancelFormulaBar(): void {
-    if (this.formulaEditCell) {
-      this.selection = setActiveCell(this.selection, this.formulaEditCell, this.limits);
-    }
+    const target = this.formulaEditCell;
     this.formulaEditCell = null;
     this.referencePreview = null;
     this.referenceHighlights = [];
     this.referenceHighlightsSource = [];
-    this.ensureActiveCellVisible();
-    const didScroll = this.scrollCellIntoView(this.selection.active);
-    if (didScroll) this.ensureViewportMappingCurrent();
+
+    if (target) {
+      // Restore the original edit location (sheet + cell).
+      this.activateCell({ sheetId: target.sheetId, row: target.cell.row, col: target.cell.col });
+      this.renderReferencePreview();
+      return;
+    }
+
     this.renderReferencePreview();
     this.renderSelection();
     this.updateStatus();
-    if (didScroll) this.refresh("scroll");
     this.focus();
   }
 

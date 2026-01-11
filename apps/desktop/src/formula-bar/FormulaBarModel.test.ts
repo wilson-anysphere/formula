@@ -34,6 +34,19 @@ describe("FormulaBarModel", () => {
     expect(model.draft).toBe("=D1+B1");
   });
 
+  it("formats sheet-qualified references when selecting a range on another sheet", () => {
+    const model = new FormulaBarModel();
+    model.setActiveCell({ address: "C1", input: "=", value: null });
+    model.beginEdit();
+    model.updateDraft("=", 1, 1);
+
+    model.beginRangeSelection(parseA1Range("B2")!, "Sheet 2");
+    expect(model.draft).toBe("='Sheet 2'!B2");
+
+    model.updateRangeSelection(parseA1Range("B2:C3")!, "O'Hare");
+    expect(model.draft).toBe("='O''Hare'!B2:C3");
+  });
+
   it("accepts AI suggestions as an insertion at the caret", () => {
     const model = new FormulaBarModel();
     model.setActiveCell({ address: "A1", input: "=SU", value: null });
