@@ -102,6 +102,20 @@ fn plaintext_migrates_to_encrypted_on_first_persist() {
 }
 
 #[test]
+fn encrypted_persist_creates_parent_directories() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("nested/dir/workbook.formula");
+    let key_provider = Arc::new(InMemoryKeyProvider::default());
+
+    let storage = Storage::open_encrypted_path(&path, key_provider).expect("open encrypted");
+    storage
+        .create_workbook("Book1", None)
+        .expect("create workbook");
+    storage.persist().expect("persist should create dirs");
+    assert!(path.exists(), "expected encrypted workbook file to exist");
+}
+
+#[test]
 fn encrypted_workbook_survives_key_rotation() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("workbook.formula");

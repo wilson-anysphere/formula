@@ -1225,6 +1225,7 @@ fn export_connection_to_sqlite_bytes(conn: &Connection) -> Result<Vec<u8>> {
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(dir)?;
     let mut temp = NamedTempFile::new_in(dir)?;
     temp.write_all(bytes)?;
     temp.flush()?;

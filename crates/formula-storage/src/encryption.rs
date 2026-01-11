@@ -204,13 +204,14 @@ impl KeyRing {
 }
 
 pub fn is_encrypted_container(bytes: &[u8]) -> bool {
-    if bytes.len() < 8 {
-        return false;
+    // Treat any `FMLENC??` prefix as encrypted so corrupted/truncated containers
+    // are surfaced as encryption errors instead of being misinterpreted as a
+    // plaintext SQLite file.
+    if bytes.len() >= MAGIC_FMLENC_PREFIX.len() && bytes[..MAGIC_FMLENC_PREFIX.len()] == *MAGIC_FMLENC_PREFIX
+    {
+        return true;
     }
-    let magic: [u8; 8] = bytes[..8].try_into().expect("slice length checked");
-    magic == *MAGIC_FMLENC_V1
-        || magic == *LEGACY_MAGIC
-        || parse_fmlenc_version(&magic).is_some()
+    bytes.len() >= LEGACY_MAGIC.len() && bytes[..LEGACY_MAGIC.len()] == *LEGACY_MAGIC
 }
 
 pub fn encrypt_sqlite_bytes(plaintext: &[u8], keyring: &KeyRing) -> Result<Vec<u8>, EncryptionError> {
