@@ -807,10 +807,7 @@ export class CanvasGridRenderer {
       { rect: main, shiftX: deltaX, shiftY: deltaY }
     ];
 
-    // Remote presence cursor badges can extend beyond their cursor cell (e.g. above + to the right).
-    // When we blit-scroll the selection layer we only redraw newly exposed stripes; without padding,
-    // badges for cursors that become visible in the new stripe can be clipped/truncated.
-    const selectionPadding = this.remotePresences.length > 0 ? this.remotePresenceDirtyPadding : 1;
+    const selectionPadding = 1;
 
     for (const { rect, shiftX, shiftY } of candidates) {
       if (rect.width <= 0 || rect.height <= 0) continue;
@@ -843,6 +840,27 @@ export class CanvasGridRenderer {
         };
         this.markDirtyBoth(stripe);
         this.markDirtySelection(stripe, selectionPadding);
+      }
+    }
+
+    if (this.remotePresences.length > 0) {
+      // Cursor name badges can overlap into frozen quadrants, which aren't shifted during blit.
+      // Mark the (padded) cursor rects dirty in both the previous and next viewport so badges
+      // are cleared/redrawn correctly.
+      const previousViewport = {
+        ...viewport,
+        scrollX: viewport.scrollX + deltaX,
+        scrollY: viewport.scrollY + deltaY
+      } as GridViewportState;
+
+      for (const presence of this.remotePresences) {
+        const cursor = presence.cursor;
+        if (!cursor) continue;
+
+        const previousRect = this.cellRectInViewport(cursor.row, cursor.col, previousViewport);
+        const nextRect = this.cellRectInViewport(cursor.row, cursor.col, viewport);
+        if (previousRect) this.markDirtySelection(previousRect, this.remotePresenceDirtyPadding);
+        if (nextRect) this.markDirtySelection(nextRect, this.remotePresenceDirtyPadding);
       }
     }
 
