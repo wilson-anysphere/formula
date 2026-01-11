@@ -101,6 +101,26 @@ test("RefreshOrchestrator: supports query ids like '__proto__' without prototype
   assert.equal(({}).polluted, undefined);
 });
 
+test("RefreshOrchestrator: query references work when the dependency id is '__proto__'", async () => {
+  let reads = 0;
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        reads += 1;
+        return "Value\n1\n";
+      },
+    },
+  });
+
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("__proto__", { type: "csv", path: "file.csv", options: { hasHeaders: true } }));
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "__proto__" }));
+
+  const results = await orchestrator.refreshAll(["B"]).promise;
+  assert.equal(reads, 1);
+  assert.deepEqual(Object.keys(results), ["B"]);
+});
+
 test("RefreshOrchestrator: refresh(queryId) refreshes dependencies and returns the target result", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
