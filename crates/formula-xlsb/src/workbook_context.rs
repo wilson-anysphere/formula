@@ -239,6 +239,44 @@ impl WorkbookContext {
             _ => Some(extern_name.name.clone()),
         }
     }
+
+    pub(crate) fn namex_function_ref(&self, name: &str) -> Option<(u16, u16)> {
+        let normalized = normalize_key(name);
+
+        // HashMap iteration order is nondeterministic; pick the lowest `(supbook, name_index)`
+        // match so encoding is stable.
+        let mut best: Option<(u16, u16)> = None;
+        for (&(supbook_index, name_index), extern_name) in &self.namex_extern_names {
+            if !extern_name.is_function {
+                continue;
+            }
+            if normalize_key(&extern_name.name) != normalized {
+                continue;
+            }
+            match best {
+                None => best = Some((supbook_index, name_index)),
+                Some((best_supbook, best_name)) => {
+                    if (supbook_index, name_index) < (best_supbook, best_name) {
+                        best = Some((supbook_index, name_index));
+                    }
+                }
+            }
+        }
+
+        let (supbook_index, name_index) = best?;
+
+        // Find an ExternSheet (`ixti`) that points at this SupBook. If the workbook doesn't have an
+        // ExternSheet table we fall back to encoding the SupBook index directly (mirrors
+        // `format_namex`).
+        let ixti = self
+            .namex_ixti_supbooks
+            .iter()
+            .filter_map(|(&ixti, &sb)| (sb == supbook_index).then_some(ixti))
+            .min()
+            .unwrap_or(supbook_index);
+
+        Some((ixti, name_index))
+    }
 }
 
 fn normalize_key(s: &str) -> String {

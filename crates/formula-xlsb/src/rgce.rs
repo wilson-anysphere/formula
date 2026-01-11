@@ -790,6 +790,7 @@ const PTG_REF: u8 = 0x24;
 const PTG_AREA: u8 = 0x25;
 const PTG_REF3D: u8 = 0x3A;
 const PTG_AREA3D: u8 = 0x3B;
+const PTG_NAMEX: u8 = 0x39;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PtgClass {
@@ -877,7 +878,7 @@ fn emit_expr(expr: &Expr, ctx: &WorkbookContext, out: &mut Vec<u8>) -> Result<()
             for arg in args {
                 emit_expr(arg, ctx, out)?;
             }
-            emit_func(name, args.len(), out)?;
+            emit_func(name, args.len(), ctx, out)?;
         }
         Expr::Unary { op, expr } => {
             match op {
@@ -927,24 +928,48 @@ fn emit_number(n: f64, out: &mut Vec<u8>) {
     }
 }
 
-fn emit_func(name: &str, argc: usize, out: &mut Vec<u8>) -> Result<(), EncodeError> {
-    let iftab = match name.trim().to_ascii_uppercase().as_str() {
-        "SUM" => 0x0004,
-        other => {
-            return Err(EncodeError::UnknownFunction {
-                name: other.to_string(),
-            })
-        }
-    };
+fn emit_func(
+    name: &str,
+    argc: usize,
+    ctx: &WorkbookContext,
+    out: &mut Vec<u8>,
+) -> Result<(), EncodeError> {
+    let upper = name.trim().to_ascii_uppercase();
 
-    if argc > u8::MAX as usize {
-        return Err(EncodeError::Parse("too many function arguments".to_string()));
+    // Built-in functions (currently very small subset).
+    if let Some(iftab) = match upper.as_str() {
+        "SUM" => Some(0x0004u16),
+        _ => None,
+    } {
+        if argc > u8::MAX as usize {
+            return Err(EncodeError::Parse("too many function arguments".to_string()));
+        }
+        out.push(PTG_FUNCVAR);
+        out.push(argc as u8);
+        out.extend_from_slice(&iftab.to_le_bytes());
+        return Ok(());
     }
 
-    out.push(PTG_FUNCVAR);
-    out.push(argc as u8);
-    out.extend_from_slice(&(iftab as u16).to_le_bytes());
-    Ok(())
+    // Add-in / UDF call pattern: args..., PtgNameX(func), PtgFuncVar(argc+1, 0x00FF)
+    if let Some((ixti, name_index)) = ctx.namex_function_ref(&upper) {
+        let argc_total = argc
+            .checked_add(1)
+            .ok_or_else(|| EncodeError::Parse("too many function arguments".to_string()))?;
+        if argc_total > u8::MAX as usize {
+            return Err(EncodeError::Parse("too many function arguments".to_string()));
+        }
+
+        out.push(PTG_NAMEX);
+        out.extend_from_slice(&ixti.to_le_bytes());
+        out.extend_from_slice(&name_index.to_le_bytes());
+
+        out.push(PTG_FUNCVAR);
+        out.push(argc_total as u8);
+        out.extend_from_slice(&0x00FFu16.to_le_bytes());
+        return Ok(());
+    }
+
+    Err(EncodeError::UnknownFunction { name: upper })
 }
 
 fn emit_name(
