@@ -184,10 +184,27 @@ export class QueryFoldingEngine {
     const localSteps = [];
     let foldingBroken = false;
 
-    for (const step of query.steps) {
+    for (let idx = 0; idx < query.steps.length; idx++) {
+      const step = query.steps[idx];
+
       if (foldingBroken) {
         localSteps.push(step);
         continue;
+      }
+
+      // Special case: `Table.NestedJoin` followed immediately by `Table.ExpandTableColumn`
+      // is equivalent to a flattened join, so we can fold the pair into SQL even
+      // though nested joins are not foldable on their own.
+      if (step.operation.type === "merge" && (step.operation.joinMode ?? "flat") === "nested") {
+        const expandStep = query.steps[idx + 1] ?? null;
+        if (expandStep?.operation.type === "expandTableColumn" && expandStep.operation.column === step.operation.newColumnName) {
+          const folded = this.applySqlNestedJoinExpand(current, step.operation, expandStep.operation, ctx, callStack);
+          if (folded) {
+            current = folded;
+            idx += 1; // consume the expand step too
+            continue;
+          }
+        }
       }
 
       if (!this.foldable.has(step.operation.type)) {
@@ -287,7 +304,9 @@ export class QueryFoldingEngine {
     /** @type {FoldingExplainStep[]} */
     const steps = [];
 
-    for (const step of query.steps) {
+    for (let idx = 0; idx < query.steps.length; idx++) {
+      const step = query.steps[idx];
+
       if (foldingBroken) {
         localSteps.push(step);
         steps.push({
@@ -297,6 +316,32 @@ export class QueryFoldingEngine {
           reason: "folding_stopped",
         });
         continue;
+      }
+
+      // Same special-case as `compile()`: fold nested join + expand as a single SQL join.
+      if (step.operation.type === "merge" && (step.operation.joinMode ?? "flat") === "nested") {
+        const expandStep = query.steps[idx + 1] ?? null;
+        if (expandStep?.operation.type === "expandTableColumn" && expandStep.operation.column === step.operation.newColumnName) {
+          const folded = this.applySqlNestedJoinExpand(current, step.operation, expandStep.operation, ctx, callStack);
+          if (folded) {
+            current = folded;
+            const sqlFragment = finalizeSqlForDialect(current, dialect);
+            steps.push({
+              stepId: step.id,
+              opType: step.operation.type,
+              status: "folded",
+              sqlFragment,
+            });
+            steps.push({
+              stepId: expandStep.id,
+              opType: expandStep.operation.type,
+              status: "folded",
+              sqlFragment,
+            });
+            idx += 1;
+            continue;
+          }
+        }
       }
 
       if (!this.foldable.has(step.operation.type)) {
@@ -381,13 +426,146 @@ export class QueryFoldingEngine {
 
     /** @type {SqlState} */
     let current = initial;
-    for (const step of query.steps) {
+    for (let idx = 0; idx < query.steps.length; idx++) {
+      const step = query.steps[idx];
+
+      if (step.operation.type === "merge" && (step.operation.joinMode ?? "flat") === "nested") {
+        const expandStep = query.steps[idx + 1] ?? null;
+        if (expandStep?.operation.type === "expandTableColumn" && expandStep.operation.column === step.operation.newColumnName) {
+          const folded = this.applySqlNestedJoinExpand(current, step.operation, expandStep.operation, ctx, nextStack);
+          if (folded) {
+            current = folded;
+            idx += 1;
+            continue;
+          }
+        }
+      }
+
       if (!this.foldable.has(step.operation.type)) return null;
       const next = this.applySqlStep(current, step.operation, ctx, nextStack);
       if (!next) return null;
       current = next;
     }
     return current;
+  }
+
+  /**
+   * Fold `Table.NestedJoin` + `Table.ExpandTableColumn` into a single SQL join.
+   *
+   * Nested joins themselves do not translate to SQL because they yield nested
+   * tables as cell values. When the next step immediately expands the nested
+   * column, the combined operation is equivalent to a flattened join.
+   *
+   * @private
+   * @param {SqlState} state
+   * @param {import("../model.js").MergeOp} merge
+   * @param {import("../model.js").ExpandTableColumnOp} expand
+   * @param {{
+   *   dialect: SqlDialect;
+   *   queries?: Record<string, Query> | null;
+   *   getConnectionIdentity?: ((connection: unknown) => unknown) | null;
+   *   privacyMode?: "ignore" | "enforce" | "warn";
+   *   privacyLevelsBySourceId?: Record<string, import("../privacy/levels.js").PrivacyLevel>;
+   *   diagnostics?: FoldingFirewallDiagnostic[];
+   * }} ctx
+   * @param {Set<string>} callStack
+   * @returns {SqlState | null}
+   */
+  applySqlNestedJoinExpand(state, merge, expand, ctx, callStack) {
+    const dialect = ctx.dialect;
+    const quoteIdentifier = dialect.quoteIdentifier;
+    if (!state.columns) return null;
+
+    const rightQuery = ctx.queries?.[merge.rightQuery];
+    if (!rightQuery) return null;
+    const rightState = this.compileQueryToSqlState(rightQuery, ctx, callStack);
+    if (!rightState?.columns) return null;
+
+    const leftSourceId = sqlSourceIdForState(state);
+    const rightSourceId = sqlSourceIdForState(rightState);
+    if (!connectionsMatch(state, rightState)) {
+      recordFoldingPrivacyDiagnostic(ctx, "merge", [leftSourceId, rightSourceId]);
+      return null;
+    }
+
+    if (ctx.privacyMode && ctx.privacyMode !== "ignore") {
+      const levelsBySourceId = ctx.privacyLevelsBySourceId;
+      const leftLevel = getPrivacyLevel(levelsBySourceId, leftSourceId);
+      const rightLevel = getPrivacyLevel(levelsBySourceId, rightSourceId);
+      if (leftLevel !== rightLevel) {
+        recordFoldingPrivacyDiagnostic(ctx, "merge", [leftSourceId, rightSourceId]);
+        return null;
+      }
+    }
+
+    const join = joinTypeToSql(dialect, merge.joinType);
+    if (!join) return null;
+
+    const leftKeys =
+      Array.isArray(merge.leftKeys) && merge.leftKeys.length > 0
+        ? merge.leftKeys
+        : typeof merge.leftKey === "string" && merge.leftKey
+          ? [merge.leftKey]
+          : [];
+    const rightKeys =
+      Array.isArray(merge.rightKeys) && merge.rightKeys.length > 0
+        ? merge.rightKeys
+        : typeof merge.rightKey === "string" && merge.rightKey
+          ? [merge.rightKey]
+          : [];
+
+    if (leftKeys.length === 0 || rightKeys.length === 0) return null;
+    if (leftKeys.length !== rightKeys.length) return null;
+    for (const key of leftKeys) {
+      if (!state.columns.includes(key)) return null;
+    }
+    for (const key of rightKeys) {
+      if (!rightState.columns.includes(key)) return null;
+    }
+
+    // Nested table schema is either explicitly projected by the merge op or the full right schema.
+    const nestedSchema = Array.isArray(merge.rightColumns) ? merge.rightColumns : rightState.columns;
+    if (!nestedSchema) return null;
+
+    /** @type {string[] | null} */
+    let expandedColumns = Array.isArray(expand.columns) ? expand.columns : null;
+    if (!expandedColumns) {
+      // Match local semantics: `columns: null` expands all columns from the first
+      // non-null nested table, which for nested joins is the nested schema.
+      expandedColumns = nestedSchema.slice();
+    }
+
+    const newColumnNames = Array.isArray(expand.newColumnNames) ? expand.newColumnNames : null;
+    if (newColumnNames && newColumnNames.length !== expandedColumns.length) return null;
+
+    for (const col of expandedColumns) {
+      if (!nestedSchema.includes(col)) return null;
+      if (!rightState.columns.includes(col)) return null;
+    }
+
+    const rawExpandedNames = newColumnNames ?? expandedColumns;
+    const expandedOutNames = computeExpandedColumnNames(state.columns, rawExpandedNames);
+
+    const selectList = [
+      ...state.columns.map((name) => `l.${quoteIdentifier(name)} AS ${quoteIdentifier(name)}`),
+      ...expandedColumns.map((name, idx) => `r.${quoteIdentifier(name)} AS ${quoteIdentifier(expandedOutNames[idx])}`),
+    ].join(", ");
+
+    const on = leftKeys
+      .map((leftKey, idx) =>
+        nullSafeEqualsSql(dialect, `l.${quoteIdentifier(leftKey)}`, `r.${quoteIdentifier(rightKeys[idx])}`),
+      )
+      .join(" AND ");
+    const sql = `SELECT ${selectList} FROM (${state.fragment.sql}) AS l ${join} (${rightState.fragment.sql}) AS r ON ${on}`;
+
+    return {
+      fragment: { sql, params: [...state.fragment.params, ...rightState.fragment.params] },
+      columns: [...state.columns, ...expandedOutNames],
+      sortBy: null,
+      sortInFragment: false,
+      connectionId: state.connectionId,
+      connection: state.connection,
+    };
   }
 
   /**
@@ -1502,6 +1680,33 @@ function nullSafeEqualsSql(dialect, leftExpr, rightExpr) {
       throw new Error(`Unsupported dialect '${exhausted}'`);
     }
   }
+}
+
+/**
+ * Compute output column names for `Table.ExpandTableColumn` while preserving
+ * Power Query-style uniquing semantics: existing columns are never renamed,
+ * and expanded columns use the `A`, `A.1`, `A.2` pattern.
+ *
+ * This mirrors the local execution logic in `src/steps.js`.
+ *
+ * @param {string[]} reservedNames
+ * @param {string[]} rawExpandedNames
+ * @returns {string[]}
+ */
+function computeExpandedColumnNames(reservedNames, rawExpandedNames) {
+  const reserved = new Set(reservedNames);
+  const baseExpanded = makeUniqueColumnNames(rawExpandedNames);
+  return baseExpanded.map((base) => {
+    if (!reserved.has(base)) {
+      reserved.add(base);
+      return base;
+    }
+    let i = 1;
+    while (reserved.has(`${base}.${i}`)) i += 1;
+    const unique = `${base}.${i}`;
+    reserved.add(unique);
+    return unique;
+  });
 }
 
 /**

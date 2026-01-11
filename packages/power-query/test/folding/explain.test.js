@@ -137,3 +137,51 @@ test("explain: nested join is not folded (unsupported_join_mode)", () => {
   );
   assert.equal(explained.steps[1].reason, "unsupported_join_mode");
 });
+
+test("explain: nested join + expand folds as a flattened join", () => {
+  const folding = new QueryFoldingEngine();
+  const connection = { id: "db1" };
+
+  const right = {
+    id: "q_right_nested_expand",
+    name: "Targets",
+    source: { type: "database", connection, query: "SELECT * FROM targets", dialect: "postgres" },
+    steps: [{ id: "r1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left_nested_expand",
+    name: "Sales",
+    source: { type: "database", connection, query: "SELECT * FROM sales", dialect: "postgres" },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target", "Sales"] } },
+      {
+        id: "l2",
+        name: "Nested Join",
+        operation: {
+          type: "merge",
+          rightQuery: "q_right_nested_expand",
+          joinType: "left",
+          leftKeys: ["Id"],
+          rightKeys: ["Id"],
+          joinMode: "nested",
+          newColumnName: "Matches",
+        },
+      },
+      { id: "l3", name: "Expand", operation: { type: "expandTableColumn", column: "Matches", columns: ["Target"] } },
+    ],
+  };
+
+  const explained = folding.explain(left, { dialect: "postgres", queries: { q_right_nested_expand: right } });
+  assert.equal(explained.plan.type, "sql");
+  assert.deepEqual(
+    explained.steps.map((s) => [s.opType, s.status]),
+    [
+      ["selectColumns", "folded"],
+      ["merge", "folded"],
+      ["expandTableColumn", "folded"],
+    ],
+  );
+  assert.match(explained.plan.sql, /\bJOIN\b/);
+  assert.match(explained.plan.sql, /"Target\.1"/);
+});
