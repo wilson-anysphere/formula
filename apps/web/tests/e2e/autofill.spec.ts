@@ -55,14 +55,14 @@ test("dragging the fill handle repeats values and shifts formulas", async ({ pag
   await page.mouse.move(a2Handle.x, a4Center.y);
   await page.mouse.up();
 
-  // Pattern repeats (1,2,1,2...).
+  // Series fill (1,2,3,4...).
   await page.mouse.click(cellCenter(2, 0).x, cellCenter(2, 0).y);
   await expect(page.getByTestId("active-address")).toHaveText("A3");
-  await expect(page.getByTestId("formula-bar-value")).toHaveText("1");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("3");
 
   await page.mouse.click(cellCenter(3, 0).x, cellCenter(3, 0).y);
   await expect(page.getByTestId("active-address")).toHaveText("A4");
-  await expect(page.getByTestId("formula-bar-value")).toHaveText("2");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("4");
 
   // Formula shifting: B1 = A1*2 -> fill down to B3 shifts the referenced row.
   await page.mouse.click(cellCenter(0, 1).x, cellCenter(0, 1).y);
@@ -92,6 +92,5 @@ test("dragging the fill handle repeats values and shifts formulas", async ({ pag
   await page.mouse.click(cellCenter(2, 1).x, cellCenter(2, 1).y);
   await expect(page.getByTestId("active-address")).toHaveText("B3");
   await expect(input).toHaveValue("=A3*2");
-  await expect(page.getByTestId("formula-bar-value")).toHaveText("2");
+  await expect(page.getByTestId("formula-bar-value")).toHaveText("6");
 });
-

@@ -120,7 +120,9 @@ function EngineDemoApp() {
     return { startRow0, startCol0, endRow0Exclusive, endCol0Exclusive };
   };
 
-  const fillDeltaRange0 = (source: Range0, target: Range0): Range0 | null => {
+  type FillDelta0 = { range: Range0; direction: "down" | "up" | "left" | "right" };
+
+  const fillDeltaRange0 = (source: Range0, target: Range0): FillDelta0 | null => {
     // Fill down.
     if (
       target.startRow0 === source.startRow0 &&
@@ -129,10 +131,13 @@ function EngineDemoApp() {
       target.endCol0Exclusive === source.endCol0Exclusive
     ) {
       return {
-        startRow0: source.endRow0Exclusive,
-        endRow0Exclusive: target.endRow0Exclusive,
-        startCol0: source.startCol0,
-        endCol0Exclusive: source.endCol0Exclusive
+        direction: "down",
+        range: {
+          startRow0: source.endRow0Exclusive,
+          endRow0Exclusive: target.endRow0Exclusive,
+          startCol0: source.startCol0,
+          endCol0Exclusive: source.endCol0Exclusive
+        }
       };
     }
 
@@ -144,10 +149,13 @@ function EngineDemoApp() {
       target.endCol0Exclusive === source.endCol0Exclusive
     ) {
       return {
-        startRow0: target.startRow0,
-        endRow0Exclusive: source.startRow0,
-        startCol0: source.startCol0,
-        endCol0Exclusive: source.endCol0Exclusive
+        direction: "up",
+        range: {
+          startRow0: target.startRow0,
+          endRow0Exclusive: source.startRow0,
+          startCol0: source.startCol0,
+          endCol0Exclusive: source.endCol0Exclusive
+        }
       };
     }
 
@@ -159,10 +167,13 @@ function EngineDemoApp() {
       target.endCol0Exclusive > source.endCol0Exclusive
     ) {
       return {
-        startRow0: source.startRow0,
-        endRow0Exclusive: source.endRow0Exclusive,
-        startCol0: source.endCol0Exclusive,
-        endCol0Exclusive: target.endCol0Exclusive
+        direction: "right",
+        range: {
+          startRow0: source.startRow0,
+          endRow0Exclusive: source.endRow0Exclusive,
+          startCol0: source.endCol0Exclusive,
+          endCol0Exclusive: target.endCol0Exclusive
+        }
       };
     }
 
@@ -174,10 +185,13 @@ function EngineDemoApp() {
       target.startCol0 < source.startCol0
     ) {
       return {
-        startRow0: source.startRow0,
-        endRow0Exclusive: source.endRow0Exclusive,
-        startCol0: target.startCol0,
-        endCol0Exclusive: source.startCol0
+        direction: "left",
+        range: {
+          startRow0: source.startRow0,
+          endRow0Exclusive: source.endRow0Exclusive,
+          startCol0: target.startCol0,
+          endCol0Exclusive: source.startCol0
+        }
       };
     }
 
@@ -483,18 +497,75 @@ function EngineDemoApp() {
     const target0 = cellRangeToRange0(target);
     if (!source0 || !target0) return;
 
-    const fillArea0 = fillDeltaRange0(source0, target0);
-    if (!fillArea0) return;
+    const fillDelta = fillDeltaRange0(source0, target0);
+    if (!fillDelta) return;
+    const { range: fillArea0, direction } = fillDelta;
 
     const sourceCells = await engine.getRange(range0ToA1(source0), activeSheet);
     const sourceHeight = source0.endRow0Exclusive - source0.startRow0;
     const sourceWidth = source0.endCol0Exclusive - source0.startCol0;
+
+    const numericSeries = (() => {
+      const isVertical = direction === "down" || direction === "up";
+      const isHorizontal = direction === "left" || direction === "right";
+
+      if (isVertical) {
+        if (sourceWidth !== 1 || sourceHeight < 2) return null;
+        const values: number[] = [];
+        for (let r = 0; r < sourceHeight; r++) {
+          const input = (sourceCells[r]?.[0]?.input ?? null) as CellScalar;
+          if (typeof input !== "number" || !Number.isFinite(input)) return null;
+          values.push(input);
+        }
+
+        const step = values[1] - values[0];
+        const eps = 1e-9;
+        for (let i = 2; i < values.length; i++) {
+          const delta = values[i] - values[i - 1]!;
+          if (Math.abs(delta - step) > eps) return null;
+        }
+
+        return { axis: "row" as const, start: values[0]!, step };
+      }
+
+      if (isHorizontal) {
+        if (sourceHeight !== 1 || sourceWidth < 2) return null;
+        const values: number[] = [];
+        for (let c = 0; c < sourceWidth; c++) {
+          const input = (sourceCells[0]?.[c]?.input ?? null) as CellScalar;
+          if (typeof input !== "number" || !Number.isFinite(input)) return null;
+          values.push(input);
+        }
+
+        const step = values[1] - values[0];
+        const eps = 1e-9;
+        for (let i = 2; i < values.length; i++) {
+          const delta = values[i] - values[i - 1]!;
+          if (Math.abs(delta - step) > eps) return null;
+        }
+
+        return { axis: "col" as const, start: values[0]!, step };
+      }
+
+      return null;
+    })();
 
     const mod = (value: number, modulo: number) => ((value % modulo) + modulo) % modulo;
 
     const updates: Array<{ address: string; value: CellScalar; sheet: string }> = [];
     for (let row0 = fillArea0.startRow0; row0 < fillArea0.endRow0Exclusive; row0++) {
       for (let col0 = fillArea0.startCol0; col0 < fillArea0.endCol0Exclusive; col0++) {
+        if (numericSeries?.axis === "row") {
+          const k = row0 - source0.startRow0;
+          updates.push({ address: toA1(row0, col0), value: numericSeries.start + numericSeries.step * k, sheet: activeSheet });
+          continue;
+        }
+        if (numericSeries?.axis === "col") {
+          const k = col0 - source0.startCol0;
+          updates.push({ address: toA1(row0, col0), value: numericSeries.start + numericSeries.step * k, sheet: activeSheet });
+          continue;
+        }
+
         const sourceRowOffset = mod(row0 - source0.startRow0, sourceHeight);
         const sourceColOffset = mod(col0 - source0.startCol0, sourceWidth);
         const sourceRow0 = source0.startRow0 + sourceRowOffset;
