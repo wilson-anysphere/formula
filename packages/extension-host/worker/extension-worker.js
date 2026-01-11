@@ -77,6 +77,25 @@ const installSandboxGlobals = vm.runInContext(
     }
   });
 
+  // Prevent a known vm sandbox escape: extensions can install a custom
+  // Error.prepareStackTrace that receives CallSite objects. When the stack
+  // contains host frames, CallSite#getFunction() can return *host* functions,
+  // whose constructors bypass codeGeneration: { strings: false }.
+  try {
+    Object.defineProperty(Error, "prepareStackTrace", {
+      configurable: false,
+      enumerable: false,
+      get() {
+        return undefined;
+      },
+      set() {
+        throw new Error("Error.prepareStackTrace is not allowed in extensions");
+      }
+    });
+  } catch {
+    // ignore
+  }
+
   return { console: Object.freeze(console), process };
 })
 `,

@@ -199,3 +199,67 @@ test("sandbox: WebSocket events cannot be used as a vm escape hatch", async (t) 
   assert.equal(result.escaped, false);
   assert.match(String(result.error ?? ""), /Code generation from strings disallowed|not allowed|disallowed/);
 });
+
+test("sandbox: blocks Error.prepareStackTrace CallSite escape", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-sandbox-stack-escape-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "formula-test.stackEscape.attempt";
+  const manifest = {
+    name: "stack-escape",
+    displayName: "Stack Escape Attempt",
+    version: "1.0.0",
+    publisher: "formula-test",
+    main: "./extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: [`onCommand:${commandId}`],
+    contributes: { commands: [{ command: commandId, title: "Stack Escape Attempt" }] },
+    permissions: ["ui.commands"]
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2), "utf8");
+  await fs.writeFile(
+    path.join(extDir, "extension.js"),
+    `
+      const formula = require("@formula/extension-api");
+
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
+          try {
+            Error.prepareStackTrace = (err, stack) => stack;
+            const stack = new Error().stack;
+            const callSite = Array.isArray(stack) ? stack.find((cs) => cs && typeof cs.getFunction === "function") : null;
+            const fn = callSite ? callSite.getFunction() : null;
+            if (typeof fn === "function") {
+              // If this ever succeeds, the sandbox is broken.
+              const proc = fn.constructor("return process")();
+              return { escaped: true, pid: proc?.pid ?? null };
+            }
+            return { escaped: false, error: "no-host-function" };
+          } catch (error) {
+            return { escaped: false, error: String(error?.message ?? error) };
+          }
+        }));
+      };
+    `,
+    "utf8"
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const result = await host.executeCommand(commandId);
+  assert.equal(result.escaped, false);
+  assert.match(String(result.error ?? ""), /Error.prepareStackTrace is not allowed in extensions/);
+});
