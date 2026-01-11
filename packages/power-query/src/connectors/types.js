@@ -63,7 +63,7 @@
  *
  * @typedef {Object} HttpConnectorOAuth2Config
  * @property {string} providerId Stable provider/config identifier.
- * @property {string[] | undefined} [scopes] Optional scope list.
+ * @property {string[] | string | undefined} [scopes] Optional scope list.
  */
 
 /**
