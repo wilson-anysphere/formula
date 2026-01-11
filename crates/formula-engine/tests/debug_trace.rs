@@ -1,5 +1,5 @@
 use formula_engine::debug::{Span, TraceKind, TraceRef};
-use formula_engine::{Engine, Value};
+use formula_engine::{Engine, NameDefinition, NameScope, Value};
 
 fn slice(formula: &str, span: Span) -> &str {
     &formula[span.start..span.end]
@@ -135,4 +135,38 @@ fn trace_respects_if_short_circuiting() {
     assert_eq!(dbg.trace.children[0].value, Value::Bool(true));
     assert_eq!(slice(&dbg.formula, dbg.trace.children[1].span), "1");
     assert_eq!(dbg.trace.children[1].value, Value::Number(1.0));
+}
+
+#[test]
+fn trace_preserves_reference_context_for_named_ranges() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine
+        .define_name(
+            "MyRange",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!A1:A2".to_string()),
+        )
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=SUM(MyRange)").unwrap();
+    engine.recalculate();
+
+    let dbg = engine.debug_evaluate("Sheet1", "B1").unwrap();
+    assert_eq!(dbg.value, Value::Number(3.0));
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "SUM(MyRange)");
+    assert!(matches!(dbg.trace.kind, TraceKind::FunctionCall { .. }));
+
+    let arg_node = &dbg.trace.children[0];
+    assert_eq!(slice(&dbg.formula, arg_node.span), "MyRange");
+    assert!(matches!(arg_node.kind, TraceKind::NameRef { .. }));
+    assert_eq!(arg_node.value, Value::Blank);
+    assert_eq!(
+        arg_node.reference,
+        Some(TraceRef::Range {
+            sheet: 0,
+            start: formula_engine::eval::CellAddr { row: 0, col: 0 },
+            end: formula_engine::eval::CellAddr { row: 1, col: 0 }
+        })
+    );
 }

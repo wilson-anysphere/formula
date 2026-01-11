@@ -1,5 +1,8 @@
-use crate::eval::{parse_a1, CellAddr, CompareOp, EvalContext, FormulaParseError, SheetReference, UnaryOp};
+use crate::eval::{
+    parse_a1, CellAddr, CompareOp, EvalContext, FormulaParseError, SheetReference, UnaryOp,
+};
 use crate::error::ExcelError;
+use crate::functions::{ArgValue as FnArgValue, FunctionContext};
 use crate::value::{ErrorKind, Value};
 use std::cmp::Ordering;
 
@@ -31,6 +34,7 @@ pub enum TraceKind {
     Error,
     CellRef,
     RangeRef,
+    NameRef { name: String },
     Group,
     Unary { op: UnaryOp },
     Binary { op: crate::eval::BinaryOp },
@@ -70,6 +74,7 @@ pub enum SpannedExprKind<S> {
     Error(ErrorKind),
     CellRef(crate::eval::CellRef<S>),
     RangeRef(crate::eval::RangeRef<S>),
+    NameRef(crate::eval::NameRef<S>),
     Group(Box<SpannedExpr<S>>),
     Unary {
         op: UnaryOp,
@@ -110,6 +115,10 @@ impl<S: Clone> SpannedExpr<S> {
                 sheet: f(&r.sheet),
                 start: r.start,
                 end: r.end,
+            }),
+            SpannedExprKind::NameRef(n) => SpannedExprKind::NameRef(crate::eval::NameRef {
+                sheet: f(&n.sheet),
+                name: n.name.clone(),
             }),
             SpannedExprKind::Group(expr) => {
                 SpannedExprKind::Group(Box::new(expr.map_sheets(f)))
@@ -631,7 +640,10 @@ impl ParserImpl {
                             ),
                             Err(_) => Ok(SpannedExpr {
                                 span: tok.span,
-                                kind: SpannedExprKind::Error(ErrorKind::Name),
+                                kind: SpannedExprKind::NameRef(crate::eval::NameRef {
+                                    sheet: SheetReference::Current,
+                                    name: id.clone(),
+                                }),
                             }),
                         },
                     }
@@ -722,8 +734,13 @@ impl ParserImpl {
                 })
             }
         };
-        let addr = parse_a1(&addr_str)?;
-        self.parse_cell_or_range(sheet, sheet_tok.span.start, addr, addr_tok.span.end)
+        match parse_a1(&addr_str) {
+            Ok(addr) => self.parse_cell_or_range(sheet, sheet_tok.span.start, addr, addr_tok.span.end),
+            Err(_) => Ok(SpannedExpr {
+                span: Span::new(sheet_tok.span.start, addr_tok.span.end),
+                kind: SpannedExprKind::NameRef(crate::eval::NameRef { sheet, name: addr_str }),
+            }),
+        }
     }
 
     fn parse_cell_or_range(
@@ -966,6 +983,99 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         EvalValue::Scalar(value.clone()),
                         TraceNode {
                             kind: TraceKind::RangeRef,
+                            span: expr.span,
+                            value,
+                            reference: None,
+                            children: Vec::new(),
+                        },
+                    )
+                }
+            },
+            SpannedExprKind::NameRef(nref) => match self.resolve_sheet_id(&nref.sheet) {
+                Some(sheet_id) if self.resolver.sheet_exists(sheet_id) => {
+                    let resolved = self.resolver.resolve_name(sheet_id, &nref.name);
+                    match resolved {
+                        Some(crate::eval::ResolvedName::Constant(v)) => (
+                            EvalValue::Scalar(v.clone()),
+                            TraceNode {
+                                kind: TraceKind::NameRef { name: nref.name.clone() },
+                                span: expr.span,
+                                value: v,
+                                reference: None,
+                                children: Vec::new(),
+                            },
+                        ),
+                        Some(crate::eval::ResolvedName::Expr(compiled)) => {
+                            let evaluator = crate::eval::Evaluator::new(
+                                self.resolver,
+                                EvalContext {
+                                    current_sheet: sheet_id,
+                                    current_cell: self.ctx.current_cell,
+                                },
+                            );
+                            match FunctionContext::eval_arg(&evaluator, &compiled) {
+                                FnArgValue::Scalar(v) => (
+                                    EvalValue::Scalar(v.clone()),
+                                    TraceNode {
+                                        kind: TraceKind::NameRef { name: nref.name.clone() },
+                                        span: expr.span,
+                                        value: v,
+                                        reference: None,
+                                        children: Vec::new(),
+                                    },
+                                ),
+                                FnArgValue::Reference(r) => {
+                                    let range = ResolvedRange {
+                                        sheet_id: r.sheet_id,
+                                        start: r.start,
+                                        end: r.end,
+                                    };
+                                    let reference = if r.is_single_cell() {
+                                        Some(TraceRef::Cell {
+                                            sheet: r.sheet_id,
+                                            addr: r.start,
+                                        })
+                                    } else {
+                                        Some(TraceRef::Range {
+                                            sheet: r.sheet_id,
+                                            start: r.start,
+                                            end: r.end,
+                                        })
+                                    };
+                                    (
+                                        EvalValue::Reference(range),
+                                        TraceNode {
+                                            kind: TraceKind::NameRef { name: nref.name.clone() },
+                                            span: expr.span,
+                                            value: Value::Blank,
+                                            reference,
+                                            children: Vec::new(),
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        None => {
+                            let value = Value::Error(ErrorKind::Name);
+                            (
+                                EvalValue::Scalar(value.clone()),
+                                TraceNode {
+                                    kind: TraceKind::NameRef { name: nref.name.clone() },
+                                    span: expr.span,
+                                    value,
+                                    reference: None,
+                                    children: Vec::new(),
+                                },
+                            )
+                        }
+                    }
+                }
+                _ => {
+                    let value = Value::Error(ErrorKind::Ref);
+                    (
+                        EvalValue::Scalar(value.clone()),
+                        TraceNode {
+                            kind: TraceKind::NameRef { name: nref.name.clone() },
                             span: expr.span,
                             value,
                             reference: None,
