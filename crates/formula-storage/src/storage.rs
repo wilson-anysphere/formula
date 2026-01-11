@@ -790,14 +790,14 @@ impl Storage {
               id,
               name,
               position,
-              visibility,
+              COALESCE(visibility, 'visible'),
               tab_color,
               tab_color_json,
               xlsx_sheet_id,
               xlsx_rel_id,
-              frozen_rows,
-              frozen_cols,
-              zoom,
+              COALESCE(frozen_rows, 0),
+              COALESCE(frozen_cols, 0),
+              COALESCE(zoom, 1.0),
               model_sheet_id,
               model_sheet_json
             FROM sheets
@@ -1026,13 +1026,13 @@ impl Storage {
               workbook_id,
               name,
               COALESCE(position, 0),
-              visibility,
+              COALESCE(visibility, 'visible'),
               tab_color,
               xlsx_sheet_id,
               xlsx_rel_id,
-              frozen_rows,
-              frozen_cols,
-              zoom,
+              COALESCE(frozen_rows, 0),
+              COALESCE(frozen_cols, 0),
+              COALESCE(zoom, 1.0),
               metadata
             FROM sheets
             WHERE workbook_id = ?1
@@ -1078,13 +1078,13 @@ impl Storage {
                   workbook_id,
                   name,
                   COALESCE(position, 0),
-                  visibility,
+                  COALESCE(visibility, 'visible'),
                   tab_color,
                   xlsx_sheet_id,
                   xlsx_rel_id,
-                  frozen_rows,
-                  frozen_cols,
-                  zoom,
+                  COALESCE(frozen_rows, 0),
+                  COALESCE(frozen_cols, 0),
+                  COALESCE(zoom, 1.0),
                   metadata
                 FROM sheets
                 WHERE id = ?1
@@ -1595,13 +1595,13 @@ impl Storage {
               workbook_id,
               name,
               COALESCE(position, 0),
-              visibility,
+              COALESCE(visibility, 'visible'),
               tab_color,
               xlsx_sheet_id,
               xlsx_rel_id,
-              frozen_rows,
-              frozen_cols,
-              zoom,
+              COALESCE(frozen_rows, 0),
+              COALESCE(frozen_cols, 0),
+              COALESCE(zoom, 1.0),
               metadata
             FROM sheets
             WHERE workbook_id = ?1
@@ -1646,13 +1646,13 @@ impl Storage {
                   workbook_id,
                   name,
                   COALESCE(position, 0),
-                  visibility,
+                  COALESCE(visibility, 'visible'),
                   tab_color,
                   xlsx_sheet_id,
                   xlsx_rel_id,
-                  frozen_rows,
-                  frozen_cols,
-                  zoom,
+                  COALESCE(frozen_rows, 0),
+                  COALESCE(frozen_cols, 0),
+                  COALESCE(zoom, 1.0),
                   metadata
                 FROM sheets
                 WHERE id = ?1
