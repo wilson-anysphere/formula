@@ -13,6 +13,7 @@
     }
   },
   "dependencies": {
+    "@formula/extension-api": "workspace:*",
     "@formula/security": "workspace:*"
   }
 }

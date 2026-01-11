@@ -23,6 +23,9 @@ importers:
       '@formula/scripting':
         specifier: workspace:*
         version: link:packages/scripting
+      '@noble/curves':
+        specifier: ^1.4.0
+        version: 1.9.7
       '@types/node':
         specifier: ^22.13.4
         version: 22.19.5
@@ -111,6 +114,12 @@ importers:
       '@formula/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@formula/extension-api':
+        specifier: workspace:*
+        version: link:../../packages/extension-api
+      '@formula/extension-host':
+        specifier: workspace:*
+        version: link:../../packages/extension-host
       '@formula/grid':
         specifier: workspace:*
         version: link:../../packages/grid
@@ -268,6 +277,9 @@ importers:
 
   packages/extension-host:
     dependencies:
+      '@formula/extension-api':
+        specifier: workspace:*
+        version: link:../extension-api
       '@formula/security':
         specifier: workspace:*
         version: link:../security
@@ -1138,6 +1150,14 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@noble/curves@1.9.7':
+    resolution: {integrity: sha512-gbKGcRUYIjA3/zCCNaWDciTMFI0dCkvou3TL8Zmy5Nc7sJ47a0jtOeZoTaMxkuqRo9cRhjOdZJXegxYE5FN/xw==}
+    engines: {node: ^14.21.3 || >=16}
+
+  '@noble/hashes@1.8.0':
+    resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
+    engines: {node: ^14.21.3 || >=16}
 
   '@opentelemetry/api-logs@0.208.0':
     resolution: {integrity: sha512-CjruKY9V6NMssL/T1kAFgzosF1v9o6oeN+aX5JB/C/xPNtmgIJqcXHG7fA82Ou1zCpWGl4lROQUKwUNE1pMCyg==}
@@ -3342,6 +3362,12 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@noble/curves@1.9.7':
+    dependencies:
+      '@noble/hashes': 1.8.0
+
+  '@noble/hashes@1.8.0': {}
 
   '@opentelemetry/api-logs@0.208.0':
     dependencies:

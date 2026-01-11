@@ -12,6 +12,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@formula/extension-api": "workspace:*",
+    "@formula/extension-host": "workspace:*",
     "@formula/engine": "workspace:*",
     "@formula/grid": "workspace:*",
     "@formula/spreadsheet-frontend": "workspace:*",

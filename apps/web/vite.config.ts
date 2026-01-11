@@ -6,6 +6,17 @@ const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    commonjsOptions: {
+      // `shared/` is CommonJS, but the web runtime imports the browser verifier (ESM)
+      // which depends on `shared/extension-package/core/v2-core.js`. Ensure Rollup
+      // runs the CommonJS transform on that file during production builds.
+      include: [
+        /node_modules/,
+        /shared[\\/]+extension-package[\\/]+core[\\/]+/
+      ]
+    }
+  },
   optimizeDeps: {
     // Ensure Vite transforms `new Worker(new URL(..., import.meta.url))` inside the
     // workspace engine package. When pre-bundled, the Worker URL can become

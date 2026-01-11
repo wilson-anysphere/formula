@@ -32,6 +32,25 @@ Formula extensions are distributed as a single binary “package” blob downloa
 - Algorithm: **Ed25519** (`signature.json.algorithm === "ed25519"`)
 - Signed bytes: canonical JSON encoding of `{ manifest, checksums }`
 
+## Browser installation model (web runtime)
+
+The web app does **not** load extension module graphs directly from the network. Instead it uses an
+install flow that keeps the initial code load fully verified:
+
+1. Download the `.fextpkg` bytes from the Marketplace (`/api/extensions/:id/download/:version`).
+2. Verify the v2 package **client-side**:
+   - parse the tar archive
+   - validate `manifest.json`, `checksums.json`, `signature.json`
+   - compute SHA-256 checksums (WebCrypto)
+   - verify the Ed25519 signature (WebCrypto when available; pure-JS fallback otherwise)
+3. Persist the verified package bytes + verification metadata in IndexedDB (keyed by `{id, version}`).
+4. Extract the entrypoint (`manifest.browser`, falling back to `module`/`main`) from the archive,
+   create a `blob:` URL for that module, and load it into `BrowserExtensionHost`.
+
+**Entrypoint requirement:** module loading from `blob:` URLs cannot resolve relative imports, so
+`manifest.browser` should be a **single-file ESM bundle** (no `./` imports). Remote `http(s):` imports
+are disallowed by the loader to avoid fetching unverified code at runtime.
+
 ## v1 (legacy / transition)
 
 **Container:** gzipped JSON bundle containing base64-encoded files.

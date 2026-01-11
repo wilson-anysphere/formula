@@ -924,6 +924,20 @@ extensions.
 
 Marketplace implementation details (HTTP endpoints, publish/download headers, caching) are documented in
 [`docs/marketplace.md`](./marketplace.md).
+### Web runtime install + update flow
+
+The browser/web runtime uses a different installation model than the desktop/Node runtime:
+
+- Extensions are downloaded as signed v2 `.fextpkg` blobs from the Marketplace.
+- The client verifies the package **in the browser** (tar parsing + SHA-256 checksums + Ed25519
+  signature verification) before persisting anything.
+- Verified package bytes + metadata are stored in IndexedDB, and the extension is loaded into
+  `BrowserExtensionHost` via a `blob:` module URL (no remote module graph imports).
+- Updates replace the stored `{id, version}` atomically and reload the extension in the host if it is
+  currently loaded.
+
+Because `blob:` module URLs cannot resolve relative imports, `manifest.browser` should point at a
+**single-file ESM bundle**.
 
 ### Extension Discovery
 
