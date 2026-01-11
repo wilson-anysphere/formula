@@ -132,6 +132,8 @@ export const enUS = {
   "clipboard.pasteSpecial.pasteValues": "Paste Values",
   "clipboard.pasteSpecial.pasteFormulas": "Paste Formulas",
   "clipboard.pasteSpecial.pasteFormats": "Paste Formats",
+  "clipboard.copy": "Copy",
+  "clipboard.cut": "Cut",
   "clipboard.paste": "Paste",
   "importExport.importCsv": "Import CSV",
   "layout.workspace.default": "Default",
