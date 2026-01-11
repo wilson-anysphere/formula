@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { buildApp } from "../app";
 import type { AppConfig } from "../config";
 import { runMigrations } from "../db/migrations";
+import { DbSiemConfigProvider } from "../siem/configProvider";
 
 function getMigrationsDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -133,5 +134,39 @@ describe("SIEM config", () => {
 
     const secretAfterDelete = await db.query("SELECT 1 FROM secrets WHERE name = $1", [secretName]);
     expect(secretAfterDelete.rowCount).toBe(0);
+  });
+
+  it("DbSiemConfigProvider resolves auth secrets from the secret store", async () => {
+    const register = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "siem-provider-owner@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "SIEM Provider Org"
+      }
+    });
+    expect(register.statusCode).toBe(200);
+    const cookie = extractCookie(register.headers["set-cookie"]);
+    const orgId = (register.json() as any).organization.id as string;
+
+    await app.inject({
+      method: "PUT",
+      url: `/orgs/${orgId}/siem`,
+      headers: { cookie },
+      payload: {
+        endpointUrl: "https://example.invalid/provider",
+        format: "json",
+        auth: { type: "bearer", token: "supersecret" }
+      }
+    });
+
+    const provider = new DbSiemConfigProvider(db, config.secretStoreKey, app.log);
+    const enabled = await provider.listEnabledOrgs();
+    const entry = enabled.find((row) => row.orgId === orgId);
+    expect(entry).toBeTruthy();
+    expect(entry!.config.endpointUrl).toBe("https://example.invalid/provider");
+    expect(entry!.config.auth).toMatchObject({ type: "bearer", token: "supersecret" });
   });
 });
