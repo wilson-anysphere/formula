@@ -30,6 +30,28 @@ impl BitVec {
         }
     }
 
+    pub fn with_len_all_true(bits: usize) -> Self {
+        if bits == 0 {
+            return Self::new();
+        }
+
+        let word_len = (bits + 63) / 64;
+        let mut words = vec![u64::MAX; word_len];
+        let rem = bits % 64;
+        if rem != 0 {
+            let mask = (1u64 << rem) - 1;
+            if let Some(last) = words.last_mut() {
+                *last = mask;
+            }
+        }
+
+        Self {
+            words,
+            len: bits,
+            ones: bits,
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.len
     }

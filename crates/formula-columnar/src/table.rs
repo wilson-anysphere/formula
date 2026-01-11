@@ -175,11 +175,7 @@ fn count_true_bits(data: &[u8], len: usize) -> u64 {
 }
 
 fn bitvec_all_true(len: usize) -> BitVec {
-    let mut out = BitVec::with_capacity_bits(len);
-    for _ in 0..len {
-        out.push(true);
-    }
-    out
+    BitVec::with_len_all_true(len)
 }
 
 impl ColumnarTable {
