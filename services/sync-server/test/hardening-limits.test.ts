@@ -92,6 +92,23 @@ test("closes websocket on oversized binary message", async (t) => {
   ws.send(Buffer.alloc(65, 1));
 
   assert.equal(await close, 1009);
+
+  // ws may reject oversize frames before emitting a "message" event. Ensure we
+  // still observe an increment in the Prometheus counter.
+  await waitForCondition(
+    async () => {
+      const res = await fetch(`${server.httpUrl}/metrics`);
+      if (!res.ok) return false;
+      const body = await res.text();
+      const match = body.match(
+        /^sync_server_ws_messages_too_large_total(?:\{[^}]*\})?\s+([0-9.]+)$/m
+      );
+      if (!match) return false;
+      return Number(match[1]) >= 1;
+    },
+    5_000,
+    100
+  );
 });
 
 test("drops oversized awareness JSON without closing connection", async (t) => {
