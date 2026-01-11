@@ -12,3 +12,4 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 assert_cmd = "2.0"
 pretty_assertions = "1.4"
 tempfile = "3.10"
+xlsx-diff = { path = "../xlsx-diff" }
