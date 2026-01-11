@@ -8,5 +8,6 @@ export * from "./index.js";
 
 export { FileSystemCacheStore } from "./cache/filesystem.js";
 export { EncryptedFileSystemCacheStore } from "./cache/encryptedFilesystem.js";
+export { createNodeCryptoCacheProvider } from "./cache/nodeCryptoProvider.js";
 
 export { createNodeCredentialStore } from "./credentials/node.js";
