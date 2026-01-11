@@ -325,8 +325,6 @@ export function installYwsSecurity(
   };
 
   const guard: MessageGuard = (raw, isBinary) => {
-    if (!isBinary) return { data: raw, isBinary };
-
     const message = toUint8Array(raw);
     if (!message) return { drop: true };
 

@@ -578,4 +578,127 @@ test("sanitizes awareness identity and blocks clientID spoofing", async (t) => {
 
   const { code } = await close;
   assert.equal(code, 1008);
+
+  // Defensive: ensure the security filter also applies to *text* websocket frames.
+  // ws emits those with `isBinary=false`, but y-websocket will still parse the raw bytes.
+  const textTokenA = signJwtToken({
+    secret,
+    docId: docName,
+    userId: "text-a",
+    role: "editor",
+  });
+  const textTokenB = signJwtToken({
+    secret,
+    docId: docName,
+    userId: "text-b",
+    role: "editor",
+  });
+
+  const textClientIdA = 42;
+  const textClientIdB = 43;
+
+  const textWsA = new WebSocket(
+    `${wsUrl}/${docName}?token=${encodeURIComponent(textTokenA)}`
+  );
+  const textWsB = new WebSocket(
+    `${wsUrl}/${docName}?token=${encodeURIComponent(textTokenB)}`
+  );
+
+  t.after(() => {
+    textWsA.terminate();
+    textWsB.terminate();
+  });
+
+  await Promise.all([
+    new Promise<void>((resolve, reject) => {
+      textWsA.once("open", () => resolve());
+      textWsA.once("error", reject);
+    }),
+    new Promise<void>((resolve, reject) => {
+      textWsB.once("open", () => resolve());
+      textWsB.once("error", reject);
+    }),
+  ]);
+
+  // Claim clientIDs with text frames and spoof the identity fields.
+  textWsA.send(
+    buildAwarenessMessage([
+      {
+        clientID: textClientIdA,
+        clock: 1,
+        stateJSON: JSON.stringify({ presence: { id: "spoofed" } }),
+      },
+    ]),
+    { binary: false }
+  );
+  textWsB.send(
+    buildAwarenessMessage([
+      {
+        clientID: textClientIdB,
+        clock: 1,
+        stateJSON: JSON.stringify({ presence: { id: "spoofed" } }),
+      },
+    ]),
+    { binary: false }
+  );
+
+  await waitForCondition(() => {
+    const states = (providerB as any).awareness.getStates() as Map<number, any>;
+    const aState = states.get(textClientIdA);
+    const bState = states.get(textClientIdB);
+    return (
+      aState?.presence?.id === "text-a" && bState?.presence?.id === "text-b"
+    );
+  }, 10_000);
+
+  // Attempt to remove A using B (text frame spoof); must be ignored.
+  textWsB.send(
+    buildAwarenessMessage([
+      { clientID: textClientIdA, clock: 2, stateJSON: "null" },
+    ]),
+    { binary: false }
+  );
+
+  await new Promise((r) => setTimeout(r, 250));
+  {
+    const states = (providerB as any).awareness.getStates() as Map<number, any>;
+    const aState = states.get(textClientIdA);
+    assert.equal(aState?.presence?.id, "text-a");
+  }
+
+  // Collision check via text frames (policy violation close 1008).
+  const textColliderToken = signJwtToken({
+    secret,
+    docId: docName,
+    userId: "text-collider",
+    role: "editor",
+  });
+  const textColliderWs = new WebSocket(
+    `${wsUrl}/${docName}?token=${encodeURIComponent(textColliderToken)}`
+  );
+  t.after(() => {
+    textColliderWs.terminate();
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    textColliderWs.once("open", () => resolve());
+    textColliderWs.once("error", reject);
+  });
+
+  const textCollisionClose = new Promise<number>((resolve) => {
+    textColliderWs.once("close", (code) => resolve(code));
+  });
+
+  textColliderWs.send(
+    buildAwarenessMessage([
+      {
+        clientID: textClientIdA,
+        clock: 1,
+        stateJSON: JSON.stringify({ presence: { id: "spoofed" } }),
+      },
+    ]),
+    { binary: false }
+  );
+
+  assert.equal(await textCollisionClose, 1008);
 });
