@@ -26,6 +26,16 @@ fn r1c1_roundtrip_relative_and_mixed_references() {
 }
 
 #[test]
+fn r1c1_roundtrip_row_and_column_ranges() {
+    let mut opts = ParseOptions::default();
+    opts.reference_style = ReferenceStyle::R1C1;
+    let mut ser = SerializeOptions::default();
+    ser.reference_style = ReferenceStyle::R1C1;
+    roundtrip("=R1:R3", opts.clone(), ser.clone());
+    roundtrip("=C1:C3", opts, ser);
+}
+
+#[test]
 fn r1c1_supports_sheet_prefixes_and_quoted_names() {
     let mut opts = ParseOptions::default();
     opts.reference_style = ReferenceStyle::R1C1;
@@ -54,4 +64,3 @@ fn converts_a1_relative_to_r1c1_using_origin() {
     ser.origin = Some(CellAddr::new(4, 2)); // C5
     assert_eq!(ast.to_string(ser).unwrap(), "=R[-4]C[-2]");
 }
-

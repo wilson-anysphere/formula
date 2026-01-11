@@ -14,6 +14,8 @@ pub enum TokenKind {
     Error(String),
     Cell(CellToken),
     R1C1Cell(R1C1CellToken),
+    R1C1Row(R1C1RowToken),
+    R1C1Col(R1C1ColToken),
     Ident(String),
     QuotedIdent(String),
     Whitespace(String),
@@ -64,6 +66,16 @@ pub struct CellToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct R1C1CellToken {
     pub row: Coord,
+    pub col: Coord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct R1C1RowToken {
+    pub row: Coord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct R1C1ColToken {
     pub col: Coord,
 }
 
@@ -435,6 +447,14 @@ impl<'a> Lexer<'a> {
                             self.push(TokenKind::R1C1Cell(cell), start, self.idx);
                             continue;
                         }
+                        if let Some(row) = self.try_lex_r1c1_row_ref() {
+                            self.push(TokenKind::R1C1Row(row), start, self.idx);
+                            continue;
+                        }
+                        if let Some(col) = self.try_lex_r1c1_col_ref() {
+                            self.push(TokenKind::R1C1Col(col), start, self.idx);
+                            continue;
+                        }
                     }
 
                     if let Some(cell) = self.try_lex_cell_ref() {
@@ -750,6 +770,94 @@ impl<'a> Lexer<'a> {
         Some(R1C1CellToken { row, col })
     }
 
+    fn try_lex_r1c1_row_ref(&mut self) -> Option<R1C1RowToken> {
+        let save_idx = self.idx;
+        let save_chars = self.chars.clone();
+
+        let ch = self.peek_char()?;
+        if !matches!(ch, 'R' | 'r') {
+            return None;
+        }
+        self.bump(); // R
+
+        let row = match self.peek_char() {
+            Some('[') => {
+                let offset = self.lex_r1c1_offset_in_brackets().or_else(|| {
+                    self.idx = save_idx;
+                    self.chars = save_chars.clone();
+                    None
+                })?;
+                Coord::Offset(offset)
+            }
+            Some(c) if is_digit(c) => {
+                let raw = self.take_while(is_digit);
+                let row_1: u32 = raw.parse().ok()?;
+                if row_1 == 0 {
+                    self.idx = save_idx;
+                    self.chars = save_chars;
+                    return None;
+                }
+                Coord::A1 {
+                    index: row_1 - 1,
+                    abs: true,
+                }
+            }
+            _ => Coord::Offset(0),
+        };
+
+        if matches!(self.peek_char(), Some(c) if is_ident_cont_char(c) || c == '(') {
+            self.idx = save_idx;
+            self.chars = save_chars;
+            return None;
+        }
+
+        Some(R1C1RowToken { row })
+    }
+
+    fn try_lex_r1c1_col_ref(&mut self) -> Option<R1C1ColToken> {
+        let save_idx = self.idx;
+        let save_chars = self.chars.clone();
+
+        let ch = self.peek_char()?;
+        if !matches!(ch, 'C' | 'c') {
+            return None;
+        }
+        self.bump(); // C
+
+        let col = match self.peek_char() {
+            Some('[') => {
+                let offset = self.lex_r1c1_offset_in_brackets().or_else(|| {
+                    self.idx = save_idx;
+                    self.chars = save_chars.clone();
+                    None
+                })?;
+                Coord::Offset(offset)
+            }
+            Some(c) if is_digit(c) => {
+                let raw = self.take_while(is_digit);
+                let col_1: u32 = raw.parse().ok()?;
+                if col_1 == 0 {
+                    self.idx = save_idx;
+                    self.chars = save_chars;
+                    return None;
+                }
+                Coord::A1 {
+                    index: col_1 - 1,
+                    abs: true,
+                }
+            }
+            _ => Coord::Offset(0),
+        };
+
+        if matches!(self.peek_char(), Some(c) if is_ident_cont_char(c) || c == '(') {
+            self.idx = save_idx;
+            self.chars = save_chars;
+            return None;
+        }
+
+        Some(R1C1ColToken { col })
+    }
+
     fn lex_r1c1_offset_in_brackets(&mut self) -> Option<i32> {
         debug_assert_eq!(self.peek_char(), Some('['));
         self.bump(); // '['
@@ -780,6 +888,13 @@ impl<'a> Lexer<'a> {
 
 fn is_digit(c: char) -> bool {
     matches!(c, '0'..='9')
+}
+
+fn is_ident_cont_char(c: char) -> bool {
+    matches!(
+        c,
+        '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9'
+    )
 }
 
 const ERROR_LITERALS: &[&str] = &[
@@ -843,6 +958,8 @@ fn is_intersect_operand(kind: &TokenKind) -> bool {
         kind,
         TokenKind::Cell(_)
             | TokenKind::R1C1Cell(_)
+            | TokenKind::R1C1Row(_)
+            | TokenKind::R1C1Col(_)
             | TokenKind::Ident(_)
             | TokenKind::QuotedIdent(_)
             | TokenKind::RParen
@@ -1090,7 +1207,12 @@ impl<'a> Parser<'a> {
                     Expr::Missing
                 }
             },
-            TokenKind::Cell(_) | TokenKind::R1C1Cell(_) | TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => {
+            TokenKind::Cell(_)
+            | TokenKind::R1C1Cell(_)
+            | TokenKind::R1C1Row(_)
+            | TokenKind::R1C1Col(_)
+            | TokenKind::Ident(_)
+            | TokenKind::QuotedIdent(_) => {
                 self.parse_reference_or_name_or_func_best_effort()
             }
             TokenKind::ArgSep | TokenKind::RParen | TokenKind::Eof => Expr::Missing,
@@ -1189,6 +1311,24 @@ impl<'a> Parser<'a> {
                     sheet: None,
                     col: cell.col,
                     row: cell.row,
+                })
+            }
+            TokenKind::R1C1Row(row) => {
+                let row = row.clone();
+                self.next();
+                Expr::RowRef(RowRef {
+                    workbook: None,
+                    sheet: None,
+                    row: row.row,
+                })
+            }
+            TokenKind::R1C1Col(col) => {
+                let col = col.clone();
+                self.next();
+                Expr::ColRef(ColRef {
+                    workbook: None,
+                    sheet: None,
+                    col: col.col,
                 })
             }
             TokenKind::QuotedIdent(name) => {
@@ -1407,7 +1547,12 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LBrace => self.parse_array_literal(),
             TokenKind::LBracket => self.parse_bracket_start(),
-            TokenKind::Cell(_) | TokenKind::R1C1Cell(_) | TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => {
+            TokenKind::Cell(_)
+            | TokenKind::R1C1Cell(_)
+            | TokenKind::R1C1Row(_)
+            | TokenKind::R1C1Col(_)
+            | TokenKind::Ident(_)
+            | TokenKind::QuotedIdent(_) => {
                 self.parse_reference_or_name_or_func()
             }
             TokenKind::ArgSep => {
@@ -1494,6 +1639,24 @@ impl<'a> Parser<'a> {
                     row: cell.row,
                 }))
             }
+            TokenKind::R1C1Row(row) => {
+                let row = row.clone();
+                self.next();
+                Ok(Expr::RowRef(RowRef {
+                    workbook: None,
+                    sheet: None,
+                    row: row.row,
+                }))
+            }
+            TokenKind::R1C1Col(col) => {
+                let col = col.clone();
+                self.next();
+                Ok(Expr::ColRef(ColRef {
+                    workbook: None,
+                    sheet: None,
+                    col: col.col,
+                }))
+            }
             TokenKind::QuotedIdent(name) => {
                 let name = name.clone();
                 self.next();
@@ -1541,6 +1704,24 @@ impl<'a> Parser<'a> {
                     sheet,
                     col: cell.col,
                     row: cell.row,
+                }))
+            }
+            TokenKind::R1C1Row(row) => {
+                let row = row.clone();
+                self.next();
+                Ok(Expr::RowRef(RowRef {
+                    workbook,
+                    sheet,
+                    row: row.row,
+                }))
+            }
+            TokenKind::R1C1Col(col) => {
+                let col = col.clone();
+                self.next();
+                Ok(Expr::ColRef(ColRef {
+                    workbook,
+                    sheet,
+                    col: col.col,
                 }))
             }
             TokenKind::Number(raw) => {
