@@ -87,6 +87,74 @@ function randomId() {
   return crypto.randomUUID();
 }
 
+function safeJoin(baseDir, relPath) {
+  const normalized = String(relPath || "").replace(/\\\\/g, "/");
+  if (normalized.startsWith("/") || normalized.includes("..")) {
+    throw new Error(`Invalid relative path: ${relPath}`);
+  }
+  const full = path.join(baseDir, normalized);
+  const relative = path.relative(baseDir, full);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Path traversal in path: ${relPath}`);
+  }
+  return full;
+}
+
+function resolvePackagePath(dataDir, storedPath) {
+  if (!storedPath) return null;
+  const raw = String(storedPath);
+  if (path.isAbsolute(raw)) {
+    const full = path.resolve(raw);
+    const base = path.resolve(dataDir);
+    if (full === base || full.startsWith(base + path.sep)) return full;
+    throw new Error(`Invalid package path (outside dataDir): ${storedPath}`);
+  }
+  return safeJoin(dataDir, raw);
+}
+
+function packageRelPath(extensionId, version) {
+  return path.posix.join("packages", String(extensionId), `${String(version)}.fextpkg`);
+}
+
+async function ensurePackageFile({ dataDir, relPath, bytes, expectedSha256 }) {
+  const fullPath = safeJoin(dataDir, relPath);
+  await fs.mkdir(path.dirname(fullPath), { recursive: true });
+
+  try {
+    const existing = await fs.readFile(fullPath);
+    const existingSha = sha256(existing);
+    if (existingSha !== expectedSha256) {
+      throw new Error("Package file already exists with different contents");
+    }
+    return fullPath;
+  } catch (error) {
+    if (error && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+      // continue
+    } else if (error) {
+      throw error;
+    }
+  }
+
+  const tmpPath = `${fullPath}.${randomId()}.tmp`;
+  await fs.writeFile(tmpPath, bytes);
+  try {
+    await fs.link(tmpPath, fullPath);
+    return fullPath;
+  } catch (error) {
+    if (error && error.code === "EEXIST") {
+      const existing = await fs.readFile(fullPath);
+      const existingSha = sha256(existing);
+      if (existingSha !== expectedSha256) {
+        throw new Error("Package file already exists with different contents");
+      }
+      return fullPath;
+    }
+    throw error;
+  } finally {
+    await fs.unlink(tmpPath).catch(() => {});
+  }
+}
+
 async function gunzipWithLimit(packageBytes, maxBytes) {
   return new Promise((resolve, reject) => {
     const gunzip = zlib.createGunzip();
@@ -296,9 +364,26 @@ class MarketplaceStore {
         const versions = extRecord.versions || {};
         for (const v of Object.values(versions)) {
           if (!v?.version) continue;
+          let absPackagePath = null;
+          let storedPackagePath = null;
+          try {
+            absPackagePath = v.packagePath
+              ? resolvePackagePath(this.dataDir, v.packagePath)
+              : safeJoin(this.dataDir, packageRelPath(extRecord.id, v.version));
+            storedPackagePath = path.relative(this.dataDir, absPackagePath).replace(/\\/g, "/");
+            if (storedPackagePath.startsWith("..") || path.isAbsolute(storedPackagePath)) {
+              storedPackagePath = null;
+            }
+          } catch {
+            absPackagePath = null;
+            storedPackagePath = null;
+          }
+
+          if (!absPackagePath || !storedPackagePath) continue;
+
           let pkgBytes = null;
           try {
-            pkgBytes = await fs.readFile(v.packagePath || path.join(this.legacyPackageDir, extRecord.id, `${v.version}.fextpkg`));
+            pkgBytes = await fs.readFile(absPackagePath);
           } catch {
             pkgBytes = null;
           }
@@ -309,13 +394,13 @@ class MarketplaceStore {
             const bundle = await readExtensionPackageSafe(pkgBytes, { maxUncompressedBytes: 50 * 1024 * 1024 });
             manifestJson = safeJsonStringify(bundle.manifest);
           } catch {
-            // Keep best-effort; still store bytes so downloads work.
+            // Keep best-effort; package bytes are stored on disk for downloads.
           }
 
           tx.run(
             `INSERT INTO extension_versions
-              (extension_id, version, sha256, signature_base64, manifest_json, readme, package_bytes, uploaded_at, yanked, yanked_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
+              (extension_id, version, sha256, signature_base64, manifest_json, readme, package_bytes, package_path, uploaded_at, yanked, yanked_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
              ON CONFLICT(extension_id, version) DO NOTHING`,
             [
               extRecord.id,
@@ -324,7 +409,8 @@ class MarketplaceStore {
               v.signatureBase64,
               manifestJson,
               v.readme || "",
-              pkgBytes,
+              Buffer.alloc(0),
+              storedPackagePath,
               v.uploadedAt || now,
             ]
           );
@@ -579,6 +665,14 @@ class MarketplaceStore {
 
     const pkgSha = sha256(packageBytes);
     const filesJson = safeJsonStringify(fileRecords);
+    const storedPackagePath = packageRelPath(id, version);
+
+    await ensurePackageFile({
+      dataDir: this.dataDir,
+      relPath: storedPackagePath,
+      bytes: packageBytes,
+      expectedSha256: pkgSha,
+    });
 
     const categories = normalizeStringArray(manifest.categories);
     const tags = normalizeStringArray(manifest.tags);
@@ -643,9 +737,9 @@ class MarketplaceStore {
       // Unique constraint on (extension_id, version) ensures concurrency safety.
       db.run(
         `INSERT INTO extension_versions
-          (extension_id, version, sha256, signature_base64, manifest_json, readme, package_bytes, uploaded_at,
-           yanked, yanked_at, format_version, file_count, unpacked_size, files_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)`,
+          (extension_id, version, sha256, signature_base64, manifest_json, readme, package_bytes, package_path,
+           uploaded_at, yanked, yanked_at, format_version, file_count, unpacked_size, files_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)`,
         [
           id,
           version,
@@ -653,7 +747,8 @@ class MarketplaceStore {
           String(storedSignatureBase64),
           safeJsonStringify(manifest),
           readme,
-          packageBytes,
+          Buffer.alloc(0),
+          storedPackagePath,
           now,
           formatVersion,
           fileCount,
@@ -970,10 +1065,10 @@ class MarketplaceStore {
   }
 
   async getPackage(id, version) {
-    const result = await this.db.withTransaction((db) => {
+    const meta = await this.db.withRead((db) => {
       const stmt = db.prepare(
         `SELECT e.publisher, e.blocked, e.malicious,
-                v.signature_base64, v.sha256, v.package_bytes, v.yanked, v.format_version
+                v.signature_base64, v.sha256, v.package_bytes, v.package_path, v.yanked, v.format_version
          FROM extensions e
          JOIN extension_versions v ON v.extension_id = e.id
          WHERE e.id = ? AND v.version = ? LIMIT 1`
@@ -990,18 +1085,44 @@ class MarketplaceStore {
         return null;
       }
 
-      db.run(`UPDATE extensions SET download_count = download_count + 1 WHERE id = ?`, [id]);
-
       return {
-        bytes: Buffer.from(row.package_bytes),
+        publisher: String(row.publisher),
         signatureBase64: String(row.signature_base64),
         sha256: String(row.sha256),
         formatVersion: Number(row.format_version || 1),
-        publisher: String(row.publisher),
+        packageBytes: row.package_bytes,
+        packagePath: row.package_path ? String(row.package_path) : null,
       };
     });
 
-    return result;
+    if (!meta) return null;
+
+    /** @type {Buffer | null} */
+    let bytes = null;
+    if (meta.packagePath) {
+      const fullPath = resolvePackagePath(this.dataDir, meta.packagePath);
+      try {
+        bytes = await fs.readFile(fullPath);
+      } catch {
+        bytes = null;
+      }
+    } else {
+      bytes = Buffer.from(meta.packageBytes);
+    }
+
+    if (!bytes || bytes.length === 0) return null;
+
+    await this.db.withTransaction((db) => {
+      db.run(`UPDATE extensions SET download_count = download_count + 1 WHERE id = ?`, [id]);
+    });
+
+    return {
+      bytes,
+      signatureBase64: meta.signatureBase64,
+      sha256: meta.sha256,
+      formatVersion: meta.formatVersion,
+      publisher: meta.publisher,
+    };
   }
 
   async setVersionFlags(
