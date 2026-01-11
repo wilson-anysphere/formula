@@ -55,6 +55,21 @@ test("precision=excel: falls back to CPU when GPU cannot do f64", async () => {
   assert.equal(engine.lastKernelBackend().sum, "cpu");
 });
 
+test("precision=excel: also falls back to CPU for Float32Array inputs when GPU cannot do f64", async () => {
+  const fakeGpu = new FakeGpuBackend(false);
+  const engine = new KernelEngine({
+    precision: "excel",
+    gpuBackend: fakeGpu,
+    thresholds: { sum: 0 }
+  });
+
+  const values = new Float32Array([1, 2, 3]);
+  const result = await engine.sum(values);
+  assert.equal(result, 6);
+  assert.equal(fakeGpu.calls.sum, 0);
+  assert.equal(engine.lastKernelBackend().sum, "cpu");
+});
+
 test("precision=excel: forces f64 precision on GPU when available", async () => {
   const fakeGpu = new FakeGpuBackend(true);
   const engine = new KernelEngine({
@@ -172,4 +187,19 @@ test("new kernels: min follows the same excel/fast precision rules", async () =>
     assert.equal(engine.lastKernelBackend().min, "webgpu");
     assert.equal(engine.diagnostics().lastKernelPrecision.min, "f32");
   }
+});
+
+test("count: always uses CPU and is exact", async () => {
+  const fakeGpu = new FakeGpuBackend(true);
+  const engine = new KernelEngine({
+    precision: "fast",
+    gpuBackend: fakeGpu,
+    thresholds: { count: 0 }
+  });
+
+  const values = new Float64Array(123).fill(0);
+  const result = await engine.count(values);
+  assert.equal(result, 123);
+  assert.equal(engine.lastKernelBackend().count, "cpu");
+  assert.equal(engine.diagnostics().lastKernelPrecision.count, "f64");
 });
