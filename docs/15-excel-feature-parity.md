@@ -264,14 +264,14 @@ This document tracks every Excel feature and our implementation status. Features
 | CHISQ.TEST | ⬜ | |
 | CONFIDENCE.NORM | ⬜ | |
 | CONFIDENCE.T | ⬜ | |
-| CORREL | ⬜ | |
+| CORREL | ✅ | |
 | COUNT | ⬜ | P0 |
 | COUNTA | ⬜ | P0 |
 | COUNTBLANK | ⬜ | P0 |
 | COUNTIF | ⬜ | P0 |
 | COUNTIFS | ⬜ | P0 |
-| COVARIANCE.P | ⬜ | |
-| COVARIANCE.S | ⬜ | |
+| COVARIANCE.P | ✅ | |
+| COVARIANCE.S | ✅ | |
 | DEVSQ | ⬜ | |
 | EXPON.DIST | ⬜ | |
 | F.DIST | ⬜ | |
@@ -300,7 +300,7 @@ This document tracks every Excel feature and our implementation status. Features
 | HYPGEOM.DIST | ⬜ | |
 | INTERCEPT | ⬜ | |
 | KURT | ⬜ | |
-| LARGE | ⬜ | P0 |
+| LARGE | ✅ | P0 |
 | LINEST | ⬜ | Array function |
 | LOGEST | ⬜ | Array function |
 | LOGNORM.DIST | ⬜ | |
@@ -308,20 +308,20 @@ This document tracks every Excel feature and our implementation status. Features
 | MAX | ⬜ | P0 |
 | MAXA | ⬜ | |
 | MAXIFS | ⬜ | P0 |
-| MEDIAN | ⬜ | P0 |
+| MEDIAN | ✅ | P0 |
 | MIN | ⬜ | P0 |
 | MINA | ⬜ | |
 | MINIFS | ⬜ | P0 |
-| MODE.MULT | ⬜ | Array function |
-| MODE.SNGL | ⬜ | |
+| MODE.MULT | ✅ | Array function |
+| MODE.SNGL | ✅ | |
 | NEGBINOM.DIST | ⬜ | |
 | NORM.DIST | ⬜ | |
 | NORM.INV | ⬜ | |
 | NORM.S.DIST | ⬜ | |
 | NORM.S.INV | ⬜ | |
 | PEARSON | ⬜ | |
-| PERCENTILE.EXC | ⬜ | |
-| PERCENTILE.INC | ⬜ | |
+| PERCENTILE.EXC | ✅ | |
+| PERCENTILE.INC | ✅ | |
 | PERCENTRANK.EXC | ⬜ | |
 | PERCENTRANK.INC | ⬜ | |
 | PERMUT | ⬜ | |
@@ -329,18 +329,18 @@ This document tracks every Excel feature and our implementation status. Features
 | PHI | ⬜ | |
 | POISSON.DIST | ⬜ | |
 | PROB | ⬜ | |
-| QUARTILE.EXC | ⬜ | |
-| QUARTILE.INC | ⬜ | |
-| RANK.AVG | ⬜ | |
-| RANK.EQ | ⬜ | |
+| QUARTILE.EXC | ✅ | |
+| QUARTILE.INC | ✅ | |
+| RANK.AVG | ✅ | |
+| RANK.EQ | ✅ | |
 | RSQ | ⬜ | |
 | SKEW | ⬜ | |
 | SKEW.P | ⬜ | |
 | SLOPE | ⬜ | |
-| SMALL | ⬜ | P0 |
+| SMALL | ✅ | P0 |
 | STANDARDIZE | ⬜ | |
-| STDEV.P | ⬜ | |
-| STDEV.S | ⬜ | |
+| STDEV.P | ✅ | |
+| STDEV.S | ✅ | |
 | STDEVA | ⬜ | |
 | STDEVPA | ⬜ | |
 | STEYX | ⬜ | |
@@ -352,8 +352,8 @@ This document tracks every Excel feature and our implementation status. Features
 | T.TEST | ⬜ | |
 | TREND | ⬜ | Array function |
 | TRIMMEAN | ⬜ | |
-| VAR.P | ⬜ | |
-| VAR.S | ⬜ | |
+| VAR.P | ✅ | |
+| VAR.S | ✅ | |
 | VARA | ⬜ | |
 | VARPA | ⬜ | |
 | WEIBULL.DIST | ⬜ | |
