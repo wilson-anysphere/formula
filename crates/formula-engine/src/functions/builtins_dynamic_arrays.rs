@@ -1865,7 +1865,7 @@ fn to_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], to_col: bool) 
     }
 
     if values.is_empty() {
-        return Value::Array(Array::new(0, 0, Vec::new()));
+        return Value::Error(ErrorKind::Calc);
     }
 
     if to_col {
@@ -1913,7 +1913,7 @@ fn wrap_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], wrap_rows: b
     }
 
     if flat.is_empty() {
-        return Value::Array(Array::new(0, 0, Vec::new()));
+        return Value::Error(ErrorKind::Calc);
     }
 
     if wrap_rows {

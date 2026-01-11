@@ -68,6 +68,19 @@ fn tocol_torow_ordering_and_ignore_blanks() {
 }
 
 #[test]
+fn tocol_returns_calc_when_all_values_are_ignored() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", r#"=IFERROR(TOCOL({,},1),"fallback")"#);
+    sheet.recalc();
+
+    assert_eq!(
+        sheet.get("A1"),
+        Value::Text("fallback".to_string()),
+        "TOCOL with ignore_blanks should produce #CALC! and be caught by IFERROR"
+    );
+}
+
+#[test]
 fn wraprows_wrapcols_wrap_sequence_and_pad() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=WRAPROWS(SEQUENCE(5),2)");
@@ -108,4 +121,3 @@ fn wraprows_wrapcols_wrap_sequence_and_pad() {
     assert_eq!(sheet.get("B10"), Value::Number(4.0));
     assert_eq!(sheet.get("C10"), Value::Number(0.0));
 }
-
