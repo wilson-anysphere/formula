@@ -396,8 +396,29 @@ export class ToolExecutor {
     const destination = parseA1Cell(params.destination, this.options.default_sheet);
 
     const sourceCells = this.spreadsheet.readRange(source);
-    const sourceValues: CellScalar[][] = sourceCells.map((row) =>
-      row.map((cell) => (cell.formula ? null : (cell.value ?? null)))
+    const dlp = this.evaluateDlpForRange("create_pivot_table", source);
+    if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
+      this.logToolDlpDecision({ tool: "create_pivot_table", range: source, dlp, redactedCellCount: 0 });
+      throw toolError(
+        "permission_denied",
+        `DLP policy blocks creating a pivot table from ${formatA1Range(source)} (ai.cloudProcessing).`
+      );
+    }
+
+    let redactedCellCount = 0;
+    const sourceValues: CellScalar[][] = sourceCells.map((row, r) =>
+      row.map((cell, c) => {
+        if (cell.formula) return null;
+        if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+          const rowIndex = source.startRow + r;
+          const colIndex = source.startCol + c;
+          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+            redactedCellCount++;
+            return null;
+          }
+        }
+        return cell.value ?? null;
+      })
     );
 
     const output = buildPivotTableOutput({
@@ -437,6 +458,7 @@ export class ToolExecutor {
     };
     this.pivots.push(registration);
 
+    if (dlp) this.logToolDlpDecision({ tool: "create_pivot_table", range: source, dlp, redactedCellCount });
     return {
       status: "ok",
       source_range: formatA1Range(source),
@@ -1047,8 +1069,21 @@ export class ToolExecutor {
 
   private refreshPivot(pivot: PivotRegistration): void {
     const sourceCells = this.spreadsheet.readRange(pivot.source);
-    const sourceValues: CellScalar[][] = sourceCells.map((row) =>
-      row.map((cell) => (cell.formula ? null : (cell.value ?? null)))
+    const dlp = this.evaluateDlpForRange("create_pivot_table", pivot.source);
+    if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
+      return;
+    }
+
+    const sourceValues: CellScalar[][] = sourceCells.map((row, r) =>
+      row.map((cell, c) => {
+        if (cell.formula) return null;
+        if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+          const rowIndex = pivot.source.startRow + r;
+          const colIndex = pivot.source.startCol + c;
+          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) return null;
+        }
+        return cell.value ?? null;
+      })
     );
 
     const output = buildPivotTableOutput({

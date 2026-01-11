@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ToolExecutor } from "../src/executor/tool-executor.js";
-import { parseA1Cell } from "../src/spreadsheet/a1.js";
+import { parseA1Cell, parseA1Range } from "../src/spreadsheet/a1.js";
 import { InMemoryWorkbook } from "../src/spreadsheet/in-memory-workbook.js";
 
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
@@ -228,6 +228,90 @@ describe("ToolExecutor DLP enforcement", () => {
       tool: "compute_statistics",
       action: DLP_ACTION.AI_CLOUD_PROCESSING,
       range: "Sheet1!A1:B2",
+      redactedCellCount: 1
+    });
+    expect(event.decision?.decision).toBe("redact");
+  });
+
+  it("create_pivot_table excludes restricted source cells when redacting", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 1,
+              col: 2
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ],
+        audit_logger
+      }
+    });
+
+    await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!A1:C5",
+        values: [
+          ["Region", "Product", "Sales"],
+          ["East", "A", 100],
+          ["East", "B", 150],
+          ["West", "A", 200],
+          ["West", "B", 250]
+        ]
+      }
+    });
+
+    const result = await executor.execute({
+      name: "create_pivot_table",
+      parameters: {
+        source_range: "Sheet1!A1:C5",
+        rows: ["Region"],
+        columns: ["Product"],
+        values: [{ field: "Sales", aggregation: "sum" }],
+        destination: "Sheet1!E1"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("create_pivot_table");
+
+    const out = workbook
+      .readRange(parseA1Range("Sheet1!E1:H4"))
+      .map((row) => row.map((cell) => cell.value));
+
+    expect(out).toEqual([
+      ["Region", "A - Sum of Sales", "B - Sum of Sales", "Grand Total - Sum of Sales"],
+      ["East", null, 150, 150],
+      ["West", 200, 250, 450],
+      ["Grand Total", 200, 400, 600]
+    ]);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "ai.tool.dlp",
+      tool: "create_pivot_table",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet1!A1:C5",
       redactedCellCount: 1
     });
     expect(event.decision?.decision).toBe("redact");
