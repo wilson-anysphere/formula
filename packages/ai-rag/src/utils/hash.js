@@ -1,4 +1,28 @@
-const encoder = new TextEncoder();
+const encoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
+
+/**
+ * @param {string} text
+ */
+function utf8Bytes(text) {
+  const str = String(text);
+  if (encoder) return encoder.encode(str);
+
+  // Minimal UTF-8 encoder fallback for environments without TextEncoder.
+  const encoded = encodeURIComponent(str);
+  /** @type {number[]} */
+  const bytes = [];
+  for (let i = 0; i < encoded.length; i += 1) {
+    const ch = encoded.charCodeAt(i);
+    if (ch === 37 /* % */) {
+      const hex = encoded.slice(i + 1, i + 3);
+      bytes.push(Number.parseInt(hex, 16));
+      i += 2;
+      continue;
+    }
+    bytes.push(ch);
+  }
+  return Uint8Array.from(bytes);
+}
 
 /**
  * Fast, deterministic content hash intended for incremental indexing cache keys.
@@ -10,7 +34,7 @@ const encoder = new TextEncoder();
  * @returns {Promise<string>} lowercase hex digest
  */
 export async function contentHash(text) {
-  const bytes = encoder.encode(String(text));
+  const bytes = utf8Bytes(text);
   const subtle = globalThis.crypto?.subtle;
   if (subtle) {
     try {

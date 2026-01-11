@@ -109,3 +109,28 @@ test("contentHash falls back when WebCrypto digest throws", async () => {
     else delete globalThis.crypto;
   }
 });
+
+test("contentHash works when TextEncoder is unavailable", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "TextEncoder");
+  if (descriptor && descriptor.configurable !== true) {
+    // Can't override in this runtime; skip.
+    return;
+  }
+
+  try {
+    Object.defineProperty(globalThis, "TextEncoder", { value: undefined, configurable: true, writable: true });
+    const mod = await import(`../src/utils/hash.js?no-text-encoder=${Date.now()}`);
+    const digest = await mod.contentHash("hello");
+    if (globalThis.crypto?.subtle) {
+      assert.equal(
+        digest,
+        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+      );
+    } else {
+      assert.match(digest, /^[0-9a-f]{16}$/);
+    }
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, "TextEncoder", descriptor);
+    else delete globalThis.TextEncoder;
+  }
+});
