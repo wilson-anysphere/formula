@@ -1,4 +1,7 @@
-use formula_model::import::{import_csv_to_worksheet, CsvOptions};
+use formula_model::import::{
+    import_csv_to_columnar_table, import_csv_to_worksheet, CsvDateOrder, CsvImportError, CsvOptions,
+    CsvTimestampTzPolicy,
+};
 use formula_model::{CellRef, CellValue};
 use std::io::Cursor;
 
@@ -34,3 +37,166 @@ fn csv_import_streams_into_columnar_backed_worksheet() {
     );
 }
 
+#[test]
+fn csv_import_rfc4180_quotes_newlines_and_crlf() {
+    let csv = concat!(
+        "id,text\r\n",
+        "1,\"hello, world\"\r\n",
+        "2,\"line1\r\nline2\"\r\n",
+        "3,\"he said \"\"hi\"\"\"\r\n",
+    );
+
+    let sheet =
+        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+            .unwrap();
+
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::String("hello, world".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::new(1, 1)),
+        CellValue::String("line1\r\nline2".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::new(2, 1)),
+        CellValue::String("he said \"hi\"".to_string())
+    );
+}
+
+#[test]
+fn csv_import_trailing_delimiter_produces_empty_field() {
+    let csv = "a,b,c\n1,2,\n";
+    let sheet =
+        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+            .unwrap();
+
+    // Trailing delimiter => third field exists but is empty.
+    assert_eq!(sheet.value(CellRef::new(0, 2)), CellValue::Empty);
+}
+
+#[test]
+fn csv_import_handles_utf8_inside_quoted_fields() {
+    let csv = "id,text\n1,\"こんにちは,世界\"\n";
+    let sheet =
+        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+            .unwrap();
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::String("こんにちは,世界".to_string())
+    );
+}
+
+#[test]
+fn csv_import_handles_wide_rows() {
+    let cols = 200usize;
+    let header = (0..cols)
+        .map(|i| format!("c{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(",");
+    let row = (0..cols)
+        .map(|i| (i + 1).to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let csv = format!("{header}\n{row}\n");
+
+    let sheet =
+        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+            .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value(CellRef::new(0, (cols - 1) as u32)),
+        CellValue::Number(cols as f64)
+    );
+}
+
+#[test]
+fn csv_import_type_inference_respects_locale_options() {
+    let csv = "amount;ratio;date\n€1.234,50;12,5%;31/12/1970\n";
+    let options = CsvOptions {
+        delimiter: b';',
+        decimal_separator: ',',
+        date_order: CsvDateOrder::Dmy,
+        ..CsvOptions::default()
+    };
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), options).unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1234.5));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(0.125));
+    assert_eq!(
+        sheet.value(CellRef::new(0, 2)),
+        CellValue::Number(31_449_600_000.0)
+    );
+}
+
+#[test]
+fn csv_import_date_order_preference_changes_ambiguous_dates() {
+    let csv = "d\n01/02/1970\n";
+
+    let mdy = CsvOptions {
+        date_order: CsvDateOrder::Mdy,
+        ..CsvOptions::default()
+    };
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), mdy).unwrap();
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(86_400_000.0));
+
+    let dmy = CsvOptions {
+        date_order: CsvDateOrder::Dmy,
+        ..CsvOptions::default()
+    };
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), dmy).unwrap();
+    assert_eq!(
+        sheet.value(CellRef::new(0, 0)),
+        CellValue::Number(2_678_400_000.0)
+    );
+}
+
+#[test]
+fn csv_import_supports_timezone_offset_policy() {
+    let csv = "ts\n1970-01-01T00:00:00-01:00\n";
+    let options = CsvOptions {
+        timestamp_tz_policy: CsvTimestampTzPolicy::ConvertToUtc,
+        ..CsvOptions::default()
+    };
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), options).unwrap();
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(3_600_000.0));
+}
+
+#[test]
+fn csv_import_supports_additional_date_formats() {
+    let csv = "d1,d2\n1970/01/02,19700102\n";
+    let sheet =
+        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+            .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(86_400_000.0));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(86_400_000.0));
+}
+
+#[test]
+fn csv_import_parses_parentheses_negative_numbers_with_grouping() {
+    let csv = "n\n\"(1,234.50)\"\n";
+    let sheet =
+        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+            .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(-1234.5));
+}
+
+#[test]
+fn csv_import_reports_invalid_utf8_with_row_and_column() {
+    let mut bytes = b"id,text\n1,\"hello".to_vec();
+    bytes.push(0xFF);
+    bytes.extend_from_slice(b"\"\n");
+
+    let err = import_csv_to_columnar_table(Cursor::new(bytes), CsvOptions::default()).unwrap_err();
+    match err {
+        CsvImportError::Parse { row, column, reason } => {
+            assert_eq!(row, 2);
+            assert_eq!(column, 2);
+            assert!(reason.contains("UTF-8"));
+        }
+        other => panic!("expected CsvImportError::Parse, got {other:?}"),
+    }
+}
