@@ -8,8 +8,10 @@ export function colToName(col: number): string {
 }
 
 export function nameToCol(name: string): number | null {
+  const normalized = name.trim().toUpperCase();
+  if (!/^[A-Z]+$/.test(normalized)) return null;
   try {
-    const { col0 } = fromA1(`${name}1`);
+    const { col0 } = fromA1(`${normalized}1`);
     return col0;
   } catch {
     return null;
