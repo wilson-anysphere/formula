@@ -248,6 +248,109 @@ test("allowed cell write is accepted and syncs", async (t) => {
   assert.equal(getCellModifiedBy(docReader, cellKey), "writer");
 });
 
+test("allowed offline edit syncs on reconnect (shadow state seeded from server doc)", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const port = await getAvailablePort();
+  const server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "jwt", secret: JWT_SECRET, audience: JWT_AUDIENCE },
+    env: { SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS: "1" },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const docName = `doc-${Math.random().toString(16).slice(2)}`;
+  const cellKey = "Sheet1:0:0";
+
+  const writerToken = signJwt({
+    sub: "writer",
+    docId: docName,
+    orgId: "o1",
+    role: "editor",
+    rangeRestrictions: [
+      {
+        range: { sheetId: "Sheet1", startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+        editAllowlist: ["writer"],
+      },
+    ],
+  });
+  const observerToken = signJwt({
+    sub: "observer",
+    docId: docName,
+    orgId: "o1",
+    role: "editor",
+  });
+
+  const docWriter = new Y.Doc();
+  const providerWriter = new WebsocketProvider(server.wsUrl, docName, docWriter, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: writerToken },
+  });
+
+  t.after(() => {
+    providerWriter.destroy();
+    docWriter.destroy();
+  });
+
+  await waitForProviderSync(providerWriter);
+
+  docWriter.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "base");
+    docWriter.getMap("cells").set(cellKey, cell);
+  });
+
+  providerWriter.destroy();
+  await new Promise((r) => setTimeout(r, 250));
+
+  // Offline edit: modify an existing cell *before* reconnecting.
+  docWriter.transact(() => {
+    const cell = docWriter.getMap("cells").get(cellKey) as any;
+    assert.ok(cell, "expected cell to exist in offline doc");
+    cell.set("value", "offline");
+    cell.set("modifiedBy", "spoofed");
+  });
+
+  const providerReconnect = new WebsocketProvider(server.wsUrl, docName, docWriter, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: writerToken },
+  });
+
+  const docObserver = new Y.Doc();
+  const providerObserver = new WebsocketProvider(server.wsUrl, docName, docObserver, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: observerToken },
+  });
+
+  t.after(() => {
+    providerReconnect.destroy();
+    providerObserver.destroy();
+    docObserver.destroy();
+  });
+
+  await waitForProviderSync(providerReconnect);
+  await waitForProviderSync(providerObserver);
+
+  await waitForCondition(
+    () =>
+      getCellValue(docObserver, cellKey) === "offline" &&
+      getCellModifiedBy(docObserver, cellKey) === "writer",
+    10_000
+  );
+
+  assert.equal(getCellValue(docObserver, cellKey), "offline");
+  assert.equal(getCellModifiedBy(docObserver, cellKey), "writer");
+});
+
 test("strict mode rejects updates when cell keys cannot be parsed", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
   t.after(async () => {

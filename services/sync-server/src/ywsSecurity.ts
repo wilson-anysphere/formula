@@ -357,6 +357,7 @@ export function installYwsSecurity(
     docName: string;
     auth: AuthContext | undefined;
     logger: Logger;
+    ydoc: any;
     limits: {
       maxMessageBytes: number;
       maxAwarenessStateBytes: number;
@@ -365,8 +366,14 @@ export function installYwsSecurity(
     enforceRangeRestrictions?: boolean;
   }
 ): void {
-  const { docName, auth, logger, limits, enforceRangeRestrictions: enforceRangeRestrictionsConfig } =
-    params;
+  const {
+    docName,
+    auth,
+    logger,
+    ydoc,
+    limits,
+    enforceRangeRestrictions: enforceRangeRestrictionsConfig,
+  } = params;
   const role = auth?.role ?? "viewer";
   const userId = auth?.userId ?? "unknown";
   const readOnly = role === "viewer" || role === "commenter";
@@ -377,10 +384,12 @@ export function installYwsSecurity(
       : null;
 
   // Approach B (Shadow-doc apply + diff):
-  // Maintain a per-connection shadow Y.Doc seeded from server->client sync traffic.
-  // Incoming updates are first applied to the shadow doc to observe which cell keys
-  // are touched. This avoids relying on Yjs internal decoding and remains accurate
-  // for edits to existing cells, at the cost of extra CPU/memory for the shadow doc.
+  // Maintain a per-connection shadow Y.Doc seeded from the current server doc state,
+  // and keep it updated via server doc update events. Incoming updates are applied
+  // to the shadow doc first to observe which cell keys are touched.
+  //
+  // Pros: avoids Yjs internal decoding; works for incremental updates against existing docs.
+  // Cons: extra CPU/memory for the shadow doc on restricted connections.
   const enforceRangeRestrictions =
     Boolean(enforceRangeRestrictionsConfig) &&
     rangeRestrictions !== null &&
@@ -389,34 +398,33 @@ export function installYwsSecurity(
   const shadowCells = shadowDoc ? shadowDoc.getMap("cells") : null;
 
   if (shadowDoc && shadowCells) {
-    const originalSend = ws.send.bind(ws);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ws.send = ((data: any, optionsOrCb?: any, cb?: any) => {
-      const raw = data as WebSocket.RawData;
+    try {
+      Y.applyUpdate(shadowDoc, Y.encodeStateAsUpdate(ydoc));
+    } catch {
+      // Best-effort: if we can't seed the shadow state, enforcement will fail closed
+      // once we start validating incoming updates.
+    }
+
+    const applyServerUpdate = (update: Uint8Array) => {
       try {
-        const message = toUint8Array(raw);
-        if (message) {
-          const outer = readVarUint(message, 0);
-          if (outer.value === 0) {
-            const inner = readVarUint(message, outer.offset);
-            if (inner.value === 1 || inner.value === 2) {
-              const updateRes = readVarUint8Array(message, inner.offset);
-              Y.applyUpdate(shadowDoc, updateRes.value);
-            }
-          }
-        }
+        Y.applyUpdate(shadowDoc, update);
       } catch {
-        // Best-effort: ignore malformed outbound messages. Enforcement stays strict
-        // on inbound updates.
+        // ignore
       }
-      // Preserve ws.send overload semantics (send(data, cb) vs send(data, opts, cb)).
-      if (typeof optionsOrCb === "function") {
-        return originalSend(data, optionsOrCb);
-      }
-      return originalSend(data, optionsOrCb, cb);
-    }) as typeof ws.send;
+    };
+
+    if (ydoc && typeof ydoc.on === "function") {
+      ydoc.on("update", applyServerUpdate);
+    }
 
     ws.on("close", () => {
+      if (ydoc && typeof ydoc.off === "function") {
+        try {
+          ydoc.off("update", applyServerUpdate);
+        } catch {
+          // ignore
+        }
+      }
       try {
         shadowDoc.destroy();
       } catch {

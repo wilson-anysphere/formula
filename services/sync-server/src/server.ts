@@ -46,13 +46,14 @@ import { TombstoneStore, docKeyFromDocName } from "./tombstones.js";
 import { Y } from "./yjs.js";
 import { installYwsSecurity } from "./ywsSecurity.js";
 
-const { setupWSConnection, setPersistence } = ywsUtils as {
+const { setupWSConnection, setPersistence, getYDoc } = ywsUtils as {
   setupWSConnection: (
     conn: WebSocket,
     req: IncomingMessage,
     opts?: { gc?: boolean }
   ) => void;
   setPersistence: (persistence: unknown) => void;
+  getYDoc: (docName: string, gc?: boolean) => any;
 };
 
 function pickIp(req: IncomingMessage, trustProxy: boolean): string {
@@ -1115,10 +1116,13 @@ export function createSyncServer(
       void retentionManager?.markSeen(persistedName);
     }
 
+    const ydoc = getYDoc(docName, config.gc);
+
     installYwsSecurity(ws, {
       docName,
       auth: authCtx,
       logger,
+      ydoc,
       limits: {
         maxMessageBytes: config.limits.maxMessageBytes,
         maxAwarenessStateBytes: config.limits.maxAwarenessStateBytes,
