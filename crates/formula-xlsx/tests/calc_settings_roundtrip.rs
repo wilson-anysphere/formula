@@ -14,6 +14,10 @@ fn round_trip_preserves_calc_chain_and_calc_settings() {
     assert_eq!(settings.iterative.max_iterations, 10);
     assert!((settings.iterative.max_change - 0.0001).abs() < 1e-12);
     assert!(settings.full_precision);
+    assert!(
+        !settings.full_calc_on_load,
+        "fixture does not set fullCalcOnLoad, default should be false"
+    );
 
     let original_calc_chain = pkg.part("xl/calcChain.xml").unwrap().to_vec();
 
@@ -27,6 +31,7 @@ fn round_trip_preserves_calc_chain_and_calc_settings() {
     };
     new_settings.calculate_before_save = false;
     new_settings.full_precision = true;
+    new_settings.full_calc_on_load = true;
 
     pkg.set_calc_settings(&new_settings).unwrap();
 

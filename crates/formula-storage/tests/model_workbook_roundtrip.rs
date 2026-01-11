@@ -49,6 +49,7 @@ fn model_workbook_import_export_round_trips() {
             max_change: 0.1,
         },
         full_precision: false,
+        full_calc_on_load: true,
     };
     workbook.theme = ThemePalette::office_2007();
     workbook.workbook_protection = WorkbookProtection {

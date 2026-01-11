@@ -167,6 +167,46 @@ fn xlsb_export_preserves_calc_mode_manual() {
     assert_eq!(settings.calculation_mode, CalculationMode::Manual);
 }
 
+#[test]
+fn xlsb_export_preserves_full_calc_on_load() {
+    let fixture_path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../formula-xlsb/tests/fixtures/simple.xlsb"
+    ));
+    let wb = formula_xlsb::XlsbWorkbook::open(fixture_path).expect("open xlsb fixture");
+
+    let workbook_bin = wb
+        .preserved_parts()
+        .get("xl/workbook.bin")
+        .expect("expected xl/workbook.bin to be preserved");
+
+    // CALC_PROP flags:
+    // - low 2 bits are calc mode (0 = Manual)
+    // - bit 0x0004 is fullCalcOnLoad.
+    let patched_workbook_bin = patch_workbook_bin_append_calc_prop(workbook_bin, 0x0004u16);
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let xlsb_path = dir.path().join("full_calc_on_load.xlsb");
+    wb.save_with_part_overrides(
+        &xlsb_path,
+        &HashMap::from([("xl/workbook.bin".to_string(), patched_workbook_bin)]),
+    )
+    .expect("write modified xlsb");
+
+    let wb = open_workbook(&xlsb_path).expect("open modified xlsb via formula-io");
+
+    let out_path = dir.path().join("export.xlsx");
+    save_workbook(&wb, &out_path).expect("export workbook");
+
+    let bytes = std::fs::read(&out_path).expect("read exported workbook");
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).expect("load exported xlsx package");
+    let settings = pkg.calc_settings().expect("read exported calc settings");
+    assert!(
+        settings.full_calc_on_load,
+        "expected fullCalcOnLoad to be preserved"
+    );
+}
+
 fn patch_workbook_bin_set_first_sheet_visibility(
     workbook_bin: &[u8],
     visibility_state: u32,

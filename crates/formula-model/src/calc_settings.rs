@@ -21,6 +21,11 @@ pub struct CalcSettings {
     ///
     /// XLSX: `fullPrecision` (1 = full precision, 0 = precision as displayed).
     pub full_precision: bool,
+    /// Whether Excel should force a full recalculation when the workbook is opened.
+    ///
+    /// XLSX: `fullCalcOnLoad`.
+    #[serde(default)]
+    pub full_calc_on_load: bool,
 }
 
 impl Default for CalcSettings {
@@ -32,6 +37,7 @@ impl Default for CalcSettings {
             iterative: IterativeCalculationSettings::default(),
             // Excel defaults to full precision.
             full_precision: true,
+            full_calc_on_load: false,
         }
     }
 }

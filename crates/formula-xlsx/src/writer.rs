@@ -165,9 +165,10 @@ fn workbook_xml(workbook: &Workbook) -> String {
 fn calc_pr_xml(workbook: &Workbook) -> String {
     let settings = &workbook.calc_settings;
     format!(
-        r#"<calcPr calcMode="{}" calcOnSave="{}" iterative="{}" iterateCount="{}" iterateDelta="{}" fullPrecision="{}"/>"#,
+        r#"<calcPr calcMode="{}" calcOnSave="{}" fullCalcOnLoad="{}" iterative="{}" iterateCount="{}" iterateDelta="{}" fullPrecision="{}"/>"#,
         settings.calculation_mode.as_calc_mode_attr(),
         bool_attr(settings.calculate_before_save),
+        bool_attr(settings.full_calc_on_load),
         bool_attr(settings.iterative.enabled),
         settings.iterative.max_iterations,
         trim_float(settings.iterative.max_change),

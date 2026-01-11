@@ -210,6 +210,9 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
             xlsb::CalcMode::AutoExceptTables => CalculationMode::AutomaticNoTable,
         };
     }
+    if let Some(full_calc_on_load) = wb.workbook_properties().full_calc_on_load {
+        out.calc_settings.full_calc_on_load = full_calc_on_load;
+    }
 
     // Best-effort style mapping: XLSB cell records reference an XF index.
     //

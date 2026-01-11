@@ -80,6 +80,7 @@ fn apply_calc_pr_attributes(
                 }
             }
             b"calcOnSave" => settings.calculate_before_save = parse_bool_attr(&value),
+            b"fullCalcOnLoad" => settings.full_calc_on_load = parse_bool_attr(&value),
             b"fullPrecision" => settings.full_precision = parse_bool_attr(&value),
             b"iterative" => iterative_enabled = parse_bool_attr(&value),
             b"iterateCount" => {
@@ -178,6 +179,8 @@ fn write_calc_pr_event(
     calc_pr.push_attribute(("calcMode", settings.calculation_mode.as_calc_mode_attr()));
     let calc_on_save = bool_attr(settings.calculate_before_save);
     calc_pr.push_attribute(("calcOnSave", calc_on_save.as_str()));
+    let full_calc_on_load = bool_attr(settings.full_calc_on_load);
+    calc_pr.push_attribute(("fullCalcOnLoad", full_calc_on_load.as_str()));
     let iterative = bool_attr(settings.iterative.enabled);
     calc_pr.push_attribute(("iterative", iterative.as_str()));
     let iterate_count = settings.iterative.max_iterations.to_string();
