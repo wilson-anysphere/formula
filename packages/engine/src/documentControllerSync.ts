@@ -1,3 +1,5 @@
+import type { CellChange } from "./protocol";
+
 export type EngineCellScalar = number | string | boolean | null;
 
 export type EngineWorkbookJson = {
@@ -24,7 +26,7 @@ export interface EngineSyncTarget {
   setCells?: (
     updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }>,
   ) => Promise<void> | void;
-  recalculate: (sheet?: string) => Promise<unknown> | unknown;
+  recalculate: (sheet?: string) => Promise<CellChange[]> | CellChange[];
 }
 
 function colToName(col0: number): string {
@@ -114,7 +116,7 @@ export function exportDocumentToEngineWorkbookJson(doc: any): EngineWorkbookJson
   return { sheets };
 }
 
-export async function engineHydrateFromDocument(engine: EngineSyncTarget, doc: any): Promise<unknown> {
+export async function engineHydrateFromDocument(engine: EngineSyncTarget, doc: any): Promise<CellChange[]> {
   const workbookJson = exportDocumentToEngineWorkbookJson(doc);
   await engine.loadWorkbookFromJson(JSON.stringify(workbookJson));
   return await engine.recalculate();
@@ -124,7 +126,7 @@ export async function engineApplyDeltas(
   engine: EngineSyncTarget,
   deltas: readonly DocumentCellDelta[],
   options: { recalculate?: boolean } = {},
-): Promise<unknown> {
+): Promise<CellChange[]> {
   const shouldRecalculate = options.recalculate ?? true;
   const updates: Array<{ address: string; value: EngineCellScalar; sheet?: string }> = [];
 
@@ -139,13 +141,13 @@ export async function engineApplyDeltas(
     updates.push({ address, value: afterInput, sheet: delta.sheetId });
   }
 
-  if (updates.length === 0) return;
+  if (updates.length === 0) return [];
 
   if (engine.setCells) {
     await engine.setCells(updates);
   } else {
     await Promise.all(updates.map((u) => engine.setCell(u.address, u.value, u.sheet)));
   }
-  if (!shouldRecalculate) return;
+  if (!shouldRecalculate) return [];
   return await engine.recalculate();
 }

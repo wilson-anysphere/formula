@@ -3,7 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 // DocumentController is authored in JS. We keep a minimal `.d.ts` next to it so this
 // TS test can import the runtime implementation under `strict` typechecking.
 import { DocumentController } from "../../../apps/desktop/src/document/documentController.js";
-import { engineApplyDeltas, engineHydrateFromDocument, exportDocumentToEngineWorkbookJson } from "./documentControllerSync";
+import type { CellChange } from "./protocol";
+import {
+  engineApplyDeltas,
+  engineHydrateFromDocument,
+  exportDocumentToEngineWorkbookJson,
+  type EngineSyncTarget,
+} from "./documentControllerSync";
 
 describe("DocumentController → engine workbook JSON exporter", () => {
   it("exports scalar values, rich text as plain text, and normalizes formulas", () => {
@@ -87,5 +93,95 @@ describe("DocumentController → engine workbook JSON exporter", () => {
     expect(engine.setCells).toHaveBeenCalledTimes(1);
     expect(engine.setCells).toHaveBeenCalledWith([{ address: "A1", value: 1, sheet: "Sheet1" }]);
     expect(engine.recalculate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("engine sync helpers", () => {
+  class FakeEngine implements EngineSyncTarget {
+    readonly loadedJson: string[] = [];
+    readonly setCalls: Array<{ address: string; value: unknown; sheet?: string }> = [];
+    readonly recalcCalls: Array<string | undefined> = [];
+    constructor(private readonly recalcResult: CellChange[]) {}
+
+    async loadWorkbookFromJson(json: string): Promise<void> {
+      this.loadedJson.push(json);
+    }
+
+    async setCell(address: string, value: any, sheet?: string): Promise<void> {
+      this.setCalls.push({ address, value, sheet });
+    }
+
+    async recalculate(sheet?: string): Promise<CellChange[]> {
+      this.recalcCalls.push(sheet);
+      return this.recalcResult;
+    }
+  }
+
+  it("engineHydrateFromDocument returns the engine's recalc changes", async () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", 1);
+    doc.setCellFormula("Sheet1", "A2", "A1*2");
+
+    const expected: CellChange[] = [{ sheet: "Sheet1", address: "A2", value: 2 }];
+    const engine = new FakeEngine(expected);
+
+    const changes = await engineHydrateFromDocument(engine, doc);
+
+    expect(engine.loadedJson).toHaveLength(1);
+    expect(engine.recalcCalls).toEqual([undefined]);
+    expect(changes).toEqual(expected);
+  });
+
+  it("engineApplyDeltas skips formatting-only edits (no recalc)", async () => {
+    const engine = new FakeEngine([{ sheet: "Sheet1", address: "A1", value: 1 }]);
+
+    const changes = await engineApplyDeltas(engine, [
+      {
+        sheetId: "Sheet1",
+        row: 0,
+        col: 0,
+        before: { value: 1, formula: null, styleId: 0 },
+        after: { value: 1, formula: null, styleId: 123 },
+      },
+    ]);
+
+    expect(changes).toEqual([]);
+    expect(engine.setCalls).toEqual([]);
+    expect(engine.recalcCalls).toEqual([]);
+  });
+
+  it("engineApplyDeltas propagates value changes and returns recalc changes", async () => {
+    const expected: CellChange[] = [{ sheet: "Sheet1", address: "B1", value: 4 }];
+    const engine = new FakeEngine(expected);
+
+    const changes = await engineApplyDeltas(engine, [
+      {
+        sheetId: "Sheet1",
+        row: 0,
+        col: 0,
+        before: { value: 1, formula: null, styleId: 0 },
+        after: { value: 2, formula: null, styleId: 0 },
+      },
+    ]);
+
+    expect(engine.setCalls).toEqual([{ address: "A1", value: 2, sheet: "Sheet1" }]);
+    expect(engine.recalcCalls).toEqual([undefined]);
+    expect(changes).toEqual(expected);
+  });
+
+  it("engineApplyDeltas normalizes formulas to start with '='", async () => {
+    const engine = new FakeEngine([]);
+
+    await engineApplyDeltas(engine, [
+      {
+        sheetId: "Sheet1",
+        row: 0,
+        col: 1,
+        before: { value: null, formula: null, styleId: 0 },
+        after: { value: null, formula: "A1*2", styleId: 0 },
+      },
+    ]);
+
+    expect(engine.setCalls).toEqual([{ address: "B1", value: "=A1*2", sheet: "Sheet1" }]);
   });
 });
