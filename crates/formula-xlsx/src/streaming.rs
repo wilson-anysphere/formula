@@ -166,6 +166,7 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     let mut patched_dimension = false;
 
     let mut row_state: Option<RowState> = None;
+    let mut in_cell = false;
 
     loop {
         let event = reader.read_event_into(&mut buf)?;
@@ -225,6 +226,7 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
 
             Event::Start(ref e) if in_sheet_data && e.name().as_ref() == b"row" => {
                 let row_1 = parse_row_number(e)?;
+                in_cell = false;
 
                 // Insert any patch rows that should appear before this row.
                 while let Some((&next_row, _)) = patches_by_row.iter().next() {
@@ -249,6 +251,7 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
             }
             Event::Empty(ref e) if in_sheet_data && e.name().as_ref() == b"row" => {
                 let row_1 = parse_row_number(e)?;
+                in_cell = false;
 
                 // Insert patch rows that should appear before this row.
                 while let Some((&next_row, _)) = patches_by_row.iter().next() {
@@ -274,6 +277,7 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 if let Some(state) = row_state.take() {
                     write_remaining_row_cells(&mut writer, &state.pending, state.next_idx)?;
                 }
+                in_cell = false;
                 writer.write_event(Event::End(e.to_owned()))?;
             }
 
@@ -289,6 +293,7 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     patch_existing_cell(&mut reader, &mut writer, e, &cell_ref, &patch)?;
                 } else {
                     writer.write_event(Event::Start(e.to_owned()))?;
+                    in_cell = true;
                 }
             }
             Event::Empty(ref e) if in_sheet_data && row_state.is_some() && e.name().as_ref() == b"c" => {
@@ -303,13 +308,21 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
             }
+            Event::End(ref e) if in_sheet_data && row_state.is_some() && in_cell && e.name().as_ref() == b"c" => {
+                in_cell = false;
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
             // Ensure cells are emitted before any non-cell elements (e.g. extLst) in the row.
-            Event::Start(ref e) if in_sheet_data && row_state.is_some() && e.name().as_ref() != b"c" => {
+            Event::Start(ref e)
+                if in_sheet_data && row_state.is_some() && !in_cell && e.name().as_ref() != b"c" =>
+            {
                 let state = row_state.as_mut().expect("row_state just checked");
                 insert_pending_before_non_cell(&mut writer, state)?;
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
-            Event::Empty(ref e) if in_sheet_data && row_state.is_some() && e.name().as_ref() != b"c" => {
+            Event::Empty(ref e)
+                if in_sheet_data && row_state.is_some() && !in_cell && e.name().as_ref() != b"c" =>
+            {
                 let state = row_state.as_mut().expect("row_state just checked");
                 insert_pending_before_non_cell(&mut writer, state)?;
                 writer.write_event(Event::Empty(e.to_owned()))?;
@@ -459,10 +472,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     patch: &CellPatch,
 ) -> Result<(), StreamingPatchError> {
     let (cell_t, body_kind) = cell_representation(&patch.value, patch.formula.as_deref())?;
-    let patch_formula = patch
-        .formula
-        .as_deref()
-        .map(|f| f.strip_prefix('=').unwrap_or(f));
+    let patch_formula = patch.formula.as_deref();
 
     let mut c = BytesStart::new("c");
     let mut has_r = false;
@@ -521,7 +531,8 @@ fn write_patched_cell_children<W: Write>(
                 saw_formula = true;
                 if !formula_written {
                     if let Some(formula) = patch_formula {
-                        write_formula_element(writer, Some(e), formula)?;
+                        let detach_shared = should_detach_shared_formula(e, formula);
+                        write_formula_element(writer, Some(e), formula, detach_shared)?;
                         formula_written = true;
                     }
                 }
@@ -532,7 +543,8 @@ fn write_patched_cell_children<W: Write>(
                 saw_formula = true;
                 if !formula_written {
                     if let Some(formula) = patch_formula {
-                        write_formula_element(writer, Some(e), formula)?;
+                        let detach_shared = should_detach_shared_formula(e, formula);
+                        write_formula_element(writer, Some(e), formula, detach_shared)?;
                         formula_written = true;
                     }
                 }
@@ -547,7 +559,7 @@ fn write_patched_cell_children<W: Write>(
                 if !formula_written {
                     if let Some(formula) = patch_formula {
                         // Original cell has no <f> before the value; insert one.
-                        write_formula_element(writer, None, formula)?;
+                        write_formula_element(writer, None, formula, false)?;
                         formula_written = true;
                     }
                 }
@@ -564,7 +576,7 @@ fn write_patched_cell_children<W: Write>(
 
                 if !formula_written {
                     if let Some(formula) = patch_formula {
-                        write_formula_element(writer, None, formula)?;
+                        write_formula_element(writer, None, formula, false)?;
                         formula_written = true;
                     }
                 }
@@ -579,7 +591,7 @@ fn write_patched_cell_children<W: Write>(
             ev => {
                 if !formula_written && !saw_formula {
                     if let Some(formula) = patch_formula {
-                        write_formula_element(writer, None, formula)?;
+                        write_formula_element(writer, None, formula, false)?;
                         formula_written = true;
                     }
                 }
@@ -595,7 +607,7 @@ fn write_patched_cell_children<W: Write>(
 
     if !formula_written {
         if let Some(formula) = patch_formula {
-            write_formula_element(writer, None, formula)?;
+            write_formula_element(writer, None, formula, false)?;
         }
     }
     if !value_written {
@@ -635,21 +647,29 @@ fn write_formula_element<W: Write>(
     writer: &mut Writer<W>,
     original: Option<&BytesStart<'_>>,
     formula: &str,
+    detach_shared: bool,
 ) -> Result<(), StreamingPatchError> {
-    let formula = formula.strip_prefix('=').unwrap_or(formula);
+    let formula_display = crate::formula_text::normalize_display_formula(formula);
+    let file_formula = crate::formula_text::add_xlfn_prefixes(&formula_display);
+
     let mut f = BytesStart::new("f");
     if let Some(orig) = original {
         for attr in orig.attributes() {
             let attr = attr?;
+            if detach_shared
+                && matches!(attr.key.as_ref(), b"t" | b"ref" | b"si")
+            {
+                continue;
+            }
             f.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
         }
     }
 
-    if formula.is_empty() {
+    if file_formula.is_empty() {
         writer.write_event(Event::Empty(f))?;
     } else {
         writer.write_event(Event::Start(f))?;
-        writer.write_event(Event::Text(BytesText::new(formula)))?;
+        writer.write_event(Event::Text(BytesText::new(&file_formula)))?;
         writer.write_event(Event::End(BytesEnd::new("f")))?;
     }
     Ok(())
@@ -680,6 +700,25 @@ fn write_value_element<W: Write>(
     }
 
     Ok(())
+}
+
+fn should_detach_shared_formula(f: &BytesStart<'_>, patch_formula: &str) -> bool {
+    let patch_formula = patch_formula.strip_prefix('=').unwrap_or(patch_formula);
+    if patch_formula.is_empty() {
+        return false;
+    }
+
+    let mut is_shared = false;
+    let mut has_ref = false;
+    for attr in f.attributes().flatten() {
+        match attr.key.as_ref() {
+            b"t" if attr.value.as_ref() == b"shared" => is_shared = true,
+            b"ref" => has_ref = true,
+            _ => {}
+        }
+    }
+
+    is_shared && !has_ref
 }
 
 fn write_patched_cell<W: Write>(
@@ -713,14 +752,7 @@ fn write_patched_cell<W: Write>(
     writer.write_event(Event::Start(c))?;
 
     if let Some(formula) = patch.formula.as_deref() {
-        let formula = formula.strip_prefix('=').unwrap_or(formula);
-        if formula.is_empty() {
-            writer.write_event(Event::Empty(BytesStart::new("f")))?;
-        } else {
-            writer.write_event(Event::Start(BytesStart::new("f")))?;
-            writer.write_event(Event::Text(BytesText::new(formula)))?;
-            writer.write_event(Event::End(BytesEnd::new("f")))?;
-        }
+        write_formula_element(writer, None, formula, false)?;
     }
 
     match body_kind {

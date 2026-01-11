@@ -131,3 +131,78 @@ fn streaming_patch_expands_dimension_when_writing_out_of_range_cell(
 
     Ok(())
 }
+
+#[test]
+fn streaming_patch_normalizes_formula_with_xlfn_prefixes() -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = include_bytes!("fixtures/rt_simple.xlsx");
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("C1")?,
+        CellValue::Number(1.0),
+        Some("=SEQUENCE(3)".to_string()),
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes.as_slice()), &mut out, &[patch])?;
+
+    // Ensure the stored formula uses the _xlfn prefix.
+    let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    assert!(
+        sheet_xml.contains("<c r=\"C1\"><f>_xlfn.SEQUENCE(3)</f>"),
+        "expected patched formula to be stored with _xlfn prefix"
+    );
+
+    // Ensure the parsed model uses the display formula without the prefix.
+    let doc = load_from_bytes(out.get_ref())?;
+    let sheet_id = doc.workbook.sheets[0].id;
+    let sheet = doc.workbook.sheet(sheet_id).unwrap();
+    let cell = sheet.cell(CellRef::from_a1("C1")?).unwrap();
+    assert_eq!(cell.formula.as_deref(), Some("SEQUENCE(3)"));
+
+    Ok(())
+}
+
+#[test]
+fn streaming_patch_detaches_textless_shared_formula() -> Result<(), Box<dyn std::error::Error>> {
+    // Fixture contains a shared formula in A2 (master) and a textless shared reference in B2.
+    let bytes = include_bytes!("fixtures/rt_simple.xlsx");
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("B2")?,
+        CellValue::Number(2.0),
+        Some("=1+1".to_string()),
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes.as_slice()), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+
+    let xml_doc = roxmltree::Document::parse(&sheet_xml)?;
+    let cell = xml_doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("B2"))
+        .expect("B2 cell should exist");
+    let f = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "f")
+        .expect("B2 should have a formula");
+    assert_eq!(
+        f.attribute("t"),
+        None,
+        "patched textless shared formula should become a standalone formula"
+    );
+    assert_eq!(f.attribute("si"), None);
+
+    Ok(())
+}
