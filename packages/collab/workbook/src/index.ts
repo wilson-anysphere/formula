@@ -90,8 +90,14 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
           remaining = nonLocal;
         }
 
+        // Deterministic pruning: keep the last surviving entry by index.
+        //
+        // This helps in scenarios where a sheet placeholder is inserted first
+        // (e.g. schema init) and later canonical state arrives (e.g. from a
+        // merge/checkout or persistence load). The later entry is more likely to
+        // reflect the intended sheet order and metadata.
         remaining.sort((a, b) => a - b);
-        for (let i = 1; i < remaining.length; i += 1) {
+        for (let i = 0; i < remaining.length - 1; i += 1) {
           deleteIndices.push(remaining[i]!);
         }
       }
