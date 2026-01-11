@@ -25,6 +25,7 @@ _ORIGINAL_SOCKET_CREATE_CONNECTION = None
 _ORIGINAL_SOCKET_CONNECT = None
 _ORIGINAL_SOCKET_CONNECT_EX = None
 _ORIGINAL_SOCKET_SENDTO = None
+_ORIGINAL_SOCKET_SENDMSG = None
 _ORIGINAL__SOCKET_SOCKET = None
 _ORIGINAL__SOCKET_SOCKETTYPE = None
 
@@ -276,6 +277,7 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
     global _ORIGINAL_SOCKET_CONNECT
     global _ORIGINAL_SOCKET_CONNECT_EX
     global _ORIGINAL_SOCKET_SENDTO
+    global _ORIGINAL_SOCKET_SENDMSG
     global _ORIGINAL__SOCKET_SOCKET
     global _ORIGINAL__SOCKET_SOCKETTYPE
 
@@ -301,6 +303,8 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
         _ORIGINAL_SOCKET_CONNECT_EX = getattr(socket.socket, "connect_ex", None)
     if _ORIGINAL_SOCKET_SENDTO is None:
         _ORIGINAL_SOCKET_SENDTO = getattr(socket.socket, "sendto", None)
+    if _ORIGINAL_SOCKET_SENDMSG is None:
+        _ORIGINAL_SOCKET_SENDMSG = getattr(socket.socket, "sendmsg", None)
 
     _socket_mod = getattr(socket, "_socket", None)
     if _socket_mod is not None:
@@ -328,6 +332,11 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
     if _ORIGINAL_SOCKET_SENDTO is not None:
         try:
             socket.socket.sendto = _ORIGINAL_SOCKET_SENDTO  # type: ignore[assignment]
+        except Exception:
+            pass
+    if _ORIGINAL_SOCKET_SENDMSG is not None:
+        try:
+            socket.socket.sendmsg = _ORIGINAL_SOCKET_SENDMSG  # type: ignore[assignment]
         except Exception:
             pass
 
@@ -383,6 +392,18 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
         enforce_hostname(_extract_hostname(address))
         return _ORIGINAL_SOCKET_SENDTO(self, data, *args, **kwargs)  # type: ignore[misc]
 
+    def guarded_sendmsg(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        # Signature: sendmsg(buffers[, ancdata[, flags[, address]]])
+        address = None
+        if "address" in kwargs:
+            address = kwargs.get("address")
+        elif len(args) >= 4:
+            address = args[3]
+
+        if address is not None:
+            enforce_hostname(_extract_hostname(address))
+        return _ORIGINAL_SOCKET_SENDMSG(self, *args, **kwargs)  # type: ignore[misc]
+
     def guarded_create_connection(address, *args, **kwargs):  # type: ignore[no-untyped-def]
         enforce_hostname(_extract_hostname(address))
 
@@ -410,6 +431,11 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
     if _ORIGINAL_SOCKET_SENDTO is not None:
         try:
             socket.socket.sendto = guarded_sendto  # type: ignore[assignment]
+        except Exception:
+            pass
+    if _ORIGINAL_SOCKET_SENDMSG is not None:
+        try:
+            socket.socket.sendmsg = guarded_sendmsg  # type: ignore[assignment]
         except Exception:
             pass
 
@@ -445,6 +471,17 @@ def _apply_socket_network_policy(network: str, permissions: Dict[str, Any]) -> N
 
                 enforce_hostname(_extract_hostname(address))
                 return super().sendto(data, *args, **kwargs)
+
+            def sendmsg(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+                address = None
+                if "address" in kwargs:
+                    address = kwargs.get("address")
+                elif len(args) >= 4:
+                    address = args[3]
+
+                if address is not None:
+                    enforce_hostname(_extract_hostname(address))
+                return super().sendmsg(*args, **kwargs)
 
         try:
             setattr(_socket_mod, "socket", GuardedSocketType)

@@ -207,6 +207,31 @@ s.connect(("127.0.0.1", ${address.port}))
   }
 });
 
+test("native allowlist sandbox cannot be bypassed via sendmsg", async () => {
+  const workbook = new MockWorkbook();
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import socket
+
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.sendmsg([b"hi"], [], 0, ("127.0.0.1", 9))
+`;
+
+  await assert.rejects(
+    () =>
+      runtime.execute(script, {
+        api: workbook,
+        permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["example.com"] },
+      }),
+    /Network access to/,
+  );
+});
+
 test("native python sandbox blocks posix_spawn escape hatch", async () => {
   const workbook = new MockWorkbook();
   const runtime = new NativePythonRuntime({

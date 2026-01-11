@@ -397,6 +397,29 @@ s.connect(("127.0.0.1", ${address.port}))
     }
   });
 
+  it("prevents allowlist bypasses via sendmsg (native allowlist sandbox)", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import socket
+
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.sendmsg([b"hi"], [], 0, ("127.0.0.1", 9))
+`;
+
+    await expect(
+      runtime.execute(script, {
+        api: workbook,
+        permissions: { filesystem: "none", network: "allowlist", networkAllowlist: ["example.com"] },
+      }),
+    ).rejects.toThrow(/Network access to/);
+  });
+
   it("blocks obvious command execution escape hatches (os.system)", async () => {
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({
