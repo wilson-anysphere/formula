@@ -261,3 +261,150 @@ test("TabCompletionEngine caches suggestions by context key", async () => {
   assert.deepEqual(s1, s2);
   assert.equal(callCount, 1, "Expected local model to be called once due to caching");
 });
+
+test("Named ranges are suggested in range arguments (=SUM(Sal → SalesData)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [{ name: "SalesData", range: "Sheet1!A1:A10" }],
+      getSheetNames: () => ["Sheet1"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(Sal";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some(s => s.text === "=SUM(SalesData)"),
+    `Expected a named-range suggestion, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
+test("Local-model prompt formatting is stable and completion inserts at the cursor", async () => {
+  /** @type {string | null} */
+  let seenPrompt = null;
+
+  const localModel = {
+    async complete(prompt) {
+      seenPrompt = prompt;
+      return "2";
+    },
+  };
+
+  const engine = new TabCompletionEngine({ localModel, localModelTimeoutMs: 200 });
+
+  const currentInput = "=1+";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  const expectedPrompt = [
+    "You are a spreadsheet formula completion engine.",
+    "Return ONLY the text to insert at the cursor.",
+    "Cell: A1",
+    `Input: ${currentInput}`,
+    `CursorPosition: ${currentInput.length}`,
+    "Completion:",
+  ].join("\n");
+
+  assert.equal(seenPrompt, expectedPrompt);
+  assert.ok(
+    suggestions.some(s => s.text === "=1+2"),
+    `Expected the local model completion to be inserted, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
+test("previewEvaluator is called and preview metadata is attached", async () => {
+  let calls = 0;
+  /** @type {any} */
+  let last = null;
+  const previewEvaluator = (params) => {
+    calls += 1;
+    last = params;
+    return "42";
+  };
+
+  const engine = new TabCompletionEngine();
+  const currentInput = "=TOD";
+  const suggestions = await engine.getSuggestions(
+    {
+      currentInput,
+      cursorPosition: currentInput.length,
+      cellRef: { row: 0, col: 0 },
+      surroundingCells: createMockCellContext({}),
+    },
+    { previewEvaluator }
+  );
+
+  const today = suggestions.find((s) => s.text === "=TODAY()");
+  assert.ok(today, `Expected TODAY() suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`);
+  assert.equal(today.preview, "42");
+  assert.ok(calls >= 1);
+  assert.equal(last?.suggestion?.text, today.text);
+});
+
+test("Structured references are suggested from table schemas", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1"],
+      getTables: () => [{ name: "Table1", columns: ["Amount"] }],
+    },
+  });
+
+  const currentInput = "=SUM(Tab";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Table1[Amount])"),
+    `Expected a structured reference suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Sheet-qualified ranges are suggested when typing Sheet2!A", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(Sheet2!A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Sheet2!A1:A10)"),
+    `Expected a sheet-qualified range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});

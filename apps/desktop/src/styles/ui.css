@@ -64,6 +64,13 @@
   opacity: 0.6;
 }
 
+.formula-bar-highlight .formula-bar-preview {
+  color: var(--text-secondary);
+  opacity: 0.8;
+  font-size: 12px;
+  margin-left: 6px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: auto 1fr;

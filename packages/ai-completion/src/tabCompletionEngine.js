@@ -20,8 +20,27 @@ import { normalizeCellRef, toA1, columnIndexToLetter } from "./a1.js";
  *   currentInput: string,
  *   cursorPosition: number,
  *   cellRef: {row:number,col:number} | string,
- *   surroundingCells: { getCellValue: (row:number, col:number) => any, getCacheKey?: () => string }
+ *   surroundingCells: { getCellValue: (row:number, col:number, sheetName?: string) => any, getCacheKey?: () => string }
  * }} CompletionContext
+ *
+ * @typedef {{
+ *   name: string,
+ *   range?: string
+ * }} NamedRangeInfo
+ *
+ * @typedef {{
+ *   name: string,
+ *   columns: string[]
+ * }} TableInfo
+ *
+ * @typedef {{
+ *   getNamedRanges?: () => NamedRangeInfo[] | Promise<NamedRangeInfo[]>,
+ *   getSheetNames?: () => string[] | Promise<string[]>,
+ *   getTables?: () => TableInfo[] | Promise<TableInfo[]>,
+ *   getCacheKey?: () => string
+ * }} SchemaProvider
+ *
+ * @typedef {(params: { suggestion: Suggestion, context: CompletionContext }) => any | Promise<any>} PreviewEvaluator
  */
 
 export class TabCompletionEngine {
@@ -30,6 +49,7 @@ export class TabCompletionEngine {
    *   functionRegistry?: FunctionRegistry,
    *   parsePartialFormula?: typeof parsePartialFormula,
    *   localModel?: { complete: (prompt: string, options?: any) => Promise<string> } | null,
+   *   schemaProvider?: SchemaProvider | null,
    *   cache?: LRUCache,
    *   cacheSize?: number,
    *   maxSuggestions?: number,
@@ -40,6 +60,7 @@ export class TabCompletionEngine {
     this.functionRegistry = options.functionRegistry ?? new FunctionRegistry();
     this.parsePartialFormula = options.parsePartialFormula ?? parsePartialFormula;
     this.localModel = options.localModel ?? null;
+    this.schemaProvider = options.schemaProvider ?? null;
     this.cache = options.cache ?? new LRUCache(options.cacheSize ?? 200);
     this.maxSuggestions = options.maxSuggestions ?? 5;
     this.localModelTimeoutMs = options.localModelTimeoutMs ?? 60;
@@ -47,9 +68,10 @@ export class TabCompletionEngine {
 
   /**
    * @param {CompletionContext} context
+   * @param {{ previewEvaluator?: PreviewEvaluator }} [options]
    * @returns {Promise<Suggestion[]>}
    */
-  async getSuggestions(context) {
+  async getSuggestions(context, options = {}) {
     const input = context?.currentInput ?? "";
     const cursorPosition = clampCursor(input, context?.cursorPosition);
 
@@ -60,24 +82,13 @@ export class TabCompletionEngine {
     });
 
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached;
+    const baseSuggestions = cached ?? (await this.#computeBaseSuggestions(context, input, cursorPosition));
+    if (!cached) this.cache.set(cacheKey, baseSuggestions);
 
-    const parsed = this.parsePartialFormula(input, cursorPosition, this.functionRegistry);
-
-    const [ruleBased, patternBased, localModelBased] = await Promise.all([
-      this.getRuleBasedSuggestions(context, parsed),
-      this.getPatternSuggestions(context, parsed),
-      this.getLocalModelSuggestions(context, parsed),
-    ]);
-
-    const ranked = rankAndDedupe([
-      ...ruleBased,
-      ...patternBased,
-      ...localModelBased,
-    ]).slice(0, this.maxSuggestions);
-
-    this.cache.set(cacheKey, ranked);
-    return ranked;
+    if (typeof options?.previewEvaluator === "function") {
+      return attachPreviews(baseSuggestions, context, options.previewEvaluator);
+    }
+    return baseSuggestions;
   }
 
   buildCacheKey(context) {
@@ -86,12 +97,31 @@ export class TabCompletionEngine {
       typeof context.surroundingCells?.getCacheKey === "function"
         ? context.surroundingCells.getCacheKey()
         : "";
+    const schemaKey =
+      typeof this.schemaProvider?.getCacheKey === "function" ? this.schemaProvider.getCacheKey() : "";
     return JSON.stringify({
       input: context.currentInput,
       cursor: context.cursorPosition,
       cell,
       surroundingKey,
+      schemaKey,
     });
+  }
+
+  async #computeBaseSuggestions(context, input, cursorPosition) {
+    const parsed = this.parsePartialFormula(input, cursorPosition, this.functionRegistry);
+
+    const [ruleBased, patternBased, localModelBased] = await Promise.all([
+      this.getRuleBasedSuggestions(context, parsed),
+      this.getPatternSuggestions(context, parsed),
+      this.getLocalModelSuggestions(context, parsed),
+    ]);
+
+    return rankAndDedupe([
+      ...ruleBased,
+      ...patternBased,
+      ...localModelBased,
+    ]).slice(0, this.maxSuggestions);
   }
 
   /**
@@ -104,7 +134,11 @@ export class TabCompletionEngine {
 
     // 1) Function name completion
     if (!parsed.inFunctionCall && parsed.functionNamePrefix) {
-      return this.suggestFunctionNames(context, parsed.functionNamePrefix);
+      const [fnSuggestions, identifierSuggestions] = await Promise.all([
+        Promise.resolve(this.suggestFunctionNames(context, parsed.functionNamePrefix)),
+        this.suggestWorkbookIdentifiers(context, parsed.functionNamePrefix),
+      ]);
+      return rankAndDedupe([...fnSuggestions, ...identifierSuggestions]).slice(0, this.maxSuggestions);
     }
 
     if (!parsed.inFunctionCall || !parsed.functionName || !parsed.currentArg) return [];
@@ -229,7 +263,7 @@ export class TabCompletionEngine {
   /**
    * @param {CompletionContext} context
    * @param {ReturnType<typeof parsePartialFormula>} parsed
-   * @returns {Suggestion[]}
+   * @returns {Promise<Suggestion[]>}
    */
   suggestRangeCompletions(context, parsed) {
     const input = context.currentInput ?? "";
@@ -269,7 +303,147 @@ export class TabCompletionEngine {
       });
     }
 
-    return suggestions;
+    return Promise.resolve()
+      .then(() => this.suggestSchemaRanges(context, parsed))
+      .then((schemaSuggestions) => {
+        const merged = rankAndDedupe([...suggestions, ...schemaSuggestions]).slice(0, this.maxSuggestions);
+        return merged;
+      });
+  }
+
+  /**
+   * Suggest named ranges, sheet-qualified ranges, and structured references for the current arg.
+   *
+   * @param {CompletionContext} context
+   * @param {ReturnType<typeof parsePartialFormula>} parsed
+   * @returns {Promise<Suggestion[]>}
+   */
+  async suggestSchemaRanges(context, parsed) {
+    const provider = this.schemaProvider;
+    if (!provider) return [];
+
+    const input = context.currentInput ?? "";
+    const cursor = clampCursor(input, context.cursorPosition);
+    const cellRef = normalizeCellRef(context.cellRef);
+
+    const fnSpec = parsed.functionName ? this.functionRegistry.getFunction(parsed.functionName) : undefined;
+    const minArgs = fnSpec?.minArgs;
+    const argIndex = parsed.argIndex ?? 0;
+    const functionCouldBeComplete =
+      !Number.isInteger(minArgs) || (Number.isInteger(argIndex) && argIndex + 1 >= minArgs);
+
+    const spanStart = parsed.currentArg?.start ?? cursor;
+    const spanEnd = parsed.currentArg?.end ?? cursor;
+    const rawPrefix = (parsed.currentArg?.text ?? "").trim();
+
+    /** @type {Suggestion[]} */
+    const suggestions = [];
+
+    const addReplacement = (replacement, { confidence }) => {
+      let newText = replaceSpan(input, spanStart, spanEnd, replacement);
+      if (cursor === input.length && functionCouldBeComplete) {
+        newText = closeUnbalancedParens(newText);
+      }
+      suggestions.push({
+        text: newText,
+        displayText: replacement,
+        type: "range",
+        confidence,
+      });
+    };
+
+    // 1) Named ranges
+    const namedRanges = await safeProviderCall(provider.getNamedRanges);
+    for (const entry of namedRanges) {
+      const name = (entry?.name ?? "").toString();
+      if (!name) continue;
+      if (rawPrefix && !startsWithIgnoreCase(name, rawPrefix)) continue;
+      addReplacement(name, { confidence: clamp01(0.65 + ratioBoost(rawPrefix, name) * 0.25) });
+    }
+
+    // 2) Structured references (tables)
+    const tables = await safeProviderCall(provider.getTables);
+    if (tables.length > 0) {
+      const structuredMatches = suggestStructuredRefs(rawPrefix, tables);
+      for (const m of structuredMatches) {
+        addReplacement(m.text, { confidence: m.confidence });
+      }
+    }
+
+    // 3) Sheet-qualified A1 ranges (Sheet2!A1:A10)
+    const sheetNames = await safeProviderCall(provider.getSheetNames);
+    const sheetArg = splitSheetQualifiedArg(rawPrefix);
+    if (sheetArg) {
+      const matchingSheets = sheetNames
+        .filter((s) => typeof s === "string" && s.length > 0)
+        .filter((s) => startsWithIgnoreCase(s, sheetArg.sheetPrefix));
+
+      for (const sheetName of matchingSheets) {
+        const rangeCandidates = suggestRanges({
+          currentArgText: sheetArg.rangePrefix,
+          cellRef,
+          surroundingCells: context.surroundingCells,
+          sheetName,
+        });
+        for (const candidate of rangeCandidates) {
+          const sheetPrefix = formatSheetPrefix(sheetName);
+          addReplacement(`${sheetPrefix}${candidate.range}`, {
+            confidence: Math.min(0.85, candidate.confidence + 0.05),
+          });
+        }
+      }
+    }
+
+    return rankAndDedupe(suggestions).slice(0, this.maxSuggestions);
+  }
+
+  /**
+   * Suggest identifiers (named ranges, tables) when not in a function call.
+   *
+   * @param {CompletionContext} context
+   * @param {{text:string,start:number,end:number}} token
+   * @returns {Promise<Suggestion[]>}
+   */
+  async suggestWorkbookIdentifiers(context, token) {
+    const provider = this.schemaProvider;
+    if (!provider) return [];
+
+    const input = context.currentInput ?? "";
+    const prefix = token.text;
+
+    /** @type {Suggestion[]} */
+    const suggestions = [];
+
+    const namedRanges = await safeProviderCall(provider.getNamedRanges);
+    for (const entry of namedRanges) {
+      const name = (entry?.name ?? "").toString();
+      if (!name) continue;
+      if (!startsWithIgnoreCase(name, prefix)) continue;
+      const replacement = name;
+      const newText = replaceSpan(input, token.start, token.end, replacement);
+      suggestions.push({
+        text: newText,
+        displayText: replacement,
+        type: "range",
+        confidence: clamp01(0.55 + ratioBoost(prefix, name) * 0.35),
+      });
+    }
+
+    const tables = await safeProviderCall(provider.getTables);
+    if (tables.length > 0) {
+      const structuredMatches = suggestStructuredRefs(prefix, tables);
+      for (const m of structuredMatches) {
+        const newText = replaceSpan(input, token.start, token.end, m.text);
+        suggestions.push({
+          text: newText,
+          displayText: m.text,
+          type: "range",
+          confidence: m.confidence,
+        });
+      }
+    }
+
+    return rankAndDedupe(suggestions).slice(0, this.maxSuggestions);
   }
 
   /**
@@ -420,6 +594,129 @@ function rankAndDedupe(suggestions) {
 
 function clamp01(v) {
   return Math.max(0, Math.min(1, v));
+}
+
+async function safeProviderCall(fn) {
+  if (typeof fn !== "function") return [];
+  try {
+    const result = fn();
+    const awaited = await Promise.resolve(result);
+    return Array.isArray(awaited) ? awaited : [];
+  } catch {
+    return [];
+  }
+}
+
+function startsWithIgnoreCase(text, prefix) {
+  if (!prefix) return true;
+  return text.toLowerCase().startsWith(prefix.toLowerCase());
+}
+
+function ratioBoost(prefix, full) {
+  if (!prefix || !full) return 0;
+  return Math.min(1, prefix.length / full.length);
+}
+
+function splitSheetQualifiedArg(text) {
+  if (!text || !text.includes("!")) return null;
+
+  // Handle quoted sheet names: 'Sheet 1'!A
+  if (text.startsWith("'")) {
+    let name = "";
+    let i = 1;
+    while (i < text.length) {
+      const ch = text[i];
+      if (ch === "'") {
+        if (text[i + 1] === "'") {
+          name += "'";
+          i += 2;
+          continue;
+        }
+        // Closing quote must be followed by !
+        if (text[i + 1] === "!") {
+          const rangePrefix = text.slice(i + 2);
+          return { sheetPrefix: name, rangePrefix };
+        }
+        return null;
+      }
+      name += ch;
+      i += 1;
+    }
+    return null;
+  }
+
+  const bang = text.indexOf("!");
+  if (bang <= 0) return null;
+  const sheetPrefix = text.slice(0, bang);
+  const rangePrefix = text.slice(bang + 1);
+  return { sheetPrefix, rangePrefix };
+}
+
+function formatSheetPrefix(sheetName) {
+  const needsQuotes = /[^A-Za-z0-9_]/.test(sheetName);
+  if (!needsQuotes) return `${sheetName}!`;
+  const escaped = sheetName.replaceAll("'", "''");
+  return `'${escaped}'!`;
+}
+
+function suggestStructuredRefs(prefix, tables) {
+  /** @type {{text:string, confidence:number}[]} */
+  const out = [];
+  const trimmed = (prefix ?? "").trim();
+
+  // If the user typed something like Table1[Col, use that as a strong hint.
+  const bracketIdx = trimmed.indexOf("[");
+  const tablePrefix = bracketIdx >= 0 ? trimmed.slice(0, bracketIdx) : trimmed;
+  const colPrefix = bracketIdx >= 0 ? trimmed.slice(bracketIdx + 1).replaceAll("]", "") : "";
+
+  for (const table of tables) {
+    const tableName = (table?.name ?? "").toString();
+    const cols = Array.isArray(table?.columns) ? table.columns : [];
+    if (!tableName || cols.length === 0) continue;
+
+    if (tablePrefix && !startsWithIgnoreCase(tableName, tablePrefix)) continue;
+
+    for (const col of cols) {
+      const colName = (col ?? "").toString();
+      if (!colName) continue;
+      if (colPrefix && !startsWithIgnoreCase(colName, colPrefix)) continue;
+      const text = `${tableName}[${colName}]`;
+      out.push({
+        text,
+        confidence: clamp01(0.6 + ratioBoost(colPrefix || tablePrefix, colName || tableName) * 0.25),
+      });
+      // Lower confidence alternative that includes #All.
+      out.push({
+        text: `${tableName}[[#All],[${colName}]]`,
+        confidence: 0.35,
+      });
+    }
+  }
+
+  return out;
+}
+
+async function attachPreviews(suggestions, context, previewEvaluator) {
+  /** @type {Suggestion[]} */
+  const out = [];
+  for (const s of suggestions) {
+    if (!s || typeof s.text !== "string") continue;
+    if (s.type !== "formula" && s.type !== "range") {
+      out.push(s);
+      continue;
+    }
+    try {
+      const preview = await previewEvaluator({ suggestion: s, context });
+      if (preview === undefined) {
+        out.push(s);
+      } else {
+        out.push({ ...s, preview });
+      }
+    } catch {
+      out.push(s);
+    }
+  }
+  return out;
 }
 
 /**

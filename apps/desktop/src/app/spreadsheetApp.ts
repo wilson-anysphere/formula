@@ -498,6 +498,17 @@ export class SpreadsheetApp {
         document: this.document,
         getSheetId: () => this.sheetId,
         limits: this.limits,
+        schemaProvider: {
+          getNamedRanges: () => Array.from(this.searchWorkbook.names.keys()).map((name) => ({ name })),
+          getTables: () =>
+            Array.from(this.searchWorkbook.tables.values())
+              .map((table: any) => ({
+                name: typeof table?.name === "string" ? table.name : "",
+                columns: Array.isArray(table?.columns) ? table.columns.map((c: unknown) => String(c)) : [],
+              }))
+              .filter((t: { name: string; columns: string[] }) => t.name.length > 0 && t.columns.length > 0),
+          getCacheKey: () => `names:${this.searchWorkbook.names.size}|tables:${this.searchWorkbook.tables.size}`,
+        },
       });
     }
 

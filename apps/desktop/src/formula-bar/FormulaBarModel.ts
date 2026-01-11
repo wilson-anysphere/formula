@@ -10,6 +10,11 @@ export type ActiveCellInfo = {
   value: unknown;
 };
 
+export type FormulaBarAiSuggestion = {
+  text: string;
+  preview?: unknown;
+};
+
 export class FormulaBarModel {
   #activeCell: ActiveCellInfo = { address: "A1", input: "", value: "" };
   #draft: string = "";
@@ -29,6 +34,7 @@ export class FormulaBarModel {
    * suggestion string.
    */
   #aiSuggestion: string | null = null;
+  #aiSuggestionPreview: unknown | null = null;
 
   setActiveCell(info: ActiveCellInfo): void {
     this.#activeCell = { ...info };
@@ -39,6 +45,7 @@ export class FormulaBarModel {
     this.#rangeInsertion = null;
     this.#hoveredReference = null;
     this.#aiSuggestion = null;
+    this.#aiSuggestionPreview = null;
   }
 
   get activeCell(): ActiveCellInfo {
@@ -72,6 +79,7 @@ export class FormulaBarModel {
     this.#cursorEnd = Math.max(0, Math.min(cursorEnd, draft.length));
     this.#rangeInsertion = null;
     this.#aiSuggestion = null;
+    this.#aiSuggestionPreview = null;
     this.#updateHoverFromCursor();
   }
 
@@ -80,6 +88,7 @@ export class FormulaBarModel {
     this.#activeCell = { ...this.#activeCell, input: this.#draft };
     this.#rangeInsertion = null;
     this.#aiSuggestion = null;
+    this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
     return this.#draft;
   }
@@ -91,6 +100,7 @@ export class FormulaBarModel {
     this.#cursorEnd = this.#draft.length;
     this.#rangeInsertion = null;
     this.#aiSuggestion = null;
+    this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
   }
 
@@ -123,6 +133,7 @@ export class FormulaBarModel {
     if (!this.#isEditing) return;
     this.#insertOrReplaceRange(rangeToA1(range), true);
     this.#aiSuggestion = null;
+    this.#aiSuggestionPreview = null;
     this.#updateHoverFromCursor();
   }
 
@@ -130,24 +141,31 @@ export class FormulaBarModel {
     if (!this.#isEditing) return;
     this.#insertOrReplaceRange(rangeToA1(range), false);
     this.#aiSuggestion = null;
+    this.#aiSuggestionPreview = null;
     this.#updateHoverFromCursor();
   }
 
   endRangeSelection(): void {
     this.#rangeInsertion = null;
     this.#aiSuggestion = null;
+    this.#aiSuggestionPreview = null;
   }
 
-  setAiSuggestion(suggestion: string | null): void {
-    if (!suggestion) {
+  setAiSuggestion(suggestion: string | FormulaBarAiSuggestion | null): void {
+    const suggestionText = typeof suggestion === "string" ? suggestion : suggestion?.text;
+    const preview = typeof suggestion === "string" ? null : (suggestion?.preview ?? null);
+
+    if (!suggestionText) {
       this.#aiSuggestion = null;
+      this.#aiSuggestionPreview = null;
       return;
     }
 
     // Normalize "tail" suggestions ("M") into full-string suggestions ("=SUM")
     // so `aiGhostText()` + `acceptAiSuggestion()` can operate consistently.
     if (!this.#isEditing) {
-      this.#aiSuggestion = suggestion;
+      this.#aiSuggestion = suggestionText;
+      this.#aiSuggestionPreview = preview;
       return;
     }
 
@@ -155,12 +173,18 @@ export class FormulaBarModel {
     const end = Math.max(this.#cursorStart, this.#cursorEnd);
     const prefix = this.#draft.slice(0, start);
     const suffix = this.#draft.slice(end);
-    const looksLikeFullSuggestion = suggestion.startsWith(prefix) && (!suffix || suggestion.endsWith(suffix));
-    this.#aiSuggestion = looksLikeFullSuggestion ? suggestion : prefix + suggestion + suffix;
+    const looksLikeFullSuggestion =
+      suggestionText.startsWith(prefix) && (!suffix || suggestionText.endsWith(suffix));
+    this.#aiSuggestion = looksLikeFullSuggestion ? suggestionText : prefix + suggestionText + suffix;
+    this.#aiSuggestionPreview = preview;
   }
 
   aiSuggestion(): string | null {
     return this.#aiSuggestion;
+  }
+
+  aiSuggestionPreview(): unknown | null {
+    return this.#aiSuggestionPreview;
   }
 
   aiGhostText(): string {
@@ -204,6 +228,7 @@ export class FormulaBarModel {
       this.#cursorEnd = newCursor;
     }
     this.#aiSuggestion = null;
+    this.#aiSuggestionPreview = null;
     this.#rangeInsertion = null;
     this.#updateHoverFromCursor();
     return true;

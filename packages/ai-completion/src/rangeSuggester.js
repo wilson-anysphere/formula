@@ -6,7 +6,7 @@ import { columnLetterToIndex, isEmptyCell, normalizeCellRef } from "./a1.js";
 
 /**
  * @typedef {{
- *   getCellValue: (row: number, col: number) => any
+ *   getCellValue: (row: number, col: number, sheetName?: string) => any
  * }} CellContext
  */
 
@@ -22,6 +22,7 @@ import { columnLetterToIndex, isEmptyCell, normalizeCellRef } from "./a1.js";
  *   currentArgText: string,
  *   cellRef: {row:number,col:number} | string,
  *   surroundingCells: CellContext,
+ *   sheetName?: string,
  *   maxScanRows?: number
  * }} params
  * @returns {RangeSuggestion[]}
@@ -29,6 +30,7 @@ import { columnLetterToIndex, isEmptyCell, normalizeCellRef } from "./a1.js";
 export function suggestRanges(params) {
   const { currentArgText, surroundingCells } = params;
   const cellRef = normalizeCellRef(params.cellRef);
+  const sheetName = params.sheetName;
   const maxScanRows = params.maxScanRows ?? 500;
 
   if (!surroundingCells || typeof surroundingCells.getCellValue !== "function") {
@@ -54,8 +56,8 @@ export function suggestRanges(params) {
   const suggestions = [];
 
   const contiguous = explicitRow
-    ? findContiguousBlockDown(surroundingCells, colIndex, explicitRow - 1, maxScanRows)
-    : findContiguousBlockAbove(surroundingCells, colIndex, cellRef.row - 1, maxScanRows);
+    ? findContiguousBlockDown(surroundingCells, colIndex, explicitRow - 1, maxScanRows, sheetName)
+    : findContiguousBlockAbove(surroundingCells, colIndex, cellRef.row - 1, maxScanRows, sheetName);
 
   if (contiguous) {
     const { startRow, endRow, numericRatio } = contiguous;
@@ -99,13 +101,13 @@ function safeColumnLetterToIndex(letters) {
  * @param {number} fromRow start scanning from this row upwards (inclusive)
  * @param {number} maxScanRows
  */
-function findContiguousBlockAbove(ctx, col, fromRow, maxScanRows) {
+function findContiguousBlockAbove(ctx, col, fromRow, maxScanRows, sheetName) {
   if (fromRow < 0) return null;
 
   // Find the nearest non-empty cell above (skip blank separators).
   let endRow = fromRow;
   let scanned = 0;
-  while (endRow >= 0 && scanned < maxScanRows && isEmptyCell(ctx.getCellValue(endRow, col))) {
+  while (endRow >= 0 && scanned < maxScanRows && isEmptyCell(ctx.getCellValue(endRow, col, sheetName))) {
     endRow--;
     scanned++;
   }
@@ -113,13 +115,13 @@ function findContiguousBlockAbove(ctx, col, fromRow, maxScanRows) {
 
   let startRow = endRow;
   scanned = 0;
-  while (startRow >= 0 && scanned < maxScanRows && !isEmptyCell(ctx.getCellValue(startRow, col))) {
+  while (startRow >= 0 && scanned < maxScanRows && !isEmptyCell(ctx.getCellValue(startRow, col, sheetName))) {
     startRow--;
     scanned++;
   }
   startRow++;
 
-  const trimmed = trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow);
+  const trimmed = trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow, sheetName);
   return { startRow: trimmed.startRow, endRow: trimmed.endRow, numericRatio: trimmed.numericRatio };
 }
 
@@ -129,25 +131,25 @@ function findContiguousBlockAbove(ctx, col, fromRow, maxScanRows) {
  * @param {number} startRow
  * @param {number} maxScanRows
  */
-function findContiguousBlockDown(ctx, col, startRow, maxScanRows) {
+function findContiguousBlockDown(ctx, col, startRow, maxScanRows, sheetName) {
   if (startRow < 0) return null;
 
   // If the explicitly provided start cell is empty, we don't have a good signal.
-  if (isEmptyCell(ctx.getCellValue(startRow, col))) return null;
+  if (isEmptyCell(ctx.getCellValue(startRow, col, sheetName))) return null;
 
   let endRow = startRow;
   let scanned = 0;
-  while (scanned < maxScanRows && !isEmptyCell(ctx.getCellValue(endRow + 1, col))) {
+  while (scanned < maxScanRows && !isEmptyCell(ctx.getCellValue(endRow + 1, col, sheetName))) {
     endRow++;
     scanned++;
   }
 
-  const metrics = computeNumericStats(ctx, col, startRow, endRow);
+  const metrics = computeNumericStats(ctx, col, startRow, endRow, sheetName);
   return { startRow, endRow, numericRatio: metrics.numericRatio };
 }
 
-function trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow) {
-  const stats = computeNumericStats(ctx, col, startRow, endRow);
+function trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow, sheetName) {
+  const stats = computeNumericStats(ctx, col, startRow, endRow, sheetName);
   // Heuristic: if the range is almost entirely numeric, treat non-numeric cells
   // at the edges as headers/footers and trim them (common in tables with a text
   // header row).
@@ -157,22 +159,22 @@ function trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow) {
   let trimmedStart = startRow;
   let trimmedEnd = endRow;
 
-  while (trimmedStart < trimmedEnd && !isNumericValue(ctx.getCellValue(trimmedStart, col))) {
+  while (trimmedStart < trimmedEnd && !isNumericValue(ctx.getCellValue(trimmedStart, col, sheetName))) {
     trimmedStart++;
   }
-  while (trimmedEnd > trimmedStart && !isNumericValue(ctx.getCellValue(trimmedEnd, col))) {
+  while (trimmedEnd > trimmedStart && !isNumericValue(ctx.getCellValue(trimmedEnd, col, sheetName))) {
     trimmedEnd--;
   }
 
   if (trimmedStart === startRow && trimmedEnd === endRow) return stats;
-  return computeNumericStats(ctx, col, trimmedStart, trimmedEnd);
+  return computeNumericStats(ctx, col, trimmedStart, trimmedEnd, sheetName);
 }
 
-function computeNumericStats(ctx, col, startRow, endRow) {
+function computeNumericStats(ctx, col, startRow, endRow, sheetName) {
   let numeric = 0;
   let total = 0;
   for (let r = startRow; r <= endRow; r++) {
-    const v = ctx.getCellValue(r, col);
+    const v = ctx.getCellValue(r, col, sheetName);
     if (isEmptyCell(v)) continue;
     total++;
     if (isNumericValue(v)) numeric++;

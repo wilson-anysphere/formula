@@ -1,4 +1,4 @@
-import { FormulaBarModel } from "./FormulaBarModel.js";
+import { FormulaBarModel, type FormulaBarAiSuggestion } from "./FormulaBarModel.js";
 import { parseA1Range, type RangeAddress } from "../spreadsheet/a1.js";
 
 export interface FormulaBarViewCallbacks {
@@ -146,7 +146,7 @@ export class FormulaBarView {
     this.#render({ preserveTextareaValue: false });
   }
 
-  setAiSuggestion(suggestion: string | null): void {
+  setAiSuggestion(suggestion: string | FormulaBarAiSuggestion | null): void {
     this.model.setAiSuggestion(suggestion);
     this.#render({ preserveTextareaValue: true });
   }
@@ -264,12 +264,19 @@ export class FormulaBarView {
 
     const cursor = this.model.cursorStart;
     const ghost = this.model.isEditing ? this.model.aiGhostText() : "";
+    const previewRaw = this.model.isEditing ? this.model.aiSuggestionPreview() : null;
+    const previewText = ghost && previewRaw != null ? formatPreview(previewRaw) : "";
     let ghostInserted = false;
+    let previewInserted = false;
     let highlightHtml = "";
 
     for (const span of this.model.highlightedSpans()) {
       if (!ghostInserted && ghost && cursor <= span.start) {
         highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+        if (previewText && !previewInserted) {
+          highlightHtml += `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`;
+          previewInserted = true;
+        }
         ghostInserted = true;
       }
 
@@ -281,6 +288,10 @@ export class FormulaBarView {
           highlightHtml += `<span data-kind="${span.kind}">${escapeHtml(before)}</span>`;
         }
         highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+        if (previewText && !previewInserted) {
+          highlightHtml += `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`;
+          previewInserted = true;
+        }
         ghostInserted = true;
         if (after) {
           highlightHtml += `<span data-kind="${span.kind}">${escapeHtml(after)}</span>`;
@@ -293,6 +304,10 @@ export class FormulaBarView {
 
     if (!ghostInserted && ghost) {
       highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+      if (previewText && !previewInserted) {
+        highlightHtml += `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`;
+        previewInserted = true;
+      }
     }
     this.#highlightEl.innerHTML = highlightHtml;
 
@@ -400,4 +415,10 @@ export class FormulaBarView {
 
 function escapeHtml(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+function formatPreview(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return ` ${value}`;
+  return ` ${String(value)}`;
 }

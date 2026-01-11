@@ -16,7 +16,7 @@ export interface CellRefObject {
 export type CellRef = CellRefObject | string;
 
 export interface SurroundingCellsContext {
-  getCellValue: (row: number, col: number) => unknown;
+  getCellValue: (row: number, col: number, sheetName?: string) => unknown;
   getCacheKey?: () => string;
 }
 
@@ -32,13 +32,14 @@ export class TabCompletionEngine {
     functionRegistry?: FunctionRegistry;
     parsePartialFormula?: typeof parsePartialFormula;
     localModel?: { complete: (prompt: string, options?: unknown) => Promise<string> } | null;
+    schemaProvider?: SchemaProvider | null;
     cache?: LRUCache<Suggestion[]>;
     cacheSize?: number;
     maxSuggestions?: number;
     localModelTimeoutMs?: number;
   });
 
-  getSuggestions(context: CompletionContext): Promise<Suggestion[]>;
+  getSuggestions(context: CompletionContext, options?: { previewEvaluator?: PreviewEvaluator }): Promise<Suggestion[]>;
   buildCacheKey(context: CompletionContext): string;
 }
 
@@ -139,6 +140,7 @@ export function suggestRanges(params: {
   currentArgText: string;
   cellRef: CellRef;
   surroundingCells: SurroundingCellsContext;
+  sheetName?: string;
   maxScanRows?: number;
 }): RangeSuggestion[];
 
@@ -161,3 +163,22 @@ export function normalizeCellRef(cellRef: CellRef): CellRefObject;
 export function toA1(ref: CellRefObject): string;
 export function parseA1(a1: string): CellRefObject | null;
 export function isEmptyCell(value: unknown): boolean;
+
+export interface NamedRangeInfo {
+  name: string;
+  range?: string;
+}
+
+export interface TableInfo {
+  name: string;
+  columns: string[];
+}
+
+export interface SchemaProvider {
+  getNamedRanges?: () => NamedRangeInfo[] | Promise<NamedRangeInfo[]>;
+  getSheetNames?: () => string[] | Promise<string[]>;
+  getTables?: () => TableInfo[] | Promise<TableInfo[]>;
+  getCacheKey?: () => string;
+}
+
+export type PreviewEvaluator = (params: { suggestion: Suggestion; context: CompletionContext }) => unknown | Promise<unknown>;
