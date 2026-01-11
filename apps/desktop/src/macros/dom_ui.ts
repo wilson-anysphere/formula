@@ -1,6 +1,10 @@
 import { DefaultMacroSecurityController } from "./security";
-import type { MacroBackend } from "./types";
+import type { MacroBackend, MacroCellUpdate } from "./types";
 import { MacroRunner } from "./runner";
+
+export interface MacroRunnerRenderOptions {
+  onApplyUpdates?: (updates: MacroCellUpdate[]) => void | Promise<void>;
+}
 
 /**
  * Minimal "macro runner" UI using DOM APIs (framework-agnostic).
@@ -15,7 +19,8 @@ import { MacroRunner } from "./runner";
 export async function renderMacroRunner(
   container: HTMLElement,
   backend: MacroBackend,
-  workbookId: string
+  workbookId: string,
+  opts: MacroRunnerRenderOptions = {}
 ): Promise<void> {
   const security = new DefaultMacroSecurityController();
   const runner = new MacroRunner(backend, security);
@@ -52,6 +57,9 @@ export async function renderMacroRunner(
       if (!result.ok) {
         output.textContent += `Error: ${result.error?.message ?? "Unknown error"}\n`;
       }
+      if (result.updates && result.updates.length > 0) {
+        await opts.onApplyUpdates?.(result.updates);
+      }
     } catch (err) {
       output.textContent += `Error: ${String(err)}\n`;
     } finally {
@@ -64,4 +72,3 @@ export async function renderMacroRunner(
   container.appendChild(runButton);
   container.appendChild(output);
 }
-

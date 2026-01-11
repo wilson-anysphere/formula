@@ -488,6 +488,14 @@ export class SpreadsheetApp {
     return this.document;
   }
 
+  repaint(): void {
+    this.renderGrid();
+    this.renderCharts();
+    this.renderReferencePreview();
+    this.renderSelection();
+    this.updateStatus();
+  }
+
   getCurrentSheetId(): string {
     return this.sheetId;
   }

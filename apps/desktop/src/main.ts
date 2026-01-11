@@ -197,7 +197,28 @@ if (
       queueMicrotask(() => {
         try {
           const backend = new TauriMacroBackend();
-          void renderMacroRunner(body, backend, workbookId).catch((err) => {
+          void renderMacroRunner(body, backend, workbookId, {
+            onApplyUpdates: async (updates) => {
+              const document = app.getDocument();
+              document.beginBatch({ label: "Run macro" });
+              try {
+                for (const update of updates) {
+                  const sheetId = update.sheetId;
+                  const cell = { row: update.row, col: update.col };
+                  if (update.formula != null) {
+                    document.setCellFormula(sheetId, cell, update.formula);
+                  } else {
+                    document.setCellValue(sheetId, cell, update.value);
+                  }
+                }
+                document.endBatch();
+              } catch (err) {
+                document.cancelBatch();
+                throw err;
+              }
+              app.repaint();
+            },
+          }).catch((err) => {
             body.textContent = `Failed to load macros: ${String(err)}`;
           });
         } catch (err) {
