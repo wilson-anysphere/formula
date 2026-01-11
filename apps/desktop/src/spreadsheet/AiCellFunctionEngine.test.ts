@@ -571,6 +571,12 @@ describe("AiCellFunctionEngine", () => {
     const occurrences = userMessage.match(/CELL_\d{4}/g)?.length ?? 0;
     expect(occurrences).toBeGreaterThan(0);
     expect(occurrences).toBeLessThan(200);
+
+    // Should include sampled cells beyond the first N rows (not just a prefix).
+    const maxCell = Math.max(
+      ...Array.from(userMessage.matchAll(/CELL_(\d{4})/g)).map((m) => Number(m[1])),
+    );
+    expect(maxCell).toBeGreaterThan(200);
   });
 
   it("truncates large cell values before serializing inputs into the prompt", async () => {
