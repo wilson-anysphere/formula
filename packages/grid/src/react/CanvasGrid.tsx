@@ -106,13 +106,13 @@ function describeCell(
   selection: { row: number; col: number } | null,
   range: CellRange | null,
   provider: CellProvider,
-  frozenRows: number,
-  frozenCols: number
+  headerRows: number,
+  headerCols: number
 ): string {
   if (!selection) return "No cell selected.";
 
-  const row0 = selection.row - frozenRows;
-  const col0 = selection.col - frozenCols;
+  const row0 = selection.row - headerRows;
+  const col0 = selection.col - headerCols;
   const address =
     row0 >= 0 && col0 >= 0
       ? toA1Address(row0, col0)
@@ -124,10 +124,10 @@ function describeCell(
 
   let selectionDescription = "none";
   if (range) {
-    const startRow0 = range.startRow - frozenRows;
-    const startCol0 = range.startCol - frozenCols;
-    const endRow0 = range.endRow - frozenRows - 1;
-    const endCol0 = range.endCol - frozenCols - 1;
+    const startRow0 = range.startRow - headerRows;
+    const startCol0 = range.startCol - headerCols;
+    const endRow0 = range.endRow - headerRows - 1;
+    const endCol0 = range.endCol - headerCols - 1;
     if (startRow0 >= 0 && startCol0 >= 0 && endRow0 >= 0 && endCol0 >= 0) {
       const start = toA1Address(startRow0, startCol0);
       const end = toA1Address(endRow0, endCol0);
@@ -190,6 +190,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   frozenRowsRef.current = frozenRows;
   frozenColsRef.current = frozenCols;
 
+  const headerRows = frozenRows > 0 ? 1 : 0;
+  const headerCols = frozenCols > 0 ? 1 : 0;
+  const headerRowsRef = useRef(headerRows);
+  const headerColsRef = useRef(headerCols);
+  headerRowsRef.current = headerRows;
+  headerColsRef.current = headerCols;
+
   const providerRef = useRef(props.provider);
   providerRef.current = props.provider;
   const prefetchOverscanRows = props.prefetchOverscanRows ?? 10;
@@ -202,11 +209,11 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const [cssTheme, setCssTheme] = useState<Partial<GridTheme>>({});
   const resolvedTheme = useMemo(() => resolveGridTheme(cssTheme, props.theme), [cssTheme, props.theme]);
   const [a11yStatusText, setA11yStatusText] = useState<string>(() =>
-    describeCell(null, null, providerRef.current, frozenRowsRef.current, frozenColsRef.current)
+    describeCell(null, null, providerRef.current, headerRowsRef.current, headerColsRef.current)
   );
 
   const announceSelection = useCallback((selection: { row: number; col: number } | null, range: CellRange | null) => {
-    const text = describeCell(selection, range, providerRef.current, frozenRowsRef.current, frozenColsRef.current);
+    const text = describeCell(selection, range, providerRef.current, headerRowsRef.current, headerColsRef.current);
     setA11yStatusText((prev) => (prev === text ? prev : text));
   }, []);
 
@@ -272,6 +279,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     hThumb.style.transform = `translateX(${hThumbMetrics.offset}px)`;
   };
 
+ 
   useImperativeHandle(
     props.apiRef,
     (): GridApi => ({
@@ -971,7 +979,11 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     if (rowCount === 0 || colCount === 0) return;
 
     const active =
-      selection ?? { row: clampIndex(frozenRowsRef.current, 0, rowCount - 1), col: clampIndex(frozenColsRef.current, 0, colCount - 1) };
+      selection ??
+      {
+        row: clampIndex(headerRowsRef.current, 0, rowCount - 1),
+        col: clampIndex(headerColsRef.current, 0, colCount - 1)
+      };
     const ctrlOrMeta = event.ctrlKey || event.metaKey;
 
     if (event.key === "F2") {

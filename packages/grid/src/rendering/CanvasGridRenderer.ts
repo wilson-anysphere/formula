@@ -1393,16 +1393,9 @@ export class CanvasGridRenderer {
       contentCtx.rect(intersection.x, intersection.y, intersection.width, intersection.height);
       contentCtx.clip();
 
-      this.renderGridQuadrant(
-        quadrant,
-        startRow,
-        endRow,
-        startCol,
-        endCol,
-        viewport.frozenRows,
-        viewport.frozenCols,
-        perf
-      );
+      const headerRows = viewport.frozenRows > 0 ? 1 : 0;
+      const headerCols = viewport.frozenCols > 0 ? 1 : 0;
+      this.renderGridQuadrant(quadrant, startRow, endRow, startCol, endCol, headerRows, headerCols, perf);
 
       contentCtx.restore();
       gridCtx.restore();
@@ -1420,8 +1413,8 @@ export class CanvasGridRenderer {
     endRow: number,
     startCol: number,
     endCol: number,
-    frozenRows: number,
-    frozenCols: number,
+    headerRows: number,
+    headerCols: number,
     perf: GridPerfStats | null
   ): void {
     if (!this.gridCtx || !this.contentCtx) return;
@@ -1478,7 +1471,7 @@ export class CanvasGridRenderer {
         if (trackCellFetches) cellFetches += 1;
         const style = cell?.style;
 
-        const isHeader = row < frozenRows || col < frozenCols;
+        const isHeader = row < headerRows || col < headerCols;
 
         // Background fill (grid layer).
         const fill = style?.fill ?? (isHeader ? headerBg : undefined);
