@@ -24,4 +24,14 @@ describe("function context", () => {
     expect(hint?.context.argIndex).toBe(1);
     expect(hint?.parts.some((p) => p.kind === "paramActive")).toBe(true);
   });
+
+  it("getFunctionHint prefers curated signatures when available (XLOOKUP)", () => {
+    const formula = "=XLOOKUP(A1, B1, C1)";
+    const cursor = formula.indexOf("B1") + 1;
+    const hint = getFunctionHint(formula, cursor);
+    expect(hint).toBeTruthy();
+    expect(hint?.signature.name).toBe("XLOOKUP");
+    expect(hint?.signature.params[0]?.name).toBe("lookup_value");
+    expect(hint?.signature.summary).toContain("Looks up");
+  });
 });

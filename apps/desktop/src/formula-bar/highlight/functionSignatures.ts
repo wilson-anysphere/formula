@@ -25,10 +25,35 @@ export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
     params: [{ name: "number1" }, { name: "number2", optional: true }],
     summary: "Adds all the numbers in a range of cells.",
   },
+  COUNT: {
+    name: "COUNT",
+    params: [{ name: "value1" }, { name: "value2", optional: true }],
+    summary: "Counts the number of cells that contain numbers.",
+  },
+  COUNTA: {
+    name: "COUNTA",
+    params: [{ name: "value1" }, { name: "value2", optional: true }],
+    summary: "Counts the number of non-empty cells.",
+  },
+  COUNTBLANK: {
+    name: "COUNTBLANK",
+    params: [{ name: "range" }],
+    summary: "Counts the number of blank cells within a range.",
+  },
   AVERAGE: {
     name: "AVERAGE",
     params: [{ name: "number1" }, { name: "number2", optional: true }],
     summary: "Returns the average (arithmetic mean) of its arguments.",
+  },
+  MAX: {
+    name: "MAX",
+    params: [{ name: "number1" }, { name: "number2", optional: true }],
+    summary: "Returns the largest value in a set of values.",
+  },
+  MIN: {
+    name: "MIN",
+    params: [{ name: "number1" }, { name: "number2", optional: true }],
+    summary: "Returns the smallest value in a set of values.",
   },
   IF: {
     name: "IF",
@@ -48,6 +73,61 @@ export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
       { name: "range_lookup", optional: true },
     ],
     summary: "Looks for a value in the leftmost column of a table, then returns a value in the same row from a specified column.",
+  },
+  HLOOKUP: {
+    name: "HLOOKUP",
+    params: [
+      { name: "lookup_value" },
+      { name: "table_array" },
+      { name: "row_index_num" },
+      { name: "range_lookup", optional: true },
+    ],
+    summary: "Looks for a value in the top row of a table, then returns a value in the same column from a specified row.",
+  },
+  XLOOKUP: {
+    name: "XLOOKUP",
+    params: [
+      { name: "lookup_value" },
+      { name: "lookup_array" },
+      { name: "return_array" },
+      { name: "if_not_found", optional: true },
+      { name: "match_mode", optional: true },
+      { name: "search_mode", optional: true },
+    ],
+    summary: "Looks up a value in a range or an array.",
+  },
+  INDEX: {
+    name: "INDEX",
+    params: [
+      { name: "array" },
+      { name: "row_num" },
+      { name: "column_num", optional: true },
+    ],
+    summary: "Returns the value of an element in a table or an array.",
+  },
+  MATCH: {
+    name: "MATCH",
+    params: [
+      { name: "lookup_value" },
+      { name: "lookup_array" },
+      { name: "match_type", optional: true },
+    ],
+    summary: "Looks up values in a reference or array.",
+  },
+  TODAY: {
+    name: "TODAY",
+    params: [],
+    summary: "Returns the current date.",
+  },
+  NOW: {
+    name: "NOW",
+    params: [],
+    summary: "Returns the current date and time.",
+  },
+  TRANSPOSE: {
+    name: "TRANSPOSE",
+    params: [{ name: "array" }],
+    summary: "Returns the transpose of an array or range.",
   },
 };
 
