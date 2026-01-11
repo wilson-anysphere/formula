@@ -730,7 +730,7 @@ fn looks_like_a1_reference(text: &str) -> bool {
     digits > 0 && chars.next().is_none()
 }
 
-fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
+fn tokenize_formula(expr: &str) -> Vec<FormulaToken> {
     let mut tokens = Vec::new();
     let mut chars = expr.chars().peekable();
 
@@ -785,63 +785,18 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
                     chars.next();
                 }
                 if !saw_char {
-                    return Err(ERROR_VALUE);
+                    tokens.push(FormulaToken::OtherOp(buf));
+                    continue;
                 }
                 tokens.push(FormulaToken::ErrorCode(buf));
             }
-            '0'..='9' | '.' => {
-                let mut buf = String::new();
-                while let Some(ch2) = chars.peek().copied() {
-                    if ch2.is_ascii_digit() || ch2 == '.' {
-                        buf.push(ch2);
-                        chars.next();
-                        continue;
-                    }
-
-                    if ch2 == 'e' || ch2 == 'E' {
-                        // Match the JS tokenizer behavior: only treat `e`/`E` as
-                        // exponent if it's followed by an optional sign and at
-                        // least one digit. Otherwise, stop the number token
-                        // before the `e` and let the parser handle the
-                        // remaining tokens.
-                        let mut lookahead = chars.clone();
-                        lookahead.next(); // consume the `e`
-                        if matches!(lookahead.peek(), Some('+') | Some('-')) {
-                            lookahead.next();
-                        }
-
-                        if !lookahead.peek().is_some_and(|next| next.is_ascii_digit()) {
-                            break;
-                        }
-
-                        buf.push(ch2);
-                        chars.next();
-
-                        if let Some(sign) = chars.peek().copied() {
-                            if sign == '+' || sign == '-' {
-                                buf.push(sign);
-                                chars.next();
-                            }
-                        }
-
-                        while let Some(exp_ch) = chars.peek().copied() {
-                            if exp_ch.is_ascii_digit() {
-                                buf.push(exp_ch);
-                                chars.next();
-                            } else {
-                                break;
-                            }
-                        }
-
-                        continue;
-                    }
-
-                    break;
+            '0'..='9' | '.' => match try_read_number_token(&mut chars) {
+                Some(number) => tokens.push(FormulaToken::Number(number)),
+                None => {
+                    chars.next();
+                    tokens.push(FormulaToken::OtherOp(ch.to_string()));
                 }
-
-                let number: f64 = buf.parse().map_err(|_| ERROR_VALUE)?;
-                tokens.push(FormulaToken::Number(number));
-            }
+            },
             '+' => {
                 chars.next();
                 tokens.push(FormulaToken::Plus);
@@ -921,7 +876,9 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
                 // valid cell reference, treat it as an unknown token (matching the
                 // JS evaluator).
                 if ch == '$' {
-                    return Err(ERROR_VALUE);
+                    chars.next();
+                    tokens.push(FormulaToken::OtherOp("$".to_string()));
+                    continue;
                 }
 
                 let mut buf = String::new();
@@ -933,16 +890,16 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
                         break;
                     }
                 }
-                if buf.is_empty() {
-                    return Err(ERROR_VALUE);
-                }
                 tokens.push(FormulaToken::Ident(buf));
             }
-            _ => return Err(ERROR_VALUE),
+            _ => {
+                chars.next();
+                tokens.push(FormulaToken::OtherOp(ch.to_string()));
+            }
         }
     }
 
-    Ok(tokens)
+    tokens
 }
 
 fn try_read_sheet_reference_token(
@@ -1063,6 +1020,73 @@ fn try_read_cell_ref_token(chars: &mut std::iter::Peekable<std::str::Chars<'_>>)
     Some(buf)
 }
 
+fn try_read_number_token(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<f64> {
+    // Mirror the JS evaluator's number tokenization logic (`tryReadNumber`):
+    // - digits, optional decimal component, optional exponent component
+    // - or `.DIGITS` (leading decimal)
+    let mut lookahead = chars.clone();
+    let first = lookahead.peek().copied()?;
+
+    if first == '.' {
+        lookahead.next();
+        if !lookahead.peek().is_some_and(|next| next.is_ascii_digit()) {
+            return None;
+        }
+        lookahead = chars.clone();
+    } else if !first.is_ascii_digit() {
+        return None;
+    }
+
+    let mut buf = String::new();
+    while let Some(next) = lookahead.peek().copied() {
+        if next.is_ascii_digit() {
+            buf.push(next);
+            lookahead.next();
+        } else {
+            break;
+        }
+    }
+
+    if lookahead.peek().copied() == Some('.') {
+        buf.push('.');
+        lookahead.next();
+        while let Some(next) = lookahead.peek().copied() {
+            if next.is_ascii_digit() {
+                buf.push(next);
+                lookahead.next();
+            } else {
+                break;
+            }
+        }
+    }
+
+    if matches!(lookahead.peek().copied(), Some('e' | 'E')) {
+        let mut exp_look = lookahead.clone();
+        let exp_char = exp_look.next().expect("peeked");
+        if matches!(exp_look.peek().copied(), Some('+' | '-')) {
+            exp_look.next();
+        }
+        if exp_look.peek().is_some_and(|next| next.is_ascii_digit()) {
+            buf.push(exp_char);
+            lookahead.next();
+            if matches!(lookahead.peek().copied(), Some('+' | '-')) {
+                buf.push(lookahead.next().expect("peeked"));
+            }
+            while let Some(next) = lookahead.peek().copied() {
+                if next.is_ascii_digit() {
+                    buf.push(next);
+                    lookahead.next();
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    *chars = lookahead;
+    buf.parse::<f64>().ok()
+}
+
 #[derive(Clone, Debug, PartialEq)]
 enum EvalValue {
     Scalar(JsonValue),
@@ -1073,10 +1097,7 @@ fn eval_formula<F>(expr: &str, mut get_cell: F) -> Result<JsonValue, WorkbookErr
 where
     F: FnMut(CellCoord) -> Result<JsonValue, WorkbookError>,
 {
-    let tokens = match tokenize_formula(expr) {
-        Ok(tokens) => tokens,
-        Err(code) => return Ok(JsonValue::String(code.to_string())),
-    };
+    let tokens = tokenize_formula(expr);
     if tokens.is_empty() {
         return Ok(JsonValue::Null);
     }
@@ -1574,6 +1595,24 @@ mod tests {
 
         assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(1.0));
         assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(1.0));
+    }
+
+    #[test]
+    fn unknown_trailing_tokens_are_ignored_like_js_evaluator() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("=1;"), None).unwrap();
+        wb.set_cell("A2", json!("=1#"), None).unwrap();
+        wb.set_cell("A3", json!("=1$"), None).unwrap();
+        wb.set_cell("A4", json!("=1..2"), None).unwrap();
+        wb.set_cell("A5", json!("=SUM(1;2)"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(1.0));
+        assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(1.0));
+        assert_eq!(wb.get_cell("A3", None).unwrap().value, json!(1.0));
+        assert_eq!(wb.get_cell("A4", None).unwrap().value, json!(1.0));
+        assert_eq!(wb.get_cell("A5", None).unwrap().value, json!(ERROR_VALUE));
     }
 
     #[test]
