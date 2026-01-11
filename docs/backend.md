@@ -56,9 +56,9 @@ In `docker-compose.yml`, the sync server is configured to reuse the API secret b
 SYNC_TOKEN_SECRET=my-local-sync-secret docker compose up --build
 ```
 
-## Persistence (local docker-compose)
+## Persistence (local docker compose)
 
-The docker-compose stack configures the sync server with:
+The docker compose stack configures the sync server with:
 
 - `SYNC_SERVER_PERSISTENCE_BACKEND=file`
 - `SYNC_SERVER_DATA_DIR=/data`

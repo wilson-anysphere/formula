@@ -7,7 +7,7 @@ COPY services/api/package.json services/api/package-lock.json ./
 # The API depends on some monorepo packages via `workspace:*` (pnpm protocol),
 # which npm does not understand. For the Docker build, strip `workspace:*`
 # dependencies and vendor those packages into `node_modules` manually.
-RUN node -e 'const fs=require("fs");const pkg=JSON.parse(fs.readFileSync("package.json","utf8"));if(pkg.dependencies){for(const [name,ver] of Object.entries(pkg.dependencies)){if(typeof ver==="string"&&ver.startsWith("workspace:")) delete pkg.dependencies[name];}}fs.writeFileSync("package.json",JSON.stringify(pkg,null,2));'
+RUN node -e 'const fs=require("fs");const pkg=JSON.parse(fs.readFileSync("package.json","utf8"));const vendored=new Set(["@formula/audit-core"]);for(const section of ["dependencies","devDependencies","optionalDependencies"]){const deps=pkg[section];if(!deps) continue;for(const [name,ver] of Object.entries(deps)){if(typeof ver==="string"&&ver.startsWith("workspace:")){if(!vendored.has(name)){console.error(`Unsupported workspace dependency (${section}): ${name}=${ver}. Update services/api/Dockerfile to vendor it.`);process.exit(1);}delete deps[name];}}}fs.writeFileSync("package.json",JSON.stringify(pkg,null,2));'
 
 RUN npm ci
 
