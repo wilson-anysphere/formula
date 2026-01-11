@@ -242,14 +242,14 @@ fn compare_fixture(path: &Path) {
         for ((row, col), cal_formula) in cal_sheet {
             let Some(decoded) = xlsb_sheet.get(&(row, col)) else {
                 panic!(
-                "fixture {}: sheet {sheet_name:?} cell {} has a formula per calamine but formula-xlsb did not report one",
-                path.display(),
-                format_a1(row, col)
-            );
-        };
+                    "fixture {}: sheet {sheet_name:?} cell {} has a formula per calamine but formula-xlsb did not report one",
+                    path.display(),
+                    format_a1(row, col)
+                );
+            };
 
-        let decoded_text = match decoded.text.as_deref() {
-            Some(text) => text,
+            let decoded_text = match decoded.text.as_deref() {
+                Some(text) => text,
                 None => match decode_rgce(&decoded.rgce) {
                     Ok(unexpected) => {
                         panic!(
