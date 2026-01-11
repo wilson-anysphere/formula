@@ -6,7 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEv
 
 import { CellEditorOverlay } from "./CellEditorOverlay";
 import { EngineCellProvider } from "./EngineCellProvider";
-import { serializeGridToHtmlTable } from "./clipboard/html";
+import { parseHtmlTableToGrid, serializeGridToHtmlTable } from "./clipboard/html";
 import { parseTsvToGrid, serializeGridToTsv } from "./clipboard/tsv";
 import { isFormulaInput, parseCellScalarInput, scalarToDisplayString } from "./cellScalar";
 import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
@@ -390,18 +390,28 @@ function EngineDemoApp() {
 
     internalClipboardRef.current = { tsv, html };
 
-    if (!event.clipboardData) return;
     event.clipboardData?.setData("text/plain", tsv);
     event.clipboardData?.setData("text/html", html);
     event.preventDefault();
   };
 
   const handleGridPaste = (event: ClipboardEvent<HTMLDivElement>) => {
-    const text =
-      event.clipboardData?.getData("text/plain") ||
-      internalClipboardRef.current?.tsv ||
-      "";
-    if (!text) return;
+    const clipboardPlain = event.clipboardData?.getData("text/plain") ?? "";
+    const clipboardHtml = event.clipboardData?.getData("text/html") ?? "";
+    const internal = internalClipboardRef.current;
+
+    const grid =
+      clipboardPlain !== ""
+        ? parseTsvToGrid(clipboardPlain)
+        : clipboardHtml !== ""
+          ? parseHtmlTableToGrid(clipboardHtml)
+          : internal?.tsv
+            ? parseTsvToGrid(internal.tsv)
+            : internal?.html
+              ? parseHtmlTableToGrid(internal.html)
+              : null;
+
+    if (!grid || grid.length === 0) return;
 
     const engine = engineRef.current;
     const api = gridApiRef.current;
@@ -417,7 +427,6 @@ function EngineDemoApp() {
     event.preventDefault();
 
     void (async () => {
-      const grid = parseTsvToGrid(text);
       const pasteRows = grid.length;
       const pasteCols = Math.max(0, ...grid.map((row) => row.length));
       if (pasteRows === 0 || pasteCols === 0) return;
