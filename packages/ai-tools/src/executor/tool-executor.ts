@@ -960,6 +960,7 @@ export class ToolExecutor {
         // We can't inspect intermediate redirect hops here, so drop any user-supplied
         // headers before following redirects to avoid leaking secrets across hosts.
         requestHeaders = undefined;
+        await cancelResponseBody(response);
         response = await fetch(currentUrl.toString(), {
           headers: undefined,
           credentials: "omit",
