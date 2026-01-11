@@ -776,7 +776,9 @@ Implementation notes (see `packages/collab/conflicts/src/formula-conflict-monito
 - Value conflicts are optionally supported via `mode: "formula+value"`.
 - In `"formula+value"` mode, value edits clear formulas via `formula = null`
   (not key deletion) so later formula writes can causally reference the clear.
-  Concurrent value-vs-formula edits surface as a `"content"` conflict.
+  Concurrent value-vs-formula edits (including formula clears) surface as a
+  `"content"` conflict that lets the user choose between the literal value and
+  the formula.
 
 ```typescript
 class FormulaConflictResolver {
