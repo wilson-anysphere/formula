@@ -376,6 +376,12 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
         let Some((record_id, data)) = read_biff_record(workbook_stream, offset) else {
             break;
         };
+        // Stop once we reach the BOF record for the next substream. This allows
+        // us to recover row/col metadata even if the worksheet EOF record is
+        // missing/corrupt.
+        if offset != start && (record_id == 0x0809 || record_id == 0x0009) {
+            break;
+        }
         offset = offset
             .checked_add(4)
             .and_then(|o| o.checked_add(data.len()))
@@ -471,6 +477,12 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
         let Some((record_id, data)) = read_biff_record(workbook_stream, offset) else {
             break;
         };
+        // Stop once we reach the BOF record for the next substream. This allows
+        // us to recover XF indices even if the worksheet EOF record is
+        // missing/corrupt.
+        if offset != start && (record_id == 0x0809 || record_id == 0x0009) {
+            break;
+        }
         offset = offset
             .checked_add(4)
             .and_then(|o| o.checked_add(data.len()))
