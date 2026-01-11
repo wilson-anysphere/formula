@@ -486,6 +486,28 @@ test("Structured references preserve the typed prefix case (lowercase)", async (
   );
 });
 
+test("Structured references are not suggested when the user types '[' before the table name is complete", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1"],
+      getTables: () => [{ name: "Table1", columns: ["Amount"] }],
+    },
+  });
+
+  // Completing this would require inserting missing characters *before* the '[',
+  // which isn't representable as a pure insertion at the caret.
+  const currentInput = "=SUM(Tab[";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.equal(suggestions.length, 0);
+});
+
 test("Sheet-qualified ranges are suggested when typing Sheet2!A", async () => {
   const values = {};
   for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
