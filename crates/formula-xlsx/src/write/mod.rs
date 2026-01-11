@@ -267,9 +267,52 @@ pub fn write_to_vec_with_recalc_policy(
 fn formulas_changed(doc: &XlsxDocument) -> bool {
     let mut seen: HashSet<(WorksheetId, CellRef)> = HashSet::new();
 
+    // WorksheetId values can differ between the in-memory workbook and the preserved metadata
+    // (e.g. if the model is reconstructed from persisted state). Use the workbook's stable XLSX
+    // identity fields when available to map back to the metadata worksheet IDs.
+    let mut meta_by_ws_id: HashMap<WorksheetId, usize> = HashMap::new();
+    let mut meta_by_rel_id: HashMap<&str, usize> = HashMap::new();
+    let mut meta_by_sheet_id: HashMap<u32, usize> = HashMap::new();
+    for (idx, meta) in doc.meta.sheets.iter().enumerate() {
+        meta_by_ws_id.insert(meta.worksheet_id, idx);
+        meta_by_rel_id.insert(meta.relationship_id.as_str(), idx);
+        meta_by_sheet_id.insert(meta.sheet_id, idx);
+    }
+
+    let mut workbook_to_meta_sheet_id: HashMap<WorksheetId, WorksheetId> = HashMap::new();
+    let mut meta_to_workbook_sheet_id: HashMap<WorksheetId, WorksheetId> = HashMap::new();
+    for sheet in &doc.workbook.sheets {
+        let idx = sheet
+            .xlsx_rel_id
+            .as_deref()
+            .and_then(|rid| meta_by_rel_id.get(rid).copied())
+            .or_else(|| sheet.xlsx_sheet_id.and_then(|sid| meta_by_sheet_id.get(&sid).copied()))
+            .or_else(|| meta_by_ws_id.get(&sheet.id).copied());
+        let Some(idx) = idx else {
+            continue;
+        };
+        let meta_sheet_id = doc
+            .meta
+            .sheets
+            .get(idx)
+            .map(|meta| meta.worksheet_id)
+            .unwrap_or(sheet.id);
+        workbook_to_meta_sheet_id.insert(sheet.id, meta_sheet_id);
+        meta_to_workbook_sheet_id.entry(meta_sheet_id).or_insert(sheet.id);
+    }
+
+    let mut shared_formulas_by_sheet: HashMap<WorksheetId, HashMap<u32, SharedFormulaGroup>> =
+        HashMap::new();
+
     for sheet in &doc.workbook.sheets {
         let sheet_id = sheet.id;
-        let shared_formulas = shared_formula_groups(doc, sheet_id);
+        let meta_sheet_id = workbook_to_meta_sheet_id
+            .get(&sheet_id)
+            .copied()
+            .unwrap_or(sheet_id);
+        let shared_formulas = shared_formulas_by_sheet
+            .entry(meta_sheet_id)
+            .or_insert_with(|| shared_formula_groups(doc, meta_sheet_id));
         for (cell_ref, cell) in sheet.iter_cells() {
             let Some(formula) = cell.formula.as_deref() else {
                 continue;
@@ -278,24 +321,25 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
                 continue;
             }
 
-            seen.insert((sheet_id, cell_ref));
+            seen.insert((meta_sheet_id, cell_ref));
             let baseline_meta = doc
                 .meta
                 .cell_meta
-                .get(&(sheet_id, cell_ref))
+                .get(&(meta_sheet_id, cell_ref))
                 .and_then(|m| m.formula.as_ref());
 
             // `read` expands textless shared-formula follower cells into explicit formulas in the
             // in-memory model. Those synthesized formulas should not count as edits when deciding
             // whether we need to drop `xl/calcChain.xml`.
             if let Some(meta) = baseline_meta {
-                if meta.t.as_deref() == Some("shared")
+                let is_textless_shared_follower = meta.t.as_deref() == Some("shared")
+                    && meta.reference.is_none()
                     && meta.file_text.is_empty()
-                    && meta.shared_index.is_some()
-                {
+                    && meta.shared_index.is_some();
+                if is_textless_shared_follower {
                     if let Some(si) = meta.shared_index {
-                        if let Some(expected) = shared_formula_expected(&shared_formulas, si, cell_ref) {
-                            if expected == strip_leading_equals(formula) {
+                        if let Some(expected) = shared_formula_expected(shared_formulas, si, cell_ref) {
+                            if !formula_text_differs(Some(expected.as_str()), Some(formula)) {
                                 continue;
                             }
                         }
@@ -316,7 +360,9 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
             continue;
         };
         if formula_meta.file_text.is_empty() {
-            // Textless shared formula followers are intentionally not represented in the model.
+            // Textless shared formula followers are represented in the model as expanded formulas,
+            // but do not correspond to explicit `f` text in the file. They are handled in the
+            // loop above, which checks whether the expanded formula still matches the shared group.
             continue;
         }
         if seen.contains(&(*sheet_id, *cell_ref)) {
@@ -324,7 +370,12 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
         }
         let model_formula = doc
             .workbook
-            .sheet(*sheet_id)
+            .sheet(
+                meta_to_workbook_sheet_id
+                    .get(sheet_id)
+                    .copied()
+                    .unwrap_or(*sheet_id),
+            )
             .and_then(|s| s.cell(*cell_ref))
             .and_then(|c| c.formula.as_deref());
         if formula_text_differs(Some(formula_meta.file_text.as_str()), model_formula) {
