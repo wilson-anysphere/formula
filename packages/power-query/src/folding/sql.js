@@ -260,13 +260,22 @@ export class QueryFoldingEngine {
         const groupCols = operation.groupColumns.map((c) => `t.${quoteIdentifier(c)}`).join(", ");
         const aggSql = operation.aggregations.map((agg) => aggregationToSql(agg, quoteIdentifier)).join(", ");
         const selectList = [groupCols, aggSql].filter(Boolean).join(", ");
-        const groupByClause = groupCols ? ` GROUP BY ${groupCols}` : "";
+
+        // We intentionally introduce a constant grouping key when groupColumns is
+        // empty. This matches the local engine behavior: empty input produces no
+        // rows (instead of a single row of aggregates over the empty set).
+        const needsSyntheticGroup = operation.groupColumns.length === 0;
+        const synthetic = "__group";
+        const groupFrom = needsSyntheticGroup
+          ? `(SELECT 1 AS ${quoteIdentifier(synthetic)}, s.* FROM (${state.fragment.sql}) AS s) AS t`
+          : from;
+        const groupByClause = needsSyntheticGroup ? ` GROUP BY t.${quoteIdentifier(synthetic)}` : groupCols ? ` GROUP BY ${groupCols}` : "";
         const columns = [
           ...operation.groupColumns,
           ...operation.aggregations.map((agg) => agg.as ?? `${agg.op} of ${agg.column}`),
         ];
         return {
-          fragment: { sql: `SELECT ${selectList} FROM ${from}${groupByClause}`, params },
+          fragment: { sql: `SELECT ${selectList} FROM ${groupFrom}${groupByClause}`, params },
           columns,
           connection: state.connection,
         };
@@ -445,7 +454,7 @@ function aggregationToSql(agg, quoteIdentifier) {
   const col = `t.${quoteIdentifier(agg.column)}`;
   switch (agg.op) {
     case "sum":
-      return `SUM(${col}) AS ${alias}`;
+      return `COALESCE(SUM(${col}), 0) AS ${alias}`;
     case "count":
       return `COUNT(*) AS ${alias}`;
     case "average":
@@ -455,7 +464,7 @@ function aggregationToSql(agg, quoteIdentifier) {
     case "max":
       return `MAX(${col}) AS ${alias}`;
     case "countDistinct":
-      return `COUNT(DISTINCT ${col}) AS ${alias}`;
+      return `(COUNT(DISTINCT ${col}) + COALESCE(MAX(CASE WHEN ${col} IS NULL THEN 1 ELSE 0 END), 0)) AS ${alias}`;
     default: {
       /** @type {never} */
       const exhausted = agg.op;

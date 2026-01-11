@@ -31,7 +31,7 @@ test("compile: folds selectColumns/filterRows/groupBy into a parameterized SQL p
   const plan = folding.compile(query);
   assert.deepEqual(plan, {
     type: "sql",
-    sql: 'SELECT t."Region", SUM(t."Sales") AS "Total Sales" FROM (SELECT * FROM (SELECT t."Region", t."Sales" FROM (SELECT * FROM sales) AS t) AS t WHERE (t."Region" = ?)) AS t GROUP BY t."Region"',
+    sql: 'SELECT t."Region", COALESCE(SUM(t."Sales"), 0) AS "Total Sales" FROM (SELECT * FROM (SELECT t."Region", t."Sales" FROM (SELECT * FROM sales) AS t) AS t WHERE (t."Region" = ?)) AS t GROUP BY t."Region"',
     params: ["East"],
   });
 });
