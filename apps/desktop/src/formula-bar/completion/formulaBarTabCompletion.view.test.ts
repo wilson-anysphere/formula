@@ -135,8 +135,11 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
-  it("suggests structured references and marks preview as unavailable", async () => {
+  it("suggests structured references and previews table column ranges", async () => {
     const doc = new DocumentController();
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Amount");
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 10);
+    doc.setCellValue("Sheet1", { row: 2, col: 0 }, 20);
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -151,7 +154,9 @@ describe("FormulaBarView tab completion (integration)", () => {
       schemaProvider: {
         getNamedRanges: () => [],
         getSheetNames: () => ["Sheet1"],
-        getTables: () => [{ name: "Table1", columns: ["Amount"] }],
+        getTables: () => [
+          { name: "Table1", columns: ["Amount"], sheetName: "Sheet1", startRow: 0, startCol: 0, endRow: 2, endCol: 0 },
+        ],
         getCacheKey: () => "tables:Table1",
       },
     });
@@ -165,7 +170,7 @@ describe("FormulaBarView tab completion (integration)", () => {
 
     expect(view.model.aiSuggestion()).toBe("=SUM(table1[Amount])");
     expect(view.model.aiGhostText()).toBe("le1[Amount])");
-    expect(view.model.aiSuggestionPreview()).toBe("(preview unavailable)");
+    expect(view.model.aiSuggestionPreview()).toBe(30);
 
     completion.destroy();
     host.remove();

@@ -261,6 +261,7 @@ function createPreviewEvaluator(params: {
   const MAX_CELL_READS = 5_000;
 
   let namedRangesPromise: Promise<Map<string, { sheetName: string | null; ref: string }>> | null = null;
+  let tablesPromise: Promise<Map<string, TablePreviewInfo>> | null = null;
   const getNamedRanges = () => {
     if (!schemaProvider?.getNamedRanges) return Promise.resolve(new Map());
     if (!namedRangesPromise) {
@@ -287,15 +288,49 @@ function createPreviewEvaluator(params: {
     return namedRangesPromise;
   };
 
+  const getTables = () => {
+    if (!schemaProvider?.getTables) return Promise.resolve(new Map());
+    if (!tablesPromise) {
+      tablesPromise = Promise.resolve()
+        .then(() => schemaProvider.getTables?.())
+        .then((items) => (Array.isArray(items) ? items : []))
+        .then((items) => {
+          const map = new Map<string, TablePreviewInfo>();
+          for (const item of items) {
+            const name = typeof (item as any)?.name === "string" ? String((item as any).name) : "";
+            if (!name) continue;
+
+            const columns = Array.isArray((item as any)?.columns) ? (item as any).columns.map(String) : [];
+            if (columns.length === 0) continue;
+
+            const sheetName = typeof (item as any)?.sheetName === "string" ? String((item as any).sheetName) : null;
+            const startRow = parseIntLike((item as any)?.startRow);
+            const startCol = parseIntLike((item as any)?.startCol);
+            const endRow = parseIntLike((item as any)?.endRow);
+            const endCol = parseIntLike((item as any)?.endCol);
+
+            map.set(name.trim().toUpperCase(), {
+              sheetName: sheetName ? sheetName.trim() : null,
+              startRow,
+              startCol,
+              endRow,
+              endCol,
+              columns,
+            });
+          }
+          return map;
+        })
+        .catch(() => new Map());
+    }
+    return tablesPromise;
+  };
+
   return async ({ suggestion }: { suggestion: Suggestion; context: CompletionContext }): Promise<unknown> => {
     const text = suggestion?.text ?? "";
     if (typeof text !== "string" || text.trim() === "") return undefined;
 
-    // The lightweight evaluator can't resolve structured references yet; don't
-    // show misleading errors.
-    if (text.includes("[")) return "(preview unavailable)";
-
     const namedRanges = await getNamedRanges();
+    const tables = await getTables();
     const resolveNameToReference = (name: string): string | null => {
       if (!name) return null;
       const entry = namedRanges.get(name.trim().toUpperCase());
@@ -303,6 +338,9 @@ function createPreviewEvaluator(params: {
       if (entry.sheetName) return `${entry.sheetName}!${entry.ref}`;
       return entry.ref;
     };
+
+    const maybeRewrittenStructured = text.includes("[") ? rewriteStructuredReferences(text, tables, sheetId) : null;
+    const evalText = maybeRewrittenStructured ?? text;
 
     const knownSheets =
       typeof document.getSheetIds === "function"
@@ -365,7 +403,7 @@ function createPreviewEvaluator(params: {
     };
 
     try {
-      const value = evaluateFormula(text, getCellValue, {
+      const value = evaluateFormula(evalText, getCellValue, {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,
       });
@@ -376,6 +414,185 @@ function createPreviewEvaluator(params: {
       return "(preview unavailable)";
     }
   };
+}
+
+type TablePreviewInfo = {
+  sheetName: string | null;
+  startRow: number | null;
+  startCol: number | null;
+  endRow: number | null;
+  endCol: number | null;
+  columns: string[];
+};
+
+function parseIntLike(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.trunc(n);
+}
+
+function formatSheetPrefix(sheetName: string): string {
+  const trimmed = sheetName.trim();
+  if (!trimmed) return "";
+  const needsQuotes = !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(trimmed);
+  if (!needsQuotes) return `${trimmed}!`;
+  return `'${trimmed.replaceAll("'", "''")}'!`;
+}
+
+function toA1(row: number, col: number): string {
+  let n = col + 1;
+  let letters = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return `${letters}${row + 1}`;
+}
+
+function findColumnIndex(columns: string[], columnName: string): number | null {
+  const target = columnName.trim().toUpperCase();
+  if (!target) return null;
+  for (let i = 0; i < columns.length; i += 1) {
+    const col = String(columns[i] ?? "").trim();
+    if (!col) continue;
+    if (col.toUpperCase() === target) return i;
+  }
+  return null;
+}
+
+function resolveStructuredColumnRef(params: {
+  tables: Map<string, TablePreviewInfo>;
+  tableName: string;
+  columnName: string;
+  mode: "data" | "all";
+  defaultSheetId: string;
+}): string | null {
+  const { tables, tableName, columnName, mode, defaultSheetId } = params;
+  const table = tables.get(tableName.trim().toUpperCase());
+  if (!table) return null;
+
+  const colIdx = findColumnIndex(table.columns, columnName);
+  if (colIdx == null) return null;
+
+  if (
+    table.startRow == null ||
+    table.startCol == null ||
+    table.endRow == null ||
+    table.endCol == null ||
+    table.startRow < 0 ||
+    table.startCol < 0 ||
+    table.endRow < 0 ||
+    table.endCol < 0
+  ) {
+    return null;
+  }
+
+  // Table coordinates include the header row. For simple `Table[Column]` refs,
+  // approximate Excel semantics by skipping the header row. (Totals rows are not
+  // currently represented in `TableInfo`, so they remain included when present.)
+  const startRow = mode === "all" ? table.startRow : table.startRow + 1;
+  const endRow = table.endRow;
+  if (startRow > endRow) return null;
+
+  const col = table.startCol + colIdx;
+  const start = toA1(startRow, col);
+  const end = toA1(endRow, col);
+  const range = start === end ? start : `${start}:${end}`;
+
+  const sheet = table.sheetName ?? defaultSheetId;
+  const prefix = sheet ? formatSheetPrefix(sheet) : "";
+  return `${prefix}${range}`;
+}
+
+function rewriteStructuredReferences(
+  formulaText: string,
+  tables: Map<string, TablePreviewInfo>,
+  defaultSheetId: string,
+): string | null {
+  let changed = false;
+  let failed = false;
+
+  const allPattern = /([A-Za-z_][A-Za-z0-9_.]*)\[\[#All\],\[([^\]]+)\]\]/gi;
+  const simplePattern = /([A-Za-z_][A-Za-z0-9_.]*)\[(?!\[)([^\]]+)\]/gi;
+
+  const rewriteSegment = (segment: string) => {
+    let out = segment;
+
+    out = out.replace(allPattern, (match, tableName, colName) => {
+      const replacement = resolveStructuredColumnRef({
+        tables,
+        tableName,
+        columnName: colName,
+        mode: "all",
+        defaultSheetId,
+      });
+      if (!replacement) {
+        failed = true;
+        return match;
+      }
+      changed = true;
+      return replacement;
+    });
+
+    out = out.replace(simplePattern, (match, tableName, colName) => {
+      const replacement = resolveStructuredColumnRef({
+        tables,
+        tableName,
+        columnName: colName,
+        mode: "data",
+        defaultSheetId,
+      });
+      if (!replacement) {
+        failed = true;
+        return match;
+      }
+      changed = true;
+      return replacement;
+    });
+
+    return out;
+  };
+
+  const rewritten = rewriteOutsideStrings(formulaText, rewriteSegment);
+  if (!changed || failed) return null;
+  return rewritten;
+}
+
+function rewriteOutsideStrings(text: string, transform: (segment: string) => string): string {
+  let out = "";
+  let segment = "";
+  let inString = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch !== '"') {
+      if (inString) out += ch;
+      else segment += ch;
+      continue;
+    }
+
+    if (!inString) {
+      out += transform(segment);
+      segment = "";
+      inString = true;
+      out += '"';
+      continue;
+    }
+
+    // Escaped quote inside a string literal: "" -> "
+    if (text[i + 1] === '"') {
+      out += '""';
+      i += 1;
+      continue;
+    }
+
+    inString = false;
+    out += '"';
+  }
+
+  out += transform(segment);
+  return out;
 }
 
 function bestPureInsertionSuggestion({

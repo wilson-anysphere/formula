@@ -68,4 +68,4 @@ Local model completions are controlled via `localStorage` flags (use DevTools in
 Notes:
 
 - Completions are time-bounded (defaults to a ~200ms budget) so the formula bar stays responsive even if Ollama is slow/unavailable.
-- Structured-reference preview is currently not evaluated (the UI will show `(preview unavailable)` for those suggestions).
+- Structured-reference preview is evaluated for simple table column refs (`Table[Column]` / `Table[[#All],[Column]]`) when table range metadata is available. More complex structured refs still fall back to `(preview unavailable)`.

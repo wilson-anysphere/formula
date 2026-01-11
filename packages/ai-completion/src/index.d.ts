@@ -172,6 +172,18 @@ export interface NamedRangeInfo {
 export interface TableInfo {
   name: string;
   columns: string[];
+  /**
+   * Optional sheet identifier for the table.
+   *
+   * This is used by consumers (e.g. the desktop formula bar preview evaluator) to
+   * resolve structured references into sheet-qualified A1 ranges.
+   */
+  sheetName?: string;
+  /** 0-based inclusive bounds for the table range (if known). */
+  startRow?: number;
+  startCol?: number;
+  endRow?: number;
+  endCol?: number;
 }
 
 export interface SchemaProvider {

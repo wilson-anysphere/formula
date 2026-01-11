@@ -30,7 +30,12 @@ import { normalizeCellRef, toA1, columnIndexToLetter } from "./a1.js";
  *
  * @typedef {{
  *   name: string,
- *   columns: string[]
+ *   columns: string[],
+ *   sheetName?: string,
+ *   startRow?: number,
+ *   startCol?: number,
+ *   endRow?: number,
+ *   endCol?: number
  * }} TableInfo
  *
  * @typedef {{

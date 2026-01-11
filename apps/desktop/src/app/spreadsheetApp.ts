@@ -696,18 +696,23 @@ export class SpreadsheetApp {
               .filter((entry: { name: string; range?: string } | null): entry is { name: string; range?: string } =>
                 Boolean(entry?.name),
               );
-          },
-          getTables: () =>
-            Array.from(this.searchWorkbook.tables.values())
+           },
+           getTables: () =>
+             Array.from(this.searchWorkbook.tables.values())
               .map((table: any) => ({
                 name: typeof table?.name === "string" ? table.name : "",
+                sheetName: typeof table?.sheetName === "string" ? table.sheetName : undefined,
+                startRow: typeof table?.startRow === "number" ? table.startRow : undefined,
+                startCol: typeof table?.startCol === "number" ? table.startCol : undefined,
+                endRow: typeof table?.endRow === "number" ? table.endRow : undefined,
+                endCol: typeof table?.endCol === "number" ? table.endCol : undefined,
                 columns: Array.isArray(table?.columns) ? table.columns.map((c: unknown) => String(c)) : [],
               }))
               .filter((t: { name: string; columns: string[] }) => t.name.length > 0 && t.columns.length > 0),
-          getCacheKey: () => `schema:${Number((this.searchWorkbook as any).schemaVersion) || 0}`,
-        },
-      });
-    }
+           getCacheKey: () => `schema:${Number((this.searchWorkbook as any).schemaVersion) || 0}`,
+         },
+       });
+     }
 
     // Precompute row/col visibility + mappings before any initial render work.
     this.rebuildAxisVisibilityCache();
