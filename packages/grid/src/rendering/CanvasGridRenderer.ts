@@ -605,6 +605,184 @@ export class CanvasGridRenderer {
     this.requestRender();
   }
 
+  getRowHeight(row: number): number {
+    this.assertRowIndex(row);
+    return this.scroll.rows.getSize(row);
+  }
+
+  getColWidth(col: number): number {
+    this.assertColIndex(col);
+    return this.scroll.cols.getSize(col);
+  }
+
+  setRowHeight(row: number, height: number): void {
+    this.assertRowIndex(row);
+    this.scroll.rows.setSize(row, height);
+    this.onAxisSizeChanged();
+  }
+
+  setColWidth(col: number, width: number): void {
+    this.assertColIndex(col);
+    this.scroll.cols.setSize(col, width);
+    this.onAxisSizeChanged();
+  }
+
+  resetRowHeight(row: number): void {
+    this.assertRowIndex(row);
+    this.scroll.rows.deleteSize(row);
+    this.onAxisSizeChanged();
+  }
+
+  resetColWidth(col: number): void {
+    this.assertColIndex(col);
+    this.scroll.cols.deleteSize(col);
+    this.onAxisSizeChanged();
+  }
+
+  /**
+   * Auto-fit a column based on the widest visible cell text in the current viewport.
+   *
+   * Note: This intentionally only scans the visible viewport for ergonomics/performance.
+   */
+  autoFitCol(col: number, options?: { maxWidth?: number }): number {
+    this.assertColIndex(col);
+    const viewport = this.scroll.getViewportState();
+
+    const maxWidth = options?.maxWidth ?? 500;
+    const minWidth = 24;
+    const paddingX = 4;
+    const extraPadding = 8;
+
+    const rowCount = this.getRowCount();
+    const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
+    const frozenRowsRange =
+      viewport.frozenRows === 0 || frozenHeightClamped === 0
+        ? { start: 0, end: 0 }
+        : this.scroll.rows.visibleRange(0, frozenHeightClamped, { min: 0, maxExclusive: viewport.frozenRows });
+
+    const viewportScrollableHeight = Math.max(0, viewport.height - frozenHeightClamped);
+    const mainRowsRange =
+      viewportScrollableHeight === 0 || rowCount === viewport.frozenRows ? { start: 0, end: 0 } : viewport.main.rows;
+
+    const layoutEngine = this.textLayoutEngine;
+
+    let maxMeasured = 0;
+    const measureRow = (row: number) => {
+      const cell = this.provider.getCell(row, col);
+      if (!cell || cell.value === null) return;
+
+      const style = cell.style;
+      const fontSize = style?.fontSize ?? 12;
+      const fontFamily = style?.fontFamily ?? "system-ui";
+      const fontWeight = style?.fontWeight ?? "400";
+      const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
+
+      const text = formatCellDisplayText(cell.value);
+      if (text === "") return;
+
+      const measurement = layoutEngine?.measure(text, fontSpec);
+      const width = measurement?.width ?? text.length * fontSize * 0.6;
+      if (Number.isFinite(width)) maxMeasured = Math.max(maxMeasured, width);
+    };
+
+    for (let row = frozenRowsRange.start; row < frozenRowsRange.end; row++) measureRow(row);
+    for (let row = mainRowsRange.start; row < mainRowsRange.end; row++) measureRow(row);
+
+    const next = clamp(Math.ceil(maxMeasured + paddingX * 2 + extraPadding), minWidth, maxWidth);
+    this.setColWidth(col, next);
+    return next;
+  }
+
+  /**
+   * Auto-fit a row based on wrapped text height for visible cells in the current viewport.
+   *
+   * If no visible cell uses wrapping, the row is reset to the default height.
+   */
+  autoFitRow(row: number, options?: { maxHeight?: number }): number {
+    this.assertRowIndex(row);
+    const viewport = this.scroll.getViewportState();
+
+    const maxHeight = options?.maxHeight ?? 500;
+    const paddingX = 4;
+    const paddingY = 2;
+
+    const colCount = this.getColCount();
+    const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
+    const frozenColsRange =
+      viewport.frozenCols === 0 || frozenWidthClamped === 0
+        ? { start: 0, end: 0 }
+        : this.scroll.cols.visibleRange(0, frozenWidthClamped, { min: 0, maxExclusive: viewport.frozenCols });
+
+    const viewportScrollableWidth = Math.max(0, viewport.width - frozenWidthClamped);
+    const mainColsRange =
+      viewportScrollableWidth === 0 || colCount === viewport.frozenCols ? { start: 0, end: 0 } : viewport.main.cols;
+
+    const layoutEngine = this.textLayoutEngine;
+    const defaultHeight = this.scroll.rows.defaultSize;
+    if (!layoutEngine) return defaultHeight;
+
+    let hasWrapped = false;
+    let maxMeasuredHeight = defaultHeight;
+
+    const measureCol = (col: number) => {
+      const cell = this.provider.getCell(row, col);
+      if (!cell || cell.value === null) return;
+
+      const style = cell.style;
+      const wrapMode = style?.wrapMode ?? "none";
+      if (wrapMode === "none") return;
+
+      const text = formatCellDisplayText(cell.value);
+      if (text === "") return;
+
+      hasWrapped = true;
+
+      const fontSize = style?.fontSize ?? 12;
+      const fontFamily = style?.fontFamily ?? "system-ui";
+      const fontWeight = style?.fontWeight ?? "400";
+      const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
+
+      const colWidth = this.scroll.cols.getSize(col);
+      const availableWidth = Math.max(0, colWidth - paddingX * 2);
+      if (availableWidth === 0) return;
+
+      const lineHeight = Math.ceil(fontSize * 1.2);
+      const align: CanvasTextAlign =
+        style?.textAlign ?? (typeof cell.value === "number" ? "end" : "start");
+      const layoutAlign =
+        align === "left" || align === "right" || align === "center" || align === "start" || align === "end"
+          ? (align as "left" | "right" | "center" | "start" | "end")
+          : "start";
+      const direction = style?.direction ?? "auto";
+
+      const layout = layoutEngine.layout({
+        text,
+        font: fontSpec,
+        maxWidth: availableWidth,
+        wrapMode,
+        align: layoutAlign,
+        direction,
+        lineHeightPx: lineHeight,
+        maxLines: 1000
+      });
+
+      const height = layout.height + paddingY * 2;
+      if (Number.isFinite(height)) maxMeasuredHeight = Math.max(maxMeasuredHeight, height);
+    };
+
+    for (let col = frozenColsRange.start; col < frozenColsRange.end; col++) measureCol(col);
+    for (let col = mainColsRange.start; col < mainColsRange.end; col++) measureCol(col);
+
+    if (!hasWrapped) {
+      this.resetRowHeight(row);
+      return this.scroll.rows.defaultSize;
+    }
+
+    const next = clamp(Math.ceil(maxMeasuredHeight), defaultHeight, maxHeight);
+    this.setRowHeight(row, next);
+    return next;
+  }
+
   pickCellAt(viewportX: number, viewportY: number): Selection | null {
     const viewport = this.scroll.getViewportState();
     const { frozenWidth, frozenHeight, frozenRows, frozenCols } = viewport;
@@ -2497,5 +2675,27 @@ export class CanvasGridRenderer {
 
   private getColCount(): number {
     return this.scroll.getCounts().colCount;
+  }
+
+  private assertRowIndex(row: number): void {
+    const rowCount = this.getRowCount();
+    if (!Number.isSafeInteger(row) || row < 0 || row >= rowCount) {
+      throw new Error(`row must be a safe integer in [0, ${Math.max(0, rowCount - 1)}], got ${row}`);
+    }
+  }
+
+  private assertColIndex(col: number): void {
+    const colCount = this.getColCount();
+    if (!Number.isSafeInteger(col) || col < 0 || col >= colCount) {
+      throw new Error(`col must be a safe integer in [0, ${Math.max(0, colCount - 1)}], got ${col}`);
+    }
+  }
+
+  private onAxisSizeChanged(): void {
+    const before = this.scroll.getScroll();
+    this.scroll.setScroll(before.x, before.y);
+    const aligned = this.alignScrollToDevicePixels(this.scroll.getScroll());
+    this.scroll.setScroll(aligned.x, aligned.y);
+    this.markAllDirty();
   }
 }

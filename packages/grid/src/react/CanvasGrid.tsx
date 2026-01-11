@@ -15,6 +15,12 @@ export interface GridApi {
   scrollBy(deltaX: number, deltaY: number): void;
   getScroll(): { x: number; y: number };
   setFrozen(frozenRows: number, frozenCols: number): void;
+  setRowHeight(row: number, height: number): void;
+  setColWidth(col: number, width: number): void;
+  resetRowHeight(row: number): void;
+  resetColWidth(col: number): void;
+  getRowHeight(row: number): number;
+  getColWidth(col: number): number;
   setSelection(row: number, col: number): void;
   setSelectionRange(range: CellRange | null): void;
   getSelectionRange(): CellRange | null;
@@ -50,6 +56,7 @@ export interface CanvasGridProps {
   theme?: Partial<GridTheme>;
   defaultRowHeight?: number;
   defaultColWidth?: number;
+  enableResize?: boolean;
   /**
    * How many extra rows beyond the visible viewport to prefetch.
    *
@@ -150,6 +157,12 @@ function partialThemeEqual(a: Partial<GridTheme>, b: Partial<GridTheme>): boolea
   return true;
 }
 
+type ResizeHit = { kind: "col"; index: number } | { kind: "row"; index: number };
+
+type ResizeDragState =
+  | { kind: "col"; index: number; startClient: number; startSize: number }
+  | { kind: "row"; index: number; startClient: number; startSize: number };
+
 export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -182,6 +195,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const transientRangeRef = useRef<CellRange | null>(null);
   const lastPointerViewportRef = useRef<{ x: number; y: number } | null>(null);
   const autoScrollFrameRef = useRef<number | null>(null);
+  const resizePointerIdRef = useRef<number | null>(null);
+  const resizeDragRef = useRef<ResizeDragState | null>(null);
 
   const frozenRows = props.frozenRows ?? 0;
   const frozenCols = props.frozenCols ?? 0;
@@ -204,6 +219,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const interactionMode = props.interactionMode ?? "default";
   const interactionModeRef = useRef<GridInteractionMode>(interactionMode);
   interactionModeRef.current = interactionMode;
+
+  const enableResizeRef = useRef(props.enableResize ?? false);
+  enableResizeRef.current = props.enableResize ?? false;
 
   const statusId = useId();
   const [cssTheme, setCssTheme] = useState<Partial<GridTheme>>({});
@@ -302,6 +320,32 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         renderer.setFrozen(rows, cols);
         syncScrollbars();
       },
+      setRowHeight: (row, height) => {
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+        renderer.setRowHeight(row, height);
+        syncScrollbars();
+      },
+      setColWidth: (col, width) => {
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+        renderer.setColWidth(col, width);
+        syncScrollbars();
+      },
+      resetRowHeight: (row) => {
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+        renderer.resetRowHeight(row);
+        syncScrollbars();
+      },
+      resetColWidth: (col) => {
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+        renderer.resetColWidth(col);
+        syncScrollbars();
+      },
+      getRowHeight: (row) => rendererRef.current?.getRowHeight(row) ?? (props.defaultRowHeight ?? 21),
+      getColWidth: (col) => rendererRef.current?.getColWidth(col) ?? (props.defaultColWidth ?? 100),
       setSelection: (row, col) => {
         const renderer = rendererRef.current;
         if (!renderer) return;
@@ -573,6 +617,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     if (!selectionCanvas) return;
 
     const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+    const RESIZE_HIT_RADIUS_PX = 4;
+    const MIN_COL_WIDTH = 24;
+    const MIN_ROW_HEIGHT = 16;
 
     const stopAutoScroll = () => {
       if (autoScrollFrameRef.current === null) return;
@@ -583,6 +630,80 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const getViewportPoint = (event: { clientX: number; clientY: number }) => {
       const rect = selectionCanvas.getBoundingClientRect();
       return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    };
+
+    const getResizeHit = (viewportX: number, viewportY: number): ResizeHit | null => {
+      const renderer = rendererRef.current;
+      if (!renderer) return null;
+
+      const viewport = renderer.scroll.getViewportState();
+      const { rowCount, colCount } = renderer.scroll.getCounts();
+      if (rowCount === 0 || colCount === 0) return null;
+
+      const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
+      const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
+
+      const inHeaderRow = viewport.frozenRows > 0 && viewportY >= 0 && viewportY <= frozenHeightClamped;
+      const inRowHeaderCol = viewport.frozenCols > 0 && viewportX >= 0 && viewportX <= frozenWidthClamped;
+
+      const absScrollX = viewport.frozenWidth + viewport.scrollX;
+      const absScrollY = viewport.frozenHeight + viewport.scrollY;
+
+      const colAxis = renderer.scroll.cols;
+      const rowAxis = renderer.scroll.rows;
+
+      let best: (ResizeHit & { distance: number }) | null = null;
+
+      if (inHeaderRow) {
+        const inFrozenCols = viewportX < frozenWidthClamped;
+        const sheetX = inFrozenCols ? viewportX : absScrollX + (viewportX - frozenWidthClamped);
+        const minCol = inFrozenCols ? 0 : viewport.frozenCols;
+        const maxColInclusive = inFrozenCols ? viewport.frozenCols - 1 : colCount - 1;
+
+        if (maxColInclusive >= minCol) {
+          const col = colAxis.indexAt(sheetX, { min: minCol, maxInclusive: maxColInclusive });
+          const colStart = colAxis.positionOf(col);
+          const colEnd = colStart + colAxis.getSize(col);
+
+          const distToStart = Math.abs(sheetX - colStart);
+          const distToEnd = Math.abs(sheetX - colEnd);
+
+          if (distToStart <= RESIZE_HIT_RADIUS_PX && col > 0) {
+            best = { kind: "col", index: col - 1, distance: distToStart };
+          } else if (distToEnd <= RESIZE_HIT_RADIUS_PX) {
+            best = { kind: "col", index: col, distance: distToEnd };
+          }
+        }
+      }
+
+      if (inRowHeaderCol) {
+        const inFrozenRows = viewportY < frozenHeightClamped;
+        const sheetY = inFrozenRows ? viewportY : absScrollY + (viewportY - frozenHeightClamped);
+        const minRow = inFrozenRows ? 0 : viewport.frozenRows;
+        const maxRowInclusive = inFrozenRows ? viewport.frozenRows - 1 : rowCount - 1;
+
+        if (maxRowInclusive >= minRow) {
+          const row = rowAxis.indexAt(sheetY, { min: minRow, maxInclusive: maxRowInclusive });
+          const rowStart = rowAxis.positionOf(row);
+          const rowEnd = rowStart + rowAxis.getSize(row);
+
+          const distToStart = Math.abs(sheetY - rowStart);
+          const distToEnd = Math.abs(sheetY - rowEnd);
+
+          let candidate: (ResizeHit & { distance: number }) | null = null;
+          if (distToStart <= RESIZE_HIT_RADIUS_PX && row > 0) {
+            candidate = { kind: "row", index: row - 1, distance: distToStart };
+          } else if (distToEnd <= RESIZE_HIT_RADIUS_PX) {
+            candidate = { kind: "row", index: row, distance: distToEnd };
+          }
+
+          if (candidate && (!best || candidate.distance < best.distance)) {
+            best = candidate;
+          }
+        }
+      }
+
+      return best ? { kind: best.kind, index: best.index } : null;
     };
 
     const applyDragRange = (picked: { row: number; col: number }) => {
@@ -703,6 +824,34 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const point = getViewportPoint(event);
       lastPointerViewportRef.current = point;
 
+      if (enableResizeRef.current) {
+        const hit = getResizeHit(point.x, point.y);
+        if (hit) {
+          resizePointerIdRef.current = event.pointerId;
+          selectionCanvas.setPointerCapture?.(event.pointerId);
+
+          if (hit.kind === "col") {
+            resizeDragRef.current = {
+              kind: "col",
+              index: hit.index,
+              startClient: event.clientX,
+              startSize: renderer.getColWidth(hit.index)
+            };
+            selectionCanvas.style.cursor = "col-resize";
+          } else {
+            resizeDragRef.current = {
+              kind: "row",
+              index: hit.index,
+              startClient: event.clientY,
+              startSize: renderer.getRowHeight(hit.index)
+            };
+            selectionCanvas.style.cursor = "row-resize";
+          }
+
+          return;
+        }
+      }
+
       const picked = renderer.pickCellAt(point.x, point.y);
       if (!picked) return;
 
@@ -789,6 +938,26 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const onPointerMove = (event: PointerEvent) => {
       const renderer = rendererRef.current;
       if (!renderer) return;
+
+      if (resizePointerIdRef.current !== null) {
+        if (event.pointerId !== resizePointerIdRef.current) return;
+        const drag = resizeDragRef.current;
+        if (!drag) return;
+
+        event.preventDefault();
+
+        if (drag.kind === "col") {
+          const delta = event.clientX - drag.startClient;
+          renderer.setColWidth(drag.index, Math.max(MIN_COL_WIDTH, drag.startSize + delta));
+        } else {
+          const delta = event.clientY - drag.startClient;
+          renderer.setRowHeight(drag.index, Math.max(MIN_ROW_HEIGHT, drag.startSize + delta));
+        }
+
+        syncScrollbars();
+        return;
+      }
+
       if (selectionPointerIdRef.current === null) return;
       if (event.pointerId !== selectionPointerIdRef.current) return;
 
@@ -805,6 +974,17 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     };
 
     const endDrag = (event: PointerEvent) => {
+      if (resizePointerIdRef.current !== null && event.pointerId === resizePointerIdRef.current) {
+        resizePointerIdRef.current = null;
+        resizeDragRef.current = null;
+        selectionCanvas.style.cursor = "default";
+        try {
+          selectionCanvas.releasePointerCapture?.(event.pointerId);
+        } catch {
+          // Some environments throw if the pointer isn't captured; ignore.
+        }
+      }
+
       if (selectionPointerIdRef.current === null) return;
       if (event.pointerId !== selectionPointerIdRef.current) return;
 
@@ -825,11 +1005,36 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       }
     };
 
+    const onPointerHover = (event: PointerEvent) => {
+      if (!enableResizeRef.current) return;
+      if (resizePointerIdRef.current !== null || selectionPointerIdRef.current !== null) return;
+      const point = getViewportPoint(event);
+      const hit = getResizeHit(point.x, point.y);
+      selectionCanvas.style.cursor = hit?.kind === "col" ? "col-resize" : hit?.kind === "row" ? "row-resize" : "default";
+    };
+
+    const onPointerLeave = () => {
+      if (resizePointerIdRef.current !== null || selectionPointerIdRef.current !== null) return;
+      selectionCanvas.style.cursor = "default";
+    };
+
     const onDoubleClick = (event: MouseEvent) => {
       if (interactionModeRef.current === "rangeSelection") return;
       const renderer = rendererRef.current;
       if (!renderer) return;
       const point = getViewportPoint(event);
+
+      if (enableResizeRef.current) {
+        const hit = getResizeHit(point.x, point.y);
+        if (hit) {
+          event.preventDefault();
+          if (hit.kind === "col") renderer.autoFitCol(hit.index, { maxWidth: 500 });
+          else renderer.autoFitRow(hit.index, { maxHeight: 500 });
+          syncScrollbars();
+          return;
+        }
+      }
+
       const picked = renderer.pickCellAt(point.x, point.y);
       if (!picked) return;
       onRequestCellEditRef.current?.({ row: picked.row, col: picked.col });
@@ -837,6 +1042,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
     selectionCanvas.addEventListener("pointerdown", onPointerDown);
     selectionCanvas.addEventListener("pointermove", onPointerMove);
+    selectionCanvas.addEventListener("pointermove", onPointerHover);
+    selectionCanvas.addEventListener("pointerleave", onPointerLeave);
     selectionCanvas.addEventListener("pointerup", endDrag);
     selectionCanvas.addEventListener("pointercancel", endDrag);
     selectionCanvas.addEventListener("dblclick", onDoubleClick);
@@ -844,6 +1051,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     return () => {
       selectionCanvas.removeEventListener("pointerdown", onPointerDown);
       selectionCanvas.removeEventListener("pointermove", onPointerMove);
+      selectionCanvas.removeEventListener("pointermove", onPointerHover);
+      selectionCanvas.removeEventListener("pointerleave", onPointerLeave);
       selectionCanvas.removeEventListener("pointerup", endDrag);
       selectionCanvas.removeEventListener("pointercancel", endDrag);
       selectionCanvas.removeEventListener("dblclick", onDoubleClick);

@@ -647,6 +647,7 @@ function EngineDemoApp() {
               colCount={colCount}
               frozenRows={frozenRows}
               frozenCols={frozenCols}
+              enableResize
               apiRef={(api) => {
                 gridApiRef.current = api;
                 const params = new URLSearchParams(window.location.search);
@@ -712,6 +713,7 @@ function PerfGridApp(): React.ReactElement {
           colCount={colCount}
           frozenRows={frozenRows}
           frozenCols={frozenCols}
+          enableResize
           apiRef={(api) => {
             apiRef.current = api;
             (window as any).__gridApi = api;
