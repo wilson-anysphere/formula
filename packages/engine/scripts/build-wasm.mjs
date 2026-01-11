@@ -54,6 +54,15 @@ async function latestMtime(entryPath) {
     return info.mtimeMs;
   }
 
+  // Ignore generated/build output directories when determining whether the Rust
+  // sources have changed. These can be updated by unrelated workflows (e.g.
+  // `wasm-pack --target nodejs` populating `pkg-node/`) and would otherwise force
+  // unnecessary rebuilds of the web WASM bundle.
+  const base = path.basename(entryPath);
+  if (base === "target" || base === "pkg" || base === "pkg-node" || base === "node_modules") {
+    return 0;
+  }
+
   let latest = info.mtimeMs;
   const entries = await readdir(entryPath, { withFileTypes: true });
   for (const entry of entries) {
