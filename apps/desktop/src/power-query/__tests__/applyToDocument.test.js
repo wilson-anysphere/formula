@@ -8,6 +8,7 @@ import { DocumentController } from "../../document/documentController.js";
 import { MockEngine } from "../../document/engine.js";
 
 import { applyQueryToDocument } from "../applyToDocument.ts";
+import { dateToExcelSerial } from "../../shared/valueParsing.js";
 
 test("applyQueryToDocument writes query output into the destination range (file CSV source)", async () => {
   const engine = new QueryEngine({
@@ -69,6 +70,33 @@ test("applyQueryToDocument loads formula-like strings as values (not formulas)",
   const apostrophe = doc.getCell("Sheet1", { row: 2, col: 0 });
   assert.equal(apostrophe.value, "'literal");
   assert.equal(apostrophe.formula, null);
+});
+
+test("applyQueryToDocument converts Date objects into Excel serial numbers", async () => {
+  const engine = new QueryEngine();
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const when = new Date("2020-01-01T00:00:00.000Z");
+
+  const query = {
+    id: "q_date",
+    name: "Date",
+    source: {
+      type: "range",
+      range: {
+        values: [["When"], [when]],
+        hasHeaders: true,
+      },
+    },
+    steps: [],
+  };
+
+  const destination = { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true };
+  await applyQueryToDocument(doc, query, destination, { engine, batchSize: 2 });
+
+  const cell = doc.getCell("Sheet1", { row: 1, col: 0 });
+  assert.equal(cell.value, dateToExcelSerial(when));
+  assert.equal(cell.formula, null);
 });
 
 test("applyQueryToDocument supports HTTP sources via injected HttpConnector", async () => {

@@ -4,6 +4,7 @@ import { ArrowTableAdapter } from "../../../../packages/power-query/src/arrowTab
 import { DataTable } from "../../../../packages/power-query/src/table.js";
 
 import type { DocumentController } from "../document/documentController.js";
+import { dateToExcelSerial } from "../shared/valueParsing.js";
 
 export type QuerySheetDestination = {
   sheetId: string;
@@ -59,6 +60,12 @@ function throwIfAborted(signal?: AbortSignal): void {
 type GridBatch = { rowOffset: number; values: unknown[][] };
 
 function cellValueToDocumentInput(value: unknown): unknown {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    // Spreadsheet engines expect dates/times as numeric serials (Excel 1900 system).
+    // Convert Date objects to serials so they behave like real Excel dates.
+    return dateToExcelSerial(value);
+  }
+
   // `DocumentController.setRangeValues` interprets string primitives with:
   // - leading "=" as a formula
   // - leading "'" as a literal escape (and it strips the apostrophe)
