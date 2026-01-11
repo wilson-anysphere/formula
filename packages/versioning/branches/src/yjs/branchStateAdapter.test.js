@@ -54,3 +54,58 @@ test("applyBranchStateToYjsDoc: writes comments as Y.Maps for CommentManager com
   assert.ok(value.get("replies") instanceof Y.Array);
 });
 
+test("applyBranchStateToYjsDoc: preserves unknown sheet + cell metadata while applying snapshot", () => {
+  const doc = new Y.Doc();
+
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "OldName");
+    sheet.set("color", "red");
+    sheets.push([sheet]);
+
+    const cells = doc.getMap("cells");
+    const cell = new Y.Map();
+    cell.set("value", 1);
+    cell.set("modified", 123);
+    cells.set("Sheet1:0:0", cell);
+  });
+
+  applyBranchStateToYjsDoc(doc, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "NewName" } },
+    },
+    cells: { Sheet1: { A1: { value: 2 } } },
+    namedRanges: {},
+    comments: {},
+  });
+
+  const sheet1 = doc.getArray("sheets").get(0);
+  assert.ok(sheet1 instanceof Y.Map);
+  assert.equal(sheet1.get("name"), "NewName");
+  assert.equal(sheet1.get("color"), "red");
+
+  const cell = doc.getMap("cells").get("Sheet1:0:0");
+  assert.ok(cell instanceof Y.Map);
+  assert.equal(cell.get("value"), 2);
+  assert.equal(cell.get("modified"), 123);
+});
+
+test("applyBranchStateToYjsDoc: ensures at least one sheet when applying an empty branch state", () => {
+  const doc = new Y.Doc();
+
+  applyBranchStateToYjsDoc(doc, {
+    schemaVersion: 1,
+    sheets: { order: [], metaById: {} },
+    cells: {},
+    namedRanges: {},
+    comments: {},
+  });
+
+  const sheets = doc.getArray("sheets");
+  assert.equal(sheets.length, 1);
+  assert.equal(sheets.get(0)?.get("id"), "Sheet1");
+});

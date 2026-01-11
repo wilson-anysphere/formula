@@ -20,11 +20,59 @@ function isRecord(value) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {Y.Map<any> | null}
+ */
+function getYMap(value) {
+  if (value instanceof Y.Map) return value;
+
+  // Duck-type to handle multiple `yjs` module instances.
+  if (!value || typeof value !== "object") return null;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YMap") return null;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.set !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  return /** @type {Y.Map<any>} */ (maybe);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {Y.Array<any> | null}
+ */
+function getYArray(value) {
+  if (value instanceof Y.Array) return value;
+
+  // Duck-type to handle multiple `yjs` module instances.
+  if (!value || typeof value !== "object") return null;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YArray") return null;
+  if (typeof maybe.toArray !== "function") return null;
+  if (typeof maybe.push !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  return /** @type {Y.Array<any>} */ (maybe);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is Y.Text}
+ */
+function isYText(value) {
+  if (value instanceof Y.Text) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YText") return false;
+  if (typeof maybe.toString !== "function") return false;
+  return true;
+}
+
+/**
  * @param {any} value
  * @param {string} key
  */
 function readYMapOrObject(value, key) {
-  if (value instanceof Y.Map) return value.get(key);
+  const map = getYMap(value);
+  if (map) return map.get(key);
   if (isRecord(value)) return value[key];
   return undefined;
 }
@@ -34,7 +82,7 @@ function readYMapOrObject(value, key) {
  * @returns {string | null}
  */
 function coerceString(value) {
-  if (value instanceof Y.Text) return value.toString();
+  if (isYText(value)) return value.toString();
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);
@@ -62,13 +110,17 @@ function normalizeFormula(value) {
  * @returns {any}
  */
 function yjsValueToJson(value) {
-  if (value instanceof Y.Text) return value.toString();
-  if (value instanceof Y.Array) return value.toArray().map((v) => yjsValueToJson(v));
-  if (value instanceof Y.Map) {
+  if (isYText(value)) return value.toString();
+
+  const array = getYArray(value);
+  if (array) return array.toArray().map((v) => yjsValueToJson(v));
+
+  const map = getYMap(value);
+  if (map) {
     /** @type {Record<string, any>} */
     const out = {};
-    const keys = Array.from(value.keys()).sort();
-    for (const key of keys) out[key] = yjsValueToJson(value.get(key));
+    const keys = Array.from(map.keys()).sort();
+    for (const key of keys) out[key] = yjsValueToJson(map.get(key));
     return out;
   }
 
@@ -105,7 +157,8 @@ function legacyListCommentsFromMapRoot(mapType) {
     if (!item.deleted && item.parentSub === null) {
       const content = item.content?.getContent?.() ?? [];
       for (const value of content) {
-        if (value instanceof Y.Map) out.push(value);
+        const map = getYMap(value);
+        if (map) out.push(map);
       }
     }
     item = item.right;
@@ -199,10 +252,11 @@ function parseSpreadsheetCellKey(key) {
 function cellFromYjsValue(cellData) {
   /** @type {Cell} */
   const cell = {};
-  if (cellData instanceof Y.Map) {
-    const formula = normalizeFormula(cellData.get("formula"));
-    const value = cellData.get("value");
-    const format = cellData.get("format") ?? cellData.get("style");
+  const cellMap = getYMap(cellData);
+  if (cellMap) {
+    const formula = normalizeFormula(cellMap.get("formula"));
+    const value = cellMap.get("value");
+    const format = cellMap.get("format") ?? cellMap.get("style");
     if (formula) cell.formula = formula;
     else if (value !== null && value !== undefined) cell.value = value;
     if (format !== null && format !== undefined) cell.format = yjsValueToJson(format);
@@ -307,14 +361,15 @@ export function branchStateFromYjsDoc(doc) {
     // both historical schemas (Map or Array) we inspect the root value first.
     const existing = doc.share.get("comments");
 
-    if (existing instanceof Y.Map) {
+    const existingMap = getYMap(existing);
+    if (existingMap) {
       /** @type {Map<string, any>} */
       const byId = new Map();
-      for (const id of Array.from(existing.keys()).sort()) {
-        byId.set(id, yjsValueToJson(existing.get(id)));
+      for (const id of Array.from(existingMap.keys()).sort()) {
+        byId.set(id, yjsValueToJson(existingMap.get(id)));
       }
       // Recovery: legacy list items stored on a Map root.
-      for (const item of legacyListCommentsFromMapRoot(existing)) {
+      for (const item of legacyListCommentsFromMapRoot(existingMap)) {
         const id = coerceString(readYMapOrObject(item, "id"));
         if (!id) continue;
         if (byId.has(id)) continue;
@@ -323,17 +378,19 @@ export function branchStateFromYjsDoc(doc) {
       for (const id of Array.from(byId.keys()).sort()) {
         comments[id] = byId.get(id);
       }
-    } else if (existing instanceof Y.Array) {
+    } else {
+      const existingArray = getYArray(existing);
+      if (existingArray) {
       /** @type {Array<{ id: string, value: any }>} */
       const entries = [];
-      for (const item of existing.toArray()) {
+      for (const item of existingArray.toArray()) {
         const id = coerceString(readYMapOrObject(item, "id"));
         if (!id) continue;
         entries.push({ id, value: yjsValueToJson(item) });
       }
       entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       for (const entry of entries) comments[entry.id] = entry.value;
-    } else {
+      } else {
       const placeholder = existing;
       const hasStart = placeholder?._start != null;
       const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
@@ -366,6 +423,7 @@ export function branchStateFromYjsDoc(doc) {
         }
         entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
         for (const entry of entries) comments[entry.id] = entry.value;
+      }
       }
     }
   }
@@ -425,38 +483,95 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
     (transaction) => {
       // --- Sheets ---
       const sheetsArray = doc.getArray("sheets");
-      if (sheetsArray.length > 0) sheetsArray.delete(0, sheetsArray.length);
-      for (const sheetId of normalized.sheets.order) {
-        const meta = normalized.sheets.metaById[sheetId];
+      if (normalized.sheets.order.length > 0) {
+        /** @type {Map<string, Y.Map<any>>} */
+        const existingById = new Map();
+        for (const entry of sheetsArray.toArray()) {
+          const id = coerceString(readYMapOrObject(entry, "id"));
+          if (!id) continue;
+          const map = getYMap(entry);
+          if (map && !existingById.has(id)) existingById.set(id, map);
+        }
+
+        /** @type {Y.Map<any>[]} */
+        const desiredEntries = [];
+        for (const sheetId of normalized.sheets.order) {
+          const meta = normalized.sheets.metaById[sheetId];
+          let entry = existingById.get(sheetId);
+          if (!entry) entry = new Y.Map();
+          entry.set("id", sheetId);
+          entry.set("name", meta?.name ?? null);
+          desiredEntries.push(entry);
+        }
+
+        if (sheetsArray.length > 0) sheetsArray.delete(0, sheetsArray.length);
+        sheetsArray.push(desiredEntries);
+      } else if (sheetsArray.length === 0) {
+        // Yjs workbooks are expected to have at least one sheet. If the branch
+        // state is empty (legacy init), preserve app invariants by creating a
+        // default sheet.
         const entry = new Y.Map();
-        entry.set("id", sheetId);
-        entry.set("name", meta?.name ?? null);
+        entry.set("id", "Sheet1");
+        entry.set("name", "Sheet1");
         sheetsArray.push([entry]);
       }
 
       // --- Cells ---
       const cellsMap = doc.getMap("cells");
-      for (const key of Array.from(cellsMap.keys())) {
-        cellsMap.delete(key);
-      }
+      /** @type {Map<string, Cell>} */
+      const desiredCells = new Map();
 
       for (const [sheetId, sheet] of Object.entries(normalized.cells)) {
         for (const [addr, cell] of Object.entries(sheet ?? {})) {
           const normalizedCell = normalizeCell(cell);
           if (!normalizedCell) continue;
           const { row, col } = a1ToRowCol(addr);
-          const key = `${sheetId}:${row}:${col}`;
+          desiredCells.set(`${sheetId}:${row}:${col}`, normalizedCell);
+        }
+      }
 
-          const yCell = new Y.Map();
-          const formula = normalizeFormula(normalizedCell.formula);
-          if (formula) {
-            yCell.set("formula", formula);
-            yCell.set("value", null);
-          } else if (normalizedCell.value !== undefined) {
-            yCell.set("value", normalizedCell.value);
-          }
-          if (normalizedCell.format != null) yCell.set("format", structuredClone(normalizedCell.format));
+      /** @type {string[]} */
+      const toDelete = [];
+      cellsMap.forEach((_cellData, rawKey) => {
+        if (typeof rawKey !== "string") return;
+        const parsed = parseSpreadsheetCellKey(rawKey);
+        if (!parsed) return;
+        const canonical = `${parsed.sheetId}:${parsed.row}:${parsed.col}`;
+        if (!desiredCells.has(canonical) || rawKey !== canonical) {
+          toDelete.push(rawKey);
+        }
+      });
+      for (const key of toDelete) cellsMap.delete(key);
+
+      for (const [key, normalizedCell] of desiredCells) {
+        let yCell = getYMap(cellsMap.get(key));
+        if (!yCell) {
+          yCell = new Y.Map();
           cellsMap.set(key, yCell);
+        }
+
+        // Branching doesn't currently model encrypted cells; ensure plaintext
+        // snapshots override any prior encryption payloads.
+        yCell.delete("enc");
+
+        const formula = normalizeFormula(normalizedCell.formula);
+        if (formula) {
+          yCell.set("formula", formula);
+          yCell.set("value", null);
+        } else if (normalizedCell.value !== undefined) {
+          yCell.set("value", normalizedCell.value);
+          yCell.delete("formula");
+        } else {
+          yCell.delete("value");
+          yCell.delete("formula");
+        }
+
+        if (normalizedCell.format != null) {
+          yCell.set("format", structuredClone(normalizedCell.format));
+          yCell.delete("style");
+        } else {
+          yCell.delete("format");
+          yCell.delete("style");
         }
       }
 
@@ -470,9 +585,9 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
       // --- Comments ---
       const existing = doc.share.get("comments");
       const commentsKind =
-        existing instanceof Y.Array
+        getYArray(existing)
           ? "array"
-          : existing instanceof Y.Map
+          : getYMap(existing)
             ? "map"
             : (() => {
                 const placeholder = existing;
