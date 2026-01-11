@@ -806,6 +806,27 @@ export class KernelEngine {
       }
     }
 
+    const joinType = opts.joinType ?? "inner";
+    if (leftKeys.length === 0) {
+      this._lastKernelBackend.hashJoin = "cpu";
+      this._lastKernelPrecision.hashJoin = "u32";
+      return { leftIndex: new Uint32Array(), rightIndex: new Uint32Array() };
+    }
+    if (rightKeys.length === 0) {
+      this._lastKernelBackend.hashJoin = "cpu";
+      this._lastKernelPrecision.hashJoin = "u32";
+      if (joinType === "left") {
+        const leftIndex = new Uint32Array(leftKeys.length);
+        const rightIndex = new Uint32Array(leftKeys.length);
+        for (let i = 0; i < leftKeys.length; i++) {
+          leftIndex[i] = i;
+          rightIndex[i] = 0xffff_ffff;
+        }
+        return { leftIndex, rightIndex };
+      }
+      return { leftIndex: new Uint32Array(), rightIndex: new Uint32Array() };
+    }
+
     const workloadSize = leftKeys.length + rightKeys.length;
     const backend = this._chooseBackend("hashJoin", workloadSize, "u32");
 

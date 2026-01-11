@@ -338,7 +338,24 @@ export class CpuBackend {
    * @returns {Promise<{ leftIndex: Uint32Array, rightIndex: Uint32Array }>}
    */
   async hashJoin(leftKeys, rightKeys, opts = {}) {
-    if (leftKeys.length === 0 || rightKeys.length === 0) {
+    const joinType = opts.joinType ?? "inner";
+    if (joinType !== "inner" && joinType !== "left") {
+      throw new Error(`hashJoin joinType must be "inner" | "left", got ${String(joinType)}`);
+    }
+
+    if (leftKeys.length === 0) {
+      return { leftIndex: new Uint32Array(), rightIndex: new Uint32Array() };
+    }
+    if (rightKeys.length === 0) {
+      if (joinType === "left") {
+        const leftIndex = new Uint32Array(leftKeys.length);
+        const rightIndex = new Uint32Array(leftKeys.length);
+        for (let i = 0; i < leftKeys.length; i++) {
+          leftIndex[i] = i;
+          rightIndex[i] = 0xffff_ffff;
+        }
+        return { leftIndex, rightIndex };
+      }
       return { leftIndex: new Uint32Array(), rightIndex: new Uint32Array() };
     }
     const leftSigned = leftKeys instanceof Int32Array;
@@ -347,10 +364,6 @@ export class CpuBackend {
       throw new Error(
         `hashJoin key type mismatch: left=${leftSigned ? "i32" : "u32"} right=${rightSigned ? "i32" : "u32"} (pass matching Int32Array/Uint32Array types)`
       );
-    }
-    const joinType = opts.joinType ?? "inner";
-    if (joinType !== "inner" && joinType !== "left") {
-      throw new Error(`hashJoin joinType must be "inner" | "left", got ${String(joinType)}`);
     }
 
     /** @type {Map<number, number[]>} */

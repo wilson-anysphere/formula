@@ -146,6 +146,18 @@ test("hashJoin: left join includes unmatched rows with rightIndex=0xFFFF_FFFF", 
   assert.deepEqual(Array.from(out.rightIndex), [0xffff_ffff, 0, 0xffff_ffff]);
 });
 
+test("hashJoin: left join with empty right side returns one unmatched row per left key", async () => {
+  const cpu = new CpuBackend();
+  const leftKeys = new Uint32Array([10, 20]);
+  const out = await cpu.hashJoin(leftKeys, new Uint32Array(), { joinType: "left" });
+  assert.deepEqual(Array.from(out.leftIndex), [0, 1]);
+  assert.deepEqual(Array.from(out.rightIndex), [0xffff_ffff, 0xffff_ffff]);
+
+  const inner = await cpu.hashJoin(leftKeys, new Uint32Array(), { joinType: "inner" });
+  assert.equal(inner.leftIndex.length, 0);
+  assert.equal(inner.rightIndex.length, 0);
+});
+
 test("KernelEngine: hashJoin left join passes options through (CPU backend)", async () => {
   const engine = new KernelEngine({ precision: "excel", gpu: { enabled: false } });
   const leftKeys = new Uint32Array([1, 2]);

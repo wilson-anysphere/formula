@@ -1666,7 +1666,19 @@ export class WebGpuBackend {
     const rightU32 = toUint32Keys(rightKeys);
     const leftLen = leftU32.length;
     const rightLen = rightU32.length;
-    if (leftLen === 0 || rightLen === 0) {
+    if (leftLen === 0) {
+      return { leftIndex: new Uint32Array(), rightIndex: new Uint32Array() };
+    }
+    if (rightLen === 0) {
+      if (joinType === "left") {
+        const leftIndex = new Uint32Array(leftLen);
+        const rightIndex = new Uint32Array(leftLen);
+        for (let i = 0; i < leftLen; i++) {
+          leftIndex[i] = i;
+          rightIndex[i] = EMPTY_U32;
+        }
+        return { leftIndex, rightIndex };
+      }
       return { leftIndex: new Uint32Array(), rightIndex: new Uint32Array() };
     }
 
