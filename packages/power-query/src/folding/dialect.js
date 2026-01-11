@@ -2,8 +2,8 @@
  * Minimal SQL dialect abstraction used by the query folding engine.
  *
  * The goal is to keep SQL generation conservative + predictable across the
- * connectors we care about (Postgres/MySQL/SQLite) without trying to fully model
- * every vendor-specific syntax variation.
+ * connectors we care about (Postgres/MySQL/SQLite/SQL Server) without trying to
+ * fully model every vendor-specific syntax variation.
  */
 
 /**

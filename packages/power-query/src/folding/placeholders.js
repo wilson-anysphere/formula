@@ -5,9 +5,9 @@
  * composition simple (nested queries, UNION ALL, joins) and works across many
  * drivers.
  *
- * Some Postgres drivers require `$1..$n` placeholders, so we provide a
- * conservative translator that attempts to only replace `?` that appear in a
- * "value position" (as opposed to Postgres operators like `jsonb ? 'key'`).
+ * Some drivers require dialect-specific placeholder styles:
+ * - Postgres: `$1..$n` (and we must avoid rewriting operators like `jsonb ? 'key'`)
+ * - SQL Server: named parameters like `@p1..@pn`
  */
 
 const POSTGRES_VALUE_KEYWORDS = new Set([
