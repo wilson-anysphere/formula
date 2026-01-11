@@ -173,6 +173,80 @@ pub fn edate(start_date: i32, months: i32, system: ExcelDateSystem) -> ExcelResu
     Err(ExcelError::Num)
 }
 
+fn is_last_day_of_month(serial_number: i32, system: ExcelDateSystem) -> ExcelResult<bool> {
+    let date = crate::date::serial_to_ymd(serial_number, system)?;
+    let next_serial = serial_number.checked_add(1).ok_or(ExcelError::Num)?;
+    let next = crate::date::serial_to_ymd(next_serial, system)?;
+    Ok(date.year != next.year || date.month != next.month)
+}
+
+/// DAYS360(start_date, end_date, [method])
+///
+/// Returns the number of days between two dates based on a 360-day year (twelve 30-day months).
+///
+/// When `method` is `false` (or omitted), Excel uses the "US/NASD" method:
+/// - If `start_date` is the last day of the month, treat it as day 30.
+/// - If `end_date` is the last day of the month:
+///   - If the adjusted `start_date` day is < 30, treat `end_date` as the 1st of the next month.
+///   - Otherwise treat `end_date` as day 30 of the same month.
+///
+/// When `method` is `true`, Excel uses the European method:
+/// - Dates that fall on the 31st are treated as day 30.
+pub fn days360(start_date: i32, end_date: i32, method: bool, system: ExcelDateSystem) -> ExcelResult<i64> {
+    let start = crate::date::serial_to_ymd(start_date, system)?;
+    let end = crate::date::serial_to_ymd(end_date, system)?;
+
+    let y1 = i64::from(start.year);
+    let m1 = i64::from(start.month);
+    let mut d1 = i64::from(start.day);
+
+    let mut y2 = i64::from(end.year);
+    let mut m2 = i64::from(end.month);
+    let mut d2 = i64::from(end.day);
+
+    if method {
+        // European method: only adjust 31st-of-month dates.
+        if d1 == 31 {
+            d1 = 30;
+        }
+        if d2 == 31 {
+            d2 = 30;
+        }
+    } else {
+        // US/NASD method: adjust end-of-month rules, including February.
+        if is_last_day_of_month(start_date, system)? {
+            d1 = 30;
+        }
+
+        if is_last_day_of_month(end_date, system)? {
+            if d1 < 30 {
+                // Move to the 1st of the next month.
+                d2 = 1;
+                if m2 == 12 {
+                    m2 = 1;
+                    y2 = y2.checked_add(1).ok_or(ExcelError::Num)?;
+                } else {
+                    m2 = m2.checked_add(1).ok_or(ExcelError::Num)?;
+                }
+            } else {
+                d2 = 30;
+            }
+        }
+    }
+
+    let year_diff = y2.checked_sub(y1).ok_or(ExcelError::Num)?;
+    let month_diff = m2.checked_sub(m1).ok_or(ExcelError::Num)?;
+    let day_diff = d2.checked_sub(d1).ok_or(ExcelError::Num)?;
+
+    let year_term = year_diff.checked_mul(360).ok_or(ExcelError::Num)?;
+    let month_term = month_diff.checked_mul(30).ok_or(ExcelError::Num)?;
+    let total = year_term
+        .checked_add(month_term)
+        .and_then(|v| v.checked_add(day_diff))
+        .ok_or(ExcelError::Num)?;
+    Ok(total)
+}
+
 /// WEEKDAY(serial_number, [return_type])
 pub fn weekday(serial_number: i32, return_type: Option<i32>, system: ExcelDateSystem) -> ExcelResult<i32> {
     // Validate serial number is representable as a date in this system.

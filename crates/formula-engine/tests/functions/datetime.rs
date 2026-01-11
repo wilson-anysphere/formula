@@ -109,6 +109,59 @@ fn datevalue_edate_and_eomonth() {
 }
 
 #[test]
+fn days_returns_day_difference() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=DAYS(DATE(2020,1,2),DATE(2020,1,1))"), 1.0);
+    assert_number(&sheet.eval("=DAYS(\"2020-01-02\",\"2020-01-01\")"), 1.0);
+    assert_eq!(sheet.eval("=DAYS(\"nope\",DATE(2020,1,1))"), Value::Error(ErrorKind::Value));
+
+    sheet.set("A1", Value::Number(f64::INFINITY));
+    assert_eq!(sheet.eval("=DAYS(A1,0)"), Value::Error(ErrorKind::Num));
+}
+
+#[test]
+fn days_spills_over_array_inputs() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=DAYS({\"2020-01-02\";\"2020-01-03\"},\"2020-01-01\")");
+    sheet.recalc();
+    assert_number(&sheet.get("A1"), 1.0);
+    assert_number(&sheet.get("A2"), 2.0);
+}
+
+#[test]
+fn days360_matches_excel_examples() {
+    let mut sheet = TestSheet::new();
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2011,1,1),DATE(2011,12,31))"),
+        360.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2011,1,1),DATE(2011,12,31),TRUE)"),
+        359.0,
+    );
+    assert_number(&sheet.eval("=DAYS360(\"2020-02-01\",\"2020-02-29\")"), 30.0);
+    assert_eq!(
+        sheet.eval("=DAYS360(\"nope\",DATE(2020,1,1))"),
+        Value::Error(ErrorKind::Value)
+    );
+
+    sheet.set("A1", Value::Number(f64::INFINITY));
+    assert_eq!(
+        sheet.eval("=DAYS360(DATE(2011,1,1),DATE(2011,12,31),A1)"),
+        Value::Error(ErrorKind::Num)
+    );
+}
+
+#[test]
+fn days360_spills_over_array_inputs() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=DAYS360({DATE(2011,1,1);DATE(2011,1,31)},DATE(2011,12,31))");
+    sheet.recalc();
+    assert_number(&sheet.get("A1"), 360.0);
+    assert_number(&sheet.get("A2"), 330.0);
+}
+
+#[test]
 fn hour_minute_second_extract_time_components() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=HOUR(TIME(1,2,3))"), 1.0);

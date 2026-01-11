@@ -315,6 +315,81 @@ fn datevalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "DAYS",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: days_fn,
+    }
+}
+
+fn days_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let end_date = eval_scalar_arg(ctx, &args[0]);
+    let start_date = eval_scalar_arg(ctx, &args[1]);
+    let system = ctx.date_system();
+    broadcast_map2(end_date, start_date, |end_date, start_date| {
+        let end_serial = match datevalue_from_value(&end_date, system) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let start_serial = match datevalue_from_value(&start_date, system) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        Value::Number((i64::from(end_serial) - i64::from(start_serial)) as f64)
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "DAYS360",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Bool],
+        implementation: days360_fn,
+    }
+}
+
+fn days360_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let start_date = eval_scalar_arg(ctx, &args[0]);
+    let end_date = eval_scalar_arg(ctx, &args[1]);
+    let method = if args.len() == 3 {
+        eval_scalar_arg(ctx, &args[2])
+    } else {
+        Value::Blank
+    };
+    let system = ctx.date_system();
+
+    broadcast_map3(start_date, end_date, method, |start_date, end_date, method| {
+        let start_serial = match datevalue_from_value(&start_date, system) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let end_serial = match datevalue_from_value(&end_date, system) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let method = match coerce_to_bool_finite(&method) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        match date_time::days360(start_serial, end_serial, method, system) {
+            Ok(v) => Value::Number(v as f64),
+            Err(e) => Value::Error(excel_error_kind(e)),
+        }
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "EOMONTH",
         min_args: 2,
         max_args: 2,
@@ -908,6 +983,18 @@ fn coerce_to_finite_number(v: &Value) -> Result<f64, ErrorKind> {
         return Err(ErrorKind::Num);
     }
     Ok(n)
+}
+
+fn coerce_to_bool_finite(v: &Value) -> Result<bool, ErrorKind> {
+    match v {
+        Value::Number(n) => {
+            if !n.is_finite() {
+                return Err(ErrorKind::Num);
+            }
+            Ok(*n != 0.0)
+        }
+        _ => v.coerce_to_bool(),
+    }
 }
 
 fn coerce_number_to_i32_trunc(n: f64) -> Result<i32, ErrorKind> {

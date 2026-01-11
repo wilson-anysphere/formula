@@ -44,6 +44,20 @@ fn eomonth_returns_last_day_of_offset_month() {
 }
 
 #[test]
+fn days360_matches_excel_examples() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let start = ymd_to_serial(ExcelDate::new(2011, 1, 1), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2011, 12, 31), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 360);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 359);
+
+    let start = ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 30);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 28);
+}
+
+#[test]
 fn weekday_matches_excel_return_types() {
     let system = ExcelDateSystem::EXCEL_1900;
     // 1900-01-01 is serial 1 and a Monday.
