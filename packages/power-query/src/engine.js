@@ -2556,6 +2556,7 @@ export class QueryEngine {
     const canStreamSource =
       query.source.type === "range" ||
       query.source.type === "table" ||
+      query.source.type === "query" ||
       (query.source.type === "csv" && Boolean(fileConnector?.readTextStream || fileConnector?.readBinaryStream || fileConnector?.readText)) ||
       (query.source.type === "parquet" && Boolean(fileConnector?.openFile));
 
@@ -2729,6 +2730,43 @@ export class QueryEngine {
     throwIfAborted(options.signal);
 
     const batchSize = options.batchSize ?? 1024;
+
+    if (source.type === "query") {
+      if (callStack.has(source.queryId)) {
+        throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${source.queryId}`);
+      }
+
+      const existing = context.queryResults?.[source.queryId];
+      if (existing) {
+        const table = existing.table;
+        const columns = table.columns.map((c) => ({ name: c.name, type: c.type ?? "any" }));
+
+        async function* batches() {
+          /** @type {unknown[][]} */
+          let batch = [];
+          for (const row of table.iterRows()) {
+            batch.push(row);
+            if (batch.length >= batchSize) {
+              yield batch;
+              batch = [];
+            }
+          }
+          if (batch.length > 0) yield batch;
+        }
+
+        return { columns, batches: batches() };
+      }
+
+      const target = context.queries?.[source.queryId];
+      if (!target) throw new Error(`Unknown query '${source.queryId}'`);
+      if (callStack.has(target.id)) {
+        throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${target.id}`);
+      }
+      const nextStack = new Set(callStack);
+      nextStack.add(target.id);
+      const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
+      return this.executeQueryToBatchesForStreaming(target, context, depOptions, state, nextStack);
+    }
 
     if (source.type === "range") {
       const hasHeaders = source.range.hasHeaders ?? true;
@@ -2915,6 +2953,154 @@ export class QueryEngine {
     /** @type {never} */
     const exhausted = source;
     throw new Error(`Streaming execution does not support source type '${exhausted.type}'`);
+  }
+
+  /**
+   * Execute a query and return its output as an async iterable of row batches.
+   *
+   * This is used to support `source.type === "query"` during non-materializing streaming execution.
+   *
+   * @private
+   * @param {Query} query
+   * @param {QueryExecutionContext} context
+   * @param {ExecuteOptions} options
+   * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+   * @param {Set<string>} callStack
+   * @returns {Promise<{ columns: import("./table.js").Column[]; batches: AsyncIterable<unknown[][]> }>}
+   */
+  async executeQueryToBatchesForStreaming(query, context, options, state, callStack) {
+    throwIfAborted(options.signal);
+
+    const batchSize = options.batchSize ?? 1024;
+
+    const maxStepIndex = options.maxStepIndex ?? query.steps.length - 1;
+    const steps = query.steps.slice(0, maxStepIndex + 1);
+
+    const canStreamSteps = steps.every((step) => isStreamableOperation(step.operation));
+
+    const fileConnector = this.connectors.get("file");
+    const canStreamSource =
+      query.source.type === "range" ||
+      query.source.type === "table" ||
+      query.source.type === "query" ||
+      (query.source.type === "csv" && Boolean(fileConnector?.readTextStream || fileConnector?.readBinaryStream || fileConnector?.readText)) ||
+      (query.source.type === "parquet" && Boolean(fileConnector?.openFile));
+
+    if (!canStreamSteps || !canStreamSource) {
+      // Fall back to materializing the referenced query when it can't be streamed.
+      const { batchSize: _batchSize, includeHeader: _includeHeader, onBatch: _onBatch, materialize: _materialize, ...executeOptions } = options;
+      const table = await this.executeQuery(query, context, executeOptions);
+      const columns = table.columns.map((c) => ({ name: c.name, type: c.type ?? "any" }));
+
+      async function* batches() {
+        /** @type {unknown[][]} */
+        let batch = [];
+        for (const row of table.iterRows()) {
+          batch.push(row);
+          if (batch.length >= batchSize) {
+            yield batch;
+            batch = [];
+          }
+        }
+        if (batch.length > 0) yield batch;
+      }
+
+      return { columns, batches: batches() };
+    }
+
+    /** @type {QueryOperation[]} */
+    const operations = steps.map((step) => step.operation);
+    if (options.limit != null) {
+      operations.push({ type: "take", count: options.limit });
+    }
+
+    let streamingSource = query.source;
+    if (streamingSource.type === "parquet") {
+      const projection = computeParquetProjectionColumns(steps);
+      const rowLimit = computeParquetRowLimit(steps, options.limit);
+      const nextOptions = projection || rowLimit != null ? { ...(streamingSource.options ?? {}) } : null;
+
+      if (projection && projection.length > 0 && nextOptions) {
+        const existing = Array.isArray(streamingSource.options?.columns) ? streamingSource.options.columns : [];
+        nextOptions.columns = Array.from(new Set([...existing, ...projection]));
+      }
+
+      if (rowLimit != null && nextOptions) {
+        const existing = typeof streamingSource.options?.limit === "number" ? streamingSource.options.limit : null;
+        nextOptions.limit = existing == null ? rowLimit : Math.min(existing, rowLimit);
+      }
+
+      if (nextOptions) {
+        streamingSource = { ...streamingSource, options: nextOptions };
+      }
+    }
+
+    const source = await this.loadSourceBatchesForStreaming(streamingSource, context, callStack, options, state);
+
+    const pipeline = compileStreamingPipeline(operations, source.columns);
+    const outputColumns = pipeline.columns;
+
+    async function* batches() {
+      /** @type {unknown[][]} */
+      let buffer = [];
+      let bufferOffset = 0;
+
+      /**
+       * @param {unknown[][]} rows
+       */
+      const enqueue = (rows) => {
+        if (rows.length === 0) return;
+        if (bufferOffset === 0 && buffer.length === 0) {
+          buffer = rows;
+          bufferOffset = 0;
+        } else {
+          buffer = buffer.slice(bufferOffset).concat(rows);
+          bufferOffset = 0;
+        }
+      };
+
+      /**
+       * @param {number} count
+       */
+      const dequeue = (count) => {
+        const slice = buffer.slice(bufferOffset, bufferOffset + count);
+        bufferOffset += count;
+        if (bufferOffset >= buffer.length) {
+          buffer = [];
+          bufferOffset = 0;
+        }
+        return slice;
+      };
+
+      /**
+       * @param {boolean} flushAll
+       */
+      const yieldAvailable = async function* (flushAll) {
+        while (buffer.length - bufferOffset >= batchSize || (flushAll && buffer.length - bufferOffset > 0)) {
+          const available = buffer.length - bufferOffset;
+          const size = flushAll ? Math.min(available, batchSize) : batchSize;
+          const chunk = dequeue(size);
+          if (chunk.length === 0) break;
+          yield chunk;
+        }
+      };
+
+      for await (const batchRows of source.batches) {
+        throwIfAborted(options.signal);
+        const result = pipeline.transformBatch(batchRows);
+        enqueue(result.rows);
+        for await (const chunk of yieldAvailable(result.done)) {
+          yield chunk;
+        }
+        if (result.done) break;
+      }
+
+      for await (const chunk of yieldAvailable(true)) {
+        yield chunk;
+      }
+    }
+
+    return { columns: outputColumns, batches: batches() };
   }
 }
 

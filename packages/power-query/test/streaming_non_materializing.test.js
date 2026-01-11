@@ -187,3 +187,49 @@ test("executeQueryStreaming(..., materialize:false) resolves table sources via t
   const expected = (await engine.executeQuery(query, {}, {})).toGrid();
   assert.deepEqual(streamed, expected);
 });
+
+test("executeQueryStreaming(..., materialize:false) streams query reference sources when the referenced pipeline is streamable", async () => {
+  const engineStreaming = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        throw new Error("readText should not be called in streaming mode");
+      },
+      readTextStream: async function* () {
+        yield "A,B\n";
+        yield "1,2\n";
+        yield "3,4\n";
+      },
+    },
+  });
+
+  const engineMaterialized = new QueryEngine({
+    fileAdapter: {
+      readText: async () => ["A,B", "1,2", "3,4"].join("\n"),
+    },
+  });
+
+  const baseQuery = {
+    id: "q_base",
+    name: "Base",
+    source: { type: "csv", path: "/tmp/base.csv", options: { hasHeaders: true } },
+    steps: [{ id: "s_filter", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "A", operator: "greaterThan", value: 1 } } }],
+  };
+
+  const query = {
+    id: "q_ref",
+    name: "Ref",
+    source: { type: "query", queryId: "q_base" },
+    steps: [{ id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["B"] } }],
+  };
+
+  const batches = [];
+  await engineStreaming.executeQueryStreaming(
+    query,
+    { queries: { q_base: baseQuery } },
+    { batchSize: 2, materialize: false, onBatch: (b) => batches.push(b) },
+  );
+
+  const streamed = collectBatches(batches);
+  const expected = (await engineMaterialized.executeQuery(query, { queries: { q_base: baseQuery } }, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
