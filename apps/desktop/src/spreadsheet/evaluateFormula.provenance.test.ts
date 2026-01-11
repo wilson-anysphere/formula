@@ -59,14 +59,24 @@ describe("evaluateFormula (AI provenance)", () => {
     };
 
     let readCount = 0;
-    const getCellValue = (_addr: string) => {
+    const readAddrs: string[] = [];
+    const getCellValue = (addr: string) => {
       readCount += 1;
+      readAddrs.push(addr);
       return 1;
     };
 
     const result = evaluateFormula('=AI("summarize", A1:A500)', getCellValue, { ai, cellAddress: "Sheet1!B1" });
     expect(result).toBe("ok");
     expect(readCount).toBe(200);
+    // Ensure sampling isn't just the first N cells: we expect to read from deeper into the range.
+    const maxRow = Math.max(
+      ...readAddrs.map((addr) => {
+        const match = /(\d+)$/.exec(addr);
+        return match ? Number(match[1]) : 0;
+      }),
+    );
+    expect(maxRow).toBeGreaterThan(200);
 
     const rangeArg = calls[0]?.args?.[1];
     expect(Array.isArray(rangeArg)).toBe(true);
