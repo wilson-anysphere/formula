@@ -34,4 +34,14 @@ describe("function context", () => {
     expect(hint?.signature.params[0]?.name).toBe("lookup_value");
     expect(hint?.signature.summary).toContain("Looks up");
   });
+
+  it("getFunctionHint prefers curated signatures when available (SEQUENCE)", () => {
+    const formula = "=SEQUENCE(10, 2)";
+    const cursor = formula.indexOf("2") + 1;
+    const hint = getFunctionHint(formula, cursor);
+    expect(hint).toBeTruthy();
+    expect(hint?.signature.name).toBe("SEQUENCE");
+    expect(hint?.signature.params[0]?.name).toBe("rows");
+    expect(hint?.signature.params[1]?.name).toBe("columns");
+  });
 });

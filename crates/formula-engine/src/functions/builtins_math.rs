@@ -469,7 +469,7 @@ inventory::submit! {
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
-        arg_types: &[ValueType::Any],
+        arg_types: &[ValueType::Any, ValueType::Any],
         implementation: countif_fn,
     }
 }
@@ -525,7 +525,7 @@ inventory::submit! {
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
-        arg_types: &[ValueType::Any],
+        arg_types: &[ValueType::Any, ValueType::Any],
         implementation: sumproduct_fn,
     }
 }

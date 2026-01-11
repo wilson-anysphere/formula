@@ -21,6 +21,26 @@ for (const fn of (FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?
 }
 
 export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
+  DATE: {
+    name: "DATE",
+    params: [{ name: "year" }, { name: "month" }, { name: "day" }],
+    summary: "Returns the serial number of a particular date.",
+  },
+  DAY: {
+    name: "DAY",
+    params: [{ name: "serial_number" }],
+    summary: "Converts a serial number to a day of the month.",
+  },
+  MONTH: {
+    name: "MONTH",
+    params: [{ name: "serial_number" }],
+    summary: "Converts a serial number to a month.",
+  },
+  YEAR: {
+    name: "YEAR",
+    params: [{ name: "serial_number" }],
+    summary: "Converts a serial number to a year.",
+  },
   SUM: {
     name: "SUM",
     params: [{ name: "number1" }, { name: "number2", optional: true }],
@@ -60,6 +80,21 @@ export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
     name: "MIN",
     params: [{ name: "number1" }, { name: "number2", optional: true }],
     summary: "Returns the smallest value in a set of values.",
+  },
+  ROUND: {
+    name: "ROUND",
+    params: [{ name: "number" }, { name: "num_digits" }],
+    summary: "Rounds a number to a specified number of digits.",
+  },
+  ROUNDUP: {
+    name: "ROUNDUP",
+    params: [{ name: "number" }, { name: "num_digits" }],
+    summary: "Rounds a number up, away from zero.",
+  },
+  ROUNDDOWN: {
+    name: "ROUNDDOWN",
+    params: [{ name: "number" }, { name: "num_digits" }],
+    summary: "Rounds a number down, toward zero.",
   },
   SUMPRODUCT: {
     name: "SUMPRODUCT",
@@ -134,6 +169,26 @@ export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
     name: "NOW",
     params: [],
     summary: "Returns the current date and time.",
+  },
+  RAND: {
+    name: "RAND",
+    params: [],
+    summary: "Returns a random number between 0 and 1.",
+  },
+  RANDBETWEEN: {
+    name: "RANDBETWEEN",
+    params: [{ name: "bottom" }, { name: "top" }],
+    summary: "Returns a random integer between the numbers you specify.",
+  },
+  SEQUENCE: {
+    name: "SEQUENCE",
+    params: [
+      { name: "rows" },
+      { name: "columns", optional: true },
+      { name: "start", optional: true },
+      { name: "step", optional: true },
+    ],
+    summary: "Generates a list of sequential numbers in an array.",
   },
   TRANSPOSE: {
     name: "TRANSPOSE",
