@@ -346,6 +346,10 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
                             }
                         }
                     }
+
+                    // If we can't validate equivalence with the shared-formula master, be
+                    // conservative and treat this as a formula change.
+                    return true;
                 }
             }
 

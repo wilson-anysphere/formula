@@ -75,7 +75,7 @@ pub use pivots::{
     PivotCacheSourceType, PivotTableDefinition, PivotTablePart, PreservedPivotParts, XlsxPivots,
 };
 pub use recalc_policy::RecalcPolicy;
-pub use read::{load_from_bytes, load_from_path};
+pub use read::{load_from_bytes, load_from_path, read_workbook_model_from_bytes};
 pub use reader::{read_workbook, read_workbook_from_reader};
 pub use sheet_metadata::{
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,

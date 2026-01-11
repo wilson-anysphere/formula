@@ -63,6 +63,133 @@ pub fn load_from_path(path: impl AsRef<Path>) -> Result<XlsxDocument, ReadError>
     load_from_bytes(&bytes)
 }
 
+/// Read an XLSX workbook model from in-memory bytes without materializing every
+/// ZIP part into memory.
+///
+/// This is a lightweight alternative to [`load_from_bytes`] that only inflates
+/// the parts required to build a [`formula_model::Workbook`] (workbook metadata,
+/// styles, shared strings, and referenced worksheets).
+pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadError> {
+    let cursor = Cursor::new(bytes);
+    let mut archive = ZipArchive::new(cursor)?;
+
+    let workbook_xml = read_zip_part_required(&mut archive, WORKBOOK_PART)?;
+    let workbook_rels = read_zip_part_required(&mut archive, WORKBOOK_RELS_PART)?;
+
+    let rels_info = parse_relationships(&workbook_rels)?;
+    let (_date_system, _calc_pr, sheets) =
+        parse_workbook_metadata(&workbook_xml, &rels_info.id_to_target)?;
+
+    let mut workbook = Workbook::new();
+
+    let styles_part_name = rels_info
+        .styles_target
+        .as_deref()
+        .map(|target| resolve_target(WORKBOOK_PART, target))
+        .unwrap_or_else(|| "xl/styles.xml".to_string());
+    let styles_bytes = read_zip_part_optional(&mut archive, &styles_part_name)?;
+    let styles_part =
+        StylesPart::parse_or_default(styles_bytes.as_deref(), &mut workbook.styles)?;
+
+    let shared_strings_part_name = rels_info
+        .shared_strings_target
+        .as_deref()
+        .map(|target| resolve_target(WORKBOOK_PART, target))
+        .unwrap_or_else(|| "xl/sharedStrings.xml".to_string());
+    let shared_strings = match read_zip_part_optional(&mut archive, &shared_strings_part_name)? {
+        Some(bytes) => parse_shared_strings(&bytes)?,
+        None => Vec::new(),
+    };
+
+    for sheet in sheets {
+        let ws_id = workbook.add_sheet(sheet.name.clone())?;
+        let ws = workbook
+            .sheet_mut(ws_id)
+            .expect("sheet just inserted must exist");
+        ws.xlsx_sheet_id = Some(sheet.sheet_id);
+        ws.xlsx_rel_id = Some(sheet.relationship_id.clone());
+        ws.visibility = match sheet.state.as_deref() {
+            Some("hidden") => SheetVisibility::Hidden,
+            Some("veryHidden") => SheetVisibility::VeryHidden,
+            _ => SheetVisibility::Visible,
+        };
+
+        let sheet_xml = read_zip_part_optional(&mut archive, &sheet.path)?
+            .ok_or(ReadError::MissingPart("worksheet part referenced from workbook.xml.rels"))?;
+
+        // Worksheet-level metadata lives inside the worksheet part (and sometimes its .rels).
+        let sheet_xml_str = std::str::from_utf8(&sheet_xml)?;
+
+        ws.tab_color = parse_sheet_tab_color(sheet_xml_str)?;
+
+        // Merged cells (must be parsed before cell content so we don't treat interior
+        // cells as value-bearing).
+        let merges =
+            crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str).map_err(
+                |err| match err {
+                    crate::merge_cells::MergeCellsError::Xml(e) => ReadError::Xml(e),
+                    crate::merge_cells::MergeCellsError::Attr(e) => ReadError::XmlAttr(e),
+                    crate::merge_cells::MergeCellsError::Utf8(e) => ReadError::Utf8(e),
+                    crate::merge_cells::MergeCellsError::InvalidRef(r) => {
+                        ReadError::InvalidRangeRef(r)
+                    }
+                    crate::merge_cells::MergeCellsError::Zip(e) => ReadError::Zip(e),
+                    crate::merge_cells::MergeCellsError::Io(e) => ReadError::Io(e),
+                },
+            )?;
+        for range in merges {
+            ws.merged_regions
+                .add(range)
+                .map_err(|e| ReadError::InvalidRangeRef(e.to_string()))?;
+        }
+
+        // Hyperlinks.
+        let rels_part = rels_for_part(&sheet.path);
+        let rels_xml_bytes = read_zip_part_optional(&mut archive, &rels_part)?;
+        let rels_xml = rels_xml_bytes
+            .as_deref()
+            .map(|bytes| std::str::from_utf8(bytes))
+            .transpose()?;
+        ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml)?;
+
+        parse_worksheet_into_model(
+            ws,
+            ws_id,
+            &sheet_xml,
+            &shared_strings,
+            &styles_part,
+            None,
+        )?;
+    }
+
+    Ok(workbook)
+}
+
+fn read_zip_part_required<R: Read + std::io::Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &'static str,
+) -> Result<Vec<u8>, ReadError> {
+    read_zip_part_optional(archive, name)?.ok_or(ReadError::MissingPart(name))
+}
+
+fn read_zip_part_optional<R: Read + std::io::Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Option<Vec<u8>>, ReadError> {
+    match archive.by_name(name) {
+        Ok(mut file) => {
+            if file.is_dir() {
+                return Ok(None);
+            }
+            let mut buf = Vec::with_capacity(file.size() as usize);
+            file.read_to_end(&mut buf)?;
+            Ok(Some(buf))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
 pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let cursor = Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor)?;
@@ -170,7 +297,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             sheet_xml,
             &shared_strings,
             &styles_part,
-            &mut cell_meta,
+            Some(&mut cell_meta),
         )?;
 
         expand_shared_formulas(ws, ws_id, &cell_meta);
@@ -357,7 +484,9 @@ fn parse_worksheet_into_model(
     worksheet_xml: &[u8],
     shared_strings: &[RichText],
     styles_part: &StylesPart,
-    cell_meta_map: &mut std::collections::HashMap<(formula_model::WorksheetId, CellRef), CellMeta>,
+    mut cell_meta_map: Option<
+        &mut std::collections::HashMap<(formula_model::WorksheetId, CellRef), CellMeta>,
+    >,
 ) -> Result<(), ReadError> {
     let mut reader = Reader::from_reader(worksheet_xml);
     reader.config_mut().trim_text(false);
@@ -365,6 +494,11 @@ fn parse_worksheet_into_model(
 
     let mut in_sheet_data = false;
     let mut in_cols = false;
+
+    // When we don't retain the full `cell_meta` map (fast reader), we still want to materialize
+    // shared-formula followers into the worksheet model so formulas match the full reader.
+    let mut shared_formula_groups: Option<HashMap<u32, SharedFormulaGroup>> =
+        cell_meta_map.is_none().then(HashMap::new);
 
     let mut current_ref: Option<CellRef> = None;
     let mut current_t: Option<String> = None;
@@ -558,13 +692,64 @@ fn parse_worksheet_into_model(
             Event::End(e) if in_sheet_data && e.name().as_ref() == b"c" => {
                 if let Some(cell_ref) = current_ref {
                     if worksheet.merged_regions.resolve_cell(cell_ref) == cell_ref {
-                        let (value, value_kind, raw_value) =
-                            interpret_cell_value(current_t.as_deref(), &current_value_text, &current_inline_text, shared_strings);
+                        let (value, value_kind, raw_value) = if cell_meta_map.is_some() {
+                            interpret_cell_value(
+                                current_t.as_deref(),
+                                &current_value_text,
+                                &current_inline_text,
+                                shared_strings,
+                            )
+                        } else {
+                            (
+                                interpret_cell_value_without_meta(
+                                    current_t.as_deref(),
+                                    &current_value_text,
+                                    &current_inline_text,
+                                    shared_strings,
+                                ),
+                                None,
+                                None,
+                            )
+                        };
 
                         let formula_in_model = current_formula.as_ref().and_then(|f| {
                             let stripped = crate::formula_text::strip_xlfn_prefixes(&f.file_text);
                             normalize_formula_text(&stripped)
                         });
+
+                        if let Some(groups) = shared_formula_groups.as_mut() {
+                            let is_shared_master = current_formula.as_ref().is_some_and(|formula| {
+                                formula.t.as_deref() == Some("shared")
+                                    && formula.reference.is_some()
+                                    && formula.shared_index.is_some()
+                                    && !formula.file_text.is_empty()
+                            });
+
+                            if is_shared_master {
+                                if let Some(formula) = current_formula.as_ref() {
+                                    if let (Some(reference), Some(shared_index)) =
+                                        (formula.reference.as_deref(), formula.shared_index)
+                                    {
+                                        if let Ok(range) = Range::from_a1(reference) {
+                                            let master_display =
+                                                crate::formula_text::strip_xlfn_prefixes(
+                                                    &formula.file_text,
+                                                );
+                                            let mut opts = ParseOptions::default();
+                                            opts.normalize_relative_to =
+                                                Some(CellAddr::new(cell_ref.row, cell_ref.col));
+
+                                            if let Ok(ast) = parse_formula(&master_display, opts) {
+                                                groups.insert(
+                                                    shared_index,
+                                                    SharedFormulaGroup { range, ast },
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         let mut cell = Cell::default();
                         cell.value = value;
@@ -575,17 +760,19 @@ fn parse_worksheet_into_model(
                             worksheet.set_cell(cell_ref, cell);
                         }
 
-                        let mut meta = CellMeta::default();
-                        meta.value_kind = value_kind;
-                        meta.raw_value = raw_value;
-                        meta.formula = current_formula.take();
+                        if let Some(cell_meta_map) = cell_meta_map.as_mut() {
+                            let mut meta = CellMeta::default();
+                            meta.value_kind = value_kind;
+                            meta.raw_value = raw_value;
+                            meta.formula = current_formula.take();
 
-                        if meta.value_kind.is_some()
-                            || meta.raw_value.is_some()
-                            || meta.formula.is_some()
-                            || current_style != 0
-                        {
-                            cell_meta_map.insert((worksheet_id, cell_ref), meta);
+                            if meta.value_kind.is_some()
+                                || meta.raw_value.is_some()
+                                || meta.formula.is_some()
+                                || current_style != 0
+                            {
+                                cell_meta_map.insert((worksheet_id, cell_ref), meta);
+                            }
                         }
                     }
                 }
@@ -680,6 +867,29 @@ fn parse_worksheet_into_model(
             _ => {}
         }
         buf.clear();
+    }
+
+    if let Some(groups) = shared_formula_groups {
+        for group in groups.values() {
+            for cell_ref in group.range.iter() {
+                // Avoid overwriting any explicit formula already present in the worksheet. The goal is
+                // to materialize formulas for shared-formula followers that are textless in the file.
+                if worksheet.formula(cell_ref).is_some() {
+                    continue;
+                }
+
+                let mut ser = SerializeOptions::default();
+                ser.origin = Some(CellAddr::new(cell_ref.row, cell_ref.col));
+                ser.omit_equals = true;
+
+                let display = match group.ast.to_string(ser) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+
+                worksheet.set_formula(cell_ref, Some(display));
+            }
+        }
     }
 
     Ok(())
@@ -832,6 +1042,49 @@ fn interpret_cell_value(
                     Some(CellValueKind::Other { t: other.to_string() }),
                     None,
                 )
+            }
+        }
+    }
+}
+
+fn interpret_cell_value_without_meta(
+    t: Option<&str>,
+    v_text: &Option<String>,
+    inline_text: &Option<String>,
+    shared_strings: &[RichText],
+) -> CellValue {
+    match t {
+        Some("s") => {
+            let raw = v_text.as_deref().unwrap_or_default();
+            let idx: u32 = raw.parse().unwrap_or(0);
+            let text = shared_strings
+                .get(idx as usize)
+                .map(|rt| rt.text.clone())
+                .unwrap_or_default();
+            CellValue::String(text)
+        }
+        Some("b") => CellValue::Boolean(v_text.as_deref() == Some("1")),
+        Some("e") => {
+            let raw = v_text.as_deref().unwrap_or_default();
+            let err = raw.parse::<ErrorValue>().unwrap_or(ErrorValue::Unknown);
+            CellValue::Error(err)
+        }
+        Some("str") => CellValue::String(v_text.clone().unwrap_or_default()),
+        Some("inlineStr") => CellValue::String(inline_text.clone().unwrap_or_default()),
+        Some("n") | None => {
+            if let Some(raw) = v_text.as_deref() {
+                raw.parse::<f64>()
+                    .map(CellValue::Number)
+                    .unwrap_or_else(|_| CellValue::String(raw.to_string()))
+            } else {
+                CellValue::Empty
+            }
+        }
+        Some(_) => {
+            if let Some(raw) = v_text.as_deref() {
+                CellValue::String(raw.to_string())
+            } else {
+                CellValue::Empty
             }
         }
     }
