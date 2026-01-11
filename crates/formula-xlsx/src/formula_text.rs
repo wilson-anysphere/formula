@@ -1,4 +1,5 @@
 const XL_FN_PREFIX: &str = "_xlfn.";
+const XL_FN_PREFIX_BYTES: &[u8] = b"_xlfn.";
 
 // Functions that Excel stores in OOXML formulas with an `_xlfn.` prefix for forward
 // compatibility (typically Excel 365 "future functions").
@@ -84,7 +85,7 @@ pub(crate) fn strip_xlfn_prefixes(formula: &str) -> String {
                 i += 1;
                 continue;
             }
-            _ if !in_string && bytes[i..].starts_with(XL_FN_PREFIX.as_bytes()) => {
+            _ if !in_string && has_xlfn_prefix_at(bytes, i) => {
                 let after_prefix = i + XL_FN_PREFIX.len();
                 let mut j = after_prefix;
                 while j < bytes.len() && is_ident_byte(bytes[j]) {
@@ -111,6 +112,17 @@ pub(crate) fn strip_xlfn_prefixes(formula: &str) -> String {
     }
 
     String::from_utf8(out).expect("formula rewrite should preserve utf-8")
+}
+
+fn has_xlfn_prefix_at(bytes: &[u8], i: usize) -> bool {
+    let prefix_len = XL_FN_PREFIX_BYTES.len();
+    if i.saturating_add(prefix_len) > bytes.len() {
+        return false;
+    }
+    bytes[i..i + prefix_len]
+        .iter()
+        .zip(XL_FN_PREFIX_BYTES)
+        .all(|(&b, &p)| b.to_ascii_lowercase() == p)
 }
 
 pub(crate) fn add_xlfn_prefixes(formula: &str) -> String {
@@ -210,6 +222,11 @@ mod tests {
             strip_xlfn_prefixes(input),
             r#"CONCAT("_xlfn.",SEQUENCE(1))"#
         );
+    }
+
+    #[test]
+    fn strip_xlfn_prefixes_is_case_insensitive_for_prefix() {
+        assert_eq!(strip_xlfn_prefixes("_XLFN.SEQUENCE(1)"), "SEQUENCE(1)");
     }
 
     #[test]
