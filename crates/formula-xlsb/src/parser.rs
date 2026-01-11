@@ -1098,15 +1098,19 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
 
                         let cce = rr.read_u32()? as usize;
                         let mut rgce = rr.read_slice(cce)?.to_vec();
+                        let extra = rr.data[rr.offset..].to_vec();
+                        let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
                             materialize_shared_formula(&rgce, row, col, &shared_formulas)
                         {
-                            rgce = materialized;
+                            rgce = materialized.rgce;
+                            if rgcb_for_decode.is_empty() {
+                                rgcb_for_decode = materialized.rgcb;
+                            }
                         }
-                        let extra = rr.data[rr.offset..].to_vec();
                         let base = crate::rgce::CellCoord::new(row, col);
                         let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
-                            &rgce, &extra, ctx, base,
+                            &rgce, rgcb_for_decode, ctx, base,
                         );
                         let decoded = if decoded.text.is_some() {
                             decoded
@@ -1116,7 +1120,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                 decoded
                             } else {
                                 let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
-                                    &rgce, &extra, base,
+                                    &rgce, rgcb_for_decode, base,
                                 );
                                 if decoded.text.is_some() {
                                     decoded
@@ -1127,7 +1131,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                     } else {
                                         let decoded =
                                             crate::rgce::decode_formula_rgce_with_context_and_rgcb(
-                                                &rgce, &extra, ctx,
+                                                &rgce, rgcb_for_decode, ctx,
                                             );
                                         if decoded.text.is_some() {
                                             decoded
@@ -1138,7 +1142,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                             } else {
                                                 let decoded =
                                                     crate::rgce::decode_formula_rgce_with_rgcb(
-                                                        &rgce, &extra,
+                                                        &rgce, rgcb_for_decode,
                                                     );
                                                 if decoded.text.is_some() {
                                                     decoded
@@ -1171,15 +1175,19 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         let flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let mut rgce = rr.read_slice(cce)?.to_vec();
+                        let extra = rr.data[rr.offset..].to_vec();
+                        let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
                             materialize_shared_formula(&rgce, row, col, &shared_formulas)
                         {
-                            rgce = materialized;
+                            rgce = materialized.rgce;
+                            if rgcb_for_decode.is_empty() {
+                                rgcb_for_decode = materialized.rgcb;
+                            }
                         }
-                        let extra = rr.data[rr.offset..].to_vec();
                         let base = crate::rgce::CellCoord::new(row, col);
                         let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
-                            &rgce, &extra, ctx, base,
+                            &rgce, rgcb_for_decode, ctx, base,
                         );
                         let decoded = if decoded.text.is_some() {
                             decoded
@@ -1189,7 +1197,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                 decoded
                             } else {
                                 let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
-                                    &rgce, &extra, base,
+                                    &rgce, rgcb_for_decode, base,
                                 );
                                 if decoded.text.is_some() {
                                     decoded
@@ -1200,7 +1208,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                     } else {
                                         let decoded =
                                             crate::rgce::decode_formula_rgce_with_context_and_rgcb(
-                                                &rgce, &extra, ctx,
+                                                &rgce, rgcb_for_decode, ctx,
                                             );
                                         if decoded.text.is_some() {
                                             decoded
@@ -1211,7 +1219,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                             } else {
                                                 let decoded =
                                                     crate::rgce::decode_formula_rgce_with_rgcb(
-                                                        &rgce, &extra,
+                                                        &rgce, rgcb_for_decode,
                                                     );
                                                 if decoded.text.is_some() {
                                                     decoded
@@ -1244,15 +1252,19 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         let flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let mut rgce = rr.read_slice(cce)?.to_vec();
+                        let extra = rr.data[rr.offset..].to_vec();
+                        let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
                             materialize_shared_formula(&rgce, row, col, &shared_formulas)
                         {
-                            rgce = materialized;
+                            rgce = materialized.rgce;
+                            if rgcb_for_decode.is_empty() {
+                                rgcb_for_decode = materialized.rgcb;
+                            }
                         }
-                        let extra = rr.data[rr.offset..].to_vec();
                         let base = crate::rgce::CellCoord::new(row, col);
                         let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
-                            &rgce, &extra, ctx, base,
+                            &rgce, rgcb_for_decode, ctx, base,
                         );
                         let decoded = if decoded.text.is_some() {
                             decoded
@@ -1262,7 +1274,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                 decoded
                             } else {
                                 let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
-                                    &rgce, &extra, base,
+                                    &rgce, rgcb_for_decode, base,
                                 );
                                 if decoded.text.is_some() {
                                     decoded
@@ -1273,7 +1285,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                     } else {
                                         let decoded =
                                             crate::rgce::decode_formula_rgce_with_context_and_rgcb(
-                                                &rgce, &extra, ctx,
+                                                &rgce, rgcb_for_decode, ctx,
                                             );
                                         if decoded.text.is_some() {
                                             decoded
@@ -1284,7 +1296,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                             } else {
                                                 let decoded =
                                                     crate::rgce::decode_formula_rgce_with_rgcb(
-                                                        &rgce, &extra,
+                                                        &rgce, rgcb_for_decode,
                                                     );
                                                 if decoded.text.is_some() {
                                                     decoded
@@ -1317,15 +1329,19 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                         let flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let mut rgce = rr.read_slice(cce)?.to_vec();
+                        let extra = rr.data[rr.offset..].to_vec();
+                        let mut rgcb_for_decode: &[u8] = &extra;
                         if let Some(materialized) =
                             materialize_shared_formula(&rgce, row, col, &shared_formulas)
                         {
-                            rgce = materialized;
+                            rgce = materialized.rgce;
+                            if rgcb_for_decode.is_empty() {
+                                rgcb_for_decode = materialized.rgcb;
+                            }
                         }
-                        let extra = rr.data[rr.offset..].to_vec();
                         let base = crate::rgce::CellCoord::new(row, col);
                         let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
-                            &rgce, &extra, ctx, base,
+                            &rgce, rgcb_for_decode, ctx, base,
                         );
                         let decoded = if decoded.text.is_some() {
                             decoded
@@ -1335,7 +1351,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                 decoded
                             } else {
                                 let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
-                                    &rgce, &extra, base,
+                                    &rgce, rgcb_for_decode, base,
                                 );
                                 if decoded.text.is_some() {
                                     decoded
@@ -1346,7 +1362,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                     } else {
                                         let decoded =
                                             crate::rgce::decode_formula_rgce_with_context_and_rgcb(
-                                                &rgce, &extra, ctx,
+                                                &rgce, rgcb_for_decode, ctx,
                                             );
                                         if decoded.text.is_some() {
                                             decoded
@@ -1357,7 +1373,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                             } else {
                                                 let decoded =
                                                     crate::rgce::decode_formula_rgce_with_rgcb(
-                                                        &rgce, &extra,
+                                                        &rgce, rgcb_for_decode,
                                                     );
                                                 if decoded.text.is_some() {
                                                     decoded
@@ -1412,6 +1428,7 @@ struct SharedFormulaDef {
     range_c1: u32,
     range_c2: u32,
     rgce: Vec<u8>,
+    rgcb: Vec<u8>,
 }
 
 impl SharedFormulaDef {
@@ -1430,7 +1447,9 @@ impl SharedFormulaDef {
             return None;
         }
 
-        let (rgce, _) = parse_rgce_tail(&data[16..])?;
+        let tail = &data[16..];
+        let (rgce, rgce_end) = parse_rgce_tail(tail)?;
+        let rgcb = tail.get(rgce_end..)?.to_vec();
 
         Some(Self {
             base_row: range_r1,
@@ -1440,6 +1459,7 @@ impl SharedFormulaDef {
             range_c1,
             range_c2,
             rgce,
+            rgcb,
         })
     }
 
@@ -1471,21 +1491,29 @@ fn parse_rgce_tail(tail: &[u8]) -> Option<(Vec<u8>, usize)> {
     None
 }
 
-fn materialize_shared_formula(
+fn materialize_shared_formula<'a>(
     rgce: &[u8],
     row: u32,
     col: u32,
-    shared_formulas: &HashMap<(u32, u32), SharedFormulaDef>,
-) -> Option<Vec<u8>> {
+    shared_formulas: &'a HashMap<(u32, u32), SharedFormulaDef>,
+) -> Option<MaterializedSharedFormula<'a>> {
     let (base_row, base_col) = parse_ptg_exp(rgce)?;
 
-    let base_rgce = shared_formulas
+    let def = shared_formulas
         .get(&(base_row, base_col))
-        .filter(|def| def.contains_cell(row, col))
-        .map(|def| def.rgce.as_slice())?;
+        .filter(|def| def.contains_cell(row, col))?;
 
     // Produce a cell-specific rgce so callers don't need shared-formula context.
-    materialize_rgce(base_rgce, base_row, base_col, row, col)
+    let rgce = materialize_rgce(&def.rgce, base_row, base_col, row, col)?;
+    Some(MaterializedSharedFormula {
+        rgce,
+        rgcb: &def.rgcb,
+    })
+}
+
+struct MaterializedSharedFormula<'a> {
+    rgce: Vec<u8>,
+    rgcb: &'a [u8],
 }
 
 fn parse_ptg_exp(rgce: &[u8]) -> Option<(u32, u32)> {
@@ -1565,6 +1593,18 @@ fn materialize_rgce(base: &[u8], base_row: u32, base_col: u32, row: u32, col: u3
                 out.push(ptg);
                 out.extend_from_slice(base.get(i..i + 8)?);
                 i += 8;
+            }
+            0x20 | 0x40 | 0x60 => {
+                // PtgArray: [unused: 7 bytes] + array data stored in the trailing rgcb stream.
+                //
+                // Arrays don't embed relative references in the token stream, so we can copy the
+                // token verbatim while leaving rgcb unchanged.
+                if i + 7 > base.len() {
+                    return None;
+                }
+                out.push(ptg);
+                out.extend_from_slice(&base[i..i + 7]);
+                i += 7;
             }
             0x19 => {
                 // PtgAttr: [grbit: u8][wAttr: u16]
