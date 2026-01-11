@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
-const cargoHome = path.join(repoRoot, "target", "cargo-home-playwright");
+const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home-playwright");
 
 const port = (() => {
   const raw = process.env.PLAYWRIGHT_WEB_PORT;
