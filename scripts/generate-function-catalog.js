@@ -76,7 +76,19 @@ const raw = await run("cargo", [
   "--bin",
   "function_catalog",
 ], {
-  env: { ...process.env, CARGO_HOME: cargoHome },
+  env: {
+    ...process.env,
+    CARGO_HOME: cargoHome,
+    // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
+    // if the caller didn't source `scripts/agent-init.sh`.
+    CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
+    MAKEFLAGS: process.env.MAKEFLAGS ?? "-j4",
+    RUSTFLAGS: process.env.RUSTFLAGS ?? "-C codegen-units=4",
+    // Some environments configure Cargo to use `sccache` via `build.rustc-wrapper`.
+    // Default to disabling any configured wrapper unless the user explicitly sets one.
+    RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
+    RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+  },
 });
 
 /** @type {any} */

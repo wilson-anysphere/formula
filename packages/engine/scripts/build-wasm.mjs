@@ -273,7 +273,18 @@ const result = spawnSync(
     // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
     "--no-pack"
   ],
-  { cwd: repoRoot, stdio: "inherit", env: wasmPackEnv }
+  {
+    cwd: repoRoot,
+    stdio: "inherit",
+    env: {
+      ...wasmPackEnv,
+      // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
+      // if the caller didn't source `scripts/agent-init.sh`.
+      CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
+      MAKEFLAGS: process.env.MAKEFLAGS ?? "-j4",
+      RUSTFLAGS: process.env.RUSTFLAGS ?? "-C codegen-units=4",
+    },
+  }
 );
 
 if (result.error) {
