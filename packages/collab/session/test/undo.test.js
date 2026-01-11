@@ -102,3 +102,35 @@ test("CollabSession undo captures cell edits when cell maps were created by a di
   session.destroy();
   doc.destroy();
 });
+
+test("CollabSession undo works when the cells root was created by a different Yjs instance (CJS Doc.getMap)", async () => {
+  const require = createRequire(import.meta.url);
+  // eslint-disable-next-line import/no-named-as-default-member
+  const Ycjs = require("yjs");
+
+  const doc = new Y.Doc();
+
+  // Simulate a mixed module loader environment where another Yjs instance eagerly
+  // instantiates the `cells` root before CollabSession is constructed.
+  const foreignCells = Ycjs.Doc.prototype.getMap.call(doc, "cells");
+
+  const foreignCell = new Ycjs.Map();
+  foreignCell.set("value", "from-cjs");
+  foreignCell.set("formula", null);
+  foreignCell.set("modified", 1);
+  foreignCells.set("Sheet1:0:0", foreignCell);
+
+  const session = createCollabSession({ doc, undo: {} });
+
+  assert.equal((await session.getCell("Sheet1:0:0"))?.value, "from-cjs");
+
+  await session.setCellValue("Sheet1:0:0", "edited");
+  assert.equal((await session.getCell("Sheet1:0:0"))?.value, "edited");
+  assert.equal(session.undo?.canUndo(), true);
+
+  session.undo?.undo();
+  assert.equal((await session.getCell("Sheet1:0:0"))?.value, "from-cjs");
+
+  session.destroy();
+  doc.destroy();
+});
