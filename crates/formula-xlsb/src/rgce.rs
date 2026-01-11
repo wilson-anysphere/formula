@@ -109,6 +109,10 @@ pub enum DecodeWarning {
     ///
     /// The decoder will emit `#UNKNOWN!` in the output formula text and continue.
     UnknownErrorCode { code: u8, offset: usize },
+    /// Encountered an unknown/extended error code inside an array constant (`PtgArray` / `rgcb`).
+    ///
+    /// The decoder will emit `#UNKNOWN!` in the output formula text and continue.
+    UnknownArrayErrorCode { code: u8, offset: usize },
 }
 
 /// Result of decoding an rgce token stream.
@@ -259,6 +263,259 @@ pub fn decode_rgce_with_context_and_rgcb_and_base(
     decode_rgce_impl(rgce, rgcb, Some(ctx), Some(base), None)
 }
 
+#[derive(Clone, Debug)]
+struct ExprFragment {
+    text: String,
+    precedence: u8,
+    /// `true` if this fragment contains the union operator (`,`).
+    contains_union: bool,
+    is_missing: bool,
+}
+
+impl ExprFragment {
+    fn new(text: String) -> Self {
+        Self {
+            text,
+            precedence: 100,
+            contains_union: false,
+            is_missing: false,
+        }
+    }
+
+    fn missing() -> Self {
+        Self {
+            text: String::new(),
+            precedence: 100,
+            contains_union: false,
+            is_missing: true,
+        }
+    }
+}
+
+// Precedence values match `formula-engine` (`Expr::precedence`).
+fn binary_precedence(ptg: u8) -> Option<u8> {
+    match ptg {
+        0x11 => Some(82),                                    // range (:)
+        0x0F => Some(81),                                    // intersect ( )
+        0x10 => Some(80),                                    // union (,)
+        0x07 => Some(50),                                    // power (^)
+        0x05 | 0x06 => Some(40),                             // mul/div
+        0x03 | 0x04 => Some(30),                             // add/sub
+        0x08 => Some(20),                                    // concat (&)
+        0x09 | 0x0A | 0x0B | 0x0C | 0x0D | 0x0E => Some(10), // comparisons
+        _ => None,
+    }
+}
+
+fn op_str(ptg: u8) -> Option<&'static str> {
+    match ptg {
+        0x03 => Some("+"),
+        0x04 => Some("-"),
+        0x05 => Some("*"),
+        0x06 => Some("/"),
+        0x07 => Some("^"),
+        0x08 => Some("&"),
+        0x09 => Some("<"),
+        0x0A => Some("<="),
+        0x0B => Some("="),
+        0x0C => Some(">"),
+        0x0D => Some(">="),
+        0x0E => Some("<>"),
+        0x0F => Some(" "),
+        0x10 => Some(","),
+        0x11 => Some(":"),
+        _ => None,
+    }
+}
+
+fn format_function_call(name: &str, args: Vec<ExprFragment>) -> ExprFragment {
+    let contains_union = args.iter().any(|arg| arg.contains_union);
+
+    let mut text = String::new();
+    text.push_str(name);
+    text.push('(');
+    for (i, arg) in args.into_iter().enumerate() {
+        if i > 0 {
+            text.push(',');
+        }
+        if arg.is_missing {
+            continue;
+        }
+        // The union operator uses `,`, which is also the function argument separator. To make
+        // decoded formulas round-trip through `formula-engine`, wrap any arg containing union in
+        // parentheses (Excel's canonical form, e.g. `SUM((A1,B1))`).
+        if arg.contains_union {
+            // If the argument is already explicitly parenthesized (via `PtgParen`), avoid adding
+            // an extra set of parentheses that `formula-engine` would discard during
+            // serialization.
+            if arg.precedence == 100 && arg.text.starts_with('(') && arg.text.ends_with(')') {
+                text.push_str(&arg.text);
+            } else {
+                text.push('(');
+                text.push_str(&arg.text);
+                text.push(')');
+            }
+        } else {
+            text.push_str(&arg.text);
+        }
+    }
+    text.push(')');
+
+    ExprFragment {
+        text,
+        precedence: 100,
+        contains_union,
+        is_missing: false,
+    }
+}
+
+fn fmt_sheet_name(out: &mut String, sheet: &str) {
+    // Based on `formula-engine`'s `fmt_sheet_name`: be conservative, because quoting is always
+    // accepted by Excel while the unquoted form is only valid for identifier-like names.
+    if sheet_name_needs_quotes(sheet) {
+        out.push('\'');
+        for ch in sheet.chars() {
+            if ch == '\'' {
+                out.push('\'');
+                out.push('\'');
+            } else {
+                out.push(ch);
+            }
+        }
+        out.push('\'');
+    } else {
+        out.push_str(sheet);
+    }
+}
+
+fn format_sheet_prefix(first: &str, last: &str) -> String {
+    let mut out = String::new();
+    if first == last {
+        fmt_sheet_name(&mut out, first);
+    } else if sheet_name_needs_quotes(first) || sheet_name_needs_quotes(last) {
+        // Excel quotes the combined `Sheet1:Sheet3` prefix as a single string.
+        out.push('\'');
+        for ch in format!("{first}:{last}").chars() {
+            if ch == '\'' {
+                out.push('\'');
+                out.push('\'');
+            } else {
+                out.push(ch);
+            }
+        }
+        out.push('\'');
+    } else {
+        out.push_str(first);
+        out.push(':');
+        out.push_str(last);
+    }
+    out.push('!');
+    out
+}
+
+fn sheet_name_needs_quotes(sheet: &str) -> bool {
+    if sheet.is_empty() {
+        return true;
+    }
+    if sheet
+        .chars()
+        .any(|c| c.is_whitespace() || matches!(c, '!' | '\''))
+    {
+        return true;
+    }
+    sheet_part_needs_quotes(sheet)
+}
+
+fn sheet_part_needs_quotes(sheet: &str) -> bool {
+    debug_assert!(!sheet.is_empty());
+
+    if sheet.eq_ignore_ascii_case("TRUE") || sheet.eq_ignore_ascii_case("FALSE") {
+        return true;
+    }
+
+    // Quote sheet names that look like cell refs (e.g. `A1`, `$B$2`).
+    if starts_like_a1_cell_ref(sheet) {
+        return true;
+    }
+
+    !is_valid_sheet_ident(sheet)
+}
+
+fn is_valid_sheet_ident(ident: &str) -> bool {
+    let mut chars = ident.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !matches!(first, '$' | '_' | '\\' | 'A'..='Z' | 'a'..='z') {
+        return false;
+    }
+    chars.all(is_sheet_ident_cont_char)
+}
+
+fn is_sheet_ident_cont_char(c: char) -> bool {
+    matches!(
+        c,
+        '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9'
+    )
+}
+
+fn starts_like_a1_cell_ref(s: &str) -> bool {
+    let mut chars = s.chars().peekable();
+    if chars.peek() == Some(&'$') {
+        chars.next();
+    }
+
+    let mut col_letters = String::new();
+    while let Some(&ch) = chars.peek() {
+        if ch.is_ascii_alphabetic() {
+            col_letters.push(ch);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if col_letters.is_empty() {
+        return false;
+    }
+
+    if chars.peek() == Some(&'$') {
+        chars.next();
+    }
+
+    let mut row_digits = String::new();
+    while let Some(&ch) = chars.peek() {
+        if ch.is_ascii_digit() {
+            row_digits.push(ch);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if row_digits.is_empty() {
+        return false;
+    }
+
+    if col_from_a1(&col_letters).is_none() {
+        return false;
+    }
+    matches!(row_digits.parse::<u32>(), Ok(v) if v != 0)
+}
+
+fn col_from_a1(letters: &str) -> Option<u32> {
+    let mut col: u32 = 0;
+    for (i, ch) in letters.chars().enumerate() {
+        let v = (ch.to_ascii_uppercase() as u8).wrapping_sub(b'A') as u32;
+        if v >= 26 {
+            return None;
+        }
+        col = col * 26 + v + 1;
+        if i >= 3 {
+            return None;
+        }
+    }
+    Some(col - 1)
+}
+
 fn decode_rgce_impl(
     rgce: &[u8],
     rgcb: &[u8],
@@ -285,7 +542,7 @@ fn decode_rgce_impl(
     let mut last_ptg = rgce[0];
     let mut rgcb_pos = 0usize;
 
-    let mut stack: Vec<String> = Vec::new();
+    let mut stack: Vec<ExprFragment> = Vec::new();
 
     while i < rgce.len() {
         let ptg_offset = i;
@@ -296,69 +553,113 @@ fn decode_rgce_impl(
         last_ptg = ptg;
 
         match ptg {
+            // Binary operators.
             0x03..=0x11 => {
+                let Some(op) = op_str(ptg) else {
+                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                };
+                let prec = binary_precedence(ptg).expect("precedence for binary ops");
+
                 if stack.len() < 2 {
                     return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
                 }
-                let b = stack.pop().expect("len checked");
-                let a = stack.pop().expect("len checked");
-                let op = match ptg {
-                    0x03 => "+",
-                    0x04 => "-",
-                    0x05 => "*",
-                    0x06 => "/",
-                    0x07 => "^",
-                    0x08 => "&",
-                    0x09 => "<",
-                    0x0A => "<=",
-                    0x0B => "=",
-                    0x0C => ">",
-                    0x0D => ">=",
-                    0x0E => "<>",
-                    0x0F => " ",
-                    0x10 => ",",
-                    0x11 => ":",
-                    _ => unreachable!("ptg matched by range"),
+                let right = stack.pop().expect("len checked");
+                let left = stack.pop().expect("len checked");
+
+                let left_s = if left.precedence < prec && !left.is_missing {
+                    format!("({})", left.text)
+                } else {
+                    left.text
                 };
-                stack.push(format!("{a}{op}{b}"));
+                let right_s = if right.precedence < prec && !right.is_missing {
+                    format!("({})", right.text)
+                } else {
+                    right.text
+                };
+
+                let mut text = String::with_capacity(left_s.len() + op.len() + right_s.len());
+                text.push_str(&left_s);
+                text.push_str(op);
+                text.push_str(&right_s);
+
+                stack.push(ExprFragment {
+                    text,
+                    precedence: prec,
+                    contains_union: left.contains_union || right.contains_union || ptg == 0x10,
+                    is_missing: false,
+                });
             }
-            0x12 => {
-                let a = stack
+            // Unary +/-.
+            0x12 | 0x13 => {
+                let op = if ptg == 0x12 { "+" } else { "-" };
+                let expr = stack
                     .pop()
                     .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
-                stack.push(format!("+{a}"));
+                let prec = 70;
+                let inner = if expr.precedence < prec && !expr.is_missing {
+                    format!("({})", expr.text)
+                } else {
+                    expr.text
+                };
+                stack.push(ExprFragment {
+                    text: format!("{op}{inner}"),
+                    precedence: prec,
+                    contains_union: expr.contains_union,
+                    is_missing: false,
+                });
             }
-            0x13 => {
-                let a = stack
-                    .pop()
-                    .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
-                stack.push(format!("-{a}"));
-            }
+            // Percent postfix.
             0x14 => {
-                let a = stack
+                let expr = stack
                     .pop()
                     .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
-                stack.push(format!("{a}%"));
+                let prec = 60;
+                let inner = if expr.precedence < prec && !expr.is_missing {
+                    format!("({})", expr.text)
+                } else {
+                    expr.text
+                };
+                stack.push(ExprFragment {
+                    text: format!("{inner}%"),
+                    precedence: prec,
+                    contains_union: expr.contains_union,
+                    is_missing: false,
+                });
             }
+            // Spill range postfix (`#`).
             PTG_SPILL => {
-                // PtgSpill: dynamic array spill range operator (`#`).
-                let a = stack
+                let expr = stack
                     .pop()
                     .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
-                stack.push(format!("{a}#"));
+                let prec = 60;
+                let inner = if expr.precedence < prec && !expr.is_missing {
+                    format!("({})", expr.text)
+                } else {
+                    expr.text
+                };
+                stack.push(ExprFragment {
+                    text: format!("{inner}#"),
+                    precedence: prec,
+                    contains_union: expr.contains_union,
+                    is_missing: false,
+                });
             }
+            // Explicit parentheses.
             0x15 => {
-                let a = stack
+                let expr = stack
                     .pop()
                     .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
-                stack.push(format!("({a})"));
+                stack.push(ExprFragment {
+                    text: format!("({})", expr.text),
+                    precedence: 100,
+                    contains_union: expr.contains_union,
+                    is_missing: false,
+                });
             }
-            0x16 => {
-                // PtgMissArg
-                stack.push(String::new());
-            }
+            // Missing arg.
+            0x16 => stack.push(ExprFragment::missing()),
+            // PtgStr: [cch: u16][utf16 chars...]
             0x17 => {
-                // PtgStr: [cch: u16][utf16 chars...]
                 if rgce.len().saturating_sub(i) < 2 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -390,16 +691,15 @@ fn decode_rgce_impl(
                 // Excel escapes embedded quotes by doubling them inside the literal.
                 let s = String::from_utf16_lossy(&units);
                 let escaped = escape_excel_string_literal(&s);
-                stack.push(format!("\"{escaped}\""));
+                stack.push(ExprFragment::new(format!("\"{escaped}\"")));
             }
             0x19 => {
                 // PtgAttr: [grbit: u8][wAttr: u16]
                 //
                 // Excel uses `PtgAttr` for multiple attributes. Most are evaluation hints or
-                // formatting metadata that do not affect the reconstructed formula text, but
-                // some do. In particular, `tAttrSum` is used for an optimization where
-                // `SUM(A1:A10)` is encoded as `PtgArea` + `PtgAttr(tAttrSum)` (no explicit
-                // `PtgFuncVar(SUM)` token).
+                // formatting metadata that do not affect the reconstructed formula text, but some
+                // do. In particular, `tAttrSum` is used for an optimization where `SUM(A1:A10)` is
+                // encoded as `PtgArea` + `PtgAttr(tAttrSum)` (no explicit `PtgFuncVar(SUM)` token).
                 if rgce.len().saturating_sub(i) < 3 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -424,13 +724,13 @@ fn decode_rgce_impl(
                     let a = stack
                         .pop()
                         .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
-                    stack.push(format!("SUM({a})"));
+                    stack.push(format_function_call("SUM", vec![a]));
                 } else if grbit & T_ATTR_CHOOSE != 0 {
                     // `tAttrChoose` is followed by a jump table of `u16` offsets used for
                     // short-circuit evaluation.
                     //
-                    // We don't need it for printing, but we must consume it so subsequent
-                    // tokens stay aligned.
+                    // We don't need it for printing, but we must consume it so subsequent tokens
+                    // stay aligned.
                     let needed = (w_attr as usize).saturating_mul(2);
                     if rgce.len().saturating_sub(i) < needed {
                         return Err(DecodeError::UnexpectedEof {
@@ -442,19 +742,14 @@ fn decode_rgce_impl(
                     }
                     i += needed;
                 } else {
-                    // Other attributes:
-                    // - `tAttrIf` / `tAttrSkip`: control-flow metadata
-                    // - `tAttrVolatile`: recalc hint
-                    // - `tAttrSpace` / `tAttrSemi`: formatting metadata
-                    //
-                    // Ignore them for best-effort formula text, but keep the constants referenced
-                    // so this doesn't accidentally get treated as "dead" code.
+                    // Ignore other attributes for printing, but keep the constants referenced so
+                    // this doesn't accidentally get treated as dead code.
                     let _ = grbit
                         & (T_ATTR_VOLATILE | T_ATTR_IF | T_ATTR_SKIP | T_ATTR_SPACE | T_ATTR_SEMI);
                 }
             }
+            // PtgErr: [err: u8]
             0x1C => {
-                // PtgErr: [err: u8]
                 if rgce.len().saturating_sub(i) < 1 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -481,10 +776,10 @@ fn decode_rgce_impl(
                         "#UNKNOWN!"
                     }
                 };
-                stack.push(text.to_string());
+                stack.push(ExprFragment::new(text.to_string()));
             }
+            // PtgBool: [b: u8]
             0x1D => {
-                // PtgBool: [b: u8]
                 if rgce.len().saturating_sub(i) < 1 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -495,10 +790,12 @@ fn decode_rgce_impl(
                 }
                 let b = rgce[i];
                 i += 1;
-                stack.push(if b == 0 { "FALSE" } else { "TRUE" }.to_string());
+                stack.push(ExprFragment::new(
+                    if b == 0 { "FALSE" } else { "TRUE" }.to_string(),
+                ));
             }
+            // PtgInt: [n: u16]
             0x1E => {
-                // PtgInt: [n: u16]
                 if rgce.len().saturating_sub(i) < 2 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -509,10 +806,10 @@ fn decode_rgce_impl(
                 }
                 let n = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
                 i += 2;
-                stack.push(n.to_string());
+                stack.push(ExprFragment::new(n.to_string()));
             }
+            // PtgNum: [f64]
             0x1F => {
-                // PtgNum: [f64]
                 if rgce.len().saturating_sub(i) < 8 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -524,10 +821,10 @@ fn decode_rgce_impl(
                 let mut bytes = [0u8; 8];
                 bytes.copy_from_slice(&rgce[i..i + 8]);
                 i += 8;
-                stack.push(f64::from_le_bytes(bytes).to_string());
+                stack.push(ExprFragment::new(f64::from_le_bytes(bytes).to_string()));
             }
+            // PtgArray: [unused: 7 bytes] + serialized array constant stored in rgcb.
             0x20 | 0x40 | 0x60 => {
-                // PtgArray: [unused: 7 bytes] + serialized array constant stored in rgcb.
                 if rgce.len().saturating_sub(i) < 7 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -538,15 +835,16 @@ fn decode_rgce_impl(
                 }
                 i += 7;
 
-                let arr = decode_array_constant(rgcb, &mut rgcb_pos).ok_or(DecodeError::InvalidConstant {
-                    offset: ptg_offset,
-                    ptg,
-                    value: 0xFF,
-                })?;
-                stack.push(arr);
+                let arr = decode_array_constant(rgcb, &mut rgcb_pos, warnings.as_deref_mut())
+                    .ok_or(DecodeError::InvalidConstant {
+                        offset: ptg_offset,
+                        ptg,
+                        value: 0xFF,
+                    })?;
+                stack.push(ExprFragment::new(arr));
             }
+            // PtgRef: [row: u32][col: u16 (with relative flags in high bits)]
             0x24 | 0x44 | 0x64 => {
-                // PtgRef: [row: u32][col: u16 (with relative flags in high bits)]
                 if rgce.len().saturating_sub(i) < 6 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -562,10 +860,10 @@ fn decode_rgce_impl(
                 let col = u16::from_le_bytes([rgce[i + 4], flags & 0x3F]);
                 i += 6;
 
-                stack.push(format_cell_ref(row, col as u32, flags));
+                stack.push(ExprFragment::new(format_cell_ref(row, col as u32, flags)));
             }
+            // PtgArea: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x25 | 0x45 | 0x65 => {
-                // PtgArea: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
                 if rgce.len().saturating_sub(i) < 12 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -575,7 +873,8 @@ fn decode_rgce_impl(
                     });
                 }
 
-                let row_first0 = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
+                let row_first0 =
+                    u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
                 let row_last0 = u32::from_le_bytes([
                     rgce[i + 4],
                     rgce[i + 5],
@@ -592,23 +891,44 @@ fn decode_rgce_impl(
                     && (col_first & COL_INDEX_MASK) == (col_last & COL_INDEX_MASK);
                 let is_value_class = (ptg & 0x60) == 0x40;
 
-                let mut out = String::new();
+                let mut text = String::new();
+                let mut prec = 100;
                 if is_value_class && !is_single_cell {
                     // Legacy implicit intersection: Excel encodes this by using a value-class
                     // range token; modern formula text uses an explicit `@` operator.
-                    out.push('@');
+                    text.push('@');
+                    prec = 70;
                 }
                 if is_single_cell {
-                    out.push_str(&a);
+                    text.push_str(&a);
                 } else {
-                    out.push_str(&a);
-                    out.push(':');
-                    out.push_str(&b);
+                    text.push_str(&a);
+                    text.push(':');
+                    text.push_str(&b);
                 }
-                stack.push(out);
+                stack.push(ExprFragment {
+                    text,
+                    precedence: prec,
+                    contains_union: false,
+                    is_missing: false,
+                });
             }
+            // PtgMem* tokens: no-op for printing, but consume payload to keep offsets aligned.
+            0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
+            | 0x2E | 0x4E | 0x6E => {
+                if rgce.len().saturating_sub(i) < 2 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 2,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                // MS-XLSB/BIFF: u16 cce (size of a subexpression, used by the evaluator).
+                i += 2;
+            }
+            // PtgRefErr: [row: u32][col: u16]
             0x2A | 0x4A | 0x6A => {
-                // PtgRefErr: [row: u32][col: u16]
                 if rgce.len().saturating_sub(i) < 6 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -617,12 +937,11 @@ fn decode_rgce_impl(
                         remaining: rgce.len().saturating_sub(i),
                     });
                 }
-                // Skip payload; Excel displays invalid refs as the `#REF!` error literal.
                 i += 6;
-                stack.push("#REF!".to_string());
+                stack.push(ExprFragment::new("#REF!".to_string()));
             }
+            // PtgAreaErr: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x2B | 0x4B | 0x6B => {
-                // PtgAreaErr: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
                 if rgce.len().saturating_sub(i) < 12 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -632,13 +951,10 @@ fn decode_rgce_impl(
                     });
                 }
                 i += 12;
-                stack.push("#REF!".to_string());
+                stack.push(ExprFragment::new("#REF!".to_string()));
             }
+            // PtgRefN: [row_off: i32][col_off: i16]
             0x2C | 0x4C | 0x6C => {
-                // PtgRefN: [row_off: i32][col_off: i16]
-                //
-                // These tokens encode row/col offsets relative to the cell containing the
-                // formula. To decode to A1 text we need the origin cell.
                 if rgce.len().saturating_sub(i) < 6 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -651,7 +967,8 @@ fn decode_rgce_impl(
                     return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
                 };
 
-                let row_off = i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
+                let row_off =
+                    i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
                 let col_off = i16::from_le_bytes([rgce[i + 4], rgce[i + 5]]) as i64;
                 i += 6;
 
@@ -660,14 +977,17 @@ fn decode_rgce_impl(
                 let abs_row = base.row as i64 + row_off;
                 let abs_col = base.col as i64 + col_off;
                 if abs_row < 0 || abs_row > MAX_ROW || abs_col < 0 || abs_col > MAX_COL {
-                    stack.push("#REF!".to_string());
+                    stack.push(ExprFragment::new("#REF!".to_string()));
                 } else {
                     let col_field = encode_col_field(abs_col as u32, false, false);
-                    stack.push(format_cell_ref_from_field(abs_row as u32, col_field));
+                    stack.push(ExprFragment::new(format_cell_ref_from_field(
+                        abs_row as u32,
+                        col_field,
+                    )));
                 }
             }
+            // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
             0x2D | 0x4D | 0x6D => {
-                // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
                 if rgce.len().saturating_sub(i) < 12 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -708,7 +1028,7 @@ fn decode_rgce_impl(
                     || abs_col_last < 0
                     || abs_col_last > MAX_COL
                 {
-                    stack.push("#REF!".to_string());
+                    stack.push(ExprFragment::new("#REF!".to_string()));
                 } else {
                     let col_first = encode_col_field(abs_col_first as u32, false, false);
                     let col_last = encode_col_field(abs_col_last as u32, false, false);
@@ -719,22 +1039,29 @@ fn decode_rgce_impl(
                         abs_row_first == abs_row_last && abs_col_first == abs_col_last;
                     let is_value_class = (ptg & 0x60) == 0x40;
 
-                    let mut out = String::new();
+                    let mut text = String::new();
+                    let mut prec = 100;
                     if is_value_class && !is_single_cell {
-                        out.push('@');
+                        text.push('@');
+                        prec = 70;
                     }
                     if is_single_cell {
-                        out.push_str(&a);
+                        text.push_str(&a);
                     } else {
-                        out.push_str(&a);
-                        out.push(':');
-                        out.push_str(&b);
+                        text.push_str(&a);
+                        text.push(':');
+                        text.push_str(&b);
                     }
-                    stack.push(out);
+                    stack.push(ExprFragment {
+                        text,
+                        precedence: prec,
+                        contains_union: false,
+                        is_missing: false,
+                    });
                 }
             }
+            // PtgRef3d: [ixti: u16][row: u32][col: u16]
             0x3A | 0x5A | 0x7A => {
-                // PtgRef3d: [ixti: u16][row: u32][col: u16]
                 if rgce.len().saturating_sub(i) < 8 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -756,16 +1083,13 @@ fn decode_rgce_impl(
                 let (first, last) = ctx
                     .extern_sheet_names(ixti)
                     .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
-                let prefix = if first == last {
-                    format!("{first}!")
-                } else {
-                    format!("{first}:{last}!")
-                };
+
+                let prefix = format_sheet_prefix(first, last);
                 let cell = format_cell_ref_from_field(row0, col_field);
-                stack.push(format!("{prefix}{cell}"));
+                stack.push(ExprFragment::new(format!("{prefix}{cell}")));
             }
+            // PtgArea3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x3B | 0x5B | 0x7B => {
-                // PtgArea3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
                 if rgce.len().saturating_sub(i) < 14 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -780,8 +1104,10 @@ fn decode_rgce_impl(
                 };
 
                 let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
-                let row_first0 = u32::from_le_bytes([rgce[i + 2], rgce[i + 3], rgce[i + 4], rgce[i + 5]]);
-                let row_last0 = u32::from_le_bytes([rgce[i + 6], rgce[i + 7], rgce[i + 8], rgce[i + 9]]);
+                let row_first0 =
+                    u32::from_le_bytes([rgce[i + 2], rgce[i + 3], rgce[i + 4], rgce[i + 5]]);
+                let row_last0 =
+                    u32::from_le_bytes([rgce[i + 6], rgce[i + 7], rgce[i + 8], rgce[i + 9]]);
                 let col_first = u16::from_le_bytes([rgce[i + 10], rgce[i + 11]]);
                 let col_last = u16::from_le_bytes([rgce[i + 12], rgce[i + 13]]);
                 i += 14;
@@ -789,11 +1115,7 @@ fn decode_rgce_impl(
                 let (first, last) = ctx
                     .extern_sheet_names(ixti)
                     .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
-                let prefix = if first == last {
-                    format!("{first}!")
-                } else {
-                    format!("{first}:{last}!")
-                };
+                let prefix = format_sheet_prefix(first, last);
 
                 let a = format_cell_ref_from_field(row_first0, col_first);
                 let b = format_cell_ref_from_field(row_last0, col_last);
@@ -801,22 +1123,29 @@ fn decode_rgce_impl(
                     && (col_first & COL_INDEX_MASK) == (col_last & COL_INDEX_MASK);
                 let is_value_class = (ptg & 0x60) == 0x40;
 
-                let mut out = String::new();
+                let mut text = String::new();
+                let mut prec = 100;
                 if is_value_class && !is_single_cell {
-                    out.push('@');
+                    text.push('@');
+                    prec = 70;
                 }
-                out.push_str(&prefix);
+                text.push_str(&prefix);
                 if is_single_cell {
-                    out.push_str(&a);
+                    text.push_str(&a);
                 } else {
-                    out.push_str(&a);
-                    out.push(':');
-                    out.push_str(&b);
+                    text.push_str(&a);
+                    text.push(':');
+                    text.push_str(&b);
                 }
-                stack.push(out);
+                stack.push(ExprFragment {
+                    text,
+                    precedence: prec,
+                    contains_union: false,
+                    is_missing: false,
+                });
             }
+            // PtgRefErr3d: [ixti: u16][row: u32][col: u16]
             0x3C | 0x5C | 0x7C => {
-                // PtgRefErr3d: [ixti: u16][row: u32][col: u16]
                 if rgce.len().saturating_sub(i) < 8 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -826,10 +1155,10 @@ fn decode_rgce_impl(
                     });
                 }
                 i += 8;
-                stack.push("#REF!".to_string());
+                stack.push(ExprFragment::new("#REF!".to_string()));
             }
+            // PtgAreaErr3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
             0x3D | 0x5D | 0x7D => {
-                // PtgAreaErr3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
                 if rgce.len().saturating_sub(i) < 14 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -839,10 +1168,10 @@ fn decode_rgce_impl(
                     });
                 }
                 i += 14;
-                stack.push("#REF!".to_string());
+                stack.push(ExprFragment::new("#REF!".to_string()));
             }
+            // PtgName: [nameId: u32][reserved: u16]
             0x23 | 0x43 | 0x63 => {
-                // PtgName: [nameId: u32][reserved: u16]
                 if rgce.len().saturating_sub(i) < 6 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -856,30 +1185,45 @@ fn decode_rgce_impl(
                     return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
                 };
 
-                let name_id = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
+                let name_id =
+                    u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
                 i += 4;
-                // reserved
-                i += 2;
+                i += 2; // reserved
 
                 let def = ctx
                     .name_definition(name_id)
                     .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
 
                 let is_value_class = (ptg & 0x60) == 0x40;
-                let mut txt = match &def.scope {
-                    NameScope::Workbook => def.name.clone(),
-                    NameScope::Sheet(sheet) => format!("{sheet}!{}", def.name),
-                };
+
+                let mut text = String::new();
+                let mut prec = 100;
                 if is_value_class {
-                    // Like value-class range tokens, a value-class name can require legacy implicit
-                    // intersection (e.g. when the name refers to a multi-cell range). Emit an
-                    // explicit `@` so the formula text preserves scalar semantics.
-                    txt = format!("@{txt}");
+                    // Like value-class range tokens, a value-class name can require legacy
+                    // implicit intersection (e.g. when the name refers to a multi-cell range).
+                    // Emit an explicit `@` so the formula text preserves scalar semantics.
+                    text.push('@');
+                    prec = 70;
                 }
-                stack.push(txt);
+
+                match &def.scope {
+                    NameScope::Workbook => text.push_str(&def.name),
+                    NameScope::Sheet(sheet) => {
+                        fmt_sheet_name(&mut text, sheet);
+                        text.push('!');
+                        text.push_str(&def.name);
+                    }
+                }
+
+                stack.push(ExprFragment {
+                    text,
+                    precedence: prec,
+                    contains_union: false,
+                    is_missing: false,
+                });
             }
+            // PtgNameX: [ixti: u16][nameIndex: u16]
             0x39 | 0x59 | 0x79 => {
-                // PtgNameX: [ixti: u16][nameIndex: u16]
                 if rgce.len().saturating_sub(i) < 4 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -900,10 +1244,10 @@ fn decode_rgce_impl(
                 let txt = ctx
                     .format_namex(ixti, name_index)
                     .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
-                stack.push(txt);
+                stack.push(ExprFragment::new(txt));
             }
+            // PtgFunc: [iftab: u16] (argument count is implicit and fixed for the function).
             0x21 | 0x41 | 0x61 => {
-                // PtgFunc: [iftab: u16] (argument count is implicit and fixed for the function).
                 if rgce.len().saturating_sub(i) < 2 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -932,11 +1276,10 @@ fn decode_rgce_impl(
                     args.push(stack.pop().expect("len checked"));
                 }
                 args.reverse();
-
-                stack.push(format!("{}({})", spec.name, args.join(",")));
+                stack.push(format_function_call(spec.name, args));
             }
+            // PtgFuncVar: [argc: u8][iftab: u16]
             0x22 | 0x42 | 0x62 => {
-                // PtgFuncVar: [argc: u8][iftab: u16]
                 if rgce.len().saturating_sub(i) < 3 {
                     return Err(DecodeError::UnexpectedEof {
                         offset: ptg_offset,
@@ -950,38 +1293,34 @@ fn decode_rgce_impl(
                 let iftab = u16::from_le_bytes([rgce[i + 1], rgce[i + 2]]);
                 i += 3;
 
+                if stack.len() < argc {
+                    return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
+                }
+
                 // Excel uses a sentinel function id for user-defined functions: the top-of-stack
                 // item is the function name (typically from `PtgNameX`), followed by args.
                 if iftab == 0x00FF {
                     if argc == 0 {
                         return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
                     }
-                    if stack.len() < argc {
-                        return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
-                    }
 
-                    let func_name = stack.pop().expect("len checked");
+                    let func_name = stack.pop().expect("len checked").text;
                     let mut args = Vec::with_capacity(argc - 1);
                     for _ in 0..argc.saturating_sub(1) {
                         args.push(stack.pop().expect("len checked"));
                     }
                     args.reverse();
-                    stack.push(format!("{func_name}({})", args.join(",")));
+                    stack.push(format_function_call(&func_name, args));
                 } else {
                     let name =
                         function_name(iftab).ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
-
-                    if stack.len() < argc {
-                        return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
-                    }
 
                     let mut args = Vec::with_capacity(argc);
                     for _ in 0..argc {
                         args.push(stack.pop().expect("len checked"));
                     }
                     args.reverse();
-
-                    stack.push(format!("{name}({})", args.join(",")));
+                    stack.push(format_function_call(name, args));
                 }
             }
             _ => return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg }),
@@ -989,7 +1328,7 @@ fn decode_rgce_impl(
 
         if stack
             .last()
-            .is_some_and(|s| s.len() > max_len)
+            .is_some_and(|s| s.text.len() > max_len)
         {
             return Err(DecodeError::OutputTooLarge {
                 offset: ptg_offset,
@@ -1000,7 +1339,7 @@ fn decode_rgce_impl(
     }
 
     if stack.len() == 1 {
-        Ok(stack.pop().expect("len checked"))
+        Ok(stack.pop().expect("len checked").text)
     } else {
         Err(DecodeError::StackNotSingular {
             offset: last_ptg_offset,
@@ -1052,7 +1391,11 @@ fn error_code_from_literal(literal: &str) -> Option<u8> {
     }
 }
 
-fn decode_array_constant(rgcb: &[u8], pos: &mut usize) -> Option<String> {
+fn decode_array_constant(
+    rgcb: &[u8],
+    pos: &mut usize,
+    mut warnings: Option<&mut Vec<DecodeWarning>>,
+) -> Option<String> {
     // MS-XLSB 2.5.198.8 PtgArray references an Array constant serialized in `rgcb`.
     // The exact structure differs from the BIFF8-era format (larger row/col counts),
     // but at a high level it is:
@@ -1135,9 +1478,21 @@ fn decode_array_constant(rgcb: &[u8], pos: &mut usize) -> Option<String> {
                     if rgcb.len().saturating_sub(i) < 1 {
                         return None;
                     }
+                    let code_offset = i;
                     let code = rgcb[i];
                     i += 1;
-                    col_texts.push(error_literal(code)?.to_string());
+                    match error_literal(code) {
+                        Some(lit) => col_texts.push(lit.to_string()),
+                        None => {
+                            if let Some(warnings) = warnings.as_deref_mut() {
+                                warnings.push(DecodeWarning::UnknownArrayErrorCode {
+                                    code,
+                                    offset: code_offset,
+                                });
+                            }
+                            col_texts.push("#UNKNOWN!".to_string());
+                        }
+                    }
                 }
                 _ => return None,
             }

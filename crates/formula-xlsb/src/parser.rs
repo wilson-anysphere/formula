@@ -11,7 +11,10 @@ use crate::rgce::{
     decode_formula_rgce, decode_formula_rgce_with_base, decode_formula_rgce_with_context,
     decode_formula_rgce_with_context_and_base, DecodeWarning,
 };
-use crate::strings::{read_xl_wide_string, read_xl_wide_string_impl, FlagsWidth, ParsedXlsbString};
+use crate::strings::{
+    read_xl_wide_string, read_xl_wide_string_impl, read_xl_wide_string_with_flags, FlagsWidth,
+    ParsedXlsbString,
+};
 
 // Record IDs (BIFF12 / MS-XLSB). Values taken from pyxlsb (public domain-ish) and MS-XLSB.
 #[allow(dead_code)]
@@ -1168,26 +1171,60 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                             (CellValue::Text(s), None, None)
                         }
                         biff12::FORMULA_STRING => {
-                            let (flags, parsed) = if preserve_parsed_parts {
-                                crate::strings::read_xl_wide_string_with_flags(
-                                    &mut rr,
-                                    FlagsWidth::U16,
-                                    true,
-                                )?
-                            } else {
-                                crate::strings::read_xl_wide_string_with_flags(
-                                    &mut rr,
-                                    FlagsWidth::U16,
-                                    false,
-                                )?
-                            };
+                            // BrtFmlaString stores the cached string value as an XLWideString-like
+                            // payload (cch + flags + utf16 + optional rich/phonetic blocks),
+                            // followed by the formula token stream ([cce][rgce...]).
+                            //
+                            // In practice, some writers appear to set the "rich/phonetic" bits in
+                            // the flags field without supplying the corresponding extra blocks
+                            // (reusing those bits for unrelated formula flags). Use a heuristic:
+                            // prefer parsing rich/phonetic payloads when they keep the trailing
+                            // `[cce][rgce]` fields in-bounds; otherwise, fall back to treating the
+                            // cached value as a plain UTF-16 string.
+                            let start_offset = rr.offset;
+                            let mut parsed = None;
+                            match read_xl_wide_string_with_flags(
+                                &mut rr,
+                                FlagsWidth::U16,
+                                preserve_parsed_parts,
+                            ) {
+                                Ok((flags, candidate)) => {
+                                    let cce_offset = rr.offset;
+                                    let mut accept = false;
+                                    if let Some(raw) = rr.data.get(cce_offset..cce_offset + 4) {
+                                        let cce =
+                                            u32::from_le_bytes(raw.try_into().unwrap()) as usize;
+                                        let rgce_offset = cce_offset + 4;
+                                        if let Some(rgce_end) = rgce_offset.checked_add(cce) {
+                                            if rgce_end <= rr.data.len() {
+                                                accept = true;
+                                            }
+                                        }
+                                    }
+                                    if accept {
+                                        parsed = Some((flags, candidate));
+                                    } else {
+                                        rr.offset = start_offset;
+                                    }
+                                }
+                                Err(Error::UnexpectedEof) => {
+                                    rr.offset = start_offset;
+                                }
+                                Err(e) => return Err(e),
+                            }
 
-                            let (v, preserved) = if preserve_parsed_parts
-                                && (parsed.rich.is_some() || parsed.phonetic.is_some())
-                            {
-                                (parsed.text.clone(), Some(parsed))
+                            let (flags, v, preserved) = if let Some((flags, parsed)) = parsed {
+                                if preserve_parsed_parts
+                                    && (parsed.rich.is_some() || parsed.phonetic.is_some())
+                                {
+                                    (flags, parsed.text.clone(), Some(parsed))
+                                } else {
+                                    (flags, parsed.text, None)
+                                }
                             } else {
-                                (parsed.text, None)
+                                let cch = rr.read_u32()? as usize;
+                                let flags = rr.read_u16()?;
+                                (flags, rr.read_utf16_chars(cch)?, None)
                             };
 
                             let cce = rr.read_u32()? as usize;

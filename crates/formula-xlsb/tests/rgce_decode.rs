@@ -1,7 +1,7 @@
 use formula_engine::parse_formula;
 use formula_xlsb::rgce::{
-    decode_formula_rgce, decode_rgce, decode_rgce_with_base, decode_rgce_with_context, CellCoord,
-    DecodeWarning,
+    decode_formula_rgce, decode_formula_rgce_with_rgcb, decode_rgce, decode_rgce_with_base,
+    decode_rgce_with_context, CellCoord, DecodeWarning,
 };
 use formula_xlsb::workbook_context::WorkbookContext;
 use pretty_assertions::assert_eq;
@@ -174,4 +174,86 @@ fn ignores_tattrif_and_tattrskip_without_breaking_offsets() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "1+2");
     assert_parses_and_roundtrips(&text);
+}
+
+#[test]
+fn quotes_sheet_names_in_ptgref3d() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("My Sheet", "My Sheet", 0);
+    ctx.add_extern_sheet("A1", "A1", 1);
+
+    let mut rgce = vec![0x3A]; // PtgRef3d
+    rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti=0 => "My Sheet"
+    rgce.extend_from_slice(&0u32.to_le_bytes()); // row=0
+    rgce.extend_from_slice(&0xC000u16.to_le_bytes()); // col=A, relative
+    let text = decode_rgce_with_context(&rgce, &ctx).expect("decode");
+    assert_eq!(text, "'My Sheet'!A1");
+    assert_parses_and_roundtrips(&text);
+
+    let mut rgce = vec![0x3A]; // PtgRef3d
+    rgce.extend_from_slice(&1u16.to_le_bytes()); // ixti=1 => "A1"
+    rgce.extend_from_slice(&0u32.to_le_bytes()); // row=0
+    rgce.extend_from_slice(&0xC000u16.to_le_bytes()); // col=A, relative
+    let text = decode_rgce_with_context(&rgce, &ctx).expect("decode");
+    assert_eq!(text, "'A1'!A1");
+    assert_parses_and_roundtrips(&text);
+}
+
+#[test]
+fn wraps_union_operator_inside_function_args() {
+    // Canonical Excel text disambiguates union inside args with parentheses.
+    // This rgce stream intentionally omits `PtgParen` so the decoder must add them.
+    //
+    // Formula: IF(1,(A1,B1))
+    let mut rgce = vec![0x1E, 0x01, 0x00]; // PtgInt(1)
+    rgce.extend_from_slice(&rgce_ref(0x24)); // A1
+
+    let mut b1 = vec![0x24]; // PtgRef(B1)
+    b1.extend_from_slice(&0u32.to_le_bytes());
+    b1.extend_from_slice(&0xC001u16.to_le_bytes());
+    rgce.extend_from_slice(&b1);
+
+    rgce.push(0x10); // PtgUnion
+    rgce.extend_from_slice(&[0x22, 0x02, 0x01, 0x00]); // PtgFuncVar(argc=2, IF)
+
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "IF(1,(A1,B1))");
+    assert_parses_and_roundtrips(&text);
+}
+
+#[test]
+fn skips_ptgmem_tokens() {
+    // Mem tokens are evaluation hints and should not affect printed formula text.
+    let rgce = [
+        0x1E, 0x01, 0x00, // PtgInt(1)
+        0x29, 0x00, 0x00, // PtgMemFunc(cce=0)
+        0x1E, 0x02, 0x00, // PtgInt(2)
+        0x03, // PtgAdd
+    ];
+
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "1+2");
+    assert_parses_and_roundtrips(&text);
+}
+
+#[test]
+fn decodes_unknown_array_error_codes_without_aborting() {
+    let rgce = [0x20, 0, 0, 0, 0, 0, 0, 0]; // PtgArray + 7 unused bytes
+    let rgcb = [
+        0x00, 0x00, // cols_minus1
+        0x00, 0x00, // rows_minus1
+        0x10, // xltypeErr
+        0xFF, // unknown error code
+    ];
+
+    let decoded = decode_formula_rgce_with_rgcb(&rgce, &rgcb);
+    assert_eq!(decoded.text.as_deref(), Some("{#UNKNOWN!}"));
+    assert_eq!(
+        decoded.warnings,
+        vec![DecodeWarning::UnknownArrayErrorCode {
+            code: 0xFF,
+            offset: 5
+        }]
+    );
+    assert_parses_and_roundtrips(decoded.text.as_ref().expect("text"));
 }
