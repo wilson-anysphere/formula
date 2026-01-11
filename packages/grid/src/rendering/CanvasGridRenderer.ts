@@ -1088,6 +1088,31 @@ export class CanvasGridRenderer {
 
     const toRender = shouldFullRender ? [full] : regions;
 
+    if (layer === "selection") {
+      // Selection primitives (selection fill/stroke, remote presence overlays) are already expressed in
+      // viewport coordinates, so we can render them once per frame clipped to the union of dirty rects.
+      // This avoids re-walking quadrants and repeatedly recomputing selection rects.
+      for (const region of toRender) {
+        ctx.clearRect(region.x, region.y, region.width, region.height);
+      }
+
+      ctx.save();
+      ctx.beginPath();
+      for (const region of toRender) {
+        ctx.rect(region.x, region.y, region.width, region.height);
+      }
+      ctx.clip();
+
+      this.renderSelectionQuadrant(full, viewport);
+      if (this.remotePresences.length > 0) {
+        this.renderRemotePresenceOverlays(ctx, viewport);
+      }
+
+      ctx.restore();
+      this.drawFreezeLines(ctx, viewport);
+      return;
+    }
+
     for (const region of toRender) {
       ctx.save();
       ctx.beginPath();
@@ -1101,31 +1126,9 @@ export class CanvasGridRenderer {
         ctx.clearRect(region.x, region.y, region.width, region.height);
       }
 
-      if (layer === "selection") {
-        // Selection overlays are already expressed in viewport coordinates, so we can render
-        // them directly for the dirty region without re-walking grid quadrants.
-        this.renderSelectionQuadrant(region, viewport);
-      } else {
-        this.renderQuadrants(layer, viewport, region);
-      }
+      this.renderQuadrants(layer, viewport, region);
 
       ctx.restore();
-    }
-
-    if (layer === "selection") {
-      if (this.remotePresences.length > 0) {
-        // Remote presence overlays are expensive; draw them once per frame, clipped to the union
-        // of dirty regions instead of redrawing per dirty rect.
-        ctx.save();
-        ctx.beginPath();
-        for (const region of toRender) {
-          ctx.rect(region.x, region.y, region.width, region.height);
-        }
-        ctx.clip();
-        this.renderRemotePresenceOverlays(ctx, viewport);
-        ctx.restore();
-      }
-      this.drawFreezeLines(ctx, viewport);
     }
   }
 
