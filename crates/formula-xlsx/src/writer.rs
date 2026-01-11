@@ -1,8 +1,8 @@
 use crate::tables::{write_table_xml, TABLE_REL_TYPE};
 use crate::styles::StylesPart;
 use formula_model::{
-    normalize_formula_text, Cell, CellRef, CellValue, Hyperlink, HyperlinkTarget, Range,
-    SheetVisibility, Workbook, Worksheet,
+    normalize_formula_text, Cell, CellRef, CellValue, DefinedNameScope, Hyperlink, HyperlinkTarget,
+    Range, SheetVisibility, Workbook, Worksheet,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
@@ -140,15 +140,52 @@ fn workbook_xml(workbook: &Workbook) -> String {
         ));
     }
 
+    let defined_names_xml = workbook_defined_names_xml(workbook);
+
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheets>
     {}
   </sheets>
+  {}
 </workbook>"#,
-        sheets_xml
+        sheets_xml, defined_names_xml
     )
+}
+
+fn workbook_defined_names_xml(workbook: &Workbook) -> String {
+    if workbook.defined_names.is_empty() {
+        return String::new();
+    }
+
+    let mut sheet_index_by_id = HashMap::new();
+    for (idx, sheet) in workbook.sheets.iter().enumerate() {
+        sheet_index_by_id.insert(sheet.id, idx as u32);
+    }
+
+    let mut out = String::new();
+    out.push_str("<definedNames>");
+    for defined in &workbook.defined_names {
+        out.push_str(r#"<definedName"#);
+        out.push_str(&format!(r#" name="{}""#, escape_xml(&defined.name)));
+        if let Some(comment) = &defined.comment {
+            out.push_str(&format!(r#" comment="{}""#, escape_xml(comment)));
+        }
+        if defined.hidden {
+            out.push_str(r#" hidden="1""#);
+        }
+        if let DefinedNameScope::Sheet(sheet_id) = defined.scope {
+            if let Some(idx) = sheet_index_by_id.get(&sheet_id) {
+                out.push_str(&format!(r#" localSheetId="{}""#, idx));
+            }
+        }
+        out.push('>');
+        out.push_str(&escape_xml(&defined.refers_to));
+        out.push_str("</definedName>");
+    }
+    out.push_str("</definedNames>");
+    out
 }
 
 fn workbook_rels_xml(workbook: &Workbook, has_shared_strings: bool) -> String {

@@ -6,7 +6,8 @@ use std::path::Path;
 use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::rich_text::RichText;
 use formula_model::{
-    normalize_formula_text, Cell, CellRef, CellValue, ErrorValue, Range, SheetVisibility, Workbook,
+    normalize_formula_text, Cell, CellRef, CellValue, DefinedNameScope, ErrorValue, Range,
+    SheetVisibility, Workbook,
 };
 use quick_xml::events::Event;
 use quick_xml::events::attributes::AttrError;
@@ -214,7 +215,8 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         .ok_or(ReadError::MissingPart(WORKBOOK_RELS_PART))?;
 
     let rels_info = parse_relationships(workbook_rels)?;
-    let (date_system, calc_pr, sheets) = parse_workbook_metadata(workbook_xml, &rels_info.id_to_target)?;
+    let (date_system, calc_pr, sheets, defined_names) =
+        parse_workbook_metadata(workbook_xml, &rels_info.id_to_target)?;
 
     let mut workbook = Workbook::new();
     let styles_part_name = rels_info
@@ -240,8 +242,10 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let mut sheet_meta: Vec<SheetMeta> = Vec::with_capacity(sheets.len());
     let mut cell_meta = std::collections::HashMap::new();
 
+    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::new();
     for sheet in sheets {
         let ws_id = workbook.add_sheet(sheet.name.clone())?;
+        worksheet_ids_by_index.push(ws_id);
         let ws = workbook
             .sheet_mut(ws_id)
             .expect("sheet just inserted must exist");
@@ -309,6 +313,22 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             state: sheet.state,
             path: sheet.path,
         });
+    }
+
+    for defined in defined_names {
+        let scope = match defined.local_sheet_id.and_then(|idx| worksheet_ids_by_index.get(idx as usize).copied()) {
+            Some(sheet_id) => DefinedNameScope::Sheet(sheet_id),
+            None => DefinedNameScope::Workbook,
+        };
+        // Best-effort: ignore invalid/duplicate names so we can still load the workbook.
+        let _ = workbook.create_defined_name(
+            scope,
+            defined.name,
+            defined.value,
+            defined.comment,
+            defined.hidden,
+            defined.local_sheet_id,
+        );
     }
 
     Ok(XlsxDocument {
@@ -395,10 +415,19 @@ struct ParsedSheet {
     path: String,
 }
 
+#[derive(Debug, Clone)]
+struct ParsedDefinedName {
+    name: String,
+    local_sheet_id: Option<u32>,
+    comment: Option<String>,
+    hidden: bool,
+    value: String,
+}
+
 fn parse_workbook_metadata(
     workbook_xml: &[u8],
     rels: &BTreeMap<String, String>,
-) -> Result<(DateSystem, CalcPr, Vec<ParsedSheet>), ReadError> {
+) -> Result<(DateSystem, CalcPr, Vec<ParsedSheet>, Vec<ParsedDefinedName>), ReadError> {
     let mut reader = Reader::from_reader(workbook_xml);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
@@ -406,6 +435,8 @@ fn parse_workbook_metadata(
     let mut date_system = DateSystem::V1900;
     let mut calc_pr = CalcPr::default();
     let mut sheets = Vec::new();
+    let mut defined_names = Vec::new();
+    let mut current_defined: Option<ParsedDefinedName> = None;
 
     loop {
         match reader.read_event_into(&mut buf)? {
@@ -469,13 +500,99 @@ fn parse_workbook_metadata(
                     path,
                 });
             }
+            Event::Start(e) if e.name().as_ref() == b"definedName" => {
+                let mut name = None;
+                let mut local_sheet_id = None;
+                let mut comment = None;
+                let mut hidden = false;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"name" => name = Some(attr.unescape_value()?.into_owned()),
+                        b"localSheetId" => {
+                            local_sheet_id = attr
+                                .unescape_value()?
+                                .into_owned()
+                                .parse::<u32>()
+                                .ok();
+                        }
+                        b"comment" => comment = Some(attr.unescape_value()?.into_owned()),
+                        b"hidden" => {
+                            let v = attr.unescape_value()?.into_owned();
+                            hidden = v == "1" || v.eq_ignore_ascii_case("true");
+                        }
+                        _ => {}
+                    }
+                }
+                let Some(name) = name else {
+                    current_defined = None;
+                    continue;
+                };
+                current_defined = Some(ParsedDefinedName {
+                    name,
+                    local_sheet_id,
+                    comment,
+                    hidden,
+                    value: String::new(),
+                });
+            }
+            Event::Empty(e) if e.name().as_ref() == b"definedName" => {
+                let mut name = None;
+                let mut local_sheet_id = None;
+                let mut comment = None;
+                let mut hidden = false;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"name" => name = Some(attr.unescape_value()?.into_owned()),
+                        b"localSheetId" => {
+                            local_sheet_id = attr
+                                .unescape_value()?
+                                .into_owned()
+                                .parse::<u32>()
+                                .ok();
+                        }
+                        b"comment" => comment = Some(attr.unescape_value()?.into_owned()),
+                        b"hidden" => {
+                            let v = attr.unescape_value()?.into_owned();
+                            hidden = v == "1" || v.eq_ignore_ascii_case("true");
+                        }
+                        _ => {}
+                    }
+                }
+                let Some(name) = name else {
+                    continue;
+                };
+                defined_names.push(ParsedDefinedName {
+                    name,
+                    local_sheet_id,
+                    comment,
+                    hidden,
+                    value: String::new(),
+                });
+            }
+            Event::Text(e) if current_defined.is_some() => {
+                if let Some(ref mut dn) = current_defined {
+                    dn.value.push_str(&e.unescape()?.to_string());
+                }
+            }
+            Event::CData(e) if current_defined.is_some() => {
+                if let Some(ref mut dn) = current_defined {
+                    dn.value.push_str(std::str::from_utf8(e.as_ref())?);
+                }
+            }
+            Event::End(e) if e.name().as_ref() == b"definedName" => {
+                if let Some(dn) = current_defined.take() {
+                    defined_names.push(dn);
+                }
+            }
             Event::Eof => break,
             _ => {}
         }
         buf.clear();
     }
 
-    Ok((date_system, calc_pr, sheets))
+    Ok((date_system, calc_pr, sheets, defined_names))
 }
 
 fn parse_worksheet_into_model(
