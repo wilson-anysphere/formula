@@ -34,6 +34,15 @@ jobs:
           if [ -f tests/compatibility/excel-oracle/reports/summary.md ]; then
             cat tests/compatibility/excel-oracle/reports/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Upload excel-oracle artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: excel-oracle-compat
+          path: |
+            tests/compatibility/excel-oracle/datasets/engine-results.json
+            tests/compatibility/excel-oracle/reports/mismatch-report.json
+            tests/compatibility/excel-oracle/reports/summary.md
 
   web:
     name: Web + desktop builds

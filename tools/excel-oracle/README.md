@@ -9,6 +9,7 @@ The intent is to continuously compare our formula engine against Excel across a 
 - A deterministic, machine-readable **case corpus** (`tests/compatibility/excel-oracle/cases.json`)
 - A Windows-only **Excel COM automation runner** that evaluates all cases in **real Excel** and exports results (`run-excel-oracle.ps1`)
 - A **comparison tool** that diffs engine output vs Excel output and emits a mismatch report (`compare.py`)
+- A lightweight **compatibility gate** that runs the engine + comparison on a bounded subset (`compat_gate.py`)
 - A GitHub Actions workflow (`.github/workflows/excel-compat.yml`) wired to run on `windows-latest`
 
 ## Prerequisites (local generation)
@@ -84,6 +85,20 @@ The workflow prefers `excel-oracle.pinned.json` if present.
 To force Excel generation in the workflow when a pinned dataset exists, run the workflow manually (`workflow_dispatch`) and set `oracle_source=generate`.
 
 ## Compare formula-engine output vs Excel oracle
+
+### One-command gate (CI-friendly)
+
+From repo root:
+
+```bash
+python tools/excel-oracle/compat_gate.py
+```
+
+This runs the in-repo engine adapter (`crates/formula-excel-oracle`) against a curated tag set,
+compares against the pinned dataset in `tests/compatibility/excel-oracle/datasets/versioned/`,
+writes reports under `tests/compatibility/excel-oracle/reports/`, and exits non-zero on mismatch.
+
+### Manual flow
 
 1) Produce engine results JSON (same schema as Excel output). The intended flow is that your engine exposes a CLI that can evaluate the case corpus and emit results.
 
