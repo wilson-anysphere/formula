@@ -1133,11 +1133,7 @@ impl Storage {
             rewrite_sheet_rename_references_tx(&tx, meta.workbook_id, &old_name, name)?;
         }
 
-        // Update any sheet-scoped named ranges that use the sheet name as their scope identifier.
-        tx.execute(
-            "UPDATE named_ranges SET scope = ?1 WHERE workbook_id = ?2 AND scope = ?3 COLLATE NOCASE",
-            params![name, meta.workbook_id.to_string(), &old_name],
-        )?;
+        update_named_range_scopes_for_sheet_rename_tx(&tx, meta.workbook_id, &old_name, name)?;
 
         tx.execute(
             "UPDATE sheets SET name = ?1 WHERE id = ?2",
@@ -1265,11 +1261,7 @@ impl Storage {
             (model_sheet_id.and_then(|id| u32::try_from(id).ok()), sheet_order, ordered_sheet_ids)
         };
 
-        // Remove sheet-scoped named ranges that use the sheet name as their scope identifier.
-        tx.execute(
-            "DELETE FROM named_ranges WHERE workbook_id = ?1 AND scope = ?2 COLLATE NOCASE",
-            params![meta.workbook_id.to_string(), meta.name],
-        )?;
+        delete_named_ranges_for_sheet_scope_tx(&tx, meta.workbook_id, &meta.name)?;
         tx.execute(
             "DELETE FROM sheet_drawings WHERE sheet_id = ?1",
             params![sheet_id.to_string()],
@@ -1458,49 +1450,74 @@ impl Storage {
         scope: &str,
     ) -> Result<Option<NamedRange>> {
         let conn = self.conn.lock().expect("storage mutex poisoned");
-        let row = conn
-            .query_row(
-                r#"
-                SELECT workbook_id, name, scope, reference
-                FROM named_ranges
-                WHERE workbook_id = ?1
-                  AND name = ?2 COLLATE NOCASE
-                  AND scope = ?3 COLLATE NOCASE
-                "#,
-                params![workbook_id.to_string(), name, scope],
-                |r| {
-                    let workbook_id: String = r.get(0)?;
-                    Ok(NamedRange {
-                        workbook_id: Uuid::parse_str(&workbook_id)
-                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                        name: r.get(1)?,
-                        scope: r.get(2)?,
-                        reference: r.get(3)?,
-                    })
-                },
-            )
-            .optional()?;
-        Ok(row)
+        let wants_workbook_scope = scope.eq_ignore_ascii_case("workbook");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT workbook_id, name, scope, reference
+            FROM named_ranges
+            WHERE workbook_id = ?1
+              AND name = ?2 COLLATE NOCASE
+            "#,
+        )?;
+        let mut rows = stmt.query(params![workbook_id.to_string(), name])?;
+
+        while let Some(row) = rows.next()? {
+            let raw_workbook_id: String = row.get(0)?;
+            let scope_value: String = row.get(2)?;
+
+            let scope_matches = if wants_workbook_scope {
+                scope_value.eq_ignore_ascii_case("workbook")
+            } else {
+                !scope_value.eq_ignore_ascii_case("workbook")
+                    && sheet_name_eq_case_insensitive(&scope_value, scope)
+            };
+            if !scope_matches {
+                continue;
+            }
+
+            return Ok(Some(NamedRange {
+                workbook_id: Uuid::parse_str(&raw_workbook_id)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                name: row.get(1)?,
+                scope: scope_value,
+                reference: row.get(3)?,
+            }));
+        }
+
+        Ok(None)
     }
 
     pub fn upsert_named_range(&self, range: &NamedRange) -> Result<()> {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
 
-        let existing: Option<(String, String)> = tx
-            .query_row(
+        let wants_workbook_scope = range.scope.eq_ignore_ascii_case("workbook");
+        let mut existing: Option<(String, String)> = None;
+        {
+            let mut stmt = tx.prepare(
                 r#"
                 SELECT name, scope
                 FROM named_ranges
                 WHERE workbook_id = ?1
                   AND name = ?2 COLLATE NOCASE
-                  AND scope = ?3 COLLATE NOCASE
-                LIMIT 1
                 "#,
-                params![range.workbook_id.to_string(), &range.name, &range.scope],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?;
+            )?;
+            let mut rows = stmt.query(params![range.workbook_id.to_string(), &range.name])?;
+            while let Some(row) = rows.next()? {
+                let name: String = row.get(0)?;
+                let scope: String = row.get(1)?;
+                let scope_matches = if wants_workbook_scope {
+                    scope.eq_ignore_ascii_case("workbook")
+                } else {
+                    !scope.eq_ignore_ascii_case("workbook")
+                        && sheet_name_eq_case_insensitive(&scope, &range.scope)
+                };
+                if scope_matches {
+                    existing = Some((name, scope));
+                    break;
+                }
+            }
+        }
 
         match existing {
             Some((name, scope)) => {
@@ -2155,6 +2172,82 @@ fn merge_named_ranges_into_defined_names(
             xlsx_local_sheet_id: None,
         });
         next_id = next_id.wrapping_add(1);
+    }
+
+    Ok(())
+}
+
+fn update_named_range_scopes_for_sheet_rename_tx(
+    tx: &Transaction<'_>,
+    workbook_id: Uuid,
+    old_name: &str,
+    new_name: &str,
+) -> Result<()> {
+    let workbook_id_str = workbook_id.to_string();
+    let old_key = canonical_sheet_name_key(old_name);
+
+    let mut stmt = tx.prepare("SELECT name, scope FROM named_ranges WHERE workbook_id = ?1")?;
+    let mut rows = stmt.query(params![&workbook_id_str])?;
+
+    let mut to_update: Vec<(String, String)> = Vec::new();
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(0)?;
+        let scope: String = row.get(1)?;
+        if scope.eq_ignore_ascii_case("workbook") {
+            continue;
+        }
+        if canonical_sheet_name_key(&scope) == old_key {
+            to_update.push((name, scope));
+        }
+    }
+
+    if to_update.is_empty() {
+        return Ok(());
+    }
+
+    let mut update_stmt = tx.prepare(
+        "UPDATE named_ranges SET scope = ?1 WHERE workbook_id = ?2 AND name = ?3 AND scope = ?4",
+    )?;
+
+    for (name, scope) in to_update {
+        update_stmt.execute(params![new_name, &workbook_id_str, name, scope])?;
+    }
+
+    Ok(())
+}
+
+fn delete_named_ranges_for_sheet_scope_tx(
+    tx: &Transaction<'_>,
+    workbook_id: Uuid,
+    sheet_name: &str,
+) -> Result<()> {
+    let workbook_id_str = workbook_id.to_string();
+    let sheet_key = canonical_sheet_name_key(sheet_name);
+
+    let mut stmt = tx.prepare("SELECT name, scope FROM named_ranges WHERE workbook_id = ?1")?;
+    let mut rows = stmt.query(params![&workbook_id_str])?;
+
+    let mut to_delete: Vec<(String, String)> = Vec::new();
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(0)?;
+        let scope: String = row.get(1)?;
+        if scope.eq_ignore_ascii_case("workbook") {
+            continue;
+        }
+        if canonical_sheet_name_key(&scope) == sheet_key {
+            to_delete.push((name, scope));
+        }
+    }
+
+    if to_delete.is_empty() {
+        return Ok(());
+    }
+
+    let mut delete_stmt = tx.prepare(
+        "DELETE FROM named_ranges WHERE workbook_id = ?1 AND name = ?2 AND scope = ?3",
+    )?;
+    for (name, scope) in to_delete {
+        delete_stmt.execute(params![&workbook_id_str, name, scope])?;
     }
 
     Ok(())
