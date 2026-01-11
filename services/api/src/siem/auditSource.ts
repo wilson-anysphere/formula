@@ -1,24 +1,12 @@
 import type { Pool } from "pg";
-import type { ExportableAuditEvent } from "./types";
+import { auditLogRowToAuditEvent, type AuditEvent, type PostgresAuditLogRow } from "@formula/audit-core";
+
+export type ExportableAuditEvent = { createdAt: Date; event: AuditEvent };
 
 export type AuditCursor = {
   lastCreatedAt: Date | null;
   lastEventId: string | null;
 };
-
-function parseDetails(raw: unknown): Record<string, unknown> {
-  if (!raw) return {};
-  if (typeof raw === "string") {
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
-    } catch {
-      return {};
-    }
-  }
-  if (raw && typeof raw === "object") return raw as Record<string, unknown>;
-  return {};
-}
 
 function toDate(value: unknown): Date {
   if (value instanceof Date) return value;
@@ -100,22 +88,8 @@ export async function fetchNextAuditEvents(
   return res.rows.map((row) => {
     const createdAt = toDate(row.created_at);
     return {
-      id: String(row.id),
-      timestamp: createdAt.toISOString(),
       createdAt,
-      orgId: row.org_id ? String(row.org_id) : null,
-      userId: row.user_id ? String(row.user_id) : null,
-      userEmail: row.user_email ? String(row.user_email) : null,
-      eventType: String(row.event_type),
-      resourceType: String(row.resource_type),
-      resourceId: row.resource_id ? String(row.resource_id) : null,
-      ipAddress: row.ip_address ? String(row.ip_address) : null,
-      userAgent: row.user_agent ? String(row.user_agent) : null,
-      sessionId: row.session_id ? String(row.session_id) : null,
-      success: Boolean(row.success),
-      errorCode: row.error_code ? String(row.error_code) : null,
-      errorMessage: row.error_message ? String(row.error_message) : null,
-      details: parseDetails(row.details)
+      event: auditLogRowToAuditEvent(row as PostgresAuditLogRow)
     } satisfies ExportableAuditEvent;
   });
 }

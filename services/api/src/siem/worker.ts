@@ -244,7 +244,7 @@ export class SiemExportWorker {
               { attributes: { orgId: org.orgId, events: events.length } },
               async (sendSpan) => {
                 try {
-                  const payload = events.map(({ createdAt: _createdAt, ...event }) => event);
+                  const payload = events.map(({ event }) => event);
                   await sendSiemBatch(org.config, payload, { tls: tlsPolicy });
                   sendSpan.setStatus({ code: SpanStatusCode.OK });
                 } catch (err) {
@@ -265,12 +265,12 @@ export class SiemExportWorker {
             const last = events[events.length - 1]!;
             await this.stateStore.markSuccess(org.orgId, {
               lastCreatedAt: last.createdAt,
-              lastEventId: last.id
+              lastEventId: last.event.id
             });
 
             cursor = {
               lastCreatedAt: last.createdAt,
-              lastEventId: last.id
+              lastEventId: last.event.id
             };
 
             lastLagSeconds = Math.max(0, (Date.now() - last.createdAt.getTime()) / 1000);

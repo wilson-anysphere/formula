@@ -1,12 +1,11 @@
 import crypto from "node:crypto";
+import { serializeBatch, type AuditEvent } from "@formula/audit-core";
 import type {
-  CanonicalAuditEvent,
   SiemAuthConfig,
   SiemEndpointConfig,
   SiemRetryConfig,
   MaybeEncryptedSecret
 } from "./types";
-import { serializeBatch } from "./format";
 import { fetchWithOrgTls, type OrgTlsPolicy } from "../http/tls";
 
 type RetriableError = Error & { retriable?: boolean; status?: number; responseBody?: string };
@@ -158,15 +157,14 @@ async function postBatch(options: {
 
 export async function sendSiemBatch(
   config: SiemEndpointConfig,
-  events: CanonicalAuditEvent[],
+  events: AuditEvent[],
   options: { tls?: OrgTlsPolicy } = {}
 ): Promise<void> {
   if (!events || events.length === 0) return;
 
   const { body, contentType } = serializeBatch(events, {
     format: config.format ?? "json",
-    redactionText: config.redactionOptions?.redactionText,
-    sensitiveKeyPatterns: config.redactionOptions?.sensitiveKeyPatterns
+    redactionOptions: config.redactionOptions
   });
 
   const headers: Record<string, string> = {

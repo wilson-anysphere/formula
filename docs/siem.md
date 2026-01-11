@@ -10,6 +10,7 @@ The current implementation lives in:
 - `services/api/src/routes/audit.ts` – audit query + export endpoints (Fastify).
 - `services/api/src/routes/siem.ts` – SIEM config CRUD endpoints (Fastify).
 - `services/api/src/siem/*` – background SIEM export worker + sender implementation.
+- `packages/security/siem/**` – client-side/offline queue + delivery helpers (separate from the server worker).
 
 ## Supported export formats
 
@@ -46,7 +47,7 @@ The first delimiter after the header is a **literal tab character** (`\t`). Key/
 
 Formula uses a canonical `AuditEvent` shape defined in `@formula/audit-core` (`createAuditEvent`). The API stores a flattened subset in Postgres (`audit_log` + `audit_log_archive`) and reconstructs canonical events on export via `auditLogRowToAuditEvent`.
 
-Note: `GET /orgs/:orgId/audit/export` returns this canonical `AuditEvent` shape. The background SIEM export worker emits a flattened event representation (see below).
+Note: `GET /orgs/:orgId/audit/export` and the background SIEM export worker both emit this canonical `AuditEvent` shape. Any internal `details.__audit` metadata stored in Postgres is stripped during reconstruction.
 
 Example:
 
@@ -156,33 +157,13 @@ The API process starts a background worker (`SiemExportWorker` in `services/api/
 High-level flow:
 
 1. Load enabled org configs from Postgres (`DbSiemConfigProvider` in `services/api/src/siem/configProvider.ts`).
-2. Fetch audit events (including archived) in ascending order via `services/api/src/siem/auditSource.ts`.
-3. Send a batch to the org’s configured `endpointUrl` using `services/api/src/siem/sender.ts`.
+2. Fetch audit events (including archived) in ascending order via `services/api/src/siem/auditSource.ts` and convert rows to canonical `AuditEvent` via `auditLogRowToAuditEvent`.
+3. Serialize + redact batches using `@formula/audit-core` (`serializeBatch`) and POST to the org’s configured `endpointUrl` using `services/api/src/siem/sender.ts`.
 4. Persist cursor + backoff state in `org_siem_export_state` (`services/api/migrations/0003_siem_export_state.sql`).
 
 ### Exported event shape (background worker)
 
-The worker exports batches of audit events in a flattened schema (see `services/api/src/siem/types.ts`), e.g.:
-
-```json
-{
-  "id": "11111111-1111-4111-8111-111111111111",
-  "timestamp": "2026-01-01T00:00:00.000Z",
-  "orgId": "org_1",
-  "userId": "user_1",
-  "userEmail": "user@example.com",
-  "eventType": "document.created",
-  "resourceType": "document",
-  "resourceId": "doc_1",
-  "ipAddress": "203.0.113.5",
-  "userAgent": "UnitTest/1.0",
-  "sessionId": "sess_1",
-  "success": true,
-  "errorCode": null,
-  "errorMessage": null,
-  "details": { "title": "Q1 Plan" }
-}
-```
+The worker exports batches of canonical `AuditEvent` objects (same schema as above). Any internal `details.__audit` metadata stored in Postgres is removed before export.
 
 ## Client-side delivery helpers (desktop / offline-first)
 

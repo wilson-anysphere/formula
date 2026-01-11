@@ -61,28 +61,3 @@ export interface SiemEndpointConfig {
    */
   batchSize?: number;
 }
-
-export interface CanonicalAuditEvent {
-  id: string;
-  timestamp: string;
-  orgId: string | null;
-  userId: string | null;
-  userEmail: string | null;
-  eventType: string;
-  resourceType: string;
-  resourceId: string | null;
-  ipAddress: string | null;
-  userAgent: string | null;
-  sessionId: string | null;
-  success: boolean;
-  errorCode: string | null;
-  errorMessage: string | null;
-  details: Record<string, unknown>;
-}
-
-export type ExportableAuditEvent = CanonicalAuditEvent & {
-  /**
-   * Raw `created_at` timestamp used for durable cursoring. Mirrors `timestamp`.
-   */
-  createdAt: Date;
-};

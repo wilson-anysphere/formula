@@ -182,6 +182,10 @@ describe("SIEM export worker", () => {
       expect(siem.requests).toHaveLength(1);
       const payload = JSON.parse(siem.requests[0]!.body) as any[];
       expect(payload.map((e) => e.id)).toEqual([firstId, secondId]);
+      for (const exported of payload) {
+        expect(exported).toHaveProperty("actor");
+        expect(exported.details).not.toHaveProperty("__audit");
+      }
 
       const idempotency = siem.requests[0]!.headers["idempotency-key"];
       expect(idempotency).toBe(idempotencyKeyFor([firstId, secondId]));
@@ -194,6 +198,73 @@ describe("SIEM export worker", () => {
       expect(new Date(state.rows[0].last_created_at).toISOString()).toBe(t1.toISOString());
       expect(state.rows[0].last_event_id).toBe(secondId);
       expect(state.rows[0].consecutive_failures).toBe(0);
+    } finally {
+      await siem.close();
+    }
+  });
+
+  it("strips __audit metadata from details and exports actor/correlation/resourceName", async () => {
+    const orgId = crypto.randomUUID();
+    await insertOrg(db, orgId);
+
+    const id = crypto.randomUUID();
+    const timestamp = "2025-01-01T03:00:00.000Z";
+
+    const event = createAuditEvent({
+      id,
+      timestamp,
+      eventType: "test.meta",
+      actor: { type: "user", id: "user_1" },
+      context: {
+        orgId,
+        userEmail: "user@example.com",
+        ipAddress: "203.0.113.5",
+        userAgent: "UnitTest/1.0"
+      },
+      resource: { type: "document", id: "doc_1", name: "Q1 Plan" },
+      success: true,
+      details: { title: "Q1 Plan" },
+      correlation: { requestId: "req_123", traceId: "trace_abc" }
+    });
+
+    await writeAuditEvent(db, event);
+
+    const raw = await db.query("SELECT details FROM audit_log WHERE id = $1", [id]);
+    expect(raw.rowCount).toBe(1);
+    const storedDetails =
+      typeof raw.rows[0].details === "string" ? JSON.parse(raw.rows[0].details) : (raw.rows[0].details as any);
+    expect(storedDetails).toHaveProperty("__audit");
+
+    const siem = await startSiemServer();
+    try {
+      const config: SiemEndpointConfig = {
+        endpointUrl: siem.url,
+        format: "json",
+        idempotencyKeyHeader: "Idempotency-Key",
+        retry: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 5, jitter: false }
+      };
+
+      const metrics = createMetrics();
+      const worker = new SiemExportWorker({
+        db,
+        configProvider: new StaticConfigProvider([{ orgId, config }]),
+        metrics,
+        logger: console,
+        pollIntervalMs: 0
+      });
+
+      await worker.tick();
+
+      expect(siem.requests).toHaveLength(1);
+      const payload = JSON.parse(siem.requests[0]!.body) as any[];
+      expect(payload).toHaveLength(1);
+      expect(payload[0].id).toBe(id);
+      expect(payload[0].timestamp).toBe(timestamp);
+      expect(payload[0].details).toEqual({ title: "Q1 Plan" });
+      expect(payload[0].details).not.toHaveProperty("__audit");
+      expect(payload[0].actor).toEqual({ type: "user", id: "user_1" });
+      expect(payload[0].correlation).toEqual({ requestId: "req_123", traceId: "trace_abc" });
+      expect(payload[0].resource).toEqual({ type: "document", id: "doc_1", name: "Q1 Plan" });
     } finally {
       await siem.close();
     }
