@@ -143,3 +143,18 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     }
   };
 }
+
+declare global {
+  // Set by Playwright E2E tests via `page.addInitScript` before the app loads.
+  // When enabled, we expose `createEngineClient` on `globalThis` so E2E tests can
+  // create a fresh engine instance from the production bundle without relying on
+  // Vite dev-server-only module resolution.
+  // eslint-disable-next-line no-var
+  var __FORMULA_E2E__: boolean | undefined;
+  // eslint-disable-next-line no-var
+  var __FORMULA_ENGINE_E2E__: { createEngineClient: typeof createEngineClient } | undefined;
+}
+
+if (typeof globalThis !== "undefined" && (globalThis as any).__FORMULA_E2E__) {
+  (globalThis as any).__FORMULA_ENGINE_E2E__ = { createEngineClient };
+}
