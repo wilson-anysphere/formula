@@ -429,6 +429,165 @@ fn sortby_disambiguates_optional_sort_order_args() {
 }
 
 #[test]
+fn expand_expands_arrays_with_padding_and_defaults() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "={1,2;3,4}")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=EXPAND(A1:B2,3,4,0)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(0.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(0.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F2"), Value::Number(0.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G2"), Value::Number(0.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Number(0.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(0.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F3"), Value::Number(0.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G3"), Value::Number(0.0));
+
+    // Omit cols via blank placeholder to reach pad_with, using the default col count (2).
+    engine
+        .set_cell_formula("Sheet1", "I1", "=EXPAND(A1:B2,3,,0)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "I3"), Value::Number(0.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "J3"), Value::Number(0.0));
+
+    // Default pad_with is #N/A.
+    engine
+        .set_cell_formula("Sheet1", "L1", "=EXPAND(A1:B2,3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "L3"),
+        Value::Error(ErrorKind::NA)
+    );
+
+    // Cannot shrink arrays.
+    engine
+        .set_cell_formula("Sheet1", "N1", "=EXPAND(A1:B2,1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "N1"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
+fn map_applies_lambda_elementwise_across_arrays() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=MAP({1;2;3},LAMBDA(x,x*2))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(6.0));
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=MAP({1;2;3},{10;20;30},LAMBDA(a,b,a+b))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(11.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(22.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C3"), Value::Number(33.0));
+
+    // Broadcast a scalar as a 1x1 array.
+    engine
+        .set_cell_formula("Sheet1", "E1", "=MAP({1;2;3},10,LAMBDA(a,b,a+b))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(11.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(12.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(13.0));
+
+    // Shape mismatch (3x1 vs 1x3) => #VALUE!
+    engine
+        .set_cell_formula("Sheet1", "G1", "=MAP({1;2;3},{1,2,3},LAMBDA(a,b,a+b))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "G1"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
+fn makearray_generates_values_from_indices() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=MAKEARRAY(2,3,LAMBDA(r,c,r*10+c))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(11.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(12.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(13.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(21.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(22.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(23.0));
+}
+
+#[test]
+fn byrow_and_bycol_apply_lambda_to_vectors() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "={1,2,3;4,5,6}")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    engine
+        .set_cell_formula("Sheet1", "E1", "=BYROW(A1:C2,LAMBDA(r,SUM(r)))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(6.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(15.0));
+
+    engine
+        .set_cell_formula("Sheet1", "F1", "=BYCOL(A1:C2,LAMBDA(c,SUM(c)))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(7.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H1"), Value::Number(9.0));
+}
+
+#[test]
+fn reduce_and_scan_accumulate_values() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=REDUCE(0,{1,2,3},LAMBDA(a,v,a+v))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(6.0));
+
+    // Omit initial_value by providing only (array, lambda).
+    engine
+        .set_cell_formula("Sheet1", "B1", "=REDUCE({1,2,3},LAMBDA(a,v,a+v))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(6.0));
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=SCAN(0,{1,2,3},LAMBDA(a,v,a+v))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(6.0));
+}
+
+#[test]
 fn take_and_drop_slice_arrays() {
     let mut engine = Engine::new();
     engine

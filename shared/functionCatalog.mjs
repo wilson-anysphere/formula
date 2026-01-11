@@ -66,6 +66,28 @@ export default {
       ]
     },
     {
+      "name": "BYCOL",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "BYROW",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "CEILING",
       "min_args": 2,
       "max_args": 2,
@@ -316,6 +338,19 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number"
+      ]
+    },
+    {
+      "name": "EXPAND",
+      "min_args": 2,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "number",
+        "number",
+        "any"
       ]
     },
     {
@@ -690,6 +725,28 @@ export default {
       ]
     },
     {
+      "name": "MAKEARRAY",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "number",
+        "number",
+        "any"
+      ]
+    },
+    {
+      "name": "MAP",
+      "min_args": 2,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "MATCH",
       "min_args": 2,
       "max_args": 3,
@@ -993,6 +1050,16 @@ export default {
       ]
     },
     {
+      "name": "REDUCE",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "REPLACE",
       "min_args": 4,
       "max_args": 4,
@@ -1047,6 +1114,16 @@ export default {
       "arg_types": [
         "number",
         "number"
+      ]
+    },
+    {
+      "name": "SCAN",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
       ]
     },
     {

@@ -1,7 +1,14 @@
 const XL_FN_PREFIX: &str = "_xlfn.";
 
 const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
+    "BYCOL",
+    "BYROW",
+    "EXPAND",
     "FILTER",
+    "MAKEARRAY",
+    "MAP",
+    "REDUCE",
+    "SCAN",
     "UNIQUE",
     "SORT",
     "SORTBY",
@@ -194,6 +201,13 @@ mod tests {
     fn add_xlfn_prefixes_handles_dynamic_array_helpers() {
         let input = "TAKE(SEQUENCE(1),1)";
         let expected = "_xlfn.TAKE(_xlfn.SEQUENCE(1),1)";
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn add_xlfn_prefixes_handles_lambda_helpers() {
+        let input = "MAP(SEQUENCE(3),LAMBDA(x,x))";
+        let expected = "_xlfn.MAP(_xlfn.SEQUENCE(3),_xlfn.LAMBDA(x,x))";
         assert_eq!(add_xlfn_prefixes(input), expected);
     }
 

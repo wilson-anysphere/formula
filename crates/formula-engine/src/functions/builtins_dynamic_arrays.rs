@@ -1,10 +1,10 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use crate::eval::{CellAddr, CompiledExpr, Expr};
+use crate::eval::{CellAddr, CompiledExpr, Expr, NameRef, SheetReference};
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{Array, ErrorKind, Value};
+use crate::value::{Array, ErrorKind, Lambda, Value};
 
 inventory::submit! {
     FunctionSpec {
@@ -1049,6 +1049,399 @@ fn randarray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     Value::Array(Array::new(rows_usize, cols_usize, values))
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "EXPAND",
+        min_args: 2,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Number, ValueType::Any],
+        implementation: expand_fn,
+    }
+}
+
+fn expand_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let array = match eval_array_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let rows = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let default_cols = i64::try_from(array.cols).unwrap_or(i64::MAX);
+    let cols = match eval_optional_i64(ctx, args.get(2), default_cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let pad_with = match eval_optional_pad_with(ctx, args.get(3)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    if rows <= 0 || cols <= 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let out_rows = match usize::try_from(rows) {
+        Ok(v) => v,
+        Err(_) => return Value::Error(ErrorKind::Num),
+    };
+    let out_cols = match usize::try_from(cols) {
+        Ok(v) => v,
+        Err(_) => return Value::Error(ErrorKind::Num),
+    };
+
+    if out_rows < array.rows || out_cols < array.cols {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let total = match out_rows.checked_mul(out_cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Num),
+    };
+
+    let mut values = Vec::with_capacity(total);
+    for row in 0..out_rows {
+        for col in 0..out_cols {
+            if row < array.rows && col < array.cols {
+                values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+            } else {
+                values.push(pad_with.clone());
+            }
+        }
+    }
+
+    Value::Array(Array::new(out_rows, out_cols, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "MAP",
+        min_args: 2,
+        max_args: 255,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any],
+        implementation: map_fn,
+    }
+}
+
+fn map_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    if args.len() < 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let lambda = match eval_lambda_arg(ctx, args.last().expect("checked args is non-empty")) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let mut arrays = Vec::with_capacity(args.len().saturating_sub(1));
+    for expr in &args[..args.len() - 1] {
+        match eval_array_arg(ctx, expr) {
+            Ok(v) => arrays.push(v),
+            Err(e) => return Value::Error(e),
+        }
+    }
+
+    if lambda.params.len() != arrays.len() {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let (out_rows, out_cols) = match broadcast_shape(&arrays) {
+        Some(shape) => shape,
+        None => return Value::Error(ErrorKind::Value),
+    };
+
+    let call = prepare_lambda_call("__MAP_LAMBDA_CALL", arrays.len());
+
+    let mut out = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+    for row in 0..out_rows {
+        for col in 0..out_cols {
+            let mut arg_values = Vec::with_capacity(arrays.len());
+            for arr in &arrays {
+                let v = if arr.rows == 1 && arr.cols == 1 {
+                    arr.get(0, 0).cloned().unwrap_or(Value::Blank)
+                } else {
+                    arr.get(row, col).cloned().unwrap_or(Value::Blank)
+                };
+                arg_values.push(v);
+            }
+
+            let value = invoke_lambda(ctx, &lambda, &call, &arg_values);
+            out.push(value);
+        }
+    }
+
+    Value::Array(Array::new(out_rows, out_cols, out))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "BYROW",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: byrow_fn,
+    }
+}
+
+fn byrow_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let array = match eval_array_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let lambda = match eval_lambda_arg(ctx, &args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    if lambda.params.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let call = prepare_lambda_call("__BYROW_LAMBDA_CALL", 1);
+    let mut values = Vec::with_capacity(array.rows);
+    for row in 0..array.rows {
+        let mut row_values = Vec::with_capacity(array.cols);
+        for col in 0..array.cols {
+            row_values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+        }
+        let arg = Value::Array(Array::new(1, array.cols, row_values));
+        values.push(invoke_lambda(ctx, &lambda, &call, &[arg]));
+    }
+
+    Value::Array(Array::new(array.rows, 1, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "BYCOL",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: bycol_fn,
+    }
+}
+
+fn bycol_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let array = match eval_array_arg(ctx, &args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let lambda = match eval_lambda_arg(ctx, &args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    if lambda.params.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let call = prepare_lambda_call("__BYCOL_LAMBDA_CALL", 1);
+    let mut values = Vec::with_capacity(array.cols);
+    for col in 0..array.cols {
+        let mut col_values = Vec::with_capacity(array.rows);
+        for row in 0..array.rows {
+            col_values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
+        }
+        let arg = Value::Array(Array::new(array.rows, 1, col_values));
+        values.push(invoke_lambda(ctx, &lambda, &call, &[arg]));
+    }
+
+    Value::Array(Array::new(1, array.cols, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "MAKEARRAY",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Any],
+        implementation: makearray_fn,
+    }
+}
+
+fn makearray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let rows = match eval_scalar_arg(ctx, &args[0]).coerce_to_i64() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let cols = match eval_scalar_arg(ctx, &args[1]).coerce_to_i64() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let lambda = match eval_lambda_arg(ctx, &args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    if lambda.params.len() != 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    if rows <= 0 || cols <= 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let rows_usize = match usize::try_from(rows) {
+        Ok(v) => v,
+        Err(_) => return Value::Error(ErrorKind::Num),
+    };
+    let cols_usize = match usize::try_from(cols) {
+        Ok(v) => v,
+        Err(_) => return Value::Error(ErrorKind::Num),
+    };
+    let total = match rows_usize.checked_mul(cols_usize) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Num),
+    };
+
+    let call = prepare_lambda_call("__MAKEARRAY_LAMBDA_CALL", 2);
+    let mut values = Vec::with_capacity(total);
+    for row in 0..rows_usize {
+        for col in 0..cols_usize {
+            let arg_values = [
+                Value::Number((row as f64) + 1.0),
+                Value::Number((col as f64) + 1.0),
+            ];
+            values.push(invoke_lambda(ctx, &lambda, &call, &arg_values));
+        }
+    }
+
+    Value::Array(Array::new(rows_usize, cols_usize, values))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "REDUCE",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any],
+        implementation: reduce_fn,
+    }
+}
+
+fn reduce_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let (initial, array_expr, lambda_expr) = match args {
+        [array, lambda] => (Value::Blank, array, lambda),
+        [initial, array, lambda] => (eval_scalar_arg(ctx, initial), array, lambda),
+        _ => return Value::Error(ErrorKind::Value),
+    };
+
+    let mut acc = match scalarize_value(initial) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    if let Value::Error(e) = acc {
+        return Value::Error(e);
+    }
+
+    let array = match eval_array_arg(ctx, array_expr) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let lambda = match eval_lambda_arg(ctx, lambda_expr) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    if lambda.params.len() != 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let call = prepare_lambda_call("__REDUCE_LAMBDA_CALL", 2);
+    for cell in &array.values {
+        let args = [acc.clone(), cell.clone()];
+        acc = invoke_lambda(ctx, &lambda, &call, &args);
+        if let Value::Error(e) = acc {
+            return Value::Error(e);
+        }
+    }
+
+    acc
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "SCAN",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any],
+        implementation: scan_fn,
+    }
+}
+
+fn scan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let (initial, array_expr, lambda_expr) = match args {
+        [array, lambda] => (Value::Blank, array, lambda),
+        [initial, array, lambda] => (eval_scalar_arg(ctx, initial), array, lambda),
+        _ => return Value::Error(ErrorKind::Value),
+    };
+
+    let mut acc = match scalarize_value(initial) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    if let Value::Error(e) = acc {
+        return Value::Error(e);
+    }
+
+    let array = match eval_array_arg(ctx, array_expr) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let lambda = match eval_lambda_arg(ctx, lambda_expr) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    if lambda.params.len() != 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let call = prepare_lambda_call("__SCAN_LAMBDA_CALL", 2);
+    let mut values = Vec::with_capacity(array.values.len());
+    for cell in &array.values {
+        let args = [acc.clone(), cell.clone()];
+        acc = invoke_lambda(ctx, &lambda, &call, &args);
+        values.push(acc.clone());
+    }
+
+    Value::Array(Array::new(array.rows, array.cols, values))
+}
+
 fn eval_array_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Array, ErrorKind> {
     arg_value_to_array(ctx, ctx.eval_arg(expr))
 }
@@ -1073,6 +1466,126 @@ fn arg_value_to_array(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Array,
             Ok(Array::new(rows, cols, values))
         }
         ArgValue::ReferenceUnion(_) => Err(ErrorKind::Value),
+    }
+}
+
+fn eval_optional_pad_with(
+    ctx: &dyn FunctionContext,
+    expr: Option<&CompiledExpr>,
+) -> Result<Value, ErrorKind> {
+    let Some(expr) = expr else {
+        return Ok(Value::Error(ErrorKind::NA));
+    };
+    if matches!(expr, Expr::Blank) {
+        return Ok(Value::Error(ErrorKind::NA));
+    }
+    let v = eval_scalar_arg(ctx, expr);
+    match v {
+        Value::Error(e) => Err(e),
+        Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
+        other => Ok(other),
+    }
+}
+
+fn eval_lambda_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Lambda, ErrorKind> {
+    match eval_scalar_arg(ctx, expr) {
+        Value::Lambda(lambda) => Ok(lambda),
+        Value::Error(e) => Err(e),
+        _ => Err(ErrorKind::Value),
+    }
+}
+
+fn broadcast_shape(arrays: &[Array]) -> Option<(usize, usize)> {
+    let mut rows = 1usize;
+    let mut cols = 1usize;
+    let mut found = false;
+    for arr in arrays {
+        if arr.rows != 1 || arr.cols != 1 {
+            rows = arr.rows;
+            cols = arr.cols;
+            found = true;
+            break;
+        }
+    }
+
+    if !found {
+        return Some((1, 1));
+    }
+
+    for arr in arrays {
+        if (arr.rows == 1 && arr.cols == 1) || (arr.rows == rows && arr.cols == cols) {
+            continue;
+        }
+        return None;
+    }
+
+    Some((rows, cols))
+}
+
+#[derive(Debug, Clone)]
+struct LambdaCall {
+    name: String,
+    arg_names: Vec<String>,
+    expr: CompiledExpr,
+}
+
+fn prepare_lambda_call(call_name: &str, arg_count: usize) -> LambdaCall {
+    let mut arg_names = Vec::with_capacity(arg_count);
+    let mut args = Vec::with_capacity(arg_count);
+    for idx in 0..arg_count {
+        let name = format!("__ARG{idx}");
+        args.push(Expr::NameRef(NameRef {
+            sheet: SheetReference::Current,
+            name: name.clone(),
+        }));
+        arg_names.push(name);
+    }
+
+    LambdaCall {
+        name: call_name.to_string(),
+        arg_names,
+        expr: Expr::FunctionCall {
+            name: call_name.to_string(),
+            original_name: call_name.to_string(),
+            args,
+        },
+    }
+}
+
+fn invoke_lambda(
+    ctx: &dyn FunctionContext,
+    lambda: &Lambda,
+    call: &LambdaCall,
+    args: &[Value],
+) -> Value {
+    if args.len() != call.arg_names.len() {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let mut bindings: HashMap<String, Value> = HashMap::with_capacity(call.arg_names.len() + 1);
+    bindings.insert(call.name.clone(), Value::Lambda(lambda.clone()));
+    for (name, value) in call.arg_names.iter().zip(args.iter()) {
+        bindings.insert(name.clone(), value.clone());
+    }
+
+    let value = ctx.eval_formula_with_bindings(&call.expr, &bindings);
+    match scalarize_value(value) {
+        Ok(v) => v,
+        Err(e) => Value::Error(e),
+    }
+}
+
+fn scalarize_value(value: Value) -> Result<Value, ErrorKind> {
+    match value {
+        Value::Array(arr) => {
+            if arr.rows == 1 && arr.cols == 1 {
+                Ok(arr.top_left())
+            } else {
+                Err(ErrorKind::Value)
+            }
+        }
+        Value::Spill { .. } => Err(ErrorKind::Value),
+        other => Ok(other),
     }
 }
 
