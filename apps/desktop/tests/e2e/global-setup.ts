@@ -19,15 +19,15 @@ function run(command: string, args: string[], cwd: string) {
 export default async function globalSetup() {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const desktopRoot = path.resolve(here, "../..");
-  const pnpmBin = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+  const repoRoot = path.resolve(desktopRoot, "../..");
 
   // Playwright e2e uses `@formula/engine`, which depends on generated wasm-pack
   // output under `packages/engine/pkg`. Ensure the artifacts exist before the
   // dev server starts serving modules.
   try {
-    await run(pnpmBin, ["-w", "smoke:wasm"], desktopRoot);
+    await run(process.execPath, [path.join(repoRoot, "packages/engine/scripts/smoke-wasm.mjs")], desktopRoot);
   } catch {
-    await run(pnpmBin, ["-w", "build:wasm"], desktopRoot);
+    await run(process.execPath, [path.join(repoRoot, "packages/engine/scripts/build-wasm.mjs")], desktopRoot);
   }
 
   await run(process.execPath, ["scripts/ensure-pyodide-assets.mjs"], desktopRoot);
