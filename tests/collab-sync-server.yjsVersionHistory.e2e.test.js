@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 
 import { createCollabSession } from "../packages/collab/session/src/index.ts";
-import { createCollabVersioning } from "../packages/collab/versioning/index.js";
+import { createCollabVersioning } from "../packages/collab/versioning/src/index.ts";
 import { YjsVersionStore } from "../packages/versioning/src/store/yjsVersionStore.js";
 import {
   getAvailablePort,
@@ -59,8 +59,8 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
       chunkSize: 8 * 1024,
     });
 
-    const versionManager = createCollabVersioning({
-      ydoc: session.doc,
+    const versioning = createCollabVersioning({
+      session,
       store,
       user: { userId, userName },
       autoStart: false,
@@ -70,12 +70,12 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
     const destroy = () => {
       if (destroyed) return;
       destroyed = true;
-      versionManager.stopAutoSnapshot();
+      versioning.destroy();
       session.destroy();
       session.doc.destroy();
     };
 
-    return { session, store, versionManager, destroy };
+    return { session, store, versioning, destroy };
   };
 
   const clientA = createClient({ userId: "u-a", userName: "User A", storeCompression: "gzip" });
@@ -92,22 +92,22 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
   clientA.session.setCellValue("Sheet1:0:0", 1);
   await waitForCondition(() => clientB.session.getCell("Sheet1:0:0")?.value === 1, 10_000);
 
-  const checkpoint = await clientA.versionManager.createCheckpoint({ name: "Approved", locked: true });
+  const checkpoint = await clientA.versioning.createCheckpoint({ name: "Approved", locked: true });
   assert.equal(checkpoint.kind, "checkpoint");
 
   clientA.session.setCellValue("Sheet1:0:0", 2);
   await waitForCondition(() => clientB.session.getCell("Sheet1:0:0")?.value === 2, 10_000);
-  const snapshot = await clientA.versionManager.createSnapshot({ description: "edit" });
+  const snapshot = await clientA.versioning.createSnapshot({ description: "edit" });
   assert.equal(snapshot.kind, "snapshot");
 
   // --- Version history sync A -> B ---
   await waitForCondition(async () => {
-    const versions = await clientB.versionManager.listVersions();
+    const versions = await clientB.versioning.listVersions();
     return versions.some((v) => v.id === checkpoint.id) && versions.some((v) => v.id === snapshot.id);
   }, 10_000);
 
   {
-    const versions = await clientB.versionManager.listVersions();
+    const versions = await clientB.versioning.listVersions();
     const seenCheckpoint = versions.find((v) => v.id === checkpoint.id);
     assert.ok(seenCheckpoint);
     assert.equal(seenCheckpoint.checkpointName, "Approved");
@@ -115,11 +115,11 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
   }
 
   // --- Restore propagates A -> B ---
-  await clientA.versionManager.restoreVersion(checkpoint.id);
+  await clientA.versioning.restoreVersion(checkpoint.id);
   await waitForCondition(() => clientB.session.getCell("Sheet1:0:0")?.value === 1, 10_000);
 
   await waitForCondition(async () => {
-    const versions = await clientB.versionManager.listVersions();
+    const versions = await clientB.versioning.listVersions();
     return versions.some((v) => v.kind === "restore");
   }, 10_000);
 
@@ -145,9 +145,8 @@ test("sync-server e2e: YjsVersionStore shares version history + restores + persi
   // --- Hydration from persisted sync-server state ---
   await waitForCondition(() => clientC.session.getCell("Sheet1:0:0")?.value === 1, 10_000);
 
-  const versionsC = await clientC.versionManager.listVersions();
+  const versionsC = await clientC.versioning.listVersions();
   assert.ok(versionsC.some((v) => v.id === checkpoint.id), "expected checkpoint to persist in doc");
   assert.ok(versionsC.some((v) => v.id === snapshot.id), "expected snapshot to persist in doc");
   assert.ok(versionsC.some((v) => v.kind === "restore"), "expected restore head to persist in doc");
 });
-

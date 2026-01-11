@@ -2,6 +2,7 @@ import type { CollabSession } from "@formula/collab-session";
 
 import { VersionManager } from "../../../versioning/src/versioning/versionManager.js";
 import { createYjsSpreadsheetDocAdapter } from "../../../versioning/src/yjs/yjsSpreadsheetDocAdapter.js";
+import { YjsVersionStore } from "../../../versioning/src/store/yjsVersionStore.js";
 
 export type CollabVersioningUser = { userId: string; userName: string };
 
@@ -37,7 +38,13 @@ export type VersionStore = {
 
 export type CollabVersioningOptions = {
   session: CollabSession;
-  store: VersionStore;
+  /**
+   * VersionStore implementation.
+   *
+   * If omitted, defaults to {@link YjsVersionStore} so version history is stored
+   * inside the collaborative Yjs document and syncs via sync-server/y-websocket.
+   */
+  store?: VersionStore;
   user?: Partial<CollabVersioningUser>;
   retention?: VersionRetention;
   autoSnapshotIntervalMs?: number;
@@ -62,10 +69,20 @@ export class CollabVersioning {
 
   constructor(opts: CollabVersioningOptions) {
     this.session = opts.session;
-    const doc = createYjsSpreadsheetDocAdapter(opts.session.doc);
+
+    const store = opts.store ?? new YjsVersionStore({ doc: opts.session.doc });
+
+    // When version history itself is stored in the Yjs doc (YjsVersionStore),
+    // we must exclude those roots from snapshots/restores to avoid recursive
+    // snapshots and to prevent restores from rolling back history.
+    const storeCtorName = (store as any)?.constructor?.name ?? "";
+    const storeInDoc = store instanceof (YjsVersionStore as any) || storeCtorName === "YjsVersionStore";
+    const excludeRoots = storeInDoc ? ["versions", "versionsMeta"] : undefined;
+
+    const doc = createYjsSpreadsheetDocAdapter(opts.session.doc, excludeRoots ? { excludeRoots } : undefined);
     this.manager = new VersionManager({
       doc,
-      store: opts.store,
+      store,
       user: opts.user,
       retention: opts.retention,
       autoSnapshotIntervalMs: opts.autoSnapshotIntervalMs,
