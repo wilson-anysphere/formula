@@ -766,9 +766,9 @@ impl AppState {
         }
 
         // Recalculate once more so formulas depending on the pivot output update.
-        self.engine.recalculate();
+        let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
         let mut updates = pivot_updates;
-        updates.extend(self.refresh_computed_values()?);
+        updates.extend(self.refresh_computed_values_from_recalc_changes(&recalc_changes)?);
 
         Ok(dedupe_updates(updates))
     }
@@ -814,8 +814,8 @@ impl AppState {
             }
         }
 
-        self.engine.recalculate();
-        self.refresh_computed_values()
+        let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
+        self.refresh_computed_values_from_recalc_changes(&recalc_changes)
     }
 
     pub fn goal_seek(
@@ -1016,8 +1016,8 @@ impl AppState {
         }
 
         self.apply_snapshots(&after)?;
-        self.engine.recalculate();
-        let mut updates = self.refresh_computed_values()?;
+        let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
+        let mut updates = self.refresh_computed_values_from_recalc_changes(&recalc_changes)?;
 
         for (resolved_sheet_id, row, col) in touched {
             if !updates
@@ -1103,8 +1103,8 @@ impl AppState {
         }
 
         self.apply_snapshots(&after)?;
-        self.engine.recalculate();
-        let mut updates = self.refresh_computed_values()?;
+        let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
+        let mut updates = self.refresh_computed_values_from_recalc_changes(&recalc_changes)?;
 
         for (resolved_sheet_id, row, col) in touched {
             if !updates

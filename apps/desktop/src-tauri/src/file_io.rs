@@ -422,8 +422,8 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             .iter()
             .map(|dn| {
                 let sheet_id = match dn.scope {
-                    formula_model::names::DefinedNameScope::Workbook => None,
-                    formula_model::names::DefinedNameScope::Sheet(id) => {
+                    formula_model::DefinedNameScope::Workbook => None,
+                    formula_model::DefinedNameScope::Sheet(id) => {
                         sheet_names_by_id.get(&id).cloned()
                     }
                 };
