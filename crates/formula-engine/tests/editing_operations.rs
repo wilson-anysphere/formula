@@ -194,3 +194,78 @@ fn structural_edits_rewrite_quoted_sheet_names() {
 
     assert_eq!(engine.get_cell_formula("Other", "A1"), Some("='My Sheet'!A2"));
 }
+
+#[test]
+fn copy_range_adjusts_row_and_column_ranges() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SUM(1:1)")
+        .unwrap();
+    engine
+        .apply_operation(EditOp::CopyRange {
+            sheet: "Sheet1".to_string(),
+            src: range("C1"),
+            dst_top_left: cell("C2"),
+        })
+        .unwrap();
+    assert_eq!(engine.get_cell_formula("Sheet1", "C2"), Some("=SUM(2:2)"));
+
+    engine
+        .set_cell_formula("Sheet1", "C3", "=SUM(A:A)")
+        .unwrap();
+    engine
+        .apply_operation(EditOp::CopyRange {
+            sheet: "Sheet1".to_string(),
+            src: range("C3"),
+            dst_top_left: cell("D3"),
+        })
+        .unwrap();
+    assert_eq!(engine.get_cell_formula("Sheet1", "D3"), Some("=SUM(B:B)"));
+}
+
+#[test]
+fn insert_cells_shift_right_moves_cells_and_rewrites_references() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 3.0).unwrap();
+    engine.set_cell_formula("Sheet1", "D1", "=A1+C1").unwrap();
+
+    engine
+        .apply_operation(EditOp::InsertCellsShiftRight {
+            sheet: "Sheet1".to_string(),
+            range: range("A1:B1"),
+        })
+        .unwrap();
+
+    // A1 moved to C1, and C1 moved to E1.
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(3.0));
+    // Formula moved from D1 -> F1 and should track the moved cells.
+    assert_eq!(engine.get_cell_formula("Sheet1", "F1"), Some("=C1+E1"));
+}
+
+#[test]
+fn delete_cells_shift_left_creates_ref_errors_and_updates_shifted_references() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "D1", 4.0).unwrap();
+    engine.set_cell_formula("Sheet1", "E1", "=A1+D1").unwrap();
+    // This reference points into the deleted region and should become #REF!
+    engine.set_cell_formula("Sheet1", "A2", "=B1").unwrap();
+
+    engine
+        .apply_operation(EditOp::DeleteCellsShiftLeft {
+            sheet: "Sheet1".to_string(),
+            range: range("B1:C1"),
+        })
+        .unwrap();
+
+    // D1 moved into B1.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(4.0));
+    // Formula moved from E1 -> C1 and should track the moved cell (D1 -> B1).
+    assert_eq!(engine.get_cell_formula("Sheet1", "C1"), Some("=A1+B1"));
+    // Reference into deleted region becomes #REF!, even though another cell moved into B1.
+    assert_eq!(engine.get_cell_formula("Sheet1", "A2"), Some("=#REF!"));
+}
