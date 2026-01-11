@@ -291,7 +291,10 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         }
     }
 
-    let date_time_styles = DateTimeStyleIds::new(&mut out);
+    // `calamine` may surface date/time serials as `Data::DateTime`, but it does not preserve the
+    // exact BIFF number format code. We attempt to recover the precise format via BIFF parsing; if
+    // that fails we fall back to a small set of heuristics (interned lazily).
+    let mut date_time_styles: Option<DateTimeStyleIds> = None;
 
     let (sheet_mapping, mapping_warning) =
         reconcile_biff_sheet_mapping(&sheets, biff_sheets.as_deref());
@@ -301,6 +304,39 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
     for (sheet_idx, sheet_meta) in sheets.iter().enumerate() {
         let sheet_name = sheet_meta.name.clone();
+        let biff_idx = sheet_mapping.get(sheet_idx).copied().flatten();
+
+        let sheet_cell_xfs = biff_idx
+            .and_then(|biff_idx| cell_xf_indices.as_ref().and_then(|v| v.get(biff_idx)))
+            .filter(|map| !map.is_empty());
+
+        let sheet_needs_datetime_fallback = xf_style_ids.is_none() || sheet_cell_xfs.is_none();
+
+        let value_range = match workbook.worksheet_range(&sheet_name) {
+            Ok(range) => Some(range),
+            Err(err) => {
+                warnings.push(ImportWarning::new(format!(
+                    "failed to read cell values for sheet `{sheet_name}`: {err}"
+                )));
+                None
+            }
+        };
+
+        if sheet_needs_datetime_fallback
+            && date_time_styles.is_none()
+            && value_range
+                .as_ref()
+                .is_some_and(|range| range.used_cells().any(|(_, _, v)| matches!(v, Data::DateTime(_))))
+        {
+            date_time_styles = Some(DateTimeStyleIds::new(&mut out));
+        }
+
+        let sheet_date_time_styles = if sheet_needs_datetime_fallback {
+            date_time_styles
+        } else {
+            None
+        };
+
         let sheet_id = out.add_sheet(sheet_name.clone())?;
         let sheet = out
             .sheet_mut(sheet_id)
@@ -314,8 +350,6 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 sheet_meta.typ
             )));
         }
-
-        let biff_idx = sheet_mapping.get(sheet_idx).copied().flatten();
 
         if let Some(biff_idx) = biff_idx {
             if let Some(props) = row_col_props
@@ -348,12 +382,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             }
         }
 
-        let sheet_cell_xfs = biff_idx
-            .and_then(|biff_idx| cell_xf_indices.as_ref().and_then(|v| v.get(biff_idx)))
-            .filter(|map| !map.is_empty());
-
-        match workbook.worksheet_range(&sheet_name) {
-            Ok(range) => {
+        if let Some(range) = value_range.as_ref() {
                 let range_start = range.start().unwrap_or((0, 0));
 
                 for (row, col, value) in range.used_cells() {
@@ -365,7 +394,9 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                     };
 
                     let anchor = sheet.merged_regions.resolve_cell(cell_ref);
-                    let Some((value, mut style_id)) = convert_value(value, date_time_styles) else {
+                    let Some((value, mut style_id)) =
+                        convert_value(value, sheet_date_time_styles)
+                    else {
                         continue;
                     };
 
@@ -380,10 +411,6 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         sheet.set_style_id(anchor, style_id);
                     }
                 }
-            }
-            Err(err) => warnings.push(ImportWarning::new(format!(
-                "failed to read cell values for sheet `{sheet_name}`: {err}"
-            ))),
         }
 
         match workbook.worksheet_formula(&sheet_name) {
@@ -524,7 +551,7 @@ fn sheet_visible_to_visibility(visible: SheetVisible) -> SheetVisibility {
 
 fn convert_value(
     value: &Data,
-    date_time_styles: DateTimeStyleIds,
+    date_time_styles: Option<DateTimeStyleIds>,
 ) -> Option<(CellValue, Option<u32>)> {
     match value {
         Data::Empty => None,
@@ -535,7 +562,7 @@ fn convert_value(
         Data::Error(e) => Some((CellValue::Error(cell_error_to_error_value(e.clone())), None)),
         Data::DateTime(v) => Some((
             CellValue::Number(v.as_f64()),
-            Some(date_time_styles.style_for_excel_datetime(v)),
+            date_time_styles.map(|styles| styles.style_for_excel_datetime(v)),
         )),
         Data::DateTimeIso(v) => Some((CellValue::String(v.clone()), None)),
         Data::DurationIso(v) => Some((CellValue::String(v.clone()), None)),
