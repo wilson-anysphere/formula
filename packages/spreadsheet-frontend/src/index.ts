@@ -145,6 +145,11 @@ export class EngineGridProvider implements CellProvider {
   private pendingInvalidations: CellRange[] = [];
   private flushScheduled = false;
 
+  private pendingPrefetchRanges: Range0[] = [];
+  private pendingPrefetchResolvers: Array<() => void> = [];
+  private prefetchScheduled = false;
+  private prefetchInFlight: Promise<void> | null = null;
+
   constructor(options: EngineGridProviderOptions) {
     this.cache = options.cache;
     this.rowCount = options.rowCount;
@@ -189,20 +194,20 @@ export class EngineGridProvider implements CellProvider {
 
     if (clamped.endRow0Exclusive <= clamped.startRow0 || clamped.endCol0Exclusive <= clamped.startCol0) return;
 
-    try {
-      await this.cache.prefetch(clamped, this.sheet);
-    } catch {
-      // Engine fetch failures should not crash the grid; the next scroll/prefetch will retry.
-      return;
+    const result = new Promise<void>((resolve) => {
+      this.pendingPrefetchRanges.push(clamped);
+      this.pendingPrefetchResolvers.push(resolve);
+    });
+
+    if (!this.prefetchScheduled) {
+      this.prefetchScheduled = true;
+      queueMicrotask(() => {
+        this.prefetchScheduled = false;
+        void this.flushPrefetches();
+      });
     }
 
-    const gridRange: CellRange = {
-      startRow: clamped.startRow0 + offset,
-      endRow: clamped.endRow0Exclusive + offset,
-      startCol: clamped.startCol0 + offset,
-      endCol: clamped.endCol0Exclusive + offset
-    };
-    this.queueInvalidation(gridRange);
+    return result;
   }
 
   applyRecalcChanges(changes: CellChange[]): void {
@@ -242,6 +247,61 @@ export class EngineGridProvider implements CellProvider {
       for (const listener of this.listeners) listener(update);
     }
   }
+
+  private async flushPrefetches(): Promise<void> {
+    if (this.prefetchInFlight) return this.prefetchInFlight;
+
+    this.prefetchInFlight = (async () => {
+      while (this.pendingPrefetchRanges.length > 0) {
+        const ranges = this.pendingPrefetchRanges;
+        const resolvers = this.pendingPrefetchResolvers;
+        this.pendingPrefetchRanges = [];
+        this.pendingPrefetchResolvers = [];
+
+        const merged = mergeRange0(ranges);
+
+        try {
+          await this.cache.prefetch(merged, this.sheet);
+        } catch {
+          // Engine fetch failures should not crash the grid; the next scroll/prefetch will retry.
+        }
+
+        const offset = this.headers ? 1 : 0;
+        this.queueInvalidation({
+          startRow: merged.startRow0 + offset,
+          endRow: merged.endRow0Exclusive + offset,
+          startCol: merged.startCol0 + offset,
+          endCol: merged.endCol0Exclusive + offset
+        });
+
+        for (const resolve of resolvers) resolve();
+      }
+    })().finally(() => {
+      this.prefetchInFlight = null;
+    });
+
+    return this.prefetchInFlight;
+  }
+}
+
+function mergeRange0(ranges: Range0[]): Range0 {
+  let startRow0 = Number.POSITIVE_INFINITY;
+  let endRow0Exclusive = 0;
+  let startCol0 = Number.POSITIVE_INFINITY;
+  let endCol0Exclusive = 0;
+
+  for (const range of ranges) {
+    startRow0 = Math.min(startRow0, range.startRow0);
+    endRow0Exclusive = Math.max(endRow0Exclusive, range.endRow0Exclusive);
+    startCol0 = Math.min(startCol0, range.startCol0);
+    endCol0Exclusive = Math.max(endCol0Exclusive, range.endCol0Exclusive);
+  }
+
+  if (!Number.isFinite(startRow0) || !Number.isFinite(startCol0)) {
+    throw new Error("mergeRange0: expected at least one range");
+  }
+
+  return { startRow0, endRow0Exclusive, startCol0, endCol0Exclusive };
 }
 
 function coalesceRanges(ranges: CellRange[]): CellRange[] {

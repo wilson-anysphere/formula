@@ -66,6 +66,29 @@ describe("EngineGridProvider", () => {
     expect(updates).toEqual([{ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 2 } }]);
   });
 
+  it("batches prefetch calls in the same microtask", async () => {
+    const values = new Map<string, CellScalar>();
+    values.set("Sheet1!A1", 1);
+    values.set("Sheet1!B1", 2);
+
+    const engine = new FakeEngine(values) as any;
+    const cache = new EngineCellCache(engine);
+    const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10 });
+
+    const updates: CellProviderUpdate[] = [];
+    provider.subscribe((update) => updates.push(update));
+
+    const p1 = provider.prefetch({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+    const p2 = provider.prefetch({ startRow: 0, endRow: 1, startCol: 1, endCol: 2 });
+    await Promise.all([p1, p2]);
+    await flushMicrotasks();
+
+    expect(engine.calls.map((c) => c.range)).toEqual(["A1:B1"]);
+    expect(provider.getCell(0, 0)?.value).toBe(1);
+    expect(provider.getCell(0, 1)?.value).toBe(2);
+    expect(updates).toEqual([{ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 2 } }]);
+  });
+
   it("supports header row/col offset mode", async () => {
     const values = new Map<string, CellScalar>();
     values.set("Sheet1!A1", 1);
