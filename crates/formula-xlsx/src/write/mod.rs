@@ -158,6 +158,7 @@ fn plan_sheet_structure(
     for sheet in &doc.workbook.sheets {
         if let Some(idx) = matched_meta_by_ws_id.get(&sheet.id).copied() {
             let mut meta = doc.meta.sheets[idx].clone();
+            meta.worksheet_id = sheet.id;
             meta.state = sheet_state_from_visibility(sheet.visibility);
             sheets.push(meta);
             continue;

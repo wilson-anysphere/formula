@@ -329,3 +329,34 @@ fn sheet_visibility_roundtrips_to_workbook_xml_state() {
     let parts = diff_parts(&fixture_path, &saved);
     assert_eq!(parts, BTreeSet::from(["xl/workbook.xml".to_string()]));
 }
+
+#[test]
+fn preserves_sheet_ids_when_internal_ids_change() {
+    let fixture = fixture_bytes();
+
+    let mut doc = load_from_bytes(&fixture).expect("load fixture");
+    for sheet in &mut doc.workbook.sheets {
+        // Simulate a reconstructed workbook model that kept XLSX identifiers but got new internal ids.
+        sheet.id = sheet.id + 1000;
+    }
+
+    let saved = doc.save_to_vec().expect("save");
+    let entries = workbook_sheet_entries(&zip_part(&saved, "xl/workbook.xml"));
+    assert_eq!(
+        entries,
+        vec![
+            ("Sheet1".to_string(), 1, "rId1".to_string()),
+            ("Sheet2".to_string(), 2, "rId2".to_string()),
+        ]
+    );
+
+    let rels = workbook_relationship_targets(&zip_part(&saved, "xl/_rels/workbook.xml.rels"));
+    assert_eq!(
+        rels.get("rId1").map(String::as_str),
+        Some("worksheets/sheet1.xml")
+    );
+    assert_eq!(
+        rels.get("rId2").map(String::as_str),
+        Some("worksheets/sheet2.xml")
+    );
+}
