@@ -1,6 +1,7 @@
 import GraphemeSplitter from "grapheme-splitter";
 
 import { LRUCache } from "../lru.js";
+import { detectBaseDirection } from "../direction.js";
 
 /**
  * @typedef {import("../measurer.js").TextMeasurement} TextMeasurement
@@ -74,6 +75,7 @@ export class HarfBuzzTextMeasurer {
     const buffer = hb.createBuffer();
     buffer.addText(text);
     buffer.guessSegmentProperties();
+    buffer.setDirection(detectBaseDirection(text));
     hb.shape(face.hbFont, buffer);
 
     let sum = 0;

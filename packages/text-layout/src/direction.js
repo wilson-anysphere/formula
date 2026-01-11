@@ -1,6 +1,6 @@
 const RTL_SCRIPT_RE =
   /[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Adlam}]/u;
-const STRONG_LTR_RE = /[\p{Alphabetic}\p{Number}]/u;
+const STRONG_LTR_RE = /[\p{Alphabetic}]/u;
 
 /**
  * @param {string} text
@@ -25,4 +25,3 @@ export function resolveAlign(align, direction) {
   if (align === "start") return direction === "rtl" ? "right" : "left";
   return direction === "rtl" ? "left" : "right";
 }
-

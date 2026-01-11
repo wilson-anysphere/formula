@@ -53,12 +53,12 @@ test("char wrap uses grapheme clusters (combining marks stay with base)", () => 
   assert.deepEqual(layout.lines.map((l) => l.text), ["a\u0301", "b"]);
 });
 
-test("auto direction chooses rtl when the first strong character is Hebrew", () => {
+test("auto direction chooses rtl when the first strong character is Hebrew (numbers are neutral)", () => {
   const measurer = makeMonospaceMeasurer();
   const engine = new TextLayoutEngine(measurer);
 
   const layout = engine.layout({
-    text: "שלום עולם",
+    text: "123 שלום עולם",
     font: { family: "Inter", sizePx: 10, weight: 400 },
     maxWidth: 4,
     wrapMode: "word",
@@ -68,7 +68,7 @@ test("auto direction chooses rtl when the first strong character is Hebrew", () 
 
   assert.equal(layout.direction, "rtl");
   assert.equal(layout.resolvedAlign, "right");
-  assert.deepEqual(layout.lines.map((l) => l.text), ["שלום", "עולם"]);
+  assert.deepEqual(layout.lines.map((l) => l.text), ["123", "שלום", "עולם"]);
 });
 
 test("layout results are cached to avoid repeated measurement work", () => {
