@@ -249,3 +249,41 @@ fn streaming_workbook_cell_patches_resolve_sheet_names() -> Result<(), Box<dyn s
 
     Ok(())
 }
+
+#[test]
+fn streaming_patch_preserves_unknown_cell_types() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/date-type.xlsx");
+    let bytes = fs::read(&fixture_path)?;
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("C1")?,
+        CellValue::String("2028-05-06T00:00:00Z".to_string()),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+
+    let xml_doc = roxmltree::Document::parse(&sheet_xml)?;
+    let cell = xml_doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("C1"))
+        .expect("C1 cell should exist");
+    assert_eq!(cell.attribute("t"), Some("d"));
+    let v = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "v")
+        .and_then(|n| n.text())
+        .unwrap_or_default();
+    assert_eq!(v, "2028-05-06T00:00:00Z");
+
+    Ok(())
+}

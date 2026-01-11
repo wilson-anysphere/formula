@@ -576,14 +576,15 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     cell_ref: &CellRef,
     patch: &CellPatchInternal,
 ) -> Result<(), StreamingPatchError> {
-    let (cell_t, body_kind) = cell_representation(&patch.value, patch.formula.as_deref())?;
     let patch_formula = patch.formula.as_deref();
+    let mut existing_t: Option<String> = None;
 
     let mut c = BytesStart::new("c");
     let mut has_r = false;
     for attr in cell_start.attributes() {
         let attr = attr?;
         if attr.key.as_ref() == b"t" {
+            existing_t = Some(attr.unescape_value()?.into_owned());
             continue;
         }
         if attr.key.as_ref() == b"r" {
@@ -595,7 +596,17 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         let a1 = cell_ref.to_a1();
         c.push_attribute(("r", a1.as_str()));
     }
-    if let Some(t) = cell_t {
+
+    let (cell_t, mut body_kind) = cell_representation(&patch.value, patch_formula)?;
+    let mut cell_t_owned = cell_t.map(|t| t.to_string());
+    if let (Some(existing_t), CellValue::String(s)) = (existing_t.as_deref(), &patch.value) {
+        if should_preserve_unknown_t(existing_t) {
+            cell_t_owned = Some(existing_t.to_string());
+            body_kind = CellBodyKind::V(s.clone());
+        }
+    }
+
+    if let Some(t) = cell_t_owned.as_deref() {
         c.push_attribute(("t", t));
     }
 
@@ -832,7 +843,10 @@ fn write_patched_cell<W: Write>(
     cell_ref: &CellRef,
     patch: &CellPatchInternal,
 ) -> Result<(), StreamingPatchError> {
-    let (cell_t, body_kind) = cell_representation(&patch.value, patch.formula.as_deref())?;
+    let patch_formula = patch.formula.as_deref();
+    let mut existing_t: Option<String> = None;
+    let (cell_t, mut body_kind) = cell_representation(&patch.value, patch_formula)?;
+    let mut cell_t_owned = cell_t.map(|t| t.to_string());
 
     let mut c = BytesStart::new("c");
     let inserted_a1 = original.is_none().then(|| cell_ref.to_a1());
@@ -841,6 +855,7 @@ fn write_patched_cell<W: Write>(
         for attr in orig.attributes() {
             let attr = attr?;
             if attr.key.as_ref() == b"t" {
+                existing_t = Some(attr.unescape_value()?.into_owned());
                 continue;
             }
             c.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
@@ -850,13 +865,20 @@ fn write_patched_cell<W: Write>(
         c.push_attribute(("r", a1.as_str()));
     }
 
-    if let Some(t) = cell_t {
+    if let (Some(existing_t), CellValue::String(s)) = (existing_t.as_deref(), &patch.value) {
+        if should_preserve_unknown_t(existing_t) {
+            cell_t_owned = Some(existing_t.to_string());
+            body_kind = CellBodyKind::V(s.clone());
+        }
+    }
+
+    if let Some(t) = cell_t_owned.as_deref() {
         c.push_attribute(("t", t));
     }
 
     writer.write_event(Event::Start(c))?;
 
-    if let Some(formula) = patch.formula.as_deref() {
+    if let Some(formula) = patch_formula {
         write_formula_element(writer, None, formula, false)?;
     }
 
@@ -909,6 +931,13 @@ fn cell_representation(
         }
         other => Err(StreamingPatchError::UnsupportedCellValue(other.clone())),
     }
+}
+
+fn should_preserve_unknown_t(t: &str) -> bool {
+    // Preserve less-common or unknown SpreadsheetML cell types (e.g. `t="d"`). When patching
+    // string cells, rewriting these as `inlineStr`/`str` can change semantics or cause Excel to
+    // re-interpret values. Keep the original `t` and write the patched value into `<v>` instead.
+    !matches!(t, "s" | "b" | "e" | "n" | "str" | "inlineStr")
 }
 
 fn needs_space_preserve(s: &str) -> bool {
