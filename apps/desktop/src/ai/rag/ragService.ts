@@ -111,11 +111,9 @@ function openAiEmbeddingDimension(model: string): number | null {
 }
 
 function embedderIdentity(config: DesktopRagEmbedderConfig | undefined, dimension: number): string {
-  const type = config?.type ?? "hash";
-  if (type === "hash") return dimension === 384 ? "hash" : `hash-${dimension}`;
-  if (type === "openai") return `openai-${config.model}`;
-  // ollama
-  return `ollama-${config.model}`;
+  if (config?.type === "openai") return `openai-${config.model}`;
+  if (config?.type === "ollama") return `ollama-${config.model}`;
+  return dimension === 384 ? "hash" : `hash-${dimension}`;
 }
 
 function storageNamespaceForEmbedder(params: {
@@ -130,9 +128,7 @@ function storageNamespaceForEmbedder(params: {
 }
 
 function resolveEmbedder(config: DesktopRagEmbedderConfig | undefined): { embedder: any; dimension: number } {
-  const type = config?.type ?? "hash";
-
-  if (type === "openai") {
+  if (config?.type === "openai") {
     const dimension = config.dimension ?? openAiEmbeddingDimension(config.model);
     if (!dimension) {
       throw new Error(
@@ -145,7 +141,7 @@ function resolveEmbedder(config: DesktopRagEmbedderConfig | undefined): { embedd
     };
   }
 
-  if (type === "ollama") {
+  if (config?.type === "ollama") {
     return {
       embedder: new OllamaEmbedder({ model: config.model, host: config.host, dimension: config.dimension }),
       dimension: config.dimension,
@@ -313,4 +309,3 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     dispose,
   };
 }
-

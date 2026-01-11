@@ -196,45 +196,39 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     options.systemPrompt ??
     "You are an AI assistant inside a spreadsheet app. Prefer using tools to read data before making claims.";
 
-  /**
-   * @param {string} [message]
-   */
-  function createAbortError(message = "Aborted") {
+  function createAbortError(message = "Aborted"): Error {
     const err = new Error(message);
     err.name = "AbortError";
     return err;
   }
 
-  /**
-   * @param {AbortSignal | undefined} signal
-   */
-  function throwIfAborted(signal) {
+  function throwIfAborted(signal: AbortSignal | undefined): void {
     if (signal?.aborted) throw createAbortError();
   }
 
-  /**
-   * @template T
-   * @param {AbortSignal | undefined} signal
-   * @param {Promise<T>} promise
-   * @returns {Promise<T>}
-   */
-  async function withAbort(signal, promise) {
+  async function withAbort<T>(signal: AbortSignal | undefined, promise: Promise<T>): Promise<T> {
     if (!signal) return promise;
     throwIfAborted(signal);
 
-    /** @type {(() => void) | null} */
-    let removeListener = null;
+    let rejectAbort!: (reason?: unknown) => void;
+    const abortPromise = new Promise<never>((_, reject) => {
+      rejectAbort = reject;
+    });
+    const onAbort = () => rejectAbort(createAbortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    // Handle the race where the signal aborts between the initial `throwIfAborted`
+    // check and registering the listener (AbortSignal does not re-fire past events
+    // for late listeners).
+    if (signal.aborted) onAbort();
+
     try {
       return await Promise.race([
         promise,
-        new Promise((_, reject) => {
-          const onAbort = () => reject(createAbortError());
-          signal.addEventListener("abort", onAbort, { once: true });
-          removeListener = () => signal.removeEventListener("abort", onAbort);
-        }),
+        abortPromise,
       ]);
     } finally {
-      removeListener?.();
+      signal.removeEventListener("abort", onAbort);
     }
   }
 
