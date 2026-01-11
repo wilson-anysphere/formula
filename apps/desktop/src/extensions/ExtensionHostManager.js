@@ -217,11 +217,9 @@ export class ExtensionHostManager {
     }
 
     for (const id of toLoad) {
-      const extensionPath = path.join(this.extensionsDir, id);
-      await this._host.loadExtension(extensionPath);
-      if (this._started && typeof this._host.startupExtension === "function") {
-        await this._host.startupExtension(id);
-      }
+      // Reuse reloadExtension() so we always run integrity checks before loading
+      // new installed extensions into the runtime.
+      await this.reloadExtension(id);
     }
   }
 
