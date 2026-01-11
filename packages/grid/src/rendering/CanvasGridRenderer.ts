@@ -2893,45 +2893,6 @@ export class CanvasGridRenderer {
     const ctx = this.selectionCtx;
     if (!ctx) return;
 
-    if (this.referenceHighlights.length > 0) {
-      const strokeRects = (rects: Rect[], lineWidth: number) => {
-        const inset = lineWidth / 2;
-        for (const rect of rects) {
-          if (!intersectRect(rect, intersection)) continue;
-          if (rect.width <= lineWidth || rect.height <= lineWidth) continue;
-          ctx.strokeRect(rect.x + inset, rect.y + inset, rect.width - lineWidth, rect.height - lineWidth);
-        }
-      };
-
-      ctx.save();
-
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4, 3]);
-
-      for (const highlight of this.referenceHighlights) {
-        if (highlight.active) continue;
-        const rects = this.rangeToViewportRects(highlight.range, viewport);
-        if (rects.length === 0) continue;
-        ctx.strokeStyle = highlight.color;
-        strokeRects(rects, ctx.lineWidth);
-      }
-
-      const hasActive = this.referenceHighlights.some((h) => h.active);
-      if (hasActive) {
-        ctx.lineWidth = 3;
-        ctx.setLineDash([]);
-        for (const highlight of this.referenceHighlights) {
-          if (!highlight.active) continue;
-          const rects = this.rangeToViewportRects(highlight.range, viewport);
-          if (rects.length === 0) continue;
-          ctx.strokeStyle = highlight.color;
-          strokeRects(rects, ctx.lineWidth);
-        }
-      }
-
-      ctx.restore();
-    }
-
     const transientRange = this.rangeSelection;
     if (transientRange) {
       const rects = this.rangeToViewportRects(transientRange, viewport);
@@ -2979,6 +2940,45 @@ export class CanvasGridRenderer {
 
         ctx.restore();
       }
+    }
+
+    if (this.referenceHighlights.length > 0) {
+      const strokeRects = (rects: Rect[], lineWidth: number) => {
+        const inset = lineWidth / 2;
+        for (const rect of rects) {
+          if (!intersectRect(rect, intersection)) continue;
+          if (rect.width <= lineWidth || rect.height <= lineWidth) continue;
+          ctx.strokeRect(rect.x + inset, rect.y + inset, rect.width - lineWidth, rect.height - lineWidth);
+        }
+      };
+
+      ctx.save();
+
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+
+      for (const highlight of this.referenceHighlights) {
+        if (highlight.active) continue;
+        const rects = this.rangeToViewportRects(highlight.range, viewport);
+        if (rects.length === 0) continue;
+        ctx.strokeStyle = highlight.color;
+        strokeRects(rects, ctx.lineWidth);
+      }
+
+      const hasActive = this.referenceHighlights.some((h) => h.active);
+      if (hasActive) {
+        ctx.lineWidth = 3;
+        ctx.setLineDash([]);
+        for (const highlight of this.referenceHighlights) {
+          if (!highlight.active) continue;
+          const rects = this.rangeToViewportRects(highlight.range, viewport);
+          if (rects.length === 0) continue;
+          ctx.strokeStyle = highlight.color;
+          strokeRects(rects, ctx.lineWidth);
+        }
+      }
+
+      ctx.restore();
     }
 
     if (this.selectionRanges.length === 0) return;

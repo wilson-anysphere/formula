@@ -313,6 +313,14 @@ export class SpreadsheetApp {
 
   private selection: SelectionState;
   private selectionRenderer = new SelectionRenderer();
+  private formulaSelectionRenderer = new SelectionRenderer({
+    fillColor: "transparent",
+    borderColor: "transparent",
+    activeBorderColor: resolveCssVar("--selection-border", { fallback: "transparent" }),
+    borderWidth: 2,
+    activeBorderWidth: 3,
+    fillHandleSize: 0,
+  });
   private readonly selectionListeners = new Set<(selection: SelectionState) => void>();
 
   private editor: CellEditorOverlay;
@@ -1083,6 +1091,7 @@ export class SpreadsheetApp {
   }
 
   getFillHandleRect(): { x: number; y: number; width: number; height: number } | null {
+    if (this.formulaBar?.isFormulaEditing()) return null;
     this.ensureViewportMappingCurrent();
     return this.selectionRenderer.getFillHandleRect(
       this.selection,
@@ -1749,7 +1758,9 @@ export class SpreadsheetApp {
       height: this.viewportHeight(),
     };
 
-    this.selectionRenderer.render(
+    const renderer = this.formulaBar?.isFormulaEditing() ? this.formulaSelectionRenderer : this.selectionRenderer;
+
+    renderer.render(
       this.selectionCtx,
       this.selection,
       {
@@ -1762,7 +1773,7 @@ export class SpreadsheetApp {
       }
     );
 
-    if (this.fillPreviewRange) {
+    if (!this.formulaBar?.isFormulaEditing() && this.fillPreviewRange) {
       const startRect = this.getCellRect({ row: this.fillPreviewRange.startRow, col: this.fillPreviewRange.startCol });
       const endRect = this.getCellRect({ row: this.fillPreviewRange.endRow, col: this.fillPreviewRange.endCol });
       if (startRect && endRect) {
