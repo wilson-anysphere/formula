@@ -16,6 +16,8 @@ import { enqueueApplyForDocument } from "./applyQueue.ts";
 // events as an opaque payload and primarily use their `type` + `job` fields.
 type RefreshEvent = any;
 
+export type DesktopPowerQueryRefreshReason = "manual" | "interval" | "on-open" | "cron";
+
 export type DesktopPowerQueryEvent =
   | RefreshEvent
   | { type: "apply:started"; jobId: string; queryId: string; destination: QuerySheetDestination; sessionId?: string }
@@ -186,7 +188,7 @@ export class DesktopPowerQueryRefreshManager {
     }
   }
 
-  refresh(queryId: string, reason: any = "manual") {
+  refresh(queryId: string, reason: DesktopPowerQueryRefreshReason = "manual") {
     const handle = this.manager.refresh(queryId, reason);
     return {
       ...handle,
@@ -204,7 +206,7 @@ export class DesktopPowerQueryRefreshManager {
    * This is useful for "refresh this query" UX where the host still wants to respect upstream
    * query dependencies and share a single credential/permission session.
    */
-  refreshWithDependencies(queryId: string, reason: any = "manual") {
+  refreshWithDependencies(queryId: string, reason: DesktopPowerQueryRefreshReason = "manual") {
     const handle = this.refreshAll([queryId], reason);
     const promise = handle.promise.then((results: any) => results?.[queryId]);
     promise.catch(() => {});
@@ -222,7 +224,7 @@ export class DesktopPowerQueryRefreshManager {
     };
   }
 
-  refreshAll(queryIds?: string[], reason: any = "manual") {
+  refreshAll(queryIds?: string[], reason: DesktopPowerQueryRefreshReason = "manual") {
     const handle = this.orchestrator.refreshAll(queryIds, reason);
     const sessionPrefix = `${handle.sessionId}:`;
 
