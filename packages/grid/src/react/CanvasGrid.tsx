@@ -68,6 +68,15 @@ export interface CanvasGridProps {
   ariaLabelledBy?: string;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function clampIndex(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return clamp(Math.trunc(value), min, max);
+}
+
 function toColumnName(col0: number): string {
   let value = col0 + 1;
   let name = "";
@@ -248,6 +257,124 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     hThumb.style.transform = `translateX(${hThumbMetrics.offset}px)`;
   };
 
+  const scrollCellIntoView = (row: number, col: number) => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+
+    const viewport = renderer.scroll.getViewportState();
+    const scroll = renderer.scroll.getScroll();
+
+    let nextScrollX = scroll.x;
+    let nextScrollY = scroll.y;
+
+    const scrollableWidth = Math.max(0, viewport.width - viewport.frozenWidth);
+    const scrollableHeight = Math.max(0, viewport.height - viewport.frozenHeight);
+
+    if (row >= viewport.frozenRows && scrollableHeight > 0) {
+      const rowTop = renderer.scroll.rows.positionOf(row);
+      const rowBottom = rowTop + renderer.scroll.rows.getSize(row);
+
+      const absScrollTop = viewport.frozenHeight + scroll.y;
+      const absScrollBottom = absScrollTop + scrollableHeight;
+
+      if (rowTop < absScrollTop) {
+        nextScrollY = rowTop - viewport.frozenHeight;
+      } else if (rowBottom > absScrollBottom) {
+        nextScrollY = rowBottom - viewport.frozenHeight - scrollableHeight;
+      }
+    }
+
+    if (col >= viewport.frozenCols && scrollableWidth > 0) {
+      const colLeft = renderer.scroll.cols.positionOf(col);
+      const colRight = colLeft + renderer.scroll.cols.getSize(col);
+
+      const absScrollLeft = viewport.frozenWidth + scroll.x;
+      const absScrollRight = absScrollLeft + scrollableWidth;
+
+      if (colLeft < absScrollLeft) {
+        nextScrollX = colLeft - viewport.frozenWidth;
+      } else if (colRight > absScrollRight) {
+        nextScrollX = colRight - viewport.frozenWidth - scrollableWidth;
+      }
+    }
+
+    if (nextScrollX !== scroll.x || nextScrollY !== scroll.y) {
+      renderer.setScroll(nextScrollX, nextScrollY);
+      syncScrollbars();
+    }
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+    if (interactionModeRef.current !== "default") return;
+
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    if (props.rowCount <= 0 || props.colCount <= 0) return;
+
+    let deltaRow = 0;
+    let deltaCol = 0;
+
+    switch (event.key) {
+      case "ArrowUp":
+        deltaRow = -1;
+        break;
+      case "ArrowDown":
+        deltaRow = 1;
+        break;
+      case "ArrowLeft":
+        deltaCol = -1;
+        break;
+      case "ArrowRight":
+        deltaCol = 1;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+
+    const previousSelection = renderer.getSelection();
+    const previousRange = renderer.getSelectionRange();
+
+    const base =
+      previousSelection ?? { row: clampIndex(frozenRowsRef.current, 0, props.rowCount - 1), col: clampIndex(frozenColsRef.current, 0, props.colCount - 1) };
+
+    const nextSelection = {
+      row: clampIndex(base.row + deltaRow, 0, props.rowCount - 1),
+      col: clampIndex(base.col + deltaCol, 0, props.colCount - 1)
+    };
+
+    renderer.setSelection(nextSelection);
+    const nextRange: CellRange = {
+      startRow: nextSelection.row,
+      endRow: nextSelection.row + 1,
+      startCol: nextSelection.col,
+      endCol: nextSelection.col + 1
+    };
+
+    announceSelection(nextSelection, nextRange);
+    scrollCellIntoView(nextSelection.row, nextSelection.col);
+
+    if (
+      (previousSelection?.row ?? null) !== nextSelection.row ||
+      (previousSelection?.col ?? null) !== nextSelection.col
+    ) {
+      onSelectionChangeRef.current?.(nextSelection);
+    }
+
+    if (
+      (previousRange?.startRow ?? null) !== nextRange.startRow ||
+      (previousRange?.endRow ?? null) !== nextRange.endRow ||
+      (previousRange?.startCol ?? null) !== nextRange.startCol ||
+      (previousRange?.endCol ?? null) !== nextRange.endCol
+    ) {
+      onSelectionRangeChangeRef.current?.(nextRange);
+    }
+  };
+
   useImperativeHandle(
     props.apiRef,
     (): GridApi => ({
@@ -280,6 +407,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
         if (!prevSelection || prevSelection.row !== row || prevSelection.col !== col) {
           announceSelection({ row, col }, { startRow: row, endRow: row + 1, startCol: col, endCol: col + 1 });
+          scrollCellIntoView(row, col);
           onSelectionChangeRef.current?.({ row, col });
         }
 
@@ -306,6 +434,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         const nextRange = renderer.getSelectionRange();
 
         announceSelection(nextSelection, nextRange);
+        if (nextSelection) scrollCellIntoView(nextSelection.row, nextSelection.col);
 
         if (
           (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
@@ -783,6 +912,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       aria-label={ariaLabel}
       aria-labelledby={props.ariaLabelledBy}
       aria-describedby={statusId}
+      onKeyDown={onKeyDown}
     >
       <div
         id={statusId}
