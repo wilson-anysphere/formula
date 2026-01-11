@@ -77,16 +77,42 @@ test("sandbox: blocks disallowed Node builtin modules (including subpaths)", asy
   await host.loadExtension(extPath);
 
   const denied = [
+    { request: "fs", normalized: "fs" },
+    { request: "node:fs", normalized: "fs" },
     { request: "fs/promises", normalized: "fs/promises" },
     { request: "node:fs/promises", normalized: "fs/promises" },
+    { request: "http", normalized: "http" },
+    { request: "node:http", normalized: "http" },
+    { request: "https", normalized: "https" },
+    { request: "node:https", normalized: "https" },
     { request: "http2", normalized: "http2" },
     { request: "node:http2", normalized: "http2" },
+    { request: "net", normalized: "net" },
+    { request: "node:net", normalized: "net" },
+    { request: "tls", normalized: "tls" },
+    { request: "node:tls", normalized: "tls" },
+    { request: "dgram", normalized: "dgram" },
+    { request: "node:dgram", normalized: "dgram" },
+    { request: "dns", normalized: "dns" },
+    { request: "node:dns", normalized: "dns" },
     { request: "dns/promises", normalized: "dns/promises" },
     { request: "node:dns/promises", normalized: "dns/promises" },
+    { request: "child_process", normalized: "child_process" },
+    { request: "node:child_process", normalized: "child_process" },
+    { request: "worker_threads", normalized: "worker_threads" },
+    { request: "node:worker_threads", normalized: "worker_threads" },
+    { request: "cluster", normalized: "cluster" },
+    { request: "node:cluster", normalized: "cluster" },
+    { request: "module", normalized: "module" },
+    { request: "node:module", normalized: "module" },
+    { request: "vm", normalized: "vm" },
+    { request: "node:vm", normalized: "vm" },
     { request: "inspector", normalized: "inspector" },
     { request: "node:inspector", normalized: "inspector" },
     { request: "inspector/promises", normalized: "inspector/promises" },
-    { request: "_http_client", normalized: "_http_client" }
+    { request: "node:inspector/promises", normalized: "inspector/promises" },
+    { request: "_http_client", normalized: "_http_client" },
+    { request: "node:_http_client", normalized: "_http_client" }
   ];
 
   for (const { request, normalized } of denied) {
