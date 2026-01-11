@@ -24,8 +24,15 @@ interface ReactPanelInstance {
   container: HTMLDivElement;
 }
 
+interface DomPanelInstance {
+  container: HTMLDivElement;
+  dispose: () => void;
+  refresh?: () => Promise<void> | void;
+}
+
 export function createPanelBodyRenderer(options: PanelBodyRendererOptions): PanelBodyRenderer {
   const reactPanels = new Map<string, ReactPanelInstance>();
+  const domPanels = new Map<string, DomPanelInstance>();
 
   function renderReactPanel(panelId: string, body: HTMLDivElement, element: React.ReactElement) {
     let instance = reactPanels.get(panelId);
@@ -42,14 +49,33 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     instance.root.render(element);
   }
 
+  function renderDomPanel(panelId: string, body: HTMLDivElement, mount: (container: HTMLDivElement) => DomPanelInstance) {
+    let instance = domPanels.get(panelId);
+    if (!instance) {
+      const container = document.createElement("div");
+      container.style.height = "100%";
+      container.style.display = "flex";
+      container.style.flexDirection = "column";
+      instance = mount(container);
+      domPanels.set(panelId, instance);
+    }
+
+    body.appendChild(instance.container);
+    void instance.refresh?.();
+  }
+
+  function makeBodyFillAvailableHeight(body: HTMLDivElement) {
+    body.style.flex = "1";
+    body.style.minHeight = "0";
+    body.style.padding = "0";
+    body.style.display = "flex";
+    body.style.flexDirection = "column";
+  }
+
   function renderPanelBody(panelId: string, body: HTMLDivElement) {
     if (panelId === PanelIds.AI_CHAT) {
-      // Ensure the React chat UI can own the full panel height (dock panels are flex columns).
-      body.style.flex = "1";
-      body.style.minHeight = "0";
-      body.style.padding = "0";
-      body.style.display = "flex";
-      body.style.flexDirection = "column";
+      // Ensure the chat UI can own the full panel height (dock panels are flex columns).
+      makeBodyFillAvailableHeight(body);
       renderReactPanel(
         panelId,
         body,
@@ -64,7 +90,11 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     }
 
     if (panelId === PanelIds.AI_AUDIT) {
-      createAIAuditPanel({ container: body });
+      makeBodyFillAvailableHeight(body);
+      renderDomPanel(panelId, body, (container) => {
+        const panel = createAIAuditPanel({ container });
+        return { container, dispose: panel.dispose, refresh: panel.refresh };
+      });
       return;
     }
 
@@ -94,6 +124,13 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       instance.root.unmount();
       instance.container.remove();
       reactPanels.delete(panelId);
+    }
+
+    for (const [panelId, instance] of domPanels) {
+      if (open.has(panelId)) continue;
+      instance.dispose();
+      instance.container.remove();
+      domPanels.delete(panelId);
     }
   }
 
