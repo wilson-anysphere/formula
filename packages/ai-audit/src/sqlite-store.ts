@@ -8,7 +8,7 @@ type SqlJsDatabase = any;
 
 export interface SqliteAIAuditStoreOptions {
   storage?: SqliteBinaryStorage;
-  locateFile?: (file: string) => string;
+  locateFile?: (file: string, prefix?: string) => string;
 }
 
 export class SqliteAIAuditStore implements AIAuditStore {
