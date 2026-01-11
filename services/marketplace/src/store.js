@@ -2135,6 +2135,9 @@ class MarketplaceStore {
       versions.sort((a, b) => compareSemver(b.version, a.version));
       const latestVersion = maxSemver(unyanked) || null;
       const readme = latestVersion ? versionMeta[latestVersion]?.readme || "" : "";
+      if (!includeHidden && !latestVersion) {
+        return null;
+      }
 
       const publisherStmt = db.prepare(`SELECT public_key_pem FROM publishers WHERE publisher = ? LIMIT 1`);
       publisherStmt.bind([row.publisher]);
