@@ -92,7 +92,13 @@ function getWasmModule(moduleUrl: string): Promise<WasmModule> {
   }
 
   wasmModulePromiseUrl = moduleUrl;
-  wasmModulePromise = loadWasmModule(moduleUrl);
+  wasmModulePromise = loadWasmModule(moduleUrl).catch((err) => {
+    // If initialization fails (e.g. transient network error during dev), allow
+    // future requests to retry by clearing the cached promise.
+    wasmModulePromise = null;
+    wasmModulePromiseUrl = null;
+    throw err;
+  });
   return wasmModulePromise;
 }
 

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+// DocumentController is authored in JS with JSDoc types; importing it from TS
+// doesn't provide a `.d.ts`, so TypeScript treats it as `any`.
+// @ts-expect-error - JS module has no declaration file.
 import { DocumentController } from "../../../apps/desktop/src/document/documentController.js";
 import { exportDocumentToEngineWorkbookJson } from "./documentControllerSync";
 
