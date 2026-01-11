@@ -4,6 +4,7 @@ declare const catalog: {
     name: string;
     min_args: number;
     max_args: number;
+    arg_types: Array<"any" | "number" | "text" | "bool">;
     volatility: "non_volatile" | "volatile";
     return_type: "any" | "number" | "text" | "bool";
   }>;

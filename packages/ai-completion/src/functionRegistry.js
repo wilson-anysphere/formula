@@ -339,14 +339,52 @@ function functionsFromCatalog(catalog) {
     if (!entry || typeof entry.name !== "string" || entry.name.length === 0) continue;
     const minArgs = Number.isInteger(entry.min_args) ? entry.min_args : undefined;
     const maxArgs = Number.isInteger(entry.max_args) ? entry.max_args : undefined;
+
+    /** @type {FunctionArgSpec[]} */
+    const args = [];
+    const catalogArgTypes = Array.isArray(entry.arg_types) ? entry.arg_types : [];
+    for (let i = 0; i < catalogArgTypes.length; i++) {
+      const type = catalogValueTypeToArgType(catalogArgTypes[i]);
+      if (!type) continue;
+      args.push({
+        name: `arg${i + 1}`,
+        type,
+        optional: Number.isInteger(minArgs) ? i >= minArgs : undefined,
+      });
+    }
+
+    if (Number.isInteger(maxArgs) && args.length > 0 && maxArgs > args.length) {
+      // Best-effort varargs handling: many Excel functions define a single ValueType
+      // and allow 0..255 args. We treat the last typed arg as repeating so argIndex
+      // lookups don’t fall off a cliff.
+      args[args.length - 1].repeating = true;
+    }
     out.push({
       name: entry.name.toUpperCase(),
       minArgs,
       maxArgs,
-      args: [],
+      args,
     });
   }
   return out;
+}
+
+/**
+ * @param {unknown} valueType
+ * @returns {ArgType | null}
+ */
+function catalogValueTypeToArgType(valueType) {
+  switch (valueType) {
+    case "number":
+      return "number";
+    case "bool":
+      return "boolean";
+    case "text":
+    case "any":
+      return "value";
+    default:
+      return null;
+  }
 }
 
 /**

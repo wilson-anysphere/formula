@@ -15,6 +15,7 @@ struct FunctionCatalogEntry {
     max_args: usize,
     volatility: String,
     return_type: String,
+    arg_types: Vec<String>,
 }
 
 fn volatility_to_string(volatility: Volatility) -> String {
@@ -44,6 +45,12 @@ fn main() {
             max_args: spec.max_args,
             volatility: volatility_to_string(spec.volatility),
             return_type: value_type_to_string(spec.return_type),
+            arg_types: spec
+                .arg_types
+                .iter()
+                .copied()
+                .map(value_type_to_string)
+                .collect(),
         };
 
         if functions.insert(name.clone(), entry).is_some() {
@@ -58,4 +65,3 @@ fn main() {
     let json = serde_json::to_string_pretty(&catalog).expect("serialize function catalog");
     println!("{json}");
 }
-

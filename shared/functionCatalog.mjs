@@ -6,455 +6,677 @@ export default {
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "AND",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "bool"
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "AVERAGE",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "CONCAT",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "text"
+      "return_type": "text",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "CONCATENATE",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "text"
+      "return_type": "text",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "COUNT",
       "min_args": 0,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "COUNTA",
       "min_args": 0,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "COUNTBLANK",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "DATE",
       "min_args": 3,
       "max_args": 3,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
     },
     {
       "name": "DAY",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "DDB",
       "min_args": 4,
       "max_args": 5,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "FIND",
       "min_args": 2,
       "max_args": 3,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "text",
+        "text",
+        "number"
+      ]
     },
     {
       "name": "FV",
       "min_args": 3,
       "max_args": 5,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "HLOOKUP",
       "min_args": 3,
       "max_args": 4,
       "volatility": "non_volatile",
-      "return_type": "any"
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "any"
+      ]
     },
     {
       "name": "IF",
       "min_args": 2,
       "max_args": 3,
       "volatility": "non_volatile",
-      "return_type": "any"
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
+      ]
     },
     {
       "name": "IFERROR",
       "min_args": 2,
       "max_args": 2,
       "volatility": "non_volatile",
-      "return_type": "any"
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any"
+      ]
     },
     {
       "name": "IFNA",
       "min_args": 2,
       "max_args": 2,
       "volatility": "non_volatile",
-      "return_type": "any"
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any"
+      ]
     },
     {
       "name": "INDEX",
       "min_args": 2,
       "max_args": 3,
       "volatility": "non_volatile",
-      "return_type": "any"
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "number",
+        "number"
+      ]
     },
     {
       "name": "INT",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "IPMT",
       "min_args": 4,
       "max_args": 6,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "IRR",
       "min_args": 1,
       "max_args": 2,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "ISERROR",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "bool"
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "LEFT",
       "min_args": 1,
       "max_args": 2,
       "volatility": "non_volatile",
-      "return_type": "text"
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number"
+      ]
     },
     {
       "name": "LEN",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
     },
     {
       "name": "LOWER",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "text"
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
     },
     {
       "name": "MATCH",
       "min_args": 2,
       "max_args": 3,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number"
+      ]
     },
     {
       "name": "MAX",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "MID",
       "min_args": 3,
       "max_args": 3,
       "volatility": "non_volatile",
-      "return_type": "text"
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number",
+        "number"
+      ]
     },
     {
       "name": "MIN",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "MIRR",
       "min_args": 3,
       "max_args": 3,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "MOD",
       "min_args": 2,
       "max_args": 2,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
     },
     {
       "name": "MONTH",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "NA",
       "min_args": 0,
       "max_args": 0,
       "volatility": "non_volatile",
-      "return_type": "any"
+      "return_type": "any",
+      "arg_types": []
     },
     {
       "name": "NOT",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "bool"
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "NOW",
       "min_args": 0,
       "max_args": 0,
       "volatility": "volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": []
     },
     {
       "name": "NPER",
       "min_args": 3,
       "max_args": 5,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "NPV",
       "min_args": 2,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "OR",
       "min_args": 1,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "bool"
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "PMT",
       "min_args": 3,
       "max_args": 5,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "PPMT",
       "min_args": 4,
       "max_args": 6,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "PV",
       "min_args": 3,
       "max_args": 5,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "RAND",
       "min_args": 0,
       "max_args": 0,
       "volatility": "volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": []
     },
     {
       "name": "RANDBETWEEN",
       "min_args": 2,
       "max_args": 2,
       "volatility": "volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
     },
     {
       "name": "RATE",
       "min_args": 3,
       "max_args": 6,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "RIGHT",
       "min_args": 1,
       "max_args": 2,
       "volatility": "non_volatile",
-      "return_type": "text"
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number"
+      ]
     },
     {
       "name": "ROUND",
       "min_args": 2,
       "max_args": 2,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
     },
     {
       "name": "ROUNDDOWN",
       "min_args": 2,
       "max_args": 2,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
     },
     {
       "name": "ROUNDUP",
       "min_args": 2,
       "max_args": 2,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
     },
     {
       "name": "SEARCH",
       "min_args": 2,
       "max_args": 3,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "text",
+        "text",
+        "number"
+      ]
     },
     {
       "name": "SEQUENCE",
       "min_args": 1,
       "max_args": 4,
       "volatility": "non_volatile",
-      "return_type": "any"
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "SIGN",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "SLN",
       "min_args": 3,
       "max_args": 3,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "SUBSTITUTE",
       "min_args": 3,
       "max_args": 4,
       "volatility": "non_volatile",
-      "return_type": "text"
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "text",
+        "text",
+        "number"
+      ]
     },
     {
       "name": "SUM",
       "min_args": 0,
       "max_args": 255,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "SYD",
       "min_args": 4,
       "max_args": 4,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     },
     {
       "name": "TODAY",
       "min_args": 0,
       "max_args": 0,
       "volatility": "volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": []
     },
     {
       "name": "TRANSPOSE",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "any"
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "TRIM",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "text"
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
     },
     {
       "name": "UPPER",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "text"
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
     },
     {
       "name": "VLOOKUP",
       "min_args": 3,
       "max_args": 4,
       "volatility": "non_volatile",
-      "return_type": "any"
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "any"
+      ]
     },
     {
       "name": "XIRR",
       "min_args": 2,
       "max_args": 3,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "XLOOKUP",
       "min_args": 3,
       "max_args": 6,
       "volatility": "non_volatile",
-      "return_type": "any"
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "XMATCH",
       "min_args": 2,
       "max_args": 4,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number"
+      ]
     },
     {
       "name": "XNPV",
       "min_args": 3,
       "max_args": 3,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
     },
     {
       "name": "YEAR",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
-      "return_type": "number"
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
     }
   ]
 };

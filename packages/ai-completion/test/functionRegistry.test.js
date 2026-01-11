@@ -10,6 +10,7 @@ test("FunctionRegistry loads the Rust function catalog (HLOOKUP is present)", ()
   assert.ok(registry.isRangeArg("_xlfn.XLOOKUP", 1), "Expected _xlfn.XLOOKUP arg2 to be a range");
   assert.equal(registry.getFunction("SUM")?.minArgs, 0, "Expected SUM minArgs to come from catalog");
   assert.equal(registry.getFunction("SUM")?.maxArgs, 255, "Expected SUM maxArgs to come from catalog");
+  assert.equal(registry.getArgType("PV", 0), "number", "Expected PV arg1 type to come from catalog arg_types");
   assert.ok(
     registry.getFunction("HLOOKUP"),
     `Expected HLOOKUP to be present, got: ${registry.list().map(f => f.name).join(", ")}`
