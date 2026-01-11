@@ -27,6 +27,7 @@ import {
 } from "../selection/selection";
 import { DocumentController } from "../document/documentController.js";
 import { MockEngine } from "../document/engine.js";
+import { isRedoKeyboardEvent, isUndoKeyboardEvent } from "../document/shortcuts.js";
 import { drawCommentIndicator } from "../comments/CommentIndicator";
 import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateFormula";
 import { DocumentWorkbookAdapter } from "../search/documentWorkbookAdapter.js";
@@ -932,6 +933,10 @@ export class SpreadsheetApp {
     }
   }
 
+  private syncEngineNow(): void {
+    (this.engine as unknown as { syncNow?: () => void }).syncNow?.();
+  }
+
   private isRowHidden(row: number): boolean {
     const entry = this.outline.rows.entry(row + 1);
     return isHidden(entry.hidden);
@@ -1244,6 +1249,32 @@ export class SpreadsheetApp {
   private onKeyDown(e: KeyboardEvent): void {
     if (this.editor.isOpen()) {
       // The editor handles Enter/Tab/Escape itself. We keep focus on the textarea.
+      return;
+    }
+
+    if (isUndoKeyboardEvent(e)) {
+      if (this.formulaBar?.isEditing()) return;
+      e.preventDefault();
+      if (this.document.undo()) {
+        this.syncEngineNow();
+        this.renderGrid();
+        this.renderCharts();
+        this.renderSelection();
+        this.updateStatus();
+      }
+      return;
+    }
+
+    if (isRedoKeyboardEvent(e)) {
+      if (this.formulaBar?.isEditing()) return;
+      e.preventDefault();
+      if (this.document.redo()) {
+        this.syncEngineNow();
+        this.renderGrid();
+        this.renderCharts();
+        this.renderSelection();
+        this.updateStatus();
+      }
       return;
     }
 

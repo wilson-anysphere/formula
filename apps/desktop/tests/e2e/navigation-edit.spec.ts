@@ -97,4 +97,29 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     const recalcAfterDelete = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
     expect(recalcAfterDelete).toBeGreaterThan(recalcBeforeDelete);
   });
+
+  test("Ctrl/Cmd+Z undo + Ctrl/Cmd+Shift+Z redo update the document", async ({ page }) => {
+    await page.goto("/");
+    await page.click("#grid", { position: { x: 5, y: 5 } });
+
+    // Clear any seeded value so undo returns to an empty cell.
+    await page.keyboard.press("Delete");
+
+    // Edit A1.
+    await page.keyboard.press("F2");
+    const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await editor.fill("Hello");
+    await page.keyboard.press("Enter");
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    await page.keyboard.press(`${modifier}+Z`);
+    const a1AfterUndo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1AfterUndo).toBe("");
+
+    await page.keyboard.press(`${modifier}+Shift+Z`);
+    const a1AfterRedo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1AfterRedo).toBe("Hello");
+  });
 });
