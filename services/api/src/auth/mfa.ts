@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import type { Pool } from "pg";
 import type { AuthenticatedUser } from "./sessions";
 
+authenticator.options = { window: 1 };
+
 export function generateTotpSecret(): string {
   return authenticator.generateSecret();
 }
