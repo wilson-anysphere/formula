@@ -78,6 +78,7 @@ The grid is canvas-rendered, but includes baseline accessibility scaffolding:
 
 - Focusable container (`tabIndex=0`) with `role="grid"` and a default accessible name (`"Spreadsheet grid"`).
 - Canvases are `aria-hidden`.
+- The active cell is also exposed via an offscreen `role="gridcell"` element wired up with `aria-activedescendant` (including `aria-rowindex`/`aria-colindex`).
 - A visually-hidden `role="status"` live region announces:
   - active cell address (A1-style when headers are enabled via `frozenRows/frozenCols`)
   - active cell value
