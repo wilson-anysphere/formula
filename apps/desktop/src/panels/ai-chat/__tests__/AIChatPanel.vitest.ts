@@ -317,10 +317,12 @@ describe("AIChatPanel tool-calling history", () => {
       await waitFor(() => container.textContent?.includes("Hello") ?? false);
     });
 
+    // Resume the mocked stream.
     await act(async () => {
       resumeStream?.();
-      await waitFor(() => container.textContent?.includes("Final") ?? false);
     });
+
+    await waitFor(() => container.textContent?.includes("Final") ?? false);
 
     expect(container.textContent).not.toContain("SHOULD_NOT_RENDER");
 
