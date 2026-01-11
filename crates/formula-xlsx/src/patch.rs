@@ -1999,7 +1999,7 @@ fn is_element_named(name: &[u8], expected_prefix: Option<&[u8]>, local: &[u8]) -
 fn parse_row_r(row: &BytesStart<'_>) -> Result<Option<u32>, XlsxError> {
     for attr in row.attributes() {
         let attr = attr?;
-        if local_name(attr.key.as_ref()) == b"r" {
+        if attr.key.as_ref() == b"r" {
             let value = attr.unescape_value()?.into_owned();
             return Ok(value.parse::<u32>().ok());
         }
@@ -2015,9 +2015,8 @@ fn parse_cell_addr_and_attrs(
     let mut s = None;
     for attr in cell.attributes() {
         let attr = attr?;
-        let key = local_name(attr.key.as_ref());
         let value = attr.unescape_value()?.into_owned();
-        match key {
+        match attr.key.as_ref() {
             b"r" => r = Some(value),
             b"t" => t = Some(value),
             b"s" => s = Some(value),

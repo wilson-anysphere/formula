@@ -181,3 +181,38 @@ fn apply_cell_patches_preserves_formula_attrs_when_formula_follows_value() {
         .expect("expected <v>");
     assert_eq!(v.text().unwrap_or_default(), "4");
 }
+
+#[test]
+fn apply_cell_patches_does_not_confuse_namespaced_s_attr_with_cell_style() {
+    // The patcher should only treat the unprefixed `s` attribute as the cell style index.
+    // Namespaced attributes like `x:s="..."` must be preserved but not interpreted as style.
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:x="http://example.com">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1"><c r="A1" x:s="7"><v>1</v></c></row>
+  </sheetData>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(worksheet_xml);
+    let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1").unwrap(),
+        CellPatch::set_value_with_style(CellValue::Number(1.0), 7),
+    );
+    pkg.apply_cell_patches(&patches).expect("apply patches");
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    assert!(
+        out_xml.contains(r#"x:s="7""#),
+        "expected namespaced x:s attr to be preserved, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains(r#" s="7""#) || out_xml.contains(r#"s="7""#),
+        "expected unprefixed s attr to be written by style patch, got: {out_xml}"
+    );
+}
