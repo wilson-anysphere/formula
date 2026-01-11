@@ -41,7 +41,7 @@ const BUILTIN_FORMATS_EN_US: [&str; 50] = [
     "# ?/?",     // 12
     "# ??/??",   // 13
     // 14-22: Date/time.
-    "m/d/yy",          // 14
+    "m/d/yyyy",        // 14
     "d-mmm-yy",        // 15
     "d-mmm",           // 16
     "mmm-yy",          // 17
@@ -49,18 +49,18 @@ const BUILTIN_FORMATS_EN_US: [&str; 50] = [
     "h:mm:ss AM/PM",   // 19
     "h:mm",            // 20
     "h:mm:ss",         // 21
-    "m/d/yy h:mm",     // 22
+    "m/d/yyyy h:mm",   // 22
     // 23-26: Accounting-style negatives (no currency symbol).
     "#,##0_);(#,##0)",            // 23
     "#,##0_);[Red](#,##0)",       // 24
     "#,##0.00_);(#,##0.00)",      // 25
     "#,##0.00_);[Red](#,##0.00)", // 26
     // 27-36: Locale-reserved date/time ids (en-US duplicates).
-    "m/d/yy",    // 27
-    "m/d/yy",    // 28
-    "m/d/yy",    // 29
-    "m/d/yy",    // 30
-    "m/d/yy",    // 31
+    "m/d/yyyy",  // 27
+    "m/d/yyyy",  // 28
+    "m/d/yyyy",  // 29
+    "m/d/yyyy",  // 30
+    "m/d/yyyy",  // 31
     "h:mm:ss",   // 32
     "h:mm:ss",   // 33
     "h:mm:ss",   // 34
@@ -116,8 +116,8 @@ pub fn builtin_format_code_with_locale(id: u16, locale: Locale) -> Option<Cow<'s
 
     match id {
         // Short date formats: flip m/d ordering for day-first locales.
-        14 | 27 | 28 | 29 | 30 | 31 if day_first_dates => Some(Cow::Borrowed("d/m/yy")),
-        22 if day_first_dates => Some(Cow::Borrowed("d/m/yy h:mm")),
+        14 | 27 | 28 | 29 | 30 | 31 if day_first_dates => Some(Cow::Borrowed("d/m/yyyy")),
+        22 if day_first_dates => Some(Cow::Borrowed("d/m/yyyy h:mm")),
         // Currency/accounting formats: substitute currency symbol. For now we
         // only special-case the locales represented by [`Locale`] constructors.
         5..=8 | 42 | 44 => {

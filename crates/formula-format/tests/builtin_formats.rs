@@ -28,7 +28,7 @@ fn builtin_format_mappings_include_representative_categories() {
     assert_eq!(builtin_format_code(12), Some("# ?/?"));
 
     // Date / time.
-    assert_eq!(builtin_format_code(14), Some("m/d/yy"));
+    assert_eq!(builtin_format_code(14), Some("m/d/yyyy"));
     assert_eq!(builtin_format_code(20), Some("h:mm"));
     assert_eq!(builtin_format_code(47), Some("mm:ss.0"));
 
@@ -123,15 +123,15 @@ fn builtin_formats_round_trip_through_formatter_under_locales() {
     let date_fr = builtin_format_code_with_locale(14, Locale::fr_fr()).unwrap();
     assert_eq!(
         format_value(Value::Number(61.0), Some(date_en.as_ref()), &en_opts).text,
-        "3/1/00"
+        "3/1/1900"
     );
     assert_eq!(
         format_value(Value::Number(61.0), Some(date_de.as_ref()), &de_opts).text,
-        "1.3.00"
+        "1.3.1900"
     );
     assert_eq!(
         format_value(Value::Number(61.0), Some(date_fr.as_ref()), &fr_opts).text,
-        "1/3/00"
+        "1/3/1900"
     );
 
     // Time with fractional seconds: decimal separator depends on locale.
