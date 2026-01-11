@@ -439,6 +439,17 @@ cd services/api
 npm run keys:rotate
 ```
 
+##### Backfilling existing plaintext versions
+
+During rollout you may have older `document_versions` rows that still have plaintext `data` populated.
+To encrypt those rows in-place for orgs with `cloud_encryption_at_rest = true`, run:
+
+```bash
+cd services/api
+# Optional: scope to a single org + limit rows per run
+ORG_ID="<org-uuid>" BATCH_SIZE=100 npm run versions:encrypt
+```
+
 ### Encryption in Transit
 
 ```typescript
