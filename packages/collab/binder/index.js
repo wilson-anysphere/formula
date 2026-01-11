@@ -105,7 +105,10 @@ async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption, ma
     }
 
     if (value === undefined && formula === undefined) {
-      value = maskFn(null, cellRef);
+      // `enc` is present but we can't decrypt (missing key, wrong key id, corrupt payload, etc).
+      // Always surface a masked placeholder even if `maskFn` is permission-aware and would
+      // otherwise return the input value unchanged.
+      value = maskFn(MASKED_CELL_VALUE, cellRef);
       formula = null;
     }
   } else {

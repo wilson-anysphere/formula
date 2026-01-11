@@ -75,6 +75,9 @@ test("Yjs↔DocumentController binder encrypts protected cell contents and masks
     defaultSheetId: "Sheet1",
     userId: "u-b",
     // No key on B.
+    // Use a pass-through mask function to ensure encrypted cells still show a fixed
+    // placeholder even when masking isn't being applied due to read restrictions.
+    maskCellValue: (value) => value,
   });
 
   t.after(() => {
