@@ -2313,6 +2313,7 @@ class MarketplaceStore {
                 e.blocked, e.malicious,
                 v.signature_base64, v.sha256, v.package_path, v.yanked, v.format_version,
                 v.signing_key_id,
+                v.file_count,
                 v.files_json,
                 s.status AS scan_status
           FROM extensions e
@@ -2341,8 +2342,9 @@ class MarketplaceStore {
         return null;
       }
 
+      const fileCount = Number(row.file_count || 0);
       const filesJson = row.files_json ? String(row.files_json) : "[]";
-      const filesSha256 = sha256Utf8(filesJson);
+      const filesSha256 = fileCount > 0 && filesJson !== "[]" ? sha256Utf8(filesJson) : null;
 
       const packagePath = row.package_path ? String(row.package_path) : null;
       let packageBytes = null;
