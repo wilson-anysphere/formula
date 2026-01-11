@@ -1,4 +1,6 @@
-import { DataTable } from "./table.js";
+/**
+ * @typedef {import("./table.js").ITable} ITable
+ */
 
 /**
  * Very small "sheet" abstraction for tests / integration points.
@@ -31,7 +33,7 @@ export class InMemorySheet {
 
 /**
  * Write a table into a sheet-like interface.
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {{ setCell: (row: number, col: number, value: unknown) => void }} sheet
  * @param {{ startRow?: number, startCol?: number }} [options]
  */
@@ -47,4 +49,3 @@ export function writeTableToSheet(table, sheet, options = {}) {
     }
   }
 }
-

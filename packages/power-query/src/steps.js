@@ -1,3 +1,5 @@
+import { arrowTableFromColumns } from "../../data-io/src/index.js";
+import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable, inferColumnType, makeUniqueColumnNames } from "./table.js";
 import { compilePredicate } from "./predicate.js";
 
@@ -6,6 +8,7 @@ import { compilePredicate } from "./predicate.js";
  * @typedef {import("./model.js").SortSpec} SortSpec
  * @typedef {import("./model.js").Aggregation} Aggregation
  * @typedef {import("./model.js").DataType} DataType
+ * @typedef {import("./table.js").ITable} ITable
  */
 
 /**
@@ -75,7 +78,7 @@ function compareValues(a, b, options) {
 }
 
 /**
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {string[]} names
  * @returns {number[]}
  */
@@ -84,21 +87,26 @@ function indicesForColumns(table, names) {
 }
 
 /**
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {string[]} columns
- * @returns {DataTable}
+ * @returns {ITable}
  */
 function selectColumns(table, columns) {
   const indices = indicesForColumns(table, columns);
   const newColumns = indices.map((idx) => table.columns[idx]);
-  const newRows = table.rows.map((row) => indices.map((idx) => row[idx]));
+
+  if (table instanceof ArrowTableAdapter) {
+    return new ArrowTableAdapter(table.table.selectAt(indices), newColumns);
+  }
+
+  const newRows = /** @type {DataTable} */ (table).rows.map((row) => indices.map((idx) => row[idx]));
   return new DataTable(newColumns, newRows);
 }
 
 /**
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {string[]} columns
- * @returns {DataTable}
+ * @returns {ITable}
  */
 function removeColumns(table, columns) {
   const remove = new Set(columns.map((name) => table.getColumnIndex(name)));
@@ -107,28 +115,58 @@ function removeColumns(table, columns) {
     .filter((idx) => !remove.has(idx));
 
   const newColumns = keepIndices.map((idx) => table.columns[idx]);
-  const newRows = table.rows.map((row) => keepIndices.map((idx) => row[idx]));
+
+  if (table instanceof ArrowTableAdapter) {
+    return new ArrowTableAdapter(table.table.selectAt(keepIndices), newColumns);
+  }
+
+  const newRows = /** @type {DataTable} */ (table).rows.map((row) => keepIndices.map((idx) => row[idx]));
   return new DataTable(newColumns, newRows);
 }
 
 /**
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {import("./model.js").FilterPredicate} predicate
- * @returns {DataTable}
+ * @returns {ITable}
  */
 function filterRows(table, predicate) {
   const fn = compilePredicate(table, predicate);
-  const newRows = table.rows.filter((row) => fn(row));
+
+  if (table instanceof ArrowTableAdapter) {
+    /** @type {unknown[][]} */
+    const outColumns = table.columns.map(() => []);
+    const vectors = table.columns.map((_c, idx) => table.getColumnVector(idx));
+
+    for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
+      if (!fn(rowIndex)) continue;
+      for (let colIndex = 0; colIndex < vectors.length; colIndex++) {
+        // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
+        outColumns[colIndex].push(vectors[colIndex].get(rowIndex));
+      }
+    }
+
+    const out = Object.fromEntries(table.columns.map((col, idx) => [col.name, outColumns[idx]]));
+    return new ArrowTableAdapter(arrowTableFromColumns(out), table.columns);
+  }
+
+  const sourceRows = /** @type {DataTable} */ (table).rows;
+  const newRows = [];
+  for (let rowIndex = 0; rowIndex < sourceRows.length; rowIndex++) {
+    if (fn(rowIndex)) newRows.push(sourceRows[rowIndex]);
+  }
   return new DataTable(table.columns, newRows);
 }
 
 /**
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {SortSpec[]} sortBy
- * @returns {DataTable}
+ * @returns {ITable}
  */
 function sortRows(table, sortBy) {
-  if (sortBy.length === 0) return new DataTable(table.columns, table.rows);
+  if (sortBy.length === 0) {
+    if (table instanceof ArrowTableAdapter) return table;
+    return new DataTable(table.columns, /** @type {DataTable} */ (table).rows);
+  }
 
   const specs = sortBy.map((spec) => ({
     idx: table.getColumnIndex(spec.column),
@@ -136,7 +174,34 @@ function sortRows(table, sortBy) {
     nulls: spec.nulls ?? "last",
   }));
 
-  const decorated = table.rows.map((row, originalIndex) => ({ row, originalIndex }));
+  if (table instanceof ArrowTableAdapter) {
+    const vectors = table.columns.map((_c, idx) => table.getColumnVector(idx));
+
+    const indices = Array.from({ length: table.rowCount }, (_, i) => i);
+    indices.sort((a, b) => {
+      for (const spec of specs) {
+        // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
+        const cmp = compareValues(vectors[spec.idx].get(a), vectors[spec.idx].get(b), spec);
+        if (cmp !== 0) return cmp;
+      }
+      return a - b;
+    });
+
+    /** @type {unknown[][]} */
+    const outColumns = vectors.map(() => new Array(indices.length));
+    for (let outRow = 0; outRow < indices.length; outRow++) {
+      const srcRow = indices[outRow];
+      for (let col = 0; col < vectors.length; col++) {
+        // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
+        outColumns[col][outRow] = vectors[col].get(srcRow);
+      }
+    }
+
+    const out = Object.fromEntries(table.columns.map((col, idx) => [col.name, outColumns[idx]]));
+    return new ArrowTableAdapter(arrowTableFromColumns(out), table.columns);
+  }
+
+  const decorated = /** @type {DataTable} */ (table).rows.map((row, originalIndex) => ({ row, originalIndex }));
   decorated.sort((a, b) => {
     for (const spec of specs) {
       const cmp = compareValues(a.row[spec.idx], b.row[spec.idx], spec);
@@ -175,10 +240,10 @@ function distinctKey(value) {
 }
 
 /**
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {string[]} groupColumns
  * @param {Aggregation[]} aggregations
- * @returns {DataTable}
+ * @returns {ITable}
  */
 function groupBy(table, groupColumns, aggregations) {
   const groupIdx = indicesForColumns(table, groupColumns);
@@ -191,8 +256,13 @@ function groupBy(table, groupColumns, aggregations) {
   /** @type {Map<string, { keyValues: unknown[], states: any[] }>} */
   const groups = new Map();
 
-  for (const row of table.rows) {
-    const keyValues = groupIdx.map((idx) => row[idx]);
+  const vectors = table.columns.map((_c, idx) => table.getColumnVector(idx));
+
+  for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
+    const keyValues = groupIdx.map((idx) => {
+      // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
+      return vectors[idx].get(rowIndex);
+    });
     const key = JSON.stringify(
       keyValues.map((v) => (isDate(v) ? `__date__:${v.toISOString()}` : v ?? null)),
     );
@@ -227,7 +297,8 @@ function groupBy(table, groupColumns, aggregations) {
 
     entry.states.forEach((state, idx) => {
       const agg = aggSpecs[idx];
-      const value = normalizeMissing(row[agg.idx]);
+      // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
+      const value = normalizeMissing(vectors[agg.idx].get(rowIndex));
 
       switch (agg.op) {
         case "sum": {
@@ -315,6 +386,11 @@ function groupBy(table, groupColumns, aggregations) {
     resultRows.push(row);
   }
 
+  if (table instanceof ArrowTableAdapter) {
+    const out = Object.fromEntries(resultColumns.map((col, idx) => [col.name, resultRows.map((r) => r[idx])]));
+    return new ArrowTableAdapter(arrowTableFromColumns(out), resultColumns);
+  }
+
   return new DataTable(resultColumns, resultRows);
 }
 
@@ -363,15 +439,42 @@ function coerceType(type, value) {
 }
 
 /**
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {string} column
  * @param {DataType} newType
- * @returns {DataTable}
+ * @returns {ITable}
  */
 function changeType(table, column, newType) {
   const idx = table.getColumnIndex(column);
   const columns = table.columns.map((col, i) => (i === idx ? { ...col, type: newType } : col));
-  const rows = table.rows.map((row) => {
+
+  if (table instanceof ArrowTableAdapter) {
+    const vectors = table.columns.map((_c, i) => table.getColumnVector(i));
+    const outColumns = vectors.map((_v, i) => (i === idx ? new Array(table.rowCount) : null));
+
+    for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
+      // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
+      outColumns[idx][rowIndex] = coerceType(newType, vectors[idx].get(rowIndex));
+    }
+
+    // For unchanged columns, reuse values by reading them out lazily; this avoids materializing
+    // row arrays but still constructs new column arrays for Arrow ingestion.
+    for (let colIndex = 0; colIndex < vectors.length; colIndex++) {
+      if (colIndex === idx) continue;
+      const colValues = new Array(table.rowCount);
+      // @ts-ignore - ColumnVector.get exists at runtime for Arrow vectors.
+      const vec = vectors[colIndex];
+      for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
+        colValues[rowIndex] = vec.get(rowIndex);
+      }
+      outColumns[colIndex] = colValues;
+    }
+
+    const out = Object.fromEntries(columns.map((col, i) => [col.name, outColumns[i]]));
+    return new ArrowTableAdapter(arrowTableFromColumns(out), columns);
+  }
+
+  const rows = /** @type {DataTable} */ (table).rows.map((row) => {
     const next = row.slice();
     next[idx] = coerceType(newType, row[idx]);
     return next;
@@ -702,9 +805,9 @@ function splitColumn(table, op) {
 }
 
 /**
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {number} count
- * @returns {DataTable}
+ * @returns {ITable}
  */
 function take(table, count) {
   if (!Number.isFinite(count) || count < 0) {
@@ -714,14 +817,28 @@ function take(table, count) {
 }
 
 /**
+ * @param {ITable} table
+ * @returns {DataTable}
+ */
+function ensureDataTable(table) {
+  if (table instanceof DataTable) return table;
+
+  const rows = [];
+  for (const row of table.iterRows()) {
+    rows.push(row);
+  }
+  return new DataTable(table.columns, rows);
+}
+
+/**
  * Apply a query operation locally.
  *
  * Operations that require external state (`merge`, `append`) are handled by the
  * `QueryEngine` because they need access to other queries.
  *
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {QueryOperation} operation
- * @returns {DataTable}
+ * @returns {ITable}
  */
 export function applyOperation(table, operation) {
   switch (operation.type) {
@@ -736,23 +853,23 @@ export function applyOperation(table, operation) {
     case "groupBy":
       return groupBy(table, operation.groupColumns, operation.aggregations);
     case "addColumn":
-      return addColumn(table, operation.name, operation.formula);
+      return addColumn(ensureDataTable(table), operation.name, operation.formula);
     case "renameColumn":
-      return renameColumn(table, operation.oldName, operation.newName);
+      return renameColumn(ensureDataTable(table), operation.oldName, operation.newName);
     case "changeType":
       return changeType(table, operation.column, operation.newType);
     case "take":
       return take(table, operation.count);
     case "pivot":
-      return pivot(table, operation);
+      return pivot(ensureDataTable(table), operation);
     case "unpivot":
-      return unpivot(table, operation);
+      return unpivot(ensureDataTable(table), operation);
     case "fillDown":
-      return fillDown(table, operation);
+      return fillDown(ensureDataTable(table), operation);
     case "replaceValues":
-      return replaceValues(table, operation);
+      return replaceValues(ensureDataTable(table), operation);
     case "splitColumn":
-      return splitColumn(table, operation);
+      return splitColumn(ensureDataTable(table), operation);
     case "merge":
     case "append":
       throw new Error(`Operation '${operation.type}' requires QueryEngine context`);

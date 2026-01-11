@@ -1,4 +1,6 @@
 import { applyOperation } from "./steps.js";
+import { arrowTableToGridBatches, parquetToArrowTable } from "../../data-io/src/index.js";
+import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable } from "./table.js";
 
 import { hashValue } from "./cache/key.js";
@@ -13,13 +15,14 @@ import { QueryFoldingEngine } from "./folding/sql.js";
  * @typedef {import("./model.js").QuerySource} QuerySource
  * @typedef {import("./model.js").QueryStep} QueryStep
  * @typedef {import("./model.js").QueryOperation} QueryOperation
+ * @typedef {import("./table.js").ITable} ITable
  * @typedef {import("./connectors/types.js").ConnectorMeta} ConnectorMeta
  * @typedef {import("./connectors/types.js").SchemaInfo} SchemaInfo
  */
 
 /**
  * @typedef {{
- *   tables?: Record<string, DataTable>;
+ *   tables?: Record<string, ITable>;
  *   queries?: Record<string, Query>;
  * }} QueryExecutionContext
  */
@@ -69,7 +72,7 @@ import { QueryFoldingEngine } from "./folding/sql.js";
 
 /**
  * @typedef {{
- *   table: DataTable;
+ *   table: ITable;
  *   meta: QueryExecutionMeta;
  * }} QueryExecutionResult
  */
@@ -83,11 +86,15 @@ import { QueryFoldingEngine } from "./folding/sql.js";
 
 /**
  * @typedef {Object} QueryEngineOptions
- * @property {{ querySql: (connection: unknown, sql: string, options?: any) => Promise<DataTable> } | undefined} [databaseAdapter]
+ * @property {{ querySql: (connection: unknown, sql: string, options?: any) => Promise<ITable> } | undefined} [databaseAdapter]
  *   Backwards-compatible adapter from the prototype. Prefer supplying a `SqlConnector`.
- * @property {{ fetchTable: (url: string, options: { method: string; headers?: Record<string, string> }) => Promise<DataTable> } | undefined} [apiAdapter]
+ * @property {{ fetchTable: (url: string, options: { method: string; headers?: Record<string, string> }) => Promise<ITable> } | undefined} [apiAdapter]
  *   Backwards-compatible adapter from the prototype. Prefer supplying a `HttpConnector`.
- * @property {{ readText?: (path: string) => Promise<string>; readParquetTable?: (path: string, options?: { signal?: AbortSignal }) => Promise<DataTable> } | undefined} [fileAdapter]
+ * @property {{
+ *   readText?: (path: string) => Promise<string>;
+ *   readBinary?: (path: string) => Promise<Uint8Array>;
+ *   readParquetTable?: (path: string, options?: { signal?: AbortSignal }) => Promise<DataTable>;
+ * } | undefined} [fileAdapter]
  *   Backwards-compatible adapter from the prototype. Prefer supplying a `FileConnector`.
  * @property {Partial<{ file: FileConnector; http: HttpConnector; sql: SqlConnector } & Record<string, any>> | undefined} [connectors]
  * @property {import("./cache/cache.js").CacheManager | undefined} [cache]
@@ -181,6 +188,7 @@ export class QueryEngine {
   constructor(options = {}) {
     this.onPermissionRequest = options.onPermissionRequest ?? null;
     this.onCredentialRequest = options.onCredentialRequest ?? null;
+    this.fileAdapter = options.fileAdapter ?? null;
 
     /** @type {Map<string, any>} */
     this.connectors = new Map();
@@ -217,7 +225,7 @@ export class QueryEngine {
    * @param {Query} query
    * @param {QueryExecutionContext} [context]
    * @param {ExecuteOptions} [options]
-   * @returns {Promise<DataTable>}
+   * @returns {Promise<ITable>}
    */
   async executeQuery(query, context = {}, options = {}) {
     const { table } = await this.executeQueryWithMeta(query, context, options);
@@ -379,11 +387,11 @@ export class QueryEngine {
       refreshedAt: completedAt,
       sources,
       outputSchema,
-      outputRowCount: table.rows.length,
+      outputRowCount: table.rowCount,
       cache: cacheKey ? { key: cacheKey, hit: false } : undefined,
     };
 
-    if (this.cache && cacheKey && cacheMode !== "bypass") {
+    if (this.cache && cacheKey && cacheMode !== "bypass" && table instanceof DataTable) {
       await this.cache.set(
         cacheKey,
         { version: 1, table: serializeTable(table), meta: serializeQueryMeta(meta) },
@@ -540,7 +548,7 @@ export class QueryEngine {
 
   /**
    * Execute a list of steps starting from an already-materialized table.
-   * @param {DataTable} table
+   * @param {ITable} table
    * @param {QueryStep[]} steps
    * @param {QueryExecutionContext} context
    * @param {ExecuteOptions} [options]
@@ -548,7 +556,7 @@ export class QueryEngine {
    * @param {Set<string>} [callStack]
    * @param {ConnectorMeta[]} [sources]
    * @param {number} [stepIndexOffset]
-   * @returns {Promise<DataTable>}
+   * @returns {Promise<ITable>}
    */
   async executeSteps(table, steps, context, options = {}, state, callStack, sources, stepIndexOffset = 0) {
     let current = table;
@@ -576,14 +584,14 @@ export class QueryEngine {
   }
 
   /**
-   * @param {DataTable} table
+   * @param {ITable} table
    * @param {QueryOperation} operation
    * @param {QueryExecutionContext} context
    * @param {ExecuteOptions} [options]
    * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} [state]
    * @param {Set<string>} [callStack]
    * @param {ConnectorMeta[]} [sources]
-   * @returns {Promise<DataTable>}
+   * @returns {Promise<ITable>}
    */
   async applyStep(table, operation, context, options = {}, state, callStack, sources) {
     throwIfAborted(options.signal);
@@ -598,7 +606,7 @@ export class QueryEngine {
   }
 
   /**
-   * Load a query source into a materialized `DataTable`.
+   * Load a query source into a materialized table.
    *
    * This is exposed for advanced callers, but most hosts should use
    * `executeQuery` / `executeQueryWithMeta`.
@@ -608,7 +616,7 @@ export class QueryEngine {
    * @param {Set<string>} callStack
    * @param {ExecuteOptions} [options]
    * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} [state]
-   * @returns {Promise<DataTable>}
+   * @returns {Promise<ITable>}
    */
   async loadSource(
     source,
@@ -628,7 +636,7 @@ export class QueryEngine {
    * @param {Set<string>} callStack
    * @param {ExecuteOptions} options
    * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
-   * @returns {Promise<{ table: DataTable, meta: ConnectorMeta, sources: ConnectorMeta[] }>}
+   * @returns {Promise<{ table: ITable, meta: ConnectorMeta, sources: ConnectorMeta[] }>}
    */
   async loadSourceWithMeta(source, context, callStack, options, state) {
     throwIfAborted(options.signal);
@@ -641,8 +649,8 @@ export class QueryEngine {
       const meta = {
         refreshedAt: new Date(state.now()),
         schema: { columns: table.columns, inferred: true },
-        rowCount: table.rows.length,
-        rowCountEstimate: table.rows.length,
+        rowCount: table.rowCount,
+        rowCountEstimate: table.rowCount,
         provenance: { kind: "range" },
       };
       options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
@@ -657,8 +665,8 @@ export class QueryEngine {
       const meta = {
         refreshedAt: new Date(state.now()),
         schema: { columns: table.columns, inferred: true },
-        rowCount: table.rows.length,
-        rowCountEstimate: table.rows.length,
+        rowCount: table.rowCount,
+        rowCountEstimate: table.rowCount,
         provenance: { kind: "table", table: source.table },
       };
       options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
@@ -698,6 +706,25 @@ export class QueryEngine {
 
       await this.assertPermission(connector.permissionKind, { source, request }, state);
       const credentials = await this.getCredentials("file", request, state);
+
+      // Prefer the Arrow-backed Parquet path when the host can provide raw bytes.
+      // This avoids materializing row arrays and lets downstream steps stay columnar.
+      if (source.type === "parquet" && this.fileAdapter?.readBinary) {
+        const bytes = await this.fileAdapter.readBinary(source.path);
+        throwIfAborted(options.signal);
+        const arrowTable = await parquetToArrowTable(bytes, source.options);
+        const table = new ArrowTableAdapter(arrowTable);
+        const meta = {
+          refreshedAt: new Date(state.now()),
+          schema: { columns: table.columns, inferred: true },
+          rowCount: table.rowCount,
+          rowCountEstimate: table.rowCount,
+          provenance: { kind: "file", path: source.path, format: "parquet" },
+        };
+        options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+        return { table, meta, sources: [meta] };
+      }
+
       const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
       options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
       return { ...result, sources: [result.meta] };
@@ -802,7 +829,7 @@ export class QueryEngine {
   }
 
   /**
-   * @param {DataTable} left
+   * @param {ITable} left
    * @param {import("./model.js").MergeOp} op
    * @param {QueryExecutionContext} context
    * @returns {Promise<DataTable>}
@@ -826,12 +853,12 @@ export class QueryEngine {
 
     /** @type {Map<unknown, number[]>} */
     const rightIndex = new Map();
-    right.rows.forEach((row, idx) => {
-      const key = row[rightKeyIdx];
+    for (let rowIndex = 0; rowIndex < right.rowCount; rowIndex++) {
+      const key = right.getCell(rowIndex, rightKeyIdx);
       const bucket = rightIndex.get(key);
-      if (bucket) bucket.push(idx);
-      else rightIndex.set(key, [idx]);
-    });
+      if (bucket) bucket.push(rowIndex);
+      else rightIndex.set(key, [rowIndex]);
+    }
 
     const rightColumnsToInclude = right.columns
       .map((col, idx) => ({ col, idx }))
@@ -848,35 +875,50 @@ export class QueryEngine {
     /** @type {unknown[][]} */
     const outRows = [];
 
-    const emit = (leftRow, rightRow) => {
-      const leftValues = leftRow ?? Array.from({ length: left.columns.length }, () => null);
-      const rightValues = rightColumnsToInclude.map(({ idx }) => rightRow?.[idx] ?? null);
-      outRows.push([...leftValues, ...rightValues]);
+    const emit = (leftRowIndex, rightRowIndex) => {
+      const row = new Array(outColumns.length);
+      let offset = 0;
+
+      if (leftRowIndex == null) {
+        for (let i = 0; i < left.columns.length; i++) row[offset++] = null;
+      } else {
+        for (let i = 0; i < left.columns.length; i++) row[offset++] = left.getCell(leftRowIndex, i);
+      }
+
+      if (rightRowIndex == null) {
+        for (let i = 0; i < rightColumnsToInclude.length; i++) row[offset++] = null;
+      } else {
+        for (const { idx } of rightColumnsToInclude) {
+          row[offset++] = right.getCell(rightRowIndex, idx);
+        }
+      }
+
+      outRows.push(row);
     };
 
     if (op.joinType === "inner" || op.joinType === "left" || op.joinType === "full") {
       /** @type {Set<number>} */
       const matchedRight = new Set();
 
-      for (const leftRow of left.rows) {
-        const matchIndices = rightIndex.get(leftRow[leftKeyIdx]) ?? [];
+      for (let leftRowIndex = 0; leftRowIndex < left.rowCount; leftRowIndex++) {
+        const matchIndices = rightIndex.get(left.getCell(leftRowIndex, leftKeyIdx)) ?? [];
         if (matchIndices.length === 0) {
-          if (op.joinType !== "inner") emit(leftRow, null);
+          if (op.joinType !== "inner") emit(leftRowIndex, null);
           continue;
         }
 
         for (const rightIdx of matchIndices) {
           matchedRight.add(rightIdx);
-          emit(leftRow, right.rows[rightIdx]);
+          emit(leftRowIndex, rightIdx);
         }
       }
 
       if (op.joinType === "full") {
-        right.rows.forEach((rightRow, idx) => {
-          if (!matchedRight.has(idx)) {
-            emit(null, rightRow);
+        for (let rightRowIndex = 0; rightRowIndex < right.rowCount; rightRowIndex++) {
+          if (!matchedRight.has(rightRowIndex)) {
+            emit(null, rightRowIndex);
           }
-        });
+        }
       }
 
       return new DataTable(outColumns, outRows);
@@ -885,23 +927,23 @@ export class QueryEngine {
     if (op.joinType === "right") {
       /** @type {Map<unknown, number[]>} */
       const leftIndex = new Map();
-      left.rows.forEach((row, idx) => {
-        const key = row[leftKeyIdx];
+      for (let rowIndex = 0; rowIndex < left.rowCount; rowIndex++) {
+        const key = left.getCell(rowIndex, leftKeyIdx);
         const bucket = leftIndex.get(key);
-        if (bucket) bucket.push(idx);
-        else leftIndex.set(key, [idx]);
-      });
+        if (bucket) bucket.push(rowIndex);
+        else leftIndex.set(key, [rowIndex]);
+      }
 
-      right.rows.forEach((rightRow) => {
-        const matchIndices = leftIndex.get(rightRow[rightKeyIdx]) ?? [];
+      for (let rightRowIndex = 0; rightRowIndex < right.rowCount; rightRowIndex++) {
+        const matchIndices = leftIndex.get(right.getCell(rightRowIndex, rightKeyIdx)) ?? [];
         if (matchIndices.length === 0) {
-          emit(null, rightRow);
-          return;
+          emit(null, rightRowIndex);
+          continue;
         }
         for (const leftIdx of matchIndices) {
-          emit(left.rows[leftIdx], rightRow);
+          emit(leftIdx, rightRowIndex);
         }
-      });
+      }
 
       return new DataTable(outColumns, outRows);
     }
@@ -910,7 +952,7 @@ export class QueryEngine {
   }
 
   /**
-   * @param {DataTable} current
+   * @param {ITable} current
    * @param {import("./model.js").AppendOp} op
    * @param {QueryExecutionContext} context
    * @returns {Promise<DataTable>}
@@ -950,12 +992,67 @@ export class QueryEngine {
     const outRows = [];
     for (const table of tables) {
       const index = new Map(table.columns.map((c, idx) => [c.name, idx]));
-      for (const row of table.rows) {
-        outRows.push(columns.map((name) => row[index.get(name) ?? -1] ?? null));
+      for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex++) {
+        outRows.push(columns.map((name) => table.getCell(rowIndex, index.get(name) ?? -1)));
       }
     }
 
     return new DataTable(outColumns, outRows);
+  }
+
+  /**
+   * Execute a query and stream the resulting grid batches to `onBatch`.
+   *
+   * This is intended for progressively populating a spreadsheet-like UI without needing to
+   * materialize a full `table.toGrid()` result in memory.
+   *
+   * @param {Query} query
+   * @param {QueryExecutionContext} [context]
+   * @param {ExecuteOptions & {
+   *   batchSize?: number;
+   *   onBatch: (batch: { rowOffset: number; values: unknown[][] }) => Promise<void> | void;
+   * }} options
+   */
+  async executeQueryStreaming(query, context = {}, options) {
+    const batchSize = options.batchSize ?? 1024;
+    const onBatch = options.onBatch;
+
+    const { batchSize: _batchSize, onBatch: _onBatch, ...executeOptions } = options;
+    const table = await this.executeQuery(query, context, executeOptions);
+
+    for await (const batch of tableToGridBatches(table, { batchSize, includeHeader: true })) {
+      await onBatch(batch);
+    }
+
+    return table;
+  }
+}
+
+/**
+ * @param {ITable} table
+ * @param {{ batchSize: number; includeHeader: boolean }} options
+ */
+async function* tableToGridBatches(table, options) {
+  if (table instanceof ArrowTableAdapter) {
+    yield* arrowTableToGridBatches(table.table, options);
+    return;
+  }
+
+  const batchSize = options.batchSize;
+  const includeHeader = options.includeHeader;
+
+  if (includeHeader) {
+    yield { rowOffset: 0, values: [table.columns.map((c) => c.name)] };
+  }
+
+  const baseOffset = includeHeader ? 1 : 0;
+  for (let rowStart = 0; rowStart < table.rowCount; rowStart += batchSize) {
+    const slice = [];
+    const end = Math.min(table.rowCount, rowStart + batchSize);
+    for (let rowIndex = rowStart; rowIndex < end; rowIndex++) {
+      slice.push(table.getRow(rowIndex));
+    }
+    yield { rowOffset: baseOffset + rowStart, values: slice };
   }
 }
 

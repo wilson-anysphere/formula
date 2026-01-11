@@ -1,0 +1,75 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { QueryEngine } from "../src/engine.js";
+import { ArrowTableAdapter } from "../src/arrowTable.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+test("parquet query source loads into Arrow and runs transforms without materializing row arrays", async () => {
+  const parquetPath = path.join(__dirname, "..", "..", "data-io", "test", "fixtures", "simple.parquet");
+
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readBinary: async (p) => new Uint8Array(await readFile(p)),
+    },
+  });
+
+  const query = {
+    id: "q_parquet",
+    name: "Parquet",
+    source: { type: "parquet", path: parquetPath, options: { batchSize: 2 } },
+    steps: [
+      {
+        id: "s_filter",
+        name: "Active only",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "active", operator: "equals", value: true } },
+      },
+      { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id", "name", "score"] } },
+      { id: "s_sort", name: "Sort", operation: { type: "sortRows", sortBy: [{ column: "score", direction: "descending" }] } },
+    ],
+  };
+
+  const result = await engine.executeQuery(query, {}, {});
+  assert.ok(result instanceof ArrowTableAdapter);
+  assert.deepEqual(result.toGrid(), [
+    ["id", "name", "score"],
+    [3, "Carla", 3.75],
+    [1, "Alice", 1.5],
+  ]);
+});
+
+test("parquet query source supports executeQueryStreaming", async () => {
+  const parquetPath = path.join(__dirname, "..", "..", "data-io", "test", "fixtures", "simple.parquet");
+
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readBinary: async (p) => new Uint8Array(await readFile(p)),
+    },
+  });
+
+  const query = {
+    id: "q_parquet_stream",
+    name: "Parquet stream",
+    source: { type: "parquet", path: parquetPath, options: { batchSize: 2 } },
+    steps: [{ id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id", "name"] } }],
+  };
+
+  const grid = [];
+  await engine.executeQueryStreaming(query, {}, {
+    batchSize: 2,
+    onBatch: (batch) => {
+      for (let i = 0; i < batch.values.length; i++) {
+        grid[batch.rowOffset + i] = batch.values[i];
+      }
+    },
+  });
+
+  assert.deepEqual(grid[0], ["id", "name"]);
+  assert.deepEqual(grid[1], [1, "Alice"]);
+  assert.deepEqual(grid[3], [3, "Carla"]);
+});
+

@@ -1,0 +1,78 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { arrowTableFromColumns } from "../../data-io/src/index.js";
+
+import { QueryEngine } from "../src/engine.js";
+import { ArrowTableAdapter } from "../src/arrowTable.js";
+import { DataTable } from "../src/table.js";
+
+function collectBatches(batches) {
+  const grid = [];
+  for (const batch of batches) {
+    for (let i = 0; i < batch.values.length; i++) {
+      grid[batch.rowOffset + i] = batch.values[i];
+    }
+  }
+  return grid;
+}
+
+test("executeQueryStreaming streams DataTable results in grid batches", async () => {
+  const engine = new QueryEngine();
+  const table = DataTable.fromGrid(
+    [
+      ["Region", "Sales"],
+      ["East", 100],
+      ["West", 200],
+      ["East", 150],
+    ],
+    { hasHeaders: true, inferTypes: true },
+  );
+
+  const query = {
+    id: "q_stream",
+    name: "Stream",
+    source: { type: "table", table: "t" },
+    steps: [{ id: "s_filter", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } } }],
+  };
+
+  const batches = [];
+  await engine.executeQueryStreaming(query, { tables: { t: table } }, {
+    batchSize: 2,
+    onBatch: (batch) => batches.push(batch),
+  });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engine.executeQuery(query, { tables: { t: table } }, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});
+
+test("executeQueryStreaming streams Arrow results using arrowTableToGridBatches", async () => {
+  const engine = new QueryEngine();
+  const arrowTable = new ArrowTableAdapter(
+    arrowTableFromColumns({
+      Region: ["East", "West", "East"],
+      Sales: [100, 200, 150],
+    }),
+  );
+
+  const query = {
+    id: "q_stream_arrow",
+    name: "Stream Arrow",
+    source: { type: "table", table: "t" },
+    steps: [
+      { id: "s_filter", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "Region", operator: "equals", value: "East" } } },
+      { id: "s_sort", name: "Sort", operation: { type: "sortRows", sortBy: [{ column: "Sales", direction: "descending" }] } },
+    ],
+  };
+
+  const batches = [];
+  await engine.executeQueryStreaming(query, { tables: { t: arrowTable } }, {
+    batchSize: 2,
+    onBatch: (batch) => batches.push(batch),
+  });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engine.executeQuery(query, { tables: { t: arrowTable } }, {})).toGrid();
+  assert.deepEqual(streamed, expected);
+});

@@ -1,7 +1,6 @@
-import { DataTable } from "./table.js";
-
 /**
  * @typedef {import("./model.js").FilterPredicate} FilterPredicate
+ * @typedef {import("./table.js").ITable} ITable
  */
 
 /**
@@ -47,69 +46,79 @@ function isEqual(a, b) {
 }
 
 /**
- * @param {DataTable} table
+ * @param {ITable} table
  * @param {FilterPredicate} predicate
- * @returns {(row: unknown[]) => boolean}
+ * @returns {(rowIndex: number) => boolean}
  */
 export function compilePredicate(table, predicate) {
+  const getCell = table.getCell.bind(table);
+
   /**
-   * @param {unknown[]} row
    * @param {FilterPredicate} node
-   * @returns {boolean}
+   * @returns {(rowIndex: number) => boolean}
    */
-  function evalNode(row, node) {
+  function compileNode(node) {
     switch (node.type) {
-      case "and":
-        return node.predicates.every((p) => evalNode(row, p));
-      case "or":
-        return node.predicates.some((p) => evalNode(row, p));
-      case "not":
-        return !evalNode(row, node.predicate);
+      case "and": {
+        const parts = node.predicates.map((p) => compileNode(p));
+        return (rowIndex) => parts.every((fn) => fn(rowIndex));
+      }
+      case "or": {
+        const parts = node.predicates.map((p) => compileNode(p));
+        return (rowIndex) => parts.some((fn) => fn(rowIndex));
+      }
+      case "not": {
+        const inner = compileNode(node.predicate);
+        return (rowIndex) => !inner(rowIndex);
+      }
       case "comparison": {
         const idx = table.getColumnIndex(node.column);
-        const value = row[idx];
+        const caseSensitive = node.caseSensitive ?? false;
+        return (rowIndex) => {
+          const value = getCell(rowIndex, idx);
 
-        switch (node.operator) {
-          case "isNull":
-            return value == null;
-          case "isNotNull":
-            return value != null;
-          case "equals":
-            return isEqual(value, node.value);
-          case "notEquals":
-            return !isEqual(value, node.value);
-          case "greaterThan":
-            return value != null && node.value != null && value > node.value;
-          case "greaterThanOrEqual":
-            return value != null && node.value != null && value >= node.value;
-          case "lessThan":
-            return value != null && node.value != null && value < node.value;
-          case "lessThanOrEqual":
-            return value != null && node.value != null && value <= node.value;
-          case "contains": {
-            const haystack = valueToString(value);
-            const needle = valueToString(node.value);
-            if (node.caseSensitive) return haystack.includes(needle);
-            return haystack.toLowerCase().includes(needle.toLowerCase());
+          switch (node.operator) {
+            case "isNull":
+              return value == null;
+            case "isNotNull":
+              return value != null;
+            case "equals":
+              return isEqual(value, node.value);
+            case "notEquals":
+              return !isEqual(value, node.value);
+            case "greaterThan":
+              return value != null && node.value != null && value > node.value;
+            case "greaterThanOrEqual":
+              return value != null && node.value != null && value >= node.value;
+            case "lessThan":
+              return value != null && node.value != null && value < node.value;
+            case "lessThanOrEqual":
+              return value != null && node.value != null && value <= node.value;
+            case "contains": {
+              const haystack = valueToString(value);
+              const needle = valueToString(node.value);
+              if (caseSensitive) return haystack.includes(needle);
+              return haystack.toLowerCase().includes(needle.toLowerCase());
+            }
+            case "startsWith": {
+              const haystack = valueToString(value);
+              const needle = valueToString(node.value);
+              if (caseSensitive) return haystack.startsWith(needle);
+              return haystack.toLowerCase().startsWith(needle.toLowerCase());
+            }
+            case "endsWith": {
+              const haystack = valueToString(value);
+              const needle = valueToString(node.value);
+              if (caseSensitive) return haystack.endsWith(needle);
+              return haystack.toLowerCase().endsWith(needle.toLowerCase());
+            }
+            default: {
+              /** @type {never} */
+              const exhausted = node.operator;
+              throw new Error(`Unsupported operator '${exhausted}'`);
+            }
           }
-          case "startsWith": {
-            const haystack = valueToString(value);
-            const needle = valueToString(node.value);
-            if (node.caseSensitive) return haystack.startsWith(needle);
-            return haystack.toLowerCase().startsWith(needle.toLowerCase());
-          }
-          case "endsWith": {
-            const haystack = valueToString(value);
-            const needle = valueToString(node.value);
-            if (node.caseSensitive) return haystack.endsWith(needle);
-            return haystack.toLowerCase().endsWith(needle.toLowerCase());
-          }
-          default: {
-            /** @type {never} */
-            const exhausted = node.operator;
-            throw new Error(`Unsupported operator '${exhausted}'`);
-          }
-        }
+        };
       }
       default: {
         /** @type {never} */
@@ -119,7 +128,7 @@ export function compilePredicate(table, predicate) {
     }
   }
 
-  return (row) => evalNode(row, predicate);
+  return compileNode(predicate);
 }
 
 /**

@@ -44,6 +44,8 @@
  * @typedef {{
  *   type: "parquet";
  *   path: string;
+ *   // Passed through to `@formula/data-io`'s `parquetToArrowTable` reader options.
+ *   options?: Record<string, unknown>;
  * }} ParquetQuerySource
  */
 

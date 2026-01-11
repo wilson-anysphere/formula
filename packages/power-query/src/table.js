@@ -17,6 +17,33 @@
  */
 
 /**
+ * A minimal column-vector interface shared by row-backed and Arrow-backed tables.
+ *
+ * @typedef {{
+ *   length: number;
+ *   get: (index: number) => unknown;
+ * }} ColumnVector
+ */
+
+/**
+ * Shared table interface used by the transformation engine. Implemented by `DataTable`
+ * and `ArrowTableAdapter`.
+ *
+ * @typedef {{
+ *   columns: Column[];
+ *   readonly rowCount: number;
+ *   readonly columnCount: number;
+ *   getColumnIndex: (name: string) => number;
+ *   getColumnVector: (index: number) => ColumnVector;
+ *   getCell: (rowIndex: number, colIndex: number) => unknown;
+ *   getRow: (rowIndex: number) => unknown[];
+ *   iterRows: () => IterableIterator<unknown[]>;
+ *   toGrid: (options?: { includeHeader?: boolean }) => unknown[][];
+ *   head: (limit: number) => any;
+ * }} ITable
+ */
+
+/**
  * Convert a user-provided value into a printable column name.
  * @param {unknown} value
  * @returns {string}
@@ -167,6 +194,14 @@ export class DataTable {
     return new DataTable(typedColumns, normalizedRows);
   }
 
+  get rowCount() {
+    return this.rows.length;
+  }
+
+  get columnCount() {
+    return this.columns.length;
+  }
+
   /**
    * @param {string} name
    * @returns {number}
@@ -177,6 +212,46 @@ export class DataTable {
       throw new Error(`Unknown column '${name}'. Available: ${this.columns.map((c) => c.name).join(", ")}`);
     }
     return idx;
+  }
+
+  /**
+   * @param {number} index
+   * @returns {ColumnVector}
+   */
+  getColumnVector(index) {
+    if (index < 0 || index >= this.columns.length) {
+      throw new Error(`Unknown column index ${index}`);
+    }
+
+    const rows = this.rows;
+    return {
+      length: rows.length,
+      get: (rowIndex) => rows[rowIndex]?.[index] ?? null,
+    };
+  }
+
+  /**
+   * @param {number} rowIndex
+   * @param {number} colIndex
+   * @returns {unknown}
+   */
+  getCell(rowIndex, colIndex) {
+    return this.rows[rowIndex]?.[colIndex] ?? null;
+  }
+
+  /**
+   * @param {number} rowIndex
+   * @returns {unknown[]}
+   */
+  getRow(rowIndex) {
+    return this.rows[rowIndex] ?? [];
+  }
+
+  /**
+   * @returns {IterableIterator<unknown[]>}
+   */
+  *iterRows() {
+    yield* this.rows;
   }
 
   /**
@@ -198,4 +273,3 @@ export class DataTable {
     return new DataTable(this.columns, this.rows.slice(0, limit));
   }
 }
-
