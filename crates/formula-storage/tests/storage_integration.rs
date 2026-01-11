@@ -4,7 +4,7 @@ use formula_model::{
 use formula_storage::storage::StorageError;
 use formula_storage::{
     AutoSaveConfig, AutoSaveManager, CellChange, CellData, CellRange, CellValue, SheetVisibility,
-    NamedRange, Storage, Style,
+    MemoryManager, MemoryManagerConfig, NamedRange, Storage, Style,
 };
 use rusqlite::{Connection, OpenFlags};
 use serde_json::json;
@@ -217,37 +217,52 @@ async fn autosave_batches_changes() {
         .create_sheet(workbook.id, "Sheet", 0, None)
         .expect("create sheet");
 
-    let autosave = AutoSaveManager::spawn(
+    let memory = MemoryManager::new(
         storage.clone(),
+        MemoryManagerConfig {
+            max_memory_bytes: 128 * 1024,
+            max_pages: 128,
+            eviction_watermark: 0.8,
+            rows_per_page: 64,
+            cols_per_page: 64,
+        },
+    );
+
+    let autosave = AutoSaveManager::spawn(
+        memory,
         AutoSaveConfig {
             save_delay: Duration::from_millis(50),
             max_delay: Duration::from_millis(200),
         },
     );
 
-    autosave.record_change(CellChange {
-        sheet_id: sheet.id,
-        row: 0,
-        col: 0,
-        data: CellData {
-            value: CellValue::Number(10.0),
-            formula: None,
-            style: None,
-        },
-        user_id: None,
-    });
+    autosave
+        .record_change(CellChange {
+            sheet_id: sheet.id,
+            row: 0,
+            col: 0,
+            data: CellData {
+                value: CellValue::Number(10.0),
+                formula: None,
+                style: None,
+            },
+            user_id: None,
+        })
+        .expect("record change");
 
-    autosave.record_change(CellChange {
-        sheet_id: sheet.id,
-        row: 0,
-        col: 1,
-        data: CellData {
-            value: CellValue::Number(20.0),
-            formula: None,
-            style: None,
-        },
-        user_id: None,
-    });
+    autosave
+        .record_change(CellChange {
+            sheet_id: sheet.id,
+            row: 0,
+            col: 1,
+            data: CellData {
+                value: CellValue::Number(20.0),
+                formula: None,
+                style: None,
+            },
+            user_id: None,
+        })
+        .expect("record change");
 
     // Wait long enough for the debounce timer to fire.
     tokio::time::sleep(Duration::from_millis(120)).await;

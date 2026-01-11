@@ -1,4 +1,5 @@
-use crate::storage::{CellChange, Result as StorageResult, Storage};
+use crate::cache::MemoryManager;
+use crate::storage::{CellChange, Result as StorageResult};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,30 +25,31 @@ impl Default for AutoSaveConfig {
 }
 
 enum Command {
-    Record(CellChange),
+    Touch,
     Flush(oneshot::Sender<StorageResult<()>>),
     Shutdown(oneshot::Sender<StorageResult<()>>),
 }
 
 /// Debounced, batched persistence for cell edits.
 ///
-/// The autosave manager is intentionally storage-only (no UI concepts). Higher
-/// layers can translate user operations into `CellChange`s.
+/// The autosave manager drives `MemoryManager::flush_dirty_pages` on a debounce
+/// timer. It does not persist each edit immediately, but guarantees that dirty
+/// pages will be flushed (and persisted) within `max_delay`.
 pub struct AutoSaveManager {
+    memory: MemoryManager,
     tx: mpsc::UnboundedSender<Command>,
     save_count: Arc<AtomicUsize>,
     handle: JoinHandle<()>,
 }
 
 impl AutoSaveManager {
-    pub fn spawn(storage: Storage, config: AutoSaveConfig) -> Self {
+    pub fn spawn(memory: MemoryManager, config: AutoSaveConfig) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<Command>();
         let save_count = Arc::new(AtomicUsize::new(0));
         let save_count_task = save_count.clone();
+        let memory_task = memory.clone();
 
         let handle = tokio::spawn(async move {
-            let mut pending: Vec<CellChange> = Vec::new();
-            let mut needs_persist = false;
             // Track the last *successful* save so that a transient SQLite error
             // doesn't postpone future flush attempts indefinitely.
             let mut last_successful_save = Instant::now();
@@ -57,12 +59,10 @@ impl AutoSaveManager {
                 tokio::select! {
                     cmd = rx.recv() => {
                         match cmd {
-                            Some(Command::Record(change)) => {
-                                pending.push(change);
-
+                            Some(Command::Touch) => {
                                 let now = Instant::now();
                                 if now.duration_since(last_successful_save) >= config.max_delay {
-                                    match flush_pending(&storage, &mut pending, &mut needs_persist, &save_count_task) {
+                                    match flush_dirty_pages(&memory_task, &save_count_task) {
                                         Ok(()) => {
                                             last_successful_save = Instant::now();
                                             next_flush = None;
@@ -77,12 +77,7 @@ impl AutoSaveManager {
                                 }
                             }
                             Some(Command::Flush(reply)) => {
-                                let result = flush_pending(
-                                    &storage,
-                                    &mut pending,
-                                    &mut needs_persist,
-                                    &save_count_task,
-                                );
+                                let result = flush_dirty_pages(&memory_task, &save_count_task);
                                 if result.is_ok() {
                                     last_successful_save = Instant::now();
                                     next_flush = None;
@@ -93,22 +88,12 @@ impl AutoSaveManager {
                                 let _ = reply.send(result);
                             }
                             Some(Command::Shutdown(reply)) => {
-                                let result = flush_pending(
-                                    &storage,
-                                    &mut pending,
-                                    &mut needs_persist,
-                                    &save_count_task,
-                                );
+                                let result = flush_dirty_pages(&memory_task, &save_count_task);
                                 let _ = reply.send(result);
                                 break;
                             }
                             None => {
-                                let _ = flush_pending(
-                                    &storage,
-                                    &mut pending,
-                                    &mut needs_persist,
-                                    &save_count_task,
-                                );
+                                let _ = flush_dirty_pages(&memory_task, &save_count_task);
                                 break;
                             }
                         }
@@ -118,7 +103,7 @@ impl AutoSaveManager {
                             tokio::time::sleep_until(deadline).await;
                         }
                     }, if next_flush.is_some() => {
-                        match flush_pending(&storage, &mut pending, &mut needs_persist, &save_count_task) {
+                        match flush_dirty_pages(&memory_task, &save_count_task) {
                             Ok(()) => {
                                 last_successful_save = Instant::now();
                                 next_flush = None;
@@ -134,16 +119,23 @@ impl AutoSaveManager {
         });
 
         Self {
+            memory,
             tx,
             save_count,
             handle,
         }
     }
 
-    pub fn record_change(&self, change: CellChange) {
-        // If the task has already exited we just drop the change; higher layers
-        // should fall back to explicit persistence in that case.
-        let _ = self.tx.send(Command::Record(change));
+    pub fn record_change(&self, change: CellChange) -> StorageResult<()> {
+        self.memory.record_change(change)?;
+        // If the task has already exited we just drop the wake-up signal; higher
+        // layers can always fall back to explicit persistence.
+        let _ = self.tx.send(Command::Touch);
+        Ok(())
+    }
+
+    pub fn notify_change(&self) {
+        let _ = self.tx.send(Command::Touch);
     }
 
     pub async fn flush(&self) -> StorageResult<()> {
@@ -165,32 +157,11 @@ impl AutoSaveManager {
     }
 }
 
-fn flush_pending(
-    storage: &Storage,
-    pending: &mut Vec<CellChange>,
-    needs_persist: &mut bool,
-    save_count: &AtomicUsize,
-) -> StorageResult<()> {
-    if pending.is_empty() && !*needs_persist {
-        return Ok(());
-    }
-
-    if !pending.is_empty() {
-        let changes = std::mem::take(pending);
-        let result = storage.apply_cell_changes(&changes);
-        if let Err(err) = result {
-            // If we failed, restore pending so we can retry on the next flush.
-            *pending = changes;
-            return Err(err);
-        }
-        *needs_persist = true;
-    }
-
-    if *needs_persist {
-        storage.persist()?;
-        *needs_persist = false;
+fn flush_dirty_pages(memory: &MemoryManager, save_count: &AtomicUsize) -> StorageResult<()> {
+    let outcome = memory.flush_dirty_pages()?;
+    if outcome.persisted {
         save_count.fetch_add(1, Ordering::Relaxed);
     }
-
     Ok(())
 }
+

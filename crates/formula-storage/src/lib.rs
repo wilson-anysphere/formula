@@ -8,7 +8,7 @@
 //! - Lazy cell range loading
 //! - Batched transactional writes
 //! - Autosave debouncing
-//! - An LRU sheet cache for memory management
+//! - A viewport-driven, page-based LRU cache for memory management
 
 mod autosave;
 mod cache;
@@ -18,7 +18,7 @@ pub mod storage;
 mod types;
 
 pub use autosave::{AutoSaveConfig, AutoSaveManager};
-pub use cache::{MemoryManager, MemoryManagerConfig, SheetData};
+pub use cache::{FlushOutcome, MemoryManager, MemoryManagerConfig, MemoryManagerStats, ViewportData};
 pub use encryption::{EncryptionError, InMemoryKeyProvider, KeyProvider, KeyProviderError, KeyRing};
 pub use storage::{Storage, StorageError};
 pub use types::{

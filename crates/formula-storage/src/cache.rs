@@ -1,125 +1,169 @@
 use crate::storage::{CellChange, CellRange, Result as StorageResult, Storage};
-use crate::types::{CellSnapshot, CellValue, SheetMeta};
+use crate::types::{CellData, CellSnapshot, CellValue, SheetMeta, Style};
 use lru::LruCache;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+
+const PAGE_BASE_OVERHEAD_BYTES: usize = 128;
+const HASHMAP_ENTRY_OVERHEAD_BYTES: usize = 64;
+const PENDING_CHANGE_OVERHEAD_BYTES: usize = 64;
 
 #[derive(Debug, Clone)]
 pub struct MemoryManagerConfig {
     /// Hard cap for the in-memory cache (default: 500MB).
     pub max_memory_bytes: usize,
-    /// Max number of sheets to cache regardless of memory (default: 32).
-    pub max_sheets: usize,
-    /// Evict sheets when usage exceeds this fraction of the memory cap (default: 0.8).
+    /// Max number of pages to cache regardless of memory (default: 4096).
+    pub max_pages: usize,
+    /// Evict pages when usage exceeds this fraction of the memory cap (default: 0.8).
     pub eviction_watermark: f64,
+    /// Rows per cached page/tile (default: 256).
+    pub rows_per_page: usize,
+    /// Columns per cached page/tile (default: 256).
+    pub cols_per_page: usize,
 }
 
 impl Default for MemoryManagerConfig {
     fn default() -> Self {
         Self {
             max_memory_bytes: 500 * 1024 * 1024,
-            max_sheets: 32,
+            max_pages: 4096,
             eviction_watermark: 0.8,
+            rows_per_page: 256,
+            cols_per_page: 256,
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SheetData {
-    pub meta: SheetMeta,
-    pub cells: HashMap<(i64, i64), CellSnapshot>,
-    pub is_dirty: bool,
-    pending_changes: Vec<CellChange>,
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryManagerStats {
+    pub page_hits: u64,
+    pub page_misses: u64,
+    pub pages_loaded: u64,
+    pub pages_evicted: u64,
+    pub flush_transactions: u64,
+    pub pages_flushed: u64,
+    pub cell_changes_flushed: u64,
 }
 
-impl SheetData {
-    fn estimated_bytes(&self) -> usize {
-        let mut bytes = 0usize;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FlushOutcome {
+    /// Number of `CellChange`s applied to the live SQLite database.
+    pub changes_applied: usize,
+    /// Whether the underlying storage was persisted durably (e.g. flushed to an
+    /// encrypted container on disk).
+    pub persisted: bool,
+}
 
-        // Sheet metadata (names, etc).
-        bytes += self.meta.name.len();
-        if let Some(tab_color) = &self.meta.tab_color {
-            bytes += tab_color.len();
-        }
-        if let Some(rel_id) = &self.meta.xlsx_rel_id {
-            bytes += rel_id.len();
-        }
-        if let Some(metadata) = &self.meta.metadata {
-            bytes += metadata.to_string().len();
-        }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PageKey {
+    sheet_id: Uuid,
+    page_row: i64,
+    page_col: i64,
+}
 
-        // Each cell entry has HashMap overhead; we use a conservative constant.
-        for snapshot in self.cells.values() {
-            bytes += 64;
-            match &snapshot.value {
-                CellValue::String(s) => bytes += s.len(),
-                CellValue::RichText(rt) => {
-                    bytes += rt.text.len();
-                    bytes += rt.runs.len() * 32;
-                }
-                CellValue::Error(err) => bytes += err.as_str().len(),
-                CellValue::Array(arr) => {
-                    // Rough estimate: nested cell values.
-                    bytes += 64;
-                    for row in &arr.data {
-                        bytes += 16;
-                        for v in row {
-                            bytes += match v {
-                                CellValue::String(s) => s.len(),
-                                CellValue::RichText(rt) => rt.text.len() + rt.runs.len() * 32,
-                                CellValue::Error(err) => err.as_str().len(),
-                                CellValue::Array(_) => 64,
-                                CellValue::Spill(_) => 16,
-                                CellValue::Number(_) | CellValue::Boolean(_) | CellValue::Empty => {
-                                    0
-                                }
-                            };
-                        }
-                    }
-                }
-                CellValue::Spill(_)
-                | CellValue::Number(_)
-                | CellValue::Boolean(_)
-                | CellValue::Empty => {}
-            }
-            if let Some(formula) = &snapshot.formula {
-                bytes += formula.len();
-            }
-        }
+#[derive(Debug, Clone)]
+pub struct ViewportData {
+    range: CellRange,
+    cells: HashMap<(i64, i64), CellSnapshot>,
+}
 
-        bytes
+impl ViewportData {
+    pub fn range(&self) -> CellRange {
+        self.range
+    }
+
+    pub fn get(&self, row: i64, col: i64) -> Option<&CellSnapshot> {
+        self.cells.get(&(row, col))
+    }
+
+    pub fn non_empty_cells(&self) -> impl Iterator<Item = (&(i64, i64), &CellSnapshot)> {
+        self.cells.iter()
+    }
+
+    pub fn into_cells(self) -> HashMap<(i64, i64), CellSnapshot> {
+        self.cells
+    }
+}
+
+#[derive(Debug)]
+struct SequencedCellChange {
+    seq: u64,
+    change: CellChange,
+}
+
+#[derive(Debug)]
+struct PageData {
+    cells: HashMap<(i64, i64), CellSnapshot>,
+    pending_changes: Vec<SequencedCellChange>,
+    bytes: usize,
+}
+
+impl PageData {
+    fn new_loaded(cells: HashMap<(i64, i64), CellSnapshot>) -> Self {
+        let mut bytes = PAGE_BASE_OVERHEAD_BYTES;
+        for snapshot in cells.values() {
+            bytes = bytes.saturating_add(estimate_cell_snapshot_bytes(snapshot));
+        }
+        Self {
+            cells,
+            pending_changes: Vec::new(),
+            bytes,
+        }
+    }
+
+    fn is_dirty(&self) -> bool {
+        !self.pending_changes.is_empty()
     }
 }
 
 struct Inner {
-    cache: LruCache<Uuid, SheetData>,
+    pages: LruCache<PageKey, PageData>,
+    sheet_meta: HashMap<Uuid, SheetMeta>,
     bytes: usize,
+    next_change_seq: u64,
+    stats: MemoryManagerStats,
+    needs_persist: bool,
 }
 
-/// In-memory sheet cache with LRU eviction.
+/// In-memory page cache with LRU eviction.
 ///
-/// This cache keeps *loaded* cell data in memory, but uses the underlying
-/// `Storage` for lazy range loading. It is intentionally conservative and does
-/// not attempt to be a full on-demand paging system yet.
+/// Pages are fixed-size tiles keyed by `(sheet_id, page_row, page_col)`. The
+/// cache is populated by `load_viewport`, which loads any missing pages from
+/// SQLite and returns a `ViewportData` snapshot for the requested range.
+///
+/// Edits recorded through `record_change` update the cached page immediately and
+/// mark it dirty. Dirty pages are flushed to SQLite on eviction and via
+/// autosave.
+#[derive(Clone)]
 pub struct MemoryManager {
     storage: Storage,
     config: MemoryManagerConfig,
-    inner: Mutex<Inner>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 impl MemoryManager {
-    pub fn new(storage: Storage, config: MemoryManagerConfig) -> Self {
-        let cap = NonZeroUsize::new(config.max_sheets.max(1)).expect("max_sheets is non-zero");
+    pub fn new(storage: Storage, mut config: MemoryManagerConfig) -> Self {
+        config.max_pages = config.max_pages.max(1);
+        config.rows_per_page = config.rows_per_page.max(1);
+        config.cols_per_page = config.cols_per_page.max(1);
+        if !config.eviction_watermark.is_finite() {
+            config.eviction_watermark = 0.8;
+        }
+        let cap = NonZeroUsize::new(config.max_pages).expect("max_pages is non-zero");
         let inner = Inner {
-            cache: LruCache::new(cap),
+            pages: LruCache::new(cap),
+            sheet_meta: HashMap::new(),
             bytes: 0,
+            next_change_seq: 0,
+            stats: MemoryManagerStats::default(),
+            needs_persist: false,
         };
         Self {
             storage,
             config,
-            inner: Mutex::new(inner),
+            inner: Arc::new(Mutex::new(inner)),
         }
     }
 
@@ -130,76 +174,178 @@ impl MemoryManager {
             .bytes
     }
 
-    pub fn cached_sheet_count(&self) -> usize {
+    pub fn cached_page_count(&self) -> usize {
         self.inner
             .lock()
             .expect("memory manager mutex poisoned")
-            .cache
+            .pages
             .len()
+    }
+
+    pub fn stats_snapshot(&self) -> MemoryManagerStats {
+        self.inner
+            .lock()
+            .expect("memory manager mutex poisoned")
+            .stats
     }
 
     pub fn get_sheet(&self, sheet_id: Uuid) -> StorageResult<SheetMeta> {
         {
-            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
-            if let Some(sheet) = inner.cache.get(&sheet_id) {
-                return Ok(sheet.meta.clone());
+            let inner = self.inner.lock().expect("memory manager mutex poisoned");
+            if let Some(meta) = inner.sheet_meta.get(&sheet_id) {
+                return Ok(meta.clone());
             }
         }
 
         let meta = self.storage.get_sheet_meta(sheet_id)?;
-        self.insert_sheet_if_missing(meta.clone())?;
+        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+        inner.sheet_meta.insert(sheet_id, meta.clone());
         Ok(meta)
     }
 
-    /// Load a visible cell range from SQLite and update the in-memory cache.
+    /// Load a cell viewport (inclusive range) and return the cached values for
+    /// just the requested range.
+    pub fn load_viewport(&self, sheet_id: Uuid, viewport: CellRange) -> StorageResult<ViewportData> {
+        self.get_sheet(sheet_id)?;
+
+        let page_keys = self.page_keys_for_range(sheet_id, viewport);
+
+        let mut missing = Vec::new();
+        {
+            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+            for key in &page_keys {
+                if inner.pages.contains(key) {
+                    inner.pages.get(key);
+                    inner.stats.page_hits = inner.stats.page_hits.saturating_add(1);
+                } else {
+                    inner.stats.page_misses = inner.stats.page_misses.saturating_add(1);
+                    missing.push(*key);
+                }
+            }
+        }
+
+        for key in missing {
+            let range = self.page_range(key);
+            let loaded = self.storage.load_cells_in_range(sheet_id, range)?;
+            let mut cells = HashMap::new();
+            for (coord, snapshot) in loaded {
+                cells.insert(coord, snapshot);
+            }
+
+            let page = PageData::new_loaded(cells);
+
+            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+            if inner.pages.contains(&key) {
+                continue;
+            }
+            inner.stats.pages_loaded = inner.stats.pages_loaded.saturating_add(1);
+            self.insert_page_locked(&mut inner, key, page)?;
+        }
+
+        let viewport_data = {
+            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+            let mut cells = HashMap::new();
+            for key in &page_keys {
+                if let Some(page) = inner.pages.get(key) {
+                    for (&(row, col), snapshot) in &page.cells {
+                        if row >= viewport.row_start
+                            && row <= viewport.row_end
+                            && col >= viewport.col_start
+                            && col <= viewport.col_end
+                        {
+                            cells.insert((row, col), snapshot.clone());
+                        }
+                    }
+                }
+            }
+
+            // Keep memory bounded after new page inserts.
+            self.evict_if_needed_locked(&mut inner)?;
+
+            ViewportData { range: viewport, cells }
+        };
+
+        Ok(viewport_data)
+    }
+
+    /// Load a visible cell range and return the sparse list of cells.
+    ///
+    /// This is retained for backwards compatibility; prefer `load_viewport`.
     pub fn load_visible_range(
         &self,
         sheet_id: Uuid,
         range: CellRange,
     ) -> StorageResult<Vec<((i64, i64), CellSnapshot)>> {
-        self.ensure_sheet(sheet_id)?;
-
-        let cells = self.storage.load_cells_in_range(sheet_id, range)?;
-
-        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
-        if let Some(sheet) = inner.cache.get_mut(&sheet_id) {
-            let before = sheet.estimated_bytes();
-            for (coord, snapshot) in &cells {
-                sheet.cells.insert(*coord, snapshot.clone());
-            }
-            let after = sheet.estimated_bytes();
-            inner.bytes = inner.bytes.saturating_sub(before).saturating_add(after);
-        }
-
-        self.evict_if_needed(&mut inner)?;
+        let viewport = self.load_viewport(sheet_id, range)?;
+        let mut cells: Vec<_> = viewport.into_cells().into_iter().collect();
+        cells.sort_by_key(|(coord, _)| *coord);
         Ok(cells)
     }
 
     pub fn get_cached_cell(&self, sheet_id: Uuid, row: i64, col: i64) -> Option<CellSnapshot> {
+        let key = self.page_key_for_cell(sheet_id, row, col);
         let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
         inner
-            .cache
-            .get(&sheet_id)
-            .and_then(|sheet| sheet.cells.get(&(row, col)).cloned())
+            .pages
+            .get(&key)
+            .and_then(|page| page.cells.get(&(row, col)).cloned())
     }
 
-    /// Record a change in-memory and mark the sheet as dirty.
+    /// Record a change in-memory and mark the owning page as dirty.
     ///
-    /// This does **not** automatically persist the change; callers can either
-    /// flush explicitly or rely on eviction/close logic to persist pending
-    /// changes.
+    /// Changes are persisted on eviction and via autosave (`flush_dirty_pages`).
     pub fn record_change(&self, change: CellChange) -> StorageResult<()> {
-        self.ensure_sheet(change.sheet_id)?;
+        self.get_sheet(change.sheet_id)?;
+
+        let key = self.page_key_for_cell(change.sheet_id, change.row, change.col);
+        let needs_load = {
+            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+            if inner.pages.contains(&key) {
+                inner.pages.get(&key);
+                inner.stats.page_hits = inner.stats.page_hits.saturating_add(1);
+                false
+            } else {
+                inner.stats.page_misses = inner.stats.page_misses.saturating_add(1);
+                true
+            }
+        };
+
+        if needs_load {
+            let range = self.page_range(key);
+            let loaded = self.storage.load_cells_in_range(change.sheet_id, range)?;
+            let mut cells = HashMap::new();
+            for (coord, snapshot) in loaded {
+                cells.insert(coord, snapshot);
+            }
+            let page = PageData::new_loaded(cells);
+            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+            if !inner.pages.contains(&key) {
+                inner.stats.pages_loaded = inner.stats.pages_loaded.saturating_add(1);
+                self.insert_page_locked(&mut inner, key, page)?;
+            }
+        }
 
         let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
-        if let Some(sheet) = inner.cache.get_mut(&change.sheet_id) {
-            let before = sheet.estimated_bytes();
+        let seq = inner.next_change_seq;
+        inner.next_change_seq = inner.next_change_seq.saturating_add(1);
 
-            // Update the in-memory view so reads reflect the user's edits.
+        let mut before_page_bytes = None;
+        let mut after_page_bytes = None;
+        if let Some(page) = inner.pages.get_mut(&key) {
+            let page_before = page.bytes;
+            // Update cached snapshot.
+            match page.cells.get(&(change.row, change.col)) {
+                Some(existing) => {
+                    page.bytes = page
+                        .bytes
+                        .saturating_sub(estimate_cell_snapshot_bytes(existing));
+                }
+                None => {}
+            }
             if change.data.is_truly_empty() {
-                sheet.cells.remove(&(change.row, change.col));
+                page.cells.remove(&(change.row, change.col));
             } else {
-                sheet.cells.insert(
+                page.cells.insert(
                     (change.row, change.col),
                     CellSnapshot {
                         value: change.data.value.clone(),
@@ -208,76 +354,353 @@ impl MemoryManager {
                     },
                 );
             }
+            if let Some(updated) = page.cells.get(&(change.row, change.col)) {
+                page.bytes = page
+                    .bytes
+                    .saturating_add(estimate_cell_snapshot_bytes(updated));
+            }
 
-            sheet.pending_changes.push(change);
-            sheet.is_dirty = true;
+            page.bytes = page.bytes.saturating_add(estimate_cell_change_bytes(&change));
+            page.pending_changes.push(SequencedCellChange { seq, change });
 
-            let after = sheet.estimated_bytes();
+            before_page_bytes = Some(page_before);
+            after_page_bytes = Some(page.bytes);
+        }
+
+        if let (Some(before), Some(after)) = (before_page_bytes, after_page_bytes) {
             inner.bytes = inner.bytes.saturating_sub(before).saturating_add(after);
         }
 
-        self.evict_if_needed(&mut inner)?;
+        self.evict_if_needed_locked(&mut inner)?;
         Ok(())
     }
 
-    fn ensure_sheet(&self, sheet_id: Uuid) -> StorageResult<()> {
-        {
-            let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
-            if inner.cache.contains(&sheet_id) {
-                // Mark as recently used.
-                inner.cache.get(&sheet_id);
-                return Ok(());
+    /// Flush all dirty pages to SQLite. Returns the number of flushed cell
+    /// changes and whether the storage was durably persisted.
+    pub fn flush_dirty_pages(&self) -> StorageResult<FlushOutcome> {
+        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
+        self.flush_pending_changes_upto_seq_locked(&mut inner, u64::MAX)
+    }
+
+    fn page_key_for_cell(&self, sheet_id: Uuid, row: i64, col: i64) -> PageKey {
+        let rows = self.config.rows_per_page as i64;
+        let cols = self.config.cols_per_page as i64;
+        PageKey {
+            sheet_id,
+            page_row: row.div_euclid(rows),
+            page_col: col.div_euclid(cols),
+        }
+    }
+
+    fn page_range(&self, key: PageKey) -> CellRange {
+        let rows = self.config.rows_per_page as i64;
+        let cols = self.config.cols_per_page as i64;
+        let row_start = key.page_row.saturating_mul(rows);
+        let col_start = key.page_col.saturating_mul(cols);
+        CellRange::new(
+            row_start,
+            row_start.saturating_add(rows.saturating_sub(1)),
+            col_start,
+            col_start.saturating_add(cols.saturating_sub(1)),
+        )
+    }
+
+    fn page_keys_for_range(&self, sheet_id: Uuid, range: CellRange) -> Vec<PageKey> {
+        let rows = self.config.rows_per_page as i64;
+        let cols = self.config.cols_per_page as i64;
+
+        let page_row_start = range.row_start.div_euclid(rows);
+        let page_row_end = range.row_end.div_euclid(rows);
+        let page_col_start = range.col_start.div_euclid(cols);
+        let page_col_end = range.col_end.div_euclid(cols);
+
+        let mut keys = Vec::new();
+        for page_row in page_row_start..=page_row_end {
+            for page_col in page_col_start..=page_col_end {
+                keys.push(PageKey {
+                    sheet_id,
+                    page_row,
+                    page_col,
+                });
             }
         }
-
-        let meta = self.storage.get_sheet_meta(sheet_id)?;
-        self.insert_sheet_if_missing(meta)?;
-        Ok(())
+        keys
     }
 
-    fn insert_sheet_if_missing(&self, meta: SheetMeta) -> StorageResult<()> {
-        let mut inner = self.inner.lock().expect("memory manager mutex poisoned");
-        if inner.cache.contains(&meta.id) {
+    fn insert_page_locked(
+        &self,
+        inner: &mut Inner,
+        key: PageKey,
+        page: PageData,
+    ) -> StorageResult<()> {
+        if let Some(existing) = inner.pages.get_mut(&key) {
+            let before_page_bytes = existing.bytes;
+            // Merge without overwriting locally modified cells.
+            for (coord, snapshot) in page.cells {
+                existing.cells.entry(coord).or_insert(snapshot);
+            }
+            existing.bytes = PAGE_BASE_OVERHEAD_BYTES;
+            for snapshot in existing.cells.values() {
+                existing.bytes = existing.bytes.saturating_add(estimate_cell_snapshot_bytes(snapshot));
+            }
+            for sc in &existing.pending_changes {
+                existing.bytes = existing
+                    .bytes
+                    .saturating_add(estimate_cell_change_bytes(&sc.change));
+            }
+            inner.bytes = inner
+                .bytes
+                .saturating_sub(before_page_bytes)
+                .saturating_add(existing.bytes);
             return Ok(());
         }
 
-        let data = SheetData {
-            meta: meta.clone(),
-            cells: HashMap::new(),
-            is_dirty: false,
-            pending_changes: Vec::new(),
-        };
-        let bytes = data.estimated_bytes();
-
-        if let Some(evicted) = inner.cache.put(meta.id, data) {
-            inner.bytes = inner.bytes.saturating_sub(evicted.estimated_bytes());
+        // Respect the explicit page cap without relying on `LruCache::put`'s
+        // implicit eviction (which does not expose the key).
+        while inner.pages.len() >= self.config.max_pages {
+            self.evict_one_page_locked(inner)?;
         }
-        inner.bytes = inner.bytes.saturating_add(bytes);
 
-        self.evict_if_needed(&mut inner)?;
+        let page_bytes = page.bytes;
+        if let Some(evicted) = inner.pages.put(key, page) {
+            inner.bytes = inner.bytes.saturating_sub(evicted.bytes);
+            inner.stats.pages_evicted = inner.stats.pages_evicted.saturating_add(1);
+        }
+        inner.bytes = inner.bytes.saturating_add(page_bytes);
         Ok(())
     }
 
-    fn evict_if_needed(&self, inner: &mut Inner) -> StorageResult<()> {
-        let limit = (self.config.max_memory_bytes as f64 * self.config.eviction_watermark) as usize;
-        while inner.bytes > limit && inner.cache.len() > 1 {
-            if let Some((_sheet_id, sheet)) = inner.cache.pop_lru() {
-                let sheet_bytes = sheet.estimated_bytes();
+    fn eviction_limit_bytes(&self) -> usize {
+        let watermark = self.config.eviction_watermark.clamp(0.0, 1.0);
+        (self.config.max_memory_bytes as f64 * watermark) as usize
+    }
 
-                if sheet.is_dirty && !sheet.pending_changes.is_empty() {
-                    // Flush before evicting to avoid losing edits.
-                    if let Err(err) = self.storage.apply_cell_changes(&sheet.pending_changes) {
-                        // Failed to persist; keep the sheet in cache.
-                        inner.cache.put(sheet.meta.id, sheet);
-                        return Err(err);
-                    }
+    fn evict_if_needed_locked(&self, inner: &mut Inner) -> StorageResult<()> {
+        let limit = self.eviction_limit_bytes();
+        while inner.bytes > limit && !inner.pages.is_empty() {
+            if let Some((_lru_key, lru_page)) = inner.pages.peek_lru() {
+                if lru_page.is_dirty() {
+                    let max_seq = lru_page
+                        .pending_changes
+                        .iter()
+                        .map(|c| c.seq)
+                        .max()
+                        .unwrap_or(0);
+                    // Flush all changes up through the oldest page's latest change to
+                    // preserve global ordering across pages.
+                    self.flush_pending_changes_upto_seq_locked(inner, max_seq)?;
                 }
+            }
 
-                inner.bytes = inner.bytes.saturating_sub(sheet_bytes);
-            } else {
+            if inner.bytes <= limit {
                 break;
+            }
+
+            if let Some((_key, page)) = inner.pages.pop_lru() {
+                inner.stats.pages_evicted = inner.stats.pages_evicted.saturating_add(1);
+                inner.bytes = inner.bytes.saturating_sub(page.bytes);
             }
         }
         Ok(())
+    }
+
+    fn evict_one_page_locked(&self, inner: &mut Inner) -> StorageResult<()> {
+        let Some((_lru_key, lru_page)) = inner.pages.peek_lru() else {
+            return Ok(());
+        };
+
+        if lru_page.is_dirty() {
+            let max_seq = lru_page
+                .pending_changes
+                .iter()
+                .map(|c| c.seq)
+                .max()
+                .unwrap_or(0);
+            // Flush all changes up through the evicted page's latest change to
+            // preserve global ordering across pages.
+            self.flush_pending_changes_upto_seq_locked(inner, max_seq)?;
+        }
+
+        if let Some((_key, page)) = inner.pages.pop_lru() {
+            inner.stats.pages_evicted = inner.stats.pages_evicted.saturating_add(1);
+            inner.bytes = inner.bytes.saturating_sub(page.bytes);
+        }
+        Ok(())
+    }
+
+    fn flush_pending_changes_upto_seq_locked(
+        &self,
+        inner: &mut Inner,
+        upto_seq: u64,
+    ) -> StorageResult<FlushOutcome> {
+        let mut flushed: Vec<(u64, CellChange)> = Vec::new();
+        let mut pages_flushed = 0u64;
+
+        for (_key, page) in inner.pages.iter_mut() {
+            if page.pending_changes.is_empty() {
+                continue;
+            }
+
+            let mut keep = Vec::new();
+            let mut flushed_any = false;
+            let original = std::mem::take(&mut page.pending_changes);
+            for sc in original {
+                if sc.seq <= upto_seq {
+                    page.bytes = page
+                        .bytes
+                        .saturating_sub(estimate_cell_change_bytes(&sc.change));
+                    inner.bytes = inner
+                        .bytes
+                        .saturating_sub(estimate_cell_change_bytes(&sc.change));
+                    flushed.push((sc.seq, sc.change));
+                    flushed_any = true;
+                } else {
+                    keep.push(sc);
+                }
+            }
+            page.pending_changes = keep;
+            if flushed_any {
+                pages_flushed += 1;
+            }
+        }
+
+        if flushed.is_empty() {
+            // Even without cell changes, encrypted storages may still require a
+            // persist after a previous successful flush.
+            if inner.needs_persist {
+                self.storage.persist()?;
+                inner.needs_persist = false;
+                return Ok(FlushOutcome {
+                    changes_applied: 0,
+                    persisted: true,
+                });
+            }
+            return Ok(FlushOutcome {
+                changes_applied: 0,
+                persisted: false,
+            });
+        }
+
+        flushed.sort_by_key(|(seq, _)| *seq);
+        let (seqs, mut changes): (Vec<u64>, Vec<CellChange>) = flushed
+            .into_iter()
+            .map(|(seq, change)| (seq, change))
+            .unzip();
+
+        let result = self.storage.apply_cell_changes(&changes);
+        match result {
+            Ok(()) => {
+                inner.stats.flush_transactions = inner.stats.flush_transactions.saturating_add(1);
+                inner.stats.pages_flushed = inner.stats.pages_flushed.saturating_add(pages_flushed);
+                inner.stats.cell_changes_flushed = inner
+                    .stats
+                    .cell_changes_flushed
+                    .saturating_add(changes.len() as u64);
+                inner.needs_persist = true;
+
+                self.storage.persist()?;
+                inner.needs_persist = false;
+
+                Ok(FlushOutcome {
+                    changes_applied: changes.len(),
+                    persisted: true,
+                })
+            }
+            Err(err) => {
+                // Restore pending changes to their pages (prepend, since all restored
+                // changes have smaller seqs than the kept ones).
+                let mut restore: HashMap<PageKey, Vec<SequencedCellChange>> = HashMap::new();
+                for (seq, change) in seqs.into_iter().zip(changes.drain(..)) {
+                    let key = self.page_key_for_cell(change.sheet_id, change.row, change.col);
+                    restore
+                        .entry(key)
+                        .or_default()
+                        .push(SequencedCellChange { seq, change });
+                }
+
+                for (key, page) in inner.pages.iter_mut() {
+                    if let Some(mut restored) = restore.remove(key) {
+                        for sc in &restored {
+                            page.bytes = page
+                                .bytes
+                                .saturating_add(estimate_cell_change_bytes(&sc.change));
+                            inner.bytes = inner
+                                .bytes
+                                .saturating_add(estimate_cell_change_bytes(&sc.change));
+                        }
+                        restored.extend(std::mem::take(&mut page.pending_changes));
+                        page.pending_changes = restored;
+                    }
+                }
+                Err(err)
+            }
+        }
+    }
+}
+
+fn estimate_cell_snapshot_bytes(snapshot: &CellSnapshot) -> usize {
+    HASHMAP_ENTRY_OVERHEAD_BYTES
+        .saturating_add(estimate_cell_value_bytes(&snapshot.value))
+        .saturating_add(snapshot.formula.as_ref().map(|s| s.len()).unwrap_or(0))
+        .saturating_add(snapshot.style_id.map(|_| 8).unwrap_or(0))
+}
+
+fn estimate_cell_change_bytes(change: &CellChange) -> usize {
+    let mut bytes = PENDING_CHANGE_OVERHEAD_BYTES;
+    bytes = bytes.saturating_add(estimate_cell_data_bytes(&change.data));
+    if let Some(user_id) = &change.user_id {
+        bytes = bytes.saturating_add(user_id.len());
+    }
+    bytes
+}
+
+fn estimate_cell_data_bytes(data: &CellData) -> usize {
+    let mut bytes = estimate_cell_value_bytes(&data.value);
+    if let Some(formula) = &data.formula {
+        bytes = bytes.saturating_add(formula.len());
+    }
+    if let Some(style) = &data.style {
+        bytes = bytes.saturating_add(estimate_style_bytes(style));
+    }
+    bytes
+}
+
+fn estimate_style_bytes(style: &Style) -> usize {
+    let mut bytes = 0usize;
+    if let Some(fmt) = &style.number_format {
+        bytes = bytes.saturating_add(fmt.len());
+    }
+    if let Some(alignment) = &style.alignment {
+        bytes = bytes.saturating_add(alignment.to_string().len());
+    }
+    if let Some(protection) = &style.protection {
+        bytes = bytes.saturating_add(protection.to_string().len());
+    }
+    bytes
+}
+
+fn estimate_cell_value_bytes(value: &CellValue) -> usize {
+    match value {
+        CellValue::String(s) => s.len(),
+        CellValue::RichText(rt) => rt.text.len().saturating_add(rt.runs.len().saturating_mul(32)),
+        CellValue::Error(err) => err.as_str().len(),
+        CellValue::Array(arr) => {
+            let mut bytes = 64usize;
+            for row in &arr.data {
+                bytes = bytes.saturating_add(16);
+                for v in row {
+                    bytes = bytes.saturating_add(match v {
+                        CellValue::String(s) => s.len(),
+                        CellValue::RichText(rt) => rt.text.len() + rt.runs.len() * 32,
+                        CellValue::Error(err) => err.as_str().len(),
+                        CellValue::Array(_) => 64,
+                        CellValue::Spill(_) => 16,
+                        CellValue::Number(_) | CellValue::Boolean(_) | CellValue::Empty => 0,
+                    });
+                }
+            }
+            bytes
+        }
+        CellValue::Spill(_) | CellValue::Number(_) | CellValue::Boolean(_) | CellValue::Empty => 0,
     }
 }

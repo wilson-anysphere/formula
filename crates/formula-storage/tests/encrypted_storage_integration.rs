@@ -1,6 +1,7 @@
 use formula_storage::encryption::is_encrypted_container;
 use formula_storage::{
-    CellChange, CellData, CellRange, CellValue, InMemoryKeyProvider, KeyProvider, Storage,
+    CellChange, CellData, CellRange, CellValue, InMemoryKeyProvider, KeyProvider, MemoryManager,
+    MemoryManagerConfig, Storage,
 };
 use formula_storage::{AutoSaveConfig, AutoSaveManager, EncryptionError, storage::StorageError};
 use std::sync::Arc;
@@ -183,15 +184,27 @@ async fn encrypted_autosave_persists_to_disk() {
         .create_sheet(workbook.id, "Sheet1", 0, None)
         .expect("create sheet");
 
-    let autosave = AutoSaveManager::spawn(
+    let memory = MemoryManager::new(
         storage.clone(),
+        MemoryManagerConfig {
+            max_memory_bytes: 128 * 1024,
+            max_pages: 128,
+            eviction_watermark: 0.8,
+            rows_per_page: 64,
+            cols_per_page: 64,
+        },
+    );
+
+    let autosave = AutoSaveManager::spawn(
+        memory,
         AutoSaveConfig {
             save_delay: Duration::from_millis(50),
             max_delay: Duration::from_millis(200),
         },
     );
 
-    autosave.record_change(CellChange {
+    autosave
+        .record_change(CellChange {
         sheet_id: sheet.id,
         row: 0,
         col: 0,
@@ -201,7 +214,8 @@ async fn encrypted_autosave_persists_to_disk() {
             style: None,
         },
         user_id: None,
-    });
+    })
+        .expect("record change");
 
     tokio::time::sleep(Duration::from_millis(120)).await;
     autosave.flush().await.expect("flush");

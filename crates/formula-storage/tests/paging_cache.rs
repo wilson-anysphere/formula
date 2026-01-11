@@ -1,0 +1,148 @@
+use formula_storage::{
+    CellChange, CellData, CellRange, CellValue, MemoryManager, MemoryManagerConfig, Storage,
+};
+
+fn seed_dense_pages(
+    storage: &Storage,
+    sheet_id: uuid::Uuid,
+    pages: usize,
+    rows_per_page: usize,
+    cols: i64,
+) {
+    let mut changes = Vec::new();
+    for page in 0..pages {
+        let row_base = (page * rows_per_page) as i64;
+        for r in row_base..row_base + 10 {
+            for c in 0..cols {
+                changes.push(CellChange {
+                    sheet_id,
+                    row: r,
+                    col: c,
+                    data: CellData {
+                        value: CellValue::Number(page as f64),
+                        formula: None,
+                        style: None,
+                    },
+                    user_id: None,
+                });
+            }
+        }
+    }
+    storage
+        .apply_cell_changes(&changes)
+        .expect("seed workbook with cells");
+}
+
+#[test]
+fn viewport_scrolling_evicts_pages_and_bounds_memory() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Sheet", 0, None)
+        .expect("create sheet");
+
+    let rows_per_page = 50;
+    let cols_per_page = 50;
+    let page_count = 30;
+    seed_dense_pages(&storage, sheet.id, page_count, rows_per_page, 10);
+
+    let config = MemoryManagerConfig {
+        max_memory_bytes: 20_000,
+        max_pages: 128,
+        eviction_watermark: 0.5,
+        rows_per_page,
+        cols_per_page,
+    };
+    let eviction_limit = (config.max_memory_bytes as f64 * config.eviction_watermark) as usize;
+    let memory = MemoryManager::new(storage.clone(), config);
+
+    for page in 0..page_count {
+        let row_start = (page * rows_per_page) as i64;
+        let viewport = CellRange::new(row_start, row_start + 20, 0, 20);
+        let data = memory.load_viewport(sheet.id, viewport).expect("load viewport");
+        assert!(
+            data.get(row_start, 0).is_some(),
+            "expected seeded cell in viewport"
+        );
+
+        let usage = memory.estimated_usage_bytes();
+        assert!(
+            usage <= eviction_limit,
+            "cache usage {usage} exceeded eviction limit {eviction_limit}"
+        );
+    }
+
+    let stats = memory.stats_snapshot();
+    assert!(stats.pages_loaded > 0, "should load at least one page");
+    assert!(stats.pages_evicted > 0, "expected pages to be evicted");
+}
+
+#[test]
+fn dirty_edits_survive_eviction_and_are_persisted() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet = storage
+        .create_sheet(workbook.id, "Sheet", 0, None)
+        .expect("create sheet");
+
+    let rows_per_page = 50;
+    let cols_per_page = 50;
+    let page_count = 12;
+    seed_dense_pages(&storage, sheet.id, page_count, rows_per_page, 10);
+
+    let memory = MemoryManager::new(
+        storage.clone(),
+        MemoryManagerConfig {
+            max_memory_bytes: 20_000,
+            max_pages: 128,
+            eviction_watermark: 0.5,
+            rows_per_page,
+            cols_per_page,
+        },
+    );
+
+    // Load + edit a cell in the first page.
+    memory
+        .load_viewport(sheet.id, CellRange::new(0, 20, 0, 20))
+        .expect("load first viewport");
+    memory
+        .record_change(CellChange {
+            sheet_id: sheet.id,
+            row: 0,
+            col: 0,
+            data: CellData {
+                value: CellValue::Number(999.0),
+                formula: None,
+                style: None,
+            },
+            user_id: None,
+        })
+        .expect("record change");
+
+    // Scroll far enough that the edited page becomes LRU and is evicted.
+    for page in 1..page_count {
+        let row_start = (page * rows_per_page) as i64;
+        memory
+            .load_viewport(sheet.id, CellRange::new(row_start, row_start + 20, 0, 20))
+            .expect("scroll viewport");
+    }
+
+    let stats = memory.stats_snapshot();
+    assert!(stats.pages_evicted > 0, "expected some evictions");
+    assert!(
+        stats.flush_transactions > 0,
+        "dirty eviction should trigger a flush"
+    );
+
+    let persisted = storage
+        .load_cells_in_range(sheet.id, CellRange::new(0, 0, 0, 0))
+        .expect("load persisted cell");
+    assert_eq!(persisted.len(), 1);
+    assert_eq!(persisted[0].0, (0, 0));
+    assert_eq!(persisted[0].1.value, CellValue::Number(999.0));
+}
+
