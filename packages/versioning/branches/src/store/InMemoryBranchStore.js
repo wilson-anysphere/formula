@@ -15,12 +15,15 @@ const UTF8_ENCODER = new TextEncoder();
 /**
  * @typedef {{
  *   ensureDocument(docId: string, actor: Actor, initialState: DocumentState): Promise<void>,
+ *   hasDocument?(docId: string): Promise<boolean>,
  *   listBranches(docId: string): Promise<Branch[]>,
  *   getBranch(docId: string, name: string): Promise<Branch | null>,
  *   createBranch(input: { docId: string, name: string, createdBy: string, createdAt: number, description: string | null, headCommitId: string }): Promise<Branch>,
  *   renameBranch(docId: string, oldName: string, newName: string): Promise<void>,
  *   deleteBranch(docId: string, name: string): Promise<void>,
  *   updateBranchHead(docId: string, name: string, headCommitId: string): Promise<void>,
+ *   getCurrentBranchName?(docId: string): Promise<string>,
+ *   setCurrentBranchName?(docId: string, name: string): Promise<void>,
  *   createCommit(input: { docId: string, parentCommitId: string | null, mergeParentCommitId: string | null, createdBy: string, createdAt: number, message: string | null, patch: Patch, nextState?: DocumentState }): Promise<Commit>,
  *   getCommit(commitId: string): Promise<Commit | null>,
  *   getDocumentStateAtCommit(commitId: string): Promise<DocumentState>
