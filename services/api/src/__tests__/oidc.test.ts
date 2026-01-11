@@ -301,6 +301,75 @@ describe("OIDC SSO", () => {
     }
   });
 
+  it("derives redirect_uri from forwarded headers only when TRUST_PROXY=true", async () => {
+    const { db, config, app } = await createTestApp();
+    let proxyApp: ReturnType<typeof buildApp> | null = null;
+    try {
+      const ownerRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "trust-proxy-oidc-owner@example.com",
+          password: "password1234",
+          name: "Owner",
+          orgName: "Trust Proxy OIDC Org"
+        }
+      });
+      expect(ownerRegister.statusCode).toBe(200);
+      const orgId = (ownerRegister.json() as any).organization.id as string;
+
+      await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb WHERE org_id = $1", [
+        orgId,
+        JSON.stringify(["password", "oidc"])
+      ]);
+
+      await db.query(
+        `
+          INSERT INTO org_oidc_providers (org_id, provider_id, issuer_url, client_id, scopes, enabled)
+          VALUES ($1,$2,$3,$4,$5::jsonb,$6)
+        `,
+        [orgId, "mock", provider.issuerUrl, provider.clientId, JSON.stringify(["openid", "email"]), true]
+      );
+
+      await putSecret(db, config.secretStoreKey, `oidc:${orgId}:mock`, provider.clientSecret);
+
+      const spoofedForwarded = {
+        host: "good.example",
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-proto": "https"
+      };
+
+      const startRes = await app.inject({
+        method: "GET",
+        url: `/auth/oidc/${orgId}/mock/start`,
+        headers: spoofedForwarded
+      });
+      expect(startRes.statusCode).toBe(302);
+      const startUrl = new URL(startRes.headers.location as string);
+      expect(startUrl.searchParams.get("redirect_uri")).toBe(
+        `http://good.example/auth/oidc/${orgId}/mock/callback`
+      );
+
+      proxyApp = buildApp({ db, config: { ...config, trustProxy: true } });
+      await proxyApp.ready();
+
+      const startResTrusted = await proxyApp.inject({
+        method: "GET",
+        url: `/auth/oidc/${orgId}/mock/start`,
+        headers: spoofedForwarded
+      });
+      expect(startResTrusted.statusCode).toBe(302);
+      const trustedUrl = new URL(startResTrusted.headers.location as string);
+      expect(trustedUrl.searchParams.get("redirect_uri")).toBe(
+        `https://evil.example/auth/oidc/${orgId}/mock/callback`
+      );
+    } finally {
+      await proxyApp?.close();
+      await app.close();
+      await db.end();
+    }
+  });
+
   it("fails on invalid state", async () => {
     const { db, app } = await createTestApp();
     try {

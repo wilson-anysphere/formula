@@ -73,7 +73,9 @@ function extractName(claims: Record<string, unknown>, email: string): string {
 }
 
 function extractHost(request: FastifyRequest): string {
-  const xfHost = request.headers["x-forwarded-host"];
+  // Only trust forwarded headers when the API is configured to trust the proxy.
+  const trustProxy = Boolean(request.server.config.trustProxy);
+  const xfHost = trustProxy ? request.headers["x-forwarded-host"] : undefined;
   const hostValue =
     typeof xfHost === "string" && xfHost.length > 0
       ? xfHost.split(",")[0]!.trim()
@@ -84,7 +86,9 @@ function extractHost(request: FastifyRequest): string {
 }
 
 function extractProto(request: FastifyRequest): string {
-  const xfProto = request.headers["x-forwarded-proto"];
+  // Only trust forwarded headers when the API is configured to trust the proxy.
+  const trustProxy = Boolean(request.server.config.trustProxy);
+  const xfProto = trustProxy ? request.headers["x-forwarded-proto"] : undefined;
   const proto =
     typeof xfProto === "string" && xfProto.length > 0 ? xfProto.split(",")[0]!.trim() : request.protocol;
   return proto === "https" ? "https" : "http";
