@@ -1737,13 +1737,7 @@ fn parse_supbook(data: &[u8]) -> Option<SupBook> {
         let mut rr = RecordReader::new(data);
         if rr.read_u16().is_ok() {
             if let Ok(raw_name) = rr.read_utf16_string() {
-                let kind = if raw_name.is_empty() {
-                    SupBookKind::Internal
-                } else if raw_name == "\u{0001}" {
-                    SupBookKind::AddIn
-                } else {
-                    SupBookKind::ExternalWorkbook
-                };
+                let kind = classify_supbook_name(&raw_name);
                 return Some(SupBook { raw_name, kind });
             }
         }
@@ -1753,19 +1747,39 @@ fn parse_supbook(data: &[u8]) -> Option<SupBook> {
         let mut rr = RecordReader::new(data);
         if rr.read_u32().is_ok() {
             if let Ok(raw_name) = rr.read_utf16_string() {
-                let kind = if raw_name.is_empty() {
-                    SupBookKind::Internal
-                } else if raw_name == "\u{0001}" {
-                    SupBookKind::AddIn
-                } else {
-                    SupBookKind::ExternalWorkbook
-                };
+                let kind = classify_supbook_name(&raw_name);
                 return Some(SupBook { raw_name, kind });
             }
         }
     }
 
     None
+}
+
+fn classify_supbook_name(raw_name: &str) -> SupBookKind {
+    if raw_name.is_empty() {
+        return SupBookKind::Internal;
+    }
+    if raw_name == "\u{0001}" {
+        return SupBookKind::AddIn;
+    }
+
+    // Heuristic: if the string looks like a file path or workbook filename, treat it as an
+    // external workbook reference. Otherwise treat it as an internal SupBook (some producers
+    // store the first sheet name here).
+    let name = raw_name.to_ascii_lowercase();
+    if name.contains(['/', '\\'])
+        || name.ends_with(".xls")
+        || name.ends_with(".xlsx")
+        || name.ends_with(".xlsm")
+        || name.ends_with(".xlsb")
+        || name.ends_with(".xlam")
+        || name.ends_with(".xll")
+    {
+        SupBookKind::ExternalWorkbook
+    } else {
+        SupBookKind::Internal
+    }
 }
 
 fn supbook_is_plausible(supbook: &SupBook) -> bool {
