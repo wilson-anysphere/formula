@@ -17,5 +17,11 @@ ordered-float = "4"
 uuid = { version = "1", features = ["v4"] }
 unicode-normalization = "0.1"
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# `uuid` requires an explicit RNG backend on `wasm32-unknown-unknown`.
+uuid = { version = "1", features = ["rng-getrandom"] }
+# `uuid` + other deps pull `getrandom` which needs opting into a WASM backend.
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
 [dev-dependencies]
 serde_json = "1.0"

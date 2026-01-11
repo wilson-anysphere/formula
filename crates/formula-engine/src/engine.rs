@@ -1283,7 +1283,7 @@ impl Engine {
             let mut results: Vec<(CellKey, Value)> =
                 Vec::with_capacity(parallel_tasks.len() + serial_tasks.len());
 
-            let mut eval_parallel_tasks_serial = |results: &mut Vec<(CellKey, Value)>| {
+            let eval_parallel_tasks_serial = |results: &mut Vec<(CellKey, Value)>| {
                 let mut vm = bytecode::Vm::with_capacity(32);
                 for (k, compiled) in &parallel_tasks {
                     let ctx = crate::eval::EvalContext {

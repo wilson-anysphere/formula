@@ -31,6 +31,10 @@ wide = "0.7"
 rayon = { version = "1.10", optional = true }
 dashmap = { version = "5", optional = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# `ahash` pulls in `getrandom` v0.3 which requires opting into a WASM backend.
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
 [dev-dependencies]
 pretty_assertions = "1.4"
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
