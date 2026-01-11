@@ -10,5 +10,5 @@ pub use ast::{
     SheetReference, UnaryOp,
 };
 pub use compiler::compile_canonical_expr;
-pub use evaluator::{EvalContext, Evaluator, ResolvedName, ValueResolver};
+pub use evaluator::{EvalContext, Evaluator, RecalcContext, ResolvedName, ValueResolver};
 pub use parser::{FormulaParseError, Parser};

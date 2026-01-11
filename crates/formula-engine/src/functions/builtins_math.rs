@@ -1,11 +1,81 @@
 use crate::eval::CompiledExpr;
-use crate::error::ExcelError;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::simd::{CmpOp, NumericCriteria};
 use crate::value::{ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
+
+inventory::submit! {
+    FunctionSpec {
+        name: "RAND",
+        min_args: 0,
+        max_args: 0,
+        volatility: Volatility::Volatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[],
+        implementation: rand_fn,
+    }
+}
+
+fn rand_fn(ctx: &dyn FunctionContext, _args: &[CompiledExpr]) -> Value {
+    Value::Number(ctx.volatile_rand())
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "RANDBETWEEN",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::Volatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number],
+        implementation: randbetween_fn,
+    }
+}
+
+fn randbetween_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let bottom = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let top = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    if !bottom.is_finite() || !top.is_finite() {
+        return Value::Error(ErrorKind::Num);
+    }
+
+    let low_f = bottom.ceil();
+    let high_f = top.floor();
+    if low_f < (i64::MIN as f64)
+        || low_f > (i64::MAX as f64)
+        || high_f < (i64::MIN as f64)
+        || high_f > (i64::MAX as f64)
+    {
+        return Value::Error(ErrorKind::Num);
+    }
+
+    let low = low_f as i64;
+    let high = high_f as i64;
+    if low > high {
+        return Value::Error(ErrorKind::Num);
+    }
+
+    let span = match high.checked_sub(low).and_then(|d| d.checked_add(1)) {
+        Some(v) if v > 0 => v as u64,
+        _ => return Value::Error(ErrorKind::Num),
+    };
+
+    let offset = (ctx.volatile_rand_u64() % span) as i64;
+    Value::Number((low + offset) as f64)
+}
 
 inventory::submit! {
     FunctionSpec {
@@ -841,57 +911,5 @@ fn sign_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Value::Number(-1.0)
     } else {
         Value::Number(0.0)
-    }
-}
-
-inventory::submit! {
-    FunctionSpec {
-        name: "RAND",
-        min_args: 0,
-        max_args: 0,
-        volatility: Volatility::Volatile,
-        thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
-        return_type: ValueType::Number,
-        arg_types: &[],
-        implementation: rand_fn,
-    }
-}
-
-fn rand_fn(_ctx: &dyn FunctionContext, _args: &[CompiledExpr]) -> Value {
-    Value::Number(crate::functions::math::rand())
-}
-
-inventory::submit! {
-    FunctionSpec {
-        name: "RANDBETWEEN",
-        min_args: 2,
-        max_args: 2,
-        volatility: Volatility::Volatile,
-        thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
-        return_type: ValueType::Number,
-        arg_types: &[ValueType::Number, ValueType::Number],
-        implementation: randbetween_fn,
-    }
-}
-
-fn randbetween_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let bottom = match eval_scalar_arg(ctx, &args[0]).coerce_to_number() {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    let top = match eval_scalar_arg(ctx, &args[1]).coerce_to_number() {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-
-    match crate::functions::math::randbetween(bottom, top) {
-        Ok(n) => Value::Number(n as f64),
-        Err(e) => Value::Error(match e {
-            ExcelError::Div0 => ErrorKind::Div0,
-            ExcelError::Value => ErrorKind::Value,
-            ExcelError::Num => ErrorKind::Num,
-        }),
     }
 }

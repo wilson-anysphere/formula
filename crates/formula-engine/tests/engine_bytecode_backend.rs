@@ -1,4 +1,6 @@
-use formula_engine::eval::{parse_a1, EvalContext, Evaluator, SheetReference, ValueResolver};
+use formula_engine::eval::{
+    parse_a1, EvalContext, Evaluator, RecalcContext, SheetReference, ValueResolver,
+};
 use formula_engine::{Engine, ExternalValueProvider, Value};
 use std::sync::Arc;
 
@@ -68,6 +70,7 @@ fn bytecode_backend_matches_ast_for_sum_and_countif() {
     }
 
     let resolver = EngineResolver { engine: &engine };
+    let recalc_ctx = RecalcContext::new(0);
 
     let parsed_sum = formula_engine::eval::Parser::parse("=SUM(A1:A1000)").unwrap();
     let compiled_sum = {
@@ -82,7 +85,7 @@ fn bytecode_backend_matches_ast_for_sum_and_countif() {
         current_sheet: 0,
         current_cell: parse_a1("B1").unwrap(),
     };
-    let eval_sum = Evaluator::new(&resolver, ctx_sum).eval_formula(&compiled_sum);
+    let eval_sum = Evaluator::new(&resolver, ctx_sum, &recalc_ctx).eval_formula(&compiled_sum);
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), eval_sum);
 
     let parsed_countif =
@@ -99,7 +102,8 @@ fn bytecode_backend_matches_ast_for_sum_and_countif() {
         current_sheet: 0,
         current_cell: parse_a1("B2").unwrap(),
     };
-    let eval_countif = Evaluator::new(&resolver, ctx_countif).eval_formula(&compiled_countif);
+    let eval_countif =
+        Evaluator::new(&resolver, ctx_countif, &recalc_ctx).eval_formula(&compiled_countif);
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), eval_countif);
 
     assert!(engine.bytecode_program_count() > 0);

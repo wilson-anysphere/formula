@@ -100,6 +100,18 @@ pub trait FunctionContext {
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc>;
     fn date_system(&self) -> ExcelDateSystem;
+
+    /// Deterministic per-recalc random bits, scoped to the current cell evaluation.
+    ///
+    /// This is used by volatile worksheet RNG functions (e.g. RAND, RANDBETWEEN) so that
+    /// results are stable within a single recalculation and independent of scheduling
+    /// order (single-threaded vs multi-threaded).
+    fn volatile_rand_u64(&self) -> u64;
+
+    fn volatile_rand(&self) -> f64 {
+        let bits = self.volatile_rand_u64() >> 11; // 53 bits.
+        (bits as f64) / ((1u64 << 53) as f64)
+    }
 }
 
 pub type FunctionImpl = fn(&dyn FunctionContext, &[CompiledExpr]) -> Value;

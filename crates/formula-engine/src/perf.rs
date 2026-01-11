@@ -185,12 +185,14 @@ pub fn run_benchmarks() -> Vec<BenchmarkResult> {
     let parsed = Parser::parse("=SUM(A1:A100)").expect("parse eval formula");
     let compiled = compile_for_benchmark(&parsed);
     let resolver = ConstResolver;
+    let recalc_ctx = crate::eval::RecalcContext::new(0);
     let evaluator = Evaluator::new(
         &resolver,
         EvalContext {
             current_sheet: 0,
             current_cell: CellAddr { row: 0, col: 0 },
         },
+        &recalc_ctx,
     );
 
     let mut results = Vec::new();

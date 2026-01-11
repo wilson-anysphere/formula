@@ -171,7 +171,12 @@ pub(crate) fn evaluate_with_trace<R: crate::eval::ValueResolver>(
     ctx: EvalContext,
     expr: &SpannedExpr<usize>,
 ) -> (Value, TraceNode) {
-    let evaluator = TracedEvaluator { resolver, ctx };
+    let recalc_ctx = crate::eval::RecalcContext::new(0);
+    let evaluator = TracedEvaluator {
+        resolver,
+        ctx,
+        recalc_ctx: &recalc_ctx,
+    };
     evaluator.eval_scalar(expr)
 }
 
@@ -889,6 +894,7 @@ enum EvalValue {
 struct TracedEvaluator<'a, R: crate::eval::ValueResolver> {
     resolver: &'a R,
     ctx: EvalContext,
+    recalc_ctx: &'a crate::eval::RecalcContext,
 }
 
 impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
@@ -1050,6 +1056,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                     current_sheet: sheet_id,
                                     current_cell: self.ctx.current_cell,
                                 },
+                                self.recalc_ctx,
                             );
                             match FunctionContext::eval_arg(&evaluator, &compiled) {
                                 FnArgValue::Scalar(v) => (

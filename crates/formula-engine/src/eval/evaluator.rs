@@ -5,13 +5,28 @@ use crate::error::ExcelError;
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference};
 use crate::value::{Array, ErrorKind, Value};
 use std::cmp::Ordering;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy)]
 pub struct EvalContext {
     pub current_sheet: usize,
     pub current_cell: CellAddr,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecalcContext {
+    pub now_utc: chrono::DateTime<chrono::Utc>,
+    pub recalc_id: u64,
+}
+
+impl RecalcContext {
+    pub fn new(recalc_id: u64) -> Self {
+        Self {
+            now_utc: chrono::Utc::now(),
+            recalc_id,
+        }
+    }
 }
 
 pub trait ValueResolver {
@@ -81,25 +96,30 @@ enum EvalValue {
 pub struct Evaluator<'a, R: ValueResolver> {
     resolver: &'a R,
     ctx: EvalContext,
+    recalc_ctx: &'a RecalcContext,
     name_stack: Rc<RefCell<Vec<(usize, String)>>>,
     date_system: ExcelDateSystem,
+    rng_counter: Rc<Cell<u64>>,
 }
 
 impl<'a, R: ValueResolver> Evaluator<'a, R> {
-    pub fn new(resolver: &'a R, ctx: EvalContext) -> Self {
-        Self::new_with_date_system(resolver, ctx, ExcelDateSystem::EXCEL_1900)
+    pub fn new(resolver: &'a R, ctx: EvalContext, recalc_ctx: &'a RecalcContext) -> Self {
+        Self::new_with_date_system(resolver, ctx, recalc_ctx, ExcelDateSystem::EXCEL_1900)
     }
 
     pub fn new_with_date_system(
         resolver: &'a R,
         ctx: EvalContext,
+        recalc_ctx: &'a RecalcContext,
         date_system: ExcelDateSystem,
     ) -> Self {
         Self {
             resolver,
             ctx,
+            recalc_ctx,
             name_stack: Rc::new(RefCell::new(Vec::new())),
             date_system,
+            rng_counter: Rc::new(Cell::new(0)),
         }
     }
 
@@ -107,8 +127,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         Self {
             resolver: self.resolver,
             ctx,
+            recalc_ctx: self.recalc_ctx,
             name_stack: Rc::clone(&self.name_stack),
             date_system: self.date_system,
+            rng_counter: Rc::clone(&self.rng_counter),
         }
     }
 
@@ -573,7 +595,19 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     }
 
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::Utc::now()
+        self.recalc_ctx.now_utc
+    }
+
+    fn volatile_rand_u64(&self) -> u64 {
+        let draw = self.rng_counter.get();
+        self.rng_counter.set(draw.wrapping_add(1));
+
+        let mut seed = self.recalc_ctx.recalc_id;
+        seed ^= (self.ctx.current_sheet as u64).wrapping_mul(0x9e3779b97f4a7c15);
+        seed ^= (self.ctx.current_cell.row as u64).wrapping_mul(0xbf58476d1ce4e5b9);
+        seed ^= (self.ctx.current_cell.col as u64).wrapping_mul(0x94d049bb133111eb);
+        seed ^= draw.wrapping_mul(0x3c79ac492ba7b653);
+        splitmix64(seed)
     }
 
     fn date_system(&self) -> ExcelDateSystem {
@@ -799,4 +833,14 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
         )),
         (left_scalar, right_scalar) => f(left_scalar, right_scalar),
     }
+}
+
+fn splitmix64(mut state: u64) -> u64 {
+    // A simple, fast mixer with good statistical properties (used as a deterministic
+    // PRNG building block). The transform is bijective over u64, making it a good fit
+    // for per-cell deterministic RNG.
+    state = state.wrapping_add(0x9e3779b97f4a7c15);
+    state = (state ^ (state >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    state = (state ^ (state >> 27)).wrapping_mul(0x94d049bb133111eb);
+    state ^ (state >> 31)
 }
