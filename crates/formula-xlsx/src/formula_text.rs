@@ -5,22 +5,31 @@ const XL_FN_PREFIX: &str = "_xlfn.";
 //
 // Keep this list sorted (ASCII) for maintainability.
 const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
+    "AGGREGATE",
     "BYCOL",
     "BYROW",
+    "CEILING.MATH",
+    "CEILING.PRECISE",
     "CHOOSECOLS",
     "CHOOSEROWS",
     "CONCAT",
     "DROP",
     "EXPAND",
     "FILTER",
+    "FLOOR.MATH",
+    "FLOOR.PRECISE",
     "HSTACK",
     "IFNA",
     "IFS",
+    "ISO.CEILING",
+    "ISO.WEEKNUM",
     "ISOMITTED",
+    "ISOWEEKNUM",
     "LAMBDA",
     "LET",
     "MAKEARRAY",
     "MAP",
+    "NETWORKDAYS.INTL",
     "NUMBERVALUE",
     "RANDARRAY",
     "REDUCE",
@@ -28,6 +37,7 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "SEQUENCE",
     "SORT",
     "SORTBY",
+    "SWITCH",
     "TAKE",
     "TEXTJOIN",
     "TEXTSPLIT",
@@ -35,6 +45,7 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "TOROW",
     "UNIQUE",
     "VSTACK",
+    "WORKDAY.INTL",
     "WRAPCOLS",
     "WRAPROWS",
     "XLOOKUP",
@@ -129,7 +140,7 @@ pub(crate) fn add_xlfn_prefixes(formula: &str) -> String {
             _ if !in_string && is_ident_start_byte(bytes[i]) => {
                 let start = i;
                 let mut end = start + 1;
-                while end < bytes.len() && is_ident_continue_byte(bytes[end]) {
+                while end < bytes.len() && is_ident_byte(bytes[end]) {
                     end += 1;
                 }
 
@@ -233,6 +244,13 @@ mod tests {
     fn add_xlfn_prefixes_handles_isomitted() {
         let input = "ISOMITTED(x)";
         let expected = "_xlfn.ISOMITTED(x)";
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn add_xlfn_prefixes_handles_dotted_function_names() {
+        let input = "ISO.WEEKNUM(1)+WORKDAY.INTL(1,2)";
+        let expected = "_xlfn.ISO.WEEKNUM(1)+_xlfn.WORKDAY.INTL(1,2)";
         assert_eq!(add_xlfn_prefixes(input), expected);
     }
 
