@@ -253,6 +253,29 @@ test("compile: folds addColumn with date() literal", () => {
   });
 });
 
+test("compile: folds transformColumns identity casts when the formula parses to '_'", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_transform_identity",
+    name: "Transform identity",
+    source: { type: "database", connection: {}, query: "SELECT * FROM raw", columns: ["Value"] },
+    steps: [
+      {
+        id: "s1",
+        name: "Transform",
+        operation: { type: "transformColumns", transforms: [{ column: "Value", formula: "=(( _ ))", newType: "string" }] },
+      },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT CAST(t."Value" AS TEXT) AS "Value" FROM (SELECT * FROM raw) AS t',
+    params: [],
+  });
+});
+
 test("compile: addColumn params come before nested query params (placeholder order)", () => {
   const folding = new QueryFoldingEngine();
   const query = {

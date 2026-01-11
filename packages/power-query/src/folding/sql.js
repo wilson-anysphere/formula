@@ -541,8 +541,13 @@ export class QueryFoldingEngine {
           }
 
           // Only fold pure type-casts where the transformation is identity.
-          const formula = typeof t.formula === "string" ? t.formula.trim() : "";
-          if (formula !== "_" && formula !== "(_)") return null;
+          const rawFormula = typeof t.formula === "string" ? t.formula : "";
+          try {
+            const parsed = parseFormula(rawFormula);
+            if (parsed.type !== "value") return null;
+          } catch {
+            return null;
+          }
           if (!t.newType || t.newType === "any") {
             projections.push(`t.${quoteIdentifier(name)}`);
             continue;
