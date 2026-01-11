@@ -233,9 +233,18 @@ export class HttpConnector {
    * @returns {unknown}
    */
   getCacheKey(request) {
+    const normalizedScopes = (scopes) => {
+      if (!Array.isArray(scopes)) return [];
+      const cleaned = scopes
+        .filter((s) => typeof s === "string")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      cleaned.sort();
+      return Array.from(new Set(cleaned));
+    };
     const auth =
       request.auth?.type === "oauth2"
-        ? { type: "oauth2", providerId: request.auth.providerId, scopes: request.auth.scopes?.slice().sort() ?? [] }
+        ? { type: "oauth2", providerId: request.auth.providerId, scopes: normalizedScopes(request.auth.scopes) }
         : null;
     const key = {
       connector: "http",
