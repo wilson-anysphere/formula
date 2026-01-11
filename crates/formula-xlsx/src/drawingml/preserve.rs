@@ -1,8 +1,9 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use roxmltree::Document;
 
 use crate::path::rels_for_part;
+use crate::preserve::rels_merge::{ensure_rels_has_relationships, RelationshipStub};
 use crate::preserve::sheet_match::{match_sheet_by_name_or_index, workbook_sheet_parts};
 use crate::relationships::parse_relationships;
 use crate::workbook::ChartExtractionError;
@@ -134,6 +135,9 @@ impl XlsxPackage {
 
         let sheets = workbook_sheet_parts(self)?;
         for (sheet_name, preserved_sheet) in &preserved.sheet_drawings {
+            if preserved_sheet.drawings.is_empty() {
+                continue;
+            }
             let Some(sheet) = match_sheet_by_name_or_index(
                 &sheets,
                 sheet_name,
@@ -142,20 +146,34 @@ impl XlsxPackage {
                 continue;
             };
 
+            let sheet_rels_part = rels_for_part(&sheet.part_name);
+            let drawing_rels: Vec<RelationshipStub> = preserved_sheet
+                .drawings
+                .iter()
+                .map(|drawing| RelationshipStub {
+                    rel_id: drawing.rel_id.clone(),
+                    target: drawing.target.clone(),
+                })
+                .collect();
+            let (updated_rels, rid_map) = ensure_rels_has_relationships(
+                self.part(&sheet_rels_part),
+                &sheet_rels_part,
+                &sheet.part_name,
+                DRAWING_REL_TYPE,
+                &drawing_rels,
+            )?;
+            self.set_part(sheet_rels_part, updated_rels);
+
             let Some(sheet_xml) = self.part(&sheet.part_name) else {
                 continue;
             };
-            let updated_sheet_xml =
-                ensure_sheet_xml_has_drawings(sheet_xml, &sheet.part_name, &preserved_sheet.drawings)?;
-            self.set_part(sheet.part_name.clone(), updated_sheet_xml);
-
-            let sheet_rels_part = rels_for_part(&sheet.part_name);
-            let updated_rels = ensure_sheet_rels_has_drawings(
-                self.part(&sheet_rels_part),
-                &sheet_rels_part,
+            let updated_sheet_xml = ensure_sheet_xml_has_drawings(
+                sheet_xml,
+                &sheet.part_name,
                 &preserved_sheet.drawings,
+                &rid_map,
             )?;
-            self.set_part(sheet_rels_part, updated_rels);
+            self.set_part(sheet.part_name.clone(), updated_sheet_xml);
         }
 
         Ok(())
@@ -186,47 +204,68 @@ fn ensure_sheet_xml_has_drawings(
     sheet_xml: &[u8],
     part_name: &str,
     drawings: &[SheetDrawingRelationship],
+    rid_map: &HashMap<String, String>,
 ) -> Result<Vec<u8>, ChartExtractionError> {
     if drawings.is_empty() {
         return Ok(sheet_xml.to_vec());
     }
 
-    let mut xml = std::str::from_utf8(sheet_xml)
-        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?
-        .to_string();
-
-    if !xml.contains("xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"")
-    {
-        let worksheet_start = xml
-            .find("<worksheet")
-            .ok_or_else(|| ChartExtractionError::XmlStructure(format!("{part_name}: missing <worksheet")))?;
-        let tag_end_rel = xml[worksheet_start..]
-            .find('>')
-            .ok_or_else(|| ChartExtractionError::XmlStructure(format!("{part_name}: invalid <worksheet> start tag")))?;
-        let insert_pos = worksheet_start + tag_end_rel;
-        xml.insert_str(insert_pos, &format!(" xmlns:r=\"{REL_NS}\""));
+    let xml_str = std::str::from_utf8(sheet_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
+    let doc =
+        Document::parse(xml_str).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let root = doc.root_element();
+    let root_name = root.tag_name().name();
+    if root_name != "worksheet" && root_name != "chartsheet" {
+        return Err(ChartExtractionError::XmlStructure(format!(
+            "{part_name}: expected <worksheet> or <chartsheet>, found <{root_name}>"
+        )));
     }
 
-    let close_idx = xml.rfind("</worksheet>").ok_or_else(|| {
-        ChartExtractionError::XmlStructure(format!("{part_name}: missing </worksheet>"))
+    let close_tag = format!("</{root_name}>");
+    let close_idx = xml_str.rfind(&close_tag).ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: missing {close_tag}"))
     })?;
-    let insert_idx = xml
-        .rfind("<extLst")
-        .filter(|idx| *idx < close_idx)
+    let insert_idx = root
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "extLst")
+        .map(|n| n.range().start)
         .unwrap_or(close_idx);
 
+    let existing: HashSet<String> = root
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "drawing")
+        .filter_map(|n| {
+            n.attribute((REL_NS, "id"))
+                .or_else(|| n.attribute("r:id"))
+                .or_else(|| n.attribute("id"))
+        })
+        .map(|s| s.to_string())
+        .collect();
+
+    let mut inserted: HashSet<String> = HashSet::new();
     let mut to_insert = String::new();
     for drawing in drawings {
-        if xml.contains(&format!("r:id=\"{}\"", drawing.rel_id)) {
+        let desired_id = rid_map
+            .get(&drawing.rel_id)
+            .map(String::as_str)
+            .unwrap_or(drawing.rel_id.as_str());
+        if existing.contains(desired_id) || !inserted.insert(desired_id.to_string()) {
             continue;
         }
-        to_insert.push_str(&format!("<drawing r:id=\"{}\"/>", drawing.rel_id));
+        to_insert.push_str(&format!("<drawing r:id=\"{}\"/>", desired_id));
     }
 
-    if !to_insert.is_empty() {
-        xml.insert_str(insert_idx, &to_insert);
+    if to_insert.is_empty() {
+        return Ok(sheet_xml.to_vec());
     }
 
+    let mut xml = xml_str.to_string();
+    xml.insert_str(insert_idx, &to_insert);
+
+    if !root_start_has_r_namespace(&xml, root_name, part_name)? {
+        xml = add_r_namespace_to_root(&xml, root_name, part_name)?;
+    }
     Ok(xml.into_bytes())
 }
 
@@ -241,50 +280,81 @@ mod tests {
             rel_id: "rId1".to_string(),
             target: "drawings/drawing1.xml".to_string(),
         }];
-        let updated = ensure_sheet_xml_has_drawings(xml, "xl/worksheets/sheet1.xml", &drawings)
-            .expect("patch sheet xml");
+        let updated = ensure_sheet_xml_has_drawings(
+            xml,
+            "xl/worksheets/sheet1.xml",
+            &drawings,
+            &HashMap::new(),
+        )
+        .expect("patch sheet xml");
         let updated_str = std::str::from_utf8(&updated).unwrap();
 
         let drawing_pos = updated_str.find("<drawing").unwrap();
         let ext_pos = updated_str.find("<extLst").unwrap();
         assert!(drawing_pos < ext_pos, "drawing should be inserted before extLst");
     }
-}
 
-fn ensure_sheet_rels_has_drawings(
-    rels_xml: Option<&[u8]>,
-    part_name: &str,
-    drawings: &[SheetDrawingRelationship],
-) -> Result<Vec<u8>, ChartExtractionError> {
-    if drawings.is_empty() {
-        return Ok(rels_xml.unwrap_or_default().to_vec());
-    }
+    #[test]
+    fn inserts_drawing_before_ext_lst_in_chartsheet() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><extLst/></chartsheet>"#;
+        let drawings = [SheetDrawingRelationship {
+            rel_id: "rId1".to_string(),
+            target: "drawings/drawing1.xml".to_string(),
+        }];
+        let updated = ensure_sheet_xml_has_drawings(
+            xml,
+            "xl/chartsheets/sheet1.xml",
+            &drawings,
+            &HashMap::new(),
+        )
+        .expect("patch chartsheet xml");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
 
-    let mut xml = match rels_xml {
-        Some(bytes) => std::str::from_utf8(bytes)
-            .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?
-            .to_string(),
-        None => String::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n</Relationships>\n",
-        ),
-    };
-
-    let insert_idx = xml.rfind("</Relationships>").ok_or_else(|| {
-        ChartExtractionError::XmlStructure(format!("{part_name}: missing </Relationships>"))
-    })?;
-
-    for drawing in drawings {
-        if xml.contains(&format!("Id=\"{}\"", drawing.rel_id)) {
-            continue;
-        }
-        xml.insert_str(
-            insert_idx,
-            &format!(
-                "  <Relationship Id=\"{}\" Type=\"{}\" Target=\"{}\"/>\n",
-                drawing.rel_id, DRAWING_REL_TYPE, drawing.target
-            ),
+        let drawing_pos = updated_str.find("<drawing").unwrap();
+        let ext_pos = updated_str.find("<extLst").unwrap();
+        assert!(
+            drawing_pos < ext_pos,
+            "drawing should be inserted before extLst"
         );
     }
+}
 
-    Ok(xml.into_bytes())
+fn root_start_has_r_namespace(
+    xml: &str,
+    root_name: &str,
+    part_name: &str,
+) -> Result<bool, ChartExtractionError> {
+    let root_start = xml.find(&format!("<{root_name}")).ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: missing <{root_name}>"))
+    })?;
+    let tag_end_rel = xml[root_start..].find('>').ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: invalid <{root_name}> start tag"))
+    })?;
+    let tag_end = root_start + tag_end_rel;
+    Ok(xml[root_start..=tag_end].contains("xmlns:r="))
+}
+
+fn add_r_namespace_to_root(
+    xml: &str,
+    root_name: &str,
+    part_name: &str,
+) -> Result<String, ChartExtractionError> {
+    let root_start = xml.find(&format!("<{root_name}")).ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: missing <{root_name}>"))
+    })?;
+    let tag_end_rel = xml[root_start..].find('>').ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: invalid <{root_name}> start tag"))
+    })?;
+    let tag_end = root_start + tag_end_rel;
+    let start_tag = &xml[root_start..=tag_end];
+    let trimmed = start_tag.trim_end();
+    let insert_pos = if trimmed.ends_with("/>") {
+        root_start + trimmed.len() - 2
+    } else {
+        tag_end
+    };
+
+    let mut out = xml.to_string();
+    out.insert_str(insert_pos, &format!(" xmlns:r=\"{REL_NS}\""));
+    Ok(out)
 }
