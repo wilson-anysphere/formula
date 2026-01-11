@@ -8,6 +8,7 @@ import test from "node:test";
 
 import { NodeFsOfflineAuditQueue } from "../siem/queue/node_fs.js";
 import { IndexedDbOfflineAuditQueue } from "../siem/queue/indexeddb.js";
+import { OfflineAuditQueue } from "../siem/offlineQueue.js";
 
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 
@@ -526,4 +527,47 @@ test("IndexedDbOfflineAuditQueue reclaims inflight records after a crash", async
   assert.equal(result.sent, 3);
   assert.deepEqual(sentIds.sort(), events.map((evt) => evt.id).sort());
   assert.deepEqual(await restarted.readAll(), []);
+});
+
+test("OfflineAuditQueue selects Node FS backend when dirPath is provided", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "siem-queue-wrapper-fs-"));
+  const queue = new OfflineAuditQueue({ dirPath: dir, flushBatchSize: 10 });
+
+  const event = makeEvent();
+  await queue.enqueue(event);
+
+  const sent = [];
+  const exporter = {
+    async sendBatch(batch) {
+      sent.push(...batch);
+    },
+  };
+
+  const result = await queue.flushToExporter(exporter);
+  assert.equal(result.sent, 1);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].details.token, "[REDACTED]");
+});
+
+test("OfflineAuditQueue selects IndexedDB backend when indexedDB is available", async () => {
+  globalThis.indexedDB = indexedDB;
+  globalThis.IDBKeyRange = IDBKeyRange;
+
+  const dbName = `siem-wrapper-idb-${randomUUID()}`;
+  const queue = new OfflineAuditQueue({ dbName, flushBatchSize: 10 });
+
+  const event = makeEvent();
+  await queue.enqueue(event);
+
+  const sent = [];
+  const exporter = {
+    async sendBatch(batch) {
+      sent.push(...batch);
+    },
+  };
+
+  const result = await queue.flushToExporter(exporter);
+  assert.equal(result.sent, 1);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].details.token, "[REDACTED]");
 });
