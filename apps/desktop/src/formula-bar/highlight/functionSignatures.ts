@@ -210,6 +210,36 @@ export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
     ],
     summary: "Generates a list of sequential numbers in an array.",
   },
+  TAKE: {
+    name: "TAKE",
+    params: [{ name: "array" }, { name: "rows", optional: true }, { name: "columns", optional: true }],
+    summary: "Returns a specified number of contiguous rows or columns from the start or end of an array.",
+  },
+  DROP: {
+    name: "DROP",
+    params: [{ name: "array" }, { name: "rows", optional: true }, { name: "columns", optional: true }],
+    summary: "Excludes a specified number of rows or columns from the start or end of an array.",
+  },
+  CHOOSECOLS: {
+    name: "CHOOSECOLS",
+    params: [{ name: "array" }, { name: "col_num1" }, { name: "col_num2", optional: true }, { name: "…", optional: true }],
+    summary: "Returns the specified columns from an array.",
+  },
+  CHOOSEROWS: {
+    name: "CHOOSEROWS",
+    params: [{ name: "array" }, { name: "row_num1" }, { name: "row_num2", optional: true }, { name: "…", optional: true }],
+    summary: "Returns the specified rows from an array.",
+  },
+  EXPAND: {
+    name: "EXPAND",
+    params: [
+      { name: "array" },
+      { name: "rows" },
+      { name: "columns", optional: true },
+      { name: "pad_with", optional: true },
+    ],
+    summary: "Expands an array to the specified row and column dimensions.",
+  },
   TRANSPOSE: {
     name: "TRANSPOSE",
     params: [{ name: "array" }],

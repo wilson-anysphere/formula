@@ -334,6 +334,50 @@ const CURATED_FUNCTIONS = [
       { name: "array", type: "range" },
     ],
   },
+  {
+    name: "TAKE",
+    description: "Returns a specified number of rows or columns from the start or end of an array.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "rows", type: "number", optional: true },
+      { name: "columns", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "DROP",
+    description: "Excludes a specified number of rows or columns from the start or end of an array.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "rows", type: "number", optional: true },
+      { name: "columns", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "CHOOSECOLS",
+    description: "Returns the specified columns from an array.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "col_num", type: "number", repeating: true },
+    ],
+  },
+  {
+    name: "CHOOSEROWS",
+    description: "Returns the specified rows from an array.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "row_num", type: "number", repeating: true },
+    ],
+  },
+  {
+    name: "EXPAND",
+    description: "Expands an array to the specified row and column dimensions.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "rows", type: "number" },
+      { name: "columns", type: "number", optional: true },
+      { name: "pad_with", type: "value", optional: true },
+    ],
+  },
 ];
 
 /**
