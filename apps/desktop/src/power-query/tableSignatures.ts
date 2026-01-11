@@ -56,8 +56,15 @@ export class TableSignatureRegistry {
   #tablesByName = new Map<string, TableRegistryEntry>();
   #tablesBySheetId = new Map<string, TableRegistryEntry[]>();
   #unsubscribe: (() => void) | null = null;
+  #workbookSignatureHash: string;
 
   constructor(doc: DocumentController) {
+    // Ensure table signatures are scoped to a specific document/workbook session so
+    // cached results do not leak across workbook opens. Callers can override this
+    // via `refreshFromTables(..., { workbookSignature })` with a stable workbook
+    // fingerprint (e.g. file path + mtime).
+    this.#workbookSignatureHash = hashValue({ kind: "session", seed: Date.now(), rand: Math.random() });
+
     if (doc && typeof (doc as any).on === "function") {
       this.#unsubscribe = (doc as any).on("change", (payload: any) => {
         const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
@@ -75,7 +82,18 @@ export class TableSignatureRegistry {
   /**
    * Refresh the registry from backend `list_tables` results.
    */
-  refreshFromTables(tables: TableInfo[]): void {
+  refreshFromTables(tables: TableInfo[], options: { workbookSignature?: string } = {}): void {
+    if (typeof options.workbookSignature === "string" && options.workbookSignature.length > 0) {
+      const nextHash = hashValue(options.workbookSignature);
+      if (nextHash !== this.#workbookSignatureHash) {
+        // A new workbook (or new on-disk revision) was loaded. Reset versions so
+        // cache keys can't collide with signatures from a previous workbook.
+        this.#workbookSignatureHash = nextHash;
+        this.#tablesByName = new Map();
+        this.#tablesBySheetId = new Map();
+      }
+    }
+
     const next = new Map<string, TableRegistryEntry>();
 
     for (const table of tables) {
@@ -118,7 +136,7 @@ export class TableSignatureRegistry {
   getTableSignature(tableName: string): string | undefined {
     const entry = this.#tablesByName.get(tableName);
     if (!entry) return undefined;
-    return `${entry.definitionHash}:${entry.version}`;
+    return `${this.#workbookSignatureHash}:${entry.definitionHash}:${entry.version}`;
   }
 
   /**
@@ -183,7 +201,10 @@ export function getTableSignatureRegistry(doc: DocumentController): TableSignatu
   return created;
 }
 
-export function refreshTableSignaturesFromBackend(doc: DocumentController, tables: TableInfo[]): void {
-  getTableSignatureRegistry(doc).refreshFromTables(tables);
+export function refreshTableSignaturesFromBackend(
+  doc: DocumentController,
+  tables: TableInfo[],
+  options: { workbookSignature?: string } = {},
+): void {
+  getTableSignatureRegistry(doc).refreshFromTables(tables, options);
 }
-

@@ -1123,6 +1123,42 @@ async function drainBackendSync(): Promise<void> {
   }
 }
 
+function randomSessionId(prefix: string): string {
+  const randomUuid = (globalThis as any).crypto?.randomUUID;
+  if (typeof randomUuid === "function") return `${prefix}:${randomUuid.call((globalThis as any).crypto)}`;
+  return `${prefix}:${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function computeWorkbookSignature(info: WorkbookInfo): Promise<string> {
+  const basePath =
+    typeof info.path === "string" && info.path.trim() !== ""
+      ? info.path
+      : typeof info.origin_path === "string" && info.origin_path.trim() !== ""
+        ? info.origin_path
+        : null;
+
+  if (!basePath) {
+    // Unsaved/new workbook: scope signatures to the current app session only.
+    return randomSessionId("workbook");
+  }
+
+  const invoke = queuedInvoke ?? ((globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined);
+  if (typeof invoke !== "function") return basePath;
+
+  try {
+    const stat = await invoke("stat_file", { path: basePath });
+    const mtimeMs = (stat as any)?.mtimeMs ?? (stat as any)?.mtime_ms ?? null;
+    const sizeBytes = (stat as any)?.sizeBytes ?? (stat as any)?.size_bytes ?? null;
+    if (typeof mtimeMs === "number" && typeof sizeBytes === "number") {
+      return `${basePath}:${mtimeMs}:${sizeBytes}`;
+    }
+  } catch {
+    // Fall back to the path-only signature below.
+  }
+
+  return basePath;
+}
+
 async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   if (!tauriBackend) {
     throw new Error("Workbook backend not available");
@@ -1210,9 +1246,10 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     sheetIdByName.set(name, id);
   }
 
-  const [definedNames, tables] = await Promise.all([
+  const [definedNames, tables, workbookSignature] = await Promise.all([
     tauriBackend.listDefinedNames().catch(() => []),
     tauriBackend.listTables().catch(() => []),
+    computeWorkbookSignature(info),
   ]);
 
   const normalizedTables = tables.map((table) => {
@@ -1220,7 +1257,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     const sheet_id = rawSheetId ? sheetIdByName.get(rawSheetId) ?? rawSheetId : rawSheetId;
     return { ...(table as any), sheet_id };
   });
-  refreshTableSignaturesFromBackend(doc, normalizedTables as any);
+  refreshTableSignaturesFromBackend(doc, normalizedTables as any, { workbookSignature });
 
   for (const entry of definedNames) {
     const name = typeof (entry as any)?.name === "string" ? String((entry as any).name) : "";
