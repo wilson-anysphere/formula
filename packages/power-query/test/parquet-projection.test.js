@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { computeParquetProjectionColumns } from "../src/parquetProjection.js";
+import { computeParquetProjectionColumns, computeParquetRowLimit } from "../src/parquetProjection.js";
 
 test("computeParquetProjectionColumns returns null without an explicit projection", () => {
   const steps = [
@@ -64,3 +64,22 @@ test("computeParquetProjectionColumns returns null when unsupported operations a
   assert.equal(computeParquetProjectionColumns(steps), null);
 });
 
+test("computeParquetRowLimit pushes down execute limit for row-preserving pipelines", () => {
+  const steps = [{ id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id"] } }];
+  assert.equal(computeParquetRowLimit(steps, 100), 100);
+});
+
+test("computeParquetRowLimit incorporates take() counts", () => {
+  const steps = [
+    { id: "s_take", name: "Take", operation: { type: "take", count: 10 } },
+    { id: "s_rename", name: "Rename", operation: { type: "renameColumn", oldName: "a", newName: "b" } },
+  ];
+  assert.equal(computeParquetRowLimit(steps, 100), 10);
+});
+
+test("computeParquetRowLimit refuses to push down for filter/sort/group", () => {
+  const steps = [
+    { id: "s_filter", name: "Filter", operation: { type: "filterRows", predicate: { type: "comparison", column: "x", operator: "isNotNull" } } },
+  ];
+  assert.equal(computeParquetRowLimit(steps, 100), null);
+});

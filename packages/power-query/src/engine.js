@@ -9,7 +9,7 @@ import { FileConnector } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
 import { SqlConnector } from "./connectors/sql.js";
 import { QueryFoldingEngine } from "./folding/sql.js";
-import { computeParquetProjectionColumns } from "./parquetProjection.js";
+import { computeParquetProjectionColumns, computeParquetRowLimit } from "./parquetProjection.js";
 
 /**
  * @typedef {import("./model.js").Query} Query
@@ -384,10 +384,21 @@ export class QueryEngine {
       let source = query.source;
       if (source.type === "parquet" && this.fileAdapter?.readBinary) {
         const projection = computeParquetProjectionColumns(steps);
-        if (projection && projection.length > 0) {
+        const rowLimit = computeParquetRowLimit(steps, options.limit);
+        const nextOptions = projection || rowLimit != null ? { ...(source.options ?? {}) } : null;
+
+        if (projection && projection.length > 0 && nextOptions) {
           const existing = Array.isArray(source.options?.columns) ? source.options.columns : [];
-          const columns = Array.from(new Set([...existing, ...projection]));
-          source = { ...source, options: { ...(source.options ?? {}), columns } };
+          nextOptions.columns = Array.from(new Set([...existing, ...projection]));
+        }
+
+        if (rowLimit != null && nextOptions) {
+          const existing = typeof source.options?.limit === "number" ? source.options.limit : null;
+          nextOptions.limit = existing == null ? rowLimit : Math.min(existing, rowLimit);
+        }
+
+        if (nextOptions) {
+          source = { ...source, options: nextOptions };
         }
       }
 

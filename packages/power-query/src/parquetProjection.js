@@ -170,3 +170,30 @@ export function computeParquetProjectionColumns(steps) {
   return Array.from(required);
 }
 
+const LIMIT_UNSAFE_OPS = new Set(["filterRows", "sortRows", "groupBy", "pivot", "unpivot", "splitColumn"]);
+
+/**
+ * Compute a safe Parquet reader `limit` value to push down.
+ *
+ * This is safe only when the pipeline preserves row order and does not require inspecting rows
+ * beyond the first N to compute the first N output rows.
+ *
+ * @param {QueryStep[]} steps
+ * @param {number | undefined} limit
+ * @returns {number | null}
+ */
+export function computeParquetRowLimit(steps, limit) {
+  if (limit == null) return null;
+  if (!Number.isFinite(limit) || limit <= 0) return null;
+
+  let effective = limit;
+  for (const step of steps) {
+    const op = step.operation;
+    if (LIMIT_UNSAFE_OPS.has(op.type)) return null;
+    if (op.type === "take") {
+      effective = Math.min(effective, op.count);
+    }
+  }
+
+  return effective;
+}
