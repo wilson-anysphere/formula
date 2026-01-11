@@ -581,6 +581,35 @@ pub async fn power_query_refresh_state_set(
     .map_err(|e| e.to_string())?
 }
 
+/// Execute a SQL query against a local database connection.
+///
+/// Used by the desktop Power Query engine (`source.type === "database"`).
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn sql_query(
+    connection: JsonValue,
+    sql: String,
+    params: Option<Vec<JsonValue>>,
+    credentials: Option<JsonValue>,
+) -> Result<crate::sql::SqlQueryResult, String> {
+    crate::sql::sql_query(connection, sql, params.unwrap_or_default(), credentials)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Describe a SQL query (columns/types) without returning data rows.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn sql_get_schema(
+    connection: JsonValue,
+    sql: String,
+    credentials: Option<JsonValue>,
+) -> Result<crate::sql::SqlSchemaResult, String> {
+    crate::sql::sql_get_schema(connection, sql, credentials)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_workbook_theme_palette(

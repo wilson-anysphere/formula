@@ -5,11 +5,13 @@ import { IndexedDBCacheStore } from "../../../../packages/power-query/src/cache/
 import { MemoryCacheStore } from "../../../../packages/power-query/src/cache/memory.js";
 import { createWebCryptoCacheProvider } from "../../../../packages/power-query/src/cache/webCryptoProvider.js";
 import { HttpConnector } from "../../../../packages/power-query/src/connectors/http.js";
+import { SqlConnector } from "../../../../packages/power-query/src/connectors/sql.js";
 import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
 import { DataTable } from "../../../../packages/power-query/src/table.js";
 import { parseA1Range, splitSheetQualifier } from "../../../../packages/search/index.js";
 import type { OAuth2Manager } from "../../../../packages/power-query/src/oauth2/manager.js";
 import type { QueryExecutionContext } from "../../../../packages/power-query/src/engine.js";
+import { normalizeFilePath } from "../../../../packages/power-query/src/privacy/sourceId.js";
 
 import { enforceExternalConnector } from "../dlp/enforceExternalConnector.js";
 import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
@@ -175,6 +177,26 @@ function getTauriInvoke(): TauriInvoke {
 
 function hasTauriInvoke(): boolean {
   return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+}
+
+function abortError(): Error {
+  const err = new Error("Aborted");
+  (err as any).name = "AbortError";
+  return err;
+}
+
+async function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return await promise;
+  if (signal.aborted) throw abortError();
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise
+      .then(resolve, reject)
+      .finally(() => {
+        signal.removeEventListener("abort", onAbort);
+      });
+  });
 }
 
 function getTauriFs(): any {
@@ -525,6 +547,70 @@ function createDefaultCacheManager(): CacheManager {
   return cache;
 }
 
+type SqlDataType = "any" | "string" | "number" | "boolean" | "date";
+
+function coerceSqlDataType(value: unknown): SqlDataType {
+  switch (value) {
+    case "any":
+    case "string":
+    case "number":
+    case "boolean":
+    case "date":
+      return value;
+    default:
+      return "any";
+  }
+}
+
+function parseConnectionIdentity(connection: unknown): unknown {
+  if (!connection || typeof connection !== "object" || Array.isArray(connection)) return null;
+  const kind = (connection as any).kind;
+
+  if (kind === "sqlite") {
+    const inMemory = (connection as any).inMemory ?? (connection as any).in_memory;
+    if (inMemory) return "sqlite::memory:";
+    const path = (connection as any).path;
+    if (typeof path !== "string" || path.length === 0) return null;
+    return normalizeFilePath(path);
+  }
+
+  if (kind === "postgres") {
+    const rawUrl = (connection as any).url;
+    let host = typeof (connection as any).host === "string" ? (connection as any).host : null;
+    let port = typeof (connection as any).port === "number" ? (connection as any).port : null;
+    let database = typeof (connection as any).database === "string" ? (connection as any).database : null;
+    let user = typeof (connection as any).user === "string" ? (connection as any).user : null;
+
+    if (typeof rawUrl === "string" && rawUrl) {
+      try {
+        const parsed = new URL(rawUrl);
+        host = parsed.hostname || host;
+        port = parsed.port ? Number(parsed.port) : port;
+        const pathDb = parsed.pathname?.replace(/^\//, "") ?? "";
+        if (pathDb) database = pathDb;
+        if (parsed.username) user = parsed.username;
+      } catch {
+        // ignore URL parse failures; fall back to explicit fields.
+      }
+    }
+
+    if (!host) return null;
+    const normalizedHost = host.toLowerCase();
+    const hostWithBrackets =
+      normalizedHost.includes(":") && !(normalizedHost.startsWith("[") && normalizedHost.endsWith("]"))
+        ? `[${normalizedHost}]`
+        : normalizedHost;
+    const portNumber = Number.isFinite(port ?? NaN) ? (port as number) : 5432;
+    const dbName = database ?? "";
+    if (!dbName) return null;
+
+    const base = `${hostWithBrackets}:${portNumber}/${dbName}`;
+    return user ? `${user}@${base}` : base;
+  }
+
+  return null;
+}
+
 function defaultPermissionPrompt(kind: string, details: unknown): boolean {
   if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
 
@@ -835,6 +921,70 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
       ? new HttpConnector({ fetch: options.fetch, oauth2Manager: options.oauth2Manager })
       : undefined;
 
+  const querySql = async (
+    connection: unknown,
+    sql: string,
+    queryOptions: { params?: unknown[]; signal?: AbortSignal; credentials?: unknown } = {},
+  ) => {
+    const invoke = getTauriInvoke();
+
+    const payload = await withAbort(
+      invoke("sql_query", {
+        connection,
+        sql,
+        ...(queryOptions.params ? { params: queryOptions.params } : null),
+        ...(queryOptions.credentials ? { credentials: queryOptions.credentials } : null),
+      }) as Promise<any>,
+      queryOptions.signal,
+    );
+
+    const columns = Array.isArray(payload?.columns) ? payload.columns.map((c: any) => String(c)) : [];
+    const typesObj = payload?.types && typeof payload.types === "object" && !Array.isArray(payload.types) ? (payload.types as any) : null;
+
+    const typedColumns = columns.map((name) => ({ name, type: coerceSqlDataType(typesObj?.[name]) }));
+    const rawRows = Array.isArray(payload?.rows) ? payload.rows : [];
+    const rows = rawRows.map((row: any) =>
+      Array.from({ length: typedColumns.length }, (_, i) => {
+        const value = Array.isArray(row) ? row[i] : null;
+        if (typedColumns[i]?.type === "date" && typeof value === "string") {
+          const parsed = new Date(value);
+          if (!Number.isNaN(parsed.getTime())) return parsed;
+        }
+        return value;
+      }),
+    );
+
+    return new DataTable(typedColumns, rows);
+  };
+
+  const getSchema = async (
+    request: { connection: unknown; sql: string },
+    schemaOptions: { signal?: AbortSignal; credentials?: unknown } = {},
+  ) => {
+    const invoke = getTauriInvoke();
+    const payload = await withAbort(
+      invoke("sql_get_schema", {
+        connection: request.connection,
+        sql: request.sql,
+        ...(schemaOptions.credentials ? { credentials: schemaOptions.credentials } : null),
+      }) as Promise<any>,
+      schemaOptions.signal,
+    );
+
+    const columns = Array.isArray(payload?.columns) ? payload.columns.map((c: any) => String(c)) : [];
+    const typesObj = payload?.types && typeof payload.types === "object" && !Array.isArray(payload.types) ? (payload.types as any) : null;
+    const types = typesObj
+      ? Object.fromEntries(Object.entries(typesObj).map(([k, v]) => [k, coerceSqlDataType(v)]))
+      : undefined;
+    return { columns, types };
+  };
+
+  const sql = new SqlConnector({
+    querySql,
+    getSchema,
+    getConnectionIdentity: parseConnectionIdentity,
+  });
+
   // Cache permission prompts across executions so previewing the same query
   // doesn't repeatedly ask the user.
   const permissionPromptCache = new Map<string, Promise<boolean>>();
@@ -861,7 +1011,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
         stat: fileAdapter.stat,
       },
       tableAdapter,
-      connectors: http ? { http } : undefined,
+      connectors: { ...(http ? { http } : null), sql },
       privacyMode: options.privacyMode,
       onCredentialRequest: options.onCredentialRequest,
       onPermissionRequest: async (kind, details) => {

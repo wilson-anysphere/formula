@@ -542,3 +542,74 @@ test("createDesktopQueryEngine applies workbook privacy levels to host queryResu
     /Formula\.Firewall/,
   );
 });
+
+test("createDesktopQueryEngine executes database sources via sql_query", async () => {
+  const originalTauri = globalThis.__TAURI__;
+
+  /** @type {{ cmd: string, args: any }[]} */
+  const calls = [];
+
+  globalThis.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+        if (cmd === "sql_query") {
+          return { columns: ["A"], types: { A: "number" }, rows: [[1]] };
+        }
+        throw new Error(`Unexpected invoke: ${cmd}`);
+      },
+    },
+  };
+
+  try {
+    const engine = createDesktopQueryEngine({
+      fileAdapter: { readText: async () => "", readBinary: async () => new Uint8Array() },
+    });
+
+    const query = {
+      id: "q_db",
+      name: "DB",
+      source: { type: "database", connection: { kind: "sqlite", path: "/tmp/test.db" }, query: "SELECT 1 AS A" },
+      steps: [],
+    };
+
+    const table = await engine.executeQuery(query, {}, {});
+    assert.deepEqual(table.toGrid(), [["A"], [1]]);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].cmd, "sql_query");
+    assert.deepEqual(calls[0].args.connection, { kind: "sqlite", path: "/tmp/test.db" });
+    assert.equal(calls[0].args.sql, "SELECT 1 AS A");
+  } finally {
+    globalThis.__TAURI__ = originalTauri;
+  }
+});
+
+test("database cache keys vary by connection identity and credentialId", async () => {
+  let credentialId = "cred-a";
+  const engine = createDesktopQueryEngine({
+    fileAdapter: { readText: async () => "", readBinary: async () => new Uint8Array() },
+    onCredentialRequest: async () => ({ credentialId }),
+  });
+
+  const baseQuery = {
+    id: "q_db_cache",
+    name: "DB Cache",
+    source: { type: "database", connection: { kind: "sqlite", path: "/tmp/a.db" }, query: "SELECT 1" },
+    steps: [],
+  };
+
+  const key1 = await engine.getCacheKey(baseQuery, {}, {});
+  assert.ok(key1);
+
+  const key2 = await engine.getCacheKey(
+    { ...baseQuery, source: { ...baseQuery.source, connection: { kind: "sqlite", path: "/tmp/b.db" } } },
+    {},
+    {},
+  );
+  assert.notEqual(key1, key2);
+
+  credentialId = "cred-b";
+  const key3 = await engine.getCacheKey(baseQuery, {}, {});
+  assert.notEqual(key1, key3);
+});

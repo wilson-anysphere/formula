@@ -4,5 +4,6 @@ pub mod macro_trust;
 pub mod macros;
 pub mod persistence;
 pub mod python;
+pub mod sql;
 pub mod state;
 pub mod storage;
