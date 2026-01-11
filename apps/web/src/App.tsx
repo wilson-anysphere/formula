@@ -220,6 +220,7 @@ function EngineDemoApp() {
       const end = replaceSpan ? replaceSpan.end : Math.max(cursorRef.current.start, cursorRef.current.end);
       const nextDraft = currentDraft.slice(0, start) + rangeText + currentDraft.slice(end);
 
+      selectedReferenceIndexRef.current = null;
       rangeInsertionRef.current = { start, end: start + rangeText.length };
       const cursor = rangeInsertionRef.current.end;
       cursorRef.current = { start: cursor, end: cursor };
@@ -231,6 +232,7 @@ function EngineDemoApp() {
 
     const { start, end } = rangeInsertionRef.current;
     const nextDraft = currentDraft.slice(0, start) + rangeText + currentDraft.slice(end);
+    selectedReferenceIndexRef.current = null;
     rangeInsertionRef.current = { start, end: start + rangeText.length };
     const cursor = rangeInsertionRef.current.end;
     cursorRef.current = { start: cursor, end: cursor };

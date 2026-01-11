@@ -187,6 +187,7 @@ export class FormulaBarView {
   beginRangeSelection(range: RangeAddress): void {
     this.model.beginEdit();
     this.model.beginRangeSelection(range);
+    this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
     this.#setTextareaSelectionFromModel();
     this.#emitOverlays();
@@ -194,6 +195,7 @@ export class FormulaBarView {
 
   updateRangeSelection(range: RangeAddress): void {
     this.model.updateRangeSelection(range);
+    this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
     this.#setTextareaSelectionFromModel();
     this.#emitOverlays();
