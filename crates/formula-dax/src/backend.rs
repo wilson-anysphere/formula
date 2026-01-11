@@ -738,7 +738,7 @@ impl TableBackend for ColumnarTableBackend {
     fn filter_eq(&self, idx: usize, value: &Value) -> Option<Vec<usize>> {
         match value {
             Value::Text(s) => Some(self.table.scan().filter_eq_string(idx, s.as_ref())),
-            _ => None,
+            _ => self.filter_in(idx, std::slice::from_ref(value)),
         }
     }
 
