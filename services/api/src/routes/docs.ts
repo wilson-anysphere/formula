@@ -10,6 +10,7 @@ import { isMfaEnforcedForOrg } from "../auth/mfa";
 import { KmsProviderFactory } from "../crypto/kms";
 import { DLP_ACTION, DLP_DECISION, normalizeClassification, selectorKey, validateDlpPolicy } from "../dlp/dlp";
 import { evaluateDocumentDlpPolicy } from "../dlp/effective";
+import { getEffectiveClassificationForSelector, normalizeSelectorColumns } from "../dlp/classificationResolver";
 import { createDocumentVersion, encryptDocumentVersionData, getDocumentVersionData } from "../db/documentVersions";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { canDocument, type DocumentRole } from "../rbac/roles";
@@ -1317,6 +1318,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     let selector;
     let classification;
     let key;
+    let selectorColumns;
 
     try {
       selector = parsed.data.selector;
@@ -1325,6 +1327,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
 
       classification = normalizeClassification(parsed.data.classification);
       key = selectorKey(selector);
+      selectorColumns = normalizeSelectorColumns(selector);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid classification";
       return reply.code(400).send({ error: "invalid_request", message });
@@ -1333,15 +1336,93 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const id = crypto.randomUUID();
     await app.db.query(
       `
-        INSERT INTO document_classifications (id, document_id, selector_key, selector, classification)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO document_classifications (
+          id,
+          document_id,
+          selector_key,
+          selector,
+          classification,
+          scope,
+          sheet_id,
+          table_id,
+          row,
+          col,
+          start_row,
+          start_col,
+          end_row,
+          end_col,
+          column_index,
+          column_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         ON CONFLICT (document_id, selector_key)
-        DO UPDATE SET selector = EXCLUDED.selector, classification = EXCLUDED.classification, updated_at = now()
+        DO UPDATE SET
+          selector = EXCLUDED.selector,
+          classification = EXCLUDED.classification,
+          scope = EXCLUDED.scope,
+          sheet_id = EXCLUDED.sheet_id,
+          table_id = EXCLUDED.table_id,
+          row = EXCLUDED.row,
+          col = EXCLUDED.col,
+          start_row = EXCLUDED.start_row,
+          start_col = EXCLUDED.start_col,
+          end_row = EXCLUDED.end_row,
+          end_col = EXCLUDED.end_col,
+          column_index = EXCLUDED.column_index,
+          column_id = EXCLUDED.column_id,
+          updated_at = now()
       `,
-      [id, docId, key, JSON.stringify(selector), JSON.stringify(classification)]
+      [
+        id,
+        docId,
+        key,
+        JSON.stringify(selector),
+        JSON.stringify(classification),
+        selectorColumns.scope,
+        selectorColumns.sheetId,
+        selectorColumns.tableId,
+        selectorColumns.row,
+        selectorColumns.col,
+        selectorColumns.startRow,
+        selectorColumns.startCol,
+        selectorColumns.endRow,
+        selectorColumns.endCol,
+        selectorColumns.columnIndex,
+        selectorColumns.columnId
+      ]
     );
 
     return reply.send({ ok: true });
+  });
+
+  const ResolveClassificationBody = z.object({ selector: z.unknown() });
+
+  app.post("/docs/:docId/classifications/resolve", { preHandler: requireAuth }, async (request, reply) => {
+    const docId = (request.params as { docId: string }).docId;
+    const membership = await requireDocRole(request, reply, docId);
+    if (!membership) return;
+    if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
+
+    const parsed = ResolveClassificationBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+
+    let selector;
+    try {
+      selector = parsed.data.selector;
+      if (typeof selector !== "object" || selector === null) throw new Error("Selector must be an object");
+      if ((selector as any).documentId !== docId) throw new Error("Selector documentId must match route docId");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid selector";
+      return reply.code(400).send({ error: "invalid_request", message });
+    }
+
+    try {
+      const result = await getEffectiveClassificationForSelector(app.db, docId, selector);
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to resolve classification";
+      return reply.code(400).send({ error: "invalid_request", message });
+    }
   });
 
   app.delete("/docs/:docId/classifications/:selectorKey", { preHandler: requireAuth }, async (request, reply) => {
