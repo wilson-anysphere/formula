@@ -154,6 +154,20 @@ describe("security hardening", () => {
       loadConfig({
         NODE_ENV: "production",
         PUBLIC_BASE_URL: "https://api.example.com",
+        COOKIE_SECURE: "true",
+        SYNC_TOKEN_SECRET: "prod-sync-token-secret",
+        LOCAL_KMS_MASTER_KEY: "prod-local-kms-master-key",
+        SECRET_STORE_KEYS_JSON: JSON.stringify({
+          currentKeyId: "dev",
+          keys: { dev: deriveSecretStoreKey("dev-secret-store-key-change-me").toString("base64") }
+        })
+      })
+    ).toThrow(/default development secrets/i);
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        PUBLIC_BASE_URL: "https://api.example.com",
         COOKIE_SECURE: "false",
         SYNC_TOKEN_SECRET: "prod-sync-token-secret",
         SECRET_STORE_KEY: "prod-secret-store-key",
