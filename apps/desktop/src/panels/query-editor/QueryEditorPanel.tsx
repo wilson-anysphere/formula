@@ -44,21 +44,25 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     (async () => {
       try {
         setError(null);
         const result = await props.engine.executeQuery(
           { ...props.query, steps: stepsToExecute },
           props.context ?? {},
-          { limit: 100 },
+          { limit: 100, signal: controller.signal },
         );
         if (!cancelled) setPreview(result);
       } catch (e: any) {
-        if (!cancelled) setError(e?.message ?? String(e));
+        if (cancelled) return;
+        if (e?.name === "AbortError") return;
+        setError(e?.message ?? String(e));
       }
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [props.engine, props.query, props.context, stepsToExecute]);
 
