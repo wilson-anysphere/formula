@@ -378,13 +378,10 @@ impl WorkbookState {
     }
 
     fn recalculate_internal(&mut self, sheet: Option<&str>) -> Result<Vec<CellChange>, JsValue> {
-        if let Some(sheet) = sheet {
-            self.require_sheet(sheet)?;
-        }
-
-        let sheet_filter = sheet
-            .and_then(|s| self.resolve_sheet(s))
-            .map(str::to_string);
+        let sheet_filter = match sheet {
+            Some(name) => Some(self.require_sheet(name)?.to_string()),
+            None => None,
+        };
 
         let recalc_changes = self.engine.recalculate_with_value_changes_single_threaded();
         let mut by_cell: BTreeMap<FormulaCellKey, JsonValue> = BTreeMap::new();
