@@ -1,11 +1,17 @@
-import crypto from "node:crypto";
-
 export const CELL_ENCRYPTION_VERSION = 1;
 export const CELL_ENCRYPTION_ALG = "AES-256-GCM";
 
 export const AES_256_KEY_BYTES = 32;
 export const AES_GCM_IV_BYTES = 12;
 export const AES_GCM_TAG_BYTES = 16;
+
+function requireCrypto() {
+  const cryptoObj = globalThis.crypto;
+  if (!cryptoObj?.subtle || typeof cryptoObj.getRandomValues !== "function") {
+    throw new Error("WebCrypto is required for cell encryption (globalThis.crypto.subtle missing)");
+  }
+  return cryptoObj;
+}
 
 /**
  * @param {Uint8Array} keyBytes
@@ -49,10 +55,71 @@ export function canonicalJson(value) {
 }
 
 /**
+ * @param {Uint8Array} bytes
+ */
+function bytesToBase64(bytes) {
+  if (!(bytes instanceof Uint8Array)) {
+    throw new TypeError("bytesToBase64 expects a Uint8Array");
+  }
+  // Node: Buffer path.
+  // eslint-disable-next-line no-undef
+  if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
+
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  // eslint-disable-next-line no-undef
+  return btoa(bin);
+}
+
+/**
+ * @param {string} value
+ */
+function base64ToBytes(value) {
+  if (typeof value !== "string") {
+    throw new TypeError("base64ToBytes expects a base64 string");
+  }
+  // eslint-disable-next-line no-undef
+  if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(value, "base64"));
+
+  // eslint-disable-next-line no-undef
+  const bin = atob(value);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/**
+ * @param {string} text
+ */
+function utf8Encode(text) {
+  if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(text);
+  // eslint-disable-next-line no-undef
+  if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(String(text), "utf8"));
+  throw new Error("No UTF-8 encoder available (TextEncoder missing)");
+}
+
+/**
+ * @param {Uint8Array} bytes
+ */
+function utf8Decode(bytes) {
+  if (typeof TextDecoder !== "undefined") return new TextDecoder().decode(bytes);
+  // eslint-disable-next-line no-undef
+  if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("utf8");
+  throw new Error("No UTF-8 decoder available (TextDecoder missing)");
+}
+
+function concatBytes(a, b) {
+  const out = new Uint8Array(a.byteLength + b.byteLength);
+  out.set(a, 0);
+  out.set(b, a.byteLength);
+  return out;
+}
+
+/**
  * @param {{ docId: string, sheetId: string, row: number, col: number }} context
  */
-function aadFromContext(context) {
-  return Buffer.from(canonicalJson(context), "utf8");
+function aadBytesFromContext(context) {
+  return utf8Encode(canonicalJson(context));
 }
 
 /**
@@ -71,6 +138,25 @@ export function isEncryptedCellPayload(value) {
   );
 }
 
+const keyCache = new Map();
+
+async function importAesGcmKey(key) {
+  const cached = keyCache.get(key.keyId);
+  if (cached) return cached;
+
+  assertKeyBytes(key.keyBytes);
+  const subtle = requireCrypto().subtle;
+  const cryptoKey = await subtle.importKey(
+    "raw",
+    key.keyBytes,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+  keyCache.set(key.keyId, cryptoKey);
+  return cryptoKey;
+}
+
 /**
  * @param {{
  *   plaintext: { value: any, formula: string | null, format?: any },
@@ -82,25 +168,30 @@ export async function encryptCellPlaintext(opts) {
   const { plaintext, key, context } = opts;
   assertKeyBytes(key.keyBytes);
 
-  const iv = crypto.randomBytes(AES_GCM_IV_BYTES);
-  const aad = aadFromContext(context);
+  const cryptoObj = requireCrypto();
+  const iv = cryptoObj.getRandomValues(new Uint8Array(AES_GCM_IV_BYTES));
+  const aad = aadBytesFromContext(context);
+  const bytes = utf8Encode(JSON.stringify(plaintext));
 
-  const bytes = Buffer.from(JSON.stringify(plaintext), "utf8");
+  const cryptoKey = await importAesGcmKey(key);
+  const ciphertextWithTag = new Uint8Array(
+    await cryptoObj.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: aad, tagLength: AES_GCM_TAG_BYTES * 8 },
+      cryptoKey,
+      bytes
+    )
+  );
 
-  const cipher = crypto.createCipheriv("aes-256-gcm", Buffer.from(key.keyBytes), iv, {
-    authTagLength: AES_GCM_TAG_BYTES,
-  });
-  cipher.setAAD(aad);
-  const ciphertext = Buffer.concat([cipher.update(bytes), cipher.final()]);
-  const tag = cipher.getAuthTag();
+  const tag = ciphertextWithTag.slice(ciphertextWithTag.byteLength - AES_GCM_TAG_BYTES);
+  const ciphertext = ciphertextWithTag.slice(0, ciphertextWithTag.byteLength - AES_GCM_TAG_BYTES);
 
   return {
     v: CELL_ENCRYPTION_VERSION,
     alg: CELL_ENCRYPTION_ALG,
     keyId: key.keyId,
-    ivBase64: iv.toString("base64"),
-    tagBase64: tag.toString("base64"),
-    ciphertextBase64: ciphertext.toString("base64"),
+    ivBase64: bytesToBase64(iv),
+    tagBase64: bytesToBase64(tag),
+    ciphertextBase64: bytesToBase64(ciphertext),
   };
 }
 
@@ -119,18 +210,23 @@ export async function decryptCellPlaintext(opts) {
     throw new Error(`Key id mismatch (payload=${encrypted.keyId}, resolver=${key.keyId})`);
   }
 
-  const iv = Buffer.from(encrypted.ivBase64, "base64");
-  const tag = Buffer.from(encrypted.tagBase64, "base64");
-  const ciphertext = Buffer.from(encrypted.ciphertextBase64, "base64");
-  const aad = aadFromContext(context);
+  const cryptoObj = requireCrypto();
 
-  const decipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(key.keyBytes), iv, {
-    authTagLength: AES_GCM_TAG_BYTES,
-  });
-  decipher.setAuthTag(tag);
-  decipher.setAAD(aad);
-  const plaintextBytes = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  const iv = base64ToBytes(encrypted.ivBase64);
+  const tag = base64ToBytes(encrypted.tagBase64);
+  const ciphertext = base64ToBytes(encrypted.ciphertextBase64);
+  const aad = aadBytesFromContext(context);
 
-  return JSON.parse(plaintextBytes.toString("utf8"));
+  const cryptoKey = await importAesGcmKey(key);
+  const combined = concatBytes(ciphertext, tag);
+
+  const plaintextBytes = new Uint8Array(
+    await cryptoObj.subtle.decrypt(
+      { name: "AES-GCM", iv, additionalData: aad, tagLength: AES_GCM_TAG_BYTES * 8 },
+      cryptoKey,
+      combined
+    )
+  );
+
+  return JSON.parse(utf8Decode(plaintextBytes));
 }
-
