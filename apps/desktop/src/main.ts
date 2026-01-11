@@ -20,6 +20,8 @@ import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend, type WorkbookInfo } from "./tauri/workbookBackend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 
+const workbookSheetNames = new Map<string, string>();
+
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
   throw new Error("Missing #grid container");
@@ -33,9 +35,10 @@ if (!formulaBarRoot) {
 const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cell"]');
 const selectionRange = document.querySelector<HTMLElement>('[data-testid="selection-range"]');
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
+const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
 const openComments = document.querySelector<HTMLButtonElement>('[data-testid="open-comments-panel"]');
 const openVbaMigratePanel = document.querySelector<HTMLButtonElement>('[data-testid="open-vba-migrate-panel"]');
-if (!activeCell || !selectionRange || !activeValue) {
+if (!activeCell || !selectionRange || !activeValue || !sheetSwitcher) {
   throw new Error("Missing status bar elements");
 }
 if (!openComments) {
@@ -59,32 +62,64 @@ if (!sheetTabsRoot) {
 
 let lastSheetIds: string[] = [];
 
-function renderSheetTabs() {
-  const sheetIds = app.getDocument().getSheetIds();
-  const nextSheetIds = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+type SheetUiInfo = { id: string; name: string };
 
-  lastSheetIds = nextSheetIds;
+function listSheetsForUi(): SheetUiInfo[] {
+  const sheetIds = app.getDocument().getSheetIds();
+  const ids = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+  return ids.map((id) => ({ id, name: workbookSheetNames.get(id) ?? id }));
+}
+
+function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
+  lastSheetIds = sheets.map((sheet) => sheet.id);
   sheetTabsRoot.replaceChildren();
 
   const active = app.getCurrentSheetId();
 
-  for (const sheetId of nextSheetIds) {
+  for (const sheet of sheets) {
+    const sheetId = sheet.id;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "sheet-tab";
     button.dataset.sheetId = sheetId;
     button.dataset.testid = `sheet-tab-${sheetId}`;
     button.dataset.active = sheetId === active ? "true" : "false";
-    button.textContent = sheetId;
+    button.textContent = sheet.name;
     button.addEventListener("click", () => {
       app.activateSheet(sheetId);
-      renderSheetTabs();
+      app.focus();
     });
     sheetTabsRoot.appendChild(button);
   }
 }
 
-renderSheetTabs();
+function syncSheetUi(): void {
+  const sheets = listSheetsForUi();
+  renderSheetTabs(sheets);
+  renderSheetSwitcher(sheets, app.getCurrentSheetId());
+}
+
+syncSheetUi();
+
+const originalActivateSheet = app.activateSheet.bind(app);
+app.activateSheet = (sheetId: string): void => {
+  originalActivateSheet(sheetId);
+  syncSheetUi();
+};
+
+const originalActivateCell = app.activateCell.bind(app);
+app.activateCell = (target: Parameters<SpreadsheetApp["activateCell"]>[0]): void => {
+  const prevSheet = app.getCurrentSheetId();
+  originalActivateCell(target);
+  if (target.sheetId && target.sheetId !== prevSheet) syncSheetUi();
+};
+
+const originalSelectRange = app.selectRange.bind(app);
+app.selectRange = (target: Parameters<SpreadsheetApp["selectRange"]>[0]): void => {
+  const prevSheet = app.getCurrentSheetId();
+  originalSelectRange(target);
+  if (target.sheetId && target.sheetId !== prevSheet) syncSheetUi();
+};
 
 // Keep the canvas renderer in sync with programmatic document mutations (e.g. AI tools)
 // and re-render when edits create new sheets (DocumentController creates sheets lazily).
@@ -93,7 +128,7 @@ app.getDocument().on("change", () => {
   const sheetIds = app.getDocument().getSheetIds();
   const nextSheetIds = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
   if (nextSheetIds.length !== lastSheetIds.length || nextSheetIds.some((id, idx) => id !== lastSheetIds[idx])) {
-    renderSheetTabs();
+    syncSheetUi();
   }
 });
 
@@ -610,11 +645,6 @@ registerFindReplaceShortcuts({
 
 installUnsavedChangesPrompt(window, app.getDocument());
 
-const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
-if (!sheetSwitcher) {
-  throw new Error("Missing sheet switcher element");
-}
-
 function renderSheetSwitcher(sheets: { id: string; name: string }[], activeId: string) {
   sheetSwitcher.replaceChildren();
   for (const sheet of sheets) {
@@ -626,7 +656,6 @@ function renderSheetSwitcher(sheets: { id: string; name: string }[], activeId: s
   sheetSwitcher.value = activeId;
 }
 
-renderSheetSwitcher([{ id: app.getCurrentSheetId(), name: app.getCurrentSheetId() }], app.getCurrentSheetId());
 sheetSwitcher.addEventListener("change", () => {
   app.activateSheet(sheetSwitcher.value);
   app.focus();
@@ -746,6 +775,11 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   const sheets = normalizeSheetList(info);
   if (sheets.length === 0) {
     throw new Error("Workbook contains no sheets");
+  }
+
+  workbookSheetNames.clear();
+  for (const sheet of sheets) {
+    workbookSheetNames.set(sheet.id, sheet.name);
   }
 
   const MAX_COLS = 200;
