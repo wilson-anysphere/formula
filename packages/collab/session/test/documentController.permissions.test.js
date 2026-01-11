@@ -147,11 +147,14 @@ test("CollabSession↔DocumentController binder blocks edits to non-editable cel
 
   // Attempt an edit as the restricted user.
   dcB.setCellValue("Sheet1", "A1", "hacked");
+  dcB.setCellFormula("Sheet1", "A1", "=HACK()");
 
   // Local UI and shared Yjs document should remain unchanged.
   await new Promise((r) => setTimeout(r, 25));
   assert.equal(dcB.getCell("Sheet1", "A1").value, "original");
+  assert.equal(dcB.getCell("Sheet1", "A1").formula, null);
   assert.equal(dcA.getCell("Sheet1", "A1").value, "original");
+  assert.equal(dcA.getCell("Sheet1", "A1").formula, null);
   assert.equal((await sessionA.getCell("Sheet1:0:0"))?.value, "original");
 
   binderA.destroy();
