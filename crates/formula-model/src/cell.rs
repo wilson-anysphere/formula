@@ -159,7 +159,15 @@ pub struct Cell {
     pub value: CellValue,
 
     /// Formula text, if the cell contains a formula.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ///
+    /// Invariant: stored **without** a leading `'='` (e.g. `"SUM(A1:A3)"`, not
+    /// `"=SUM(A1:A3)"`). Use [`crate::display_formula_text`] when rendering a
+    /// formula for UI display.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_formula_opt"
+    )]
     pub formula: Option<String>,
 
     /// Index into the workbook style table.
@@ -192,6 +200,17 @@ impl Cell {
     pub fn is_truly_empty(&self) -> bool {
         self.value == CellValue::Empty && self.formula.is_none() && self.style_id == 0
     }
+}
+
+fn deserialize_formula_opt<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    Ok(raw.and_then(|s| {
+        let normalized = crate::normalize_formula_text(&s);
+        (!normalized.is_empty()).then_some(normalized)
+    }))
 }
 
 #[cfg(test)]

@@ -16,13 +16,14 @@ mod display;
 /// Drawing primitives (images, shapes, charts, etc.).
 pub mod drawings;
 mod error;
-pub mod import;
-mod hyperlinks;
-pub mod rich_text;
 mod formula_rewrite;
-pub mod pivots;
+mod formula_text;
+mod hyperlinks;
+pub mod import;
 mod merge;
 mod outline;
+pub mod pivots;
+pub mod rich_text;
 mod style;
 mod theme;
 pub mod table;
@@ -38,8 +39,9 @@ pub use conditional_formatting::*;
 pub use data_validation::*;
 pub use display::{format_cell_display, CellDisplay};
 pub use error::ErrorValue;
-pub use hyperlinks::{Hyperlink, HyperlinkTarget};
 pub use formula_rewrite::rewrite_sheet_names_in_formula;
+pub use formula_text::{display_formula_text, normalize_formula_text};
+pub use hyperlinks::{Hyperlink, HyperlinkTarget};
 pub use merge::{MergeError, MergedRegion, MergedRegions};
 pub use outline::{HiddenState, Outline, OutlineAxis, OutlineEntry, OutlinePr};
 pub use style::{
@@ -52,7 +54,8 @@ pub use theme::{
     ThemePalette,
 };
 pub use table::{
-    AutoFilter, FilterColumn, SortCondition, SortState, Table, TableArea, TableColumn, TableStyleInfo,
+    AutoFilter, FilterColumn, SortCondition, SortState, Table, TableArea, TableColumn,
+    TableStyleInfo,
 };
 pub use value::{ArrayValue, CellValue, RichText, SpillValue};
 pub use workbook::{RenameSheetError, Workbook, WorkbookId};

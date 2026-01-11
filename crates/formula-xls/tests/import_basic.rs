@@ -26,7 +26,7 @@ fn imports_basic_xls() {
     assert_eq!(sheet1.value_a1("B2").unwrap(), CellValue::Number(123.0));
 
     let c3 = CellRef::from_a1("C3").unwrap();
-    assert_eq!(sheet1.formula(c3), Some("=B2*2"));
+    assert_eq!(sheet1.formula(c3), Some("B2*2"));
 
     let sheet2 = result
         .workbook

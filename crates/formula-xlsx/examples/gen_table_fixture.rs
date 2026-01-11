@@ -76,7 +76,7 @@ fn main() {
             CellRef::from_a1(&format!("D{row}")).unwrap(),
             Cell {
                 value: CellValue::Number(*total),
-                formula: Some("=[@Qty]*[@Price]".into()),
+                formula: Some("[@Qty]*[@Price]".into()),
                 style_id: 0,
             },
         );
@@ -87,7 +87,7 @@ fn main() {
         CellRef::from_a1("E1").unwrap(),
         Cell {
             value: CellValue::Number(20.0),
-            formula: Some("=SUM(Table1[Total])".into()),
+            formula: Some("SUM(Table1[Total])".into()),
             style_id: 0,
         },
     );
@@ -96,7 +96,7 @@ fn main() {
         CellRef::from_a1("F1").unwrap(),
         Cell {
             value: CellValue::String("Qty".into()),
-            formula: Some("=Table1[[#Headers],[Qty]]".into()),
+            formula: Some("Table1[[#Headers],[Qty]]".into()),
             style_id: 0,
         },
     );
@@ -154,7 +154,8 @@ fn main() {
     };
     sheet.tables.push(table);
 
-    let out_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/table.xlsx");
+    let out_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/table.xlsx");
     std::fs::create_dir_all(out_path.parent().unwrap()).unwrap();
     formula_xlsx::write_workbook(&workbook, &out_path).unwrap();
 }

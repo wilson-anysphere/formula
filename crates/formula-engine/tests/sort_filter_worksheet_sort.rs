@@ -37,10 +37,9 @@ fn worksheet_sort_moves_cells_and_rewrites_relative_formulas() {
     assert_eq!(sheet.value(CellRef::new(2, 0)), CellValue::Number(2.0));
 
     // Formulas moved and updated to keep relative references consistent.
-    assert_eq!(sheet.formula(CellRef::new(1, 1)), Some("=A2*10"));
-    assert_eq!(sheet.formula(CellRef::new(2, 1)), Some("=A3*10"));
+    assert_eq!(sheet.formula(CellRef::new(1, 1)), Some("A2*10"));
+    assert_eq!(sheet.formula(CellRef::new(2, 1)), Some("A3*10"));
 
     // Row height moved with the row that contained the `1.0` value.
     assert_eq!(sheet.row_properties(1).and_then(|p| p.height), Some(50.0));
 }
-

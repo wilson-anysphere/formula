@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
-    CellRef, CellValue, ColProperties, ErrorValue, Range, RowProperties, SheetVisibility, Style,
-    Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    normalize_formula_text, CellRef, CellValue, ColProperties, ErrorValue, Range, RowProperties,
+    SheetVisibility, Style, Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 use thiserror::Error;
 
@@ -245,7 +245,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         continue;
                     };
 
-                    let normalized = normalize_formula(formula);
+                    let normalized = normalize_formula_text(formula);
                     if normalized.is_empty() {
                         continue;
                     }
@@ -292,19 +292,6 @@ fn sheet_visible_to_visibility(visible: SheetVisible) -> SheetVisibility {
         SheetVisible::Visible => SheetVisibility::Visible,
         SheetVisible::Hidden => SheetVisibility::Hidden,
         SheetVisible::VeryHidden => SheetVisibility::VeryHidden,
-    }
-}
-
-fn normalize_formula(formula: &str) -> String {
-    let trimmed = formula.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-
-    if trimmed.starts_with('=') {
-        trimmed.to_owned()
-    } else {
-        format!("={trimmed}")
     }
 }
 

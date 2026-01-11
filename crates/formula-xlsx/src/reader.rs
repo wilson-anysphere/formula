@@ -2,7 +2,7 @@ use crate::tables::parse_table;
 use crate::tables::TablePart;
 use crate::tables::TABLE_REL_TYPE;
 use crate::XlsxError;
-use formula_model::{Cell, CellRef, CellValue, Workbook, Worksheet};
+use formula_model::{normalize_formula_text, Cell, CellRef, CellValue, Workbook, Worksheet};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::collections::HashMap;
@@ -251,7 +251,10 @@ fn parse_sheet(
                             }
                         }
                     };
-                    let formula = current_formula.take().map(|f| format!("={f}"));
+                    let formula = current_formula.take().and_then(|f| {
+                        let normalized = normalize_formula_text(&f);
+                        (!normalized.is_empty()).then_some(normalized)
+                    });
                     sheet.set_cell(
                         cell_ref,
                         Cell {

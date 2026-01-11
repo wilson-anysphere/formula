@@ -178,7 +178,8 @@ fn rewrite_formula_for_move(formula: &str, from: CellAddr, to: CellAddr) -> Opti
         reference_style: crate::ReferenceStyle::A1,
         include_xlfn_prefix: true,
         origin: Some(to),
-        omit_equals: false,
+        // `formula-model` stores formulas without a leading '='.
+        omit_equals: true,
     };
 
     ast.to_string(out_opts).ok()

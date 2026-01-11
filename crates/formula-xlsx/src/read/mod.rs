@@ -4,7 +4,9 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use formula_model::rich_text::RichText;
-use formula_model::{Cell, CellRef, CellValue, ErrorValue, SheetVisibility, Workbook};
+use formula_model::{
+    normalize_formula_text, Cell, CellRef, CellValue, ErrorValue, SheetVisibility, Workbook,
+};
 use quick_xml::events::Event;
 use quick_xml::events::attributes::AttrError;
 use quick_xml::Reader;
@@ -401,10 +403,11 @@ fn parse_worksheet_into_model(
                     let (value, value_kind, raw_value) =
                         interpret_cell_value(current_t.as_deref(), &current_value_text, &current_inline_text, shared_strings);
 
-                     let formula_in_model = current_formula.as_ref().and_then(|f| {
-                         (!f.file_text.is_empty())
-                             .then(|| crate::formula_text::strip_xlfn_prefixes(&f.file_text))
-                     });
+                    let formula_in_model = current_formula.as_ref().and_then(|f| {
+                        let stripped = crate::formula_text::strip_xlfn_prefixes(&f.file_text);
+                        let normalized = normalize_formula_text(&stripped);
+                        (!normalized.is_empty()).then_some(normalized)
+                    });
 
                     let mut cell = Cell::default();
                     cell.value = value;

@@ -1366,14 +1366,14 @@ fn value_kind_compatible(kind: &CellValueKind, value: &CellValue) -> bool {
 
 fn formula_file_text(meta: &crate::FormulaMeta, display: Option<&str>) -> String {
     let Some(display) = display else {
-        return meta.file_text.clone();
+        return strip_leading_equals(&meta.file_text).to_string();
     };
 
     let display = strip_leading_equals(display);
 
     // Preserve stored file text if the model's display text matches.
     if !meta.file_text.is_empty() && crate::formula_text::strip_xlfn_prefixes(&meta.file_text) == display {
-        return meta.file_text.clone();
+        return strip_leading_equals(&meta.file_text).to_string();
     }
 
     crate::formula_text::add_xlfn_prefixes(display)
@@ -1862,3 +1862,6 @@ fn next_relationship_id_in_xml(xml: &str) -> u32 {
     }
     max_id + 1
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,5 +1,5 @@
 use crate::tables::{write_table_xml, TABLE_REL_TYPE};
-use formula_model::{Cell, CellRef, CellValue, Workbook, Worksheet};
+use formula_model::{normalize_formula_text, Cell, CellRef, CellValue, Workbook, Worksheet};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Seek, Write};
@@ -236,8 +236,10 @@ fn cell_xml(cell_ref: &CellRef, cell: &Cell, shared_strings: &SharedStrings) -> 
     let mut value_xml = String::new();
 
     if let Some(formula) = &cell.formula {
-        let formula = formula.strip_prefix('=').unwrap_or(formula);
-        value_xml.push_str(&format!(r#"<f>{}</f>"#, escape_xml(formula)));
+        let formula = normalize_formula_text(formula);
+        if !formula.is_empty() {
+            value_xml.push_str(&format!(r#"<f>{}</f>"#, escape_xml(&formula)));
+        }
     }
 
     match &cell.value {
