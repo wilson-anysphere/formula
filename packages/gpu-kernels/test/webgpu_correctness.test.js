@@ -65,6 +65,25 @@ test("webgpu: f32 + f64 correctness for SUM / SUMPRODUCT / HISTOGRAM (if WebGPU 
   }
 
   {
+    const rng = makeRng(246);
+    const n = 200_000;
+    const values = new Float32Array(n);
+    for (let i = 0; i < n; i++) values[i] = (rng() - 0.5) * 1000;
+
+    const cpuMin = await cpu.min(values);
+    const cpuMax = await cpu.max(values);
+    const cpuAvg = await cpu.average(values);
+
+    const gpuMin = await gpu.min(values, { precision: "f32" });
+    const gpuMax = await gpu.max(values, { precision: "f32" });
+    const gpuAvg = await gpu.average(values, { precision: "f32" });
+
+    assert.ok(approxEqual(gpuMin, cpuMin, { rel: 1e-4, abs: 1e-3 }), `gpu=${gpuMin} cpu=${cpuMin}`);
+    assert.ok(approxEqual(gpuMax, cpuMax, { rel: 1e-4, abs: 1e-3 }), `gpu=${gpuMax} cpu=${cpuMax}`);
+    assert.ok(approxEqual(gpuAvg, cpuAvg, { rel: 1e-4, abs: 1e-3 }), `gpu=${gpuAvg} cpu=${cpuAvg}`);
+  }
+
+  {
     const rng = makeRng(13579);
     const aRows = 32;
     const aCols = 32;
@@ -100,11 +119,13 @@ test("webgpu: f32 + f64 correctness for SUM / SUMPRODUCT / HISTOGRAM (if WebGPU 
       const rng = makeRng(321);
       const n = 200_000;
       const values = new Float64Array(n);
-      for (let i = 0; i < n; i++) values[i] = (rng() - 0.5) * 10_000;
+      // Use integer values so the f64 reduction order cannot introduce
+      // rounding differences (sum stays < 2^53 and is exactly representable).
+      for (let i = 0; i < n; i++) values[i] = ((rng() * 2048) | 0) - 1024;
 
       const cpuSum = await cpu.sum(values);
       const gpuSum = await gpu.sum(values, { precision: "f64", allowFp32FallbackForF64: false });
-      assert.ok(approxEqual(gpuSum, cpuSum, { rel: 1e-12, abs: 1e-9 }), `gpu=${gpuSum} cpu=${cpuSum}`);
+      assert.equal(gpuSum, cpuSum);
     }
 
     {
@@ -113,12 +134,13 @@ test("webgpu: f32 + f64 correctness for SUM / SUMPRODUCT / HISTOGRAM (if WebGPU 
       const a = new Float64Array(n);
       const b = new Float64Array(n);
       for (let i = 0; i < n; i++) {
-        a[i] = (rng() - 0.5) * 100;
-        b[i] = (rng() - 0.5) * 100;
+        // Integer values so products + sums remain exactly representable in f64.
+        a[i] = (rng() * 1024) | 0;
+        b[i] = (rng() * 1024) | 0;
       }
       const cpuDot = await cpu.sumproduct(a, b);
       const gpuDot = await gpu.sumproduct(a, b, { precision: "f64", allowFp32FallbackForF64: false });
-      assert.ok(approxEqual(gpuDot, cpuDot, { rel: 1e-12, abs: 1e-9 }), `gpu=${gpuDot} cpu=${cpuDot}`);
+      assert.equal(gpuDot, cpuDot);
     }
 
     {
@@ -132,6 +154,25 @@ test("webgpu: f32 + f64 correctness for SUM / SUMPRODUCT / HISTOGRAM (if WebGPU 
       const cpuBins = await cpu.histogram(values, { min: 0, max: 1, bins: 16 });
       const gpuBins = await gpu.histogram(values, { min: 0, max: 1, bins: 16 }, { precision: "f64", allowFp32FallbackForF64: false });
       assert.deepEqual(Array.from(gpuBins), Array.from(cpuBins));
+    }
+
+    {
+      const rng = makeRng(111);
+      const n = 200_000;
+      const values = new Float64Array(n);
+      for (let i = 0; i < n; i++) values[i] = ((rng() * 2048) | 0) - 1024;
+
+      const cpuMin = await cpu.min(values);
+      const cpuMax = await cpu.max(values);
+      const cpuAvg = await cpu.average(values);
+
+      const gpuMin = await gpu.min(values, { precision: "f64", allowFp32FallbackForF64: false });
+      const gpuMax = await gpu.max(values, { precision: "f64", allowFp32FallbackForF64: false });
+      const gpuAvg = await gpu.average(values, { precision: "f64", allowFp32FallbackForF64: false });
+
+      assert.equal(gpuMin, cpuMin);
+      assert.equal(gpuMax, cpuMax);
+      assert.equal(gpuAvg, cpuAvg);
     }
 
     {
