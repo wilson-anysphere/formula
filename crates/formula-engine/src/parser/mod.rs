@@ -1372,8 +1372,8 @@ impl<'a> Parser<'a> {
                     }
                 } else if matches!(self.peek_kind(), TokenKind::Bang) {
                     self.next();
-                    let (workbook, sheet) = split_external_sheet_name(&start_raw);
-                    Some((workbook, SheetRef::Sheet(sheet)))
+                    let (workbook, sheet_ref) = sheet_ref_from_raw_prefix(&start_raw);
+                    Some((workbook, sheet_ref))
                 } else {
                     self.pos = save_pos;
                     None
@@ -1754,8 +1754,8 @@ impl<'a> Parser<'a> {
                     }
                 } else if matches!(self.peek_kind(), TokenKind::Bang) {
                     self.next();
-                    let (workbook, sheet) = split_external_sheet_name(&start_raw);
-                    (workbook, Some(SheetRef::Sheet(sheet)))
+                    let (workbook, sheet_ref) = sheet_ref_from_raw_prefix(&start_raw);
+                    (workbook, Some(sheet_ref))
                 } else {
                     self.pos = save_pos;
                     (None, None)
@@ -2100,7 +2100,10 @@ impl<'a> Parser<'a> {
                 self.pos = save;
                 return self.parse_structured_ref(None, None, None);
             }
-            SheetRef::Sheet(start_sheet)
+            match split_sheet_span_name(&start_sheet) {
+                Some((start, end)) => SheetRef::SheetRange { start, end },
+                None => SheetRef::Sheet(start_sheet),
+            }
         };
         self.next(); // bang
         self.parse_ref_after_prefix(Some(workbook), Some(sheet_ref))
@@ -2340,4 +2343,21 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
     } else {
         (Some(workbook), sheet)
     }
+}
+
+fn sheet_ref_from_raw_prefix(raw: &str) -> (Option<String>, SheetRef) {
+    let (workbook, sheet) = split_external_sheet_name(raw);
+    let sheet_ref = match split_sheet_span_name(&sheet) {
+        Some((start, end)) => SheetRef::SheetRange { start, end },
+        None => SheetRef::Sheet(sheet),
+    };
+    (workbook, sheet_ref)
+}
+
+fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
+    let (start, end) = name.split_once(':')?;
+    if start.is_empty() || end.is_empty() {
+        return None;
+    }
+    Some((start.to_string(), end.to_string()))
 }
