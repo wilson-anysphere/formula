@@ -160,3 +160,43 @@ await new Promise(() => {});
   expect(result.spoofed.error?.message).toContain("timed out");
   expect(result.cellValue).toBe(10);
 });
+
+test("scripting: forwards ctx.confirm/prompt/alert via RPC", async ({ page }) => {
+  await page.goto("/scripting-test.html");
+  await page.waitForFunction(() => Boolean((globalThis as any).__formulaScripting));
+
+  const dialogs: Array<{ type: string; message: string }> = [];
+  page.on("dialog", async (dialog) => {
+    dialogs.push({ type: dialog.type(), message: dialog.message() });
+    if (dialog.type() === "prompt") {
+      await dialog.accept("Alice");
+      return;
+    }
+    // confirm + alert
+    await dialog.accept();
+  });
+
+  const result = await page.evaluate(async () => {
+    const { ScriptRuntime, Workbook } = (globalThis as any).__formulaScripting;
+
+    const workbook = new Workbook();
+    workbook.addSheet("Sheet1");
+    workbook.setActiveSheet("Sheet1");
+
+    const runtime = new ScriptRuntime(workbook);
+    return await runtime.run(`
+export default async function main(ctx) {
+  const ok = await ctx.confirm("Proceed?");
+  const name = await ctx.prompt("Name?", "Unknown");
+  await ctx.alert("done");
+  ctx.ui.log("confirm", ok, "prompt", name);
+}
+`);
+  });
+
+  expect(result.error).toBeUndefined();
+  expect(result.logs.some((entry) => entry.message.includes("confirm"))).toBe(true);
+  expect(dialogs.map((d) => d.type)).toEqual(["confirm", "prompt", "alert"]);
+  expect(dialogs[0]?.message).toBe("Proceed?");
+  expect(dialogs[1]?.message).toBe("Name?");
+});
