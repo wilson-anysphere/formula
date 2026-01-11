@@ -261,14 +261,15 @@ if (
             try {
               const baseBackend = new TauriMacroBackend({ invoke: queuedInvoke ?? undefined });
               return {
-                listMacros: (id: string) => baseBackend.listMacros(id),
-                runMacro: async (request: MacroRunRequest) => {
-                  // Allow any microtask-batched workbook edits to enqueue before the
-                  // macro runs so backend state reflects the latest grid changes.
-                  await new Promise<void>((resolve) => queueMicrotask(resolve));
-                  return baseBackend.runMacro(request);
-                },
-              };
+            listMacros: (id: string) => baseBackend.listMacros(id),
+            runMacro: async (request: MacroRunRequest) => {
+              // Allow any microtask-batched workbook edits to enqueue before the
+              // macro runs so backend state reflects the latest grid changes.
+              await new Promise<void>((resolve) => queueMicrotask(resolve));
+              await drainBackendSync();
+              return baseBackend.runMacro(request);
+            },
+          };
             } catch {
               return getMacrosBackend();
             }
