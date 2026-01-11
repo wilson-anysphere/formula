@@ -498,3 +498,12 @@ test("privacy source ids: http origins normalize IPv6 hosts with brackets", () =
   assert.equal(getHttpSourceId("http://[::1]/data"), "http://[::1]:80");
   assert.equal(getHttpSourceId("https://[::1]/data"), "https://[::1]:443");
 });
+
+test("privacy source ids: sql source ids are not double-prefixed", () => {
+  assert.equal(getSqlSourceId("sql:db1"), "sql:db1");
+  assert.equal(getSqlSourceId({ id: "sql:db1" }), "sql:db1");
+});
+
+test("privacy source ids: file source ids preserve UNC prefix", () => {
+  assert.equal(getFileSourceId("\\\\server\\share\\dir\\..\\file.csv"), "//server/share/file.csv");
+});

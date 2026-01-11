@@ -11,13 +11,20 @@ export function normalizeFilePath(input) {
 
   // Normalize slashes.
   out = out.replaceAll("\\", "/");
-  out = out.replace(/\/{2,}/g, "/");
+  // Preserve UNC / network path prefix (`//server/share`) by only collapsing
+  // duplicate slashes after the leading `//` when present.
+  if (out.startsWith("//")) {
+    out = `//${out.slice(2).replace(/\/{2,}/g, "/")}`;
+  } else {
+    out = out.replace(/\/{2,}/g, "/");
+  }
 
   // Lowercase Windows drive letters (C:\ -> c:/)
   out = out.replace(/^([A-Za-z]):(?=\/|$)/, (_, drive) => `${drive.toLowerCase()}:`);
 
   // Resolve "." / ".." segments.
-  const isAbs = out.startsWith("/") || /^[a-z]:\//.test(out);
+  const isUnc = out.startsWith("//");
+  const isAbs = isUnc || out.startsWith("/") || /^[a-z]:\//.test(out);
   const parts = out.split("/").filter((p) => p.length > 0);
   /** @type {string[]} */
   const resolved = [];
@@ -34,7 +41,7 @@ export function normalizeFilePath(input) {
     resolved.push(part);
   }
 
-  const prefix = isAbs && !/^[a-z]:\//.test(out) ? "/" : "";
+  const prefix = isAbs && !/^[a-z]:\//.test(out) ? (isUnc ? "//" : "/") : "";
   return prefix + resolved.join("/");
 }
 
@@ -79,15 +86,15 @@ export function getHttpSourceId(url) {
  * @param {unknown} connection
  */
 export function getSqlSourceId(connection) {
-  if (typeof connection === "string") return `sql:${connection}`;
+  if (typeof connection === "string") return connection.startsWith("sql:") ? connection : `sql:${connection}`;
   if (connection && typeof connection === "object" && !Array.isArray(connection)) {
     // Prefer a host-provided stable identifier when present.
     // @ts-ignore - runtime indexing
     const id = connection.id;
-    if (typeof id === "string" && id.length > 0) return `sql:${id}`;
+    if (typeof id === "string" && id.length > 0) return id.startsWith("sql:") ? id : `sql:${id}`;
     // @ts-ignore - runtime indexing
     const name = connection.name;
-    if (typeof name === "string" && name.length > 0) return `sql:${name}`;
+    if (typeof name === "string" && name.length > 0) return name.startsWith("sql:") ? name : `sql:${name}`;
   }
   return `sql:${hashValue(connection)}`;
 }

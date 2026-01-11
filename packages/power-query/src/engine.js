@@ -12,7 +12,7 @@ import { QueryFoldingEngine } from "./folding/sql.js";
 import { normalizePostgresPlaceholders } from "./folding/placeholders.js";
 import { computeParquetProjectionColumns, computeParquetRowLimit } from "./parquetProjection.js";
 import { collectSourcePrivacy, distinctPrivacyLevels, shouldBlockCombination } from "./privacy/firewall.js";
-import { getSourceIdForProvenance, getSourceIdForQuerySource } from "./privacy/sourceId.js";
+import { getSourceIdForProvenance, getSourceIdForQuerySource, getSqlSourceId } from "./privacy/sourceId.js";
 import { getPrivacyLevel } from "./privacy/levels.js";
 
 /**
@@ -1391,7 +1391,11 @@ export class QueryEngine {
       if (!connector) return { type: "database", missingConnector: "sql" };
       const connectionId = resolveDatabaseConnectionId(source, connector);
       const connectionRefId = this.getEphemeralObjectId(source.connection);
-      const sourceId = connectionId ? `sql:${connectionId}` : connectionRefId ? `sql:${connectionRefId}` : getSourceIdForQuerySource(source);
+      const sourceId = connectionId
+        ? getSqlSourceId(connectionId)
+        : connectionRefId
+          ? getSqlSourceId(connectionRefId)
+          : getSourceIdForQuerySource(source);
       const privacyLevel = getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId);
       if (!connectionId) {
         return {
@@ -1733,7 +1737,11 @@ export class QueryEngine {
       const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
       const connectionRefId = this.getEphemeralObjectId(source.connection);
       const sqlSourceId =
-        connectionId ? `sql:${connectionId}` : connectionRefId ? `sql:${connectionRefId}` : getSourceIdForQuerySource(source) ?? "<unknown-sql>";
+        connectionId
+          ? getSqlSourceId(connectionId)
+          : connectionRefId
+            ? getSqlSourceId(connectionRefId)
+            : getSourceIdForQuerySource(source) ?? "<unknown-sql>";
       this.setTableSourceIds(result.table, [sqlSourceId]);
       const meta = {
         ...result.meta,
@@ -1805,7 +1813,11 @@ export class QueryEngine {
     const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
     const connectionRefId = this.getEphemeralObjectId(source.connection);
     const sqlSourceId =
-      connectionId ? `sql:${connectionId}` : connectionRefId ? `sql:${connectionRefId}` : getSourceIdForQuerySource(source) ?? "<unknown-sql>";
+      connectionId
+        ? getSqlSourceId(connectionId)
+        : connectionRefId
+          ? getSqlSourceId(connectionRefId)
+          : getSourceIdForQuerySource(source) ?? "<unknown-sql>";
     this.setTableSourceIds(result.table, [sqlSourceId]);
     const meta = {
       ...result.meta,
