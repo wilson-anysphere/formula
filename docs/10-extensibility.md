@@ -607,6 +607,29 @@ misbehaving extension cannot hang or OOM the main app:
 - **Crash/restart**: on crash/timeout, the extension is marked inactive and the next activation will
   spawn a fresh worker. Hosts can also explicitly recycle an extension via `reloadExtension(id)`.
 
+### Node extension sandbox (security boundary)
+
+For the desktop/Node runtime, extensions execute inside a hardened `vm` context with a minimal
+CommonJS loader. This is the primary security boundary that makes the permission system enforceable.
+
+Key properties:
+
+- **No Node builtins**: `require("node:fs")`, `require("fs")`, `import("node:fs")`, etc. are blocked.
+- **No ESM dynamic import**: `import(...)` is rejected (prevents bypassing CommonJS loaders).
+- **No `process` escape hatches**: extensions do not receive the real `process` object;
+  `process.binding(...)` is blocked.
+- **No string codegen**: `eval` / `new Function(...)` are disabled via
+  `codeGeneration: { strings: false, wasm: false }`.
+- **Filesystem/network access is API-only**: extensions must use Formula APIs (e.g.
+  `formula.network.fetch`, `formula.storage.*`) which are permission-gated by the host.
+- **Module restrictions**:
+  - allowed: `require("@formula/extension-api")` (or `require("formula")`)
+  - allowed: relative `./` / `../` requires that resolve inside the extension folder
+  - blocked: any other specifier (including `node_modules` dependencies)
+
+Implication: extensions should be shipped as a bundled CommonJS entrypoint (and can include relative
+chunks inside the extension folder if needed).
+
 ### Permission System
 
 ```typescript
