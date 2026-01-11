@@ -443,8 +443,10 @@ impl DependencyGraph {
         seen.insert(cell);
 
         while let Some(cur) = queue.pop_front() {
-            if self.cells.contains_key(&cur) {
-                self.dirty.insert(cur);
+            // If `cur` is a formula cell and was already dirty, we can stop exploring through it:
+            // its transitive dependents must already have been marked dirty as well.
+            if self.cells.contains_key(&cur) && !self.dirty.insert(cur) {
+                continue;
             }
 
             if let Some(dependents) = self.cell_dependents.get(&cur) {
@@ -465,6 +467,32 @@ impl DependencyGraph {
                 }
             }
         }
+    }
+
+    /// Returns the direct dependents of `cell`.
+    ///
+    /// This includes:
+    /// - cell-to-cell dependents (formulas that reference the cell directly)
+    /// - range-node dependents (formulas that reference a range that contains the cell)
+    ///
+    /// The returned list is de-duplicated and sorted deterministically by sheet/row/col.
+    #[must_use]
+    pub fn direct_dependents(&self, cell: CellId) -> Vec<CellId> {
+        let mut vec: Vec<CellId> = Vec::new();
+
+        if let Some(dependents) = self.cell_dependents.get(&cell) {
+            vec.extend(dependents.iter().copied());
+        }
+
+        for range_id in self.range_nodes_containing_cell(cell) {
+            if let Some(range_node) = self.range_nodes.get(&range_id) {
+                vec.extend(range_node.dependents.iter().copied());
+            }
+        }
+
+        vec.sort_by_key(|c| (c.sheet_id, c.cell.row, c.cell.col));
+        vec.dedup();
+        vec
     }
 
     #[must_use]
