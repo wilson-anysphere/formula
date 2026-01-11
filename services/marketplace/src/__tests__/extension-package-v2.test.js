@@ -325,6 +325,11 @@ test("v2 rejects path segments with trailing dot/space", () => {
   assert.throws(() => readExtensionPackageV2(archive), /invalid path/i);
 });
 
+test("v2 rejects Windows-invalid characters in path segments", () => {
+  const archive = createTarArchive([{ name: "files/bad?.txt", data: Buffer.from("x") }]);
+  assert.throws(() => readExtensionPackageV2(archive), /invalid path/i);
+});
+
 test("v2 rejects checksums.json with too many entries", () => {
   const manifest = {
     name: "temp-ext",
