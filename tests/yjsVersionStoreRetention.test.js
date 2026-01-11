@@ -13,10 +13,12 @@ test("VersionManager retention works with YjsVersionStore (history in-doc, exclu
 
   const store = new YjsVersionStore({ doc: ydoc });
   const doc = createYjsSpreadsheetDocAdapter(ydoc, { excludeRoots: ["versions", "versionsMeta"] });
+  let now = 0;
   const vm = new VersionManager({
     doc,
     store,
     autoStart: false,
+    nowMs: () => now,
     retention: { maxSnapshots: 2 },
   });
 
@@ -26,6 +28,7 @@ test("VersionManager retention works with YjsVersionStore (history in-doc, exclu
       cell.set("value", i);
       cells.set(`Sheet1:0:${i}`, cell);
     });
+    now += 10;
     await vm.createSnapshot({ description: `s${i}` });
   }
 
@@ -38,4 +41,3 @@ test("VersionManager retention works with YjsVersionStore (history in-doc, exclu
     "expected newest snapshots to be retained"
   );
 });
-
