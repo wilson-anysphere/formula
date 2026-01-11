@@ -88,4 +88,61 @@ describe("WasmWorkbookBackend", () => {
     expect(engine.recalculate).toHaveBeenCalledTimes(1);
     expect(engine.recalculate).toHaveBeenCalledWith("Sheet1");
   });
+
+  it("loads a workbook from XLSX bytes (and clears used range tracking)", async () => {
+    const calls: string[] = [];
+    let resolveLoad: (() => void) | undefined;
+    const loadPromise = new Promise<void>((resolve) => {
+      resolveLoad = resolve;
+    });
+
+    const engine: EngineClient = {
+      init: vi.fn(async () => {}),
+      newWorkbook: vi.fn(async () => {}),
+      loadWorkbookFromJson: vi.fn(async () => {}),
+      loadWorkbookFromXlsxBytes: vi.fn(async () => {
+        calls.push("loadWorkbookFromXlsxBytes");
+        return await loadPromise;
+      }),
+      toJson: vi.fn(async () => "{}"),
+      getCell: vi.fn(async () => ({ sheet: "Sheet1", address: "A1", input: null, value: null })),
+      getRange: vi.fn(async () => []),
+      setCell: vi.fn(async () => {}),
+      setCells: vi.fn(async () => {}),
+      setRange: vi.fn(async () => {}),
+      recalculate: vi.fn(async () => {
+        calls.push("recalculate");
+        return [];
+      }),
+      terminate: vi.fn(),
+    };
+
+    const backend = new WasmWorkbookBackend(engine);
+
+    await backend.setCell({ sheetId: "Sheet1", row: 2, col: 3, value: 123, formula: null });
+    expect(await backend.getSheetUsedRange("Sheet1")).toEqual({ start_row: 2, end_row: 2, start_col: 3, end_col: 3 });
+
+    calls.length = 0;
+
+    const bytes = new Uint8Array([1, 2, 3]);
+    const openPromise = backend.openWorkbookFromBytes(bytes);
+
+    expect(engine.loadWorkbookFromXlsxBytes).toHaveBeenCalledTimes(1);
+    expect(engine.loadWorkbookFromXlsxBytes).toHaveBeenCalledWith(bytes);
+    expect(engine.recalculate).toHaveBeenCalledTimes(1); // from setCell only
+    expect(calls).toEqual(["loadWorkbookFromXlsxBytes"]);
+
+    resolveLoad?.();
+    const info = await openPromise;
+
+    expect(engine.recalculate).toHaveBeenCalledTimes(2);
+    expect(calls).toEqual(["loadWorkbookFromXlsxBytes", "recalculate"]);
+    expect(info).toEqual({
+      path: null,
+      origin_path: null,
+      sheets: [{ id: "Sheet1", name: "Sheet1" }],
+    });
+    expect(backend.getWorkbookInfo()).toEqual(info);
+    expect(await backend.getSheetUsedRange("Sheet1")).toBeNull();
+  });
 });

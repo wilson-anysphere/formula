@@ -63,8 +63,20 @@ export class WasmWorkbookBackend implements WorkbookBackend {
     return info;
   }
 
-  async openWorkbookFromBytes(_bytes: Uint8Array): Promise<WorkbookInfo> {
-    throw new Error("openWorkbookFromBytes is not supported by the WASM workbook backend yet");
+  async openWorkbookFromBytes(bytes: Uint8Array): Promise<WorkbookInfo> {
+    // `loadWorkbookFromXlsxBytes` may transfer/detach the underlying buffer.
+    await this.engine.loadWorkbookFromXlsxBytes(bytes);
+    await this.engine.recalculate();
+
+    this.usedRanges.clear();
+
+    const info: WorkbookInfo = {
+      path: null,
+      origin_path: null,
+      sheets: [DEFAULT_SHEET],
+    };
+    this.workbookInfo = info;
+    return info;
   }
 
   async getSheetUsedRange(sheetId: string): Promise<SheetUsedRange | null> {
@@ -142,4 +154,3 @@ export class WasmWorkbookBackend implements WorkbookBackend {
     return this.workbookInfo;
   }
 }
-
