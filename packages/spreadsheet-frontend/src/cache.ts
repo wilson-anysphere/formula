@@ -17,14 +17,31 @@ function normalizeCellValue(value: CellScalar): string | number | null {
   return String(value);
 }
 
+export interface EngineCellCacheOptions {
+  /**
+   * Maximum number of cached cell entries (including cached empty cells).
+   *
+   * Prefetching a large sparse sheet can otherwise grow the cache without bound as
+   * the user scrolls around. When the limit is exceeded, the oldest entries are
+   * evicted (insertion order).
+   */
+  maxEntries?: number;
+}
+
 export class EngineCellCache {
   readonly engine: EngineClient;
 
   private readonly values = new Map<string, string | number | null>();
   private readonly inflight = new Map<string, Promise<void>>();
+  private readonly maxEntries: number;
 
-  constructor(engine: EngineClient) {
+  constructor(engine: EngineClient, options?: EngineCellCacheOptions) {
     this.engine = engine;
+    const maxEntries = options?.maxEntries ?? 200_000;
+    if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
+      throw new Error(`EngineCellCache: maxEntries must be a positive safe integer, got ${maxEntries}`);
+    }
+    this.maxEntries = maxEntries;
   }
 
   getValue(row0: number, col0: number, sheet?: string): string | number | null {
@@ -75,9 +92,10 @@ export class EngineCellCache {
           const value = normalizeCellValue(cell.value);
           const cellRow0 = range.startRow0 + r;
           const cellCol0 = range.startCol0 + c;
-          this.values.set(cacheKey(sheetName, cellRow0, cellCol0), value);
+          this.setValue(cacheKey(sheetName, cellRow0, cellCol0), value);
         }
       }
+      this.trim();
     })();
 
     this.inflight.set(key, task);
@@ -92,13 +110,31 @@ export class EngineCellCache {
     for (const change of changes) {
       const sheet = defaultSheetName(change.sheet);
       const { row0, col0 } = fromA1(change.address);
-      this.values.set(cacheKey(sheet, row0, col0), normalizeCellValue(change.value));
+      this.setValue(cacheKey(sheet, row0, col0), normalizeCellValue(change.value));
     }
+    this.trim();
   }
 
   async recalculate(sheet?: string): Promise<CellChange[]> {
     const changes = await this.engine.recalculate(sheet);
     this.applyRecalcChanges(changes);
     return changes;
+  }
+
+  private setValue(key: string, value: string | number | null): void {
+    // Refresh insertion order when updating an existing key so eviction behaves
+    // like an LRU-by-prefetch cache.
+    if (this.values.has(key)) {
+      this.values.delete(key);
+    }
+    this.values.set(key, value);
+  }
+
+  private trim(): void {
+    while (this.values.size > this.maxEntries) {
+      const firstKey = this.values.keys().next().value as string | undefined;
+      if (!firstKey) break;
+      this.values.delete(firstKey);
+    }
   }
 }

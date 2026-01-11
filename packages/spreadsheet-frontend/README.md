@@ -42,4 +42,4 @@ Pass `provider` to `CanvasGrid`. The grid will call `provider.prefetch(range)` a
 
 - `EngineGridProvider.prefetch()` matches the grid API and is **fire-and-forget**. For tests/tools that need to await fetch completion, use `prefetchAsync()`.
 - `EngineGridProvider.recalculate()` is a convenience that runs an engine recalc and updates the cache + notifies subscribers.
-
+- `EngineCellCache` is size-bounded (default `maxEntries=200_000`) to avoid unbounded growth when scrolling large sparse sheets.
