@@ -9,6 +9,15 @@ use wasm_bindgen_test::wasm_bindgen_test;
 use formula_wasm::WasmWorkbook;
 
 #[wasm_bindgen_test]
+fn debug_function_registry_contains_builtins() {
+    // Ensure the wasm module invoked Rust global constructors before touching the
+    // function registry (otherwise it can be cached as empty).
+    let _ = WasmWorkbook::new();
+    assert!(formula_engine::functions::lookup_function("SUM").is_some());
+    assert!(formula_engine::functions::lookup_function("SEQUENCE").is_some());
+}
+
+#[wasm_bindgen_test]
 fn recalculate_reports_changed_cells() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
