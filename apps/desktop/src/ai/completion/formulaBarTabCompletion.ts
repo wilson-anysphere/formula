@@ -147,13 +147,33 @@ export class FormulaBarTabCompletionController {
     const activeCell = model.activeCell.address;
     const sheetId = this.#getSheetId();
     const cellsVersion = this.#cellsVersion;
+    const knownSheets =
+      typeof this.#document.getSheetIds === "function"
+        ? (this.#document.getSheetIds() as string[]).filter((s) => typeof s === "string" && s.length > 0)
+        : [];
+
+    const resolveSheetId = (name: string): string | null => {
+      const trimmed = name.trim();
+      if (!trimmed) return null;
+
+      // Avoid creating phantom sheets during completion (DocumentController lazily
+      // materializes sheets on read). If we don't have any known sheets yet,
+      // only allow reads against the current sheet id.
+      if (knownSheets.length === 0) {
+        return trimmed.toLowerCase() === sheetId.toLowerCase() ? sheetId : null;
+      }
+
+      return knownSheets.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
+    };
 
     const surroundingCells = {
       getCellValue: (row: number, col: number, sheetName?: string): unknown => {
         if (row < 0 || col < 0) return null;
         if (this.#limits && (row >= this.#limits.maxRows || col >= this.#limits.maxCols)) return null;
 
-        const targetSheet = typeof sheetName === "string" && sheetName.length > 0 ? sheetName : sheetId;
+        const targetSheet =
+          typeof sheetName === "string" && sheetName.length > 0 ? resolveSheetId(sheetName) : sheetId;
+        if (!targetSheet) return null;
         const state = this.#document.getCell(targetSheet, { row, col }) as { value: unknown; formula: string | null };
         if (state?.value != null) return state.value;
         if (typeof state?.formula === "string" && state.formula.length > 0) return state.formula;
@@ -292,7 +312,12 @@ function createPreviewEvaluator(params: {
     const resolveSheetId = (name: string): string | null => {
       const trimmed = name.trim();
       if (!trimmed) return null;
-      if (knownSheets.length === 0) return trimmed;
+      // Avoid creating phantom sheets during preview evaluation (DocumentController
+      // lazily materializes sheets on read). If we don't have any known sheets
+      // yet, only allow reads against the current sheet id.
+      if (knownSheets.length === 0) {
+        return trimmed.toLowerCase() === sheetId.toLowerCase() ? sheetId : null;
+      }
       return knownSheets.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
     };
 

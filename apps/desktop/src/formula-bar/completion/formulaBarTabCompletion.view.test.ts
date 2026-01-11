@@ -95,6 +95,48 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
+  it("does not create phantom sheets when suggesting sheet-qualified ranges", async () => {
+    const doc = new DocumentController();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    // Use a row below the header so the range suggester scans upward (and would
+    // previously materialize unknown sheets via `document.getCell()` reads).
+    view.setActiveCell({ address: "B11", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      // Provide a sheet list that includes a sheet that doesn't exist in the DocumentController yet.
+      schemaProvider: {
+        getNamedRanges: () => [],
+        getTables: () => [],
+        getSheetNames: () => ["Sheet2"],
+        getCacheKey: () => "sheets:Sheet2",
+      },
+    });
+
+    expect(doc.getSheetIds()).toEqual([]);
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=SUM(Sheet2!A";
+    view.textarea.setSelectionRange(13, 13);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    // Still no sheets; completion should not materialize Sheet2 via reads.
+    expect(doc.getSheetIds()).toEqual([]);
+    expect(view.model.aiSuggestion()).toBe("=SUM(Sheet2!A:A)");
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("previews named ranges that refer to another sheet", async () => {
     const doc = new DocumentController();
     for (let row = 0; row < 10; row += 1) {
