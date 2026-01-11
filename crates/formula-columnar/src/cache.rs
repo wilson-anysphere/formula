@@ -65,6 +65,26 @@ where
         self.order.clear();
     }
 
+    pub fn remove_if<F>(&mut self, mut predicate: F)
+    where
+        F: FnMut(&K) -> bool,
+    {
+        if self.map.is_empty() {
+            return;
+        }
+
+        let keys: Vec<K> = self
+            .map
+            .keys()
+            .filter(|k| predicate(k))
+            .cloned()
+            .collect();
+
+        for key in keys {
+            self.map.remove(&key);
+        }
+    }
+
     pub fn get(&mut self, key: &K) -> Option<V> {
         if self.cap == 0 {
             self.stats.misses += 1;

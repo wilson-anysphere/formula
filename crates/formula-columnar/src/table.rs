@@ -725,7 +725,7 @@ impl MutableColumnarTable {
             self.cache
                 .lock()
                 .expect("columnar page cache poisoned")
-                .clear();
+                .remove_if(|key| key.col == col);
         }
     }
 
