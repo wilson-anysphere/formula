@@ -578,6 +578,29 @@ export class SpreadsheetApp {
     this.root.addEventListener("keydown", (e) => this.onKeyDown(e), { signal: this.domAbort.signal });
     this.root.addEventListener("wheel", (e) => this.onWheel(e), { passive: false, signal: this.domAbort.signal });
 
+    // If the user copies/cuts from an input/contenteditable (formula bar, comments, etc),
+    // the system clipboard content changes and any prior "internal copy" context used for
+    // style/formula shifting should be discarded. Grid copy/cut uses `preventDefault()`
+    // and the Clipboard API, so it should not trigger these native events.
+    if (typeof document !== "undefined") {
+      const clearClipboardContext = () => {
+        this.clipboardCopyContext = null;
+      };
+      document.addEventListener("copy", clearClipboardContext, { capture: true, signal: this.domAbort.signal });
+      document.addEventListener("cut", clearClipboardContext, { capture: true, signal: this.domAbort.signal });
+
+      if (typeof window !== "undefined") {
+        window.addEventListener("blur", clearClipboardContext, { signal: this.domAbort.signal });
+      }
+      document.addEventListener(
+        "visibilitychange",
+        () => {
+          if ((document as any).hidden) clearClipboardContext();
+        },
+        { signal: this.domAbort.signal }
+      );
+    }
+
     this.vScrollbarThumb.addEventListener("pointerdown", (e) => this.onScrollbarThumbPointerDown(e, "y"), {
       passive: false,
       signal: this.domAbort.signal
