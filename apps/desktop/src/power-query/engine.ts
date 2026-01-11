@@ -371,6 +371,8 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
   const defaultPrivacyLevelsBySourceId = {};
   if (workbookPrivacyLevel !== "unknown") {
     defaultPrivacyLevelsBySourceId["workbook:range"] = workbookPrivacyLevel;
+    // Provide a fallback for table provenance that does not include a specific table name.
+    defaultPrivacyLevelsBySourceId["workbook:table"] = workbookPrivacyLevel;
   }
 
   return new DesktopQueryEngine(
