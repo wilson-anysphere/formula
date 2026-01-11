@@ -152,3 +152,12 @@ test("CollabSession schema init waits for provider sync even if provider.synced 
   session.destroy();
   doc.destroy();
 });
+
+test("CollabSession schema.autoInit=false does not create workbook roots eagerly", () => {
+  const session = createCollabSession({ doc: new Y.Doc(), schema: { autoInit: false } });
+  assert.equal(session.sheets.length, 0);
+  assert.equal(session.cells.size, 0);
+  assert.equal(session.namedRanges.size, 0);
+  assert.equal(session.metadata.size, 0);
+  session.destroy();
+});
