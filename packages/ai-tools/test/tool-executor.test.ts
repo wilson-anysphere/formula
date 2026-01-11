@@ -439,6 +439,29 @@ describe("ToolExecutor", () => {
     expect(result.error?.code).toBe("permission_denied");
   });
 
+  it("fetch_external_data is disabled by default (requires allow_external_data)", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    const fetchMock = vi.fn(async () => {
+      return new Response("ok", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://example.com/data",
+        destination: "Sheet1!A1"
+      }
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+  });
+
   it("fetch_external_data blocks allowlist bypass via redirects", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com"] });
