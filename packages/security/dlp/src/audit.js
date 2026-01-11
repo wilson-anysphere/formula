@@ -11,7 +11,11 @@ function createAuditEvent(input) {
   auditEventSeq += 1;
   const eventInput = input && typeof input === "object" ? input : {};
   const id =
-    typeof eventInput.id === "string" && eventInput.id.length > 0 ? eventInput.id : `audit_${Date.now()}_${auditEventSeq}`;
+    typeof eventInput.id === "string" && eventInput.id.length > 0
+      ? eventInput.id
+      : typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `audit_${Date.now()}_${auditEventSeq}`;
   const timestamp =
     typeof eventInput.timestamp === "string" && eventInput.timestamp.length > 0
       ? eventInput.timestamp
@@ -20,7 +24,7 @@ function createAuditEvent(input) {
   // Keep the event shape compatible with `@formula/audit-core` without depending
   // on Node-only modules (the desktop UI runs in a browser runtime for e2e).
   return {
-    schemaVersion: 1,
+    schemaVersion: eventInput.schemaVersion ?? 1,
     id,
     timestamp,
     eventType: eventInput.eventType,
