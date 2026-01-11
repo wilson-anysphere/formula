@@ -384,6 +384,73 @@ test("QueryEngine: folds merge into a single SQL query when both sides are folda
   ]);
 });
 
+test("QueryEngine: folds nested join + expand into a single SQL query", async () => {
+  /** @type {{ sql: string, params: unknown[] | undefined }[]} */
+  const calls = [];
+  const connection = {};
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async (_connection, sql, options) => {
+          calls.push({ sql, params: options?.params });
+          // Simulate the database applying the join.
+          return DataTable.fromGrid(
+            [
+              ["Id", "Target", "Sales", "Target.1"],
+              [1, "L1", 100, null],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          );
+        },
+      }),
+    },
+  });
+
+  const right = {
+    id: "q_right_nested_expand",
+    name: "Targets",
+    source: { type: "database", connection, query: "SELECT * FROM targets" },
+    steps: [{ id: "r1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left_nested_expand",
+    name: "Sales",
+    source: { type: "database", connection, query: "SELECT * FROM sales", dialect: "postgres" },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target", "Sales"] } },
+      {
+        id: "l2",
+        name: "Nested Join",
+        operation: {
+          type: "merge",
+          rightQuery: "q_right_nested_expand",
+          joinType: "left",
+          leftKeys: ["Id"],
+          rightKeys: ["Id"],
+          joinMode: "nested",
+          newColumnName: "Matches",
+        },
+      },
+      { id: "l3", name: "Expand", operation: { type: "expandTableColumn", column: "Matches", columns: ["Target"], newColumnNames: null } },
+    ],
+  };
+
+  const { table: result, meta } = await engine.executeQueryWithMeta(left, { queries: { q_right_nested_expand: right } }, {});
+  assert.equal(calls.length, 1, "expected a single SQL roundtrip when nested join + expand folds");
+  assert.match(calls[0].sql, /\bJOIN\b/);
+  assert.match(calls[0].sql, /Target\.1/);
+  assert.ok(meta.folding, "expected folding metadata");
+  assert.equal(meta.folding.planType, "sql");
+  assert.deepEqual(meta.folding.steps.map((s) => s.status), ["folded", "folded", "folded"]);
+
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Target", "Sales", "Target.1"],
+    [1, "L1", 100, null],
+  ]);
+});
+
 test("QueryEngine: folds merge when connections are deep-equal (M-style descriptors) without a custom identity hook", async () => {
   /** @type {{ sql: string, params: unknown[] | undefined }[]} */
   const calls = [];
