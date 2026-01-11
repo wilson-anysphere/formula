@@ -1,6 +1,6 @@
 # Formula: Next-Generation AI-Native Spreadsheet
 
-> **⚠️ AGENT DEVELOPMENT CONSTRAINTS**: Before running any build commands, read [docs/99-agent-development-guide.md](./docs/99-agent-development-guide.md) and run `source scripts/agent-init.sh`. Memory limits are critical—this machine runs ~200 concurrent agents. (`agent-init.sh` also defaults `CARGO_HOME` to `target/cargo-home` to avoid shared `~/.cargo` lock contention.)
+> **⚠️ AGENT DEVELOPMENT CONSTRAINTS**: Before running any build commands, read [docs/99-agent-development-guide.md](./docs/99-agent-development-guide.md) and run `source scripts/agent-init.sh` (or `. scripts/agent-init.sh` if your shell doesn’t support `source`). Memory limits are critical—this machine runs ~200 concurrent agents. (`agent-init.sh` also defaults `CARGO_HOME` to `target/cargo-home` to avoid shared `~/.cargo` lock contention.)
 
 ## Mission Statement
 

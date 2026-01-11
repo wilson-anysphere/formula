@@ -44,9 +44,11 @@ Per-agent:        ~7 GB soft target
 
 ```bash
 # Recommended (sets all of the below, including repo-local CARGO_HOME):
-source scripts/agent-init.sh
+# - `source` works in bash/zsh
+# - POSIX shells (e.g. `/bin/sh`) use `.`
+source scripts/agent-init.sh  # or: . scripts/agent-init.sh
 
-# If you can't source agent-init.sh, set the memory limits globally:
+# If you can't (or don't want to) source agent-init.sh, set the memory limits globally:
 # (These are safe to put in ~/.bashrc.)
 export NODE_OPTIONS="--max-old-space-size=3072"  # 3GB limit for Node
 export CARGO_BUILD_JOBS=4                         # Limit Rust parallelism
