@@ -300,16 +300,20 @@ fn encrypt_sqlite_bytes_with_key(
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key_bytes));
-    let mut buffer = plaintext.to_vec();
     let aad = aad_for_magic(MAGIC_FMLENC_V1, None, key_version);
-    let tag = cipher.encrypt_in_place_detached(nonce, &aad, &mut buffer)?;
 
-    let mut out = Vec::with_capacity(HEADER_LEN_FMLENC_V1 + buffer.len());
-    out.extend_from_slice(MAGIC_FMLENC_V1);
-    out.extend_from_slice(&key_version.to_be_bytes());
-    out.extend_from_slice(&nonce_bytes);
-    out.extend_from_slice(tag.as_slice());
-    out.extend_from_slice(&buffer);
+    // Layout output as `[header][ciphertext]` so we can encrypt in-place without
+    // allocating an intermediate ciphertext buffer (important for large workbooks).
+    let mut out = Vec::with_capacity(HEADER_LEN_FMLENC_V1 + plaintext.len());
+    out.resize(HEADER_LEN_FMLENC_V1, 0);
+    out.extend_from_slice(plaintext);
+
+    let tag = cipher.encrypt_in_place_detached(nonce, &aad, &mut out[HEADER_LEN_FMLENC_V1..])?;
+
+    out[..8].copy_from_slice(MAGIC_FMLENC_V1);
+    out[8..12].copy_from_slice(&key_version.to_be_bytes());
+    out[12..24].copy_from_slice(&nonce_bytes);
+    out[24..40].copy_from_slice(tag.as_slice());
     Ok(out)
 }
 
