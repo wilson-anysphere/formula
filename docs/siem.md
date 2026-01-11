@@ -16,6 +16,44 @@ This repository includes:
 
 This is the best default for HTTP-based collectors (Splunk HEC, Datadog Logs HTTP intake, custom gateways).
 
+## Canonical audit event schema
+
+Formula uses a single canonical `AuditEvent` shape across client libraries and server storage/export.
+
+Key fields:
+
+- `id`, `timestamp` (ISO 8601), `eventType`
+- `actor` (who initiated the action)
+- `context` (org/user/session/ip/userAgent)
+- `resource` (what the action targeted)
+- `success` + optional `error`
+- `details` (arbitrary metadata; **redacted** on export)
+- `correlation` (requestId / traceId)
+
+Example:
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "11111111-1111-4111-8111-111111111111",
+  "timestamp": "2026-01-01T00:00:00.000Z",
+  "eventType": "document.created",
+  "actor": { "type": "user", "id": "user_1" },
+  "context": {
+    "orgId": "org_1",
+    "userId": "user_1",
+    "userEmail": "user@example.com",
+    "ipAddress": "203.0.113.5",
+    "userAgent": "UnitTest/1.0",
+    "sessionId": "sess_1"
+  },
+  "resource": { "type": "document", "id": "doc_1" },
+  "success": true,
+  "details": { "title": "Q1 Plan" },
+  "correlation": { "requestId": "req_123", "traceId": "trace_abc" }
+}
+```
+
 ### CEF
 
 - Content-Type: `text/plain`
@@ -80,7 +118,7 @@ Authentication options supported by the exporter:
 - `PUT /orgs/:orgId/siem` – upsert SIEM configuration for an org.
 - `GET /orgs/:orgId/siem` – fetch sanitized config (secrets are masked).
 - `DELETE /orgs/:orgId/siem` – remove SIEM configuration.
-- `POST /orgs/:orgId/audit` – ingest an audit event (server assigns `id` + `timestamp`).
+- `POST /orgs/:orgId/audit` – ingest an audit event (server assigns `schemaVersion` + `id` + `timestamp` and sets `context.orgId`).
 - `GET /orgs/:orgId/audit?limit=100` – pull recent audit events.
 - `GET /orgs/:orgId/audit/stream` – SSE stream of audit events.
 
@@ -115,4 +153,3 @@ Run:
 ```bash
 npm test
 ```
-

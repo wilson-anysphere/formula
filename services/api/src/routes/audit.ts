@@ -69,11 +69,22 @@ export function registerAuditRoutes(app: FastifyInstance): void {
     values.push(limit);
     values.push(offset);
 
+    const columns =
+      "id, org_id, user_id, user_email, event_type, resource_type, resource_id, ip_address, user_agent, session_id, success, error_code, error_message, details, created_at";
+    const whereSql = where.join(" AND ");
+
     const result = await app.db.query(
       `
-        SELECT *
-        FROM audit_log
-        WHERE ${where.join(" AND ")}
+        SELECT ${columns}
+        FROM (
+          SELECT ${columns}
+          FROM audit_log
+          WHERE ${whereSql}
+          UNION ALL
+          SELECT ${columns}
+          FROM audit_log_archive
+          WHERE ${whereSql}
+        ) audit
         ORDER BY created_at DESC
         LIMIT $${values.length - 1}
         OFFSET $${values.length}
@@ -108,11 +119,22 @@ export function registerAuditRoutes(app: FastifyInstance): void {
     if (parsed.data.success)
       add("success = $", parsed.data.success === "true" ? true : false);
 
+    const columns =
+      "id, org_id, user_id, user_email, event_type, resource_type, resource_id, ip_address, user_agent, session_id, success, error_code, error_message, details, created_at";
+    const whereSql = where.join(" AND ");
+
     const result = await app.db.query(
       `
-        SELECT *
-        FROM audit_log
-        WHERE ${where.join(" AND ")}
+        SELECT ${columns}
+        FROM (
+          SELECT ${columns}
+          FROM audit_log
+          WHERE ${whereSql}
+          UNION ALL
+          SELECT ${columns}
+          FROM audit_log_archive
+          WHERE ${whereSql}
+        ) audit
         ORDER BY created_at ASC
       `,
       values
