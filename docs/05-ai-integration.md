@@ -425,6 +425,8 @@ Implementation notes:
 - UI surface: `apps/desktop/src/panels/ai-chat/AIChatPanelContainer.tsx`
   - Agent tab (goal + constraints + run/cancel + live step log)
   - Preview-based approval gating via `PreviewEngine` + the shared approval modal
+    - Default configuration requires explicit approval for any non-noop mutation (`approval_cell_threshold: 0`)
+    - Optional "continue after deny" allows the model to re-plan when an approval is denied
   - Audit trail viewable in the AI Audit panel
 
 **Capabilities:**
