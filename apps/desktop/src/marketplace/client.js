@@ -20,6 +20,7 @@ async function readJsonIfExists(filePath) {
     return JSON.parse(raw);
   } catch (error) {
     if (error && (error.code === "ENOENT" || error.code === "ENOTDIR")) return null;
+    if (error instanceof SyntaxError) return null;
     throw error;
   }
 }
@@ -90,14 +91,18 @@ export class MarketplaceClient {
       const cacheBase = path.join(this.cacheDir, "packages", safeId, safeVersion);
       const indexPath = path.join(cacheBase, "index.json");
       cached = await readJsonIfExists(indexPath);
-      if (cached?.sha256) {
-        const cachedPath = path.join(cacheBase, `${safePathComponent(cached.sha256)}.fextpkg`);
+      const cachedSha256 =
+        cached && typeof cached === "object" && typeof cached.sha256 === "string" ? cached.sha256.trim().toLowerCase() : null;
+      if (cachedSha256 && isSha256Hex(cachedSha256)) {
+        const cachedPath = path.join(cacheBase, `${safePathComponent(cachedSha256)}.fextpkg`);
         try {
           cachedBytes = await fs.readFile(cachedPath);
           const cachedSha = sha256Hex(cachedBytes);
-          if (cachedSha !== String(cached.sha256).toLowerCase()) {
+          if (cachedSha !== cachedSha256) {
             cached = null;
             cachedBytes = null;
+          } else {
+            cached.sha256 = cachedSha256;
           }
         } catch {
           cached = null;
@@ -115,7 +120,8 @@ export class MarketplaceClient {
     if (response.status === 304) {
       if (cached && cachedBytes) {
         const headerSha = response.headers.get("x-package-sha256");
-        if (headerSha && String(headerSha).toLowerCase() !== String(cached.sha256).toLowerCase()) {
+        const headerShaNorm = headerSha ? String(headerSha).trim().toLowerCase() : null;
+        if (headerShaNorm && (!isSha256Hex(headerShaNorm) || headerShaNorm !== String(cached.sha256).toLowerCase())) {
           response = await fetch(url);
         } else {
           return {
