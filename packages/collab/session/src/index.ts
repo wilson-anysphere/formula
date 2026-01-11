@@ -1082,9 +1082,6 @@ export class CollabSession {
         }
 
         monitor.setLocalFormula(cellKey, formula ?? "");
-        // We don't sync calculated values. Clearing `value` marks the cell dirty
-        // for the local formula engine to recompute.
-        cell.set("value", null);
       });
       return;
     }

@@ -119,6 +119,9 @@ export class FormulaConflictMonitor {
         // ambiguous without an explicit marker.
         cell.set("formula", null);
       }
+      // Formula cells should not store a synced "value" (it's computed locally).
+      // Clearing the value marks the cell dirty for the local formula engine to recompute.
+      cell.set("value", null);
       cell.set("modified", ts);
       cell.set("modifiedBy", this.localUserId);
     }, this.origin);
