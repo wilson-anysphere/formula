@@ -8,7 +8,7 @@ import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
 import { getPanelTitle, PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
-import { renderMacroRunner, TauriMacroBackend, WebMacroBackend, type MacroRunRequest } from "./macros";
+import { renderMacroRunner, TauriMacroBackend, WebMacroBackend, type MacroRunRequest, type MacroTrustDecision } from "./macros";
 import { applyMacroCellUpdates } from "./macros/applyUpdates";
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
@@ -296,12 +296,14 @@ if (
           const backend = (() => {
             try {
               const baseBackend = new TauriMacroBackend({ invoke: queuedInvoke ?? undefined });
-              return {
-                listMacros: (id: string) => baseBackend.listMacros(id),
-                runMacro: async (request: MacroRunRequest) => {
-                  // Allow any microtask-batched workbook edits to enqueue before the
-                  // macro runs so backend state reflects the latest grid changes.
-                  await new Promise<void>((resolve) => queueMicrotask(resolve));
+               return {
+                 listMacros: (id: string) => baseBackend.listMacros(id),
+                 getMacroSecurityStatus: (id: string) => baseBackend.getMacroSecurityStatus(id),
+                 setMacroTrust: (id: string, decision: MacroTrustDecision) => baseBackend.setMacroTrust(id, decision),
+                 runMacro: async (request: MacroRunRequest) => {
+                   // Allow any microtask-batched workbook edits to enqueue before the
+                   // macro runs so backend state reflects the latest grid changes.
+                   await new Promise<void>((resolve) => queueMicrotask(resolve));
                   await drainBackendSync();
                   return baseBackend.runMacro(request);
                 },

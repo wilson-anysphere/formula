@@ -5,7 +5,16 @@ import { DocumentControllerBridge } from "@formula/python-runtime/document-contr
 import { DocumentControllerWorkbookAdapter } from "../scripting/documentControllerWorkbookAdapter.js";
 
 import type { DocumentController } from "../document/documentController.js";
-import type { MacroBackend, MacroInfo, MacroLanguage, MacroPermission, MacroRunRequest, MacroRunResult } from "./types";
+import type {
+  MacroBackend,
+  MacroInfo,
+  MacroLanguage,
+  MacroPermission,
+  MacroRunRequest,
+  MacroRunResult,
+  MacroSecurityStatus,
+  MacroTrustDecision,
+} from "./types";
 
 type PythonPermissions = {
   filesystem?: "none" | "read" | "readwrite";
@@ -157,6 +166,16 @@ export class WebMacroBackend implements MacroBackend {
     });
 
     return this.getMacros(workbookId).map(({ code: _code, ...info }) => info);
+  }
+
+  async getMacroSecurityStatus(_workbookId: string): Promise<MacroSecurityStatus> {
+    // Web builds do not integrate with the desktop Trust Center. Treat workbook macros
+    // as absent so the macros UI can still function for TypeScript/Python demos.
+    return { hasMacros: false, trust: "blocked" };
+  }
+
+  async setMacroTrust(workbookId: string, _decision: MacroTrustDecision): Promise<MacroSecurityStatus> {
+    return await this.getMacroSecurityStatus(workbookId);
   }
 
   async runMacro(request: MacroRunRequest): Promise<MacroRunResult> {

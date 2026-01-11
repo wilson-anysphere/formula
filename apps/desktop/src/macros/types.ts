@@ -10,6 +10,54 @@ export interface MacroInfo {
   module?: string;
 }
 
+/** Trust Center decision for a workbook's macro fingerprint. */
+export type MacroTrustDecision =
+  | "blocked"
+  | "trusted_once"
+  | "trusted_always"
+  | "trusted_signed_only";
+
+/**
+ * Digital signature state for the workbook's VBA project.
+ *
+ * These values intentionally mirror the backend's snake_case strings so the
+ * frontend can round-trip them back to the Trust Center APIs.
+ */
+export type MacroSignatureStatus =
+  | "unsigned"
+  | "signed_unverified"
+  | "signed_verified"
+  | "signed_invalid"
+  | "signed_untrusted";
+
+export interface MacroSignatureInfo {
+  status: MacroSignatureStatus;
+  signerSubject?: string;
+  signatureBase64?: string;
+}
+
+export interface MacroSecurityStatus {
+  hasMacros: boolean;
+  originPath?: string;
+  workbookFingerprint?: string;
+  signature?: MacroSignatureInfo;
+  trust: MacroTrustDecision;
+}
+
+export type MacroBlockedReason = "not_trusted" | "signature_required";
+
+export interface MacroBlockedError {
+  reason: MacroBlockedReason;
+  status: MacroSecurityStatus;
+}
+
+export interface MacroPermissionRequest {
+  reason: string;
+  macroId: string;
+  workbookOriginPath?: string;
+  requested: MacroPermission[];
+}
+
 export type MacroPermission =
   | "filesystem_read"
   | "filesystem_write"
@@ -49,9 +97,16 @@ export interface MacroRunResult {
    * incrementally).
    */
   updates?: MacroCellUpdate[];
+  /**
+   * Optional permission escalation request (e.g. sandbox denied an operation).
+   * Present when `ok=false`.
+   */
+  permissionRequest?: MacroPermissionRequest;
   error?: {
     message: string;
     stack?: string;
+    code?: string;
+    blocked?: MacroBlockedError;
   };
 }
 
@@ -63,5 +118,7 @@ export interface MacroRunResult {
  */
 export interface MacroBackend {
   listMacros(workbookId: string): Promise<MacroInfo[]>;
+  getMacroSecurityStatus(workbookId: string): Promise<MacroSecurityStatus>;
+  setMacroTrust(workbookId: string, decision: MacroTrustDecision): Promise<MacroSecurityStatus>;
   runMacro(request: MacroRunRequest): Promise<MacroRunResult>;
 }
