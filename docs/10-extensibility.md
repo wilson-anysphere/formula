@@ -39,6 +39,11 @@ The desktop implements a small, VS Code-inspired subset of `when` syntax for men
 - Identifiers (context keys): `cellHasValue`, `hasSelection`, `sheetName`, …
 - Equality: `==` / `!=` against string/number/boolean literals
 
+Notes on built-in keys:
+
+- `sheetName` uses the active sheet’s **display name**.
+- `cellHasValue` is `true` for both literal values and formula cells (presence of a formula counts as “has value”).
+
 Unknown/invalid clauses fail closed (treated as `false`).
 
 ---

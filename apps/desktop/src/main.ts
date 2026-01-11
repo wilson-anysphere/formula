@@ -433,9 +433,11 @@ if (
 
   const updateContextKeys = () => {
     const sheetId = app.getCurrentSheetId();
+    const sheetName = workbookSheetNames.get(sheetId) ?? sheetId;
     const active = app.getActiveCell();
     const cell = app.getDocument().getCell(sheetId, { row: active.row, col: active.col }) as any;
     const value = normalizeExtensionCellValue(cell?.value ?? null);
+    const formula = typeof cell?.formula === "string" ? cell.formula : null;
     const hasSelection = (() => {
       const range = app.getSelectionRanges()[0];
       if (!range) return false;
@@ -443,9 +445,9 @@ if (
     })();
 
     contextKeys.batch({
-      sheetName: sheetId,
+      sheetName,
       hasSelection,
-      cellHasValue: value != null && String(value).trim().length > 0,
+      cellHasValue: (value != null && String(value).trim().length > 0) || (formula != null && formula.trim().length > 0),
     });
   };
 
