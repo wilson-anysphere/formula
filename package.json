@@ -26,6 +26,8 @@
     "bench:gpu-kernels": "node packages/gpu-kernels/bench/bench.mjs",
     "benchmark": "node --experimental-strip-types apps/desktop/tests/performance/run.ts",
     "test:perf": "pnpm benchmark",
+    "extension:build": "node tools/extension-builder/src/cli.js build",
+    "extension:check": "node tools/extension-builder/src/cli.js check",
     "extension:pack": "node scripts/extension.mjs pack",
     "extension:verify": "node scripts/extension.mjs verify",
     "extension:inspect": "node scripts/extension.mjs inspect"

@@ -98,7 +98,7 @@
     "storage"
   ],
   "scripts": {
-    "build": "node build.js",
-    "build:check": "node build.js --check"
+    "build": "node ../../tools/extension-builder/src/cli.js build .",
+    "build:check": "node ../../tools/extension-builder/src/cli.js check ."
   }
 }

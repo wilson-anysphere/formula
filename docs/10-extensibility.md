@@ -715,6 +715,56 @@ Key properties:
 Implication: extensions should be shipped as a bundled CommonJS entrypoint (and can include relative
 chunks inside the extension folder if needed).
 
+#### Recommended build pipeline (repo supported)
+
+This repo ships an esbuild-based bundler at `tools/extension-builder/` that produces **two**
+entrypoints for each extension:
+
+- **Node (CommonJS)**: `manifest.main` (defaults to `./dist/extension.js`)
+- **Browser (ESM)**: `manifest.browser` or `manifest.module` (defaults to `./dist/extension.mjs`)
+
+The builder bundles your extension source into those outputs and validates that the resulting code
+conforms to sandbox restrictions:
+
+- no Node builtins (`fs`, `node:fs`, etc)
+- no remote/URL imports (`https://...`)
+- no `import(...)` (dynamic import)
+- (strict mode) no `eval` / `new Function`
+
+In this repo you can run it via the root `pnpm` scripts:
+
+```bash
+pnpm extension:build <extensionDir>
+pnpm extension:check <extensionDir>
+```
+
+When published, it is also available as a binary: `formula-extension-builder`.
+
+#### Packaging + publishing
+
+Once built, extensions are distributed as a signed `.fextpkg` archive:
+
+```bash
+# Build (writes dist entrypoints)
+pnpm extension:build extensions/my-extension
+
+# Pack into a signed archive (generates an ephemeral keypair if you don't pass one)
+pnpm extension:pack extensions/my-extension --out ./my-extension.fextpkg --private-key ./publisher-private.pem
+
+# Verify / inspect the resulting package
+pnpm extension:verify ./my-extension.fextpkg --pubkey ./publisher-public.pem
+pnpm extension:inspect ./my-extension.fextpkg
+```
+
+To publish to a marketplace instance, use the repo tool:
+
+```bash
+node tools/extension-publisher/src/cli.js publish extensions/my-extension \
+  --marketplace https://marketplace.example.com \
+  --token <publisher-token> \
+  --private-key ./publisher-private.pem
+```
+
 ### Browser extension sandbox (best-effort)
 
 In the browser runtime, extensions run inside a Web Worker. JavaScript does not provide the same
@@ -979,8 +1029,11 @@ by integration tests and marketplace packaging tests. It demonstrates:
 `extensions/sample-hello/src/extension.js` is the source of truth, and
 `extensions/sample-hello/dist/extension.js` is the built entrypoint referenced by the extension
 manifest for the Node extension host. The build also emits `dist/extension.mjs` for the browser
-extension host. Run `node extensions/sample-hello/build.js` to regenerate the dist files; CI
-enforces that the dist entrypoints stay in sync with `src/extension.js`.
+extension host. To regenerate:
+
+```bash
+pnpm extension:build extensions/sample-hello
+```
 
 ### 1. Custom Visualization Extension
 

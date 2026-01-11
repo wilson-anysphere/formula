@@ -116,6 +116,8 @@ async function filterExternalDependencyTests(files) {
   const importFromRe = /\b(?:import|export)\s+(?:type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
   const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+  const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
+  const requireResolveRe = /\brequire\.resolve\(\s*["']([^"']+)["']\s*\)/g;
 
   const candidateExtensions = [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"];
 
@@ -217,6 +219,12 @@ async function filterExternalDependencyTests(files) {
       specifiers.push(match[1]);
     }
     for (const match of text.matchAll(dynamicImportRe)) {
+      specifiers.push(match[1]);
+    }
+    for (const match of text.matchAll(requireCallRe)) {
+      specifiers.push(match[1]);
+    }
+    for (const match of text.matchAll(requireResolveRe)) {
       specifiers.push(match[1]);
     }
 

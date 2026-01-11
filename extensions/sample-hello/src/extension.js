@@ -1,4 +1,5 @@
 const formula = require("@formula/extension-api");
+const { sumValues } = require("./util");
 
 const PANEL_ID = "sampleHello.panel";
 const PANEL_TITLE = "Sample Hello Panel";
@@ -21,22 +22,6 @@ function panelHtml() {
 }
 
 /**
- * @param {import("@formula/extension-api").CellValue[][] | undefined | null} values
- */
-function sumValues(values) {
-  let sum = 0;
-  if (!Array.isArray(values)) return sum;
-  for (const row of values) {
-    if (!Array.isArray(row)) continue;
-    for (const value of row) {
-      if (typeof value === "number" && Number.isFinite(value)) {
-        sum += value;
-      }
-    }
-  }
-  return sum;
-}
-
 async function getSelectionSum() {
   const selection = await formula.cells.getSelection();
   return sumValues(selection?.values);

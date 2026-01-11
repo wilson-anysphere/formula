@@ -31,7 +31,7 @@ marketplace packaging tests.
 To regenerate:
 
 ```bash
-node extensions/sample-hello/build.js
+pnpm extension:build extensions/sample-hello
 ```
 
 CI runs a node:test (`build.test.js`) that fails if `dist/extension.js` is out of date.
