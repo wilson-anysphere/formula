@@ -69,6 +69,7 @@ export type DesktopPowerQueryRefreshOptions = {
   getContext?: () => QueryExecutionContext;
   concurrency?: number;
   batchSize?: number;
+  stateStore?: { load(): Promise<any>; save(state: any): Promise<void> };
 };
 
 /**
@@ -94,6 +95,7 @@ export class DesktopPowerQueryRefreshManager {
       engine: engine as any,
       getContext: options.getContext,
       concurrency: options.concurrency,
+      stateStore: options.stateStore as any,
     });
 
     this.manager.onEvent((evt: any) => {

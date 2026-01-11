@@ -9,6 +9,7 @@ import { applyQueryToDocument, type QuerySheetDestination } from "../../power-qu
 import { maybeGetPowerQueryDlpContext } from "../../power-query/dlpContext.js";
 import { createDesktopQueryEngine } from "../../power-query/engine.js";
 import { DesktopPowerQueryRefreshManager } from "../../power-query/refresh.js";
+import { createPowerQueryRefreshStateStore } from "../../power-query/refreshStateStore.js";
 
 import { QueryEditorPanel } from "./QueryEditorPanel.js";
 
@@ -114,6 +115,11 @@ export function QueryEditorPanelContainer(props: Props) {
   });
 
   const doc = props.getDocumentController();
+
+  const refreshStateStore = useMemo(() => {
+    return createPowerQueryRefreshStateStore({ workbookId: props.workbookId });
+  }, [props.workbookId]);
+
   const refreshManager = useMemo(() => {
     return new DesktopPowerQueryRefreshManager({
       engine,
@@ -121,8 +127,9 @@ export function QueryEditorPanelContainer(props: Props) {
       getContext: () => ({}),
       concurrency: 1,
       batchSize: 1024,
+      stateStore: refreshStateStore,
     });
-  }, [doc, engine]);
+  }, [doc, engine, refreshStateStore]);
 
   const [query, setQuery] = useState<Query>(() => {
     if (typeof localStorage === "undefined") return defaultQuery();

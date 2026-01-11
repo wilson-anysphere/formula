@@ -39,6 +39,46 @@ class StaticEngine {
   }
 }
 
+test("DesktopPowerQueryRefreshManager persists refresh state when a stateStore is provided", async () => {
+  const table = DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true });
+  const engine = new StaticEngine(table);
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  let loadCalls = 0;
+  /** @type {any} */
+  let savedState = null;
+
+  const stateStore = {
+    load: async () => {
+      loadCalls += 1;
+      return {};
+    },
+    save: async (state) => {
+      savedState = state;
+    },
+  };
+
+  const mgr = new DesktopPowerQueryRefreshManager({ engine, document: doc, concurrency: 1, batchSize: 1, stateStore });
+
+  const query = {
+    id: "q_state",
+    name: "State",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+    refreshPolicy: { type: "interval", intervalMs: 10_000 },
+  };
+
+  mgr.registerQuery(query);
+  await mgr.manager.ready;
+  await new Promise((resolve) => queueMicrotask(resolve));
+
+  assert.equal(loadCalls, 1);
+  assert.ok(savedState);
+  assert.ok(savedState[query.id]);
+
+  mgr.dispose();
+});
+
 test("DesktopPowerQueryRefreshManager applies completed refresh results into the destination", async () => {
   const table = DataTable.fromGrid(
     [
@@ -134,4 +174,3 @@ test("DesktopPowerQueryRefreshManager cancellation aborts apply and reverts part
 
   mgr.dispose();
 });
-
