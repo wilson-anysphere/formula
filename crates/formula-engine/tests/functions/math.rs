@@ -90,3 +90,9 @@ fn sign_returns_expected_signum() {
     assert_number(&sheet.eval("=SIGN(0)"), 0.0);
     assert_number(&sheet.eval("=SIGN(2)"), 1.0);
 }
+
+#[test]
+fn sign_accepts_xlfn_prefix() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=_xlfn.SIGN(-2)"), -1.0);
+}

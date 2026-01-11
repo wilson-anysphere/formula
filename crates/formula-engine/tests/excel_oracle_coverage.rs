@@ -54,6 +54,7 @@ fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTree
             collect_unknown_function_calls(right, unknown);
         }
         eval::Expr::ImplicitIntersection(inner) => collect_unknown_function_calls(inner, unknown),
+        eval::Expr::NameRef(_) => {}
         eval::Expr::Number(_)
         | eval::Expr::Text(_)
         | eval::Expr::Bool(_)
@@ -64,4 +65,3 @@ fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTree
         | eval::Expr::StructuredRef(_) => {}
     }
 }
-

@@ -75,6 +75,12 @@ fn na_function_returns_na_error() {
 }
 
 #[test]
+fn na_accepts_xlfn_prefix() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(sheet.eval("=_xlfn.NA()"), Value::Error(ErrorKind::NA));
+}
+
+#[test]
 fn unknown_functions_return_name_error() {
     let mut sheet = TestSheet::new();
     assert_eq!(
