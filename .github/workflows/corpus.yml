@@ -5,11 +5,23 @@ on:
     paths:
       - "tools/corpus/**"
       - "docs/compatibility-corpus.md"
+      # Run the corpus harness when the XLSX stack changes so we catch compatibility
+      # regressions in load/save/diff behavior.
+      - "crates/formula-corpus-triage/**"
+      - "crates/formula-xlsx/**"
+      - "crates/xlsx-diff/**"
+      - "crates/formula-engine/**"
+      - "crates/formula-model/**"
   push:
     branches: ["main"]
     paths:
       - "tools/corpus/**"
       - "docs/compatibility-corpus.md"
+      - "crates/formula-corpus-triage/**"
+      - "crates/formula-xlsx/**"
+      - "crates/xlsx-diff/**"
+      - "crates/formula-engine/**"
+      - "crates/formula-model/**"
   schedule:
     # Nightly full-corpus run (requires secrets)
     - cron: "0 3 * * *"
