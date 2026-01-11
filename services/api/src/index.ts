@@ -6,6 +6,7 @@ import { initOpenTelemetry } from "./observability/otel";
 import { runRetentionSweep } from "./retention";
 import { DbSiemConfigProvider } from "./siem/configProvider";
 import { SiemExportWorker } from "./siem/worker";
+import { closeCachedOrgTlsAgents } from "./http/tls";
 
 const config = loadConfig();
 const otel = initOpenTelemetry({ serviceName: "api" });
@@ -43,6 +44,7 @@ async function main(): Promise<void> {
   siemWorker.start();
   app.addHook("onClose", async () => {
     siemWorker.stop();
+    await closeCachedOrgTlsAgents();
   });
 
   if (config.retentionSweepIntervalMs) {

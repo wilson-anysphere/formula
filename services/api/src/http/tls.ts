@@ -173,8 +173,11 @@ export async function fetchWithOrgTls(
   return fetch(url, { ...init, dispatcher } as RequestInit);
 }
 
-export async function closeCachedOrgTlsAgentsForTests(): Promise<void> {
+export async function closeCachedOrgTlsAgents(): Promise<void> {
   const agents = Array.from(agentCache.values());
   agentCache.clear();
   await Promise.allSettled(agents.map((agent) => agent.close()));
 }
+
+// Backwards-compatible/test-friendly alias.
+export const closeCachedOrgTlsAgentsForTests = closeCachedOrgTlsAgents;
