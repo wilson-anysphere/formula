@@ -154,6 +154,12 @@ fn compile_expr_inner(
                     resolve_sheet,
                 )),
             },
+            crate::PostfixOp::SpillRange => Expr::SpillRange(Box::new(compile_expr_inner(
+                &p.expr,
+                current_sheet,
+                current_cell,
+                resolve_sheet,
+            ))),
         },
         crate::Expr::Binary(b) => compile_binary(b, current_sheet, current_cell, resolve_sheet),
     }

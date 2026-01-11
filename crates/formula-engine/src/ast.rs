@@ -376,12 +376,15 @@ pub struct UnaryExpr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PostfixOp {
     Percent,
+    /// Excel spill-range reference operator (`#`), e.g. `A1#`.
+    SpillRange,
 }
 
 impl PostfixOp {
     fn as_str(self) -> &'static str {
         match self {
             PostfixOp::Percent => "%",
+            PostfixOp::SpillRange => "#",
         }
     }
 }

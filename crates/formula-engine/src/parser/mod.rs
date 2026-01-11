@@ -39,6 +39,7 @@ pub enum TokenKind {
     Caret,
     Amp,
     Percent,
+    Hash,
     Eq,
     Ne,
     Lt,
@@ -276,6 +277,33 @@ impl<'a> Lexer<'a> {
                     self.push(TokenKind::QuotedIdent(value), start, self.idx);
                 }
                 '#' => {
+                    // Excel's spill-range reference operator (`#`) is postfix (e.g. `A1#`),
+                    // but error literals also start with `#` (e.g. `#REF!`).
+                    //
+                    // Treat `#` as a postfix operator only when it is *immediately* after an
+                    // expression-like token (no intervening whitespace).
+                    let is_immediate = self
+                        .tokens
+                        .last()
+                        .is_some_and(|t| t.span.end == start && !matches!(t.kind, TokenKind::Whitespace(_)));
+                    let is_postfix_spill = is_immediate
+                        && matches!(
+                            self.prev_sig,
+                            Some(
+                                TokenKind::Cell(_)
+                                    | TokenKind::Ident(_)
+                                    | TokenKind::QuotedIdent(_)
+                                    | TokenKind::RParen
+                                    | TokenKind::RBracket
+                            )
+                        );
+
+                    if is_postfix_spill {
+                        self.bump();
+                        self.push(TokenKind::Hash, start, self.idx);
+                        continue;
+                    }
+
                     if let Some(len) = match_error_literal(&self.src[start..]) {
                         let end = start + len;
                         while self.idx < end {
@@ -964,6 +992,7 @@ fn is_intersect_operand(kind: &TokenKind) -> bool {
             | TokenKind::QuotedIdent(_)
             | TokenKind::RParen
             | TokenKind::RBracket
+            | TokenKind::Hash
     )
 }
 
@@ -1007,12 +1036,20 @@ impl<'a> Parser<'a> {
 
         loop {
             self.skip_trivia();
-            // Postfix percent.
+            // Postfix operators (`%` and spill-range `#`).
             let percent_bp = 60;
             if matches!(self.peek_kind(), TokenKind::Percent) && percent_bp >= min_bp {
                 self.next();
                 lhs = Expr::Postfix(PostfixExpr {
                     op: PostfixOp::Percent,
+                    expr: Box::new(lhs),
+                });
+                continue;
+            }
+            if matches!(self.peek_kind(), TokenKind::Hash) && percent_bp >= min_bp {
+                self.next();
+                lhs = Expr::Postfix(PostfixExpr {
+                    op: PostfixOp::SpillRange,
                     expr: Box::new(lhs),
                 });
                 continue;
@@ -1087,6 +1124,14 @@ impl<'a> Parser<'a> {
                 self.next();
                 lhs = Expr::Postfix(PostfixExpr {
                     op: PostfixOp::Percent,
+                    expr: Box::new(lhs),
+                });
+                continue;
+            }
+            if matches!(self.peek_kind(), TokenKind::Hash) && percent_bp >= min_bp {
+                self.next();
+                lhs = Expr::Postfix(PostfixExpr {
+                    op: PostfixOp::SpillRange,
                     expr: Box::new(lhs),
                 });
                 continue;

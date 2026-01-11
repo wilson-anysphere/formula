@@ -41,6 +41,7 @@ pub enum TraceKind {
     Compare { op: CompareOp },
     FunctionCall { name: String },
     ImplicitIntersection,
+    SpillRange,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -95,6 +96,7 @@ pub enum SpannedExprKind<S> {
         args: Vec<SpannedExpr<S>>,
     },
     ImplicitIntersection(Box<SpannedExpr<S>>),
+    SpillRange(Box<SpannedExpr<S>>),
 }
 
 impl<S: Clone> SpannedExpr<S> {
@@ -144,6 +146,9 @@ impl<S: Clone> SpannedExpr<S> {
             SpannedExprKind::ImplicitIntersection(inner) => {
                 SpannedExprKind::ImplicitIntersection(Box::new(inner.map_sheets(f)))
             }
+            SpannedExprKind::SpillRange(inner) => {
+                SpannedExprKind::SpillRange(Box::new(inner.map_sheets(f)))
+            }
         };
         SpannedExpr {
             span: self.span,
@@ -189,6 +194,7 @@ enum TokenKind {
     Colon,
     Bang,
     At,
+    Hash,
     Plus,
     Minus,
     Star,
@@ -206,6 +212,7 @@ enum TokenKind {
 struct Lexer<'a> {
     input: &'a str,
     pos: usize,
+    prev_can_spill: bool,
 }
 
 impl<'a> Lexer<'a> {
@@ -221,7 +228,11 @@ impl<'a> Lexer<'a> {
         if input[pos..].starts_with('=') {
             pos += 1;
         }
-        Self { input, pos }
+        Self {
+            input,
+            pos,
+            prev_can_spill: false,
+        }
     }
 
     fn tokenize(&mut self) -> Result<Vec<Token>, FormulaParseError> {
@@ -305,7 +316,7 @@ impl<'a> Lexer<'a> {
                 }
                 '"' => self.lex_string()?,
                 '\'' => self.lex_sheet_name()?,
-                '#' => self.lex_error()?,
+                '#' => self.lex_hash_or_error()?,
                 '.' | '0'..='9' => self.lex_number()?,
                 _ if is_ident_start(ch) => self.lex_ident(),
                 _ => {
@@ -316,6 +327,7 @@ impl<'a> Lexer<'a> {
             };
             let span = Span::new(start, self.pos);
             tokens.push(Token { kind, span });
+            self.prev_can_spill = matches!(tokens.last().map(|t| &t.kind), Some(TokenKind::Ident(_) | TokenKind::RParen));
         }
         tokens.push(Token {
             kind: TokenKind::End,
@@ -442,6 +454,16 @@ impl<'a> Lexer<'a> {
             _ => ErrorKind::Value,
         };
         Ok(TokenKind::Error(kind))
+    }
+
+    fn lex_hash_or_error(&mut self) -> Result<TokenKind, FormulaParseError> {
+        // Spill-range operator is postfix (`A1#`), while error literals start with `#` (`#REF!`).
+        if self.prev_can_spill {
+            self.pos += 1;
+            Ok(TokenKind::Hash)
+        } else {
+            self.lex_error()
+        }
     }
 }
 
@@ -593,7 +615,7 @@ impl ParserImpl {
 
     fn parse_primary(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
         let tok = self.peek().clone();
-        match &tok.kind {
+        let mut expr = match &tok.kind {
             TokenKind::Number(n) => {
                 self.next();
                 Ok(SpannedExpr {
@@ -670,7 +692,17 @@ impl ParserImpl {
                 })
             }
             other => Err(FormulaParseError::UnexpectedToken(format!("{other:?}"))),
+        }?;
+
+        while matches!(self.peek().kind, TokenKind::Hash) {
+            let hash = self.next();
+            expr = SpannedExpr {
+                span: Span::new(expr.span.start, hash.span.end),
+                kind: SpannedExprKind::SpillRange(Box::new(expr)),
+            };
         }
+
+        Ok(expr)
     }
 
     fn parse_function_call(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
@@ -1113,6 +1145,47 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     ev,
                     TraceNode {
                         kind: TraceKind::Group,
+                        span: expr.span,
+                        value,
+                        reference,
+                        children: vec![child],
+                    },
+                )
+            }
+            SpannedExprKind::SpillRange(inner) => {
+                let (ev, child) = self.eval_value(inner);
+                let (out_ev, reference) = match ev {
+                    EvalValue::Scalar(_) => (EvalValue::Scalar(Value::Error(ErrorKind::Ref)), None),
+                    EvalValue::Reference(range) => {
+                        if !range.is_single_cell() {
+                            (EvalValue::Reference(range), child.reference.clone())
+                        } else {
+                            let sheet_id = range.sheet_id;
+                            let addr = range.start;
+                            let origin = self.resolver.spill_origin(sheet_id, addr).unwrap_or(addr);
+                            match self.resolver.spill_range(sheet_id, origin) {
+                                Some((start, end)) => (
+                                    EvalValue::Reference(ResolvedRange { sheet_id, start, end }),
+                                    Some(TraceRef::Range { sheet: sheet_id, start, end }),
+                                ),
+                                None => (
+                                    EvalValue::Reference(ResolvedRange { sheet_id, start: origin, end: origin }),
+                                    Some(TraceRef::Cell { sheet: sheet_id, addr: origin }),
+                                ),
+                            }
+                        }
+                    }
+                };
+
+                let value = match &out_ev {
+                    EvalValue::Scalar(v) => v.clone(),
+                    EvalValue::Reference(_) => Value::Blank,
+                };
+
+                (
+                    out_ev,
+                    TraceNode {
+                        kind: TraceKind::SpillRange,
                         span: expr.span,
                         value,
                         reference,

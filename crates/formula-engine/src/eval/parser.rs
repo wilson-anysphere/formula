@@ -31,6 +31,7 @@ enum Token {
     Colon,
     Bang,
     At,
+    Hash,
     Plus,
     Minus,
     Star,
@@ -176,7 +177,7 @@ impl ParserImpl {
     }
 
     fn parse_primary(&mut self) -> Result<ParsedExpr, FormulaParseError> {
-        match self.peek().clone() {
+        let mut expr = match self.peek().clone() {
             Token::Number(n) => {
                 self.next();
                 Ok(Expr::Number(n))
@@ -239,7 +240,15 @@ impl ParserImpl {
                 Ok(expr)
             }
             other => Err(FormulaParseError::UnexpectedToken(format!("{other:?}"))),
+        }?;
+
+        // Postfix spill-range operator (`#`).
+        while *self.peek() == Token::Hash {
+            self.next();
+            expr = Expr::SpillRange(Box::new(expr));
         }
+
+        Ok(expr)
     }
 
     fn parse_function_call(&mut self) -> Result<ParsedExpr, FormulaParseError> {
@@ -373,6 +382,7 @@ fn try_parse_cell_addr(id: &str) -> Result<CellAddr, AddressParseError> {
 struct Lexer<'a> {
     input: &'a str,
     pos: usize,
+    prev: Option<Token>,
 }
 
 impl<'a> Lexer<'a> {
@@ -380,7 +390,11 @@ impl<'a> Lexer<'a> {
         // Permit formulas with or without leading '='.
         let input = input.trim_start();
         let input = input.strip_prefix('=').unwrap_or(input);
-        Self { input, pos: 0 }
+        Self {
+            input,
+            pos: 0,
+            prev: None,
+        }
     }
 
     fn tokenize(&mut self) -> Result<Vec<Token>, FormulaParseError> {
@@ -416,6 +430,7 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                     Token::At
                 }
+                '#' => self.lex_hash_or_error()?,
                 '[' => self.lex_structured_ref()?,
                 '+' => {
                     self.pos += 1;
@@ -464,7 +479,6 @@ impl<'a> Lexer<'a> {
                 }
                 '"' => self.lex_string()?,
                 '\'' => self.lex_sheet_name()?,
-                '#' => self.lex_error()?,
                 '.' | '0'..='9' => self.lex_number()?,
                 _ if is_ident_start(ch) => self.lex_ident()?,
                 _ => {
@@ -474,6 +488,7 @@ impl<'a> Lexer<'a> {
                 }
             };
             tokens.push(tok);
+            self.prev = tokens.last().cloned();
         }
         tokens.push(Token::End);
         Ok(tokens)
@@ -619,9 +634,21 @@ impl<'a> Lexer<'a> {
             "#NAME?" => ErrorKind::Name,
             "#N/A" => ErrorKind::NA,
             "#NULL!" => ErrorKind::Null,
+            "#SPILL!" => ErrorKind::Spill,
+            "#CALC!" => ErrorKind::Calc,
             _ => ErrorKind::Value,
         };
         Ok(Token::Error(kind))
+    }
+
+    fn lex_hash_or_error(&mut self) -> Result<Token, FormulaParseError> {
+        // Spill-range operator is postfix (`A1#`), while error literals start with `#` (`#REF!`).
+        let is_postfix = self.prev.as_ref().is_some_and(|t| matches!(t, Token::Ident(_) | Token::StructuredRef(_) | Token::RParen));
+        if is_postfix {
+            self.pos += 1;
+            return Ok(Token::Hash);
+        }
+        self.lex_error()
     }
 }
 

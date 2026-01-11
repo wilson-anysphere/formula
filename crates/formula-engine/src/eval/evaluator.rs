@@ -24,6 +24,14 @@ pub trait ValueResolver {
     fn resolve_name(&self, _sheet_id: usize, _name: &str) -> Option<ResolvedName> {
         None
     }
+    /// If `addr` is part of a spilled array, returns the spill origin cell.
+    fn spill_origin(&self, _sheet_id: usize, _addr: CellAddr) -> Option<CellAddr> {
+        None
+    }
+    /// If `origin` is the origin of a spilled array, returns the full spill range (inclusive).
+    fn spill_range(&self, _sheet_id: usize, _origin: CellAddr) -> Option<(CellAddr, CellAddr)> {
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +142,37 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 _ => EvalValue::Scalar(Value::Error(ErrorKind::Name)),
             },
             Expr::NameRef(nref) => self.eval_name_ref(nref),
+            Expr::SpillRange(inner) => {
+                let v = self.eval_value(inner);
+                match v {
+                    EvalValue::Scalar(_) => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+                    EvalValue::Reference(mut ranges) => {
+                        // Spill-range references are only well-defined for a single-cell reference.
+                        if ranges.len() != 1 {
+                            return EvalValue::Reference(ranges);
+                        }
+                        let range = ranges
+                            .pop()
+                            .expect("checked len() above");
+
+                        // If `#` is applied to a multi-cell reference, treat it as a no-op.
+                        if !range.is_single_cell() {
+                            return EvalValue::Reference(vec![range]);
+                        }
+
+                        let sheet_id = range.sheet_id;
+                        let addr = range.start;
+                        let origin = self.resolver.spill_origin(sheet_id, addr).unwrap_or(addr);
+
+                        match self.resolver.spill_range(sheet_id, origin) {
+                            Some((start, end)) => {
+                                EvalValue::Reference(vec![ResolvedRange { sheet_id, start, end }])
+                            }
+                            None => EvalValue::Reference(vec![ResolvedRange { sheet_id, start: origin, end: origin }]),
+                        }
+                    }
+                }
+            }
             Expr::Unary { op, expr } => {
                 let v = self.eval_scalar(expr);
                 match v {

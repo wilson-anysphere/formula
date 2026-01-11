@@ -387,7 +387,7 @@ impl Engine {
         for (key, ast) in formulas {
             let cell_id = cell_id_from_key(key);
             let (precedents, names, volatile, thread_safe) =
-                analyze_expr(&ast, key, &tables_by_sheet, &self.workbook);
+                analyze_expr(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
             self.graph.set_precedents(key, precedents);
             if volatile {
                 self.graph.volatile_cells.insert(key);
@@ -397,7 +397,7 @@ impl Engine {
             self.set_cell_name_refs(key, names);
 
             let calc_precedents =
-                analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook);
+                analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
             let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
             calc_vec.sort_by_key(|p| match p {
                 Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col),
@@ -519,7 +519,7 @@ impl Engine {
  
         // Expanded precedents for auditing, plus volatility/thread-safety flags.
         let (precedents, names, volatile, thread_safe) =
-            analyze_expr(&compiled, key, &tables_by_sheet, &self.workbook);
+            analyze_expr(&compiled, key, &tables_by_sheet, &self.workbook, &self.spills);
         self.graph.set_precedents(key, precedents);
         if volatile {
             self.graph.volatile_cells.insert(key);
@@ -530,7 +530,7 @@ impl Engine {
  
         // Optimized precedents for calculation ordering (range nodes are not expanded).
         let calc_precedents =
-            analyze_calc_precedents(&compiled, key, &tables_by_sheet, &self.workbook);
+            analyze_calc_precedents(&compiled, key, &tables_by_sheet, &self.workbook, &self.spills);
         let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
         calc_vec.sort_by_key(|p| match p {
             Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col),
@@ -1291,8 +1291,10 @@ impl Engine {
 
                 let mut spill_too_big = || {
                     let cleared = self.clear_spill_for_origin(key);
+                    snapshot.spill_end_by_origin.remove(&key);
                     for cleared_key in cleared {
                         snapshot.values.remove(&cleared_key);
+                        snapshot.spill_origin_by_cell.remove(&cleared_key);
                         spill_dirty_roots.push(cell_id_from_key(cleared_key));
                         self.append_blocked_spill_dirty_roots(cleared_key, spill_dirty_roots);
                     }
@@ -1364,8 +1366,10 @@ impl Engine {
                 // Spill footprint change: clear the previous spill range (if any) before attempting
                 // to write the new one.
                 let cleared = self.clear_spill_for_origin(key);
+                snapshot.spill_end_by_origin.remove(&key);
                 for cleared_key in cleared {
                     snapshot.values.remove(&cleared_key);
+                    snapshot.spill_origin_by_cell.remove(&cleared_key);
                     spill_dirty_roots.push(cell_id_from_key(cleared_key));
                     self.append_blocked_spill_dirty_roots(cleared_key, spill_dirty_roots);
                 }
@@ -1382,8 +1386,10 @@ impl Engine {
             }
             other => {
                 let cleared = self.clear_spill_for_origin(key);
+                snapshot.spill_end_by_origin.remove(&key);
                 for cleared_key in cleared {
                     snapshot.values.remove(&cleared_key);
+                    snapshot.spill_origin_by_cell.remove(&cleared_key);
                     spill_dirty_roots.push(cell_id_from_key(cleared_key));
                     self.append_blocked_spill_dirty_roots(cleared_key, spill_dirty_roots);
                 }
@@ -1566,6 +1572,7 @@ impl Engine {
         snapshot.values.insert(origin, top_left);
 
         self.spills.by_origin.insert(origin, Spill { end, array: array.clone() });
+        snapshot.spill_end_by_origin.insert(origin, end);
 
         let origin_id = cell_id_from_key(origin);
         for r in 0..array.rows {
@@ -1582,6 +1589,7 @@ impl Engine {
                     addr,
                 };
                 self.spills.origin_by_cell.insert(key, origin);
+                snapshot.spill_origin_by_cell.insert(key, origin);
 
                 if let Some(v) = array.get(r, c).cloned() {
                     snapshot.values.insert(key, v);
@@ -1682,7 +1690,7 @@ impl Engine {
             let cell_id = cell_id_from_key(key);
 
             let (precedents, names, volatile, thread_safe) =
-                analyze_expr(&ast, key, &tables_by_sheet, &self.workbook);
+                analyze_expr(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
             self.graph.set_precedents(key, precedents);
             if volatile {
                 self.graph.volatile_cells.insert(key);
@@ -1692,7 +1700,7 @@ impl Engine {
             self.set_cell_name_refs(key, names);
 
             let calc_precedents =
-                analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook);
+                analyze_calc_precedents(&ast, key, &tables_by_sheet, &self.workbook, &self.spills);
             let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
             calc_vec.sort_by_key(|p| match p {
                 Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col),
@@ -2410,6 +2418,8 @@ struct Snapshot {
     workbook_names: HashMap<String, crate::eval::ResolvedName>,
     sheet_names: Vec<HashMap<String, crate::eval::ResolvedName>>,
     external_value_provider: Option<Arc<dyn ExternalValueProvider>>,
+    spill_end_by_origin: HashMap<CellKey, CellAddr>,
+    spill_origin_by_cell: HashMap<CellKey, CellKey>,
 }
 
 impl Snapshot {
@@ -2427,9 +2437,11 @@ impl Snapshot {
             }
         }
 
+        let mut spill_end_by_origin = HashMap::new();
         // Overlay spilled values so formula evaluation can observe dynamic array results even
         // when the workbook map doesn't contain explicit cell records.
         for (origin, spill) in &spills.by_origin {
+            spill_end_by_origin.insert(*origin, spill.end);
             for r in 0..spill.array.rows {
                 for c in 0..spill.array.cols {
                     if r == 0 && c == 0 {
@@ -2450,6 +2462,7 @@ impl Snapshot {
             }
         }
         let tables = workbook.sheets.iter().map(|s| s.tables.clone()).collect();
+        let spill_origin_by_cell = spills.origin_by_cell.clone();
 
         let mut workbook_names = HashMap::new();
         for (name, def) in &workbook.names {
@@ -2484,6 +2497,8 @@ impl Snapshot {
             workbook_names,
             sheet_names,
             external_value_provider,
+            spill_end_by_origin,
+            spill_origin_by_cell,
         }
     }
 }
@@ -2525,6 +2540,22 @@ impl crate::eval::ValueResolver for Snapshot {
             }
         }
         self.workbook_names.get(&key).cloned()
+    }
+
+    fn spill_origin(&self, sheet_id: usize, addr: CellAddr) -> Option<CellAddr> {
+        let key = CellKey { sheet: sheet_id, addr };
+        if self.spill_end_by_origin.contains_key(&key) {
+            return Some(addr);
+        }
+        self.spill_origin_by_cell.get(&key).map(|k| k.addr)
+    }
+
+    fn spill_range(&self, sheet_id: usize, origin: CellAddr) -> Option<(CellAddr, CellAddr)> {
+        let key = CellKey {
+            sheet: sheet_id,
+            addr: origin,
+        };
+        self.spill_end_by_origin.get(&key).map(|end| (origin, *end))
     }
 }
 
@@ -2800,6 +2831,7 @@ fn analyze_expr(
     current_cell: CellKey,
     tables_by_sheet: &[Vec<Table>],
     workbook: &Workbook,
+    spills: &SpillState,
 ) -> (HashSet<CellKey>, HashSet<String>, bool, bool) {
     let mut precedents = HashSet::new();
     let mut names = HashSet::new();
@@ -2811,6 +2843,7 @@ fn analyze_expr(
         current_cell,
         tables_by_sheet,
         workbook,
+        spills,
         &mut precedents,
         &mut names,
         &mut volatile,
@@ -2827,6 +2860,7 @@ fn walk_expr(
     current_cell: CellKey,
     tables_by_sheet: &[Vec<Table>],
     workbook: &Workbook,
+    spills: &SpillState,
     precedents: &mut HashSet<CellKey>,
     names: &mut HashSet<String>,
     volatile: &mut bool,
@@ -2941,6 +2975,7 @@ fn walk_expr(
                         },
                         tables_by_sheet,
                         workbook,
+                        spills,
                         precedents,
                         names,
                         volatile,
@@ -2951,11 +2986,31 @@ fn walk_expr(
             }
             visiting_names.remove(&visit_key);
         }
+        Expr::SpillRange(inner) => {
+            walk_expr(
+                inner,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                names,
+                volatile,
+                thread_safe,
+                visiting_names,
+            );
+
+            if let Some(target) = spill_range_target_cell(inner, current_cell) {
+                let (origin, end) = spill_range_bounds(target, spills);
+                add_cell_rect(origin.sheet, origin.addr, end, workbook, precedents);
+            }
+        }
         Expr::Unary { expr, .. } | Expr::Postfix { expr, .. } => walk_expr(
             expr,
             current_cell,
             tables_by_sheet,
             workbook,
+            spills,
             precedents,
             names,
             volatile,
@@ -2968,6 +3023,7 @@ fn walk_expr(
                 current_cell,
                 tables_by_sheet,
                 workbook,
+                spills,
                 precedents,
                 names,
                 volatile,
@@ -2979,6 +3035,7 @@ fn walk_expr(
                 current_cell,
                 tables_by_sheet,
                 workbook,
+                spills,
                 precedents,
                 names,
                 volatile,
@@ -3004,6 +3061,7 @@ fn walk_expr(
                     current_cell,
                     tables_by_sheet,
                     workbook,
+                    spills,
                     precedents,
                     names,
                     volatile,
@@ -3018,6 +3076,7 @@ fn walk_expr(
                 current_cell,
                 tables_by_sheet,
                 workbook,
+                spills,
                 precedents,
                 names,
                 volatile,
@@ -3038,6 +3097,7 @@ fn analyze_calc_precedents(
     current_cell: CellKey,
     tables_by_sheet: &[Vec<Table>],
     workbook: &Workbook,
+    spills: &SpillState,
 ) -> HashSet<Precedent> {
     let mut out = HashSet::new();
     let mut visiting_names = HashSet::new();
@@ -3046,10 +3106,74 @@ fn analyze_calc_precedents(
         current_cell,
         tables_by_sheet,
         workbook,
+        spills,
         &mut out,
         &mut visiting_names,
     );
     out
+}
+
+fn spill_range_target_cell(expr: &CompiledExpr, current_cell: CellKey) -> Option<CellKey> {
+    match expr {
+        Expr::CellRef(r) => resolve_sheet(&r.sheet, current_cell.sheet).map(|sheet| CellKey {
+            sheet,
+            addr: r.addr,
+        }),
+        Expr::ImplicitIntersection(inner) | Expr::SpillRange(inner) => {
+            spill_range_target_cell(inner, current_cell)
+        }
+        _ => None,
+    }
+}
+
+fn spill_range_bounds(cell: CellKey, spills: &SpillState) -> (CellKey, CellAddr) {
+    let origin = if spills.by_origin.contains_key(&cell) {
+        cell
+    } else {
+        spills.origin_by_cell.get(&cell).copied().unwrap_or(cell)
+    };
+    let end = spills
+        .by_origin
+        .get(&origin)
+        .map(|spill| spill.end)
+        .unwrap_or(origin.addr);
+    (origin, end)
+}
+
+fn add_cell_rect(
+    sheet: SheetId,
+    start: CellAddr,
+    end: CellAddr,
+    workbook: &Workbook,
+    precedents: &mut HashSet<CellKey>,
+) {
+    let (r1, r2) = if start.row <= end.row {
+        (start.row, end.row)
+    } else {
+        (end.row, start.row)
+    };
+    let (c1, c2) = if start.col <= end.col {
+        (start.col, end.col)
+    } else {
+        (end.col, start.col)
+    };
+    let cell_count = ((r2 - r1 + 1) as u64).saturating_mul((c2 - c1 + 1) as u64);
+    if cell_count <= MAX_AUDIT_RANGE_EXPANSION_CELLS {
+        for row in r1..=r2 {
+            for col in c1..=c2 {
+                precedents.insert(CellKey {
+                    sheet,
+                    addr: CellAddr { row, col },
+                });
+            }
+        }
+    } else if let Some(sheet_cells) = workbook.sheets.get(sheet) {
+        for addr in sheet_cells.cells.keys() {
+            if addr.row >= r1 && addr.row <= r2 && addr.col >= c1 && addr.col <= c2 {
+                precedents.insert(CellKey { sheet, addr: *addr });
+            }
+        }
+    }
 }
 
 fn walk_calc_expr(
@@ -3057,6 +3181,7 @@ fn walk_calc_expr(
     current_cell: CellKey,
     tables_by_sheet: &[Vec<Table>],
     workbook: &Workbook,
+    spills: &SpillState,
     precedents: &mut HashSet<Precedent>,
     visiting_names: &mut HashSet<(SheetId, String)>,
 ) {
@@ -3121,6 +3246,7 @@ fn walk_calc_expr(
                         },
                         tables_by_sheet,
                         workbook,
+                        spills,
                         precedents,
                         visiting_names,
                     );
@@ -3128,20 +3254,42 @@ fn walk_calc_expr(
             }
             visiting_names.remove(&visit_key);
         }
+        Expr::SpillRange(inner) => {
+            if let Some(target) = spill_range_target_cell(inner, current_cell) {
+                let (origin, end) = spill_range_bounds(target, spills);
+                if origin.addr == end {
+                    precedents.insert(Precedent::Cell(CellId::new(
+                        sheet_id_for_graph(origin.sheet),
+                        origin.addr.row,
+                        origin.addr.col,
+                    )));
+                } else {
+                    let range = Range::new(
+                        CellRef::new(origin.addr.row, origin.addr.col),
+                        CellRef::new(end.row, end.col),
+                    );
+                    precedents.insert(Precedent::Range(SheetRange::new(
+                        sheet_id_for_graph(origin.sheet),
+                        range,
+                    )));
+                }
+            }
+            walk_calc_expr(inner, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names)
+        }
         Expr::Unary { expr, .. } | Expr::Postfix { expr, .. } => {
-            walk_calc_expr(expr, current_cell, tables_by_sheet, workbook, precedents, visiting_names)
+            walk_calc_expr(expr, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names)
         }
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
-            walk_calc_expr(left, current_cell, tables_by_sheet, workbook, precedents, visiting_names);
-            walk_calc_expr(right, current_cell, tables_by_sheet, workbook, precedents, visiting_names);
+            walk_calc_expr(left, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names);
+            walk_calc_expr(right, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names);
         }
         Expr::FunctionCall { args, .. } => {
             for a in args {
-                walk_calc_expr(a, current_cell, tables_by_sheet, workbook, precedents, visiting_names);
+                walk_calc_expr(a, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names);
             }
         }
         Expr::ImplicitIntersection(inner) => {
-            walk_calc_expr(inner, current_cell, tables_by_sheet, workbook, precedents, visiting_names)
+            walk_calc_expr(inner, current_cell, tables_by_sheet, workbook, spills, precedents, visiting_names)
         }
         Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Blank | Expr::Error(_) => {}
     }

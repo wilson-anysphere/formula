@@ -107,6 +107,8 @@ pub enum Expr<S> {
     },
     /// Excel's implicit intersection operator (`@`).
     ImplicitIntersection(Box<Expr<S>>),
+    /// Excel spill-range reference operator (`#`), e.g. `A1#`.
+    SpillRange(Box<Expr<S>>),
 }
 
 impl<S: Clone> Expr<S> {
@@ -164,6 +166,7 @@ impl<S: Clone> Expr<S> {
             Expr::ImplicitIntersection(inner) => {
                 Expr::ImplicitIntersection(Box::new(inner.map_sheets(f)))
             }
+            Expr::SpillRange(inner) => Expr::SpillRange(Box::new(inner.map_sheets(f))),
         }
     }
 }
