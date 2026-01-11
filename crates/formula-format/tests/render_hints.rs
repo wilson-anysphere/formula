@@ -23,11 +23,16 @@ fn bracket_currency_tokens_resolve_default_symbol_for_locale() {
     let options = FormatOptions::default();
     assert_eq!(
         render_value(Value::Number(1.2), Some("[$-409]0.00"), &options).text,
-        "$1.20"
+        "1.20"
     );
     assert_eq!(
         render_value(Value::Number(1.2), Some("[$€-407]0.00"), &options).text,
-        "€1.20"
+        "€1,20"
+    );
+
+    assert_eq!(
+        render_value(Value::Number(1234.5), Some("[$€-407]#,##0.00"), &options).text,
+        "€1.234,50"
     );
 }
 

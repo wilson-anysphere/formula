@@ -221,8 +221,12 @@ pub fn render_value(value: Value<'_>, format_code: Option<&str>, options: &Forma
             }
 
             let section = code.select_section_for_number(n);
+            let mut section_options = *options;
+            if let Some(locale) = section.locale_override {
+                section_options.locale = locale;
+            }
             if crate::datetime::looks_like_datetime(section.pattern) {
-                let rendered = crate::datetime::format_datetime(n, section.pattern, options);
+                let rendered = crate::datetime::format_datetime(n, section.pattern, &section_options);
                 let layout_hint = rendered.layout_hint();
                 RenderResult {
                     text: rendered.text,
@@ -235,7 +239,7 @@ pub fn render_value(value: Value<'_>, format_code: Option<&str>, options: &Forma
                     n,
                     section.pattern,
                     section.auto_negative_sign,
-                    options,
+                    &section_options,
                 );
                 let alignment = if crate::number::pattern_is_text(section.pattern) {
                     AlignmentHint::Left

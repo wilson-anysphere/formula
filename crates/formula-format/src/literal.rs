@@ -223,26 +223,11 @@ pub(crate) fn render_literal_segment(segment: &str) -> RenderedText {
 fn currency_symbol_from_bracket(content: &str) -> Option<String> {
     let after = content.strip_prefix('$')?;
     let (symbol, locale) = after.split_once('-').unwrap_or((after, ""));
-    if !symbol.is_empty() {
-        return Some(symbol.to_string());
-    }
-    let locale = locale.trim();
-    if locale.is_empty() {
+    if symbol.is_empty() {
+        // `[$-409]` is a locale override without an explicit currency symbol; it should not render
+        // any text. (Locale effects are handled by the format parser / renderer.)
         return None;
     }
-    let lcid = u32::from_str_radix(locale, 16).ok()?;
-    default_currency_symbol_for_lcid(lcid).map(|s| s.to_string())
-}
-
-fn default_currency_symbol_for_lcid(lcid: u32) -> Option<&'static str> {
-    // This is intentionally a small, deterministic mapping covering the most common LCIDs seen in
-    // OOXML format codes. It can be expanded as we encounter additional locales in the corpus.
-    Some(match lcid {
-        0x0409 | 0x1009 => "$", // en-US, en-CA
-        0x0809 => "£",         // en-GB
-        0x0407 | 0x040c | 0x0410 | 0x040a | 0x0413 => "€", // de-DE, fr-FR, it-IT, es-ES, nl-NL
-        0x0411 | 0x0804 => "¥", // ja-JP, zh-CN
-        0x0412 => "₩",         // ko-KR
-        _ => return None,
-    })
+    let _ = locale; // locale is parsed elsewhere when applying locale overrides.
+    Some(symbol.to_string())
 }

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::ColorOverride;
+use crate::{ColorOverride, Locale};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
@@ -49,6 +49,7 @@ struct Section {
     raw: String,
     condition: Option<Condition>,
     color: Option<ColorOverride>,
+    locale_override: Option<Locale>,
 }
 
 /// Parsed Excel number format code split into `;`-delimited sections.
@@ -62,6 +63,7 @@ pub(crate) struct SelectedSection<'a> {
     pub pattern: &'a str,
     pub auto_negative_sign: bool,
     pub color: Option<ColorOverride>,
+    pub locale_override: Option<Locale>,
 }
 
 impl FormatCode {
@@ -71,6 +73,7 @@ impl FormatCode {
                 raw: "General".to_string(),
                 condition: None,
                 color: None,
+                locale_override: None,
             }],
         }
     }
@@ -113,6 +116,7 @@ impl FormatCode {
                                 pattern: section.raw.as_str(),
                                 auto_negative_sign: false,
                                 color: section.color,
+                                locale_override: section.locale_override,
                             };
                         }
                     }
@@ -128,6 +132,7 @@ impl FormatCode {
                 pattern: section.raw.as_str(),
                 auto_negative_sign: false,
                 color: section.color,
+                locale_override: section.locale_override,
             };
         }
 
@@ -144,12 +149,14 @@ impl FormatCode {
                     pattern: self.sections[1].raw.as_str(),
                     auto_negative_sign: false,
                     color: self.sections[1].color,
+                    locale_override: self.sections[1].locale_override,
                 }
             } else {
                 SelectedSection {
                     pattern: self.sections[0].raw.as_str(),
                     auto_negative_sign: true,
                     color: self.sections[0].color,
+                    locale_override: self.sections[0].locale_override,
                 }
             }
         } else if v == 0.0 {
@@ -158,12 +165,14 @@ impl FormatCode {
                     pattern: self.sections[2].raw.as_str(),
                     auto_negative_sign: false,
                     color: self.sections[2].color,
+                    locale_override: self.sections[2].locale_override,
                 }
             } else {
                 SelectedSection {
                     pattern: self.sections[0].raw.as_str(),
                     auto_negative_sign: false,
                     color: self.sections[0].color,
+                    locale_override: self.sections[0].locale_override,
                 }
             }
         } else {
@@ -171,6 +180,7 @@ impl FormatCode {
                 pattern: self.sections[0].raw.as_str(),
                 auto_negative_sign: false,
                 color: self.sections[0].color,
+                locale_override: self.sections[0].locale_override,
             }
         }
     }
@@ -247,6 +257,7 @@ fn parse_section(input: &str) -> Result<Section, ParseError> {
     let mut rest = input;
     let mut condition: Option<Condition> = None;
     let mut color: Option<ColorOverride> = None;
+    let mut locale_override: Option<Locale> = None;
 
     // Strip leading bracketed components like colors, locale tags, currencies,
     // and conditions. Conditions are of the form `[>=100]`.
@@ -276,6 +287,12 @@ fn parse_section(input: &str) -> Result<Section, ParseError> {
             }
         }
 
+        if locale_override.is_none() {
+            if let Some(locale) = parse_locale_override(content) {
+                locale_override = Some(locale);
+            }
+        }
+
         if condition.is_none() {
             if let Some(cond) = parse_condition(content) {
                 condition = Some(cond);
@@ -290,6 +307,7 @@ fn parse_section(input: &str) -> Result<Section, ParseError> {
         raw: input.to_string(),
         condition,
         color,
+        locale_override,
     })
 }
 
@@ -329,5 +347,22 @@ fn parse_color_token(lower: &str) -> Option<ColorOverride> {
             let idx: u8 = rest.trim().parse().ok()?;
             ColorOverride::Indexed(idx)
         }
+    })
+}
+
+fn parse_locale_override(content: &str) -> Option<Locale> {
+    // Locale/currency tags are encoded as `[$$-409]` where the locale is the hex LCID suffix.
+    let after = content.strip_prefix('$')?;
+    let (_, locale) = after.split_once('-')?;
+    let lcid = u32::from_str_radix(locale.trim(), 16).ok()?;
+    locale_for_lcid(lcid)
+}
+
+fn locale_for_lcid(lcid: u32) -> Option<Locale> {
+    // Deterministic subset covering the most common locales seen in OOXML format codes.
+    Some(match lcid {
+        0x0409 | 0x0809 | 0x1009 => Locale::en_us(), // en-US, en-GB, en-CA
+        0x0407 => Locale::de_de(),                  // de-DE
+        _ => return None,
     })
 }
