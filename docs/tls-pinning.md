@@ -20,6 +20,8 @@ SHA-256( DER-encoded certificate bytes )
 
 and compares it to the configured `certificate_pins` (case-insensitive; colons are ignored).
 
+Pinning is an **additional** check on top of normal TLS certificate validation. The server certificate chain must still be trusted by the runtime (system CAs). Certificate pinning does **not** bypass CA validation.
+
 ## Configuring pins
 
 Pins are stored per-org in `org_settings`. When using the API, update org settings with:
