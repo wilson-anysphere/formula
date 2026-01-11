@@ -12,6 +12,7 @@ export { CacheManager } from "./cache/cache.js";
 export { MemoryCacheStore } from "./cache/memory.js";
 export { FileSystemCacheStore } from "./cache/filesystem.js";
 export { IndexedDBCacheStore } from "./cache/indexeddb.js";
+export { OAuth2Manager, OAuth2TokenClient, OAuth2TokenError, InMemoryOAuthTokenStore } from "./oauth2/index.js";
 
 export { parseM } from "./m/parser.js";
 export { compileMToQuery } from "./m/compiler.js";

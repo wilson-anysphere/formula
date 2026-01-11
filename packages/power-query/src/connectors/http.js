@@ -11,6 +11,7 @@ import { parseCsv, parseCsvCell } from "./file.js";
  * @property {string} url
  * @property {string | undefined} [method]
  * @property {Record<string, string> | undefined} [headers]
+ * @property {{ type: "oauth2"; providerId: string; scopes?: string[] } | undefined} [auth]
  * @property {"auto" | "json" | "csv" | "text" | undefined} [responseType]
  *   How to interpret the response body. Defaults to auto-detect.
  * @property {string | undefined} [jsonPath] Optional JSON path to select an array/object from a larger payload.
@@ -90,6 +91,11 @@ function tableFromJson(json) {
  * @property {((url: string, options: { method: string; headers?: Record<string, string>; signal?: AbortSignal; credentials?: unknown }) => Promise<DataTable>) | undefined} [fetchTable]
  *   Backwards compatible adapter used by the early prototype.
  *   If provided, it is used instead of `fetch` and is expected to return a DataTable directly.
+ * @property {import("../oauth2/manager.js").OAuth2Manager | undefined} [oauth2Manager]
+ *   Optional OAuth2 manager used when requests specify `request.auth.type === "oauth2"`
+ *   or when credential hooks return `{ oauth2: { providerId, scopes? } }`.
+ * @property {number[] | undefined} [oauth2RetryStatusCodes]
+ *   HTTP status codes that should trigger a single refresh + retry when using OAuth2 auth.
  */
 
 export class HttpConnector {
@@ -101,6 +107,8 @@ export class HttpConnector {
     this.permissionKind = "http:request";
     this.fetchFn = options.fetch ?? (typeof fetch === "function" ? fetch.bind(globalThis) : null);
     this.fetchTable = options.fetchTable ?? null;
+    this.oauth2Manager = options.oauth2Manager ?? null;
+    this.oauth2RetryStatusCodes = Array.isArray(options.oauth2RetryStatusCodes) ? options.oauth2RetryStatusCodes : [401, 403];
   }
 
   /**
@@ -108,7 +116,11 @@ export class HttpConnector {
    * @returns {unknown}
    */
   getCacheKey(request) {
-    return {
+    const auth =
+      request.auth?.type === "oauth2"
+        ? { type: "oauth2", providerId: request.auth.providerId, scopes: request.auth.scopes?.slice().sort() ?? [] }
+        : null;
+    const key = {
       connector: "http",
       url: request.url,
       method: (request.method ?? "GET").toUpperCase(),
@@ -116,6 +128,13 @@ export class HttpConnector {
       responseType: request.responseType ?? "auto",
       jsonPath: request.jsonPath ?? "",
     };
+    // Avoid changing cache keys for unauthenticated callers by only including
+    // the new `auth` field when present.
+    if (auth) {
+      // @ts-ignore - stable JSON shape
+      key.auth = auth;
+    }
+    return key;
   }
 
   /**
@@ -145,6 +164,8 @@ export class HttpConnector {
       credentials = await credentials.getSecret();
     }
 
+    /** @type {{ providerId: string; scopes?: string[] } | null} */
+    let credentialOAuth2 = null;
     if (credentials && typeof credentials === "object" && !Array.isArray(credentials)) {
       // Generic convention: host apps can return `{ headers }` as credentials for HTTP APIs.
       // @ts-ignore - runtime merge
@@ -152,25 +173,88 @@ export class HttpConnector {
       if (extraHeaders && typeof extraHeaders === "object") {
         Object.assign(headers, extraHeaders);
       }
+
+      // Standard convention: host apps can return `{ oauth2: { providerId, scopes? } }`.
+      // @ts-ignore - runtime access
+      const oauth2 = credentials.oauth2;
+      if (oauth2 && typeof oauth2 === "object") {
+        // @ts-ignore - runtime access
+        const providerId = oauth2.providerId;
+        // @ts-ignore - runtime access
+        const scopes = oauth2.scopes;
+        if (typeof providerId === "string" && providerId) {
+          credentialOAuth2 = { providerId, scopes: Array.isArray(scopes) ? scopes : undefined };
+        }
+      }
     }
 
     const method = (request.method ?? "GET").toUpperCase();
+
+    /** @type {{ type: "oauth2"; providerId: string; scopes?: string[] } | null} */
+    let oauth2Auth = null;
+    if (request.auth?.type === "oauth2") {
+      oauth2Auth = request.auth;
+    } else if (credentialOAuth2) {
+      oauth2Auth = { type: "oauth2", ...credentialOAuth2 };
+    }
+
+    const applyOAuthHeader = async (forceRefresh = false) => {
+      if (!oauth2Auth) return;
+      if (!this.oauth2Manager) {
+        throw new Error("HTTP OAuth2 requests require configuring HttpConnector with an OAuth2Manager");
+      }
+      const token = await this.oauth2Manager.getAccessToken({
+        providerId: oauth2Auth.providerId,
+        scopes: oauth2Auth.scopes,
+        signal,
+        now,
+        forceRefresh,
+      });
+      headers.Authorization = `Bearer ${token.accessToken}`;
+    };
+
+    await applyOAuthHeader(false);
 
     let table;
     /** @type {Date | undefined} */
     let sourceTimestamp;
 
     if (this.fetchTable) {
-      table = await this.fetchTable(request.url, { method, headers, signal, credentials });
+      const shouldRetry = (err) => {
+        if (!oauth2Auth) return false;
+        if (!err || (typeof err !== "object" && typeof err !== "function")) return false;
+        // @ts-ignore - best-effort status extraction for host adapters
+        const status = err.status ?? err.response?.status ?? null;
+        return typeof status === "number" && this.oauth2RetryStatusCodes.includes(status);
+      };
+
+      try {
+        table = await this.fetchTable(request.url, { method, headers, signal, credentials });
+      } catch (err) {
+        if (shouldRetry(err)) {
+          await applyOAuthHeader(true);
+          table = await this.fetchTable(request.url, { method, headers, signal, credentials });
+        } else {
+          throw err;
+        }
+      }
     } else {
       if (!this.fetchFn) {
         throw new Error("HTTP source requires either a global fetch implementation or an HttpConnector fetch adapter");
       }
 
-      const response = await this.fetchFn(request.url, { method, headers, signal });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} for ${request.url}`);
+      const fetchOnce = async () => {
+        const response = await this.fetchFn(request.url, { method, headers, signal });
+        return response;
+      };
+
+      let response = await fetchOnce();
+      if (!response.ok && oauth2Auth && this.oauth2RetryStatusCodes.includes(response.status)) {
+        await applyOAuthHeader(true);
+        response = await fetchOnce();
       }
+
+      if (!response.ok) throw new Error(`HTTP ${response.status} for ${request.url}`);
 
       const lastModified = response.headers.get("last-modified");
       if (lastModified) {

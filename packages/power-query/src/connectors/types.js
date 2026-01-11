@@ -43,17 +43,44 @@
  * @property {ConnectorMeta} meta
  */
  
+ /**
+  * @typedef {Object} ConnectorExecuteOptions
+  * @property {AbortSignal | undefined} [signal]
+  * @property {unknown} [credentials]
+  * @property {(() => number) | undefined} [now]
+  */
+
 /**
- * @typedef {Object} ConnectorExecuteOptions
- * @property {AbortSignal | undefined} [signal]
- * @property {unknown} [credentials]
- * @property {(() => number) | undefined} [now]
- */
- 
-/**
- * Base connector interface.
+ * OAuth2 configuration for HTTP requests.
  *
- * @template Request
+ * Used by:
+ * - `HttpConnectorRequest.auth`
+ * - `onCredentialRequest("http", { request })` responses (via `credentials.oauth2`)
+ *
+ * @typedef {Object} HttpConnectorOAuth2Config
+ * @property {string} providerId Stable provider/config identifier.
+ * @property {string[] | undefined} [scopes] Optional scope list.
+ */
+
+/**
+ * Credentials shape understood by the built-in `HttpConnector`.
+ *
+ * Host applications can return this object from `onCredentialRequest("http", ...)`:
+ * - `headers` is merged into the request headers (legacy / escape hatch).
+ * - `oauth2` delegates bearer token handling to an `OAuth2Manager` configured
+ *   on the connector.
+ *
+ * Precedence: if `request.auth` is provided, it overrides `credentials.oauth2`.
+ *
+ * @typedef {Object} HttpConnectorCredentials
+ * @property {Record<string, string> | undefined} [headers]
+ * @property {HttpConnectorOAuth2Config | undefined} [oauth2]
+ */
+
+ /**
+  * Base connector interface.
+  *
+  * @template Request
  * @typedef {{
  *   id: string;
  *   /**
