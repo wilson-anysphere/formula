@@ -335,9 +335,10 @@ fn parse_worksheet_into_model(
                     let (value, value_kind, raw_value) =
                         interpret_cell_value(current_t.as_deref(), &current_value_text, &current_inline_text, shared_strings);
 
-                    let formula_in_model = current_formula
-                        .as_ref()
-                        .and_then(|f| (!f.file_text.is_empty()).then(|| strip_xlfn_prefixes(&f.file_text)));
+                     let formula_in_model = current_formula.as_ref().and_then(|f| {
+                         (!f.file_text.is_empty())
+                             .then(|| crate::formula_text::strip_xlfn_prefixes(&f.file_text))
+                     });
 
                     let mut cell = Cell::default();
                     cell.value = value;
@@ -507,8 +508,4 @@ fn interpret_cell_value(
             }
         }
     }
-}
-
-fn strip_xlfn_prefixes(s: &str) -> String {
-    s.replace("_xlfn.", "")
 }

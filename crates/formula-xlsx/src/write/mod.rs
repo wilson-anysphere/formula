@@ -203,7 +203,7 @@ fn build_shared_strings_xml(
         cells.sort_by_key(|(r, _)| (r.row, r.col));
         for (cell_ref, cell) in cells {
             let meta = doc.meta.cell_meta.get(&(sheet_meta.worksheet_id, cell_ref));
-            let kind = meta.and_then(|m| m.value_kind.clone()).unwrap_or_else(|| infer_value_kind(cell));
+            let kind = effective_value_kind(meta, cell);
             let CellValueKind::SharedString { .. } = kind else {
                 continue;
             };
@@ -782,9 +782,7 @@ fn render_sheet_data(
         }
 
         let meta = doc.meta.cell_meta.get(&(sheet_meta.worksheet_id, cell_ref));
-        let value_kind = meta
-            .and_then(|m| m.value_kind.clone())
-            .unwrap_or_else(|| infer_value_kind(cell));
+        let value_kind = effective_value_kind(meta, cell);
 
         if !matches!(cell.value, CellValue::Empty) {
             match value_kind {
@@ -799,11 +797,35 @@ fn render_sheet_data(
 
         out.push('>');
 
-        if let Some(formula_meta) = meta.and_then(|m| m.formula.clone()).or_else(|| {
-            cell.formula
-                .as_ref()
-                .map(|f| crate::FormulaMeta { file_text: f.clone(), ..Default::default() })
-        }) {
+        let model_formula = cell.formula.as_deref();
+        let formula_meta = match (model_formula, meta.and_then(|m| m.formula.clone())) {
+            (Some(_), Some(meta)) => Some(meta),
+            (Some(formula), None) => Some(crate::FormulaMeta {
+                file_text: crate::formula_text::add_xlfn_prefixes(strip_leading_equals(formula)),
+                ..Default::default()
+            }),
+            (None, Some(meta)) => {
+                // The in-memory model doesn't currently represent shared formulas for follower
+                // cells. Preserve those formulas when the stored SpreadsheetML indicates a formula
+                // even if the model omits it.
+                if meta.file_text.is_empty()
+                    && meta.t.is_none()
+                    && meta.reference.is_none()
+                    && meta.shared_index.is_none()
+                    && meta.always_calc.is_none()
+                {
+                    None
+                } else if meta.file_text.is_empty() {
+                    Some(meta)
+                } else {
+                    // Model cleared the formula; don't keep stale formula text from metadata.
+                    None
+                }
+            }
+            (None, None) => None,
+        };
+
+        if let Some(formula_meta) = formula_meta {
             out.push_str("<f");
             if let Some(t) = &formula_meta.t {
                 out.push_str(&format!(r#" t="{}""#, escape_attr(t)));
@@ -818,7 +840,7 @@ fn render_sheet_data(
                 out.push_str(&format!(r#" aca="{}""#, if aca { "1" } else { "0" }));
             }
 
-            let file_text = formula_file_text(&formula_meta, cell.formula.as_deref());
+            let file_text = formula_file_text(&formula_meta, model_formula);
             if file_text.is_empty() {
                 out.push_str("/>");
             } else {
@@ -913,21 +935,45 @@ fn infer_value_kind(cell: &formula_model::Cell) -> CellValueKind {
     }
 }
 
-fn formula_file_text(meta: &crate::FormulaMeta, display: Option<&str>) -> String {
-    if meta.file_text.is_empty() {
-        return String::new();
-    }
-    if let Some(display) = display {
-        // Preserve stored file text if the model's display text matches.
-        if strip_xlfn_prefixes(&meta.file_text) == display {
-            return meta.file_text.clone();
+fn effective_value_kind(meta: Option<&crate::CellMeta>, cell: &formula_model::Cell) -> CellValueKind {
+    if let Some(kind) = meta.and_then(|m| m.value_kind.clone()) {
+        if value_kind_compatible(&kind, &cell.value) {
+            return kind;
         }
     }
-    meta.file_text.clone()
+    infer_value_kind(cell)
 }
 
-fn strip_xlfn_prefixes(s: &str) -> String {
-    s.replace("_xlfn.", "")
+fn value_kind_compatible(kind: &CellValueKind, value: &CellValue) -> bool {
+    match (kind, value) {
+        (_, CellValue::Empty) => true,
+        (CellValueKind::Number, CellValue::Number(_)) => true,
+        (CellValueKind::Bool, CellValue::Boolean(_)) => true,
+        (CellValueKind::Error, CellValue::Error(_)) => true,
+        (CellValueKind::SharedString { .. }, CellValue::String(_) | CellValue::RichText(_)) => true,
+        (CellValueKind::InlineString, CellValue::String(_)) => true,
+        (CellValueKind::Str, CellValue::String(_)) => true,
+        _ => false,
+    }
+}
+
+fn formula_file_text(meta: &crate::FormulaMeta, display: Option<&str>) -> String {
+    let Some(display) = display else {
+        return meta.file_text.clone();
+    };
+
+    let display = strip_leading_equals(display);
+
+    // Preserve stored file text if the model's display text matches.
+    if !meta.file_text.is_empty() && crate::formula_text::strip_xlfn_prefixes(&meta.file_text) == display {
+        return meta.file_text.clone();
+    }
+
+    crate::formula_text::add_xlfn_prefixes(display)
+}
+
+fn strip_leading_equals(s: &str) -> &str {
+    s.strip_prefix('=').unwrap_or(s)
 }
 
 fn raw_or_number(meta: Option<&crate::CellMeta>, n: f64) -> String {

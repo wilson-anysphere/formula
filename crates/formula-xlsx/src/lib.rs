@@ -25,6 +25,7 @@ pub mod charts;
 pub mod comments;
 pub mod conditional_formatting;
 mod compare;
+mod formula_text;
 mod model_package;
 mod openxml;
 mod xml;
@@ -78,7 +79,7 @@ pub use writer::{write_workbook, write_workbook_to_writer, XlsxWriteError};
 pub use xml::XmlDomError;
 
 use formula_model::rich_text::RichText;
-use formula_model::{CellRef, Workbook, WorksheetId};
+use formula_model::{CellRef, CellValue, Workbook, WorksheetId};
 
 /// Excel date system used to interpret serialized dates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,5 +189,113 @@ impl XlsxDocument {
 
     pub fn save_to_vec(&self) -> Result<Vec<u8>, write::WriteError> {
         write::write_to_vec(self)
+    }
+
+    pub fn set_cell_value(&mut self, sheet_id: WorksheetId, cell: CellRef, value: CellValue) -> bool {
+        let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
+            return false;
+        };
+        sheet.set_value(cell, value.clone());
+
+        let Some(cell_record) = sheet.cell(cell) else {
+            self.meta.cell_meta.remove(&(sheet_id, cell));
+            return true;
+        };
+
+        let meta = self.meta.cell_meta.entry((sheet_id, cell)).or_default();
+        let (value_kind, raw_value) = cell_meta_from_value(&cell_record.value);
+        meta.value_kind = value_kind;
+        meta.raw_value = raw_value;
+
+        if meta.value_kind.is_none() && meta.raw_value.is_none() && meta.formula.is_none() {
+            self.meta.cell_meta.remove(&(sheet_id, cell));
+        }
+
+        true
+    }
+
+    pub fn set_cell_formula(
+        &mut self,
+        sheet_id: WorksheetId,
+        cell: CellRef,
+        formula_display: Option<String>,
+    ) -> bool {
+        let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
+            return false;
+        };
+
+        let Some(formula_display) = formula_display else {
+            sheet.set_formula(cell, None);
+            if let Some(meta) = self.meta.cell_meta.get_mut(&(sheet_id, cell)) {
+                meta.formula = None;
+                if meta.value_kind.is_none() && meta.raw_value.is_none() {
+                    self.meta.cell_meta.remove(&(sheet_id, cell));
+                }
+            }
+            if sheet.cell(cell).is_none() {
+                self.meta.cell_meta.remove(&(sheet_id, cell));
+            }
+            return true;
+        };
+
+        let display = crate::formula_text::normalize_display_formula(&formula_display);
+        sheet.set_formula(cell, Some(display.clone()));
+
+        let file_text = crate::formula_text::add_xlfn_prefixes(&display);
+
+        let meta = self.meta.cell_meta.entry((sheet_id, cell)).or_default();
+        match meta.formula.as_mut() {
+            Some(existing) => {
+                let was_textless = existing.file_text.is_empty();
+                existing.file_text = file_text;
+                if was_textless {
+                    // Textless shared formulas become standalone formulas when edited.
+                    existing.t = None;
+                    existing.reference = None;
+                    existing.shared_index = None;
+                }
+            }
+            None => {
+                meta.formula = Some(FormulaMeta {
+                    file_text,
+                    ..Default::default()
+                });
+            }
+        }
+
+        if let Some(cell_record) = sheet.cell(cell) {
+            let (value_kind, raw_value) = cell_meta_from_value(&cell_record.value);
+            meta.value_kind = value_kind;
+            meta.raw_value = raw_value;
+        }
+
+        true
+    }
+
+    pub fn clear_cell(&mut self, sheet_id: WorksheetId, cell: CellRef) -> bool {
+        let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
+            return false;
+        };
+        sheet.clear_cell(cell);
+        self.meta.cell_meta.remove(&(sheet_id, cell));
+        true
+    }
+}
+
+fn cell_meta_from_value(value: &CellValue) -> (Option<CellValueKind>, Option<String>) {
+    match value {
+        CellValue::Empty => (None, None),
+        CellValue::Number(n) => (Some(CellValueKind::Number), Some(n.to_string())),
+        CellValue::Boolean(b) => (
+            Some(CellValueKind::Bool),
+            Some(if *b { "1" } else { "0" }.to_string()),
+        ),
+        CellValue::Error(err) => (Some(CellValueKind::Error), Some(err.as_str().to_string())),
+        CellValue::String(s) => (Some(CellValueKind::SharedString { index: 0 }), Some(s.clone())),
+        CellValue::RichText(rich) => (
+            Some(CellValueKind::SharedString { index: 0 }),
+            Some(rich.text.clone()),
+        ),
+        _ => (Some(CellValueKind::Number), None),
     }
 }
