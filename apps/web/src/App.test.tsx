@@ -28,8 +28,8 @@ vi.mock("@formula/text-layout", () => ({
 }));
 
 const mocks = vi.hoisted(() => {
-  const seeded = new Map<string, string | number>([
-    ["A1", 1],
+  const seeded = new Map<string, string | number | boolean>([
+    ["A1", true],
     ["A2", 2],
     ["B1", 3],
     ["B2", 6],
@@ -83,9 +83,9 @@ const mocks = vi.hoisted(() => {
     })),
     getRange: vi.fn(async (range: string) => {
       const bounds = parseRange(range);
-      const rows: Array<Array<{ value: string | number | null }>> = [];
+      const rows: Array<Array<{ value: string | number | boolean | null }>> = [];
       for (let r = bounds.startRow; r <= bounds.endRow; r++) {
-        const cols: Array<{ value: string | number | null }> = [];
+        const cols: Array<{ value: string | number | boolean | null }> = [];
         for (let c = bounds.startCol; c <= bounds.endCol; c++) {
           const addr = `${colToLetters(c)}${r + 1}`;
           cols.push({ value: seeded.get(addr) ?? null });
@@ -223,6 +223,7 @@ describe("App (web preview)", () => {
     expect(host.textContent).toContain("ready (B1=3)");
     expect(mocks.engine.getRange).toHaveBeenCalled();
     expect(drawnText.some((call) => call.text === "3" && call.x > 100 && call.y > 21)).toBe(true);
+    expect(drawnText.some((call) => call.text === "TRUE")).toBe(true);
 
     await act(async () => {
       root.unmount();
