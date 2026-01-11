@@ -149,3 +149,100 @@ test("QueryEngine: executes hybrid folded SQL then runs remaining steps locally"
   ]);
 });
 
+test("QueryEngine: folds merge into a single SQL query when both sides are foldable", async () => {
+  /** @type {{ sql: string, params: unknown[] | undefined }[]} */
+  const calls = [];
+  const connection = {};
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async (_connection, sql, options) => {
+          calls.push({ sql, params: options?.params });
+          return DataTable.fromGrid(
+            [
+              ["Id", "Region", "Target"],
+              [1, "East", 10],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          );
+        },
+      }),
+    },
+  });
+
+  const right = {
+    id: "q_right",
+    name: "Targets",
+    source: { type: "database", connection, query: "SELECT * FROM targets" },
+    steps: [{ id: "r1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Target"] } }],
+  };
+
+  const left = {
+    id: "q_left",
+    name: "Sales",
+    source: { type: "database", connection, query: "SELECT * FROM sales", dialect: "postgres" },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Region"] } },
+      { id: "l2", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } },
+    ],
+  };
+
+  const result = await engine.executeQuery(left, { queries: { q_right: right } }, {});
+  assert.equal(calls.length, 1, "expected a single SQL roundtrip when merge folds");
+  assert.match(calls[0].sql, /\bJOIN\b/);
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Region", "Target"],
+    [1, "East", 10],
+  ]);
+});
+
+test("QueryEngine: folds append into a single SQL query when schemas are compatible", async () => {
+  /** @type {{ sql: string, params: unknown[] | undefined }[]} */
+  const calls = [];
+  const connection = {};
+
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async (_connection, sql, options) => {
+          calls.push({ sql, params: options?.params });
+          return DataTable.fromGrid(
+            [
+              ["Id", "Value"],
+              [1, "a"],
+              [2, "b"],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          );
+        },
+      }),
+    },
+  });
+
+  const other = {
+    id: "q_other",
+    name: "Other",
+    source: { type: "database", connection, query: "SELECT * FROM b" },
+    steps: [{ id: "o1", name: "Select", operation: { type: "selectColumns", columns: ["Value", "Id"] } }],
+  };
+
+  const base = {
+    id: "q_base",
+    name: "Base",
+    source: { type: "database", connection, query: "SELECT * FROM a", dialect: "postgres" },
+    steps: [
+      { id: "b1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Value"] } },
+      { id: "b2", name: "Append", operation: { type: "append", queries: ["q_other"] } },
+    ],
+  };
+
+  const result = await engine.executeQuery(base, { queries: { q_other: other } }, {});
+  assert.equal(calls.length, 1, "expected a single SQL roundtrip when append folds");
+  assert.match(calls[0].sql, /\bUNION ALL\b/);
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Value"],
+    [1, "a"],
+    [2, "b"],
+  ]);
+});
