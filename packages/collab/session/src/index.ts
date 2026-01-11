@@ -335,6 +335,7 @@ export class CollabSession {
   private sheetsSchemaObserver: ((event: any, transaction: Y.Transaction) => void) | null = null;
   private ensuringSchema = false;
   private readonly offlineAutoConnectAfterLoad: boolean;
+  private isDestroyed = false;
 
   constructor(options: CollabSessionOptions = {}) {
     // When connecting to a sync provider, use the provider document id as the
@@ -402,7 +403,10 @@ export class CollabSession {
             // Ignore offline load errors when auto-connecting. Callers can
             // observe the rejection by awaiting `session.offline.whenLoaded()`.
           })
-          .then(() => this.provider?.connect?.());
+          .then(() => {
+            if (this.isDestroyed) return;
+            this.provider?.connect?.();
+          });
       }
     }
 
@@ -446,6 +450,7 @@ export class CollabSession {
       let ensureDefaultSheetScheduled = false;
 
       const ensureSchema = (transaction?: Y.Transaction) => {
+        if (this.isDestroyed) return;
         // Avoid mutating the workbook schema while a sync provider is still in
         // the middle of initial hydration. In particular, sheets can be created
         // incrementally (e.g. map inserted before its `id` field is applied),
@@ -597,6 +602,8 @@ export class CollabSession {
   }
 
   destroy(): void {
+    if (this.isDestroyed) return;
+    this.isDestroyed = true;
     if (this.sheetsSchemaObserver) {
       this.sheets.unobserve(this.sheetsSchemaObserver);
       this.sheetsSchemaObserver = null;
@@ -614,6 +621,7 @@ export class CollabSession {
   }
 
   connect(): void {
+    if (this.isDestroyed) return;
     if (!this.provider?.connect) return;
 
     if (this.offline && this.offlineAutoConnectAfterLoad && !this.offline.isLoaded) {
@@ -622,7 +630,10 @@ export class CollabSession {
         .catch(() => {
           // Ignore offline load errors. Callers can await `session.offline.whenLoaded()`.
         })
-        .then(() => this.provider?.connect?.());
+        .then(() => {
+          if (this.isDestroyed) return;
+          this.provider?.connect?.();
+        });
       return;
     }
 

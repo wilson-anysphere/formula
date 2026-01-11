@@ -21,22 +21,40 @@ export function attachIndexeddbPersistence(doc: Y.Doc, opts: { key: string }): O
   const persistence = new IndexeddbPersistence(opts.key, doc) as any;
 
   let destroyed = false;
+  let loaded = false;
+  let resolveLoaded: () => void = () => {};
+  const loadedPromise = new Promise<void>((resolve) => {
+    resolveLoaded = () => {
+      if (loaded) return;
+      loaded = true;
+      resolve();
+    };
+  });
+
+  // y-indexeddb uses `whenSynced` for "load complete". If the persistence layer
+  // is destroyed before it syncs, `whenSynced` never resolves; ensure our
+  // `whenLoaded` promise still settles in that case.
+  void Promise.resolve(persistence.whenSynced)
+    .then(() => resolveLoaded())
+    .catch(() => resolveLoaded());
 
   // y-indexeddb uses `whenSynced` for "load complete".
   const whenLoaded = async () => {
     if (destroyed) return;
-    await Promise.resolve(persistence.whenSynced);
+    await loadedPromise;
   };
 
   const destroy = () => {
     if (destroyed) return;
     destroyed = true;
+    resolveLoaded();
     persistence.destroy?.();
     doc.off("destroy", destroy);
   };
 
   const clear = async () => {
     if (destroyed) return;
+    resolveLoaded();
 
     // Prefer the library's API when available.
     if (typeof persistence.clearData === "function") {
