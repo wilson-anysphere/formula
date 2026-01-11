@@ -3240,7 +3240,13 @@ export class SpreadsheetApp {
       let deltaRow = 0;
       let deltaCol = 0;
 
-      const normalizeClipboardText = (text: string): string => text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const normalizeClipboardText = (text: string): string =>
+        text
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n")
+          // Some clipboard implementations add a trailing newline; ignore it when
+          // detecting "internal" pastes for formula shifting.
+          .replace(/\n+$/g, "");
 
       if (
         ctx &&
