@@ -572,7 +572,7 @@ pub fn function_id_from_name(name: &str) -> Option<u16> {
 //
 // These are typically stored by Excel as `_xlfn.` functions and encoded in BIFF as
 // user-defined function calls (`iftab = 255`) with an accompanying name token.
-const FUTURE_UDF_FUNCTIONS: [&str; 32] = [
+const FUTURE_UDF_FUNCTIONS: [&str; 34] = [
     "AGGREGATE",
     "CEILING.MATH",
     "CEILING.PRECISE",
@@ -586,6 +586,8 @@ const FUTURE_UDF_FUNCTIONS: [&str; 32] = [
     "HSTACK",
     "IFNA",
     "ISO.CEILING",
+    "ISO.WEEKNUM",
+    "ISOWEEKNUM",
     "LAMBDA",
     "LET",
     "NETWORKDAYS.INTL",
