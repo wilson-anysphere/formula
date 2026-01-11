@@ -150,6 +150,11 @@ export class ExtensionHostManager {
 
     const extensionPath = path.join(this.extensionsDir, id);
     await this._host.loadExtension(extensionPath);
+    if (this._started) {
+      // Ensure extensions that activate on `onStartupFinished` get a chance to run
+      // when they are installed/updated after the runtime has already started.
+      await this._host.startup();
+    }
   }
 
   /**

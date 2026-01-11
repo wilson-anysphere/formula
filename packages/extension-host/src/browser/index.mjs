@@ -719,6 +719,23 @@ class BrowserExtensionHost {
     return out;
   }
 
+  getContributedMenus() {
+    const menuIds = new Set();
+    for (const extension of this._extensions.values()) {
+      const menus = extension.manifest.contributes?.menus ?? {};
+      for (const key of Object.keys(menus)) menuIds.add(key);
+    }
+    for (const record of this._contextMenus.values()) {
+      if (record?.menuId) menuIds.add(record.menuId);
+    }
+
+    const out = {};
+    for (const id of [...menuIds].sort()) {
+      out[id] = this.getContributedMenu(id);
+    }
+    return out;
+  }
+
   getContributedCustomFunctions() {
     const out = [];
     for (const extension of this._extensions.values()) {
@@ -769,6 +786,40 @@ class BrowserExtensionHost {
 
     this._terminateWorker(extension, { reason: "reload", cause: new Error("Extension reloaded") });
     this._spawnWorker(extension);
+  }
+
+  async unloadExtension(extensionId) {
+    const id = String(extensionId);
+    const extension = this._extensions.get(id);
+    if (!extension) throw new Error(`Extension not loaded: ${id}`);
+
+    this._terminateWorker(extension, { reason: "unload", cause: new Error("Extension unloaded") });
+
+    try {
+      for (const cmd of extension.manifest.contributes?.commands ?? []) {
+        if (this._commands.get(cmd.command) === extension.id) this._commands.delete(cmd.command);
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      for (const fn of extension.manifest.contributes?.customFunctions ?? []) {
+        if (this._customFunctions.get(fn.name) === extension.id) this._customFunctions.delete(fn.name);
+      }
+    } catch {
+      // ignore
+    }
+
+    for (const [panelId, panel] of this._panels.entries()) {
+      if (panel?.extensionId === extension.id) this._panels.delete(panelId);
+    }
+
+    for (const [registrationId, record] of this._contextMenus.entries()) {
+      if (record?.extensionId === extension.id) this._contextMenus.delete(registrationId);
+    }
+
+    this._extensions.delete(id);
   }
 
   _spawnWorker(extension) {
