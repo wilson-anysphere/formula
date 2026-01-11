@@ -123,7 +123,10 @@ describe("pythonPanelMount", () => {
       expect(runButton).not.toBeNull();
       runButton?.dispatchEvent(new MouseEvent("click"));
 
-      for (let i = 0; i < 10 && __pyodideMocks.initialize.mock.calls.length === 0; i++) {
+      // The run handler awaits runtime initialization before calling `execute`, so
+      // the `initialize` spy can be called before the `execute` spy. Wait until the
+      // script execution call is observed to avoid racey assertions.
+      for (let i = 0; i < 10 && __pyodideMocks.execute.mock.calls.length === 0; i++) {
         // eslint-disable-next-line no-await-in-loop
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
