@@ -1,5 +1,3 @@
-import { stableStringify } from "./key.js";
-
 /**
  * @typedef {import("./cache.js").CacheEntry} CacheEntry
  * @typedef {import("./cache.js").CacheStore} CacheStore
@@ -36,6 +34,37 @@ const ENVELOPE_VERSION = 1;
 const VALUE_MAGIC = /** @type {const} */ ([0x50, 0x51, 0x43, 0x56]); // "PQCV"
 const VALUE_VERSION = 1;
 const TYPE_KEY = "__pq_cache_type";
+
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && /** @type {any} */ (value).constructor === Object;
+}
+
+function sortJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortJson);
+  }
+  if (isPlainObject(value)) {
+    const sorted = {};
+    for (const key of Object.keys(value).sort()) {
+      // @ts-ignore - runtime
+      sorted[key] = sortJson(value[key]);
+    }
+    return sorted;
+  }
+  return value;
+}
+
+/**
+ * Deterministic JSON encoding suitable for AAD / encryption context.
+ *
+ * Do NOT use this for security-sensitive canonicalization of untrusted input; it
+ * exists so encryption context bytes are stable across runtime instances.
+ *
+ * @param {unknown} value
+ */
+function canonicalJson(value) {
+  return JSON.stringify(sortJson(value));
+}
 
 function utf8Encode(text) {
   if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(text);
@@ -396,7 +425,7 @@ function buildAadBytes(storeId, schemaVersion) {
   /** @type {any} */
   const aad = { scope: AAD_SCOPE, schemaVersion };
   if (storeId != null) aad.storeId = storeId;
-  return utf8Encode(stableStringify(aad));
+  return utf8Encode(canonicalJson(aad));
 }
 
 export class EncryptedCacheStore {
