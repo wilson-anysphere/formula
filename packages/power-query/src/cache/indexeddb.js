@@ -50,6 +50,23 @@ function estimateEntrySizeBytes(entry) {
         binaryBytes += value.byteLength;
         return { [SIZE_MARKER_KEY]: value.byteLength };
       }
+      // Node Buffers define a `toJSON()` hook that runs before replacers, so we may
+      // see the `{ type: "Buffer", data: number[] }` shape here instead of the
+      // original `Uint8Array`. Treat it as binary to avoid JSON bloat.
+      if (
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        // @ts-ignore - runtime inspection
+        value.type === "Buffer" &&
+        // @ts-ignore - runtime inspection
+        Array.isArray(value.data)
+      ) {
+        // @ts-ignore - runtime inspection
+        const bytes = Uint8Array.from(value.data);
+        binaryBytes += bytes.byteLength;
+        return { [SIZE_MARKER_KEY]: bytes.byteLength };
+      }
       if (typeof value === "bigint") {
         return value.toString();
       }
