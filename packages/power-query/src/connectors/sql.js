@@ -9,11 +9,12 @@ import { DataTable } from "../table.js";
  * @typedef {Object} SqlConnectorRequest
  * @property {unknown} connection
  * @property {string} sql
+ * @property {unknown[] | undefined} [params]
  */
 
 /**
  * @typedef {Object} SqlConnectorOptions
- * @property {((connection: unknown, sql: string, options?: { signal?: AbortSignal; credentials?: unknown }) => Promise<DataTable>) | undefined} [querySql]
+ * @property {((connection: unknown, sql: string, options?: { params?: unknown[]; signal?: AbortSignal; credentials?: unknown }) => Promise<DataTable>) | undefined} [querySql]
  */
 
 export class SqlConnector {
@@ -35,6 +36,7 @@ export class SqlConnector {
       connector: "sql",
       connection: request.connection,
       sql: request.sql,
+      params: request.params ?? null,
     };
   }
 
@@ -49,7 +51,11 @@ export class SqlConnector {
     }
 
     const now = options.now ?? (() => Date.now());
-    const table = await this.querySql(request.connection, request.sql, { signal: options.signal, credentials: options.credentials });
+    const table = await this.querySql(request.connection, request.sql, {
+      params: request.params,
+      signal: options.signal,
+      credentials: options.credentials,
+    });
 
     return {
       table,
@@ -63,4 +69,3 @@ export class SqlConnector {
     };
   }
 }
-

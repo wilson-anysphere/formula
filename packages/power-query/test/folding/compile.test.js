@@ -36,6 +36,29 @@ test("compile: folds selectColumns/filterRows/groupBy into a parameterized SQL p
   });
 });
 
+test("compile: LIKE predicates escape wildcard characters + use ESCAPE clause", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_like",
+    name: "Like",
+    source: { type: "database", connection: {}, query: "SELECT * FROM items" },
+    steps: [
+      {
+        id: "s1",
+        name: "Filter",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "Name", operator: "contains", value: "50%_!\\test" } },
+      },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.deepEqual(plan, {
+    type: "sql",
+    sql: 'SELECT * FROM (SELECT * FROM items) AS t WHERE (LOWER(t."Name") LIKE LOWER(?) ESCAPE \'!\')',
+    params: ["%50!%!_!!\\test%"],
+  });
+});
+
 test("compile: folds renameColumn when output columns are known", () => {
   const folding = new QueryFoldingEngine();
   const query = {

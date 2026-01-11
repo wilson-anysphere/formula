@@ -23,6 +23,19 @@ function valueToString(value) {
 }
 
 /**
+ * Escape user text for a `LIKE` pattern that uses `ESCAPE '!'`.
+ *
+ * We intentionally avoid using backslash as the escape character because SQL
+ * string literal escaping semantics differ by dialect (e.g. Postgres vs MySQL).
+ *
+ * @param {string} value
+ * @returns {string}
+ */
+function escapeLikePattern(value) {
+  return value.replaceAll("!", "!!").replaceAll("%", "!%").replaceAll("_", "!_");
+}
+
+/**
  * @param {unknown} a
  * @param {unknown} b
  * @returns {boolean}
@@ -187,19 +200,19 @@ export function predicateToSql(predicate, options = {}) {
           case "lessThanOrEqual":
             return `(${colRef} <= ${param(node.value ?? null)})`;
           case "contains": {
-            const pattern = `%${valueToString(node.value).replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)})`;
-            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}))`;
+            const pattern = `%${escapeLikePattern(valueToString(node.value))}%`;
+            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)} ESCAPE '!')`;
+            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}) ESCAPE '!')`;
           }
           case "startsWith": {
-            const pattern = `${valueToString(node.value).replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)})`;
-            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}))`;
+            const pattern = `${escapeLikePattern(valueToString(node.value))}%`;
+            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)} ESCAPE '!')`;
+            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}) ESCAPE '!')`;
           }
           case "endsWith": {
-            const pattern = `%${valueToString(node.value).replaceAll("%", "\\%").replaceAll("_", "\\_")}`;
-            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)})`;
-            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}))`;
+            const pattern = `%${escapeLikePattern(valueToString(node.value))}`;
+            if (caseSensitive) return `(${colRef} LIKE ${param(pattern)} ESCAPE '!')`;
+            return `(LOWER(${colRef}) LIKE LOWER(${param(pattern)}) ESCAPE '!')`;
           }
           default: {
             /** @type {never} */

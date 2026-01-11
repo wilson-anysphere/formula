@@ -87,14 +87,14 @@ test("SqlConnector: forwards credentials + signal to adapter", async () => {
   const controller = new AbortController();
   const credentials = { user: "alice" };
   const { table, meta } = await connector.execute(
-    { connection: { id: "db1" }, sql: "SELECT 1 AS n" },
+    { connection: { id: "db1" }, sql: "SELECT 1 AS n", params: [1, "x"] },
     { signal: controller.signal, credentials },
   );
 
   assert.equal(table.rows.length, 1);
+  assert.deepEqual(observedOptions.params, [1, "x"]);
   assert.equal(observedOptions.credentials, credentials);
   assert.equal(observedOptions.signal, controller.signal);
   assert.equal(meta.provenance.kind, "sql");
   assert.equal(meta.provenance.sql, "SELECT 1 AS n");
 });
-
