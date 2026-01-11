@@ -248,10 +248,10 @@ This document tracks every Excel feature and our implementation status. Features
 | Function | Status | Notes |
 |----------|--------|-------|
 | AVEDEV | ⬜ | |
-| AVERAGE | ⬜ | P0 |
+| AVERAGE | ✅ | P0 |
 | AVERAGEA | ⬜ | |
-| AVERAGEIF | ⬜ | P0 |
-| AVERAGEIFS | ⬜ | P0 |
+| AVERAGEIF | ✅ | P0 |
+| AVERAGEIFS | ✅ | P0 |
 | BETA.DIST | ⬜ | |
 | BETA.INV | ⬜ | |
 | BINOM.DIST | ⬜ | |
@@ -265,11 +265,11 @@ This document tracks every Excel feature and our implementation status. Features
 | CONFIDENCE.NORM | ⬜ | |
 | CONFIDENCE.T | ⬜ | |
 | CORREL | ✅ | |
-| COUNT | ⬜ | P0 |
-| COUNTA | ⬜ | P0 |
-| COUNTBLANK | ⬜ | P0 |
-| COUNTIF | ⬜ | P0 |
-| COUNTIFS | ⬜ | P0 |
+| COUNT | ✅ | P0 |
+| COUNTA | ✅ | P0 |
+| COUNTBLANK | ✅ | P0 |
+| COUNTIF | ✅ | P0 |
+| COUNTIFS | ✅ | P0 |
 | COVARIANCE.P | ✅ | |
 | COVARIANCE.S | ✅ | |
 | DEVSQ | ⬜ | |
@@ -305,11 +305,11 @@ This document tracks every Excel feature and our implementation status. Features
 | LOGEST | ⬜ | Array function |
 | LOGNORM.DIST | ⬜ | |
 | LOGNORM.INV | ⬜ | |
-| MAX | ⬜ | P0 |
+| MAX | ✅ | P0 |
 | MAXA | ⬜ | |
 | MAXIFS | ⬜ | P0 |
 | MEDIAN | ✅ | P0 |
-| MIN | ⬜ | P0 |
+| MIN | ✅ | P0 |
 | MINA | ⬜ | |
 | MINIFS | ⬜ | P0 |
 | MODE.MULT | ✅ | Array function |
