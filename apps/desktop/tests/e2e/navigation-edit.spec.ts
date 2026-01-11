@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+}
+
 test.describe("grid keyboard navigation + in-place editing", () => {
   test("arrow navigation updates active cell", async ({ page }) => {
     await page.goto("/");
@@ -30,6 +34,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
 
     await page.keyboard.type("ello");
     await page.keyboard.press("Enter");
+    await waitForIdle(page);
 
     await expect(page.getByTestId("active-cell")).toHaveText("A2");
     const a1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
@@ -64,6 +69,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
 
     await editor.fill("Hello");
     await page.keyboard.press("Enter");
+    await waitForIdle(page);
 
     // Commit moves down.
     await expect(page.getByTestId("active-cell")).toHaveText("A2");
@@ -93,6 +99,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     const recalcBeforeDelete = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
     await page.keyboard.press("Delete");
+    await waitForIdle(page);
     const a1Cleared = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1Cleared).toBe("");
     const recalcAfterDelete = await page.evaluate(() => (window as any).__formulaApp.getRecalcCount());
@@ -105,6 +112,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
 
     // Clear any seeded value so undo returns to an empty cell.
     await page.keyboard.press("Delete");
+    await waitForIdle(page);
 
     // Create a dependent formula in B1 so we can verify recomputation after undo/redo.
     await page.keyboard.press("ArrowRight");
@@ -114,6 +122,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     await expect(editor).toBeVisible();
     await editor.fill("=A1");
     await page.keyboard.press("Enter"); // commit, moves to B2
+    await waitForIdle(page);
 
     // Edit A1.
     await page.keyboard.press("ArrowUp"); // back to B1
@@ -122,16 +131,19 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     await expect(editor).toBeVisible();
     await editor.fill("Hello");
     await page.keyboard.press("Enter");
+    await waitForIdle(page);
 
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
 
     await page.keyboard.press(`${modifier}+Z`);
+    await waitForIdle(page);
     const a1AfterUndo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1AfterUndo).toBe("");
     const b1AfterUndo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
     expect(b1AfterUndo).toBe("");
 
     await page.keyboard.press(`${modifier}+Shift+Z`);
+    await waitForIdle(page);
     const a1AfterRedo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1AfterRedo).toBe("Hello");
     const b1AfterRedo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
@@ -139,12 +151,14 @@ test.describe("grid keyboard navigation + in-place editing", () => {
 
     // Redo should also work via Ctrl/Cmd+Y.
     await page.keyboard.press(`${modifier}+Z`);
+    await waitForIdle(page);
     const a1AfterUndo2 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1AfterUndo2).toBe("");
     const b1AfterUndo2 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
     expect(b1AfterUndo2).toBe("");
 
     await page.keyboard.press(`${modifier}+Y`);
+    await waitForIdle(page);
     const a1AfterRedoY = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1AfterRedoY).toBe("Hello");
     const b1AfterRedoY = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
@@ -153,15 +167,55 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     // Undo/redo should still work even if the grid is not focused (e.g. after clicking a toolbar button).
     await page.getByTestId("split-vertical").click();
     await page.keyboard.press(`${modifier}+Z`);
+    await waitForIdle(page);
     const a1AfterUndoFromToolbar = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1AfterUndoFromToolbar).toBe("");
     const b1AfterUndoFromToolbar = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
     expect(b1AfterUndoFromToolbar).toBe("");
 
     await page.keyboard.press(`${modifier}+Shift+Z`);
+    await waitForIdle(page);
     const a1AfterRedoFromToolbar = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1AfterRedoFromToolbar).toBe("Hello");
     const b1AfterRedoFromToolbar = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"));
     expect(b1AfterRedoFromToolbar).toBe("Hello");
+  });
+
+  test("Ctrl/Cmd+Z does not steal undo while editing a cell", async ({ page }) => {
+    await page.goto("/");
+    await page.click("#grid", { position: { x: 5, y: 5 } });
+
+    // Clear any seeded value.
+    await page.keyboard.press("Delete");
+    await waitForIdle(page);
+
+    // Commit A1 = Hello.
+    await page.keyboard.press("F2");
+    const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("Hello");
+    await page.keyboard.press("Enter");
+    await waitForIdle(page);
+
+    await page.keyboard.press("ArrowUp"); // back to A1
+
+    // Start editing and append a character.
+    await page.keyboard.press("F2");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("X");
+    await expect(editor).toHaveValue("HelloX");
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${modifier}+Z`);
+
+    // Should undo inside the textarea (native undo), not the spreadsheet history.
+    await expect(editor).toHaveValue("Hello");
+    const a1AfterEditorUndo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1AfterEditorUndo).toBe("Hello");
+
+    await page.keyboard.press("Escape");
+    await waitForIdle(page);
+    const a1Final = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1Final).toBe("Hello");
   });
 });

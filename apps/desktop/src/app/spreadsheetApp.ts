@@ -554,7 +554,8 @@ export class SpreadsheetApp {
   }
 
   whenIdle(): Promise<void> {
-    return this.idle.whenIdle();
+    const wasm = this.wasmSyncPromise;
+    return Promise.all([this.idle.whenIdle(), wasm.catch(() => {})]).then(() => {});
   }
 
   getRecalcCount(): number {
