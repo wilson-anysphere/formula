@@ -4,6 +4,23 @@ use uuid::Uuid;
 
 pub use formula_model::CellValue;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImportModelWorkbookOptions {
+    /// Workbook name stored in the SQLite `workbooks` table.
+    pub name: String,
+    /// Optional application-specific metadata stored in the SQLite `workbooks.metadata` column.
+    pub metadata: Option<Value>,
+}
+
+impl ImportModelWorkbookOptions {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            metadata: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum SheetVisibility {
@@ -121,7 +138,7 @@ pub struct NamedRange {
     pub reference: String,
 }
 
-fn canonical_json(value: &Value) -> String {
+pub(crate) fn canonical_json(value: &Value) -> String {
     // `serde_json::Value` has no canonical serialization by default because
     // object key order is preserved. For style deduplication we want stable
     // strings, so we sort object keys recursively.

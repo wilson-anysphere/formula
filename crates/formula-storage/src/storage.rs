@@ -4,11 +4,14 @@ use crate::encryption::{
     KeyProvider,
 };
 use crate::types::{
-    CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, SheetVisibility, Style, WorkbookMeta,
+    canonical_json, CellData, CellSnapshot, CellValue, ImportModelWorkbookOptions, NamedRange,
+    SheetMeta, SheetVisibility, Style as StorageStyle, WorkbookMeta,
 };
 use formula_model::{validate_sheet_name, ErrorValue, SheetNameError};
 use rusqlite::{params, Connection, DatabaseName, OpenFlags, OptionalExtension, Transaction};
+use serde::de::DeserializeOwned;
 use serde_json::json;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -275,6 +278,316 @@ impl Storage {
             .optional()?;
 
         row.ok_or(StorageError::WorkbookNotFound(id))
+    }
+
+    pub fn import_model_workbook(
+        &self,
+        workbook: &formula_model::Workbook,
+        opts: ImportModelWorkbookOptions,
+    ) -> Result<WorkbookMeta> {
+        let workbook_meta = WorkbookMeta {
+            id: Uuid::new_v4(),
+            name: opts.name,
+            metadata: opts.metadata,
+        };
+
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+
+        tx.execute(
+            r#"
+            INSERT INTO workbooks (
+              id,
+              name,
+              metadata,
+              model_schema_version,
+              model_workbook_id,
+              date_system,
+              calc_settings
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+            params![
+                workbook_meta.id.to_string(),
+                &workbook_meta.name,
+                workbook_meta.metadata.clone(),
+                workbook.schema_version as i64,
+                workbook.id as i64,
+                date_system_to_str(workbook.date_system),
+                serde_json::to_value(&workbook.calc_settings)?
+            ],
+        )?;
+
+        // Insert worksheets in the order they appear in the model workbook.
+        let mut seen_names: Vec<String> = Vec::with_capacity(workbook.sheets.len());
+        let mut model_sheet_to_storage: HashMap<u32, Uuid> = HashMap::new();
+        for (position, sheet) in workbook.sheets.iter().enumerate() {
+            validate_sheet_name(&sheet.name).map_err(map_sheet_name_error)?;
+            if seen_names
+                .iter()
+                .any(|existing| sheet_name_eq_case_insensitive(existing, &sheet.name))
+            {
+                return Err(StorageError::DuplicateSheetName(sheet.name.clone()));
+            }
+            seen_names.push(sheet.name.clone());
+
+            let storage_sheet_id = Uuid::new_v4();
+            model_sheet_to_storage.insert(sheet.id, storage_sheet_id);
+
+            let visibility = model_sheet_visibility_to_storage(sheet.visibility);
+            let tab_color_fast = sheet.tab_color.as_ref().and_then(|c| c.rgb.clone());
+            let tab_color_json = sheet
+                .tab_color
+                .as_ref()
+                .map(|c| serde_json::to_value(c))
+                .transpose()?;
+
+            tx.execute(
+                r#"
+                INSERT INTO sheets (
+                  id,
+                  workbook_id,
+                  name,
+                  position,
+                  visibility,
+                  tab_color,
+                  tab_color_json,
+                  xlsx_sheet_id,
+                  xlsx_rel_id,
+                  frozen_rows,
+                  frozen_cols,
+                  zoom,
+                  metadata,
+                  model_sheet_id
+                ) VALUES (
+                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
+                )
+                "#,
+                params![
+                    storage_sheet_id.to_string(),
+                    workbook_meta.id.to_string(),
+                    &sheet.name,
+                    position as i64,
+                    visibility.as_str(),
+                    tab_color_fast,
+                    tab_color_json,
+                    sheet.xlsx_sheet_id.map(|v| v as i64),
+                    sheet.xlsx_rel_id.clone(),
+                    sheet.frozen_rows as i64,
+                    sheet.frozen_cols as i64,
+                    sheet.zoom as f64,
+                    Option::<serde_json::Value>::None,
+                    sheet.id as i64
+                ],
+            )?;
+        }
+
+        // Persist styles (deduplicated globally), and preserve model style indices per workbook.
+        let mut model_style_to_storage: Vec<Option<i64>> =
+            vec![None; workbook.styles.styles.len().max(1)];
+        for (style_index, style) in workbook.styles.styles.iter().enumerate().skip(1) {
+            let storage_style_id = get_or_insert_model_style_tx(&tx, style)?;
+            model_style_to_storage[style_index] = Some(storage_style_id);
+            tx.execute(
+                r#"
+                INSERT INTO workbook_styles (workbook_id, style_index, style_id)
+                VALUES (?1, ?2, ?3)
+                "#,
+                params![
+                    workbook_meta.id.to_string(),
+                    style_index as i64,
+                    storage_style_id
+                ],
+            )?;
+        }
+
+        // Stream cell inserts without building an intermediate change list.
+        {
+            let mut stmt = tx.prepare(
+                r#"
+                INSERT INTO cells (
+                  sheet_id,
+                  row,
+                  col,
+                  value_type,
+                  value_number,
+                  value_string,
+                  value_json,
+                  formula,
+                  style_id
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                "#,
+            )?;
+
+            for sheet in &workbook.sheets {
+                let Some(storage_sheet_id) = model_sheet_to_storage.get(&sheet.id) else {
+                    continue;
+                };
+                for (cell_ref, cell) in sheet.iter_cells() {
+                    if cell.is_truly_empty() {
+                        continue;
+                    }
+
+                    let storage_style_id = model_style_to_storage
+                        .get(cell.style_id as usize)
+                        .copied()
+                        .flatten();
+
+                    let value_json = serde_json::to_string(&cell.value)?;
+                    let (value_type, value_number, value_string) =
+                        cell_value_fast_path(&cell.value);
+
+                    stmt.execute(params![
+                        storage_sheet_id.to_string(),
+                        cell_ref.row as i64,
+                        cell_ref.col as i64,
+                        value_type,
+                        value_number,
+                        value_string,
+                        value_json,
+                        cell.formula.as_deref(),
+                        storage_style_id
+                    ])?;
+                }
+            }
+        }
+
+        tx.commit()?;
+        Ok(workbook_meta)
+    }
+
+    pub fn export_model_workbook(&self, workbook_id: Uuid) -> Result<formula_model::Workbook> {
+        let conn = self.conn.lock().expect("storage mutex poisoned");
+
+        let row = conn
+            .query_row(
+                r#"
+                SELECT model_schema_version, model_workbook_id, date_system, calc_settings
+                FROM workbooks
+                WHERE id = ?1
+                "#,
+                params![workbook_id.to_string()],
+                |r| {
+                    Ok((
+                        r.get::<_, Option<i64>>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, Option<serde_json::Value>>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        let Some((model_schema_version, model_workbook_id, date_system, calc_settings)) = row
+        else {
+            return Err(StorageError::WorkbookNotFound(workbook_id));
+        };
+
+        let (styles, storage_style_to_model) = build_model_style_table(&conn, workbook_id)?;
+
+        let mut model_workbook = formula_model::Workbook::new();
+        if let Some(schema_version) = model_schema_version {
+            model_workbook.schema_version = schema_version as u32;
+        }
+        if let Some(id) = model_workbook_id {
+            model_workbook.id = id as u32;
+        }
+        if let Some(date_system) = date_system {
+            model_workbook.date_system = parse_date_system(&date_system)?;
+        }
+        if let Some(calc_settings) = calc_settings {
+            model_workbook.calc_settings = serde_json::from_value(calc_settings)?;
+        }
+        model_workbook.styles = styles;
+
+        // Allocate deterministic worksheet ids for sheets that predate model import.
+        let mut used_sheet_ids: HashSet<u32> = HashSet::new();
+        let max_model_sheet_id: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(model_sheet_id), 0) FROM sheets WHERE workbook_id = ?1",
+            params![workbook_id.to_string()],
+            |r| r.get(0),
+        )?;
+
+        let mut sheets_stmt = conn.prepare(
+            r#"
+            SELECT
+              id,
+              name,
+              position,
+              visibility,
+              tab_color,
+              tab_color_json,
+              xlsx_sheet_id,
+              xlsx_rel_id,
+              frozen_rows,
+              frozen_cols,
+              zoom,
+              model_sheet_id
+            FROM sheets
+            WHERE workbook_id = ?1
+            ORDER BY position
+            "#,
+        )?;
+        let mut sheet_rows = sheets_stmt.query(params![workbook_id.to_string()])?;
+
+        let mut worksheets: Vec<formula_model::Worksheet> = Vec::new();
+        let mut next_generated_sheet_id: u32 = (max_model_sheet_id.max(0) as u32).wrapping_add(1);
+
+        while let Some(row) = sheet_rows.next()? {
+            let storage_sheet_id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            let visibility_raw: String = row.get(3)?;
+            let tab_color_fast: Option<String> = row.get(4)?;
+            let tab_color_json: Option<serde_json::Value> = row.get(5)?;
+            let xlsx_sheet_id: Option<i64> = row.get(6)?;
+            let xlsx_rel_id: Option<String> = row.get(7)?;
+            let frozen_rows: i64 = row.get(8)?;
+            let frozen_cols: i64 = row.get(9)?;
+            let zoom: f64 = row.get(10)?;
+            let model_sheet_id: Option<i64> = row.get(11)?;
+
+            let sheet_id = match model_sheet_id.map(|id| id.max(0) as u32) {
+                Some(explicit) if !used_sheet_ids.contains(&explicit) => explicit,
+                _ => {
+                    while used_sheet_ids.contains(&next_generated_sheet_id) {
+                        next_generated_sheet_id = next_generated_sheet_id.wrapping_add(1);
+                    }
+                    let out = next_generated_sheet_id;
+                    next_generated_sheet_id = next_generated_sheet_id.wrapping_add(1);
+                    out
+                }
+            };
+            used_sheet_ids.insert(sheet_id);
+
+            let mut sheet = formula_model::Worksheet::new(sheet_id, name.clone());
+            sheet.visibility = storage_sheet_visibility_to_model(&visibility_raw);
+            sheet.xlsx_sheet_id = xlsx_sheet_id.map(|v| v as u32);
+            sheet.xlsx_rel_id = xlsx_rel_id;
+            sheet.frozen_rows = frozen_rows.max(0) as u32;
+            sheet.frozen_cols = frozen_cols.max(0) as u32;
+            sheet.zoom = zoom as f32;
+            sheet.view.pane.frozen_rows = sheet.frozen_rows;
+            sheet.view.pane.frozen_cols = sheet.frozen_cols;
+            sheet.view.zoom = sheet.zoom;
+
+            sheet.tab_color = if let Some(raw) = tab_color_json {
+                Some(serde_json::from_value(raw)?)
+            } else {
+                tab_color_fast.map(formula_model::TabColor::rgb)
+            };
+
+            stream_cells_into_model_sheet(
+                &conn,
+                &storage_sheet_id,
+                &storage_style_to_model,
+                &mut sheet,
+            )?;
+
+            worksheets.push(sheet);
+        }
+
+        model_workbook.sheets = worksheets;
+        model_workbook.recompute_runtime_state();
+        Ok(model_workbook)
     }
 
     pub fn create_sheet(
@@ -734,7 +1047,7 @@ impl Storage {
         Ok(())
     }
 
-    pub fn get_or_insert_style(&self, style: &Style) -> Result<i64> {
+    pub fn get_or_insert_style(&self, style: &StorageStyle) -> Result<i64> {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
         let id = get_or_insert_style_tx(&tx, style)?;
@@ -990,25 +1303,21 @@ fn apply_one_change(tx: &Transaction<'_>, change: &CellChange) -> Result<()> {
     };
 
     let formula = change.data.formula.clone();
-    let (value_type, value_number, value_string, value_json) = match &change.data.value {
-        CellValue::Empty => (None, None, None, None),
-        CellValue::Number(n) => (Some("number".to_string()), Some(*n), None, None),
-        CellValue::String(s) => (Some("string".to_string()), None, Some(s.to_string()), None),
+    // `cells.value_json` is the canonical representation for all cell values
+    // (including scalar types), while the legacy scalar columns are kept as an
+    // optional fast path.
+    let value_json = Some(serde_json::to_string(&change.data.value)?);
+    let (value_type, value_number, value_string) = match &change.data.value {
+        CellValue::Empty => (None, None, None),
+        CellValue::Number(n) => (Some("number".to_string()), Some(*n), None),
+        CellValue::String(s) => (Some("string".to_string()), None, Some(s.to_string())),
         CellValue::Boolean(b) => (
             Some("boolean".to_string()),
             Some(if *b { 1.0 } else { 0.0 }),
             None,
-            None,
         ),
-        CellValue::Error(err) => (
-            Some("error".to_string()),
-            None,
-            Some(err.as_str().to_string()),
-            None,
-        ),
-        value @ (CellValue::RichText(_) | CellValue::Array(_) | CellValue::Spill(_)) => {
-            (None, None, None, Some(serde_json::to_string(value)?))
-        }
+        CellValue::Error(err) => (Some("error".to_string()), None, Some(err.as_str().to_string())),
+        CellValue::RichText(_) | CellValue::Array(_) | CellValue::Spill(_) => (None, None, None),
     };
 
     tx.execute(
@@ -1130,7 +1439,7 @@ fn touch_workbook_modified_at_by_workbook_id(
     Ok(())
 }
 
-fn get_or_insert_style_tx(tx: &Transaction<'_>, style: &Style) -> Result<i64> {
+fn get_or_insert_style_tx(tx: &Transaction<'_>, style: &StorageStyle) -> Result<i64> {
     let alignment = style.canonical_alignment();
     let protection = style.canonical_protection();
 
@@ -1219,6 +1528,286 @@ fn load_sqlite_bytes_into_connection(dst: &mut Connection, sqlite_bytes: &[u8]) 
     Ok(())
 }
 
+fn date_system_to_str(value: formula_model::DateSystem) -> &'static str {
+    match value {
+        formula_model::DateSystem::Excel1900 => "excel1900",
+        formula_model::DateSystem::Excel1904 => "excel1904",
+    }
+}
+
+fn parse_date_system(value: &str) -> Result<formula_model::DateSystem> {
+    match value {
+        "excel1900" => Ok(formula_model::DateSystem::Excel1900),
+        "excel1904" => Ok(formula_model::DateSystem::Excel1904),
+        other => Ok(serde_json::from_str::<formula_model::DateSystem>(&format!("\"{other}\""))?),
+    }
+}
+
+fn model_sheet_visibility_to_storage(value: formula_model::SheetVisibility) -> SheetVisibility {
+    match value {
+        formula_model::SheetVisibility::Visible => SheetVisibility::Visible,
+        formula_model::SheetVisibility::Hidden => SheetVisibility::Hidden,
+        formula_model::SheetVisibility::VeryHidden => SheetVisibility::VeryHidden,
+    }
+}
+
+fn storage_sheet_visibility_to_model(value: &str) -> formula_model::SheetVisibility {
+    match value {
+        "hidden" => formula_model::SheetVisibility::Hidden,
+        "veryHidden" => formula_model::SheetVisibility::VeryHidden,
+        _ => formula_model::SheetVisibility::Visible,
+    }
+}
+
+fn cell_value_fast_path(value: &CellValue) -> (Option<String>, Option<f64>, Option<String>) {
+    match value {
+        CellValue::Empty => (None, None, None),
+        CellValue::Number(n) => (Some("number".to_string()), Some(*n), None),
+        CellValue::String(s) => (Some("string".to_string()), None, Some(s.to_string())),
+        CellValue::Boolean(b) => (
+            Some("boolean".to_string()),
+            Some(if *b { 1.0 } else { 0.0 }),
+            None,
+        ),
+        CellValue::Error(err) => (Some("error".to_string()), None, Some(err.as_str().to_string())),
+        CellValue::RichText(_) | CellValue::Array(_) | CellValue::Spill(_) => (None, None, None),
+    }
+}
+
+fn get_or_insert_style_component_tx(
+    tx: &Transaction<'_>,
+    table: &str,
+    data: &serde_json::Value,
+) -> Result<i64> {
+    let key = canonical_json(data);
+    tx.execute(
+        &format!("INSERT OR IGNORE INTO {table} (key, data) VALUES (?1, ?2)"),
+        params![key, data],
+    )?;
+    let id: i64 = tx.query_row(
+        &format!("SELECT id FROM {table} WHERE key = ?1 LIMIT 1"),
+        params![key],
+        |r| r.get(0),
+    )?;
+    Ok(id)
+}
+
+fn get_or_insert_font_tx(tx: &Transaction<'_>, font: &formula_model::Font) -> Result<i64> {
+    let data = serde_json::to_value(font)?;
+    get_or_insert_style_component_tx(tx, "fonts", &data)
+}
+
+fn get_or_insert_fill_tx(tx: &Transaction<'_>, fill: &formula_model::Fill) -> Result<i64> {
+    let data = serde_json::to_value(fill)?;
+    get_or_insert_style_component_tx(tx, "fills", &data)
+}
+
+fn get_or_insert_border_tx(tx: &Transaction<'_>, border: &formula_model::Border) -> Result<i64> {
+    let data = serde_json::to_value(border)?;
+    get_or_insert_style_component_tx(tx, "borders", &data)
+}
+
+fn get_or_insert_model_style_tx(tx: &Transaction<'_>, style: &formula_model::Style) -> Result<i64> {
+    let font_id = match style.font.as_ref() {
+        Some(font) => Some(get_or_insert_font_tx(tx, font)?),
+        None => None,
+    };
+    let fill_id = match style.fill.as_ref() {
+        Some(fill) => Some(get_or_insert_fill_tx(tx, fill)?),
+        None => None,
+    };
+    let border_id = match style.border.as_ref() {
+        Some(border) => Some(get_or_insert_border_tx(tx, border)?),
+        None => None,
+    };
+
+    let alignment = style
+        .alignment
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()?;
+    let protection = style
+        .protection
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()?;
+
+    let stored = StorageStyle {
+        font_id,
+        fill_id,
+        border_id,
+        number_format: style.number_format.clone(),
+        alignment,
+        protection,
+    };
+
+    get_or_insert_style_tx(tx, &stored)
+}
+
+fn load_style_component<T: DeserializeOwned>(
+    conn: &Connection,
+    table: &str,
+    id: i64,
+) -> Result<T> {
+    let data: serde_json::Value = conn.query_row(
+        &format!("SELECT data FROM {table} WHERE id = ?1"),
+        params![id],
+        |r| r.get(0),
+    )?;
+    Ok(serde_json::from_value(data)?)
+}
+
+fn load_model_style(conn: &Connection, style_id: i64) -> Result<formula_model::Style> {
+    let (font_id, fill_id, border_id, number_format, alignment, protection): (
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn.query_row(
+        r#"
+        SELECT font_id, fill_id, border_id, number_format, alignment, protection
+        FROM styles
+        WHERE id = ?1
+        "#,
+        params![style_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+    )?;
+
+    let font = font_id.and_then(|id| load_style_component::<formula_model::Font>(conn, "fonts", id).ok());
+    let fill = fill_id.and_then(|id| load_style_component::<formula_model::Fill>(conn, "fills", id).ok());
+    let border =
+        border_id.and_then(|id| load_style_component::<formula_model::Border>(conn, "borders", id).ok());
+
+    let alignment = alignment.and_then(|raw| serde_json::from_str::<formula_model::Alignment>(&raw).ok());
+    let protection =
+        protection.and_then(|raw| serde_json::from_str::<formula_model::Protection>(&raw).ok());
+
+    Ok(formula_model::Style {
+        font,
+        fill,
+        border,
+        alignment,
+        protection,
+        number_format,
+    })
+}
+
+fn build_model_style_table(
+    conn: &Connection,
+    workbook_id: Uuid,
+) -> Result<(formula_model::StyleTable, HashMap<i64, u32>)> {
+    let mut style_table = formula_model::StyleTable::new();
+    let mut storage_to_model: HashMap<i64, u32> = HashMap::new();
+
+    let mut mapping_stmt = conn.prepare(
+        r#"
+        SELECT style_index, style_id
+        FROM workbook_styles
+        WHERE workbook_id = ?1
+        ORDER BY style_index
+        "#,
+    )?;
+    let mut mapping_rows = mapping_stmt.query(params![workbook_id.to_string()])?;
+
+    let mut mapped_any = false;
+    while let Some(row) = mapping_rows.next()? {
+        mapped_any = true;
+        let style_id: i64 = row.get(1)?;
+        let style = load_model_style(conn, style_id)?;
+        let model_id = style_table.intern(style);
+        storage_to_model.insert(style_id, model_id);
+    }
+
+    if mapped_any {
+        return Ok((style_table, storage_to_model));
+    }
+
+    // Older databases (or workbooks created via the legacy APIs) do not have an explicit style
+    // table ordering. Build a minimal table from the styles referenced by cells.
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT DISTINCT c.style_id
+        FROM cells c
+        JOIN sheets s ON s.id = c.sheet_id
+        WHERE s.workbook_id = ?1
+          AND c.style_id IS NOT NULL
+        ORDER BY c.style_id
+        "#,
+    )?;
+
+    let style_ids = stmt.query_map(params![workbook_id.to_string()], |r| r.get::<_, i64>(0))?;
+    for style_id in style_ids {
+        let style_id = style_id?;
+        let style = load_model_style(conn, style_id)?;
+        let model_id = style_table.intern(style);
+        storage_to_model.insert(style_id, model_id);
+    }
+
+    Ok((style_table, storage_to_model))
+}
+
+fn stream_cells_into_model_sheet(
+    conn: &Connection,
+    sheet_id: &str,
+    style_map: &HashMap<i64, u32>,
+    sheet: &mut formula_model::Worksheet,
+) -> Result<()> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT row, col, value_type, value_number, value_string, value_json, formula, style_id
+        FROM cells
+        WHERE sheet_id = ?1
+        ORDER BY row, col
+        "#,
+    )?;
+
+    let mut rows = stmt.query(params![sheet_id])?;
+    while let Some(row) = rows.next()? {
+        let row_idx: i64 = row.get(0)?;
+        let col_idx: i64 = row.get(1)?;
+
+        if row_idx < 0
+            || row_idx > u32::MAX as i64
+            || col_idx < 0
+            || col_idx >= formula_model::EXCEL_MAX_COLS as i64
+        {
+            continue;
+        }
+
+        let snapshot = snapshot_from_row(
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+            row.get(5)?,
+            row.get(6)?,
+            row.get(7)?,
+        )?;
+
+        let style_id = snapshot
+            .style_id
+            .and_then(|id| style_map.get(&id).copied())
+            .unwrap_or(0);
+        let formula = snapshot
+            .formula
+            .as_deref()
+            .and_then(formula_model::normalize_formula_text);
+
+        let cell = formula_model::Cell {
+            value: snapshot.value,
+            formula,
+            style_id,
+        };
+
+        sheet.set_cell(
+            formula_model::CellRef::new(row_idx as u32, col_idx as u32),
+            cell,
+        );
+    }
+
+    Ok(())
+}
 fn export_connection_to_sqlite_bytes(conn: &Connection) -> Result<Vec<u8>> {
     let data = conn.serialize(DatabaseName::Main)?;
     Ok(data.to_vec())

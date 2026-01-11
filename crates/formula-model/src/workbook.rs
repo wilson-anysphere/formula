@@ -184,6 +184,49 @@ impl Workbook {
         }
     }
 
+    /// Recompute runtime-only counters and normalize view/print settings.
+    ///
+    /// This is useful for callers that construct a workbook by directly assigning
+    /// `Workbook::sheets` / `Workbook::defined_names` instead of going through the
+    /// higher-level mutation APIs (e.g. when loading from an external persistence layer).
+    pub fn recompute_runtime_state(&mut self) {
+        self.next_sheet_id = self
+            .sheets
+            .iter()
+            .map(|s| s.id)
+            .max()
+            .unwrap_or(0)
+            .wrapping_add(1);
+
+        self.next_defined_name_id = self
+            .defined_names
+            .iter()
+            .map(|n| n.id)
+            .max()
+            .unwrap_or(0)
+            .wrapping_add(1);
+
+        for sheet_settings in &mut self.print_settings.sheets {
+            if let Some(sheet) = self.sheets.iter().find(|s| {
+                crate::formula_rewrite::sheet_name_eq_case_insensitive(
+                    &s.name,
+                    &sheet_settings.sheet_name,
+                )
+            }) {
+                sheet_settings.sheet_name = sheet.name.clone();
+            }
+        }
+
+        if let Some(active) = self.view.active_sheet_id {
+            if self.sheets.iter().all(|s| s.id != active) {
+                self.view.active_sheet_id = None;
+            }
+        }
+
+        // Ensure deterministic ordering for serialization and UX.
+        self.sort_print_settings_by_sheet_order();
+    }
+
     /// Convenience helper for formatting cell values according to this workbook's
     /// date system.
     pub fn format_options(&self, locale: formula_format::Locale) -> formula_format::FormatOptions {

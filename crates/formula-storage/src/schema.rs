@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, Transaction};
 
-const LATEST_SCHEMA_VERSION: i64 = 2;
+const LATEST_SCHEMA_VERSION: i64 = 3;
 
 pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
     // Ensure foreign keys are enforced (disabled by default in SQLite).
@@ -26,6 +26,7 @@ pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
         match next {
             1 => migrate_to_v1(&tx)?,
             2 => migrate_to_v2(&tx)?,
+            3 => migrate_to_v3(&tx)?,
             _ => unreachable!("unknown schema migration target: {next}"),
         }
         tx.execute(
@@ -152,6 +153,53 @@ fn migrate_to_v2(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     // Persist full `formula-model` cell values (RichText, Array, Spill, typed errors)
     // while keeping the scalar fast-path columns for common cases.
     ensure_column(tx, "cells", "value_json", "value_json TEXT")?;
+
+    Ok(())
+}
+
+fn migrate_to_v3(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    // Workbook metadata needed to reconstruct a `formula_model::Workbook`.
+    ensure_column(
+        tx,
+        "workbooks",
+        "model_schema_version",
+        "model_schema_version INTEGER",
+    )?;
+    ensure_column(tx, "workbooks", "model_workbook_id", "model_workbook_id INTEGER")?;
+    ensure_column(tx, "workbooks", "date_system", "date_system TEXT")?;
+    ensure_column(tx, "workbooks", "calc_settings", "calc_settings JSON")?;
+
+    // Sheet metadata needed to reconstruct a `formula_model::Worksheet`.
+    ensure_column(tx, "sheets", "model_sheet_id", "model_sheet_id INTEGER")?;
+    // Preserve full XLSX tab color payload (rgb/theme/indexed/tint/auto) while keeping the
+    // legacy `tab_color` fast-path (ARGB hex string) used by existing APIs.
+    ensure_column(tx, "sheets", "tab_color_json", "tab_color_json JSON")?;
+
+    // Style component dedup keys. These tables existed in v1 as placeholders; v3
+    // upgrades them into usable round-trip storage for `formula_model::style`
+    // components.
+    ensure_column(tx, "fonts", "key", "key TEXT")?;
+    ensure_column(tx, "fills", "key", "key TEXT")?;
+    ensure_column(tx, "borders", "key", "key TEXT")?;
+
+    tx.execute_batch(
+        r#"
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_fonts_key ON fonts(key);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_fills_key ON fills(key);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_borders_key ON borders(key);
+
+        -- Preserve `formula_model::StyleTable` ordering by mapping per-workbook style indices
+        -- to global `styles` rows.
+        CREATE TABLE IF NOT EXISTS workbook_styles (
+          workbook_id TEXT NOT NULL REFERENCES workbooks(id),
+          style_index INTEGER NOT NULL,
+          style_id INTEGER NOT NULL REFERENCES styles(id),
+          PRIMARY KEY (workbook_id, style_index)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_workbook_styles_workbook ON workbook_styles(workbook_id);
+        "#,
+    )?;
 
     Ok(())
 }

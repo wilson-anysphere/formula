@@ -22,7 +22,8 @@ pub use cache::{MemoryManager, MemoryManagerConfig, SheetData};
 pub use encryption::{EncryptionError, InMemoryKeyProvider, KeyProvider, KeyProviderError, KeyRing};
 pub use storage::{Storage, StorageError};
 pub use types::{
-    CellData, CellSnapshot, CellValue, NamedRange, SheetMeta, SheetVisibility, Style, WorkbookMeta,
+    CellData, CellSnapshot, CellValue, ImportModelWorkbookOptions, NamedRange, SheetMeta,
+    SheetVisibility, Style, WorkbookMeta,
 };
 
 pub use storage::{CellChange, CellRange};
