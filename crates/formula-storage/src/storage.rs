@@ -909,6 +909,13 @@ impl Storage {
             }
         }
 
+        let max_model_sheet_id: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(model_sheet_id), 0) FROM sheets WHERE workbook_id = ?1",
+            params![&workbook_id_str],
+            |r| r.get(0),
+        )?;
+        let model_sheet_id = max_model_sheet_id.max(0).saturating_add(1);
+
         let sheet = SheetMeta {
             id: Uuid::new_v4(),
             workbook_id,
@@ -938,8 +945,9 @@ impl Storage {
               frozen_rows,
               frozen_cols,
               zoom,
-              metadata
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+              metadata,
+              model_sheet_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             "#,
             params![
                 sheet.id.to_string(),
@@ -953,7 +961,8 @@ impl Storage {
                 sheet.frozen_rows,
                 sheet.frozen_cols,
                 sheet.zoom,
-                sheet.metadata.clone()
+                sheet.metadata.clone(),
+                model_sheet_id
             ],
         )?;
 

@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, Transaction};
 
-const LATEST_SCHEMA_VERSION: i64 = 7;
+const LATEST_SCHEMA_VERSION: i64 = 8;
 
 pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
     // Ensure foreign keys are enforced (disabled by default in SQLite).
@@ -31,6 +31,7 @@ pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
             5 => migrate_to_v5(&tx)?,
             6 => migrate_to_v6(&tx)?,
             7 => migrate_to_v7(&tx)?,
+            8 => migrate_to_v8(&tx)?,
             _ => unreachable!("unknown schema migration target: {next}"),
         }
         tx.execute(
@@ -344,6 +345,52 @@ fn migrate_to_v7(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     // Optional JSON representation of `formula_model::Worksheet` metadata (excluding cells).
     // This enables round-tripping features not yet modeled in first-class columns/tables.
     ensure_column(tx, "sheets", "model_sheet_json", "model_sheet_json JSON")?;
+    Ok(())
+}
+
+fn migrate_to_v8(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    // Backfill `model_sheet_id` for sheets that were created before we started assigning stable
+    // model ids. This makes `export_model_workbook` deterministic even after sheet reordering.
+    //
+    // We allocate ids monotonically per workbook, preserving the current sheet order.
+    let mut workbook_stmt = tx.prepare("SELECT id FROM workbooks")?;
+    let workbook_ids = workbook_stmt.query_map([], |row| row.get::<_, String>(0))?;
+    for workbook_id in workbook_ids {
+        let workbook_id = workbook_id?;
+        let max_existing: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(model_sheet_id), 0) FROM sheets WHERE workbook_id = ?1",
+            params![&workbook_id],
+            |r| r.get(0),
+        )?;
+        let mut next_id = max_existing.max(0).saturating_add(1);
+
+        let mut sheet_stmt = tx.prepare(
+            r#"
+            SELECT id
+            FROM sheets
+            WHERE workbook_id = ?1 AND model_sheet_id IS NULL
+            ORDER BY COALESCE(position, 0), id
+            "#,
+        )?;
+        let sheet_ids = sheet_stmt.query_map(params![&workbook_id], |row| row.get::<_, String>(0))?;
+        for sheet_id in sheet_ids {
+            let sheet_id = sheet_id?;
+            tx.execute(
+                "UPDATE sheets SET model_sheet_id = ?1 WHERE id = ?2",
+                params![next_id, sheet_id],
+            )?;
+            next_id = next_id.saturating_add(1);
+        }
+    }
+
+    tx.execute_batch(
+        r#"
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sheets_workbook_model_sheet_id
+        ON sheets(workbook_id, model_sheet_id)
+        WHERE model_sheet_id IS NOT NULL;
+        "#,
+    )?;
+
     Ok(())
 }
 
