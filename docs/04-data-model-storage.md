@@ -507,46 +507,27 @@ CREATE TABLE change_log (
 );
 ```
 
-### Auto-Save Strategy
+### Auto-Save Strategy (Debounced Dirty-Page Flush)
 
 ```typescript
 class AutoSaveManager {
-  private pendingChanges: Change[] = [];
-  private saveTimeout: number | null = null;
-  private lastSaveTime: number = 0;
-  
   // Debounced save
   private readonly SAVE_DELAY = 1000;  // 1 second
   private readonly MAX_DELAY = 5000;   // 5 seconds max
-  
+
+  constructor(private readonly memory: MemoryManager) {}
+
   recordChange(change: Change): void {
-    this.pendingChanges.push(change);
-    
-    // Clear existing timeout
-    if (this.saveTimeout) {
-      clearTimeout(this.saveTimeout);
-    }
-    
-    // Check if we've exceeded max delay
-    const timeSinceLastSave = Date.now() - this.lastSaveTime;
-    if (timeSinceLastSave > this.MAX_DELAY) {
-      this.save();
-    } else {
-      this.saveTimeout = setTimeout(() => this.save(), this.SAVE_DELAY);
-    }
+    // Update the in-memory page cache immediately (for snappy UX).
+    this.memory.recordChange(change);
+
+    // Then debounce a flush of dirty pages to SQLite.
+    this.scheduleFlush();
   }
-  
-  private async save(): Promise<void> {
-    const changes = this.pendingChanges;
-    this.pendingChanges = [];
-    this.lastSaveTime = Date.now();
-    
-    // Batch write to SQLite
-    await this.db.transaction(async (tx) => {
-      for (const change of changes) {
-        await this.applyChange(tx, change);
-      }
-    });
+
+  private async flush(): Promise<void> {
+    // Transactional, ordered writeback of dirty pages.
+    await this.memory.flushDirtyPages();
   }
 }
 ```
@@ -656,49 +637,53 @@ class ValidationEngine {
 
 ```typescript
 class MemoryManager {
-  private readonly MAX_MEMORY_MB = 500;
-  private loadedSheets: Map<string, SheetData> = new Map();
-  private accessOrder: string[] = [];  // LRU tracking
-  
-  async getSheet(sheetId: string): Promise<SheetData> {
-    if (this.loadedSheets.has(sheetId)) {
-      // Move to end of access order (most recent)
-      this.accessOrder = this.accessOrder.filter(id => id !== sheetId);
-      this.accessOrder.push(sheetId);
-      return this.loadedSheets.get(sheetId)!;
-    }
-    
-    // Check memory before loading
-    while (this.getMemoryUsage() > this.MAX_MEMORY_MB * 0.8) {
-      this.evictOldest();
-    }
-    
-    const data = await this.loadSheetFromStorage(sheetId);
-    this.loadedSheets.set(sheetId, data);
-    this.accessOrder.push(sheetId);
-    
-    return data;
-  }
-  
-  private evictOldest(): void {
-    const oldestId = this.accessOrder.shift();
-    if (oldestId) {
-      const sheet = this.loadedSheets.get(oldestId);
-      if (sheet?.isDirty) {
-        // Must save before evicting
-        this.saveSheet(oldestId, sheet);
+  // Fixed tile size; paging works on (sheet_id, page_row, page_col) keys.
+  readonly rowsPerPage = 256;
+  readonly colsPerPage = 256;
+
+  // Byte-bounded LRU across pages (not whole sheets).
+  readonly maxMemoryBytes = 500 * 1024 * 1024;
+  readonly evictionWatermark = 0.8;
+  private readonly pages = new LruCache<PageKey, PageData>();
+
+  // Viewport-driven loading: callers request the visible range; the memory
+  // manager loads any missing pages from SQLite and returns a sparse snapshot.
+  async loadViewport(sheetId: string, viewport: CellRange): Promise<ViewportData> {
+    const keys = pageKeysForRange(sheetId, viewport, this.rowsPerPage, this.colsPerPage);
+    for (const key of keys) {
+      if (!this.pages.has(key)) {
+        const range = pageRange(key, this.rowsPerPage, this.colsPerPage);
+        const cells = await this.db.loadCellsInRange(sheetId, range);
+        this.pages.set(key, new PageData(cells));
       }
-      this.loadedSheets.delete(oldestId);
     }
+    this.evictIfNeeded();
+    return buildViewportData(viewport, this.pages);
   }
-  
-  private getMemoryUsage(): number {
-    // Estimate memory usage
-    let total = 0;
-    for (const [_, sheet] of this.loadedSheets) {
-      total += this.estimateSheetSize(sheet);
+
+  // Edits mark pages dirty; dirty pages flush on eviction and via autosave.
+  recordChange(change: Change): void {
+    const key = pageKeyForCell(change.sheetId, change.row, change.col);
+    const page = this.pages.getOrLoad(key);
+    page.applyChange(change);
+    page.dirty = true;
+  }
+
+  async flushDirtyPages(): Promise<void> {
+    // Transactional writeback, preserving edit ordering.
+    const changes = collectDirtyChangesInOrder(this.pages);
+    await this.db.transaction(async (tx) => tx.applyCellChanges(changes));
+    markPagesClean(this.pages);
+  }
+
+  private evictIfNeeded(): void {
+    while (this.estimatedUsageBytes() > this.maxMemoryBytes * this.evictionWatermark) {
+      const lru = this.pages.popLru();
+      if (lru?.dirty) {
+        // Flush before eviction to avoid losing edits.
+        this.flushDirtyPages();
+      }
     }
-    return total / (1024 * 1024);  // Convert to MB
   }
 }
 ```
