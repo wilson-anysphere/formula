@@ -1,11 +1,11 @@
 /**
  * Workbook state helpers for BranchService.
  *
- * Branching originally stored only `{ sheets: Record<sheetId, CellMap> }`.  As
- * branching expanded to include workbook metadata (sheet order/names, named
- * ranges, comments), persisted stores may still contain commits using the legacy
- * schema. These helpers provide a single normalization/migration path so old
- * histories can still be loaded.
+ * Branching originally stored only `{ sheets: Record<sheetId, CellMap> }`. As
+ * branching expanded to include full workbook metadata (sheet order/names,
+ * metadata map, named ranges, comments), persisted stores may still contain
+ * commits using the legacy schema. These helpers provide a single
+ * normalization/migration path so old histories can still be loaded.
  */
 
 /**

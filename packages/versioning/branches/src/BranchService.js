@@ -50,8 +50,8 @@ function isRecord(value) {
  * `{ sheets: Record<sheetId, CellMap> }`.
  *
  * Old clients only know about cell edits; they should not be able to accidentally
- * wipe workbook metadata (sheet names/order, namedRanges, comments) by omitting
- * those fields from commits.
+ * wipe workbook metadata (sheet names/order, metadata map, namedRanges,
+ * comments) by omitting those fields from commits.
  *
  * @param {any} value
  */

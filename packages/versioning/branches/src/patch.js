@@ -14,8 +14,9 @@ import { normalizeDocumentState } from "./state.js";
  *
  * Legacy patches (v0) used the shape `{ sheets: Record<sheetId, CellPatch> }`
  * where `sheets` meant *cell* updates. BranchService v2 reserves `sheets` for
- * workbook metadata and uses `cells` for cell updates; {@link applyPatch} still
- * accepts legacy patches for store migration.
+ * workbook metadata (sheet order/names, metadata map, named ranges, comments)
+ * and uses `cells` for cell updates; {@link applyPatch} still accepts legacy
+ * patches for store migration.
  *
  * @typedef {{
  *   schemaVersion?: 1,
