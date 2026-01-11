@@ -16,7 +16,15 @@ const FIXTURE_URL = new URL(
   import.meta.url
 );
 
-test("Parquet import writes batches into DocumentController (with header)", async () => {
+let parquetAvailable = true;
+try {
+  await import("apache-arrow");
+  await import("parquet-wasm/esm");
+} catch {
+  parquetAvailable = false;
+}
+
+test("Parquet import writes batches into DocumentController (with header)", { skip: !parquetAvailable }, async () => {
   const parquetBytes = new Uint8Array(await readFile(FIXTURE_URL));
 
   const doc = new DocumentController({ engine: new MockEngine() });
@@ -30,7 +38,7 @@ test("Parquet import writes batches into DocumentController (with header)", asyn
   assert.equal(doc.getCell("Sheet1", { row: 3, col: 3 }).value, 3.75);
 });
 
-test("Parquet import can omit header row", async () => {
+test("Parquet import can omit header row", { skip: !parquetAvailable }, async () => {
   const parquetBytes = new Uint8Array(await readFile(FIXTURE_URL));
 
   const doc = new DocumentController({ engine: new MockEngine() });
@@ -43,7 +51,7 @@ test("Parquet import can omit header row", async () => {
   assert.equal(doc.getCell("Sheet1", { row: 0, col: 1 }).value, null);
 });
 
-test("Parquet export from document range produces a readable parquet file", async () => {
+test("Parquet export from document range produces a readable parquet file", { skip: !parquetAvailable }, async () => {
   const parquetBytes = new Uint8Array(await readFile(FIXTURE_URL));
 
   const doc = new DocumentController({ engine: new MockEngine() });
@@ -66,4 +74,3 @@ test("Parquet export from document range produces a readable parquet file", asyn
   assert.equal(roundTrip.getChildAt(1).get(2), "Carla");
   assert.equal(roundTrip.getChildAt(3).get(1), 2.25);
 });
-

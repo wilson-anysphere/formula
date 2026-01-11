@@ -8,6 +8,13 @@ import { applyOperation } from "../src/steps.js";
 import { ArrowTableAdapter } from "../src/arrowTable.js";
 import { DataTable } from "../src/table.js";
 
+let arrowAvailable = true;
+try {
+  await import("apache-arrow");
+} catch {
+  arrowAvailable = false;
+}
+
 function sampleRows() {
   return [
     { Region: "East", Product: "A", Sales: 100 },
@@ -41,7 +48,7 @@ function sampleArrowTable() {
   );
 }
 
-test("Arrow backend: core steps match DataTable results", () => {
+test("Arrow backend: core steps match DataTable results", { skip: !arrowAvailable }, () => {
   const dataTable = sampleDataTable();
   const arrowTable = sampleArrowTable();
 
@@ -61,7 +68,7 @@ test("Arrow backend: core steps match DataTable results", () => {
   }
 });
 
-test("Arrow backend: changeType matches DataTable results", () => {
+test("Arrow backend: changeType matches DataTable results", { skip: !arrowAvailable }, () => {
   const dataTable = DataTable.fromGrid(
     [
       ["Value"],
@@ -84,7 +91,7 @@ test("Arrow backend: changeType matches DataTable results", () => {
   assert.deepEqual(actual, expected);
 });
 
-test("Arrow backend: changeType to date matches DataTable results", () => {
+test("Arrow backend: changeType to date matches DataTable results", { skip: !arrowAvailable }, () => {
   const dataTable = DataTable.fromGrid(
     [
       ["When"],
@@ -104,7 +111,7 @@ test("Arrow backend: changeType to date matches DataTable results", () => {
   assert.deepEqual(applyOperation(arrowTable, op).toGrid(), applyOperation(dataTable, op).toGrid());
 });
 
-test("Arrow backend: int64/BigInt values are normalized for aggregations", () => {
+test("Arrow backend: int64/BigInt values are normalized for aggregations", { skip: !arrowAvailable }, () => {
   const dataTable = DataTable.fromGrid(
     [
       ["Group", "Value"],
@@ -126,7 +133,7 @@ test("Arrow backend: int64/BigInt values are normalized for aggregations", () =>
   assert.deepEqual(applyOperation(arrowTable, op).toGrid(), applyOperation(dataTable, op).toGrid());
 });
 
-test("Arrow backend: int64 group keys do not break JSON stringification", () => {
+test("Arrow backend: int64 group keys do not break JSON stringification", { skip: !arrowAvailable }, () => {
   const dataTable = DataTable.fromGrid(
     [
       ["id", "value"],
@@ -147,7 +154,7 @@ test("Arrow backend: int64 group keys do not break JSON stringification", () => 
   assert.deepEqual(applyOperation(arrowTable, op).toGrid(), applyOperation(dataTable, op).toGrid());
 });
 
-test("QueryEngine: identical results across backends for a multi-step query", async () => {
+test("QueryEngine: identical results across backends for a multi-step query", { skip: !arrowAvailable }, async () => {
   const engine = new QueryEngine();
   const dataTable = sampleDataTable();
   const arrowTable = sampleArrowTable();

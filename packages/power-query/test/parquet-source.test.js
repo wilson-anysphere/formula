@@ -9,7 +9,15 @@ import { ArrowTableAdapter } from "../src/arrowTable.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-test("parquet query source loads into Arrow and runs transforms without materializing row arrays", async () => {
+let parquetAvailable = true;
+try {
+  await import("apache-arrow");
+  await import("parquet-wasm/esm");
+} catch {
+  parquetAvailable = false;
+}
+
+test("parquet query source loads into Arrow and runs transforms without materializing row arrays", { skip: !parquetAvailable }, async () => {
   const parquetPath = path.join(__dirname, "..", "..", "data-io", "test", "fixtures", "simple.parquet");
 
   const engine = new QueryEngine({
@@ -42,7 +50,7 @@ test("parquet query source loads into Arrow and runs transforms without material
   ]);
 });
 
-test("parquet query source supports executeQueryStreaming", async () => {
+test("parquet query source supports executeQueryStreaming", { skip: !parquetAvailable }, async () => {
   const parquetPath = path.join(__dirname, "..", "..", "data-io", "test", "fixtures", "simple.parquet");
 
   const engine = new QueryEngine({
@@ -72,4 +80,3 @@ test("parquet query source supports executeQueryStreaming", async () => {
   assert.deepEqual(grid[1], [1, "Alice"]);
   assert.deepEqual(grid[3], [3, "Carla"]);
 });
-

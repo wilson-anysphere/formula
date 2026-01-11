@@ -7,6 +7,13 @@ import { QueryEngine } from "../src/engine.js";
 import { ArrowTableAdapter } from "../src/arrowTable.js";
 import { DataTable } from "../src/table.js";
 
+let arrowAvailable = true;
+try {
+  await import("apache-arrow");
+} catch {
+  arrowAvailable = false;
+}
+
 function collectBatches(batches) {
   const grid = [];
   for (const batch of batches) {
@@ -47,7 +54,7 @@ test("executeQueryStreaming streams DataTable results in grid batches", async ()
   assert.deepEqual(streamed, expected);
 });
 
-test("executeQueryStreaming streams Arrow results using arrowTableToGridBatches", async () => {
+test("executeQueryStreaming streams Arrow results using arrowTableToGridBatches", { skip: !arrowAvailable }, async () => {
   const engine = new QueryEngine();
   const arrowTable = new ArrowTableAdapter(
     arrowTableFromColumns({
@@ -77,7 +84,7 @@ test("executeQueryStreaming streams Arrow results using arrowTableToGridBatches"
   assert.deepEqual(streamed, expected);
 });
 
-test("executeQueryStreaming uses adapter column names for Arrow headers (renameColumn)", async () => {
+test("executeQueryStreaming uses adapter column names for Arrow headers (renameColumn)", { skip: !arrowAvailable }, async () => {
   const engine = new QueryEngine();
   const arrowTable = new ArrowTableAdapter(
     arrowTableFromColumns({
@@ -108,7 +115,7 @@ test("executeQueryStreaming uses adapter column names for Arrow headers (renameC
   assert.deepEqual(grid[2], ["West", 200]);
 });
 
-test("executeQueryStreaming emits Arrow date values as Date objects", async () => {
+test("executeQueryStreaming emits Arrow date values as Date objects", { skip: !arrowAvailable }, async () => {
   const engine = new QueryEngine();
   const arrowTable = new ArrowTableAdapter(
     arrowTableFromColumns({

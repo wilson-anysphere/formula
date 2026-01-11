@@ -5,7 +5,6 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import "fake-indexeddb/auto";
 import { arrowTableFromColumns, arrowTableToIPC, arrowTableToParquet } from "../../../data-io/src/index.js";
 
 import { CacheManager } from "../../src/cache/cache.js";
@@ -21,6 +20,27 @@ import { stableStringify } from "../../src/cache/key.js";
 import { DataTable } from "../../src/table.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+let arrowAvailable = true;
+try {
+  await import("apache-arrow");
+} catch {
+  arrowAvailable = false;
+}
+
+let parquetAvailable = arrowAvailable;
+try {
+  await import("parquet-wasm/esm");
+} catch {
+  parquetAvailable = false;
+}
+
+let indexedDbAvailable = true;
+try {
+  await import("fake-indexeddb/auto");
+} catch {
+  indexedDbAvailable = false;
+}
 
 test("CacheManager: hit/miss, TTL, manual invalidation", async () => {
   let now = 0;
@@ -39,7 +59,7 @@ test("CacheManager: hit/miss, TTL, manual invalidation", async () => {
   assert.equal(await cache.get("k1"), null);
 });
 
-test("deserializeAnyTable: rejects Arrow payloads with mismatched column metadata", () => {
+test("deserializeAnyTable: rejects Arrow payloads with mismatched column metadata", { skip: !arrowAvailable }, () => {
   const table = arrowTableFromColumns({ id: [1], name: ["Alice"] });
   const bytes = arrowTableToIPC(table);
 
@@ -291,7 +311,7 @@ test("QueryEngine: corrupted cache entry is treated as a miss and refreshed", as
   assert.equal(readCount, 1, "cache hit should not re-read the source");
 });
 
-test("QueryEngine: caches Arrow-backed Parquet results and avoids re-reading the source", async () => {
+test("QueryEngine: caches Arrow-backed Parquet results and avoids re-reading the source", { skip: !parquetAvailable }, async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store });
 
@@ -330,7 +350,7 @@ test("QueryEngine: caches Arrow-backed Parquet results and avoids re-reading the
   assert.deepEqual(second.table.toGrid(), firstGrid);
 });
 
-test("QueryEngine: parquet source options are part of the cache key", async () => {
+test("QueryEngine: parquet source options are part of the cache key", { skip: !parquetAvailable }, async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store });
 
@@ -380,7 +400,7 @@ test("QueryEngine: parquet source options are part of the cache key", async () =
   assert.equal(readCount, 2);
 });
 
-test("QueryEngine: Arrow cache preserves renamed columns", async () => {
+test("QueryEngine: Arrow cache preserves renamed columns", { skip: !parquetAvailable }, async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store });
 
@@ -425,7 +445,7 @@ test("QueryEngine: Arrow cache preserves renamed columns", async () => {
   assert.deepEqual(second.table.toGrid(), first.table.toGrid());
 });
 
-test("QueryEngine: executeQueryStreaming uses cached Arrow results", async () => {
+test("QueryEngine: executeQueryStreaming uses cached Arrow results", { skip: !parquetAvailable }, async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store });
 
@@ -476,7 +496,7 @@ test("QueryEngine: executeQueryStreaming uses cached Arrow results", async () =>
   assert.deepEqual(grid2, grid1);
 });
 
-test("FileSystemCacheStore: persists Arrow cache blobs and avoids re-reading Parquet on cache hit", async () => {
+test("FileSystemCacheStore: persists Arrow cache blobs and avoids re-reading Parquet on cache hit", { skip: !parquetAvailable }, async () => {
   const cacheDir = await mkdtemp(path.join(os.tmpdir(), "pq-cache-arrow-"));
 
   try {
@@ -678,7 +698,10 @@ test("FileSystemCacheStore: DataTable cache preserves Uint8Array values", async 
   }
 });
 
-test("IndexedDBCacheStore: caches Arrow-backed Parquet results without re-reading the source", async () => {
+test(
+  "IndexedDBCacheStore: caches Arrow-backed Parquet results without re-reading the source",
+  { skip: !parquetAvailable || !indexedDbAvailable },
+  async () => {
   const dbName = `pq-cache-idb-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const store1 = new IndexedDBCacheStore({ dbName });
   const cache1 = new CacheManager({ store: store1 });
@@ -734,9 +757,10 @@ test("IndexedDBCacheStore: caches Arrow-backed Parquet results without re-readin
     req.onerror = () => reject(req.error ?? new Error("IndexedDB deleteDatabase failed"));
     req.onblocked = () => resolve(undefined);
   });
-});
+  },
+);
 
-test("QueryEngine: Arrow cache roundtrip preserves date columns", async () => {
+test("QueryEngine: Arrow cache roundtrip preserves date columns", { skip: !parquetAvailable }, async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store });
 

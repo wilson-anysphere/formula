@@ -17,7 +17,21 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-test('Parquet import -> Arrow table -> grid batches', async () => {
+let arrowAvailable = true;
+try {
+  await import('apache-arrow');
+} catch {
+  arrowAvailable = false;
+}
+
+let parquetAvailable = arrowAvailable;
+try {
+  await import('parquet-wasm/esm');
+} catch {
+  parquetAvailable = false;
+}
+
+test('Parquet import -> Arrow table -> grid batches', { skip: !parquetAvailable }, async () => {
   const parquetPath = path.join(__dirname, 'fixtures', 'simple.parquet');
   const parquetBytes = new Uint8Array(await readFile(parquetPath));
 
@@ -49,7 +63,7 @@ test('Parquet import -> Arrow table -> grid batches', async () => {
   assert.deepEqual(grid[3], [3, 'Carla', true, 3.75]);
 });
 
-test('arrowTableToGridBatches can omit header row', async () => {
+test('arrowTableToGridBatches can omit header row', { skip: !parquetAvailable }, async () => {
   const parquetPath = path.join(__dirname, 'fixtures', 'simple.parquet');
   const parquetBytes = new Uint8Array(await readFile(parquetPath));
 
@@ -69,7 +83,7 @@ test('arrowTableToGridBatches can omit header row', async () => {
   assert.deepEqual(grid[2], [3, 'Carla', true, 3.75]);
 });
 
-test('Parquet import from Blob streams and can emit grid batches', async () => {
+test('Parquet import from Blob streams and can emit grid batches', { skip: !parquetAvailable }, async () => {
   const parquetPath = path.join(__dirname, 'fixtures', 'simple.parquet');
   const parquetBytes = new Uint8Array(await readFile(parquetPath));
 
@@ -93,7 +107,7 @@ test('Parquet import from Blob streams and can emit grid batches', async () => {
   assert.deepEqual(grid[3], [3, 'Carla', true, 3.75]);
 });
 
-test('Parquet export produces a readable parquet file', async () => {
+test('Parquet export produces a readable parquet file', { skip: !parquetAvailable }, async () => {
   const parquetPath = path.join(__dirname, 'fixtures', 'simple.parquet');
   const parquetBytes = new Uint8Array(await readFile(parquetPath));
 
@@ -117,7 +131,7 @@ test('Parquet export produces a readable parquet file', async () => {
   assert.equal(tableRoundTrip.getChildAt(3).get(2), 3.75);
 });
 
-test('ArrowColumnarSheet provides a columnar backing store', async () => {
+test('ArrowColumnarSheet provides a columnar backing store', { skip: !parquetAvailable }, async () => {
   const parquetPath = path.join(__dirname, 'fixtures', 'simple.parquet');
   const parquetBytes = new Uint8Array(await readFile(parquetPath));
 
@@ -130,7 +144,7 @@ test('ArrowColumnarSheet provides a columnar backing store', async () => {
   assert.equal(sheet.getCell(3, 1), 'Carla');
 });
 
-test('Arrow IPC roundtrip preserves schema and values', () => {
+test('Arrow IPC roundtrip preserves schema and values', { skip: !arrowAvailable }, () => {
   const table = arrowTableFromColumns({
     id: [1, 2, 3],
     name: ['Alice', 'Bob', 'Carla'],
