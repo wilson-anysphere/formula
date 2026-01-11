@@ -560,8 +560,14 @@ export class ExtensionHostManager {
 
   async reloadExtension(extensionId) {
     return this._runHostOperation(async () => {
-      await this._reloadExtensionUnsafe(extensionId);
-      this._emitContributionsChanged();
+      try {
+        await this._reloadExtensionUnsafe(extensionId);
+      } finally {
+        // Reload can unload an extension before attempting to load it again. If the
+        // load step fails (e.g. integrity check), we still want the app to refresh
+        // contributed commands/panels to reflect the unload.
+        this._emitContributionsChanged();
+      }
     });
   }
 
