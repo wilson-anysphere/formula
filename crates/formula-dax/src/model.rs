@@ -1,4 +1,4 @@
-use crate::backend::{ColumnarTableBackend, InMemoryTableBackend, TableBackend};
+use crate::backend::{AggregationSpec, ColumnarTableBackend, InMemoryTableBackend, TableBackend};
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
 use crate::parser::Expr;
 use crate::value::Value;
@@ -190,6 +190,23 @@ impl TableBackend for Table {
 
     fn filter_eq(&self, idx: usize, value: &Value) -> Option<Vec<usize>> {
         self.backend().filter_eq(idx, value)
+    }
+
+    fn distinct_values_filtered(&self, idx: usize, rows: Option<&[usize]>) -> Option<Vec<Value>> {
+        self.backend().distinct_values_filtered(idx, rows)
+    }
+
+    fn group_by_aggregations(
+        &self,
+        group_by: &[usize],
+        aggs: &[AggregationSpec],
+        rows: Option<&[usize]>,
+    ) -> Option<Vec<Vec<Value>>> {
+        self.backend().group_by_aggregations(group_by, aggs, rows)
+    }
+
+    fn filter_in(&self, idx: usize, values: &[Value]) -> Option<Vec<usize>> {
+        self.backend().filter_in(idx, values)
     }
 }
 

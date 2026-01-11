@@ -858,6 +858,10 @@ impl DaxEngine {
         }
 
         let rows = resolve_table_rows(model, filter, table)?;
+        if let Some(values) = table_ref.distinct_values_filtered(idx, Some(rows.as_slice())) {
+            return Ok(values.into_iter().collect());
+        }
+
         let mut out = HashSet::new();
         for row in rows {
             let value = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
@@ -1406,6 +1410,20 @@ fn resolve_row_sets(
             if values.len() == 1 {
                 let value = values.iter().next().expect("len==1");
                 if let Some(rows) = table.filter_eq(idx, value) {
+                    let mut next = vec![false; row_count];
+                    for row in rows {
+                        if row < row_count && allowed[row] {
+                            next[row] = true;
+                        }
+                    }
+                    allowed = next;
+                    continue;
+                }
+            }
+
+            if values.len() > 1 {
+                let values_vec: Vec<Value> = values.iter().cloned().collect();
+                if let Some(rows) = table.filter_in(idx, &values_vec) {
                     let mut next = vec![false; row_count];
                     for row in rows {
                         if row < row_count && allowed[row] {

@@ -4,6 +4,22 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AggregationKind {
+    Sum,
+    Average,
+    Min,
+    Max,
+    CountRows,
+    DistinctCount,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AggregationSpec {
+    pub kind: AggregationKind,
+    pub column_idx: Option<usize>,
+}
+
 /// Storage abstraction for tables used by the DAX engine.
 ///
 /// The engine relies on this trait to:
@@ -59,6 +75,35 @@ pub trait TableBackend: fmt::Debug + Send + Sync {
 
     /// If the backend can efficiently find rows where `column == value`, return those rows.
     fn filter_eq(&self, _idx: usize, _value: &Value) -> Option<Vec<usize>> {
+        None
+    }
+
+    /// Enumerate distinct values for a column within a set of rows.
+    ///
+    /// When `rows` is `None`, the backend may assume all rows are included.
+    fn distinct_values_filtered(&self, _idx: usize, _rows: Option<&[usize]>) -> Option<Vec<Value>> {
+        None
+    }
+
+    /// Group the table by `group_by` column indices and compute aggregations for each group.
+    ///
+    /// The returned rows must contain `group_by.len()` key values followed by one value per
+    /// aggregation spec, in the same order as `aggs`.
+    ///
+    /// When `rows` is `None`, the backend may assume all rows are included.
+    fn group_by_aggregations(
+        &self,
+        _group_by: &[usize],
+        _aggs: &[AggregationSpec],
+        _rows: Option<&[usize]>,
+    ) -> Option<Vec<Vec<Value>>> {
+        None
+    }
+
+    /// If the backend can efficiently find rows where `column IN (values...)`, return those rows.
+    ///
+    /// This is useful for relationship propagation and multi-value filters.
+    fn filter_in(&self, _idx: usize, _values: &[Value]) -> Option<Vec<usize>> {
         None
     }
 }
@@ -211,6 +256,16 @@ impl ColumnarTableBackend {
             formula_columnar::Value::Percentage(v) => Value::from(v as f64),
         }
     }
+
+    fn numeric_from_columnar(value: &formula_columnar::Value) -> Option<f64> {
+        match value {
+            formula_columnar::Value::Number(n) => Some(*n),
+            formula_columnar::Value::DateTime(v)
+            | formula_columnar::Value::Currency(v)
+            | formula_columnar::Value::Percentage(v) => Some(*v as f64),
+            _ => None,
+        }
+    }
 }
 
 impl TableBackend for ColumnarTableBackend {
@@ -273,5 +328,311 @@ impl TableBackend for ColumnarTableBackend {
             Value::Text(s) => Some(self.table.scan().filter_eq_string(idx, s.as_ref())),
             _ => None,
         }
+    }
+
+    fn distinct_values_filtered(&self, idx: usize, rows: Option<&[usize]>) -> Option<Vec<Value>> {
+        use std::collections::HashSet;
+
+        let row_count = self.table.row_count();
+        if idx >= self.table.column_count() {
+            return None;
+        }
+
+        if rows.is_none() {
+            if let Some(values) = self.dictionary_values(idx) {
+                let mut out: Vec<Value> = values;
+                if self.stats_has_blank(idx).unwrap_or(false) {
+                    out.push(Value::Blank);
+                }
+                return Some(out);
+            }
+        }
+
+        let mut seen: HashSet<Value> = HashSet::new();
+        let mut out = Vec::new();
+
+        const CHUNK_ROWS: usize = 65_536;
+        let mut push_value = |value: Value| {
+            if seen.insert(value.clone()) {
+                out.push(value);
+            }
+        };
+
+        match rows {
+            None => {
+                let mut start = 0;
+                while start < row_count {
+                    let end = (start + CHUNK_ROWS).min(row_count);
+                    let range = self.table.get_range(start, end, idx, idx + 1);
+                    for v in range.columns.get(0).into_iter().flatten() {
+                        push_value(Self::dax_from_columnar(v.clone()));
+                    }
+                    start = end;
+                }
+            }
+            Some(rows) => {
+                let mut pos = 0;
+                while pos < rows.len() {
+                    let row = rows[pos];
+                    let chunk_start = (row / CHUNK_ROWS) * CHUNK_ROWS;
+                    let chunk_end = (chunk_start + CHUNK_ROWS).min(row_count);
+                    let range = self.table.get_range(chunk_start, chunk_end, idx, idx + 1);
+                    while pos < rows.len() {
+                        let row = rows[pos];
+                        if row >= chunk_end {
+                            break;
+                        }
+                        let in_chunk = row - chunk_start;
+                        if let Some(v) = range.columns.get(0).and_then(|c| c.get(in_chunk)) {
+                            push_value(Self::dax_from_columnar(v.clone()));
+                        }
+                        pos += 1;
+                    }
+                }
+            }
+        }
+
+        Some(out)
+    }
+
+    fn group_by_aggregations(
+        &self,
+        group_by: &[usize],
+        aggs: &[AggregationSpec],
+        rows: Option<&[usize]>,
+    ) -> Option<Vec<Vec<Value>>> {
+        use std::collections::HashMap;
+        use std::collections::HashSet;
+
+        let row_count = self.table.row_count();
+        if group_by.is_empty() {
+            return None;
+        }
+        if group_by
+            .iter()
+            .chain(aggs.iter().filter_map(|a| a.column_idx.as_ref()))
+            .any(|idx| *idx >= self.table.column_count())
+        {
+            return None;
+        }
+
+        #[derive(Clone)]
+        enum AggState {
+            Sum { sum: f64, count: usize },
+            Avg { sum: f64, count: usize },
+            Min { best: Option<f64> },
+            Max { best: Option<f64> },
+            CountRows { count: usize },
+            DistinctCount { set: HashSet<Value> },
+        }
+
+        impl AggState {
+            fn new(spec: &AggregationSpec) -> Option<Self> {
+                Some(match spec.kind {
+                    AggregationKind::Sum => AggState::Sum { sum: 0.0, count: 0 },
+                    AggregationKind::Average => AggState::Avg { sum: 0.0, count: 0 },
+                    AggregationKind::Min => AggState::Min { best: None },
+                    AggregationKind::Max => AggState::Max { best: None },
+                    AggregationKind::CountRows => AggState::CountRows { count: 0 },
+                    AggregationKind::DistinctCount => AggState::DistinctCount {
+                        set: HashSet::new(),
+                    },
+                })
+            }
+
+            fn update(&mut self, spec: &AggregationSpec, value: Option<&formula_columnar::Value>) {
+                match (self, spec.kind) {
+                    (AggState::CountRows { count }, AggregationKind::CountRows) => {
+                        *count += 1;
+                    }
+                    (AggState::Sum { sum, count }, AggregationKind::Sum) => {
+                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar) {
+                            *sum += v;
+                            *count += 1;
+                        }
+                    }
+                    (AggState::Avg { sum, count }, AggregationKind::Average) => {
+                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar) {
+                            *sum += v;
+                            *count += 1;
+                        }
+                    }
+                    (AggState::Min { best }, AggregationKind::Min) => {
+                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar) {
+                            *best = Some(best.map_or(v, |current| current.min(v)));
+                        }
+                    }
+                    (AggState::Max { best }, AggregationKind::Max) => {
+                        if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar) {
+                            *best = Some(best.map_or(v, |current| current.max(v)));
+                        }
+                    }
+                    (AggState::DistinctCount { set }, AggregationKind::DistinctCount) => {
+                        let Some(v) = value else {
+                            return;
+                        };
+                        set.insert(ColumnarTableBackend::dax_from_columnar(v.clone()));
+                    }
+                    _ => {}
+                }
+            }
+
+            fn finalize(self) -> Value {
+                match self {
+                    AggState::Sum { sum, count } => {
+                        if count == 0 {
+                            Value::Blank
+                        } else {
+                            Value::from(sum)
+                        }
+                    }
+                    AggState::Avg { sum, count } => {
+                        if count == 0 {
+                            Value::Blank
+                        } else {
+                            Value::from(sum / count as f64)
+                        }
+                    }
+                    AggState::Min { best } => best.map(Value::from).unwrap_or(Value::Blank),
+                    AggState::Max { best } => best.map(Value::from).unwrap_or(Value::Blank),
+                    AggState::CountRows { count } => Value::from(count as i64),
+                    AggState::DistinctCount { set } => Value::from(set.len() as i64),
+                }
+            }
+        }
+
+        let key_len = group_by.len();
+        let mut key_buf: Vec<Value> = Vec::with_capacity(key_len);
+
+        let mut states_template = Vec::with_capacity(aggs.len());
+        for spec in aggs {
+            states_template.push(AggState::new(spec)?);
+        }
+
+        let mut groups: HashMap<Vec<Value>, Vec<AggState>> = HashMap::new();
+
+        let needed_min = group_by
+            .iter()
+            .chain(aggs.iter().filter_map(|a| a.column_idx.as_ref()))
+            .copied()
+            .min()
+            .unwrap_or(0);
+        let needed_max = group_by
+            .iter()
+            .chain(aggs.iter().filter_map(|a| a.column_idx.as_ref()))
+            .copied()
+            .max()
+            .unwrap_or(0);
+        let col_start = needed_min;
+        let col_end = needed_max + 1;
+
+        const CHUNK_ROWS: usize = 65_536;
+        let mut process_row = |row_offset: usize, range: &formula_columnar::ColumnarRange| {
+            key_buf.clear();
+            for idx in group_by {
+                let col = *idx - col_start;
+                let value = range
+                    .columns
+                    .get(col)
+                    .and_then(|c| c.get(row_offset))
+                    .cloned()
+                    .unwrap_or(formula_columnar::Value::Null);
+                key_buf.push(Self::dax_from_columnar(value));
+            }
+
+            if let Some(existing) = groups.get_mut(key_buf.as_slice()) {
+                for (state, spec) in existing.iter_mut().zip(aggs) {
+                    let value = spec.column_idx.and_then(|idx| {
+                        let col = idx - col_start;
+                        range.columns.get(col).and_then(|c| c.get(row_offset))
+                    });
+                    state.update(spec, value);
+                }
+                return;
+            }
+
+            let mut states = states_template.clone();
+            for (state, spec) in states.iter_mut().zip(aggs) {
+                let value = spec.column_idx.and_then(|idx| {
+                    let col = idx - col_start;
+                    range.columns.get(col).and_then(|c| c.get(row_offset))
+                });
+                state.update(spec, value);
+            }
+            groups.insert(key_buf.clone(), states);
+        };
+
+        match rows {
+            None => {
+                let mut start = 0;
+                while start < row_count {
+                    let end = (start + CHUNK_ROWS).min(row_count);
+                    let range = self.table.get_range(start, end, col_start, col_end);
+                    for row_offset in 0..range.rows() {
+                        process_row(row_offset, &range);
+                    }
+                    start = end;
+                }
+            }
+            Some(rows) => {
+                let mut pos = 0;
+                while pos < rows.len() {
+                    let row = rows[pos];
+                    let chunk_start = (row / CHUNK_ROWS) * CHUNK_ROWS;
+                    let chunk_end = (chunk_start + CHUNK_ROWS).min(row_count);
+                    let range = self.table.get_range(chunk_start, chunk_end, col_start, col_end);
+                    while pos < rows.len() {
+                        let row = rows[pos];
+                        if row >= chunk_end {
+                            break;
+                        }
+                        process_row(row - chunk_start, &range);
+                        pos += 1;
+                    }
+                }
+            }
+        }
+
+        let mut out = Vec::with_capacity(groups.len());
+        for (key, states) in groups {
+            let mut row = key;
+            for state in states {
+                row.push(state.finalize());
+            }
+            out.push(row);
+        }
+        Some(out)
+    }
+
+    fn filter_in(&self, idx: usize, values: &[Value]) -> Option<Vec<usize>> {
+        use std::collections::HashSet;
+
+        if values.is_empty() {
+            return Some(Vec::new());
+        }
+        if idx >= self.table.column_count() {
+            return None;
+        }
+
+        let targets: HashSet<Value> = values.iter().cloned().collect();
+        let row_count = self.table.row_count();
+
+        const CHUNK_ROWS: usize = 65_536;
+        let mut out = Vec::new();
+        let mut start = 0;
+        while start < row_count {
+            let end = (start + CHUNK_ROWS).min(row_count);
+            let range = self.table.get_range(start, end, idx, idx + 1);
+            if let Some(col) = range.columns.get(0) {
+                for (offset, v) in col.iter().enumerate() {
+                    let dax_value = Self::dax_from_columnar(v.clone());
+                    if targets.contains(&dax_value) {
+                        out.push(start + offset);
+                    }
+                }
+            }
+            start = end;
+        }
+        Some(out)
     }
 }
