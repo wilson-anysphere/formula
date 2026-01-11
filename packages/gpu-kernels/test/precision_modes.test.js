@@ -5,7 +5,7 @@ import { KernelEngine } from "../src/index.js";
 
 class FakeGpuBackend {
   kind = "webgpu";
-  calls = { sum: 0, min: 0 };
+  calls = { sum: 0, min: 0, sort: 0, histogram: 0 };
   /** @type {any} */
   lastOpts = null;
 
@@ -17,12 +17,17 @@ class FakeGpuBackend {
   }
 
   diagnostics() {
-    return { kind: "webgpu", supportedKernels: { sum: true }, supportsF64: this._supportsF64, numericPrecision: "f32" };
+    return {
+      kind: "webgpu",
+      supportedKernels: { sum: true, min: true, sort: true, histogram: true },
+      supportsF64: this._supportsF64,
+      numericPrecision: "f32"
+    };
   }
 
   supportsKernelPrecision(kernel, precision) {
     if (precision === "f32") return true;
-    return kernel === "sum" || kernel === "min" ? this._supportsF64 : false;
+    return kernel === "sum" || kernel === "min" || kernel === "sort" || kernel === "histogram" ? this._supportsF64 : false;
   }
 
   dispose() {}
@@ -37,6 +42,33 @@ class FakeGpuBackend {
     this.calls.min += 1;
     this.lastOpts = opts;
     return 5;
+  }
+
+  async sort(values, opts) {
+    this.calls.sort += 1;
+    this.lastOpts = opts;
+    const out = Float64Array.from(values);
+    out.sort();
+    return out;
+  }
+
+  async histogram(values, opts, backendOpts) {
+    this.calls.histogram += 1;
+    this.lastOpts = backendOpts;
+    const { min, max, bins } = opts;
+    if (!(bins > 0)) throw new Error("histogram bins must be > 0");
+    if (!(max > min)) throw new Error("histogram max must be > min");
+    const counts = new Uint32Array(bins);
+    const invWidth = bins / (max - min);
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (Number.isNaN(v)) continue;
+      let bin = Math.floor((v - min) * invWidth);
+      if (bin < 0) bin = 0;
+      if (bin >= bins) bin = bins - 1;
+      counts[bin] += 1;
+    }
+    return counts;
   }
 }
 
@@ -202,4 +234,52 @@ test("count: always uses CPU and is exact", async () => {
   assert.equal(result, 123);
   assert.equal(engine.lastKernelBackend().count, "cpu");
   assert.equal(engine.diagnostics().lastKernelPrecision.count, "f64");
+});
+
+test("sort: never downcasts Float64Array even in fast mode", async () => {
+  const fakeGpu = new FakeGpuBackend(false);
+  const engine = new KernelEngine({
+    precision: "fast",
+    gpuBackend: fakeGpu,
+    thresholds: { sort: 0 }
+  });
+
+  const values = new Float64Array([3, 1, 2]);
+  const out = await engine.sort(values);
+  assert.deepEqual(Array.from(out), [1, 2, 3]);
+  assert.equal(fakeGpu.calls.sort, 0);
+  assert.equal(engine.lastKernelBackend().sort, "cpu");
+  assert.equal(engine.diagnostics().lastKernelPrecision.sort, "f64");
+});
+
+test("histogram: excel mode requires f64 GPU support even for Float32Array inputs", async () => {
+  const fakeGpu = new FakeGpuBackend(false);
+  const engine = new KernelEngine({
+    precision: "excel",
+    gpuBackend: fakeGpu,
+    thresholds: { histogram: 0 }
+  });
+
+  const values = new Float32Array([0.1, 0.2, 0.9]);
+  const out = await engine.histogram(values, { min: 0, max: 1, bins: 2 });
+  assert.deepEqual(Array.from(out), [2, 1]);
+  assert.equal(fakeGpu.calls.histogram, 0);
+  assert.equal(engine.lastKernelBackend().histogram, "cpu");
+});
+
+test("histogram: fast mode uses f32 precision for Float64Array inputs", async () => {
+  const fakeGpu = new FakeGpuBackend(true);
+  const engine = new KernelEngine({
+    precision: "fast",
+    gpuBackend: fakeGpu,
+    thresholds: { histogram: 0 }
+  });
+
+  const values = new Float64Array([0.1, 0.2, 0.9]);
+  const out = await engine.histogram(values, { min: 0, max: 1, bins: 2 });
+  assert.deepEqual(Array.from(out), [2, 1]);
+  assert.equal(fakeGpu.calls.histogram, 1);
+  assert.deepEqual(fakeGpu.lastOpts, { precision: "f32", allowFp32FallbackForF64: true });
+  assert.equal(engine.lastKernelBackend().histogram, "webgpu");
+  assert.equal(engine.diagnostics().lastKernelPrecision.histogram, "f32");
 });
