@@ -503,18 +503,56 @@ fn worksheets_edited<R: Read + Seek>(
             continue;
         }
 
-        let Some(original) = read_zip_entry(zip, name)? else {
-            // Treat missing original parts as edited; downstream the caller
-            // may be synthesizing a sheet.
+        let Some(equal) = zip_entry_equals(zip, name, override_bytes)? else {
+            // Treat missing original parts as edited; downstream the caller may be synthesizing a
+            // sheet.
             return Ok(true);
         };
-
-        if original != *override_bytes {
+        if !equal {
             return Ok(true);
         }
     }
 
     Ok(false)
+}
+
+fn zip_entry_equals<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    name: &str,
+    expected: &[u8],
+) -> Result<Option<bool>, ParseError> {
+    let mut entry = match zip.by_name(name) {
+        Ok(entry) => entry,
+        Err(zip::result::ZipError::FileNotFound) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+
+    if entry.size() as usize != expected.len() {
+        return Ok(Some(false));
+    }
+
+    let mut buf = [0u8; 16 * 1024];
+    let mut offset = 0usize;
+
+    loop {
+        let n = entry.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+
+        let end = offset.checked_add(n).ok_or(ParseError::UnexpectedEof)?;
+        if end > expected.len() {
+            return Ok(Some(false));
+        }
+
+        if buf[..n] != expected[offset..end] {
+            return Ok(Some(false));
+        }
+
+        offset = end;
+    }
+
+    Ok(Some(offset == expected.len()))
 }
 
 fn get_part_bytes<R: Read + Seek>(
