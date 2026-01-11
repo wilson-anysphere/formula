@@ -7,14 +7,16 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
-const defaultGlobalCargoHome = path.join(homedir(), ".cargo");
+const defaultGlobalCargoHome = path.resolve(homedir(), ".cargo");
+const envCargoHome = process.env.CARGO_HOME;
+const normalizedEnvCargoHome = envCargoHome ? path.resolve(envCargoHome) : null;
 const cargoHome =
-  !process.env.CARGO_HOME ||
+  !envCargoHome ||
   (!process.env.CI &&
     !process.env.FORMULA_ALLOW_GLOBAL_CARGO_HOME &&
-    process.env.CARGO_HOME === defaultGlobalCargoHome)
+    normalizedEnvCargoHome === defaultGlobalCargoHome)
     ? path.join(repoRoot, "target", "cargo-home-playwright")
-    : process.env.CARGO_HOME!;
+    : envCargoHome!;
 
 function stablePortFromString(input: string, { base = 4173, range = 1000 } = {}): number {
   // Deterministic port selection avoids collisions when multiple agents run Playwright tests

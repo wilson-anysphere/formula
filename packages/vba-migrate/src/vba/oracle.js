@@ -133,14 +133,16 @@ async function ensureBuilt({ repoRoot, binPath }) {
       return;
     } catch {
       // Build the oracle CLI once. Subsequent invocations will use the binary directly.
-      const defaultGlobalCargoHome = path.join(os.homedir(), ".cargo");
+      const defaultGlobalCargoHome = path.resolve(os.homedir(), ".cargo");
+      const envCargoHome = process.env.CARGO_HOME;
+      const normalizedEnvCargoHome = envCargoHome ? path.resolve(envCargoHome) : null;
       const cargoHome =
-        !process.env.CARGO_HOME ||
+        !envCargoHome ||
         (!process.env.CI &&
           !process.env.FORMULA_ALLOW_GLOBAL_CARGO_HOME &&
-          process.env.CARGO_HOME === defaultGlobalCargoHome)
+          normalizedEnvCargoHome === defaultGlobalCargoHome)
           ? path.join(repoRoot, "target", "cargo-home")
-          : process.env.CARGO_HOME;
+          : envCargoHome;
       await mkdir(cargoHome, { recursive: true });
       const baseEnv = { ...process.env, CARGO_HOME: cargoHome };
       try {

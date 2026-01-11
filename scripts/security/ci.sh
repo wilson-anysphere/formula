@@ -15,10 +15,13 @@ cd "$ROOT_DIR"
 # To explicitly keep `CARGO_HOME=$HOME/.cargo` in local runs, set
 # `FORMULA_ALLOW_GLOBAL_CARGO_HOME=1`.
 DEFAULT_GLOBAL_CARGO_HOME="${HOME:-/root}/.cargo"
+CARGO_HOME_NORM="${CARGO_HOME:-}"
+CARGO_HOME_NORM="${CARGO_HOME_NORM%/}"
+DEFAULT_GLOBAL_CARGO_HOME_NORM="${DEFAULT_GLOBAL_CARGO_HOME%/}"
 if [ -z "${CARGO_HOME:-}" ] || {
   [ -z "${CI:-}" ] &&
     [ -z "${FORMULA_ALLOW_GLOBAL_CARGO_HOME:-}" ] &&
-    [ "${CARGO_HOME}" = "${DEFAULT_GLOBAL_CARGO_HOME}" ];
+    [ "${CARGO_HOME_NORM}" = "${DEFAULT_GLOBAL_CARGO_HOME_NORM}" ];
 }; then
   export CARGO_HOME="$ROOT_DIR/target/cargo-home"
 fi

@@ -61,12 +61,14 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "../..")
 $defaultGlobalCargoHome = Join-Path ([Environment]::GetFolderPath("UserProfile")) ".cargo"
+$cargoHomeNorm = if ($env:CARGO_HOME) { $env:CARGO_HOME.TrimEnd('\', '/') } else { "" }
+$defaultGlobalCargoHomeNorm = $defaultGlobalCargoHome.TrimEnd('\', '/')
 if (
   [string]::IsNullOrWhiteSpace($env:CARGO_HOME) -or
   (
     -not $env:CI -and
     -not $env:FORMULA_ALLOW_GLOBAL_CARGO_HOME -and
-    $env:CARGO_HOME -eq $defaultGlobalCargoHome
+    $cargoHomeNorm -eq $defaultGlobalCargoHomeNorm
   )
 ) {
   $env:CARGO_HOME = Join-Path $repoRoot "target/cargo-home"

@@ -58,7 +58,7 @@ test('agent-init treats $HOME/.cargo as default and overrides it', { skip: !hasB
   const cargoHome = runBash(
     [
       'unset CI',
-      'export CARGO_HOME="$HOME/.cargo"',
+      'export CARGO_HOME="$HOME/.cargo/"',
       'export DISPLAY=:99',
       'source scripts/agent-init.sh >/dev/null',
       'printf "%s" "$CARGO_HOME"',
@@ -139,7 +139,7 @@ test(
     const cargoHome = runBash(
       [
         `export HOME="${fakeHome}"`,
-        'export CARGO_HOME="$HOME/.cargo"',
+        'export CARGO_HOME="$HOME/.cargo/"',
         'unset CI',
         'unset FORMULA_ALLOW_GLOBAL_CARGO_HOME',
         'export DISPLAY=:99',

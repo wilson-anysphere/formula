@@ -62,13 +62,15 @@ function runRustBenchmarks(): BenchmarkResult[] {
   ];
 
   const defaultGlobalCargoHome = resolve(homedir(), '.cargo');
+  const envCargoHome = process.env.CARGO_HOME;
+  const normalizedEnvCargoHome = envCargoHome ? resolve(envCargoHome) : null;
   const cargoHome =
-    !process.env.CARGO_HOME ||
+    !envCargoHome ||
     (!process.env.CI &&
       !process.env.FORMULA_ALLOW_GLOBAL_CARGO_HOME &&
-      process.env.CARGO_HOME === defaultGlobalCargoHome)
+      normalizedEnvCargoHome === defaultGlobalCargoHome)
       ? resolve(repoRoot, 'target', 'cargo-home')
-      : process.env.CARGO_HOME!;
+      : envCargoHome;
   mkdirSync(cargoHome, { recursive: true });
 
   const safeRun = resolve(repoRoot, 'scripts/safe-cargo-run.sh');
