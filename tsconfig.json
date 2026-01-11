@@ -18,6 +18,7 @@
     "packages/ai-tools/**/*.ts",
     "packages/ai-audit/**/*.ts",
     "packages/ai-audit/**/*.d.ts",
+    "packages/llm/**/*.ts",
     "packages/engine/**/*.ts",
     "vitest.config.ts"
   ]
