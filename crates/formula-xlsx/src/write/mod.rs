@@ -77,30 +77,54 @@ fn plan_sheet_structure(
     parts: &mut BTreeMap<String, Vec<u8>>,
     is_new: bool,
 ) -> Result<SheetStructurePlan, WriteError> {
-    let workbook_sheet_ids: HashSet<WorksheetId> = doc.workbook.sheets.iter().map(|s| s.id).collect();
+    // Match model sheets to preserved sheet metadata using the XLSX identity fields when
+    // available. This makes sheet structure edits robust even if the workbook model
+    // was reconstructed (e.g. loaded from persisted state) with different internal
+    // `WorksheetId`s.
+    let mut meta_by_ws_id: HashMap<WorksheetId, usize> = HashMap::new();
+    let mut meta_by_rel_id: HashMap<&str, usize> = HashMap::new();
+    let mut meta_by_sheet_id: HashMap<u32, usize> = HashMap::new();
+    for (idx, meta) in doc.meta.sheets.iter().enumerate() {
+        meta_by_ws_id.insert(meta.worksheet_id, idx);
+        meta_by_rel_id.insert(meta.relationship_id.as_str(), idx);
+        meta_by_sheet_id.insert(meta.sheet_id, idx);
+    }
 
-    let existing_by_id: HashMap<WorksheetId, SheetMeta> = doc
-        .meta
-        .sheets
-        .iter()
-        .cloned()
-        .map(|meta| (meta.worksheet_id, meta))
-        .collect();
+    let mut matched_meta_idxs: HashSet<usize> = HashSet::new();
+    let mut matched_meta_by_ws_id: HashMap<WorksheetId, usize> = HashMap::new();
+    for sheet in &doc.workbook.sheets {
+        let idx = sheet
+            .xlsx_rel_id
+            .as_deref()
+            .and_then(|rid| meta_by_rel_id.get(rid).copied())
+            .or_else(|| {
+                sheet.xlsx_sheet_id
+                    .and_then(|sid| meta_by_sheet_id.get(&sid).copied())
+            })
+            .or_else(|| meta_by_ws_id.get(&sheet.id).copied());
+
+        if let Some(idx) = idx {
+            matched_meta_idxs.insert(idx);
+            matched_meta_by_ws_id.insert(sheet.id, idx);
+        }
+    }
 
     let removed: Vec<SheetMeta> = doc
         .meta
         .sheets
         .iter()
-        .filter(|meta| !workbook_sheet_ids.contains(&meta.worksheet_id))
-        .cloned()
+        .enumerate()
+        .filter(|(idx, _)| !matched_meta_idxs.contains(idx))
+        .map(|(_, meta)| meta.clone())
         .collect();
 
     let mut next_sheet_id = doc
         .meta
         .sheets
         .iter()
-        .filter(|meta| workbook_sheet_ids.contains(&meta.worksheet_id))
-        .map(|meta| meta.sheet_id)
+        .enumerate()
+        .filter(|(idx, _)| matched_meta_idxs.contains(idx))
+        .map(|(_, meta)| meta.sheet_id)
         .max()
         .unwrap_or(0)
         + 1;
@@ -109,8 +133,9 @@ fn plan_sheet_structure(
         doc.meta
             .sheets
             .iter()
-            .filter(|meta| workbook_sheet_ids.contains(&meta.worksheet_id))
-            .filter_map(|meta| meta.relationship_id.strip_prefix("rId")?.parse::<u32>().ok())
+            .enumerate()
+            .filter(|(idx, _)| matched_meta_idxs.contains(idx))
+            .filter_map(|(_, meta)| meta.relationship_id.strip_prefix("rId")?.parse::<u32>().ok())
             .max()
             .unwrap_or(0)
             + 1
@@ -131,8 +156,8 @@ fn plan_sheet_structure(
     let mut added: Vec<SheetMeta> = Vec::new();
 
     for sheet in &doc.workbook.sheets {
-        if let Some(existing) = existing_by_id.get(&sheet.id) {
-            let mut meta = existing.clone();
+        if let Some(idx) = matched_meta_by_ws_id.get(&sheet.id).copied() {
+            let mut meta = doc.meta.sheets[idx].clone();
             meta.state = sheet_state_from_visibility(sheet.visibility);
             sheets.push(meta);
             continue;
