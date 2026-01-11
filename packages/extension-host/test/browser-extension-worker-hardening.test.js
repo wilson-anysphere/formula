@@ -11,19 +11,11 @@ async function createTempDir(prefix) {
 }
 
 async function ensureExtensionApiResolvable() {
-  try {
-    require.resolve("@formula/extension-api");
-    return;
-  } catch {
-    // fall through
-  }
-
-  const hostDir = path.resolve(__dirname, "..");
-  const scopeDir = path.join(hostDir, "node_modules", "@formula");
+  const repoRoot = path.resolve(__dirname, "../../..");
+  const scopeDir = path.join(repoRoot, "node_modules", "@formula");
   const linkPath = path.join(scopeDir, "extension-api");
   const target = path.resolve(__dirname, "../../extension-api");
 
-  await fs.mkdir(scopeDir, { recursive: true });
   try {
     await fs.lstat(linkPath);
     return;
@@ -31,6 +23,7 @@ async function ensureExtensionApiResolvable() {
     // ignore
   }
 
+  await fs.mkdir(scopeDir, { recursive: true });
   await fs.symlink(target, linkPath, process.platform === "win32" ? "junction" : undefined);
 }
 
@@ -54,7 +47,8 @@ function withTimeout(promise, timeoutMs, message) {
 async function activateExtensionWorker({
   mainUrl,
   extensionPath,
-  sandbox
+  sandbox,
+  apiHandler
 }) {
   await ensureExtensionApiResolvable();
   const extensionWorkerUrl = pathToFileURL(
@@ -137,6 +131,33 @@ parentPort.postMessage({ type: "__ready__" });
               sandbox
             });
             worker.postMessage({ type: "activate", id: activationId, reason: "test" });
+            return;
+          }
+
+          if (msg.type === "api_call") {
+            Promise.resolve()
+              .then(async () => {
+                if (typeof apiHandler === "function") {
+                  return apiHandler({
+                    namespace: msg.namespace,
+                    method: msg.method,
+                    args: Array.isArray(msg.args) ? msg.args : []
+                  });
+                }
+                return null;
+              })
+              .then(
+                (result) => {
+                  worker.postMessage({ type: "api_result", id: msg.id, result });
+                },
+                (error) => {
+                  worker.postMessage({
+                    type: "api_error",
+                    id: msg.id,
+                    error: { message: String(error?.message ?? error), stack: error?.stack }
+                  });
+                }
+              );
             return;
           }
 
@@ -236,4 +257,24 @@ test("extension-worker: eval() throws when disableEval is enabled", async () => 
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test("extension-worker: sample extension activates under strict sandbox defaults", async () => {
+  const distDir = path.resolve(__dirname, "../../../extensions/sample-hello/dist");
+  const mainUrl = pathToFileURL(path.join(distDir, "extension.mjs")).href;
+  const extensionPath = pathToFileURL(`${distDir}${path.sep}`).href;
+
+  await activateExtensionWorker({
+    mainUrl,
+    extensionPath,
+    apiHandler({ namespace, method }) {
+      if (namespace === "commands" && (method === "registerCommand" || method === "unregisterCommand")) {
+        return null;
+      }
+      if (namespace === "functions" && (method === "register" || method === "unregister")) {
+        return null;
+      }
+      return null;
+    }
+  });
 });
