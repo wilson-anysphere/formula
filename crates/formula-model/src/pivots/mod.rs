@@ -1,5 +1,6 @@
 use chrono::NaiveDate;
 use ordered_float::OrderedFloat;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -24,6 +25,58 @@ impl ScalarValue {
             _ => None,
         }
     }
+}
+
+/// Aggregation modes for value fields in a pivot table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AggregationType {
+    Sum,
+    Count,
+    Average,
+    Max,
+    Min,
+    Product,
+    CountNumbers,
+    StdDev,
+    StdDevP,
+    Var,
+    VarP,
+}
+
+/// Excel-style "Show Values As" transformations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ShowAsType {
+    Normal,
+    PercentOfGrandTotal,
+    PercentOfRowTotal,
+    PercentOfColumnTotal,
+    PercentOf,
+    PercentDifferenceFrom,
+    RunningTotal,
+    RankAscending,
+    RankDescending,
+}
+
+/// Configuration for a pivot table value field.
+///
+/// This struct is part of the canonical pivot model (IPC/serialization friendly).
+/// `show_as: None` (or missing in serialized data) is treated as "normal".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValueField {
+    pub source_field: String,
+    pub name: String,
+    pub aggregation: AggregationType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_as: Option<ShowAsType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_item: Option<String>,
 }
 
 impl From<&str> for ScalarValue {
@@ -131,7 +184,9 @@ impl PivotTable {
         }
         for field in row_fields.iter().chain(std::iter::once(&value_field)) {
             if source.column_index(field).is_none() {
-                return Err(format!("pivot field {field} does not exist in source table"));
+                return Err(format!(
+                    "pivot field {field} does not exist in source table"
+                ));
             }
         }
 
@@ -387,7 +442,11 @@ impl PivotManager {
                 .get_mut(&timeline_id)
                 .ok_or_else(|| "unknown timeline".to_string())?;
             timeline.selection = selection;
-            timeline.connected_pivots.iter().copied().collect::<Vec<_>>()
+            timeline
+                .connected_pivots
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
         };
 
         for pivot_id in pivot_ids {
@@ -438,4 +497,3 @@ impl PivotManager {
         filters
     }
 }
-

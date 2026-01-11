@@ -12,6 +12,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+pub use formula_model::pivots::ShowAsType;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -162,7 +163,9 @@ impl PivotKeyPart {
     fn display_string(&self) -> String {
         match self {
             PivotKeyPart::Blank => String::new(),
-            PivotKeyPart::Number(bits) => PivotValue::Number(f64::from_bits(*bits)).display_string(),
+            PivotKeyPart::Number(bits) => {
+                PivotValue::Number(f64::from_bits(*bits)).display_string()
+            }
             PivotKeyPart::Text(s) => s.clone(),
             PivotKeyPart::Bool(b) => b.to_string(),
         }
@@ -346,6 +349,12 @@ pub struct ValueField {
     pub source_field: String,
     pub name: String,
     pub aggregation: AggregationType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_as: Option<ShowAsType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_item: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -475,6 +484,9 @@ impl CreatePivotTableRequest {
                         .unwrap_or_else(|| format!("{:?} of {}", vf.aggregation, vf.field)),
                     source_field: vf.field,
                     aggregation: vf.aggregation,
+                    show_as: None,
+                    base_field: None,
+                    base_item: None,
                 })
                 .collect(),
             filter_fields: self
@@ -482,7 +494,9 @@ impl CreatePivotTableRequest {
                 .into_iter()
                 .map(|f| FilterField {
                     source_field: f.field,
-                    allowed: f.allowed.map(|vals| vals.into_iter().map(|v| v.to_key_part()).collect()),
+                    allowed: f
+                        .allowed
+                        .map(|vals| vals.into_iter().map(|v| v.to_key_part()).collect()),
                 })
                 .collect(),
             layout: self.layout.unwrap_or(Layout::Tabular),
@@ -502,7 +516,11 @@ pub struct PivotTable {
 }
 
 impl PivotTable {
-    pub fn new(name: impl Into<String>, source: &[Vec<PivotValue>], config: PivotConfig) -> Result<Self, PivotError> {
+    pub fn new(
+        name: impl Into<String>,
+        source: &[Vec<PivotValue>],
+        config: PivotConfig,
+    ) -> Result<Self, PivotError> {
         Ok(Self {
             id: next_pivot_id(),
             name: name.into(),
@@ -671,6 +689,14 @@ impl Accumulator {
 
 pub struct PivotEngine;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PivotRowKind {
+    Header,
+    Leaf,
+    Subtotal,
+    GrandTotal,
+}
+
 impl PivotEngine {
     pub fn calculate(cache: &PivotCache, cfg: &PivotConfig) -> Result<PivotResult, PivotError> {
         if cfg.value_fields.is_empty() {
@@ -695,12 +721,16 @@ impl PivotEngine {
             col_keys.insert(col_key.clone());
 
             let row_entry = cube.entry(row_key).or_default();
-            let cell = row_entry
-                .entry(col_key)
-                .or_insert_with(|| (0..cfg.value_fields.len()).map(|_| Accumulator::new()).collect());
+            let cell = row_entry.entry(col_key).or_insert_with(|| {
+                (0..cfg.value_fields.len())
+                    .map(|_| Accumulator::new())
+                    .collect()
+            });
 
             for (vf_idx, _vf) in cfg.value_fields.iter().enumerate() {
-                let val = record.get(indices.value_indices[vf_idx]).unwrap_or(&PivotValue::Blank);
+                let val = record
+                    .get(indices.value_indices[vf_idx])
+                    .unwrap_or(&PivotValue::Blank);
                 cell[vf_idx].update(val);
             }
         }
@@ -718,6 +748,7 @@ impl PivotEngine {
 
         let mut data = Vec::new();
         data.push(Self::build_header_row(&col_keys, cfg));
+        let mut row_kinds = vec![PivotRowKind::Header];
 
         // Subtotal accumulators per row-field level (excluding leaf level).
         let subtotal_levels = cfg.row_fields.len().saturating_sub(1);
@@ -744,6 +775,7 @@ impl PivotEngine {
                     &mut group_accs,
                     &mut current_group_prefix,
                     &mut data,
+                    &mut row_kinds,
                 );
 
                 // Open new groups for changed prefixes.
@@ -756,6 +788,7 @@ impl PivotEngine {
             let row_map = cube.get(row_key);
             let row_cells = Self::render_row(row_key, row_map, &col_keys, cfg, /*label*/ None);
             data.push(row_cells.clone());
+            row_kinds.push(PivotRowKind::Leaf);
 
             // Update subtotal accumulators & grand accumulator.
             if subtotal_levels > 0 {
@@ -781,6 +814,7 @@ impl PivotEngine {
                 &mut group_accs,
                 &mut current_group_prefix,
                 &mut data,
+                &mut row_kinds,
             );
         }
 
@@ -796,6 +830,15 @@ impl PivotEngine {
                 Some(PivotValue::Text("Grand Total".to_string())),
             );
             data.push(rendered);
+            row_kinds.push(PivotRowKind::GrandTotal);
+        }
+
+        if cfg
+            .value_fields
+            .iter()
+            .any(|vf| vf.show_as.unwrap_or(ShowAsType::Normal) != ShowAsType::Normal)
+        {
+            Self::apply_show_as(&mut data, &row_kinds, &cube, &row_keys, &col_keys, cfg);
         }
 
         Ok(PivotResult { data })
@@ -894,7 +937,9 @@ impl PivotEngine {
             }
         }
 
-        let mut row_total_accs: Vec<Accumulator> = (0..cfg.value_fields.len()).map(|_| Accumulator::new()).collect();
+        let mut row_total_accs: Vec<Accumulator> = (0..cfg.value_fields.len())
+            .map(|_| Accumulator::new())
+            .collect();
 
         for col_key in col_keys {
             let maybe_cell = row_map.and_then(|m| m.get(col_key));
@@ -935,7 +980,13 @@ impl PivotEngine {
                 if let Some(l) = label {
                     row.push(l);
                 } else {
-                    row.push(PivotValue::Text(row_key.0.get(0).map(|p| p.display_string()).unwrap_or_default()));
+                    row.push(PivotValue::Text(
+                        row_key
+                            .0
+                            .get(0)
+                            .map(|p| p.display_string())
+                            .unwrap_or_default(),
+                    ));
                 }
                 for _ in 1..cfg.row_fields.len() {
                     row.push(PivotValue::Blank);
@@ -943,14 +994,16 @@ impl PivotEngine {
             }
         }
 
-        let mut row_total_accs: Vec<Accumulator> = (0..cfg.value_fields.len()).map(|_| Accumulator::new()).collect();
+        let mut row_total_accs: Vec<Accumulator> = (0..cfg.value_fields.len())
+            .map(|_| Accumulator::new())
+            .collect();
 
         for col_key in col_keys {
-            let cell_accs = totals
-                .cells
-                .get(col_key)
-                .cloned()
-                .unwrap_or_else(|| (0..cfg.value_fields.len()).map(|_| Accumulator::new()).collect());
+            let cell_accs = totals.cells.get(col_key).cloned().unwrap_or_else(|| {
+                (0..cfg.value_fields.len())
+                    .map(|_| Accumulator::new())
+                    .collect()
+            });
 
             for (vf_idx, vf) in cfg.value_fields.iter().enumerate() {
                 row_total_accs[vf_idx].merge(&cell_accs[vf_idx]);
@@ -974,6 +1027,7 @@ impl PivotEngine {
         group_accs: &mut [Option<GroupAccumulator>],
         current_group_prefix: &mut [Option<PivotKeyPart>],
         out: &mut Vec<Vec<PivotValue>>,
+        row_kinds: &mut Vec<PivotRowKind>,
     ) {
         // Close from deepest to keep_prefix_len.
         for level in (keep_prefix_len..group_accs.len()).rev() {
@@ -991,8 +1045,325 @@ impl PivotEngine {
                     cfg,
                     Some(PivotValue::Text(label)),
                 ));
+                row_kinds.push(PivotRowKind::Subtotal);
             }
             current_group_prefix[level] = None;
+        }
+    }
+
+    fn apply_show_as(
+        data: &mut [Vec<PivotValue>],
+        row_kinds: &[PivotRowKind],
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &[PivotKey],
+        col_keys: &[PivotKey],
+        cfg: &PivotConfig,
+    ) {
+        if data.len() <= 1 {
+            return;
+        }
+
+        let value_field_count = cfg.value_fields.len();
+        if value_field_count == 0 {
+            return;
+        }
+
+        let row_label_width = match cfg.layout {
+            Layout::Compact => 1,
+            Layout::Tabular => cfg.row_fields.len(),
+        };
+
+        let regular_column_count = col_keys.len() * value_field_count;
+        let row_grand_total_start = row_label_width + regular_column_count;
+
+        let leaf_rows: Vec<usize> = row_kinds
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, kind)| (*kind == PivotRowKind::Leaf).then_some(idx))
+            .collect();
+
+        for vf_idx in 0..value_field_count {
+            let show_as = cfg.value_fields[vf_idx]
+                .show_as
+                .unwrap_or(ShowAsType::Normal);
+            if show_as == ShowAsType::Normal {
+                continue;
+            }
+
+            // All output columns that correspond to this value field:
+            // - each column key has `value_field_count` columns (one per value field)
+            // - followed by an optional row grand total section (also one per value field)
+            let mut cols =
+                Vec::with_capacity(col_keys.len() + usize::from(cfg.grand_totals.columns));
+            for col_idx in 0..col_keys.len() {
+                cols.push(row_label_width + col_idx * value_field_count + vf_idx);
+            }
+            if cfg.grand_totals.columns {
+                cols.push(row_grand_total_start + vf_idx);
+            }
+
+            let agg = cfg.value_fields[vf_idx].aggregation;
+            match show_as {
+                ShowAsType::PercentOfGrandTotal => {
+                    let denom = Self::compute_grand_total(cube, row_keys, col_keys, vf_idx, agg);
+                    Self::apply_percent_of_total(data, &cols, denom);
+                }
+                ShowAsType::PercentOfRowTotal => {
+                    let row_denoms = Self::compute_row_totals_for_show_as(
+                        data,
+                        row_label_width,
+                        col_keys.len(),
+                        value_field_count,
+                        vf_idx,
+                        cfg.grand_totals.columns,
+                    );
+                    Self::apply_percent_of_row_total(data, &cols, &row_denoms);
+                }
+                ShowAsType::PercentOfColumnTotal => {
+                    let col_denoms =
+                        Self::compute_column_totals(cube, row_keys, col_keys, vf_idx, agg);
+                    let grand_denom =
+                        Self::compute_grand_total(cube, row_keys, col_keys, vf_idx, agg);
+                    Self::apply_percent_of_column_total(
+                        data,
+                        row_label_width,
+                        col_keys.len(),
+                        value_field_count,
+                        vf_idx,
+                        cfg.grand_totals.columns,
+                        &col_denoms,
+                        grand_denom,
+                    );
+                }
+                ShowAsType::RunningTotal => {
+                    Self::apply_running_total(data, &leaf_rows, &cols);
+                }
+                ShowAsType::RankAscending => {
+                    Self::apply_rank(data, &leaf_rows, &cols, /*descending*/ false);
+                }
+                ShowAsType::RankDescending => {
+                    Self::apply_rank(data, &leaf_rows, &cols, /*descending*/ true);
+                }
+                // Not implemented yet.
+                ShowAsType::PercentOf | ShowAsType::PercentDifferenceFrom => {}
+                ShowAsType::Normal => {}
+            }
+        }
+    }
+
+    fn compute_grand_total(
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &[PivotKey],
+        col_keys: &[PivotKey],
+        value_field_idx: usize,
+        agg: AggregationType,
+    ) -> Option<f64> {
+        let mut acc = Accumulator::new();
+        for row_key in row_keys {
+            let Some(row_map) = cube.get(row_key) else {
+                continue;
+            };
+            for col_key in col_keys {
+                if let Some(cell_accs) = row_map.get(col_key) {
+                    acc.merge(&cell_accs[value_field_idx]);
+                }
+            }
+        }
+        acc.finalize(agg).as_number()
+    }
+
+    fn compute_column_totals(
+        cube: &HashMap<PivotKey, HashMap<PivotKey, Vec<Accumulator>>>,
+        row_keys: &[PivotKey],
+        col_keys: &[PivotKey],
+        value_field_idx: usize,
+        agg: AggregationType,
+    ) -> Vec<Option<f64>> {
+        let mut out = Vec::with_capacity(col_keys.len());
+        for col_key in col_keys {
+            let mut acc = Accumulator::new();
+            for row_key in row_keys {
+                let Some(row_map) = cube.get(row_key) else {
+                    continue;
+                };
+                if let Some(cell_accs) = row_map.get(col_key) {
+                    acc.merge(&cell_accs[value_field_idx]);
+                }
+            }
+            out.push(acc.finalize(agg).as_number());
+        }
+        out
+    }
+
+    fn apply_percent_of_total(data: &mut [Vec<PivotValue>], cols: &[usize], denom: Option<f64>) {
+        let Some(denom) = denom.filter(|d| *d != 0.0) else {
+            for r in 1..data.len() {
+                for &c in cols {
+                    if matches!(data[r].get(c), Some(PivotValue::Number(_))) {
+                        data[r][c] = PivotValue::Blank;
+                    }
+                }
+            }
+            return;
+        };
+
+        for r in 1..data.len() {
+            for &c in cols {
+                if let Some(n) = data[r][c].as_number() {
+                    data[r][c] = PivotValue::Number(n / denom);
+                }
+            }
+        }
+    }
+
+    fn compute_row_totals_for_show_as(
+        data: &[Vec<PivotValue>],
+        row_label_width: usize,
+        col_key_count: usize,
+        value_field_count: usize,
+        value_field_idx: usize,
+        has_row_grand_totals: bool,
+    ) -> Vec<Option<f64>> {
+        let mut out = vec![None; data.len()];
+        let row_grand_total_start = row_label_width + col_key_count * value_field_count;
+
+        for r in 1..data.len() {
+            if has_row_grand_totals {
+                out[r] = data[r][row_grand_total_start + value_field_idx].as_number();
+                continue;
+            }
+
+            let mut sum = 0.0;
+            let mut saw_number = false;
+            for col_idx in 0..col_key_count {
+                let c = row_label_width + col_idx * value_field_count + value_field_idx;
+                if let Some(n) = data[r][c].as_number() {
+                    sum += n;
+                    saw_number = true;
+                }
+            }
+            out[r] = saw_number.then_some(sum);
+        }
+
+        out
+    }
+
+    fn apply_percent_of_row_total(
+        data: &mut [Vec<PivotValue>],
+        cols: &[usize],
+        row_denoms: &[Option<f64>],
+    ) {
+        for r in 1..data.len() {
+            let denom = row_denoms.get(r).and_then(|d| d.filter(|d| *d != 0.0));
+            for &c in cols {
+                if let Some(n) = data[r][c].as_number() {
+                    if let Some(d) = denom {
+                        data[r][c] = PivotValue::Number(n / d);
+                    } else {
+                        data[r][c] = PivotValue::Blank;
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_percent_of_column_total(
+        data: &mut [Vec<PivotValue>],
+        row_label_width: usize,
+        col_key_count: usize,
+        value_field_count: usize,
+        value_field_idx: usize,
+        has_row_grand_totals: bool,
+        col_denoms: &[Option<f64>],
+        grand_denom: Option<f64>,
+    ) {
+        let row_grand_total_start = row_label_width + col_key_count * value_field_count;
+
+        for r in 1..data.len() {
+            for col_idx in 0..col_key_count {
+                let denom = col_denoms
+                    .get(col_idx)
+                    .and_then(|d| d.filter(|d| *d != 0.0));
+                let c = row_label_width + col_idx * value_field_count + value_field_idx;
+                if let Some(n) = data[r][c].as_number() {
+                    if let Some(d) = denom {
+                        data[r][c] = PivotValue::Number(n / d);
+                    } else {
+                        data[r][c] = PivotValue::Blank;
+                    }
+                }
+            }
+
+            if has_row_grand_totals {
+                let denom = grand_denom.filter(|d| *d != 0.0);
+                let c = row_grand_total_start + value_field_idx;
+                if let Some(n) = data[r][c].as_number() {
+                    if let Some(d) = denom {
+                        data[r][c] = PivotValue::Number(n / d);
+                    } else {
+                        data[r][c] = PivotValue::Blank;
+                    }
+                }
+            }
+        }
+    }
+
+    fn apply_running_total(data: &mut [Vec<PivotValue>], leaf_rows: &[usize], cols: &[usize]) {
+        for &c in cols {
+            let mut running = 0.0;
+            for &r in leaf_rows {
+                if let Some(n) = data[r][c].as_number() {
+                    running += n;
+                    data[r][c] = PivotValue::Number(running);
+                }
+            }
+        }
+    }
+
+    fn apply_rank(
+        data: &mut [Vec<PivotValue>],
+        leaf_rows: &[usize],
+        cols: &[usize],
+        descending: bool,
+    ) {
+        for &c in cols {
+            let mut values: Vec<(usize, f64)> = leaf_rows
+                .iter()
+                .filter_map(|&r| data[r][c].as_number().map(|n| (r, n)))
+                .collect();
+            if values.is_empty() {
+                continue;
+            }
+
+            values.sort_by(|(_, a), (_, b)| {
+                if descending {
+                    b.total_cmp(a)
+                } else {
+                    a.total_cmp(b)
+                }
+            });
+
+            let mut rank_by_row: HashMap<usize, usize> = HashMap::new();
+            let mut next_rank = 1usize;
+            let mut i = 0usize;
+            while i < values.len() {
+                let value = values[i].1;
+                let mut j = i + 1;
+                while j < values.len() && values[j].1 == value {
+                    j += 1;
+                }
+                for k in i..j {
+                    rank_by_row.insert(values[k].0, next_rank);
+                }
+                next_rank += j - i;
+                i = j;
+            }
+
+            for &r in leaf_rows {
+                if let Some(rank) = rank_by_row.get(&r) {
+                    data[r][c] = PivotValue::Number(*rank as f64);
+                }
+            }
         }
     }
 }
@@ -1018,10 +1389,9 @@ impl GroupAccumulator {
         for col_key in col_keys {
             let src = row_map.and_then(|m| m.get(col_key));
             if let Some(src_accs) = src {
-                let dst = self
-                    .cells
-                    .entry(col_key.clone())
-                    .or_insert_with(|| (0..value_field_count).map(|_| Accumulator::new()).collect());
+                let dst = self.cells.entry(col_key.clone()).or_insert_with(|| {
+                    (0..value_field_count).map(|_| Accumulator::new()).collect()
+                });
                 for i in 0..value_field_count {
                     dst[i].merge(&src_accs[i]);
                 }
@@ -1041,19 +1411,33 @@ impl FieldIndices {
     fn new(cache: &PivotCache, cfg: &PivotConfig) -> Result<Self, PivotError> {
         let mut row_indices = Vec::new();
         for f in &cfg.row_fields {
-            row_indices.push(cache.field_index(&f.source_field).ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?);
+            row_indices.push(
+                cache
+                    .field_index(&f.source_field)
+                    .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?,
+            );
         }
         let mut col_indices = Vec::new();
         for f in &cfg.column_fields {
-            col_indices.push(cache.field_index(&f.source_field).ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?);
+            col_indices.push(
+                cache
+                    .field_index(&f.source_field)
+                    .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?,
+            );
         }
         let mut value_indices = Vec::new();
         for f in &cfg.value_fields {
-            value_indices.push(cache.field_index(&f.source_field).ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?);
+            value_indices.push(
+                cache
+                    .field_index(&f.source_field)
+                    .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?,
+            );
         }
         let mut filter_indices = Vec::new();
         for f in &cfg.filter_fields {
-            let idx = cache.field_index(&f.source_field).ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?;
+            let idx = cache
+                .field_index(&f.source_field)
+                .ok_or_else(|| PivotError::MissingField(f.source_field.clone()))?;
             filter_indices.push((idx, f.allowed.clone()));
         }
         Ok(Self {
@@ -1124,6 +1508,9 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
             }],
             column_fields: vec![],
             filter_fields: vec![],
@@ -1171,6 +1558,9 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
             }],
             filter_fields: vec![FilterField {
                 source_field: "Region".to_string(),
@@ -1220,6 +1610,9 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
             }],
             filter_fields: vec![],
             layout: Layout::Tabular,
@@ -1275,6 +1668,9 @@ mod tests {
                 source_field: "Sales".to_string(),
                 name: "Sum of Sales".to_string(),
                 aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
             }],
             filter_fields: vec![],
             layout: Layout::Tabular,
@@ -1298,6 +1694,289 @@ mod tests {
                 vec!["West".into(), "B".into(), 250.into()],
                 vec!["West Total".into(), PivotValue::Blank, 450.into()],
                 vec!["Grand Total".into(), PivotValue::Blank, 700.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_percent_of_grand_total() {
+        let data = vec![
+            pv_row(&["Region".into(), "Sales".into()]),
+            pv_row(&["East".into(), 1.into()]),
+            pv_row(&["West".into(), 3.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: "Region".to_string(),
+            }],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: Some(ShowAsType::PercentOfGrandTotal),
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Region".into(), "Sum of Sales".into()],
+                vec!["East".into(), 0.25.into()],
+                vec!["West".into(), 0.75.into()],
+                vec!["Grand Total".into(), 1.0.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_percent_of_row_total() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), 1.into()]),
+            pv_row(&["East".into(), "B".into(), 1.into()]),
+            pv_row(&["West".into(), "A".into(), 3.into()]),
+            pv_row(&["West".into(), "B".into(), 1.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: "Region".to_string(),
+            }],
+            column_fields: vec![PivotField {
+                source_field: "Product".to_string(),
+            }],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: Some(ShowAsType::PercentOfRowTotal),
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: true,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Region".into(),
+                    "A - Sum of Sales".into(),
+                    "B - Sum of Sales".into(),
+                    "Grand Total - Sum of Sales".into(),
+                ],
+                vec!["East".into(), 0.5.into(), 0.5.into(), 1.0.into()],
+                vec!["West".into(), 0.75.into(), 0.25.into(), 1.0.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_percent_of_column_total() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+            pv_row(&["East".into(), "A".into(), 1.into()]),
+            pv_row(&["East".into(), "B".into(), 1.into()]),
+            pv_row(&["West".into(), "A".into(), 3.into()]),
+            pv_row(&["West".into(), "B".into(), 1.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: "Region".to_string(),
+            }],
+            column_fields: vec![PivotField {
+                source_field: "Product".to_string(),
+            }],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: Some(ShowAsType::PercentOfColumnTotal),
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Region".into(),
+                    "A - Sum of Sales".into(),
+                    "B - Sum of Sales".into()
+                ],
+                vec!["East".into(), 0.25.into(), 0.5.into()],
+                vec!["West".into(), 0.75.into(), 0.5.into()],
+                vec!["Grand Total".into(), 1.0.into(), 1.0.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_running_total() {
+        let data = vec![
+            pv_row(&["Item".into(), "Sales".into()]),
+            pv_row(&["A".into(), 1.into()]),
+            pv_row(&["B".into(), 2.into()]),
+            pv_row(&["C".into(), 3.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: "Item".to_string(),
+            }],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: Some(ShowAsType::RunningTotal),
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Item".into(), "Sum of Sales".into()],
+                vec!["A".into(), 1.into()],
+                vec!["B".into(), 3.into()],
+                vec!["C".into(), 6.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_rank_ascending() {
+        let data = vec![
+            pv_row(&["Item".into(), "Sales".into()]),
+            pv_row(&["A".into(), 30.into()]),
+            pv_row(&["B".into(), 10.into()]),
+            pv_row(&["C".into(), 20.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: "Item".to_string(),
+            }],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: Some(ShowAsType::RankAscending),
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Item".into(), "Sum of Sales".into()],
+                vec!["A".into(), 3.into()],
+                vec!["B".into(), 1.into()],
+                vec!["C".into(), 2.into()],
+            ]
+        );
+    }
+
+    #[test]
+    fn show_as_rank_descending() {
+        let data = vec![
+            pv_row(&["Item".into(), "Sales".into()]),
+            pv_row(&["A".into(), 30.into()]),
+            pv_row(&["B".into(), 10.into()]),
+            pv_row(&["C".into(), 20.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField {
+                source_field: "Item".to_string(),
+            }],
+            column_fields: vec![],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: Some(ShowAsType::RankDescending),
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec!["Item".into(), "Sum of Sales".into()],
+                vec!["A".into(), 1.into()],
+                vec!["B".into(), 3.into()],
+                vec!["C".into(), 2.into()],
             ]
         );
     }
