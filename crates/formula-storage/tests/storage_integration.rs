@@ -676,6 +676,52 @@ fn create_sheet_inserts_at_position_and_renormalizes_positions() {
 }
 
 #[test]
+fn list_sheets_tolerates_null_positions() {
+    use rusqlite::{Connection, OpenFlags};
+
+    let uri = "file:sheet_null_positions?mode=memory&cache=shared";
+    let storage = Storage::open_uri(uri).expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet_a = storage
+        .create_sheet(workbook.id, "SheetA", 0, None)
+        .expect("create sheet A");
+    let sheet_b = storage
+        .create_sheet(workbook.id, "SheetB", 1, None)
+        .expect("create sheet B");
+
+    let flags =
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_URI;
+    let conn = Connection::open_with_flags(uri, flags).expect("open raw connection");
+    conn.execute(
+        "UPDATE sheets SET position = NULL WHERE workbook_id = ?1",
+        rusqlite::params![workbook.id.to_string()],
+    )
+    .expect("null out sheet positions");
+
+    // `list_sheets` should coalesce NULL positions so legacy/corrupt databases don't panic.
+    let sheets = storage.list_sheets(workbook.id).expect("list sheets");
+    assert_eq!(sheets.len(), 2);
+    assert!(sheets.iter().all(|s| s.position == 0));
+
+    let mut expected = vec![sheet_a.id.to_string(), sheet_b.id.to_string()];
+    expected.sort();
+    let actual = sheets.iter().map(|s| s.id.to_string()).collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+
+    // Creating a sheet should renormalize positions back to a contiguous ordering.
+    storage
+        .create_sheet(workbook.id, "Inserted", 0, None)
+        .expect("create sheet");
+    let sheets = storage.list_sheets(workbook.id).expect("list sheets after insert");
+    assert_eq!(
+        sheets.iter().map(|s| s.position).collect::<Vec<_>>(),
+        vec![0, 1, 2]
+    );
+}
+
+#[test]
 fn sheet_names_are_unique_case_insensitive() {
     let storage = Storage::open_in_memory().expect("open storage");
     let workbook = storage

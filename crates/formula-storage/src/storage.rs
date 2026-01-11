@@ -802,7 +802,7 @@ impl Storage {
               model_sheet_json
             FROM sheets
             WHERE workbook_id = ?1
-            ORDER BY position
+            ORDER BY COALESCE(position, 0), id
             "#,
         )?;
         let mut sheet_rows = sheets_stmt.query(params![workbook_id.to_string()])?;
@@ -1020,7 +1020,7 @@ impl Storage {
               id,
               workbook_id,
               name,
-              position,
+              COALESCE(position, 0),
               visibility,
               tab_color,
               xlsx_sheet_id,
@@ -1031,7 +1031,7 @@ impl Storage {
               metadata
             FROM sheets
             WHERE workbook_id = ?1
-            ORDER BY position
+            ORDER BY COALESCE(position, 0), id
             "#,
         )?;
 
@@ -1072,7 +1072,7 @@ impl Storage {
                   id,
                   workbook_id,
                   name,
-                  position,
+                  COALESCE(position, 0),
                   visibility,
                   tab_color,
                   xlsx_sheet_id,
@@ -1263,7 +1263,7 @@ impl Storage {
                 SELECT name, model_sheet_id
                 FROM sheets
                 WHERE workbook_id = ?1
-                ORDER BY position
+                ORDER BY COALESCE(position, 0), id
                 "#,
             )?;
             let mut rows = stmt.query(params![meta.workbook_id.to_string()])?;
@@ -1589,7 +1589,7 @@ impl Storage {
               id,
               workbook_id,
               name,
-              position,
+              COALESCE(position, 0),
               visibility,
               tab_color,
               xlsx_sheet_id,
@@ -1600,7 +1600,7 @@ impl Storage {
               metadata
             FROM sheets
             WHERE workbook_id = ?1
-            ORDER BY position
+            ORDER BY COALESCE(position, 0), id
             "#,
         )?;
 
@@ -1640,7 +1640,7 @@ impl Storage {
                   id,
                   workbook_id,
                   name,
-                  position,
+                  COALESCE(position, 0),
                   visibility,
                   tab_color,
                   xlsx_sheet_id,
