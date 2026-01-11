@@ -784,3 +784,46 @@ test("Sheet-qualified range suggestions do not attempt to add missing quotes (no
 
   assert.equal(suggestions.length, 0);
 });
+
+test("Sheet-qualified range suggestions require quotes for sheet names that start with a digit", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`2024!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "2024"],
+      getTables: () => [],
+    },
+  });
+
+  const unquoted = "=SUM(2024!A";
+  const unquotedSuggestions = await engine.getSuggestions({
+    currentInput: unquoted,
+    cursorPosition: unquoted.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+  assert.equal(unquotedSuggestions.length, 0);
+
+  const quoted = "=SUM('2024'!A";
+  const quotedSuggestions = await engine.getSuggestions({
+    currentInput: quoted,
+    cursorPosition: quoted.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    quotedSuggestions.some((s) => s.text === "=SUM('2024'!A1:A10)"),
+    `Expected a quoted numeric sheet range suggestion, got: ${quotedSuggestions.map((s) => s.text).join(", ")}`
+  );
+});

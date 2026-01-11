@@ -680,7 +680,10 @@ function splitSheetQualifiedArg(text) {
 }
 
 function needsSheetQuotes(sheetName) {
-  return /[^A-Za-z0-9_]/.test(sheetName);
+  // Match Excel's "unquoted sheet name" rules (roughly identifier-like).
+  // Anything that doesn't look like an identifier (spaces, punctuation, or
+  // leading digits) requires quotes.
+  return !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(sheetName);
 }
 
 function formatSheetPrefix(sheetName) {
