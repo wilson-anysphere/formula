@@ -268,14 +268,14 @@ function resolvePrimaryAxes(model: ChartModel): { xAxis: ChartAxisModel; yAxis: 
     axes.find(
       (a) =>
         normalizeAxisPosition(a.position) === "bottom" &&
-        (model.chartType.kind === "scatter" ? a.kind === "value" : true)
+        (model.chartType.kind === "scatter" ? normalizeAxisKind(a.kind) === "value" : true)
     ) ??
-    axes.find((a) => a.kind === defaultX.kind) ??
+    axes.find((a) => normalizeAxisKind(a.kind) === normalizeAxisKind(defaultX.kind)) ??
     defaultX;
 
   const yAxis =
-    axes.find((a) => normalizeAxisPosition(a.position) === "left" && a.kind === "value") ??
-    axes.find((a) => a.kind === "value") ??
+    axes.find((a) => normalizeAxisPosition(a.position) === "left" && normalizeAxisKind(a.kind) === "value") ??
+    axes.find((a) => normalizeAxisKind(a.kind) === "value") ??
     defaultY;
 
   return { xAxis, yAxis };
@@ -292,6 +292,21 @@ function normalizeAxisPosition(pos: unknown): "left" | "right" | "top" | "bottom
   if (pos === "top" || pos === "t") return "top";
   if (pos === "bottom" || pos === "b") return "bottom";
   return null;
+}
+
+function normalizeAxisKind(kind: unknown): "category" | "value" | null {
+  if (kind === "category" || kind === "catAx") return "category";
+  if (kind === "value" || kind === "valAx") return "value";
+  return null;
+}
+
+function isReverseOrder(scaling: unknown): boolean {
+  if (!scaling || typeof scaling !== "object") return false;
+  const s: any = scaling;
+  if (s.orientation === "maxMin") return true;
+  if (s.reverseOrder === true) return true;
+  if (s.reverseOrder === 1 || s.reverseOrder === "1") return true;
+  return false;
 }
 
 function axisFormatCode(axis: ChartAxisModel): string | null | undefined {
@@ -365,7 +380,7 @@ function computeValueAxisInfo(args: {
     domain: tickResult.domain,
     ticks: tickResult.ticks,
     formatCode: axisFormatCode(args.axis),
-    reverseOrder: Boolean(scaling.reverseOrder),
+    reverseOrder: isReverseOrder(scaling),
   };
 }
 
@@ -499,7 +514,7 @@ function buildXAxisLayout(args: {
   }
 
   const categories = resolveCategories(args.model.series);
-  const reverse = Boolean(args.axis.scaling?.reverseOrder);
+  const reverse = isReverseOrder(args.axis.scaling);
   const domain = reverse ? [...categories].reverse() : categories;
   const count = Math.max(1, domain.length);
   const step = args.plotAreaRect.width / count;

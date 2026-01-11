@@ -63,13 +63,18 @@ export interface AxisScalingModel {
   min?: number | null;
   max?: number | null;
   reverseOrder?: boolean | null;
+  /**
+   * Optional OOXML scaling orientation ("minMax" or "maxMin"). If present, it
+   * should be treated as the source of truth for reverse order behavior.
+   */
+  orientation?: "minMax" | "maxMin" | null;
 }
 
 export interface ChartAxisModel {
   /**
    * User-visible axis kind (category vs numeric value axis).
    */
-  kind: "category" | "value";
+  kind: "category" | "value" | "catAx" | "valAx";
   /**
    * Axis position. Accept both human-friendly values and OOXML-style single
    * letters (b/l/r/t).

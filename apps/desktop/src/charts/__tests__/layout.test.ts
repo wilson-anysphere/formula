@@ -273,8 +273,8 @@ describe("charts/layout", () => {
       title: "Example Chart",
       legend: { position: "r", overlay: false },
       axes: [
-        { kind: "category", position: "b" },
-        { kind: "value", position: "l", majorGridlines: true },
+        { kind: "catAx", position: "b" },
+        { kind: "valAx", position: "l", majorGridlines: true },
       ],
       series: [
         {
