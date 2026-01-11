@@ -15,6 +15,7 @@
     "@formula/extension-api": "workspace:*",
     "@formula/extension-host": "workspace:*",
     "@formula/engine": "workspace:*",
+    "@formula/fill-engine": "workspace:*",
     "@formula/grid": "workspace:*",
     "@formula/spreadsheet-frontend": "workspace:*",
     "react": "^18.2.0",

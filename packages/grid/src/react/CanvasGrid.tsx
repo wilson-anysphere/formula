@@ -5,6 +5,7 @@ import { CanvasGridRenderer, formatCellDisplayText, type GridPerfStats } from ".
 import type { GridTheme } from "../theme/GridTheme";
 import { resolveGridTheme } from "../theme/GridTheme";
 import { resolveGridThemeFromCssVars } from "../theme/resolveThemeFromCssVars";
+import type { FillMode } from "../interaction/fillHandle";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
 import { wheelDeltaToPixels } from "./wheelDeltaToPixels";
@@ -64,6 +65,12 @@ export interface GridApi {
 }
 
 export type GridInteractionMode = "default" | "rangeSelection";
+
+export interface FillCommitEvent {
+  sourceRange: CellRange;
+  targetRange: CellRange;
+  mode: FillMode;
+}
 
 export interface CanvasGridProps {
   provider: CellProvider;
@@ -135,6 +142,8 @@ export interface CanvasGridProps {
    * `source` range.
    */
   onFillHandleCommit?: (args: { source: CellRange; target: CellRange }) => void | Promise<void>;
+  onFillPreviewChange?: (previewRange: CellRange | null) => void;
+  onFillCommit?: (event: FillCommitEvent) => void;
   onRequestCellEdit?: (request: { row: number; col: number; initialKey?: string }) => void;
   style?: React.CSSProperties;
   ariaLabel?: string;
@@ -259,6 +268,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const onRequestCellEditRef = useRef(props.onRequestCellEdit);
   const onFillHandleChangeRef = useRef(props.onFillHandleChange);
   const onFillHandleCommitRef = useRef(props.onFillHandleCommit);
+  const onFillPreviewChangeRef = useRef(props.onFillPreviewChange);
+  const onFillCommitRef = useRef(props.onFillCommit);
   const onZoomChangeRef = useRef(props.onZoomChange);
 
   onSelectionChangeRef.current = props.onSelectionChange;
@@ -269,6 +280,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   onRequestCellEditRef.current = props.onRequestCellEdit;
   onFillHandleChangeRef.current = props.onFillHandleChange;
   onFillHandleCommitRef.current = props.onFillHandleCommit;
+  onFillPreviewChangeRef.current = props.onFillPreviewChange;
+  onFillCommitRef.current = props.onFillCommit;
   onZoomChangeRef.current = props.onZoomChange;
 
   const selectionAnchorRef = useRef<{ row: number; col: number } | null>(null);
@@ -280,11 +293,14 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const resizePointerIdRef = useRef<number | null>(null);
   const resizeDragRef = useRef<ResizeDragState | null>(null);
   const dragModeRef = useRef<"selection" | "fillHandle" | null>(null);
+  const cancelFillHandleDragRef = useRef<(() => void) | null>(null);
   const fillHandleStateRef = useRef<{
     source: CellRange;
     startX: number;
     startY: number;
     target: CellRange;
+    mode: FillMode;
+    previewTarget: CellRange | null;
   } | null>(null);
 
   const sanitizeHeaderCount = (value: number | undefined, max: number) => {
@@ -313,6 +329,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const prefetchOverscanRows = props.prefetchOverscanRows ?? 10;
   const prefetchOverscanCols = props.prefetchOverscanCols ?? 5;
   const interactionMode = props.interactionMode ?? "default";
+  const fillHandleEnabled = interactionMode === "default" && (props.onFillCommit != null || props.onFillHandleCommit != null);
   const interactionModeRef = useRef<GridInteractionMode>(interactionMode);
   interactionModeRef.current = interactionMode;
 
@@ -958,8 +975,41 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const rangesEqual = (a: CellRange, b: CellRange) =>
       a.startRow === b.startRow && a.endRow === b.endRow && a.startCol === b.startCol && a.endCol === b.endCol;
 
+    const rangesEqualNullable = (a: CellRange | null, b: CellRange | null) => {
+      if (a === b) return true;
+      if (!a || !b) return false;
+      return rangesEqual(a, b);
+    };
+
     const hitTestRect = (point: { x: number; y: number }, rect: { x: number; y: number; width: number; height: number }) =>
       point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
+
+    const computeFillDeltaRange = (source: CellRange, union: CellRange): CellRange | null => {
+      if (rangesEqual(source, union)) return null;
+
+      const sameCols = source.startCol === union.startCol && source.endCol === union.endCol;
+      const sameRows = source.startRow === union.startRow && source.endRow === union.endRow;
+
+      if (sameCols) {
+        if (union.endRow > source.endRow) {
+          return { startRow: source.endRow, endRow: union.endRow, startCol: source.startCol, endCol: source.endCol };
+        }
+        if (union.startRow < source.startRow) {
+          return { startRow: union.startRow, endRow: source.startRow, startCol: source.startCol, endCol: source.endCol };
+        }
+      }
+
+      if (sameRows) {
+        if (union.endCol > source.endCol) {
+          return { startRow: source.startRow, endRow: source.endRow, startCol: source.endCol, endCol: union.endCol };
+        }
+        if (union.startCol < source.startCol) {
+          return { startRow: source.startRow, endRow: source.endRow, startCol: union.startCol, endCol: source.startCol };
+        }
+      }
+
+      return null;
+    };
 
     const computeFillTarget = (
       source: CellRange,
@@ -1008,9 +1058,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const target = computeFillTarget(state.source, picked, direction);
       if (rangesEqual(target, state.target)) return;
 
-      fillHandleStateRef.current = { ...state, target };
+      const previewTarget = computeFillDeltaRange(state.source, target);
+      fillHandleStateRef.current = { ...state, target, previewTarget };
       renderer.setFillPreviewRange(target);
       onFillHandleChangeRef.current?.({ source: state.source, target });
+      if (!rangesEqualNullable(previewTarget, state.previewTarget)) {
+        onFillPreviewChangeRef.current?.(previewTarget);
+      }
     };
 
     const applyDragRange = (picked: { row: number; col: number }) => {
@@ -1143,6 +1197,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         dragModeRef.current = null;
         fillHandleStateRef.current = null;
         renderer.setFillPreviewRange(null);
+        onFillPreviewChangeRef.current?.(null);
 
         touchPointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
         try {
@@ -1181,6 +1236,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       dragModeRef.current = null;
       fillHandleStateRef.current = null;
       renderer.setFillPreviewRange(null);
+      onFillPreviewChangeRef.current?.(null);
 
       if (enableResizeRef.current) {
         const hit = getResizeHit(point.x, point.y);
@@ -1216,7 +1272,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         if (source && handleRect && hitTestRect(point, handleRect)) {
           selectionPointerIdRef.current = event.pointerId;
           dragModeRef.current = "fillHandle";
-          fillHandleStateRef.current = { source, startX: point.x, startY: point.y, target: source };
+          const mode: FillMode = event.altKey ? "formulas" : event.metaKey || event.ctrlKey ? "copy" : "series";
+          fillHandleStateRef.current = { source, startX: point.x, startY: point.y, target: source, mode, previewTarget: null };
           selectionCanvas.setPointerCapture?.(event.pointerId);
 
           containerRef.current?.focus({ preventScroll: true });
@@ -1672,46 +1729,56 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         const state = fillHandleStateRef.current;
         fillHandleStateRef.current = null;
         renderer.setFillPreviewRange(null);
+        onFillPreviewChangeRef.current?.(null);
 
-        if (state && !rangesEqual(state.source, state.target)) {
+        const shouldCommit = event.type === "pointerup";
+
+        if (state && shouldCommit && !rangesEqual(state.source, state.target)) {
           const { source, target } = state;
-          const commitResult = onFillHandleCommitRef.current?.({ source, target });
-          void Promise.resolve(commitResult).catch(() => {
-            // Consumers own commit error handling; swallow to avoid unhandled rejections.
-          });
+          const targetRange = computeFillDeltaRange(source, target);
 
-          const prevSelection = renderer.getSelection();
-          const prevRange = renderer.getSelectionRange();
+          if (targetRange) {
+            const commitResult = onFillCommitRef.current
+              ? onFillCommitRef.current({ sourceRange: source, targetRange, mode: state.mode })
+              : onFillHandleCommitRef.current?.({ source, target });
+            void Promise.resolve(commitResult).catch(() => {
+              // Consumers own commit error handling; swallow to avoid unhandled rejections.
+            });
 
-          const ranges = renderer.getSelectionRanges();
-          const activeIndex = renderer.getActiveSelectionIndex();
-          const updatedRanges = ranges.length === 0 ? [target] : [...ranges];
-          updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = target;
-          renderer.setSelectionRanges(updatedRanges, { activeIndex });
+            const prevSelection = renderer.getSelection();
+            const prevRange = renderer.getSelectionRange();
 
-          const nextSelection = renderer.getSelection();
-          const nextRange = renderer.getSelectionRange();
-          announceSelection(nextSelection, nextRange);
+            const ranges = renderer.getSelectionRanges();
+            const activeIndex = renderer.getActiveSelectionIndex();
+            const updatedRanges = ranges.length === 0 ? [target] : [...ranges];
+            updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = target;
+            renderer.setSelectionRanges(updatedRanges, { activeIndex });
 
-          if (
-            (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
-            (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
-          ) {
-            onSelectionChangeRef.current?.(nextSelection);
-          }
+            const nextSelection = renderer.getSelection();
+            const nextRange = renderer.getSelectionRange();
+            announceSelection(nextSelection, nextRange);
 
-          if (
-            (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
-            (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
-            (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
-            (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
-          ) {
-            onSelectionRangeChangeRef.current?.(nextRange);
+            if (
+              (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+              (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
+            ) {
+              onSelectionChangeRef.current?.(nextSelection);
+            }
+
+            if (
+              (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
+              (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
+              (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
+              (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
+            ) {
+              onSelectionRangeChangeRef.current?.(nextRange);
+            }
           }
         }
       } else {
         fillHandleStateRef.current = null;
         renderer?.setFillPreviewRange(null);
+        onFillPreviewChangeRef.current?.(null);
       }
 
       if (interactionModeRef.current === "rangeSelection") {
@@ -1727,6 +1794,34 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         // Some environments throw if the pointer isn't captured; ignore.
       }
     };
+
+    const cancelFillHandleDrag = () => {
+      if (dragModeRef.current !== "fillHandle") return;
+      const renderer = rendererRef.current;
+
+      const pointerId = selectionPointerIdRef.current;
+      selectionPointerIdRef.current = null;
+      selectionAnchorRef.current = null;
+      lastPointerViewportRef.current = null;
+      stopAutoScroll();
+
+      dragModeRef.current = null;
+      fillHandleStateRef.current = null;
+      renderer?.setFillPreviewRange(null);
+      onFillPreviewChangeRef.current?.(null);
+
+      selectionCanvas.style.cursor = "default";
+
+      if (pointerId !== null) {
+        try {
+          selectionCanvas.releasePointerCapture?.(pointerId);
+        } catch {
+          // Ignore capture release failures.
+        }
+      }
+    };
+
+    cancelFillHandleDragRef.current = cancelFillHandleDrag;
 
     const onPointerHover = (event: PointerEvent) => {
       if (resizePointerIdRef.current !== null || selectionPointerIdRef.current !== null) return;
@@ -1796,6 +1891,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       selectionCanvas.removeEventListener("pointerup", endDrag);
       selectionCanvas.removeEventListener("pointercancel", endDrag);
       selectionCanvas.removeEventListener("dblclick", onDoubleClick);
+      cancelFillHandleDragRef.current = null;
       stopAutoScroll();
     };
   }, []);
@@ -1810,8 +1906,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       transientRangeRef.current = null;
     }
 
-    rendererRef.current?.setFillHandleEnabled(interactionMode === "default");
-  }, [interactionMode]);
+    rendererRef.current?.setFillHandleEnabled(fillHandleEnabled);
+  }, [interactionMode, fillHandleEnabled]);
 
   useEffect(() => {
     const vThumb = vThumbRef.current;
@@ -2010,6 +2106,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const renderer = rendererRef.current;
     if (!renderer) return;
+
+    if (event.key === "Escape" && dragModeRef.current === "fillHandle") {
+      event.preventDefault();
+      cancelFillHandleDragRef.current?.();
+      return;
+    }
 
     if (interactionModeRef.current === "rangeSelection") return;
 

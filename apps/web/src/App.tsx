@@ -1,4 +1,5 @@
 import { createEngineClient, type CellChange, type CellScalar } from "@formula/engine";
+import { computeFillEdits, type FillSourceCell } from "@formula/fill-engine";
 import type { CellRange } from "@formula/grid";
 import { CanvasGrid, GridPlaceholder, MockCellProvider, type GridApi } from "@formula/grid";
 import {
@@ -486,6 +487,64 @@ function EngineDemoApp() {
       gridApiRef.current?.scrollToCell(nextRow, nextCol, { align: "auto", padding: 8 });
       focusGrid();
     });
+  };
+
+  const handleFillCommit = async (event: { sourceRange: CellRange; targetRange: CellRange; mode: "copy" | "series" | "formulas" }) => {
+    const engine = engineRef.current;
+    if (!engine || !provider) return;
+
+    const sourceA1 = cellRangeToA1(event.sourceRange);
+    if (!sourceA1) return;
+
+    const toEngineRange = (range: CellRange) => {
+      const startRow0 = range.startRow - headerRowOffset;
+      const endRow0Exclusive = range.endRow - headerRowOffset;
+      const startCol0 = range.startCol - headerColOffset;
+      const endCol0Exclusive = range.endCol - headerColOffset;
+      if (startRow0 < 0 || startCol0 < 0) return null;
+      if (endRow0Exclusive <= startRow0 || endCol0Exclusive <= startCol0) return null;
+      return { startRow: startRow0, endRow: endRow0Exclusive, startCol: startCol0, endCol: endCol0Exclusive };
+    };
+
+    const sourceRange0 = toEngineRange(event.sourceRange);
+    const targetRange0 = toEngineRange(event.targetRange);
+    if (!sourceRange0 || !targetRange0) return;
+
+    const sourceMatrix = await engine.getRange(sourceA1, activeSheet);
+    const sourceCells: FillSourceCell[][] = sourceMatrix.map((row) =>
+      row.map((cell) => ({
+        input: cell.input as CellScalar,
+        value: cell.value as CellScalar
+      }))
+    );
+
+    const { edits } = computeFillEdits({
+      sourceRange: sourceRange0,
+      targetRange: targetRange0,
+      sourceCells,
+      mode: event.mode
+    });
+
+    if (edits.length === 0) return;
+
+    await engine.setCells(
+      edits.map((edit) => ({
+        sheet: activeSheet,
+        address: toA1(edit.row, edit.col),
+        value: edit.value as CellScalar
+      }))
+    );
+
+    const changes = await engine.recalculate(activeSheet);
+    const directChanges: CellChange[] = edits
+      .filter((edit) => !(typeof edit.value === "string" && edit.value.trimStart().startsWith("=")))
+      .map((edit) => ({
+        sheet: activeSheet,
+        address: toA1(edit.row, edit.col),
+        value: edit.value as CellScalar
+      }));
+
+    provider.applyRecalcChanges(directChanges.length > 0 ? [...changes, ...directChanges] : changes);
   };
 
   const onSelectionChange = (cell: { row: number; col: number } | null) => {
@@ -1140,11 +1199,17 @@ function EngineDemoApp() {
                 if (editingCell) return;
                 beginCellEdit(request);
               }}
+              onFillCommit={
+                editingCell || isFormulaEditing
+                  ? undefined
+                  : (event) => {
+                      void handleFillCommit(event);
+                    }
+              }
               interactionMode={isFormulaEditing ? "rangeSelection" : "default"}
               onRangeSelectionStart={beginRangeSelection}
               onRangeSelectionChange={updateRangeSelection}
               onRangeSelectionEnd={endRangeSelection}
-              onFillHandleCommit={onFillHandleCommit}
             />
             <CellEditorOverlay
               gridApi={gridApiRef.current}
