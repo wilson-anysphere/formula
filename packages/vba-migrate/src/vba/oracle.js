@@ -134,10 +134,26 @@ async function ensureBuilt({ repoRoot, binPath }) {
       // Build the oracle CLI once. Subsequent invocations will use the binary directly.
       const cargoHome = process.env.CARGO_HOME ?? path.join(repoRoot, "target", "cargo-home");
       await mkdir(cargoHome, { recursive: true });
-      await execFileAsync("cargo", ["build", "-q", "-p", "formula-vba-oracle-cli"], {
-        cwd: repoRoot,
-        env: { ...process.env, CARGO_HOME: cargoHome },
-      });
+      const baseEnv = { ...process.env, CARGO_HOME: cargoHome };
+      try {
+        await execFileAsync("cargo", ["build", "-q", "-p", "formula-vba-oracle-cli"], { cwd: repoRoot, env: baseEnv });
+      } catch (err) {
+        // Some sandbox environments have flaky sccache daemons; retry once with sccache
+        // disabled to keep tests deterministic.
+        const stderr = String(err?.stderr ?? "");
+        const message = String(err?.message ?? "");
+        const looksLikeSccacheFailure =
+          (stderr.includes("sccache") || message.includes("sccache")) &&
+          (stderr.includes("Connection reset") ||
+            stderr.includes("Failed to send data") ||
+            message.includes("Connection reset") ||
+            message.includes("Failed to send data"));
+        if (!looksLikeSccacheFailure) throw err;
+
+        const noSccacheEnv = { ...baseEnv, SCCACHE_DISABLE: "1" };
+        delete noSccacheEnv.RUSTC_WRAPPER;
+        await execFileAsync("cargo", ["build", "-q", "-p", "formula-vba-oracle-cli"], { cwd: repoRoot, env: noSccacheEnv });
+      }
     }
   })();
   return buildPromise;
