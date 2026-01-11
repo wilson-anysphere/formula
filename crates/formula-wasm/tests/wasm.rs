@@ -62,6 +62,50 @@ fn recalculate_reports_dynamic_array_spills() {
 }
 
 #[wasm_bindgen_test]
+fn recalculate_reports_spill_resize_clears_trailing_cells() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_str("=SEQUENCE(1,3)"),
+        None,
+    )
+    .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    // Shrink the spill width from 3 -> 2; `C1` should be cleared and surfaced as a recalc delta.
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_str("=SEQUENCE(1,2)"),
+        None,
+    )
+    .unwrap();
+
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert_eq!(
+        changes,
+        vec![
+            CellChange {
+                sheet: formula_core::DEFAULT_SHEET.to_string(),
+                address: "A1".to_string(),
+                value: json!(1),
+            },
+            CellChange {
+                sheet: formula_core::DEFAULT_SHEET.to_string(),
+                address: "B1".to_string(),
+                value: json!(2),
+            },
+            CellChange {
+                sheet: formula_core::DEFAULT_SHEET.to_string(),
+                address: "C1".to_string(),
+                value: JsonValue::Null,
+            },
+        ]
+    );
+}
+
+#[wasm_bindgen_test]
 fn recalculate_reports_cleared_spill_outputs_after_edit() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell(
