@@ -511,8 +511,14 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         print_settings: WorkbookPrintSettings::default(),
     };
 
+    // If formula-xlsb can detect a formula record but can't decode its RGCE token stream yet,
+    // it surfaces the formula without any text. In that case we keep the cached value, but also
+    // track the cell so we can fall back to Calamine's formula text extraction.
+    let mut missing_formulas: Vec<(usize, String, Vec<(usize, usize, CellScalar)>)> = Vec::new();
+
     for (idx, sheet_meta) in wb.sheet_metas().iter().enumerate() {
         let mut sheet = Sheet::new(sheet_meta.name.clone(), sheet_meta.name.clone());
+        let mut undecoded_formula_cells: Vec<(usize, usize, CellScalar)> = Vec::new();
 
         wb.for_each_cell(idx, |cell| {
             let row = cell.row as usize;
@@ -526,31 +532,115 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
                 XlsbCellValue::Text(s) => CellScalar::Text(s),
             };
 
-            if let Some(formula) = cell.formula.and_then(|f| f.text) {
-                let normalized = if formula.starts_with('=') {
-                    formula
-                } else {
-                    format!("={formula}")
-                };
-                let mut c = Cell::from_formula(normalized);
-                c.computed_value = value;
-                sheet.set_cell(row, col, c);
-                return;
+            match cell.formula {
+                Some(formula) => match formula.text {
+                    Some(formula) => {
+                        let normalized = if formula.starts_with('=') {
+                            formula
+                        } else {
+                            format!("={formula}")
+                        };
+                        let mut c = Cell::from_formula(normalized);
+                        c.computed_value = value;
+                        sheet.set_cell(row, col, c);
+                    }
+                    None => {
+                        // Preserve the cached value and fill the formula text later (best-effort).
+                        undecoded_formula_cells.push((row, col, value));
+                    }
+                },
+                None => {
+                    if matches!(value, CellScalar::Empty) {
+                        return;
+                    }
+                    sheet.set_cell(row, col, Cell::from_literal(Some(value)));
+                }
             }
-
-            if matches!(value, CellScalar::Empty) {
-                return;
-            }
-
-            sheet.set_cell(row, col, Cell::from_literal(Some(value)));
         })
         .with_context(|| format!("read xlsb sheet {}", sheet_meta.name))?;
 
+        if !undecoded_formula_cells.is_empty() {
+            missing_formulas.push((out.sheets.len(), sheet_meta.name.clone(), undecoded_formula_cells));
+        }
         out.sheets.push(sheet);
+    }
+
+    if !missing_formulas.is_empty() {
+        // Best-effort: if Calamine can't open the workbook (or doesn't expose formulas), fall back
+        // to the cached values only, matching the previous behavior.
+        let mut calamine_wb = open_workbook_auto(path).ok();
+        let mut formula_cache: HashMap<String, HashMap<(usize, usize), String>> = HashMap::new();
+        let empty_lookup: HashMap<(usize, usize), String> = HashMap::new();
+
+        for (sheet_idx, sheet_name, missing_cells) in missing_formulas {
+            let formula_lookup = if let Some(wb) = calamine_wb.as_mut() {
+                if !formula_cache.contains_key(&sheet_name) {
+                    let lookup = calamine_formula_lookup_for_sheet(wb, &sheet_name);
+                    formula_cache.insert(sheet_name.clone(), lookup);
+                }
+                formula_cache.get(&sheet_name).unwrap_or(&empty_lookup)
+            } else {
+                &empty_lookup
+            };
+
+            if let Some(sheet) = out.sheets.get_mut(sheet_idx) {
+                apply_xlsb_formula_fallback(sheet, missing_cells, formula_lookup);
+            }
+        }
     }
 
     out.ensure_sheet_ids();
     Ok(out)
+}
+
+fn calamine_formula_lookup_for_sheet<R, RS>(
+    workbook: &mut R,
+    sheet_name: &str,
+) -> HashMap<(usize, usize), String>
+where
+    RS: std::io::Read + std::io::Seek,
+    R: Reader<RS>,
+{
+    let mut out = HashMap::new();
+    let Ok(formulas) = workbook.worksheet_formula(sheet_name) else {
+        return out;
+    };
+
+    let (row_offset, col_offset) = formulas.start().unwrap_or((0, 0));
+    let row_offset = row_offset as usize;
+    let col_offset = col_offset as usize;
+
+    for (row, col, formula) in formulas.cells() {
+        if formula.trim().is_empty() {
+            continue;
+        }
+
+        let normalized = if formula.starts_with('=') {
+            formula.to_string()
+        } else {
+            format!("={formula}")
+        };
+
+        out.insert((row_offset + row, col_offset + col), normalized);
+    }
+
+    out
+}
+
+fn apply_xlsb_formula_fallback(
+    sheet: &mut Sheet,
+    missing_cells: Vec<(usize, usize, CellScalar)>,
+    formula_lookup: &HashMap<(usize, usize), String>,
+) {
+    for (row, col, cached_value) in missing_cells {
+        if let Some(formula) = formula_lookup.get(&(row, col)) {
+            let mut cell = Cell::from_formula(formula.clone());
+            cell.computed_value = cached_value;
+            sheet.set_cell(row, col, cell);
+        } else if !matches!(cached_value, CellScalar::Empty) {
+            sheet.set_cell(row, col, Cell::from_literal(Some(cached_value)));
+        }
+    }
 }
 
 fn xlsb_error_display(code: u8) -> String {
@@ -702,6 +792,23 @@ mod tests {
             CellScalar::Number(85.0)
         );
         assert_eq!(sheet.get_cell(0, 2).formula.as_deref(), Some("=B1*2"));
+    }
+
+    #[test]
+    fn xlsb_formula_fallback_fills_missing_formula_text() {
+        // Simulate a formula-xlsb cell that has a cached value but no decoded formula text,
+        // and a Calamine-provided lookup table for formulas.
+        let lookup = HashMap::from([((0, 2), "=B1*2".to_string())]);
+        let mut sheet = Sheet::new("Sheet1".to_string(), "Sheet1".to_string());
+        apply_xlsb_formula_fallback(
+            &mut sheet,
+            vec![(0, 2, CellScalar::Number(85.0))],
+            &lookup,
+        );
+
+        let cell = sheet.get_cell(0, 2);
+        assert_eq!(cell.formula.as_deref(), Some("=B1*2"));
+        assert_eq!(cell.computed_value, CellScalar::Number(85.0));
     }
 
     #[test]
