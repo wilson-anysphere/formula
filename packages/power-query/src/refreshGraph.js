@@ -416,8 +416,27 @@ export class RefreshOrchestrator {
     const queryResults = Object.create(null);
 
     const baseContext = this.getContext();
-    const registeredQueries = Object.fromEntries(this.registrations.entries());
-    const queries = { ...(baseContext.queries ?? {}), ...registeredQueries };
+
+    // Use a null-prototype object so query ids like "__proto__" are treated as
+    // ordinary keys (and so consumers can safely access `context.queries[id]`).
+    /** @type {Record<string, Query>} */
+    const queries = Object.create(null);
+
+    const baseQueries = /** @type {any} */ (baseContext.queries);
+    if (baseQueries) {
+      if (baseQueries instanceof Map) {
+        for (const [id, query] of baseQueries) {
+          if (typeof id === "string" && query) queries[id] = query;
+        }
+      } else if (typeof baseQueries === "object") {
+        for (const [id, query] of Object.entries(baseQueries)) {
+          if (query) queries[id] = /** @type {any} */ (query);
+        }
+      }
+    }
+
+    // Registered queries always win.
+    for (const [id, query] of this.registrations) queries[id] = query;
 
     /** @type {QueryExecutionContext} */
     const context = { ...baseContext, queries, queryResults };
