@@ -9,6 +9,7 @@ import { InMemoryVectorStore } from "../../../../../../packages/ai-rag/src/store
 
 import { createAiChatOrchestrator } from "../orchestrator.js";
 import { ChartStore } from "../../../charts/chartStore";
+import { createDesktopRagService } from "../../rag/ragService.js";
 
 function seed2x2(controller: DocumentController) {
   controller.setCellValue("Sheet1", "A1", 1);
@@ -80,6 +81,66 @@ function createMockLlmClientWithToolCall(call: { name: string; arguments: unknow
 }
 
 describe("ai chat orchestrator", () => {
+  it("does not re-index workbook RAG when document has not changed", async () => {
+    const controller = new DocumentController();
+    seed2x2(controller);
+
+    const embedder = new HashEmbedder({ dimension: 32 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 32 });
+    const contextManager = new ContextManager({
+      tokenBudgetTokens: 800,
+      workbookRag: { vectorStore, embedder, topK: 3 }
+    });
+
+    const indexWorkbookSpy = vi.fn(async () => ({ totalChunks: 0, upserted: 0, skipped: 0, deleted: 0 }));
+
+    const ragService = createDesktopRagService({
+      documentController: controller,
+      workbookId: "wb_rag_incremental",
+      createRag: async () =>
+        ({
+          vectorStore,
+          embedder,
+          contextManager,
+          indexWorkbook: indexWorkbookSpy
+        }) as any
+    });
+
+    const llmRequests: any[] = [];
+    const llmClient = {
+      async chat(request: any) {
+        llmRequests.push(request);
+        return { message: { role: "assistant", content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } };
+      }
+    };
+
+    const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_rag_incremental" });
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_rag_incremental",
+      llmClient: llmClient as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      auditStore,
+      sessionId: "session_rag_incremental",
+      ragService,
+      previewOptions: { approval_cell_threshold: 0 }
+    });
+
+    await orchestrator.sendMessage({ text: "Hello", history: [] });
+    await orchestrator.sendMessage({ text: "Hello again", history: [] });
+
+    expect(indexWorkbookSpy).toHaveBeenCalledTimes(1);
+
+    // Mutate the workbook; the next message should re-index.
+    controller.setCellValue("Sheet1", "A1", 123);
+    await orchestrator.sendMessage({ text: "After change", history: [] });
+
+    expect(indexWorkbookSpy).toHaveBeenCalledTimes(2);
+    await ragService.dispose();
+  });
+
   it("denies tool calls when preview requires approval and no approval callback is provided", async () => {
     const controller = new DocumentController();
     seed2x2(controller);

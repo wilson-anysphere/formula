@@ -7,9 +7,7 @@ import { LocalStorageAIAuditStore } from "../../../../../packages/ai-audit/src/l
 
 import { createAiChatOrchestrator } from "../../ai/chat/orchestrator.js";
 import { runAgentTask, type AgentProgressEvent, type AgentTaskResult } from "../../ai/agent/agentOrchestrator.js";
-import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
-import { HashEmbedder } from "../../../../../packages/ai-rag/src/embedding/hashEmbedder.js";
-import { InMemoryVectorStore } from "../../../../../packages/ai-rag/src/store/inMemoryVectorStore.js";
+import { createDesktopRagService } from "../../ai/rag/ragService.js";
 import type { LLMToolCall } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
@@ -151,20 +149,28 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
   const workbookId = props.workbookId ?? "local-workbook";
   const auditStore = useMemo(() => new LocalStorageAIAuditStore(), []);
 
-  const contextManager = useMemo(() => {
-    // Keep this lightweight + dependency-free for now (deterministic hash embeddings).
-    const dimension = 128;
-    const embedder = new HashEmbedder({ dimension });
-    const vectorStore = new InMemoryVectorStore({ dimension });
-    return new ContextManager({
+  const documentController = useMemo(() => props.getDocumentController() as any, [props.getDocumentController]);
+
+  const ragService = useMemo(() => {
+    return createDesktopRagService({
+      documentController,
+      workbookId,
       tokenBudgetTokens: 8_000,
-      workbookRag: { vectorStore, embedder, topK: 6 },
+      topK: 6,
+      sampleRows: 6,
+      embedder: { type: "hash", dimension: 384 },
     });
-  }, [workbookId]);
+  }, [documentController, workbookId]);
+
+  useEffect(() => {
+    return () => {
+      void ragService.dispose();
+    };
+  }, [ragService]);
 
   const orchestrator = useMemo(() => {
     return createAiChatOrchestrator({
-      documentController: props.getDocumentController() as any,
+      documentController,
       workbookId,
       llmClient: client as any,
       model: (client as any).model ?? "gpt-4o-mini",
@@ -174,16 +180,16 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
       onApprovalRequired,
       previewOptions: { approval_cell_threshold: 0 },
       sessionId: `${workbookId}:${sessionId.current}`,
-      contextManager,
+      ragService,
     });
   }, [
     auditStore,
     client,
-    contextManager,
+    documentController,
     onApprovalRequired,
     props.createChart,
     props.getActiveSheetId,
-    props.getDocumentController,
+    ragService,
     workbookId,
   ]);
 
@@ -256,12 +262,13 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
         constraints: constraints.length ? constraints : undefined,
         workbookId,
         defaultSheetId,
-        documentController: props.getDocumentController() as any,
+        documentController,
         llmClient: client as any,
         auditStore,
         createChart: props.createChart,
         onProgress: (event) => setAgentEvents((prev) => [...prev, event]),
         onApprovalRequired: onApprovalRequired as any,
+        ragService,
         continueOnApprovalDenied: agentContinueOnDenied,
         maxIterations: 20,
         maxDurationMs: 5 * 60 * 1000,
@@ -283,8 +290,10 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps & { apiKey: string 
     agentRunning,
     auditStore,
     client,
+    documentController,
     onApprovalRequired,
     props,
+    ragService,
     workbookId
   ]);
 

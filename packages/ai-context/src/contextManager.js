@@ -216,6 +216,7 @@ export class ContextManager {
    *   query: string,
    *   attachments?: Attachment[],
    *   topK?: number,
+   *   skipIndexing?: boolean,
    *   dlp?: {
    *     documentId: string,
    *     policy: any,
@@ -270,80 +271,89 @@ export class ContextManager {
     /** @type {Map<string, ReturnType<typeof classifyText>>} */
     const heuristicByChunkId = new Map();
 
-    const indexStats = await indexWorkbook({
-      workbook: params.workbook,
-      vectorStore,
-      embedder,
-      sampleRows: this.workbookRag.sampleRows,
-      transform: dlp
-        ? (record) => {
-            const rawText = record.text ?? "";
-            const heuristic = classifyText(rawText);
-            heuristicByChunkId.set(record.id, heuristic);
-            const heuristicClassification = heuristicToPolicyClassification(heuristic);
+    // In the desktop app, indexing can be expensive (it enumerates all non-empty cells).
+    // Allow callers that manage their own incremental indexing to skip this step.
+    //
+    // Safety: if DLP enforcement is enabled for this build, indexing must still run so
+    // chunk redaction can be applied before embedding and persistence.
+    const shouldIndex = (params.skipIndexing ?? false) !== true || Boolean(dlp);
 
-            // Fold in structured DLP classifications for the chunk's sheet + rect metadata.
-            let recordClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
-            const range = rectToRange(record.metadata?.rect);
-            const sheetName = record.metadata?.sheetName;
-            if (range && sheetName) {
-              recordClassification = effectiveRangeClassification(
-                { documentId: dlp.documentId, sheetId: sheetName, range },
-                classificationRecords,
-              );
-            }
+    const indexStats = shouldIndex
+      ? await indexWorkbook({
+          workbook: params.workbook,
+          vectorStore,
+          embedder,
+          sampleRows: this.workbookRag.sampleRows,
+          transform: dlp
+            ? (record) => {
+                const rawText = record.text ?? "";
+                const heuristic = classifyText(rawText);
+                heuristicByChunkId.set(record.id, heuristic);
+                const heuristicClassification = heuristicToPolicyClassification(heuristic);
 
-            const classification = maxClassification(recordClassification, heuristicClassification);
-
-            const recordDecision = evaluatePolicy({
-              action: DLP_ACTION.AI_CLOUD_PROCESSING,
-              classification: recordClassification,
-              policy: dlp.policy,
-              options: { includeRestrictedContent },
-            });
-
-            const decision = evaluatePolicy({
-              action: DLP_ACTION.AI_CLOUD_PROCESSING,
-              classification,
-              policy: dlp.policy,
-              options: { includeRestrictedContent },
-            });
-
-            let safeText = rawText;
-            if (decision.decision !== DLP_DECISION.ALLOW) {
-              if (decision.decision === DLP_DECISION.BLOCK) {
-                // If the policy blocks cloud AI processing for this chunk, do not send any
-                // workbook content to the embedder. Persist only a minimal placeholder so
-                // the vector store cannot contain raw restricted data.
-                safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
-              } else {
-                // If DLP redaction is required due to explicit document/sheet/range classification,
-                // redact the entire content; pattern-based redaction isn't sufficient in that case.
-                if (recordDecision.decision !== DLP_DECISION.ALLOW) {
-                  safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
-                } else {
-                  safeText = this.redactor(rawText);
+                // Fold in structured DLP classifications for the chunk's sheet + rect metadata.
+                let recordClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
+                const range = rectToRange(record.metadata?.rect);
+                const sheetName = record.metadata?.sheetName;
+                if (range && sheetName) {
+                  recordClassification = effectiveRangeClassification(
+                    { documentId: dlp.documentId, sheetId: sheetName, range },
+                    classificationRecords,
+                  );
                 }
-                if (!includeRestrictedContent && classifyText(safeText).level === "sensitive") {
-                  safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+
+                const classification = maxClassification(recordClassification, heuristicClassification);
+
+                const recordDecision = evaluatePolicy({
+                  action: DLP_ACTION.AI_CLOUD_PROCESSING,
+                  classification: recordClassification,
+                  policy: dlp.policy,
+                  options: { includeRestrictedContent },
+                });
+
+                const decision = evaluatePolicy({
+                  action: DLP_ACTION.AI_CLOUD_PROCESSING,
+                  classification,
+                  policy: dlp.policy,
+                  options: { includeRestrictedContent },
+                });
+
+                let safeText = rawText;
+                if (decision.decision !== DLP_DECISION.ALLOW) {
+                  if (decision.decision === DLP_DECISION.BLOCK) {
+                    // If the policy blocks cloud AI processing for this chunk, do not send any
+                    // workbook content to the embedder. Persist only a minimal placeholder so
+                    // the vector store cannot contain raw restricted data.
+                    safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+                  } else {
+                    // If DLP redaction is required due to explicit document/sheet/range classification,
+                    // redact the entire content; pattern-based redaction isn't sufficient in that case.
+                    if (recordDecision.decision !== DLP_DECISION.ALLOW) {
+                      safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+                    } else {
+                      safeText = this.redactor(rawText);
+                    }
+                    if (!includeRestrictedContent && classifyText(safeText).level === "sensitive") {
+                      safeText = this.redactor(`${firstLine(rawText)}\n[REDACTED]`);
+                    }
+                  }
                 }
+
+                return {
+                  text: safeText,
+                  metadata: {
+                    ...(record.metadata ?? {}),
+                    // Store the heuristic classification computed on the *raw* chunk text so policy
+                    // enforcement can still detect sensitive chunks even if `text` is redacted before
+                    // embedding / persistence.
+                    dlpHeuristic: heuristic,
+                    text: safeText,
+                  },
+                };
               }
-            }
-
-            return {
-              text: safeText,
-              metadata: {
-                ...(record.metadata ?? {}),
-                // Store the heuristic classification computed on the *raw* chunk text so policy
-                // enforcement can still detect sensitive chunks even if `text` is redacted before
-                // embedding / persistence.
-                dlpHeuristic: heuristic,
-                text: safeText,
-              },
-            };
-          }
-        : undefined,
-    });
+            : undefined,
+        })
+      : null;
 
     // If DLP is enabled, redact the query before sending it to the embedder when policy
     // would not allow sending that sensitive content to a cloud provider. This avoids
@@ -609,6 +619,7 @@ export class ContextManager {
    *   query: string,
    *   attachments?: Attachment[],
    *   topK?: number,
+   *   skipIndexing?: boolean,
    *   dlp?: {
    *     documentId: string,
    *     policy: any,
@@ -620,17 +631,24 @@ export class ContextManager {
    * }} params
    */
   async buildWorkbookContextFromSpreadsheetApi(params) {
-    const workbook = workbookFromSpreadsheetApi({
-      spreadsheet: params.spreadsheet,
-      workbookId: params.workbookId,
-      coordinateBase: "one",
-    });
+    const workbook =
+      (params.skipIndexing ?? false) === true && !params.dlp
+        ? {
+            id: params.workbookId,
+            sheets: (params.spreadsheet?.listSheets?.() ?? []).map((name) => ({ name, cells: new Map() })),
+          }
+        : workbookFromSpreadsheetApi({
+            spreadsheet: params.spreadsheet,
+            workbookId: params.workbookId,
+            coordinateBase: "one",
+          });
     return this.buildWorkbookContext({
       workbook,
       query: params.query,
       attachments: params.attachments,
       topK: params.topK,
       dlp: params.dlp,
+      skipIndexing: params.skipIndexing,
     });
   }
 }

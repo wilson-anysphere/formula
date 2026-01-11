@@ -8,9 +8,9 @@ import { PreviewEngine } from "../../../../../packages/ai-tools/src/preview/prev
 import { runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
-import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
-import { HashEmbedder, InMemoryVectorStore } from "../../../../../packages/ai-rag/src/index.js";
 import type { LLMClient, ToolCall } from "../../../../../packages/llm/src/types.js";
+
+import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
 
 export interface AgentApprovalRequest {
   call: ToolCall;
@@ -108,6 +108,9 @@ export interface RunAgentTaskParams {
   maxDurationMs?: number;
   signal?: AbortSignal;
   model?: string;
+
+  ragService?: DesktopRagService;
+  ragOptions?: Omit<DesktopRagServiceOptions, "documentController" | "workbookId">;
 }
 
 class AgentCancelledError extends Error {
@@ -145,16 +148,6 @@ function isApprovalDeniedError(error: unknown): boolean {
   return error instanceof Error && /requires approval and was denied/i.test(error.message);
 }
 
-function createContextManager(): ContextManager {
-  const dimension = 128;
-  const embedder = new HashEmbedder({ dimension });
-  const vectorStore = new InMemoryVectorStore({ dimension });
-  return new ContextManager({
-    tokenBudgetTokens: 8_000,
-    workbookRag: { vectorStore, embedder, topK: 6, sampleRows: 6 }
-  });
-}
-
 export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTaskResult> {
   const goal = params.goal.trim();
   if (!goal) {
@@ -170,6 +163,15 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
   let deniedCall: ToolCall | undefined;
 
   const signal = params.signal;
+  const ownedRagService =
+    params.ragService == null
+      ? createDesktopRagService({
+          documentController: params.documentController,
+          workbookId: params.workbookId,
+          ...(params.ragOptions ?? {})
+        })
+      : null;
+  const ragService = (params.ragService ?? ownedRagService)!;
 
   function emit(event: AgentProgressEvent) {
     try {
@@ -231,7 +233,6 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       require_approval_for_mutations: true
     });
     const previewEngine = new PreviewEngine({ approval_cell_threshold: 0, ...(params.previewOptions ?? {}) });
-    const contextManager = createContextManager();
 
     const userMessage = [
       `Goal: ${goal}`,
@@ -264,7 +265,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
 
     async function refreshSystemMessage(targetMessages: any[]): Promise<void> {
       const ctx = await guard(
-        contextManager.buildWorkbookContextFromSpreadsheetApi({
+        ragService.buildWorkbookContextFromSpreadsheetApi({
           spreadsheet,
           workbookId: params.workbookId,
           query: goal
@@ -392,5 +393,11 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       session_id: sessionId,
       error: error instanceof Error ? error.message : String(error)
     };
+  } finally {
+    try {
+      await ownedRagService?.dispose();
+    } catch {
+      // ignore
+    }
   }
 }

@@ -6,8 +6,6 @@ import type { AIAuditEntry, AuditListFilters } from "../../../../../packages/ai-
 
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
 
-import { HashEmbedder } from "../../../../../packages/ai-rag/src/embedding/hashEmbedder.js";
-import { InMemoryVectorStore } from "../../../../../packages/ai-rag/src/store/inMemoryVectorStore.js";
 import { rectToA1 } from "../../../../../packages/ai-rag/src/workbook/rect.js";
 
 import type { ToolExecutionResult } from "../../../../../packages/ai-tools/src/executor/tool-executor.js";
@@ -24,6 +22,7 @@ import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spread
 import type { DocumentController } from "../../document/documentController.js";
 
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
+import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
 
 export type AiChatAttachment =
   | { type: "range"; reference: string; data?: unknown }
@@ -102,13 +101,12 @@ export interface AiChatOrchestratorOptions {
   /**
    * Context builder used to produce schema-first + RAG workbook context per message.
    *
-   * If omitted, the orchestrator will create a default `ContextManager`:
-   * - If `ragStore` + `embedder` are provided, those are used (e.g. persistent store).
-   * - Otherwise an in-memory RAG index is used (deterministic HashEmbedder + InMemoryVectorStore).
+   * If omitted, the orchestrator will create a default desktop RAG service backed
+   * by a persistent sqlite vector store (stored in LocalStorage).
    */
   contextManager?: ContextManager;
-  ragStore?: any;
-  embedder?: { embedTexts(texts: string[]): Promise<ArrayLike<number>[]> };
+  ragService?: DesktopRagService;
+  ragOptions?: Omit<DesktopRagServiceOptions, "documentController" | "workbookId">;
 
   systemPrompt?: string;
 
@@ -140,7 +138,15 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
   const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, { createChart: options.createChart });
 
-  const contextManager = options.contextManager ?? createDefaultContextManager(options);
+  const contextProvider:
+    | ContextManager
+    | DesktopRagService = options.contextManager ??
+    options.ragService ??
+    createDesktopRagService({
+      documentController: options.documentController,
+      workbookId: options.workbookId,
+      ...(options.ragOptions ?? {}),
+    });
 
   const baseSystemPrompt =
     options.systemPrompt ??
@@ -153,7 +159,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     const activeSheetId = options.getActiveSheetId?.() ?? "Sheet1";
     const attachments = params.attachments ?? [];
 
-    const workbookContext = await contextManager.buildWorkbookContextFromSpreadsheetApi({
+    const workbookContext = await contextProvider.buildWorkbookContextFromSpreadsheetApi({
       spreadsheet,
       workbookId: options.workbookId,
       query: text,
@@ -240,7 +246,10 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
           retrievedRanges: extractRetrievedRanges(workbookContext.retrieved ?? []),
           retrieved: workbookContext.retrieved ?? [],
           indexStats: workbookContext.indexStats,
-          tokenBudgetTokens: (contextManager as any)?.tokenBudgetTokens
+          tokenBudgetTokens:
+            contextProvider instanceof ContextManager
+              ? (contextProvider as any)?.tokenBudgetTokens
+              : ((await (contextProvider as DesktopRagService).getContextManager()) as any)?.tokenBudgetTokens
         },
         auditEntryId: capturingAuditStore.lastEntry?.id,
         sessionId
@@ -380,28 +389,4 @@ function formatSheetNameForA1(sheetName: string): string {
   // Quote when needed (Excel style): 'Sheet Name'!A1
   if (/^[A-Za-z0-9_]+$/.test(sheetName)) return sheetName;
   return `'${sheetName.replace(/'/g, "''")}'`;
-}
-
-function createDefaultContextManager(options: AiChatOrchestratorOptions): ContextManager {
-  if (options.ragStore || options.embedder) {
-    if (!options.ragStore || !options.embedder) {
-      throw new Error("createAiChatOrchestrator requires both ragStore and embedder when providing workbook RAG");
-    }
-    return new ContextManager({
-      workbookRag: {
-        vectorStore: options.ragStore,
-        embedder: options.embedder
-      }
-    });
-  }
-
-  const dimension = 384;
-  const vectorStore = new InMemoryVectorStore({ dimension });
-  const embedder = new HashEmbedder({ dimension });
-  return new ContextManager({
-    workbookRag: {
-      vectorStore,
-      embedder
-    }
-  });
 }
