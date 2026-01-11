@@ -960,8 +960,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       direction: "up" | "down" | "left" | "right"
     ) => {
       const { rowCount, colCount } = rendererRef.current?.scroll.getCounts() ?? { rowCount: 0, colCount: 0 };
-      const clampRow = (row: number) => Math.max(0, Math.min(row, rowCount));
-      const clampCol = (col: number) => Math.max(0, Math.min(col, colCount));
+      const headerRows = headerRowsRef.current;
+      const headerCols = headerColsRef.current;
+      const dataStartRow = headerRows >= rowCount ? 0 : headerRows;
+      const dataStartCol = headerCols >= colCount ? 0 : headerCols;
+
+      const clampRow = (row: number) => Math.max(dataStartRow, Math.min(row, rowCount));
+      const clampCol = (col: number) => Math.max(dataStartCol, Math.min(col, colCount));
 
       if (direction === "down") {
         const endRow = clampRow(Math.max(source.endRow, picked.row + 1));

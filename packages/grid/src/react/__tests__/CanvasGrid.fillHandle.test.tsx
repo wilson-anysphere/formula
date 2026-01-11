@@ -213,4 +213,66 @@ describe("CanvasGrid fill handle", () => {
     });
     host.remove();
   });
+
+  it("does not extend the selection into header rows/cols", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onFillHandleCommit = vi.fn();
+    const onSelectionRangeChange = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
+          rowCount={20}
+          colCount={10}
+          headerRows={1}
+          headerCols={1}
+          frozenRows={1}
+          frozenCols={1}
+          apiRef={apiRef}
+          onSelectionRangeChange={onSelectionRangeChange}
+          onFillHandleCommit={onFillHandleCommit}
+        />
+      );
+    });
+
+    const sourceRange = { startRow: 1, endRow: 3, startCol: 1, endCol: 2 };
+    await act(async () => {
+      apiRef.current?.setSelectionRange(sourceRange);
+    });
+
+    onSelectionRangeChange.mockClear();
+    onFillHandleCommit.mockClear();
+
+    const handle = apiRef.current?.getFillHandleRect();
+    expect(handle).not.toBeNull();
+
+    const headerCell = apiRef.current?.getCellRect(0, 1);
+    expect(headerCell).not.toBeNull();
+
+    const selectionCanvas = host.querySelectorAll("canvas")[2] as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
+    const end = { clientX: start.clientX, clientY: headerCell!.y + headerCell!.height / 2 };
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointermove", { ...end, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerup", { ...end, pointerId: 1 }));
+    });
+
+    expect(onFillHandleCommit).not.toHaveBeenCalled();
+    expect(apiRef.current?.getSelectionRange()).toEqual(sourceRange);
+    expect(onSelectionRangeChange).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
 });
