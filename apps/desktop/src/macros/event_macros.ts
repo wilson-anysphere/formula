@@ -254,7 +254,6 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   let eventsDisabled = false;
 
   let macroStatus: MacroSecurityStatus | null = null;
-  let securityReady = false;
   let eventsAllowed = true;
   let promptedForTrust = false;
   let workbookOpenFired = false;
@@ -279,8 +278,6 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       console.warn("Failed to read macro security status for event macros:", err);
       macroStatus = null;
       eventsAllowed = true;
-    } finally {
-      securityReady = true;
     }
   })();
 
@@ -425,7 +422,10 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     await statusPromise;
     if (disposed) return;
     if (eventsDisabled) return;
-    if (!eventsAllowed) return;
+    if (!eventsAllowed) {
+      pendingChangesBySheet.clear();
+      return;
+    }
     if (applyingMacroUpdates) return;
 
     if (runningEventMacro) {
@@ -467,7 +467,11 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     await statusPromise;
     if (disposed) return;
     if (eventsDisabled) return;
-    if (!eventsAllowed) return;
+    if (!eventsAllowed) {
+      pendingSelectionRect = null;
+      pendingSelectionKey = "";
+      return;
+    }
     if (!pendingSelectionRect) return;
     if (applyingMacroUpdates) return;
 
@@ -498,7 +502,6 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
 
   const stopDocListening = args.app.getDocument().on("change", ({ deltas, source }) => {
     if (disposed) return;
-    if (!securityReady) return;
     if (!Array.isArray(deltas) || deltas.length === 0) return;
     if (eventsDisabled) return;
     if (applyingMacroUpdates) return;
@@ -527,7 +530,6 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
 
   const stopSelectionListening = args.app.subscribeSelection((selection) => {
     if (disposed) return;
-    if (!securityReady) return;
     if (!selection || !Array.isArray(selection.ranges)) return;
     if (eventsDisabled) return;
     if (!eventsAllowed) return;
