@@ -84,7 +84,14 @@ function loadKeyRingFromEnv(): KeyRing {
   if (keyRingJsonEnv && keyRingJsonEnv.trim().length > 0) {
     json = keyRingJsonEnv;
   } else if (keyRingPath && keyRingPath.trim().length > 0) {
-    json = readFileSync(keyRingPath, "utf8");
+    try {
+      json = readFileSync(keyRingPath, "utf8");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Failed to read KeyRing JSON from SYNC_SERVER_ENCRYPTION_KEYRING_PATH (${keyRingPath}): ${message}`
+      );
+    }
   } else if (keyBase64Env && keyBase64Env.trim().length > 0) {
     const keyBase64 = keyBase64Env.trim();
     const decoded = Buffer.from(keyBase64, "base64");
