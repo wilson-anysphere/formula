@@ -191,28 +191,45 @@ export class OpenAIClient {
     }
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: request.model ?? this.model,
-          messages: toOpenAIMessages(request.messages),
-          tools: request.tools?.length ? toOpenAITools(request.tools) : undefined,
-          tool_choice: request.tools?.length ? request.toolChoice ?? "auto" : undefined,
-          temperature: request.temperature,
-          max_tokens: request.maxTokens,
-          stream: true,
-          stream_options: { include_usage: true },
-        }),
-        signal: controller.signal,
-      });
+      const requestBody = {
+        model: request.model ?? this.model,
+        messages: toOpenAIMessages(request.messages),
+        tools: request.tools?.length ? toOpenAITools(request.tools) : undefined,
+        tool_choice: request.tools?.length ? request.toolChoice ?? "auto" : undefined,
+        temperature: request.temperature,
+        max_tokens: request.maxTokens,
+        stream: true,
+      };
+
+      /**
+       * @param {boolean} includeUsage
+       */
+      const doFetch = (includeUsage) =>
+        fetch(`${this.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(
+            includeUsage ? { ...requestBody, stream_options: { include_usage: true } } : requestBody,
+          ),
+          signal: controller.signal,
+        });
+
+      let response = await doFetch(true);
 
       if (!response.ok) {
         const text = await response.text().catch(() => "");
-        throw new Error(`OpenAI streamChat error ${response.status}: ${text}`);
+        // Some OpenAI-compatible backends (older proxies, etc.) don't support
+        // `stream_options`. Retry without it so streaming still works.
+        if (response.status === 400 && /stream_options/i.test(text)) {
+          response = await doFetch(false);
+        }
+        if (!response.ok) {
+          const retryText = await response.text().catch(() => "");
+          throw new Error(`OpenAI streamChat error ${response.status}: ${retryText || text}`);
+        }
       }
 
       const reader = response.body?.getReader();
