@@ -1,26 +1,21 @@
 use formula_xlsb::{CellValue, XlsbWorkbook};
 use pretty_assertions::assert_eq;
+use std::io::Write;
+use tempfile::NamedTempFile;
 
 mod fixture_builder;
 
 use fixture_builder::XlsbFixtureBuilder;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn write_temp_xlsb(bytes: &[u8]) -> PathBuf {
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let pid = std::process::id();
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-
-    let mut path = std::env::temp_dir();
-    path.push(format!("formula_xlsb_fixture_{pid}_{ts}_{n}.xlsb"));
-    std::fs::write(&path, bytes).expect("write temp xlsb");
-    path
+fn write_temp_xlsb(bytes: &[u8]) -> NamedTempFile {
+    let mut file = tempfile::Builder::new()
+        .prefix("formula_xlsb_fixture_")
+        .suffix(".xlsb")
+        .tempfile()
+        .expect("create temp xlsb");
+    file.write_all(bytes).expect("write temp xlsb");
+    file.flush().expect("flush temp xlsb");
+    file
 }
 
 #[test]
@@ -70,8 +65,8 @@ fn generated_fixture_reads_number_and_formula_cells() {
     );
 
     let bytes = builder.build_bytes();
-    let path = write_temp_xlsb(&bytes);
-    let wb = XlsbWorkbook::open(&path).expect("open generated xlsb");
+    let tmp = write_temp_xlsb(&bytes);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open generated xlsb");
 
     assert_eq!(wb.sheet_metas().len(), 1);
     assert_eq!(wb.sheet_metas()[0].name, "Sheet1");
@@ -97,7 +92,6 @@ fn generated_fixture_reads_number_and_formula_cells() {
         vec![0x24, 0, 0, 0, 0, 0x01, 0xC0, 0x1E, 0x02, 0x00, 0x05]
     );
 
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -124,8 +118,8 @@ fn generated_fixture_supports_shared_strings_and_absolute_refs() {
     );
 
     let bytes = builder.build_bytes();
-    let path = write_temp_xlsb(&bytes);
-    let wb = XlsbWorkbook::open(&path).expect("open generated xlsb");
+    let tmp = write_temp_xlsb(&bytes);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open generated xlsb");
 
     assert_eq!(wb.sheet_metas().len(), 1);
     assert_eq!(wb.sheet_metas()[0].name, "Data");
@@ -148,7 +142,6 @@ fn generated_fixture_supports_shared_strings_and_absolute_refs() {
     let formula = formula_cell.formula.as_ref().expect("formula payload preserved");
     assert_eq!(formula.text.as_deref(), Some("$A$1+$B1"));
 
-    let _ = std::fs::remove_file(&path);
 }
 
 #[test]
@@ -166,8 +159,8 @@ fn generated_fixture_preserves_formula_extra_bytes_for_array_constants() {
     builder.set_cell_formula_num(0, 0, 1.0, rgce.clone(), extra);
 
     let bytes = builder.build_bytes();
-    let path = write_temp_xlsb(&bytes);
-    let wb = XlsbWorkbook::open(&path).expect("open generated xlsb");
+    let tmp = write_temp_xlsb(&bytes);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open generated xlsb");
     let sheet = wb.read_sheet(0).expect("read sheet1");
 
     let formula_cell = sheet
@@ -180,5 +173,27 @@ fn generated_fixture_preserves_formula_extra_bytes_for_array_constants() {
     assert_eq!(formula.text.as_deref(), None);
     assert_eq!(formula.rgce, rgce);
 
-    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn generated_fixture_supports_inline_strings_without_shared_strings_part() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("Inline");
+    builder.set_cell_inline_string(0, 0, "Hello");
+
+    let bytes = builder.build_bytes();
+    let tmp = write_temp_xlsb(&bytes);
+    let wb = XlsbWorkbook::open(tmp.path()).expect("open generated xlsb");
+
+    assert_eq!(wb.sheet_metas().len(), 1);
+    assert_eq!(wb.sheet_metas()[0].name, "Inline");
+    assert!(wb.shared_strings().is_empty());
+
+    let sheet = wb.read_sheet(0).expect("read sheet1");
+    let cell = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("cell A1");
+    assert_eq!(cell.value, CellValue::Text("Hello".to_string()));
 }

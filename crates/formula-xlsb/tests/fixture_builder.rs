@@ -22,6 +22,7 @@ pub struct XlsbFixtureBuilder {
 enum CellSpec {
     Number(f64),
     Sst(u32),
+    InlineString(String),
     FormulaNum { cached: f64, rgce: Vec<u8>, extra: Vec<u8> },
 }
 
@@ -56,6 +57,13 @@ impl XlsbFixtureBuilder {
             .entry(row)
             .or_default()
             .insert(col, CellSpec::Sst(sst_idx));
+    }
+
+    pub fn set_cell_inline_string(&mut self, row: u32, col: u32, s: &str) {
+        self.cells
+            .entry(row)
+            .or_default()
+            .insert(col, CellSpec::InlineString(s.to_string()));
     }
 
     pub fn set_cell_formula_num(&mut self, row: u32, col: u32, cached: f64, rgce: Vec<u8>, extra: Vec<u8>) {
@@ -194,6 +202,7 @@ mod biff12 {
     pub const ROW: u32 = 0x0000;
     pub const FLOAT: u32 = 0x0005;
     pub const STRING: u32 = 0x0007;
+    pub const CELL_ST: u32 = 0x0006;
     pub const FORMULA_FLOAT: u32 = 0x0009;
 
     pub const SST: u32 = 0x019F;
@@ -255,6 +264,13 @@ fn build_sheet_bin(cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>) -> Vec<u8> {
                     data.extend_from_slice(&0u32.to_le_bytes()); // style
                     data.extend_from_slice(&idx.to_le_bytes());
                     write_record(&mut out, biff12::STRING, &data);
+                }
+                CellSpec::InlineString(s) => {
+                    let mut data = Vec::<u8>::new();
+                    data.extend_from_slice(&col.to_le_bytes());
+                    data.extend_from_slice(&0u32.to_le_bytes()); // style
+                    write_utf16_string(&mut data, s);
+                    write_record(&mut out, biff12::CELL_ST, &data);
                 }
                 CellSpec::FormulaNum { cached, rgce, extra } => {
                     let mut data = Vec::<u8>::new();
