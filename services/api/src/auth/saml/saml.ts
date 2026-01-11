@@ -405,10 +405,10 @@ export async function samlCallback(request: FastifyRequest, reply: FastifyReply)
 
   let profile: Record<string, unknown>;
   try {
-    const result = await saml.validatePostResponseAsync({
-      SAMLResponse: parsed.data.SAMLResponse,
-      RelayState: parsed.data.RelayState
-    });
+    const container: Record<string, string> = { SAMLResponse: parsed.data.SAMLResponse };
+    if (typeof parsed.data.RelayState === "string") container.RelayState = parsed.data.RelayState;
+
+    const result = await saml.validatePostResponseAsync(container);
     profile = (result?.profile ?? null) as Record<string, unknown>;
   } catch (err) {
     request.server.metrics.authFailuresTotal.inc({ reason: "invalid_saml_response" });
