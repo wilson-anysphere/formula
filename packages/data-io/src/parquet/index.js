@@ -238,7 +238,7 @@ export async function arrowTableToParquet(table, options = {}) {
  * @returns {Uint8Array}
  */
 export function arrowTableToIPC(table) {
-  return arrow.tableToIPC(table, 'stream');
+  return requireArrow().tableToIPC(table, 'stream');
 }
 
 /**
@@ -248,7 +248,7 @@ export function arrowTableToIPC(table) {
  * @returns {arrow.Table}
  */
 export function arrowTableFromIPC(bytes) {
-  return arrow.tableFromIPC(bytes);
+  return requireArrow().tableFromIPC(bytes);
 }
 
 /**
