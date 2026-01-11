@@ -300,6 +300,32 @@ test("concurrent value vs formula surfaces a content conflict on the formula wri
   assert.equal(getValue(bob.cells, "s:0:0"), "bob");
 });
 
+test("resolving a content conflict by choosing the formula re-applies the formula and clears the value", () => {
+  // Value writer has higher clientID and wins initially.
+  const alice = createClient("alice", { clientID: 1, mode: "formula+value" });
+  const bob = createClient("bob", { clientID: 2, mode: "formula+value" });
+
+  alice.monitor.setLocalValue("s:0:0", "base");
+  syncDocs(alice.doc, bob.doc);
+
+  // Offline concurrent edits: alice writes a formula; bob writes a value.
+  alice.monitor.setLocalFormula("s:0:0", "=1");
+  bob.monitor.setLocalValue("s:0:0", "bob");
+  syncDocs(alice.doc, bob.doc);
+
+  const conflict = alice.conflicts.find((c) => c.kind === "content") ?? null;
+  assert.ok(conflict, "expected a content conflict on alice");
+
+  // Keep the formula (re-apply it on top of the winning value).
+  assert.ok(alice.monitor.resolveConflict(conflict.id, conflict.local));
+  syncDocs(alice.doc, bob.doc);
+
+  assert.equal(getFormula(alice.cells, "s:0:0"), "=1");
+  assert.equal(getFormula(bob.cells, "s:0:0"), "=1");
+  assert.equal(getValue(alice.cells, "s:0:0"), null);
+  assert.equal(getValue(bob.cells, "s:0:0"), null);
+});
+
 test("legacy value writes that do not create a formula marker still surface a content conflict (and resolving remote value clears the formula)", () => {
   // Alice uses the monitor in formula+value mode, but Bob is a legacy client that
   // sets `value` without creating a `formula=null` marker. If Bob doesn't have the
