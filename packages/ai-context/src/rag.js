@@ -63,15 +63,17 @@ export class HashEmbedder {
 
 export class InMemoryVectorStore {
   constructor() {
-    /** @type {{ id: string, embedding: number[], metadata: any, text: string }[]} */
-    this.items = [];
+    /** @type {Map<string, { id: string, embedding: number[], metadata: any, text: string }>} */
+    this.items = new Map();
   }
 
   /**
    * @param {{ id: string, embedding: number[], metadata: any, text: string }[]} items
    */
   async add(items) {
-    this.items.push(...items);
+    for (const item of items) {
+      this.items.set(item.id, item);
+    }
   }
 
   /**
@@ -79,12 +81,27 @@ export class InMemoryVectorStore {
    * @param {number} topK
    */
   async search(queryEmbedding, topK) {
-    const scored = this.items.map((item) => ({
+    const scored = Array.from(this.items.values()).map((item) => ({
       item,
       score: cosineSimilarity(queryEmbedding, item.embedding),
     }));
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, topK);
+  }
+
+  /**
+   * Remove items whose ids start with a given prefix. Useful for per-sheet
+   * re-indexing when the number of chunks can shrink.
+   * @param {string} prefix
+   */
+  async deleteByPrefix(prefix) {
+    for (const id of this.items.keys()) {
+      if (id.startsWith(prefix)) this.items.delete(id);
+    }
+  }
+
+  get size() {
+    return this.items.size;
   }
 }
 
@@ -191,6 +208,13 @@ export class RagIndex {
    * @param {{ name: string, values: unknown[][] }} sheet
    */
   async indexSheet(sheet) {
+    // `chunkSheetByRegions()` ids are deterministic (sheet name + region index),
+    // but the number of regions can change over time. Clear the previous region
+    // chunks for this sheet so stale chunks don't linger in the store.
+    if (typeof this.store.deleteByPrefix === "function") {
+      await this.store.deleteByPrefix(`${sheet.name}-region-`);
+    }
+
     const chunks = chunkSheetByRegions(sheet);
     const items = [];
     for (const chunk of chunks) {

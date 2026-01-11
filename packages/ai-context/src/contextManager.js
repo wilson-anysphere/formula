@@ -164,21 +164,21 @@ export class ContextManager {
       },
       {
         key: "attachments",
-        priority: 4,
+        priority: 2,
         text: params.attachments?.length
           ? this.redactor(`User-provided attachments:\n${JSON.stringify(params.attachments, null, 2)}`)
           : "",
       },
       {
         key: "samples",
-        priority: 2,
+        priority: 1,
         text: sampled.length
           ? this.redactor(`Sample rows:\n${sampled.map((r) => JSON.stringify(r)).join("\n")}`)
           : "",
       },
       {
         key: "retrieved",
-        priority: 1,
+        priority: 4,
         text: retrieved.length ? this.redactor(`Retrieved context:\n${JSON.stringify(retrieved, null, 2)}`) : "",
       },
     ].filter((s) => s.text);
@@ -445,14 +445,14 @@ export class ContextManager {
       },
       {
         key: "attachments",
-        priority: 4,
+        priority: 2,
         text: params.attachments?.length
           ? this.redactor(`User-provided attachments:\n${JSON.stringify(params.attachments, null, 2)}`)
           : "",
       },
       {
         key: "retrieved",
-        priority: 1,
+        priority: 4,
         text: retrievedChunks.length ? `Retrieved workbook context:\n${retrievedChunks.map((c) => c.text).join("\n\n")}` : "",
       },
     ].filter((s) => s.text);
