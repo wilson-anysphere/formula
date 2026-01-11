@@ -108,6 +108,25 @@ async function expectWsUpgradeStatus(
   });
 }
 
+function parseEncryptedYjsKeyVersions(bytes: Buffer): number[] {
+  if (bytes.byteLength < 12) return [];
+  if (bytes.subarray(0, 8).toString("ascii") !== "FMLYJS01") return [];
+  const flags = bytes.readUInt8(8);
+  if ((flags & 0b1) !== 0b1) return [];
+
+  const out: number[] = [];
+  let offset = 12; // header bytes: magic(8) + flags(1) + reserved(3)
+  while (offset + 4 <= bytes.byteLength) {
+    const recordLen = bytes.readUInt32BE(offset);
+    offset += 4;
+    if (offset + recordLen > bytes.byteLength) break;
+    if (recordLen < 4) break;
+    out.push(bytes.readUInt32BE(offset));
+    offset += recordLen;
+  }
+  return out;
+}
+
 function encodeVarUint(value: number): Uint8Array {
   const bytes: number[] = [];
   let v = value;
@@ -514,6 +533,129 @@ test("migrates legacy plaintext persistence files to encrypted format", async (t
     10_000
   );
   assert.equal(doc2.getText("t").toString(), secretText);
+});
+
+test("supports KeyRing rotation for encrypted file persistence", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const port = await getAvailablePort();
+  const wsUrl = `ws://127.0.0.1:${port}`;
+
+  const docName = "rotation-doc";
+  const secretText = "rotation-secret: hello world 0123456789 abcdef";
+
+  const keyV1 = Buffer.alloc(32, 7).toString("base64");
+  const keyV2 = Buffer.alloc(32, 8).toString("base64");
+
+  const keyRingV1 = JSON.stringify({
+    currentVersion: 1,
+    keys: { "1": keyV1 },
+  });
+  const keyRingV2 = JSON.stringify({
+    currentVersion: 2,
+    keys: { "1": keyV1, "2": keyV2 },
+  });
+
+  let server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "keyring",
+      SYNC_SERVER_ENCRYPTION_KEYRING_JSON: keyRingV1,
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  {
+    const doc = new Y.Doc();
+    const provider = new WebsocketProvider(wsUrl, docName, doc, {
+      WebSocketPolyfill: WebSocket,
+      disableBc: true,
+      params: { token: "test-token" },
+    });
+
+    t.after(() => {
+      provider.destroy();
+      doc.destroy();
+    });
+
+    await waitForProviderSync(provider);
+    doc.getText("t").insert(0, secretText);
+
+    provider.destroy();
+    doc.destroy();
+    await new Promise((r) => setTimeout(r, 250));
+
+    const persistedPath = yjsFilePathForDoc(dataDir, docName);
+    const bytesV1 = await readFile(persistedPath);
+    assert.equal(bytesV1.subarray(0, 8).toString("ascii"), "FMLYJS01");
+    assert.equal(bytesV1.readUInt8(8) & 0b1, 0b1);
+    assert.equal(bytesV1.includes(Buffer.from(secretText, "utf8")), false);
+
+    const versionsV1 = parseEncryptedYjsKeyVersions(bytesV1);
+    assert.ok(
+      versionsV1.includes(1),
+      `expected persisted records to include keyVersion=1 (got ${versionsV1.join(",")})`
+    );
+  }
+
+  await server.stop();
+
+  server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "keyring",
+      SYNC_SERVER_ENCRYPTION_KEYRING_JSON: keyRingV2,
+    },
+  });
+
+  {
+    const doc = new Y.Doc();
+    const provider = new WebsocketProvider(wsUrl, docName, doc, {
+      WebSocketPolyfill: WebSocket,
+      disableBc: true,
+      params: { token: "test-token" },
+    });
+
+    t.after(() => {
+      provider.destroy();
+      doc.destroy();
+    });
+
+    await waitForProviderSync(provider);
+    await waitForCondition(
+      () => doc.getText("t").toString() === secretText,
+      10_000
+    );
+    assert.equal(doc.getText("t").toString(), secretText);
+
+    // Trigger a write under the rotated keyring (currentVersion=2).
+    doc.getText("t").insert(secretText.length, "!");
+
+    provider.destroy();
+    doc.destroy();
+    await new Promise((r) => setTimeout(r, 250));
+
+    const persistedPath = yjsFilePathForDoc(dataDir, docName);
+    const bytesV2 = await readFile(persistedPath);
+    assert.equal(bytesV2.subarray(0, 8).toString("ascii"), "FMLYJS01");
+    assert.equal(bytesV2.readUInt8(8) & 0b1, 0b1);
+    assert.equal(bytesV2.includes(Buffer.from(secretText, "utf8")), false);
+
+    const versionsV2 = parseEncryptedYjsKeyVersions(bytesV2);
+    assert.ok(
+      versionsV2.includes(2),
+      `expected persisted records to include keyVersion=2 (got ${versionsV2.join(",")})`
+    );
+  }
 });
 
 test("enforces read-only roles (viewer/commenter) for Yjs updates", async (t) => {
