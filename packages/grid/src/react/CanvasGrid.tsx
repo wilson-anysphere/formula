@@ -1298,10 +1298,88 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       };
     const ctrlOrMeta = event.ctrlKey || event.metaKey;
 
+    const applySelectionRange = (range: CellRange) => {
+      keyboardAnchorRef.current = null;
+
+      const prevSelection = renderer.getSelection();
+      const prevRange = renderer.getSelectionRange();
+
+      renderer.setSelectionRange(range, { activeCell: prevSelection ?? active });
+
+      const nextSelection = renderer.getSelection();
+      const nextRange = renderer.getSelectionRange();
+
+      announceSelection(nextSelection, nextRange);
+
+      if (nextSelection) {
+        renderer.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto", padding: 8 });
+        syncScrollbars();
+      }
+
+      if (
+        (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
+        (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)
+      ) {
+        onSelectionChangeRef.current?.(nextSelection);
+      }
+
+      if (
+        (prevRange?.startRow ?? null) !== (nextRange?.startRow ?? null) ||
+        (prevRange?.endRow ?? null) !== (nextRange?.endRow ?? null) ||
+        (prevRange?.startCol ?? null) !== (nextRange?.startCol ?? null) ||
+        (prevRange?.endCol ?? null) !== (nextRange?.endCol ?? null)
+      ) {
+        onSelectionRangeChangeRef.current?.(nextRange);
+      }
+    };
+
     if (event.key === "F2") {
       event.preventDefault();
       if (!selection) renderer.setSelection(active);
       requestCellEdit();
+      return;
+    }
+
+    // Shift+Space selects the entire row, like Excel.
+    if (!ctrlOrMeta && !event.altKey && event.shiftKey && (event.code === "Space" || event.key === " ")) {
+      event.preventDefault();
+
+      const startCol = headerColsRef.current >= colCount ? 0 : headerColsRef.current;
+      applySelectionRange({
+        startRow: active.row,
+        endRow: active.row + 1,
+        startCol,
+        endCol: colCount
+      });
+      return;
+    }
+
+    // Ctrl/Cmd+Space selects the entire column, like Excel.
+    if (ctrlOrMeta && !event.altKey && (event.code === "Space" || event.key === " ")) {
+      event.preventDefault();
+
+      const startRow = headerRowsRef.current >= rowCount ? 0 : headerRowsRef.current;
+      applySelectionRange({
+        startRow,
+        endRow: rowCount,
+        startCol: active.col,
+        endCol: active.col + 1
+      });
+      return;
+    }
+
+    // Ctrl/Cmd+A selects all cells.
+    if (ctrlOrMeta && !event.altKey && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+
+      const startRow = headerRowsRef.current >= rowCount ? 0 : headerRowsRef.current;
+      const startCol = headerColsRef.current >= colCount ? 0 : headerColsRef.current;
+      applySelectionRange({
+        startRow,
+        endRow: rowCount,
+        startCol,
+        endCol: colCount
+      });
       return;
     }
 
