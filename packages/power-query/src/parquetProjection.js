@@ -437,6 +437,12 @@ export function computeParquetRowLimit(steps, limit) {
         }
         break;
       }
+      case "demoteHeaders": {
+        // `demoteHeaders` inserts the column names as the first data row. When at least one output
+        // row is requested, we can satisfy it with one fewer source row.
+        if (required > 0) required = Math.max(0, required - 1);
+        break;
+      }
       case "promoteHeaders": {
         // `promoteHeaders` consumes the first data row as a header row (dropping it from the output).
         // To preserve output limit semantics we need one extra source row when at least one row is requested.

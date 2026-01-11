@@ -318,6 +318,13 @@ test("computeParquetRowLimit accounts for skip/removeRows/promoteHeaders", () =>
   );
 });
 
+test("computeParquetRowLimit accounts for demoteHeaders", () => {
+  assert.equal(
+    computeParquetRowLimit([{ id: "s_demote", name: "Demote", operation: { type: "demoteHeaders" } }], 100),
+    99,
+  );
+});
+
 test("computeParquetRowLimit accounts for unpivot row expansion", () => {
   assert.equal(
     computeParquetRowLimit([{ id: "s_unpivot", name: "Unpivot", operation: { type: "unpivot", columns: ["q1", "q2"], nameColumn: "Quarter", valueColumn: "Value" } }], 5),
