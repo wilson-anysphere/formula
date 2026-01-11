@@ -40,7 +40,7 @@ test("SQLiteBranchStore persists branches and commits (with snapshots)", async (
   const scenario = branches.find((b) => b.name === "scenario");
   assert.ok(scenario);
   const state = await store2.getDocumentStateAtCommit(scenario.headCommitId);
-  assert.deepEqual(state.sheets.Sheet1, { A1: { value: 6 } });
+  assert.deepEqual(state.cells.Sheet1, { A1: { value: 6 } });
   store2.close();
 });
 
@@ -77,7 +77,7 @@ test("SQLiteBranchStore encryption: keyring required to reopen encrypted store",
   const main = branches.find((b) => b.name === "main");
   assert.ok(main);
   const state = await reopened.getDocumentStateAtCommit(main.headCommitId);
-  assert.deepEqual(state.sheets.Sheet1, { A1: { value: 2 } });
+  assert.deepEqual(state.cells.Sheet1, { A1: { value: 2 } });
   reopened.close();
 
   const missingKeyRing = new SQLiteBranchStore({ filePath: storePath });

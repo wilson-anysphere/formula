@@ -2,7 +2,8 @@ import initSqlJs from "sql.js";
 import { createRequire } from "node:module";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { applyPatch } from "../patch.js";
+import { applyPatch, diffDocumentStates } from "../patch.js";
+import { emptyDocumentState, normalizeDocumentState } from "../state.js";
 import { randomUUID } from "../uuid.js";
 import {
   decodeEncryptedFileBytes,
@@ -192,8 +193,8 @@ export class SQLiteBranchStore {
     const rootCommitId = randomUUID();
     const mainBranchId = randomUUID();
 
-    const patch = { sheets: structuredClone(initialState.sheets ?? {}) };
-    const snapshot = { sheets: structuredClone(initialState.sheets ?? {}) };
+    const patch = diffDocumentStates(emptyDocumentState(), initialState);
+    const snapshot = applyPatch(emptyDocumentState(), patch);
 
     db.run("BEGIN");
     try {
@@ -448,7 +449,7 @@ export class SQLiteBranchStore {
     if (!row) throw new Error(`Commit not found: ${commitId}`);
 
     if (row.snapshotJson) {
-      return JSON.parse(row.snapshotJson);
+      return normalizeDocumentState(JSON.parse(row.snapshotJson));
     }
 
     /** @type {{ id: string, patch: Patch }[]} */
@@ -465,7 +466,7 @@ export class SQLiteBranchStore {
     chain.reverse();
 
     /** @type {DocumentState} */
-    let state = current?.snapshotJson ? JSON.parse(current.snapshotJson) : { sheets: {} };
+    let state = current?.snapshotJson ? normalizeDocumentState(JSON.parse(current.snapshotJson)) : emptyDocumentState();
     for (const c of chain) {
       state = this._applyPatch(state, c.patch);
     }
@@ -511,8 +512,8 @@ export class SQLiteBranchStore {
   }
 
   async #resolveSnapshotState({ parentCommitId, patch, nextState }) {
-    if (nextState) return structuredClone(nextState);
-    const base = parentCommitId ? await this.getDocumentStateAtCommit(parentCommitId) : { sheets: {} };
+    if (nextState) return normalizeDocumentState(nextState);
+    const base = parentCommitId ? await this.getDocumentStateAtCommit(parentCommitId) : emptyDocumentState();
     return this._applyPatch(base, patch);
   }
 

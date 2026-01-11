@@ -89,6 +89,20 @@ export class BranchService {
   }
 
   /**
+   * Convenience helper: load the current branch head state.
+   *
+   * This is intentionally *not* permission-gated (it's a read of already
+   * reachable history) and is useful for adapters that can't represent the full
+   * workbook metadata surface area (e.g. DocumentController).
+   *
+   * @returns {Promise<DocumentState>}
+   */
+  async getCurrentState() {
+    const branch = await this.getCurrentBranch();
+    return this.#store.getDocumentStateAtCommit(branch.headCommitId);
+  }
+
+  /**
    * @param {Actor} actor
    * @param {{ name: string, description?: string }} input
    */

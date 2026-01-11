@@ -26,13 +26,22 @@ test("yjs document adapter: normalizes formulas + handles legacy cell keys", () 
 
   const state = yjsDocToDocumentState(doc);
   assert.deepEqual(state, {
+    schemaVersion: 1,
     sheets: {
+      order: ["Sheet1"],
+      metaById: {
+        Sheet1: { id: "Sheet1", name: "Sheet1" },
+      },
+    },
+    cells: {
       Sheet1: {
         A1: { value: 123 },
         B1: { formula: "=1+1", format: { bold: true } },
         C1: { formula: "=SUM(1,2)" },
       },
     },
+    namedRanges: {},
+    comments: {},
   });
 
   const doc2 = new Y.Doc();
@@ -50,4 +59,3 @@ test("yjs document adapter: normalizes formulas + handles legacy cell keys", () 
   assert.equal(b1.get("formula"), "=1+1");
   assert.deepEqual(b1.get("format"), { bold: true });
 });
-

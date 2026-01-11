@@ -32,7 +32,7 @@ test("integration: create branch, diverge, merge back", async () => {
     resolutions: [{ conflictIndex: 0, choice: "theirs" }]
   });
 
-  assert.deepEqual(merge.state.sheets.Sheet1, {
+  assert.deepEqual(merge.state.cells.Sheet1, {
     A1: { value: 10 },
     B1: { value: 99 },
     C1: { value: 7 }

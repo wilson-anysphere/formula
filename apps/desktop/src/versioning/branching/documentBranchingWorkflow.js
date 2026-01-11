@@ -2,6 +2,7 @@ import {
   applyBranchStateToDocumentController,
   documentControllerToBranchState,
 } from "./branchStateAdapter.js";
+import { normalizeDocumentState } from "../../../../../packages/versioning/branches/src/state.js";
 
 /**
  * @typedef {import("../../document/documentController.js").DocumentController} DocumentController
@@ -68,8 +69,30 @@ export class DocumentBranchingWorkflow {
    * @param {string} [message]
    */
   async commitCurrentState(actor, message) {
-    const nextState = documentControllerToBranchState(this.doc);
-    return this.branchService.commit(actor, { nextState, message });
+    const nextState = normalizeDocumentState(documentControllerToBranchState(this.doc));
+
+    // DocumentController doesn't model workbook-level metadata like empty sheets,
+    // named ranges, or comments. Preserve whatever is currently stored in the
+    // branch head and only overlay the cell edits we can observe locally.
+    const baseState = normalizeDocumentState(await this.branchService.getCurrentState());
+
+    /** @type {import("../../../../../packages/versioning/branches/src/types.js").DocumentState} */
+    const merged = structuredClone(baseState);
+
+    for (const [sheetId, cellMap] of Object.entries(nextState.cells)) {
+      merged.cells[sheetId] = cellMap;
+      if (!merged.sheets.metaById[sheetId]) {
+        merged.sheets.metaById[sheetId] = { id: sheetId, name: sheetId };
+      }
+    }
+
+    // Ensure any new sheets are present in the ordering (DocumentController
+    // doesn't maintain sheet order, so append).
+    for (const sheetId of nextState.sheets.order) {
+      if (!merged.sheets.order.includes(sheetId)) merged.sheets.order.push(sheetId);
+    }
+
+    return this.branchService.commit(actor, { nextState: normalizeDocumentState(merged), message });
   }
 
   /**

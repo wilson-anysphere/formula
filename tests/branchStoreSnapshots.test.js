@@ -61,7 +61,7 @@ test("snapshotting bounds patch replay (InMemoryBranchStore, long history)", asy
   store.applyPatchCalls = 0;
   const state = await store.getDocumentStateAtCommit(headCommitId);
 
-  assert.deepEqual(state.sheets.Sheet1, { A1: { value: commits } });
+  assert.deepEqual(state.cells.Sheet1, { A1: { value: commits } });
   assert.ok(
     store.applyPatchCalls <= snapshotEveryNCommits + 1,
     `expected <=${snapshotEveryNCommits + 1} applyPatch calls, got ${store.applyPatchCalls}`

@@ -1,5 +1,6 @@
 import * as Y from "yjs";
-import { applyPatch } from "../patch.js";
+import { applyPatch, diffDocumentStates } from "../patch.js";
+import { emptyDocumentState } from "../state.js";
 import { randomUUID } from "../uuid.js";
 
 /**
@@ -71,7 +72,7 @@ export class YjsBranchStore {
     const mainBranchId = randomUUID();
 
     /** @type {Patch} */
-    const patch = { sheets: structuredClone(initialState.sheets ?? {}) };
+    const patch = diffDocumentStates(emptyDocumentState(), initialState);
 
     this.#ydoc.transact(() => {
       const rootAfter = this.#meta.get("rootCommitId");
@@ -131,7 +132,7 @@ export class YjsBranchStore {
       createdBy: String(commitMap.get("createdBy") ?? ""),
       createdAt: Number(commitMap.get("createdAt") ?? 0),
       message: commitMap.get("message") ?? null,
-      patch: structuredClone(commitMap.get("patch") ?? { sheets: {} })
+      patch: structuredClone(commitMap.get("patch") ?? { schemaVersion: 1 })
     };
   }
 
@@ -323,11 +324,10 @@ export class YjsBranchStore {
     chain.reverse();
 
     /** @type {DocumentState} */
-    let state = { sheets: {} };
+    let state = emptyDocumentState();
     for (const c of chain) {
       state = applyPatch(state, c.patch);
     }
     return state;
   }
 }
-

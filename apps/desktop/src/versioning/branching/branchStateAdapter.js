@@ -1,4 +1,5 @@
 import { formatA1, parseA1 } from "../../document/coords.js";
+import { normalizeDocumentState } from "../../../../../packages/versioning/branches/src/state.js";
 
 /**
  * @typedef {import("../../document/documentController.js").DocumentController} DocumentController
@@ -45,10 +46,11 @@ function parseRowColKey(key) {
  * @returns {DocumentState}
  */
 export function documentControllerToBranchState(doc) {
-  /** @type {DocumentState} */
-  const state = { sheets: {} };
-
   const sheetIds = doc.getSheetIds().slice().sort();
+  /** @type {Record<string, any>} */
+  const metaById = {};
+  /** @type {Record<string, Record<string, BranchCell>>} */
+  const cells = {};
   for (const sheetId of sheetIds) {
     const sheet = doc.model.sheets.get(sheetId);
     /** @type {Record<string, BranchCell>} */
@@ -77,8 +79,19 @@ export function documentControllerToBranchState(doc) {
       }
     }
 
-    state.sheets[sheetId] = outSheet;
+    cells[sheetId] = outSheet;
+    // DocumentController doesn't currently track display names separately from ids.
+    metaById[sheetId] = { id: sheetId, name: sheetId };
   }
+
+  /** @type {DocumentState} */
+  const state = {
+    schemaVersion: 1,
+    sheets: { order: sheetIds, metaById },
+    cells,
+    namedRanges: {},
+    comments: {},
+  };
 
   return state;
 }
@@ -86,17 +99,17 @@ export function documentControllerToBranchState(doc) {
 /**
  * Replace the live DocumentController workbook contents from a BranchService `DocumentState`.
  *
- * Missing keys in `state.sheets[sheetId]` are treated as deletions (cells will be cleared).
+ * Missing keys in `state.cells[sheetId]` are treated as deletions (cells will be cleared).
  *
  * @param {DocumentController} doc
  * @param {DocumentState} state
  */
 export function applyBranchStateToDocumentController(doc, state) {
-  const sheetsObj = state?.sheets ?? {};
-  const sheetIds = Object.keys(sheetsObj).sort();
+  const normalized = normalizeDocumentState(state);
+  const sheetIds = normalized.sheets.order.slice();
 
   const sheets = sheetIds.map((sheetId) => {
-    const cellMap = sheetsObj[sheetId] ?? {};
+    const cellMap = normalized.cells[sheetId] ?? {};
     /** @type {Array<{ row: number, col: number, value: any, formula: string | null, format: any }>} */
     const cells = [];
 

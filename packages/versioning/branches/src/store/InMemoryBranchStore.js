@@ -1,4 +1,5 @@
-import { applyPatch } from "../patch.js";
+import { applyPatch, diffDocumentStates } from "../patch.js";
+import { emptyDocumentState, normalizeDocumentState } from "../state.js";
 import { randomUUID } from "../uuid.js";
 
 const UTF8_ENCODER = new TextEncoder();
@@ -61,7 +62,8 @@ export class InMemoryBranchStore {
     if (this.#rootCommitByDoc.has(docId)) return;
 
     const rootCommitId = randomUUID();
-    const snapshot = { sheets: structuredClone(initialState.sheets ?? {}) };
+    const patch = diffDocumentStates(emptyDocumentState(), initialState);
+    const snapshot = applyPatch(emptyDocumentState(), patch);
     const rootCommit = {
       id: rootCommitId,
       docId,
@@ -70,7 +72,7 @@ export class InMemoryBranchStore {
       createdBy: actor.userId,
       createdAt: Date.now(),
       message: "root",
-      patch: { sheets: structuredClone(initialState.sheets ?? {}) },
+      patch
     };
 
     this.#commits.set(rootCommitId, rootCommit);
@@ -201,7 +203,7 @@ export class InMemoryBranchStore {
 
     /** @type {DocumentState} */
     const baseSnapshot = current ? this.#snapshotsByCommitId.get(current.id) : null;
-    let state = baseSnapshot ? structuredClone(baseSnapshot) : { sheets: {} };
+    let state = baseSnapshot ? structuredClone(baseSnapshot) : emptyDocumentState();
     for (const c of chain) {
       state = this._applyPatch(state, c.patch);
     }
@@ -247,8 +249,8 @@ export class InMemoryBranchStore {
   }
 
   async #resolveSnapshotState({ parentCommitId, patch, nextState }) {
-    if (nextState) return structuredClone(nextState);
-    const base = parentCommitId ? await this.getDocumentStateAtCommit(parentCommitId) : { sheets: {} };
+    if (nextState) return normalizeDocumentState(nextState);
+    const base = parentCommitId ? await this.getDocumentStateAtCommit(parentCommitId) : emptyDocumentState();
     return this._applyPatch(base, patch);
   }
 }

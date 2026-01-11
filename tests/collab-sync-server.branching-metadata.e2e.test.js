@@ -1,0 +1,181 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
+
+import * as Y from "yjs";
+
+import { BranchService } from "../packages/versioning/branches/src/BranchService.js";
+import { InMemoryBranchStore } from "../packages/versioning/branches/src/store/InMemoryBranchStore.js";
+import {
+  applyBranchStateToYjsDoc,
+  branchStateFromYjsDoc,
+} from "../packages/versioning/branches/src/yjs/branchStateAdapter.js";
+import { createCollabSession } from "../packages/collab/session/src/index.ts";
+import {
+  getAvailablePort,
+  startSyncServer,
+  waitForCondition,
+} from "../services/sync-server/test/test-helpers.ts";
+
+test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedRanges (+ comments) and survives restart", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-branching-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const port = await getAvailablePort();
+  // Resolve deps from the sync-server package so this test doesn't need to add them to the root package.json.
+  const requireFromSyncServer = createRequire(new URL("../services/sync-server/package.json", import.meta.url));
+  const WebSocket = requireFromSyncServer("ws");
+
+  /** @type {Awaited<ReturnType<typeof startSyncServer>> | null} */
+  let server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+  });
+  t.after(async () => {
+    await server?.stop();
+  });
+
+  const createClient = ({ wsUrl: wsBaseUrl, docId, token }) => {
+    const session = createCollabSession({
+      connection: {
+        wsUrl: wsBaseUrl,
+        docId,
+        token,
+        WebSocketPolyfill: WebSocket,
+        disableBc: true,
+      },
+      defaultSheetId: "Sheet1",
+    });
+
+    const ydoc = session.doc;
+
+    let destroyed = false;
+    const destroy = () => {
+      if (destroyed) return;
+      destroyed = true;
+      session.destroy();
+      ydoc.destroy();
+    };
+
+    return { session, ydoc, destroy };
+  };
+
+  const docId = `e2e-branching-${randomUUID()}`;
+  const wsUrl = server.wsUrl;
+
+  const clientA = createClient({ wsUrl, docId, token: "test-token" });
+  const clientB = createClient({ wsUrl, docId, token: "test-token" });
+  t.after(() => {
+    clientA.destroy();
+    clientB.destroy();
+  });
+
+  await Promise.all([clientA.session.whenSynced(), clientB.session.whenSynced()]);
+
+  // Initialize a minimal workbook.
+  clientA.ydoc.transact(() => {
+    const sheets = clientA.ydoc.getArray("sheets");
+    if (sheets.length > 0) sheets.delete(0, sheets.length);
+    const sheet1 = new Y.Map();
+    sheet1.set("id", "Sheet1");
+    sheet1.set("name", "Sheet1");
+    sheets.push([sheet1]);
+  });
+
+  await waitForCondition(() => {
+    const stateB = branchStateFromYjsDoc(clientB.ydoc);
+    return stateB.sheets.order.length === 1 && stateB.sheets.metaById.Sheet1?.name === "Sheet1";
+  }, 10_000);
+
+  const actor = { userId: "u1", role: "owner" };
+  const store = new InMemoryBranchStore();
+  const branchService = new BranchService({ docId, store });
+  await branchService.init(actor, branchStateFromYjsDoc(clientA.ydoc));
+
+  await branchService.createBranch(actor, { name: "feature" });
+
+  // --- Feature branch edits (offline/state-only) ---
+  const featureBase = await branchService.checkoutBranch(actor, { name: "feature" });
+  const featureNext = structuredClone(featureBase);
+  featureNext.sheets.metaById.Sheet1.name = "FeatureName";
+  featureNext.sheets.metaById.Sheet2 = { id: "Sheet2", name: "AddedSheet" };
+  featureNext.cells.Sheet2 = {};
+  featureNext.sheets.order = ["Sheet1", "Sheet2"];
+  featureNext.namedRanges.NR1 = { sheetId: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } };
+  featureNext.comments.c1 = { id: "c1", cellRef: "A1", content: "hello", resolved: false, replies: [] };
+  await branchService.commit(actor, { nextState: featureNext, message: "feature edits" });
+
+  // --- Main branch edits ---
+  const mainBase = await branchService.checkoutBranch(actor, { name: "main" });
+  const mainNext = structuredClone(mainBase);
+  mainNext.sheets.metaById.Sheet1.name = "MainName";
+  await branchService.commit(actor, { nextState: mainNext, message: "main rename" });
+
+  const preview = await branchService.previewMerge(actor, { sourceBranch: "feature" });
+  assert.equal(preview.conflicts.length, 1);
+  assert.deepEqual(preview.conflicts[0], {
+    type: "sheet",
+    reason: "rename",
+    sheetId: "Sheet1",
+    base: "Sheet1",
+    ours: "MainName",
+    theirs: "FeatureName",
+  });
+
+  const merge = await branchService.merge(actor, {
+    sourceBranch: "feature",
+    resolutions: [{ conflictIndex: 0, choice: "theirs" }],
+    message: "merge feature",
+  });
+
+  // Apply merge result back into the shared Yjs document.
+  applyBranchStateToYjsDoc(clientA.ydoc, merge.state);
+
+  await waitForCondition(() => {
+    const stateB = branchStateFromYjsDoc(clientB.ydoc);
+    return (
+      stateB.sheets.order.join(",") === "Sheet1,Sheet2" &&
+      stateB.sheets.metaById.Sheet1?.name === "FeatureName" &&
+      stateB.sheets.metaById.Sheet2?.name === "AddedSheet" &&
+      stateB.namedRanges.NR1?.sheetId === "Sheet1" &&
+      stateB.comments.c1?.content === "hello"
+    );
+  }, 10_000);
+
+  // Tear down clients and restart the server, keeping the same data directory.
+  clientA.destroy();
+  clientB.destroy();
+
+  // Give the server a moment to persist state after the last client disconnects.
+  await new Promise((r) => setTimeout(r, 500));
+
+  await server.stop();
+  server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+  });
+
+  const clientC = createClient({ wsUrl, docId, token: "test-token" });
+  t.after(() => clientC.destroy());
+  await clientC.session.whenSynced();
+
+  await waitForCondition(() => {
+    const stateC = branchStateFromYjsDoc(clientC.ydoc);
+    return (
+      stateC.sheets.order.join(",") === "Sheet1,Sheet2" &&
+      stateC.sheets.metaById.Sheet1?.name === "FeatureName" &&
+      stateC.sheets.metaById.Sheet2?.name === "AddedSheet" &&
+      stateC.namedRanges.NR1?.sheetId === "Sheet1" &&
+      stateC.comments.c1?.content === "hello"
+    );
+  }, 10_000);
+});
+

@@ -25,9 +25,50 @@
 /**
  * Multi-sheet document state.
  *
+ * Legacy (v0) state shape used by early BranchService versions.
+ *
  * @typedef {{
  *   sheets: Record<string, CellMap>
- * }} DocumentState
+ * }} LegacyDocumentState
+ */
+
+/**
+ * Minimal sheet metadata tracked by branching/versioning.
+ *
+ * `id` is the stable sheet identifier used by collaboration and cell keys.
+ * `name` is the user-visible display name (nullable for older/malformed docs).
+ *
+ * @typedef {{ id: string, name: string | null }} SheetMeta
+ */
+
+/**
+ * Workbook-level sheet state.
+ *
+ * @typedef {{
+ *   order: string[],
+ *   metaById: Record<string, SheetMeta>
+ * }} SheetsState
+ */
+
+/**
+ * Workbook document state for BranchService v2.
+ *
+ * This matches the collaboration/versioning surface area (cells + workbook
+ * metadata) so scenario branches can preserve realistic spreadsheet workflows.
+ *
+ * @typedef {{
+ *   schemaVersion: 1,
+ *   sheets: SheetsState,
+ *   cells: Record<string, CellMap>,
+ *   namedRanges: Record<string, any>,
+ *   comments: Record<string, any>
+ * }} WorkbookDocumentState
+ */
+
+/**
+ * Alias used throughout the BranchService package.
+ *
+ * @typedef {WorkbookDocumentState} DocumentState
  */
 
 /**
@@ -56,6 +97,25 @@
  *   base: Cell | null,
  *   ours: { to: string } | null,
  *   theirs: { to: string } | null
+ * } | {
+ *   type: "sheet",
+ *   reason: "rename" | "order" | "presence",
+ *   sheetId?: string,
+ *   base: any,
+ *   ours: any,
+ *   theirs: any
+ * } | {
+ *   type: "namedRange",
+ *   key: string,
+ *   base: any,
+ *   ours: any,
+ *   theirs: any
+ * } | {
+ *   type: "comment",
+ *   id: string,
+ *   base: any,
+ *   ours: any,
+ *   theirs: any
  * }} MergeConflict
  */
 
