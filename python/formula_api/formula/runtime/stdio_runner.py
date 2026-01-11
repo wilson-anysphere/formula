@@ -138,6 +138,47 @@ def main() -> None:
             except Exception:
                 pass
 
+            try:
+                original_find_spec = importlib.machinery.BuiltinImporter.find_spec
+
+                def guarded_find_spec(fullname: str, path=None, target=None):  # type: ignore[no-untyped-def]
+                    root = fullname.split(".", 1)[0]
+                    if root in blocked_import_roots:
+                        raise PermissionError(f"Import of {root!r} is not permitted")
+                    return original_find_spec(fullname, path, target)
+
+                importlib.machinery.BuiltinImporter.find_spec = guarded_find_spec  # type: ignore[assignment]
+            except Exception:
+                pass
+
+            try:
+                original_create_module = importlib.machinery.BuiltinImporter.create_module
+
+                def guarded_create_module(spec):  # type: ignore[no-untyped-def]
+                    name = getattr(spec, "name", "")
+                    root = name.split(".", 1)[0] if isinstance(name, str) else ""
+                    if root in blocked_import_roots:
+                        raise PermissionError(f"Import of {root!r} is not permitted")
+                    return original_create_module(spec)
+
+                importlib.machinery.BuiltinImporter.create_module = guarded_create_module  # type: ignore[assignment]
+            except Exception:
+                pass
+
+            try:
+                original_exec_module = importlib.machinery.BuiltinImporter.exec_module
+
+                def guarded_exec_module(module):  # type: ignore[no-untyped-def]
+                    name = getattr(module, "__name__", "")
+                    root = name.split(".", 1)[0] if isinstance(name, str) else ""
+                    if root in blocked_import_roots:
+                        raise PermissionError(f"Import of {root!r} is not permitted")
+                    return original_exec_module(module)
+
+                importlib.machinery.BuiltinImporter.exec_module = guarded_exec_module  # type: ignore[assignment]
+            except Exception:
+                pass
+
         # Drop references to the runner + sandbox modules so scripts can't fetch them
         # directly from sys.modules (e.g. to restore original import/open functions).
         for name in list(sys.modules.keys()):

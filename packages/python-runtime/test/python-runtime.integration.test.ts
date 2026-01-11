@@ -209,6 +209,24 @@ ib._builtin_from_name("_socket")
     await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Import of '_socket' is not permitted/);
   });
 
+  it("blocks importlib BuiltinImporter direct load path (network=none)", async () => {
+    const workbook = new MockWorkbook();
+    const runtime = new NativePythonRuntime({
+      timeoutMs: 10_000,
+      maxMemoryBytes: 256 * 1024 * 1024,
+      permissions: { filesystem: "none", network: "none" },
+    });
+
+    const script = `
+import importlib._bootstrap as ib
+spec = ib.BuiltinImporter.find_spec("_socket")
+mod = ib.BuiltinImporter.create_module(spec)
+ib.BuiltinImporter.exec_module(mod)
+`;
+
+    await expect(runtime.execute(script, { api: workbook })).rejects.toThrow(/Import of '_socket' is not permitted/);
+  });
+
   it("blocks network access even if a script tries to use sys.modules for socket (network=none)", async () => {
     const workbook = new MockWorkbook();
     const runtime = new NativePythonRuntime({
