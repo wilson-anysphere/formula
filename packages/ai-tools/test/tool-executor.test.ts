@@ -293,6 +293,7 @@ describe("ToolExecutor", () => {
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("fetch_external_data");
     if (!result.ok || result.tool !== "fetch_external_data") throw new Error("Unexpected tool result");
+    if (!result.data) throw new Error("Expected fetch_external_data to return data");
 
     expect(result.data).toMatchObject({
       url: "https://api.example.com/data",
@@ -347,6 +348,7 @@ describe("ToolExecutor", () => {
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("fetch_external_data");
     if (!result.ok || result.tool !== "fetch_external_data") throw new Error("Unexpected tool result");
+    if (!result.data) throw new Error("Expected fetch_external_data to return data");
 
     expect(result.data).toMatchObject({
       url: "https://example.com/raw",
@@ -357,6 +359,7 @@ describe("ToolExecutor", () => {
       written_cells: 1,
       shape: { rows: 1, cols: 1 }
     });
+    expect(typeof result.data.fetched_at_ms).toBe("number");
     expect(workbook.getCell(parseA1Cell("Sheet1!C3")).value).toBe(payload);
   });
 
