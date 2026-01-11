@@ -67,6 +67,11 @@ export interface CreateAIAuditPanelOptions {
   store?: AIAuditStore;
   initialSessionId?: string;
   initialWorkbookId?: string;
+  /**
+   * Auto-refresh the list on an interval while mounted (useful during demos).
+   * Disabled by default.
+   */
+  autoRefreshMs?: number;
 }
 
 export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
@@ -141,7 +146,16 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
     }
   }
 
+  let refreshInFlight = false;
+  let refreshQueued = false;
+
   async function refresh() {
+    if (refreshInFlight) {
+      refreshQueued = true;
+      return;
+    }
+
+    refreshInFlight = true;
     entriesMeta.textContent = "Loading…";
     const session_id = sessionInput.value.trim() || undefined;
     const workbookId = workbookInput.value.trim() || undefined;
@@ -159,6 +173,12 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       currentEntries = [];
       entriesMeta.textContent = "Failed to load audit log.";
       list.replaceChildren(el("div", { style: "font-size: 12px; opacity: 0.8;" }, [`Error: ${message}`]));
+    } finally {
+      refreshInFlight = false;
+      if (refreshQueued) {
+        refreshQueued = false;
+        void refresh();
+      }
     }
   }
 
@@ -217,6 +237,18 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
 
   const ready = refresh();
 
+  const autoRefreshMs = options.autoRefreshMs ?? 0;
+  const intervalId =
+    autoRefreshMs > 0
+      ? globalThis.setInterval(() => {
+          void refresh();
+        }, autoRefreshMs)
+      : null;
+
+  // Avoid keeping Node-based test runners alive when auto-refresh is enabled.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (intervalId as any)?.unref?.();
+
   return {
     ready,
     refresh,
@@ -224,8 +256,8 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       return currentEntries.slice();
     },
     dispose() {
+      if (intervalId != null) globalThis.clearInterval(intervalId);
       options.container.textContent = "";
     },
   };
 }
-

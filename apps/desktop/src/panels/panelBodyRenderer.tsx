@@ -92,7 +92,11 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     if (panelId === PanelIds.AI_AUDIT) {
       makeBodyFillAvailableHeight(body);
       renderDomPanel(panelId, body, (container) => {
-        const panel = createAIAuditPanel({ container });
+        const panel = createAIAuditPanel({
+          container,
+          initialWorkbookId: options.workbookId,
+          autoRefreshMs: 1_000,
+        });
         return { container, dispose: panel.dispose, refresh: panel.refresh };
       });
       return;
