@@ -72,3 +72,37 @@ test("strict mode rejects legacy plaintext reads", async (t) => {
 
   await assert.rejects(db.get("legacy"), /Encountered unencrypted LevelDB value/);
 });
+
+test("non-strict mode allows legacy plaintext reads (migration compatibility)", async (t) => {
+  const keyRing = createTestKeyRing();
+  const encryptedLevel = createEncryptedLevelAdapter({
+    keyRing,
+    strict: false,
+    magic: DEFAULT_LEVELDB_VALUE_MAGIC,
+  })(levelMem as any);
+
+  const db = encryptedLevel(`mem-${Date.now()}-${Math.random().toString(16).slice(2)}`, {
+    valueEncoding: RAW_VALUE_ENCODING,
+  });
+  t.after(async () => {
+    await db.close();
+  });
+
+  const plaintext = Buffer.from("plaintext");
+  // Simulate a legacy plaintext record written without the encryption wrapper.
+  await db.put("legacy", plaintext, { valueEncoding: RAW_VALUE_ENCODING });
+
+  const readBack = (await db.get("legacy")) as Buffer;
+  assert.ok(Buffer.isBuffer(readBack));
+  assert.ok(readBack.equals(plaintext));
+
+  // New writes are always encrypted regardless of strictness.
+  const newValue = Buffer.from("new");
+  await db.put("new", newValue);
+  const rawStored = (await db.get("new", { valueEncoding: RAW_VALUE_ENCODING })) as Buffer;
+  assert.ok(
+    rawStored
+      .subarray(0, DEFAULT_LEVELDB_VALUE_MAGIC.byteLength)
+      .equals(DEFAULT_LEVELDB_VALUE_MAGIC)
+  );
+});
