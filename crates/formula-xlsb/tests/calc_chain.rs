@@ -311,6 +311,52 @@ fn edited_save_removes_calc_chain_with_weird_casing() {
 }
 
 #[test]
+fn edited_save_ignores_calc_chain_override_key_case() {
+    let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let base_bytes = std::fs::read(fixture_path).expect("read fixture");
+    // Package contains `xl/CalcChain.bin` (upper-case C).
+    let with_calc_chain = build_fixture_with_calc_chain_custom(&base_bytes, "xl/CalcChain.bin");
+
+    let dir = tempdir().expect("tempdir");
+    let input_path = dir.path().join("with_calc_chain.xlsb");
+    let output_path = dir.path().join("edited.xlsb");
+    std::fs::write(&input_path, with_calc_chain).expect("write input");
+
+    let wb = XlsbWorkbook::open_with_options(&input_path, OpenOptions::default()).expect("open");
+
+    // Apply a worksheet edit (to trigger calcChain invalidation) and also provide an
+    // override for calcChain using different casing than the ZIP entry. The writer should
+    // ignore the calcChain override rather than error.
+    let mut zip_in =
+        ZipArchive::new(File::open(&input_path).expect("open input zip")).expect("read input zip");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    let mut sheet_bytes = Vec::new();
+    zip_in
+        .by_name(&sheet_part)
+        .expect("read sheet part")
+        .read_to_end(&mut sheet_bytes)
+        .expect("read sheet bytes");
+    let edited_sheet = tweak_first_float_cell(&sheet_bytes);
+
+    let mut overrides = HashMap::new();
+    overrides.insert(sheet_part, edited_sheet);
+    overrides.insert("xl/calcChain.bin".to_string(), b"ignored".to_vec());
+
+    wb.save_with_part_overrides(&output_path, &overrides)
+        .expect("save with part overrides");
+
+    let zip_out = ZipArchive::new(File::open(&output_path).expect("open output zip"))
+        .expect("read output zip");
+    let has_calc_chain = zip_out
+        .file_names()
+        .any(|name| name.to_ascii_lowercase() == "xl/calcchain.bin");
+    assert!(
+        !has_calc_chain,
+        "calcChain should be removed even if caller provides an override with different casing"
+    );
+}
+
+#[test]
 fn edited_save_changes_only_expected_parts() {
     let fixture_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
     let base_bytes = std::fs::read(fixture_path).expect("read fixture");

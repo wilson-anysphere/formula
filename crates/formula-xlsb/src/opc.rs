@@ -359,6 +359,16 @@ impl XlsbWorkbook {
 
         let edited = worksheets_edited(&mut zip, &self.sheets, overrides)?;
 
+        let ignored_overrides: HashSet<String> = if edited {
+            overrides
+                .keys()
+                .filter(|key| is_calc_chain_part_name(key))
+                .cloned()
+                .collect()
+        } else {
+            HashSet::new()
+        };
+
         // Compute updated plumbing parts if we need to invalidate calcChain.
         let mut updated_content_types: Option<Vec<u8>> = None;
         let mut updated_workbook_rels: Option<Vec<u8>> = None;
@@ -402,7 +412,7 @@ impl XlsbWorkbook {
             }
 
             // Drop calcChain when any worksheet was edited.
-            if edited && name.trim_start_matches('/').eq_ignore_ascii_case("xl/calcChain.bin") {
+            if edited && is_calc_chain_part_name(&name) {
                 if overrides.contains_key(&name) {
                     used_overrides.insert(name);
                 }
@@ -442,10 +452,10 @@ impl XlsbWorkbook {
             }
         }
 
-        if used_overrides.len() != overrides.len() {
+        if used_overrides.len() + ignored_overrides.len() != overrides.len() {
             let mut missing = Vec::new();
             for key in overrides.keys() {
-                if !used_overrides.contains(key) {
+                if !used_overrides.contains(key) && !ignored_overrides.contains(key) {
                     missing.push(key.clone());
                 }
             }
@@ -545,6 +555,11 @@ fn worksheets_edited<R: Read + Seek>(
     }
 
     Ok(false)
+}
+
+fn is_calc_chain_part_name(name: &str) -> bool {
+    name.trim_start_matches('/')
+        .eq_ignore_ascii_case("xl/calcChain.bin")
 }
 
 fn zip_entry_equals<R: Read + Seek>(
