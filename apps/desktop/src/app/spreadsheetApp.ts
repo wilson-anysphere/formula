@@ -912,69 +912,118 @@ export class SpreadsheetApp {
     if (this.wasmEngine) return;
     if (typeof Worker === "undefined") return;
 
-    const env = (import.meta as any)?.env as Record<string, unknown> | undefined;
-    const wasmModuleUrl =
-      typeof env?.VITE_FORMULA_WASM_MODULE_URL === "string" ? env.VITE_FORMULA_WASM_MODULE_URL : undefined;
-    const wasmBinaryUrl =
-      typeof env?.VITE_FORMULA_WASM_BINARY_URL === "string" ? env.VITE_FORMULA_WASM_BINARY_URL : undefined;
+    let postInitHydrate: Promise<void> | null = null;
 
-    let engine: EngineClient | null = null;
-    try {
-      engine = createEngineClient({ wasmModuleUrl, wasmBinaryUrl });
-      await engine.init();
-      const changes = await engineHydrateFromDocument(engine, this.document);
-      this.applyComputedChanges(changes);
+    // Include WASM initialization in the idle tracker. This ensures e2e tests (and any UI that
+    // awaits `whenIdle()`) don't race the initial engine hydration.
+    const prior = this.wasmSyncPromise;
+    this.wasmSyncPromise = prior
+      .catch(() => {})
+      .then(async () => {
+        // Another init call may have completed while we were waiting on the prior promise.
+        if (this.wasmEngine) return;
 
-      this.wasmEngine = engine;
-      this.wasmUnsubscribe = this.document.on(
-        "change",
-        ({ deltas, source, recalc }: { deltas: any[]; source?: string; recalc?: boolean }) => {
-          if (!this.wasmEngine || this.wasmSyncSuspended) return;
+        const env = (import.meta as any)?.env as Record<string, unknown> | undefined;
+        const wasmModuleUrl =
+          typeof env?.VITE_FORMULA_WASM_MODULE_URL === "string" ? env.VITE_FORMULA_WASM_MODULE_URL : undefined;
+        const wasmBinaryUrl =
+          typeof env?.VITE_FORMULA_WASM_BINARY_URL === "string" ? env.VITE_FORMULA_WASM_BINARY_URL : undefined;
 
-          if (source === "applyState") {
-            this.computedValues.clear();
-            void this.enqueueWasmSync(async (worker) => {
-              const changes = await engineHydrateFromDocument(worker, this.document);
-              this.applyComputedChanges(changes);
-            });
-            return;
-          }
-
-          if (!Array.isArray(deltas) || deltas.length === 0) {
-            if (recalc) {
-              void this.enqueueWasmSync(async (worker) => {
-                const changes = await worker.recalculate();
-                this.applyComputedChanges(changes);
-              });
-            }
-            return;
-          }
-
-          void this.enqueueWasmSync(async (worker) => {
-            const changes = await engineApplyDeltas(worker, deltas, { recalculate: recalc !== false });
-            this.applyComputedChanges(changes);
+        let engine: EngineClient | null = null;
+        try {
+          engine = createEngineClient({ wasmModuleUrl, wasmBinaryUrl });
+          let changedDuringInit = false;
+          const unsubscribeInit = this.document.on("change", () => {
+            changedDuringInit = true;
           });
-        }
-      );
+          try {
+            await engine.init();
 
-      // `initWasmEngine` runs asynchronously and can overlap with early user edits (or e2e
-      // interactions) before the `document.on("change")` listener is installed. If the
-      // DocumentController changed while `engineHydrateFromDocument` was in-flight, those
-      // deltas could be missed, leaving the worker with an incomplete view of inputs.
-      //
-      // Re-hydrate once through the serialized WASM queue to guarantee the worker matches the
-      // latest DocumentController state before incremental deltas begin flowing.
-      void this.enqueueWasmSync(async (worker) => {
-        const changes = await engineHydrateFromDocument(worker, this.document);
-        this.applyComputedChanges(changes);
+            // `engineHydrateFromDocument` is relatively expensive, but we need to ensure we don't miss
+            // edits that happen while the WASM worker is booting. If the user edits the document
+            // between hydrating the worker and subscribing to incremental deltas, the engine can get
+            // permanently out of sync (until a full reload). Track any DocumentController changes
+            // during the hydrate step and retry once to converge.
+            //
+            // This is especially important for fast e2e runs that start editing immediately after
+            // navigation.
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              changedDuringInit = false;
+              this.computedValues.clear();
+              const changes = await engineHydrateFromDocument(engine, this.document);
+              this.applyComputedChanges(changes);
+              if (!changedDuringInit) break;
+            }
+          } finally {
+            unsubscribeInit();
+          }
+
+           this.wasmEngine = engine;
+           this.wasmUnsubscribe = this.document.on(
+             "change",
+             ({ deltas, source, recalc }: { deltas: any[]; source?: string; recalc?: boolean }) => {
+              if (!this.wasmEngine || this.wasmSyncSuspended) return;
+
+              if (source === "applyState") {
+                this.computedValues.clear();
+                void this.enqueueWasmSync(async (worker) => {
+                  const changes = await engineHydrateFromDocument(worker, this.document);
+                  this.applyComputedChanges(changes);
+                });
+                return;
+              }
+
+              if (!Array.isArray(deltas) || deltas.length === 0) {
+                if (recalc) {
+                  void this.enqueueWasmSync(async (worker) => {
+                    const changes = await worker.recalculate();
+                    this.applyComputedChanges(changes);
+                  });
+                }
+                return;
+              }
+
+               void this.enqueueWasmSync(async (worker) => {
+                 const changes = await engineApplyDeltas(worker, deltas, { recalculate: recalc !== false });
+                 this.applyComputedChanges(changes);
+               });
+             }
+           );
+
+           // `initWasmEngine` runs asynchronously and can overlap with early user edits (or e2e
+           // interactions) before the `document.on("change")` listener is installed. If the
+           // DocumentController changed while `engineHydrateFromDocument` was in-flight, those
+           // deltas could be missed, leaving the worker with an incomplete view of inputs.
+           //
+           // Re-hydrate once through the serialized WASM queue to guarantee the worker matches the
+           // latest DocumentController state before incremental deltas begin flowing.
+           //
+           // Note: do not `await` inside this init chain (it would deadlock by waiting on the
+           // promise chain we're currently building).
+           postInitHydrate = this.enqueueWasmSync(async (worker) => {
+             const changes = await engineHydrateFromDocument(worker, this.document);
+             this.applyComputedChanges(changes);
+           });
+         } catch {
+           // Ignore initialization failures (e.g. missing WASM bundle).
+           engine?.terminate();
+           this.wasmEngine = null;
+           this.wasmUnsubscribe?.();
+           this.wasmUnsubscribe = null;
+           this.computedValues.clear();
+         }
+      })
+      .catch(() => {
+        // Ignore WASM init failures; the app continues to function using the in-process mock engine.
       });
-    } catch {
-      // Ignore initialization failures (e.g. missing WASM bundle).
-      engine?.terminate();
-      this.wasmEngine = null;
-      this.wasmUnsubscribe?.();
-      this.wasmUnsubscribe = null;
-      this.computedValues.clear();
+
+    await this.wasmSyncPromise;
+    if (postInitHydrate) {
+      try {
+        await postInitHydrate;
+      } catch {
+        // ignore
+      }
     }
   }
 

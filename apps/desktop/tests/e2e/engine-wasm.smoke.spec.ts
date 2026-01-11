@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 test("can load wasm-bindgen assets without CSP/wasm errors", async ({ page }) => {
   const wasmErrors: string[] = [];
 
@@ -18,7 +20,7 @@ test("can load wasm-bindgen assets without CSP/wasm errors", async ({ page }) =>
     }
   });
 
-  await page.goto("/");
+  await gotoDesktop(page);
 
   const result = await page.evaluate(async () => {
     return await new Promise<{ ok: boolean; value?: unknown; error?: string }>((resolve, reject) => {
@@ -39,4 +41,3 @@ test("can load wasm-bindgen assets without CSP/wasm errors", async ({ page }) =>
   expect(result.value).toBe(2);
   expect(wasmErrors).toEqual([]);
 });
-

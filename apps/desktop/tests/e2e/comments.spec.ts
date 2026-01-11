@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 test.describe("comments", () => {
   test("add comment, reply, resolve", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     // Focus + select A1 (top-left).
     await page.click("#grid", { position: { x: 5, y: 5 } });

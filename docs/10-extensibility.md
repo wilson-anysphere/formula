@@ -4,6 +4,41 @@
 
 A vibrant extension ecosystem is critical for long-term success. We follow VS Code's model: extensions run in isolated processes with well-defined APIs, enabling powerful customization without compromising stability or security.
 
+## Desktop UX (current)
+
+The desktop app wires `@formula/extension-host` contribution points into the UI so extensions are actually usable without devtools:
+
+- **Extensions panel**: open via the status bar **Extensions** button. It lists installed extensions, their contributed commands, and contributed panels.
+- **Executing commands**: clicking a command routes to `BrowserExtensionHost.executeCommand(commandId, ...args)`. Errors surface as a toast.
+- **Panels / webviews**:
+  - Contributed panels (`contributes.panels`) are registered in the panel registry so they can be persisted in layouts.
+  - Panels created programmatically (`formula.ui.createPanel`) are opened automatically in the layout when created.
+- **Notifications + prompts**:
+  - `formula.ui.showMessage` shows a **toast** in the desktop UI.
+  - `formula.ui.showQuickPick` / `formula.ui.showInputBox` are implemented via native `<dialog>` prompts.
+
+## Webview sandbox model (desktop)
+
+Extension panels are rendered as a sandboxed `<iframe>` using `srcdoc`:
+
+- `sandbox="allow-scripts"` (no `allow-same-origin`)
+- No top navigation / popups enabled
+- Communication is **postMessage-only**:
+  - Webview → extension: `window.parent.postMessage(message, "*")`
+  - Extension → webview: `panel.webview.postMessage(message)` delivered to the iframe via `postMessage`
+
+This is a **best-effort** browser sandbox. The primary security boundary remains the Node host sandbox (vm + module restrictions).
+
+## `when` clauses + context keys (subset)
+
+The desktop implements a small, VS Code-inspired subset of `when` syntax for menus/keybindings:
+
+- Operators: `&&`, `||`, `!`, parentheses
+- Identifiers (context keys): `cellHasValue`, `hasSelection`, `sheetName`, …
+- Equality: `==` / `!=` against string/number/boolean literals
+
+Unknown/invalid clauses fail closed (treated as `false`).
+
 ---
 
 ## Architecture

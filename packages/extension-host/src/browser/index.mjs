@@ -268,6 +268,7 @@ class BrowserExtensionHost {
     spreadsheetApi,
     clipboardApi,
     storageApi,
+    uiApi,
     activationTimeoutMs = 5000,
     commandTimeoutMs = 5000,
     customFunctionTimeoutMs = 5000,
@@ -281,11 +282,13 @@ class BrowserExtensionHost {
     this._engineVersion = engineVersion;
     this._extensions = new Map();
     this._commands = new Map();
+    this._panelContributions = new Map();
     this._panels = new Map();
     this._contextMenus = new Map();
     this._customFunctions = new Map();
     this._dataConnectors = new Map();
     this._messages = [];
+    this._uiApi = uiApi ?? null;
     this._activationTimeoutMs = Number.isFinite(activationTimeoutMs)
       ? Math.max(0, activationTimeoutMs)
       : 5000;
@@ -492,7 +495,19 @@ class BrowserExtensionHost {
     };
 
     for (const cmd of manifest.contributes.commands ?? []) {
+      const existing = this._commands.get(cmd.command);
+      if (existing && existing !== extensionId) {
+        throw new Error(`Command id already contributed: ${cmd.command} (existing: ${existing}, new: ${extensionId})`);
+      }
       this._commands.set(cmd.command, extensionId);
+    }
+
+    for (const panel of manifest.contributes.panels ?? []) {
+      const existing = this._panelContributions.get(panel.id);
+      if (existing && existing !== extensionId) {
+        throw new Error(`Panel id already contributed: ${panel.id} (existing: ${existing}, new: ${extensionId})`);
+      }
+      this._panelContributions.set(panel.id, extensionId);
     }
 
     for (const fn of manifest.contributes.customFunctions ?? []) {
@@ -868,6 +883,7 @@ class BrowserExtensionHost {
     const extensions = [...this._extensions.values()];
     this._extensions.clear();
     this._commands.clear();
+    this._panelContributions.clear();
     this._panels.clear();
     this._contextMenus.clear();
     this._customFunctions.clear();
@@ -1195,18 +1211,38 @@ class BrowserExtensionHost {
 
       case "ui.showMessage":
         this._messages.push({ message: args[0], type: args[1] });
+        try {
+          await this._uiApi?.showMessage?.(args[0], args[1]);
+        } catch {
+          // ignore UI errors
+        }
         return null;
 
       case "ui.showInputBox": {
-        // Placeholder implementation until the desktop UI wires actual input prompts.
         const options = args[0] ?? {};
+        if (this._uiApi?.showInputBox) {
+          try {
+            return await this._uiApi.showInputBox(options);
+          } catch {
+            return null;
+          }
+        }
+        // Back-compat placeholder implementation (tests may rely on this fallback).
         const value = options && typeof options === "object" ? options.value : undefined;
         return typeof value === "string" ? value : null;
       }
 
       case "ui.showQuickPick": {
-        // Placeholder implementation: choose the first entry.
         const items = Array.isArray(args[0]) ? args[0] : [];
+        const options = args[1] ?? {};
+        if (this._uiApi?.showQuickPick) {
+          try {
+            return await this._uiApi.showQuickPick(items, options);
+          } catch {
+            return null;
+          }
+        }
+        // Back-compat placeholder implementation: choose the first entry.
         if (items.length === 0) return null;
         const first = items[0];
         if (first && typeof first === "object" && Object.prototype.hasOwnProperty.call(first, "value")) {
@@ -1252,13 +1288,28 @@ class BrowserExtensionHost {
         const panelId = String(args[0]);
         const options = args[1] ?? {};
         const title = String(options.title ?? panelId);
-        this._panels.set(panelId, {
+        const existing = this._panels.get(panelId);
+        if (existing && existing.extensionId !== extension.id) {
+          throw new Error(`Panel already created by another extension: ${panelId}`);
+        }
+        const panel = existing ?? {
           id: panelId,
           title,
+          icon: options.icon ?? null,
+          position: options.position ?? null,
           html: "",
           extensionId: extension.id,
           outgoingMessages: []
-        });
+        };
+        panel.title = title;
+        panel.icon = options.icon ?? panel.icon ?? null;
+        panel.position = options.position ?? panel.position ?? null;
+        this._panels.set(panelId, panel);
+        try {
+          this._uiApi?.onPanelCreated?.(panel);
+        } catch {
+          // ignore
+        }
         return { id: panelId };
       }
       case "ui.setPanelHtml": {
@@ -1266,7 +1317,15 @@ class BrowserExtensionHost {
         const html = String(args[1]);
         const panel = this._panels.get(panelId);
         if (!panel) throw new Error(`Unknown panel: ${panelId}`);
+        if (panel.extensionId !== extension.id) {
+          throw new Error(`Panel ${panelId} does not belong to extension ${extension.id}`);
+        }
         panel.html = html;
+        try {
+          this._uiApi?.onPanelHtmlUpdated?.(panelId, html);
+        } catch {
+          // ignore
+        }
         return null;
       }
       case "ui.postMessageToPanel": {
@@ -1278,11 +1337,26 @@ class BrowserExtensionHost {
           throw new Error(`Panel ${panelId} does not belong to extension ${extension.id}`);
         }
         panel.outgoingMessages.push(message);
+        try {
+          this._uiApi?.onPanelMessage?.(panelId, message);
+        } catch {
+          // ignore
+        }
         return null;
       }
       case "ui.disposePanel": {
         const panelId = String(args[0]);
+        const panel = this._panels.get(panelId);
+        if (!panel) return null;
+        if (panel.extensionId !== extension.id) {
+          throw new Error(`Panel ${panelId} does not belong to extension ${extension.id}`);
+        }
         this._panels.delete(panelId);
+        try {
+          this._uiApi?.onPanelDisposed?.(panelId);
+        } catch {
+          // ignore
+        }
         return null;
       }
 

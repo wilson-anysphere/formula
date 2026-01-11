@@ -925,7 +925,14 @@ function scanModuleImports(source, url) {
 
 function assertAllowedStaticImport(specifier, parentUrl) {
   const request = String(specifier ?? "");
+  // Extensions are allowed to import the Formula extension API. In Vite dev the alias for
+  // `@formula/extension-api` is rewritten to an absolute `/@fs/.../packages/extension-api/index.mjs`
+  // specifier, so accept that form as well.
+  const requestNoQuery = request.split("?", 1)[0] ?? request;
   if (request === "@formula/extension-api" || request === "formula") return { type: "virtual" };
+  if (requestNoQuery.startsWith("/@fs/") && requestNoQuery.endsWith("/packages/extension-api/index.mjs")) {
+    return { type: "virtual" };
+  }
 
   // In-memory extension loaders (eg: web marketplace installs) may rewrite module specifiers to
   // `data:`/`blob:` URLs that contain already-verified code. Allow these, but only when they are

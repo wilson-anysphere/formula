@@ -20,10 +20,20 @@ const basePort = Number.isFinite(parsedBasePort) ? parsedBasePort : 4174;
 const cspPort = basePort + 1;
 const desktopPort = basePort + 2;
 
+const parsedWorkers = Number.parseInt(process.env.FORMULA_E2E_WORKERS ?? "2", 10);
+// The desktop e2e suite spins up additional workers for WASM/python/script runtimes. Running
+// too many Playwright workers in parallel can starve the dev server and lead to timeouts.
+// Default to a conservative value and allow overrides via FORMULA_E2E_WORKERS.
+const workers = Number.isFinite(parsedWorkers) ? Math.max(1, parsedWorkers) : 2;
+
 export default defineConfig({
   testDir: "./tests/e2e",
-  timeout: 30_000,
+  // First-run Vite dependency optimization (and WASM/python worker boot) can exceed the default
+  // Playwright timeout under heavy CI load. Use a slightly more forgiving default; individual
+  // tests still override this when they need longer.
+  timeout: 60_000,
   retries: 0,
+  workers,
   globalSetup: "./tests/e2e/global-setup.ts",
   use: {
     headless: true

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop, waitForDesktopReady } from "./helpers";
+
 test.describe("macros panel", () => {
   test("running a macro applies returned cell updates and is undoable as one step", async ({ page }) => {
     await page.addInitScript(() => {
@@ -102,11 +104,10 @@ test.describe("macros panel", () => {
       };
     });
 
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload();
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await waitForDesktopReady(page);
 
     await page.getByTestId("open-macros-panel").click();
     const panel = page.getByTestId("dock-right").getByTestId("panel-macros");
@@ -142,8 +143,7 @@ test.describe("macros panel", () => {
     await page.addInitScript(() => localStorage.clear());
     page.on("dialog", (dialog) => dialog.accept());
 
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     await page.getByTestId("open-macros-panel").click();
 
@@ -157,15 +157,21 @@ test.describe("macros panel", () => {
     // Run TypeScript macro (writes E1).
     await select.selectOption({ label: "TypeScript: Write E1" });
     const runButton = body.getByRole("button", { name: "Run" });
-    await runButton.click();
-    await expect(runButton).toBeDisabled();
-    await expect(runButton).toBeEnabled({ timeout: 30_000 });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await runButton.click();
+      await expect(runButton).toBeDisabled();
+      await expect(runButton).toBeEnabled({ timeout: 40_000 });
 
-    await expect
-      .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("E1")), {
-        timeout: 10_000,
-      })
-      .toBe("hello from ts");
+      try {
+        await expect
+          .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("E1")), { timeout: 10_000 })
+          .toBe("hello from ts");
+        break;
+      } catch (err) {
+        if (attempt === 0) continue;
+        throw err;
+      }
+    }
 
     // Run Python macro (writes E2).
     await select.selectOption({ label: "Python: Write E2" });

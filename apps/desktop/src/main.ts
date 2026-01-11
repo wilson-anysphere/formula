@@ -6,7 +6,7 @@ import "./styles/workspace.css";
 import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
-import { getPanelTitle, PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
+import { getPanelTitle, panelRegistry, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
 import { MacroRecorder, generatePythonMacro, generateTypeScriptMacro } from "./macro-recorder/index.js";
 import {
@@ -37,8 +37,34 @@ import {
   setDesktopPowerQueryService,
 } from "./power-query/service.js";
 import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateStore.js";
+import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
+import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
+import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
+import { ContextKeyService } from "./extensions/contextKeys.js";
+import { resolveMenuItems } from "./extensions/contextMenus.js";
+import { matchesKeybinding, parseKeybinding, platformKeybinding, type ContributedKeybinding } from "./extensions/keybindings.js";
+import { CommandRegistry } from "./extensions/commandRegistry.js";
+
+import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
 
 const workbookSheetNames = new Map<string, string>();
+
+// Seed contributed panels early so layout persistence doesn't drop their ids before the
+// extension host finishes loading installed extensions.
+const sampleHelloExtensionId = `${(sampleHelloManifest as any).publisher}.${(sampleHelloManifest as any).name}`;
+for (const panel of (sampleHelloManifest as any)?.contributes?.panels ?? []) {
+  panelRegistry.registerPanel(
+    String(panel.id),
+    {
+      title: String(panel.title ?? panel.id),
+      icon: panel.icon ?? null,
+      defaultDock: "right",
+      defaultFloatingRect: { x: 140, y: 140, width: 520, height: 640 },
+      source: { kind: "extension", extensionId: sampleHelloExtensionId, contributed: true },
+    },
+    { owner: sampleHelloExtensionId },
+  );
+}
 
 // Tauri/desktop state (declared early so panel wiring can reference them without TDZ errors).
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
@@ -250,6 +276,7 @@ const openAiAuditPanel = document.querySelector<HTMLButtonElement>('[data-testid
 const openMacrosPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-macros-panel"]');
 const openScriptEditorPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-script-editor-panel"]');
 const openPythonPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-python-panel"]');
+const openExtensionsPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-extensions-panel"]');
 const splitVertical = document.querySelector<HTMLButtonElement>('[data-testid="split-vertical"]');
 const splitHorizontal = document.querySelector<HTMLButtonElement>('[data-testid="split-horizontal"]');
 const splitNone = document.querySelector<HTMLButtonElement>('[data-testid="split-none"]');
@@ -271,7 +298,7 @@ if (
   splitHorizontal &&
   splitNone
 ) {
-  const workspaceManager = new LayoutWorkspaceManager({ storage: localStorage, panelRegistry: PANEL_REGISTRY });
+  const workspaceManager = new LayoutWorkspaceManager({ storage: localStorage, panelRegistry });
   const layoutController = new LayoutController({
     workbookId,
     workspaceManager,
@@ -390,6 +417,278 @@ if (
     return getPanelTitle(panelId);
   }
 
+  function normalizeExtensionCellValue(value: unknown) {
+    if (value == null) return null;
+    if (typeof value === "string") return value;
+    if (typeof value === "number") return value;
+    if (typeof value === "boolean") return value;
+    if (typeof value === "object" && value && "text" in value && typeof (value as any).text === "string") {
+      return String((value as any).text);
+    }
+    return null;
+  }
+
+  const contextKeys = new ContextKeyService();
+
+  const updateContextKeys = () => {
+    const sheetId = app.getCurrentSheetId();
+    const active = app.getActiveCell();
+    const cell = app.getDocument().getCell(sheetId, { row: active.row, col: active.col }) as any;
+    const value = normalizeExtensionCellValue(cell?.value ?? null);
+    const hasSelection = (() => {
+      const range = app.getSelectionRanges()[0];
+      if (!range) return false;
+      return range.startRow !== range.endRow || range.startCol !== range.endCol;
+    })();
+
+    contextKeys.batch({
+      sheetName: sheetId,
+      hasSelection,
+      cellHasValue: value != null && String(value).trim().length > 0,
+    });
+  };
+
+  app.subscribeSelection(() => updateContextKeys());
+  app.getDocument().on("change", () => updateContextKeys());
+  updateContextKeys();
+
+  let extensionPanelBridge: ExtensionPanelBridge | null = null;
+
+  const extensionHostManager = new DesktopExtensionHostManager({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async getActiveSheet() {
+        const sheetId = app.getCurrentSheetId();
+        return { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
+      },
+      listSheets() {
+        const ids = app.getDocument().getSheetIds();
+        const list = ids.length > 0 ? ids : ["Sheet1"];
+        return list.map((id) => ({ id, name: workbookSheetNames.get(id) ?? id }));
+      },
+      async getSelection() {
+        const sheetId = app.getCurrentSheetId();
+        const range = app.getSelectionRanges()[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+        const values: Array<Array<string | number | boolean | null>> = [];
+        for (let r = range.startRow; r <= range.endRow; r++) {
+          const row: Array<string | number | boolean | null> = [];
+          for (let c = range.startCol; c <= range.endCol; c++) {
+            const cell = app.getDocument().getCell(sheetId, { row: r, col: c }) as any;
+            row.push(normalizeExtensionCellValue(cell?.value ?? null));
+          }
+          values.push(row);
+        }
+        return { ...range, values };
+      },
+      async getCell(row: number, col: number) {
+        const sheetId = app.getCurrentSheetId();
+        const cell = app.getDocument().getCell(sheetId, { row, col }) as any;
+        return normalizeExtensionCellValue(cell?.value ?? null);
+      },
+      async setCell(row: number, col: number, value: unknown) {
+        const sheetId = app.getCurrentSheetId();
+        app.getDocument().setCellValue(sheetId, { row, col }, value);
+      },
+    },
+    uiApi: {
+      showMessage: async (message: string, type?: string) => {
+        showToast(String(message ?? ""), (type as any) ?? "info");
+      },
+      showInputBox: async (options: any) => showInputBox(options),
+      showQuickPick: async (items: any[], options: any) => showQuickPick(items, options),
+      onPanelCreated: (panel: any) => extensionPanelBridge?.onPanelCreated(panel),
+      onPanelHtmlUpdated: (panelId: string) => extensionPanelBridge?.onPanelHtmlUpdated(panelId),
+      onPanelMessage: (panelId: string, message: unknown) => extensionPanelBridge?.onPanelMessage(panelId, message),
+      onPanelDisposed: (panelId: string) => extensionPanelBridge?.onPanelDisposed(panelId),
+    },
+  });
+
+  const commandRegistry = new CommandRegistry();
+
+  extensionPanelBridge = new ExtensionPanelBridge({
+    host: extensionHostManager.host as any,
+    panelRegistry,
+    layoutController: layoutController as any,
+  });
+
+  // Loading extensions spins up an additional Worker for each workbook tab. That can be
+  // expensive in e2e + low-spec environments, so defer actually loading extensions until
+  // the user opens the Extensions panel or invokes an extension command.
+  let extensionsLoadPromise: Promise<void> | null = null;
+  const ensureExtensionsLoaded = async () => {
+    if (extensionHostManager.ready) return;
+    if (!extensionsLoadPromise) {
+      extensionsLoadPromise = extensionHostManager.loadBuiltInExtensions();
+    }
+    await extensionsLoadPromise;
+  };
+
+  const executeExtensionCommand = (commandId: string) => {
+    void (async () => {
+      await ensureExtensionsLoaded();
+      syncContributedCommands();
+      await commandRegistry.executeCommand(commandId);
+    })().catch((err) => {
+      showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+    });
+  };
+
+  const openExtensionPanel = (panelId: string) => {
+    void (async () => {
+      await ensureExtensionsLoaded();
+      syncContributedPanels();
+      layoutController.openPanel(panelId);
+      await extensionPanelBridge?.activateView(panelId);
+    })().catch((err) => {
+      showToast(`Failed to open panel: ${String((err as any)?.message ?? err)}`, "error");
+    });
+  };
+
+  // Keybindings (foundation): execute contributed commands.
+  const parsedKeybindings: Array<ReturnType<typeof parseKeybinding>> = [];
+
+  const syncContributedCommands = () => {
+    if (!extensionHostManager.ready || extensionHostManager.error) return;
+    try {
+      commandRegistry.setExtensionCommands(
+        extensionHostManager.getContributedCommands(),
+        (commandId, ...args) => extensionHostManager.executeCommand(commandId, ...args),
+      );
+    } catch (err) {
+      showToast(`Failed to register extension commands: ${String((err as any)?.message ?? err)}`, "error");
+    }
+  };
+
+  const syncContributedPanels = () => {
+    if (!extensionHostManager.ready || extensionHostManager.error) return;
+    const contributed = extensionHostManager.getContributedPanels() as Array<{ extensionId: string; id: string; title: string; icon?: string | null }>;
+    const contributedIds = new Set(contributed.map((p) => p.id));
+
+    for (const panel of contributed) {
+      panelRegistry.registerPanel(
+        panel.id,
+        {
+          title: panel.title,
+          icon: (panel as any).icon ?? null,
+          defaultDock: "right",
+          defaultFloatingRect: { x: 140, y: 140, width: 520, height: 640 },
+          source: { kind: "extension", extensionId: panel.extensionId, contributed: true },
+        },
+        { owner: panel.extensionId, overwrite: true },
+      );
+    }
+
+    for (const id of panelRegistry.listPanelIds()) {
+      const def = panelRegistry.get(id) as any;
+      const source = def?.source;
+      if (source?.kind !== "extension" || source.contributed !== true) continue;
+      if (contributedIds.has(id)) continue;
+      panelRegistry.unregisterPanel(id, { owner: source.extensionId });
+    }
+  };
+
+  const updateKeybindings = () => {
+    parsedKeybindings.length = 0;
+    if (!extensionHostManager.ready) return;
+    const platform = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "mac" : "other";
+    const contributed = extensionHostManager.getContributedKeybindings() as ContributedKeybinding[];
+    for (const kb of contributed) {
+      const binding = platformKeybinding(kb, platform);
+      const parsed = parseKeybinding(kb.command, binding);
+      if (parsed) parsedKeybindings.push(parsed);
+    }
+  };
+
+  extensionHostManager.subscribe(() => {
+    syncContributedCommands();
+    syncContributedPanels();
+    updateKeybindings();
+  });
+  syncContributedCommands();
+  syncContributedPanels();
+  updateKeybindings();
+
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (!extensionHostManager.ready) return;
+      if (e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+
+      for (const binding of parsedKeybindings) {
+        if (!binding) continue;
+        if (!matchesKeybinding(binding, e)) continue;
+        e.preventDefault();
+        executeExtensionCommand(binding.command);
+        return;
+      }
+    },
+    true,
+  );
+
+  // Context menus (foundation): show cell/context contributions.
+  const contextMenu = document.createElement("div");
+  contextMenu.dataset.testid = "context-menu";
+  contextMenu.style.position = "fixed";
+  contextMenu.style.display = "none";
+  contextMenu.style.flexDirection = "column";
+  contextMenu.style.minWidth = "220px";
+  contextMenu.style.padding = "6px";
+  contextMenu.style.borderRadius = "10px";
+  contextMenu.style.border = "1px solid var(--border)";
+  contextMenu.style.background = "var(--dialog-bg)";
+  contextMenu.style.boxShadow = "var(--dialog-shadow)";
+  contextMenu.style.zIndex = "200";
+  document.body.appendChild(contextMenu);
+
+  const hideContextMenu = () => {
+    contextMenu.style.display = "none";
+    contextMenu.replaceChildren();
+  };
+
+  gridRoot.addEventListener("contextmenu", (e) => {
+    if (!extensionHostManager.ready) return;
+    const items = resolveMenuItems(extensionHostManager.getContributedMenu("cell/context"), contextKeys.asLookup());
+    if (items.length === 0) return;
+
+    e.preventDefault();
+    contextMenu.replaceChildren();
+
+    for (const item of items) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = item.command;
+      btn.disabled = !item.enabled;
+      btn.style.display = "block";
+      btn.style.width = "100%";
+      btn.style.textAlign = "left";
+      btn.style.padding = "8px 10px";
+      btn.style.borderRadius = "8px";
+      btn.style.border = "1px solid transparent";
+      btn.style.background = "transparent";
+      btn.style.color = item.enabled ? "var(--text-primary)" : "var(--text-secondary)";
+      btn.style.cursor = item.enabled ? "pointer" : "default";
+      btn.addEventListener("click", () => {
+        if (!item.enabled) return;
+        hideContextMenu();
+        executeExtensionCommand(item.command);
+      });
+      contextMenu.appendChild(btn);
+    }
+
+    contextMenu.style.left = `${e.clientX}px`;
+    contextMenu.style.top = `${e.clientY}px`;
+    contextMenu.style.display = "flex";
+  });
+
+  window.addEventListener("click", () => hideContextMenu(), true);
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideContextMenu();
+  });
+
   let macrosBackend: unknown | null = null;
   const getMacrosBackend = () => {
     if (macrosBackend) return macrosBackend as any;
@@ -436,6 +735,11 @@ if (
       };
     },
     createChart: (spec) => app.addChart(spec),
+    panelRegistry,
+    extensionPanelBridge: extensionPanelBridge ?? undefined,
+    extensionHostManager,
+    onExecuteExtensionCommand: executeExtensionCommand,
+    onOpenExtensionPanel: openExtensionPanel,
     renderMacrosPanel: (body) => {
       body.textContent = "Loading macros…";
       queueMicrotask(() => {
@@ -899,7 +1203,7 @@ if (
 
     controls.appendChild(
       button("Float", "float-panel", () => {
-        const rect = (PANEL_REGISTRY as any)?.[active]?.defaultFloatingRect ?? { x: 80, y: 80, width: 420, height: 560 };
+        const rect = (panelRegistry.get(active) as any)?.defaultFloatingRect ?? { x: 80, y: 80, width: 420, height: 560 };
         layoutController.floatPanel(active, rect);
       }),
     );
@@ -1039,6 +1343,18 @@ if (
     const placement = getPanelPlacement(layoutController.layout, PanelIds.PYTHON);
     if (placement.kind === "closed") layoutController.openPanel(PanelIds.PYTHON);
     else layoutController.closePanel(PanelIds.PYTHON);
+  });
+
+  openExtensionsPanel?.addEventListener("click", () => {
+    void ensureExtensionsLoaded().then(() => {
+      // Ensure registries are up-to-date once the host finishes loading.
+      syncContributedCommands();
+      syncContributedPanels();
+      updateKeybindings();
+    });
+    const placement = getPanelPlacement(layoutController.layout, PanelIds.EXTENSIONS);
+    if (placement.kind === "closed") layoutController.openPanel(PanelIds.EXTENSIONS);
+    else layoutController.closePanel(PanelIds.EXTENSIONS);
   });
 
   openVbaMigratePanel?.addEventListener("click", () => {

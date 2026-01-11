@@ -60,6 +60,14 @@ function ensureSplitPane(pane) {
   }
 }
 
+function panelRegistryGet(panelRegistry, panelId) {
+  if (!panelRegistry) return undefined;
+  const id = String(panelId);
+  if (typeof panelRegistry.get === "function") return panelRegistry.get(id);
+  if (typeof panelRegistry.getPanel === "function") return panelRegistry.getPanel(id);
+  return panelRegistry[id];
+}
+
 /**
  * @param {{ primarySheetId?: string | null }} [options]
  */
@@ -106,7 +114,7 @@ export function getPanelPlacement(layout, panelId) {
 /**
  * @param {ReturnType<typeof createDefaultLayout>} layout
  * @param {string} panelId
- * @param {{ panelRegistry?: Record<string, { defaultDock?: "left" | "right" | "bottom", defaultFloatingRect?: { x: number, y: number, width: number, height: number } }> }} [options]
+ * @param {{ panelRegistry?: any }} [options]
  */
 export function openPanel(layout, panelId, options = {}) {
   const placement = getPanelPlacement(layout, panelId);
@@ -115,7 +123,7 @@ export function openPanel(layout, panelId, options = {}) {
   }
   if (placement.kind === "floating") return layout;
 
-  const defaults = options.panelRegistry?.[panelId];
+  const defaults = panelRegistryGet(options.panelRegistry, panelId);
   if (defaults?.defaultDock) {
     return dockPanel(layout, panelId, defaults.defaultDock, { activate: true });
   }

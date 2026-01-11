@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 test.describe("python panel", () => {
   test("runs a script that prints output and updates the workbook", async ({ page }) => {
     test.setTimeout(120_000);
@@ -16,8 +18,7 @@ print("Hello from Python")
     // dependencies are first loaded). If that happens, retry the whole interaction once after
     // the navigation completes.
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      await page.goto("/");
-      await page.waitForFunction(() => (window as any).__formulaApp != null);
+      await gotoDesktop(page);
       try {
         const isolation = await page.evaluate(() => ({
           crossOriginIsolated: globalThis.crossOriginIsolated,

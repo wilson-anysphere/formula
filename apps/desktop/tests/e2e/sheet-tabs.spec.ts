@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 test.describe("sheet tabs", () => {
   test("switching sheets updates the visible cell values", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     // Ensure A1 is active before switching sheets so the status bar reflects A1 values.
     await page.click("#grid", { position: { x: 5, y: 5 } });

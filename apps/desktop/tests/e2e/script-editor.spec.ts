@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 test.describe("script editor panel", () => {
   test("runs a script that writes to the workbook", async ({ page }) => {
     test.setTimeout(60_000);
@@ -11,8 +13,7 @@ await ctx.activeSheet.getRange("C1").setValue(99);
     // scripting worker is first instantiated). If that happens, retry the whole interaction
     // once after the navigation completes.
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      await page.goto("/");
-      await page.waitForFunction(() => (window as any).__formulaApp != null);
+      await gotoDesktop(page);
 
       await page.getByTestId("open-script-editor-panel").click();
       const panel = page.getByTestId("dock-bottom").getByTestId("panel-scriptEditor");
@@ -29,9 +30,9 @@ await ctx.activeSheet.getRange("C1").setValue(99);
       try {
         await expect(runButton).toBeEnabled({ timeout: 30_000 });
         await expect
-          .poll(async () =>
-            page.evaluate(() => (window as any).__formulaApp?.getCellValueA1?.("C1") ?? ""),
-            { timeout: 20_000 }
+          .poll(
+            async () => page.evaluate(() => (window as any).__formulaApp?.getCellValueA1?.("C1") ?? ""),
+            { timeout: 20_000 },
           )
           .toBe("99");
         break;

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { gotoDesktop } from "./helpers";
+
 test.describe("tauri workbook integration", () => {
   test("file-dropped event opens a workbook and populates the document", async ({ page }) => {
     await page.addInitScript(() => {
@@ -79,8 +81,8 @@ test.describe("tauri workbook integration", () => {
       };
     });
 
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
+    
 
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
     await page.evaluate(() => {

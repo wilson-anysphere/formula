@@ -212,6 +212,8 @@ test("timeouts: custom function timeout terminates a hanging handler", async (t)
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
+    // Worker startup can be slow under heavy CI load; keep activation timeout generous so this
+    // test exercises the custom-function timeout rather than flaking on activation.
     activationTimeoutMs: 5000,
     customFunctionTimeoutMs: 100
   });
@@ -266,6 +268,8 @@ test("timeouts: worker termination clears runtime context menus and can re-regis
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
+    // Worker startup can be slow under heavy CI load; keep activation timeout generous so this
+    // test exercises command timeouts + cleanup rather than flaking on activation.
     activationTimeoutMs: 5000,
     commandTimeoutMs: 100
   });

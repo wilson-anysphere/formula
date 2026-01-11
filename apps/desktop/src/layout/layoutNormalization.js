@@ -13,6 +13,14 @@ import { createDefaultLayout } from "./layoutState.js";
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
+function panelRegistryHas(panelRegistry, panelId) {
+  if (!panelRegistry) return true;
+  const id = String(panelId);
+  if (typeof panelRegistry.has === "function") return panelRegistry.has(id);
+  if (typeof panelRegistry.hasPanel === "function") return panelRegistry.hasPanel(id);
+  return hasOwn(panelRegistry, id);
+}
+
 function clampNumber(value, { min, max, fallback }) {
   if (typeof value !== "number" || Number.isNaN(value)) return fallback;
   if (value < min) return min;
@@ -38,7 +46,7 @@ function normalizeDockZone(rawZone, side, { panelRegistry }) {
 
   if (Array.isArray(rawZone.panels)) {
     const panels = rawZone.panels.filter((id) => typeof id === "string" && id.length > 0);
-    zone.panels = panelRegistry ? panels.filter((id) => hasOwn(panelRegistry, id)) : panels;
+    zone.panels = panelRegistry ? panels.filter((id) => panelRegistryHas(panelRegistry, id)) : panels;
   }
 
   zone.active = typeof rawZone.active === "string" ? rawZone.active : null;
@@ -56,7 +64,7 @@ function normalizeFloating(rawFloating, { panelRegistry }) {
 
   for (const [panelId, rawPanel] of Object.entries(rawFloating)) {
     if (typeof panelId !== "string" || panelId.length === 0) continue;
-    if (panelRegistry && !hasOwn(panelRegistry, panelId)) continue;
+    if (panelRegistry && !panelRegistryHas(panelRegistry, panelId)) continue;
     if (!rawPanel || typeof rawPanel !== "object") continue;
 
     const x = clampNumber(rawPanel.x, { min: -10000, max: 100000, fallback: DEFAULT_FLOATING_RECT.x });

@@ -128,3 +128,36 @@
   min-height: 0;
   overflow: auto;
 }
+
+#toast-root {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  min-width: 240px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  color: var(--text-primary);
+  box-shadow: var(--dialog-shadow);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.toast[data-type="error"] {
+  border-color: var(--error);
+}
+
+.toast[data-type="warning"] {
+  border-color: var(--warning);
+}

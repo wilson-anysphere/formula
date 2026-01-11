@@ -7,6 +7,11 @@ import { QueryEditorPanelContainer } from "./query-editor/QueryEditorPanelContai
 import { createAIAuditPanel } from "./ai-audit/index.js";
 import { mountPythonPanel } from "./python/index.js";
 import { VbaMigratePanel } from "./vba-migrate/index.js";
+import { ExtensionPanelBody } from "../extensions/ExtensionPanelBody.js";
+import { ExtensionsPanel } from "../extensions/ExtensionsPanel.js";
+import type { ExtensionPanelBridge } from "../extensions/extensionPanelBridge.js";
+import type { DesktopExtensionHostManager } from "../extensions/extensionHostManager.js";
+import type { PanelRegistry } from "./panelRegistry.js";
 import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 
 export interface PanelBodyRendererOptions {
@@ -48,6 +53,11 @@ export interface PanelBodyRendererOptions {
   getWorkbookId?: () => string | undefined;
   renderMacrosPanel?: (body: HTMLDivElement) => void;
   createChart?: SpreadsheetApi["createChart"];
+  panelRegistry?: PanelRegistry;
+  extensionPanelBridge?: ExtensionPanelBridge;
+  extensionHostManager?: DesktopExtensionHostManager;
+  onExecuteExtensionCommand?: (commandId: string) => void;
+  onOpenExtensionPanel?: (panelId: string) => void;
 }
 
 export interface PanelBodyRenderer {
@@ -143,6 +153,20 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       return;
     }
 
+    if (panelId === PanelIds.EXTENSIONS && options.extensionHostManager && options.onExecuteExtensionCommand && options.onOpenExtensionPanel) {
+      makeBodyFillAvailableHeight(body);
+      renderReactPanel(
+        panelId,
+        body,
+        <ExtensionsPanel
+          manager={options.extensionHostManager}
+          onExecuteCommand={options.onExecuteExtensionCommand}
+          onOpenPanel={options.onOpenExtensionPanel}
+        />,
+      );
+      return;
+    }
+
     if (panelId === PanelIds.PYTHON) {
       makeBodyFillAvailableHeight(body);
       renderDomPanel(panelId, body, (container) => {
@@ -155,6 +179,13 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         });
         return { container, dispose };
       });
+      return;
+    }
+
+    const panelDef = options.panelRegistry?.get(panelId) as any;
+    if (panelDef?.source?.kind === "extension" && options.extensionPanelBridge) {
+      makeBodyFillAvailableHeight(body);
+      renderReactPanel(panelId, body, <ExtensionPanelBody panelId={panelId} bridge={options.extensionPanelBridge} />);
       return;
     }
 

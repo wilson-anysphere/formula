@@ -33,6 +33,37 @@ let wasmModuleUrl: string | null = null;
 let wasmBinaryUrl: string | null = null;
 let workbook: WasmWorkbookInstance | null = null;
 
+function normalizeCellScalar(value: unknown): CellScalar {
+  // wasm-bindgen maps `Option<T>` to `T | undefined` in JS. Our public protocol uses `null`
+  // for empty cells, so normalize `undefined` at the worker boundary.
+  if (value === undefined) return null;
+  if (value === null) return null;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  return null;
+}
+
+function normalizeCellData(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const cell = value as any;
+  if (!("input" in cell) && !("value" in cell)) return value;
+  return { ...cell, input: normalizeCellScalar(cell.input), value: normalizeCellScalar(cell.value) };
+}
+
+function normalizeRangeData(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((row) => (Array.isArray(row) ? row.map((cell) => normalizeCellData(cell)) : row));
+}
+
+function normalizeCellChanges(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((change) => {
+    if (!change || typeof change !== "object") return change;
+    const obj = change as any;
+    if (!("value" in obj)) return change;
+    return { ...obj, value: normalizeCellScalar(obj.value) };
+  });
+}
+
 let cancelledRequests = new Set<number>();
 const pendingRequestIds = new Set<number>();
 
@@ -264,10 +295,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               result = wb.toJson();
               break;
             case "getCell":
-              result = wb.getCell(params.address, params.sheet);
+              result = normalizeCellData(wb.getCell(params.address, params.sheet));
               break;
             case "getRange":
-              result = wb.getRange(params.range, params.sheet);
+              result = normalizeRangeData(wb.getRange(params.range, params.sheet));
               break;
             case "setCells":
               if (typeof (wb as any).setCells === "function") {
@@ -284,7 +315,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               result = null;
               break;
             case "recalculate":
-              result = wb.recalculate(params.sheet);
+              result = normalizeCellChanges(wb.recalculate(params.sheet));
               break;
             default:
               throw new Error(`unknown method: ${req.method}`);

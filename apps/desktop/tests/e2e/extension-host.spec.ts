@@ -3,6 +3,8 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { gotoDesktop } from "./helpers";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "../../../..");
@@ -13,8 +15,7 @@ function viteFsUrl(absPath: string) {
 
 test.describe("BrowserExtensionHost", () => {
   test("loads sample extension in a Worker and can run sumSelection", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
     const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
@@ -98,8 +99,7 @@ test.describe("BrowserExtensionHost", () => {
   });
 
   test("activation context includes storage paths and matches formula.context", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
     const extensionApiUrl = viteFsUrl(path.join(repoRoot, "packages/extension-api/index.mjs"));
@@ -108,8 +108,8 @@ test.describe("BrowserExtensionHost", () => {
       async ({ hostModuleUrl, extensionApiUrl }) => {
         const { BrowserExtensionHost } = await import(hostModuleUrl);
 
-        // The extension entrypoint is loaded via `blob:` URL, so its module resolution base
-        // is non-hierarchical. Convert Vite's `/@fs/...` path into an absolute http(s) URL so
+        // The extension entrypoint is loaded via `blob:` URL, so its module resolution base is
+        // non-hierarchical. Convert Vite's `/@fs/...` path into an absolute http(s) URL so
         // `import` inside the blob-backed worker can resolve it.
         const extensionApiAbsoluteUrl = new URL(extensionApiUrl, location.href).href;
 
@@ -203,8 +203,7 @@ test.describe("BrowserExtensionHost", () => {
     if (!port) throw new Error("Failed to allocate test port");
 
     try {
-      await page.goto("/");
-      await page.waitForFunction(() => (window as any).__formulaApp != null);
+      await gotoDesktop(page);
 
       const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
       const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
@@ -248,8 +247,7 @@ test.describe("BrowserExtensionHost", () => {
   });
 
   test("denied network permission blocks fetch in the browser host", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
     const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
@@ -297,8 +295,7 @@ test.describe("BrowserExtensionHost", () => {
   });
 
   test("denied network permission blocks WebSocket connections in the browser worker", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForFunction(() => (window as any).__formulaApp != null);
+    await gotoDesktop(page);
 
     const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
     const extensionApiUrl = viteFsUrl(path.join(repoRoot, "packages/extension-api/index.mjs"));
