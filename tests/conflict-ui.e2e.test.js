@@ -292,3 +292,68 @@ test("E2E: concurrent value vs formula surfaces a content conflict and converges
     globalThis.Event = prevEvent;
   }
 });
+
+test("E2E: concurrent value vs formula (value wins) surfaces a content conflict and converges after user resolution", () => {
+  const dom = new JSDOM('<div id="a"></div><div id="b"></div>', { url: "http://localhost" });
+
+  const prevWindow = globalThis.window;
+  const prevDocument = globalThis.document;
+  const prevEvent = globalThis.Event;
+
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.Event = dom.window.Event;
+
+  try {
+    const containerA = dom.window.document.getElementById("a");
+    const containerB = dom.window.document.getElementById("b");
+    assert.ok(containerA && containerB);
+
+    // Deterministic tie-break: value writer has higher clientID and wins.
+    const a = createClient("alice", containerA, { mode: "formula+value", clientID: 1 });
+    const b = createClient("bob", containerB, { mode: "formula+value", clientID: 2 });
+
+    a.monitor.setLocalValue("s:0:0", "base");
+    syncDocs(a.doc, b.doc);
+
+    // Offline concurrent edits: alice writes a formula; bob writes a value.
+    a.monitor.setLocalFormula("s:0:0", "=1");
+    b.monitor.setLocalValue("s:0:0", "bob");
+    syncDocs(a.doc, b.doc);
+
+    // Expect conflict toast on alice (the formula writer).
+    const toastA = containerA.querySelector('[data-testid="conflict-toast"]');
+    assert.ok(toastA, "expected conflict toast on alice");
+
+    const conflict = a.conflicts[0];
+    assert.ok(conflict, "expected recorded conflict");
+    assert.equal(conflict.kind, "content");
+    assert.equal(conflict.local.type, "formula");
+    assert.equal(conflict.remote.type, "value");
+
+    const openBtn = containerA.querySelector('[data-testid="conflict-toast-open"]');
+    assert.ok(openBtn);
+    openBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+
+    const dialog = containerA.querySelector('[data-testid="conflict-dialog"]');
+    assert.ok(dialog, "expected conflict dialog to open");
+
+    // Choose the remote value (already applied) - should converge without clobbering.
+    const useTheirsBtn = containerA.querySelector('[data-testid="conflict-choose-remote"]');
+    assert.ok(useTheirsBtn);
+    useTheirsBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+
+    syncDocs(a.doc, b.doc);
+
+    assert.equal(getFormula(a.cells, "s:0:0"), "");
+    assert.equal(getFormula(b.cells, "s:0:0"), "");
+    assert.equal(getValue(a.cells, "s:0:0"), "bob");
+    assert.equal(getValue(b.cells, "s:0:0"), "bob");
+
+    assert.equal(containerA.querySelector('[data-testid="conflict-toast"]'), null);
+  } finally {
+    globalThis.window = prevWindow;
+    globalThis.document = prevDocument;
+    globalThis.Event = prevEvent;
+  }
+});

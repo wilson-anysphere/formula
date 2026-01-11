@@ -293,6 +293,8 @@ export class FormulaConflictMonitor {
         const action = formulaChange.action;
         const itemId = getItemId(cellMap, "formula");
         const newItemOriginId = getItemOriginId(cellMap, "formula");
+        const hasValueChange = Boolean(event.changes.keys.get("value"));
+        const currentValue = cellMap.get("value") ?? null;
 
         this._handleFormulaChange({
           cellKey,
@@ -302,7 +304,9 @@ export class FormulaConflictMonitor {
           remoteUserId,
           origin: transaction.origin,
           itemId,
-          newItemOriginId
+          newItemOriginId,
+          hasValueChange,
+          currentValue
         });
       }
 
@@ -340,9 +344,22 @@ export class FormulaConflictMonitor {
    * @param {any} input.origin
    * @param {{ client: number, clock: number } | null} input.itemId
    * @param {{ client: number, clock: number } | null} input.newItemOriginId
+   * @param {boolean} [input.hasValueChange]
+   * @param {any} [input.currentValue]
    */
   _handleFormulaChange(input) {
-    const { cellKey, oldFormula, newFormula, action, remoteUserId, origin, itemId, newItemOriginId } = input;
+    const {
+      cellKey,
+      oldFormula,
+      newFormula,
+      action,
+      remoteUserId,
+      origin,
+      itemId,
+      newItemOriginId,
+      hasValueChange = false,
+      currentValue = null
+    } = input;
 
     const isLocal = this.localOrigins.has(origin);
     if (isLocal) return;
@@ -431,10 +448,48 @@ export class FormulaConflictMonitor {
 
     // We no longer consider that local edit "pending" for conflict detection.
     this._lastLocalFormulaEditByCellKey.delete(cellKey);
+    const lastContent = this._lastLocalContentEditByCellKey.get(cellKey);
     this._lastLocalContentEditByCellKey.delete(cellKey);
 
     const localFormula = oldFormula.trim();
     const remoteFormula = newFormula.trim();
+
+    // Symmetric content conflict:
+    // local formula write vs remote value write, where the remote value wins and
+    // clears the formula (formula=null marker) while also writing a literal value.
+    if (
+      this.includeValueConflicts &&
+      hasValueChange &&
+      lastContent?.kind === "formula" &&
+      lastContent.formula &&
+      !remoteFormula &&
+      currentValue !== null
+    ) {
+      const cell = cellRefFromKey(cellKey);
+      const conflict = /** @type {FormulaConflict} */ ({
+        id: crypto.randomUUID(),
+        kind: "content",
+        cell,
+        cellKey,
+        local: { type: "formula", formula: localFormula },
+        remote: { type: "value", value: currentValue },
+        remoteUserId,
+        detectedAt: Date.now()
+      });
+
+      if (this.getCellValue) {
+        const localPreview = tryEvaluateFormula(localFormula, {
+          getCellValue: ({ col, row }) => this.getCellValue({ sheetId: cell.sheetId, col, row })
+        });
+        if (conflict.local.type === "formula") {
+          conflict.local.preview = localPreview.ok ? localPreview.value : null;
+        }
+      }
+
+      this._conflicts.set(conflict.id, conflict);
+      this.onConflict(conflict);
+      return;
+    }
 
     const decision = resolveFormulaConflict({
       localFormula,

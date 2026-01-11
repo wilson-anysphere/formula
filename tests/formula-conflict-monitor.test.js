@@ -271,7 +271,7 @@ test("concurrent value vs formula surfaces a content conflict on the value write
   assert.equal(getFormula(bob.cells, "s:0:0"), "=1");
 });
 
-test("concurrent value vs formula can surface a formula conflict on the formula writer when the value writer wins", () => {
+test("concurrent value vs formula surfaces a content conflict on the formula writer when the value writer wins", () => {
   // Value writer has higher clientID, so their formula=null write wins and clears
   // the concurrent formula.
   const alice = createClient("alice", { clientID: 1, mode: "formula+value" });
@@ -284,14 +284,18 @@ test("concurrent value vs formula can surface a formula conflict on the formula 
   bob.monitor.setLocalValue("s:0:0", "bob");
   syncDocs(alice.doc, bob.doc);
 
-  const conflict = alice.conflicts.find((c) => c.kind === "formula") ?? null;
-  assert.ok(conflict, "expected a formula conflict on alice");
-  assert.equal(conflict.localFormula.trim(), "=1");
-  assert.equal(conflict.remoteFormula.trim(), "");
+  const conflict = alice.conflicts.find((c) => c.kind === "content") ?? null;
+  assert.ok(conflict, "expected a content conflict on alice");
+  assert.equal(conflict.local.type, "formula");
+  assert.equal(conflict.local.formula.trim(), "=1");
+  assert.equal(conflict.remote.type, "value");
+  assert.equal(conflict.remote.value, "bob");
 
-  // Choosing the remote (empty formula) is a no-op and must preserve the remote value.
-  assert.ok(alice.monitor.resolveConflict(conflict.id, conflict.remoteFormula));
+  // Choosing the remote value is a no-op and must preserve the remote value.
+  assert.ok(alice.monitor.resolveConflict(conflict.id, conflict.remote));
   syncDocs(alice.doc, bob.doc);
+  assert.equal(getFormula(alice.cells, "s:0:0"), "");
+  assert.equal(getFormula(bob.cells, "s:0:0"), "");
   assert.equal(getValue(alice.cells, "s:0:0"), "bob");
   assert.equal(getValue(bob.cells, "s:0:0"), "bob");
 });
