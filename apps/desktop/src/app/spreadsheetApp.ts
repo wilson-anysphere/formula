@@ -3190,6 +3190,23 @@ export class SpreadsheetApp {
     return this.clipboardProviderPromise;
   }
 
+  private snapshotClipboardCells(range: Range): Array<Array<{ value: unknown; formula: string | null; styleId: number }>> {
+    const cells: Array<Array<{ value: unknown; formula: string | null; styleId: number }>> = [];
+    for (let row = range.startRow; row <= range.endRow; row += 1) {
+      const outRow: Array<{ value: unknown; formula: string | null; styleId: number }> = [];
+      for (let col = range.startCol; col <= range.endCol; col += 1) {
+        const cell = this.document.getCell(this.sheetId, { row, col }) as {
+          value: unknown;
+          formula: string | null;
+          styleId: number;
+        };
+        outRow.push({ value: cell.value ?? null, formula: cell.formula ?? null, styleId: cell.styleId ?? 0 });
+      }
+      cells.push(outRow);
+    }
+    return cells;
+  }
+
   private getClipboardCopyRange(): Range {
     const activeRange = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
     const activeCellFallback: Range = {
@@ -3219,19 +3236,7 @@ export class SpreadsheetApp {
   private async copySelectionToClipboard(): Promise<void> {
     try {
       const range = this.getClipboardCopyRange();
-      const cells: Array<Array<{ value: unknown; formula: string | null; styleId: number }>> = [];
-      for (let row = range.startRow; row <= range.endRow; row += 1) {
-        const outRow: Array<{ value: unknown; formula: string | null; styleId: number }> = [];
-        for (let col = range.startCol; col <= range.endCol; col += 1) {
-          const cell = this.document.getCell(this.sheetId, { row, col }) as {
-            value: unknown;
-            formula: string | null;
-            styleId: number;
-          };
-          outRow.push({ value: cell.value ?? null, formula: cell.formula ?? null, styleId: cell.styleId ?? 0 });
-        }
-        cells.push(outRow);
-      }
+      const cells = this.snapshotClipboardCells(range);
       const dlp = this.dlpContext;
       const payload = copyRangeToClipboardPayload(
         this.document,
@@ -3353,19 +3358,7 @@ export class SpreadsheetApp {
   private async cutSelectionToClipboard(): Promise<void> {
     try {
       const range = this.getClipboardCopyRange();
-      const cells: Array<Array<{ value: unknown; formula: string | null; styleId: number }>> = [];
-      for (let row = range.startRow; row <= range.endRow; row += 1) {
-        const outRow: Array<{ value: unknown; formula: string | null; styleId: number }> = [];
-        for (let col = range.startCol; col <= range.endCol; col += 1) {
-          const cell = this.document.getCell(this.sheetId, { row, col }) as {
-            value: unknown;
-            formula: string | null;
-            styleId: number;
-          };
-          outRow.push({ value: cell.value ?? null, formula: cell.formula ?? null, styleId: cell.styleId ?? 0 });
-        }
-        cells.push(outRow);
-      }
+      const cells = this.snapshotClipboardCells(range);
       const dlp = this.dlpContext;
       const payload = copyRangeToClipboardPayload(
         this.document,
