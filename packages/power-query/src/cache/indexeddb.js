@@ -180,40 +180,56 @@ export class IndexedDBCacheStore {
    */
   async get(key) {
     const normalized = this.normalizeKey(key);
-    const result = await this.withRead((store) => store.get(normalized));
-    if (!result) return null;
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.storeName, "readwrite");
+      /** @type {CacheEntry | null} */
+      let entryToReturn = null;
 
-    /** @type {CacheEntry | null} */
-    let entry = null;
-    /** @type {number | null} */
-    let sizeBytes = null;
+      tx.oncomplete = () => resolve(entryToReturn);
+      tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+      tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
 
-    if (isCacheRecord(result)) {
-      entry = result.entry ?? null;
-      sizeBytes = typeof result.sizeBytes === "number" ? result.sizeBytes : null;
-    } else {
-      entry = result;
-      sizeBytes = null;
-    }
+      const store = tx.objectStore(this.storeName);
+      const req = store.get(normalized);
+      req.onerror = () => reject(req.error ?? new Error("IndexedDB request failed"));
+      req.onsuccess = () => {
+        const result = req.result;
+        if (!result) return;
 
-    if (!entry) return null;
+        /** @type {CacheEntry | null} */
+        let entry = null;
+        /** @type {number | null} */
+        let sizeBytes = null;
 
-    const updated = {
-      entry,
-      sizeBytes: sizeBytes ?? estimateEntrySizeBytes(entry),
-      lastAccessMs: this.now(),
-    };
+        if (isCacheRecord(result)) {
+          entry = result.entry ?? null;
+          sizeBytes = typeof result.sizeBytes === "number" ? result.sizeBytes : null;
+        } else {
+          entry = result;
+          sizeBytes = null;
+        }
 
-    // Best-effort metadata update (do not fail reads if updating access time races).
-    try {
-      await this.withWrite((store) => {
-        store.put(updated, normalized);
-      });
-    } catch {
-      // ignore; return cached value even if metadata update fails
-    }
+        if (!entry) return;
+        entryToReturn = entry;
 
-    return entry;
+        const updated = {
+          entry,
+          sizeBytes: sizeBytes ?? estimateEntrySizeBytes(entry),
+          lastAccessMs: this.now(),
+        };
+
+        // Best-effort metadata update: do not let access-time updates turn reads into failures.
+        try {
+          const putReq = store.put(updated, normalized);
+          putReq.onerror = (event) => {
+            if (event && typeof event.preventDefault === "function") event.preventDefault();
+          };
+        } catch {
+          // ignore
+        }
+      };
+    });
   }
 
   /**

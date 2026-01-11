@@ -270,6 +270,54 @@ export class FileSystemCacheStore {
   }
 
   /**
+   * Best-effort atomic write guarded by an optimistic \"compare\" check so we don't
+   * overwrite a concurrently-written cache entry (e.g. a `get()` updating
+   * `lastAccessMs` racing with a `set()` writing a new entry).
+   *
+   * @param {string} finalPath
+   * @param {string} expectedText
+   * @param {string} nextText
+   */
+  async writeFileAtomicIfUnchanged(finalPath, expectedText, nextText) {
+    const { fs, path } = await this.deps();
+    const tmpPath = path.join(
+      path.dirname(finalPath),
+      `${path.basename(finalPath)}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+
+    try {
+      await fs.writeFile(tmpPath, nextText, "utf8");
+
+      let currentText;
+      try {
+        currentText = await fs.readFile(finalPath, "utf8");
+      } catch {
+        currentText = null;
+      }
+
+      if (currentText !== expectedText) {
+        await fs.rm(tmpPath, { force: true }).catch(() => {});
+        return;
+      }
+
+      try {
+        await fs.rename(tmpPath, finalPath);
+      } catch (err) {
+        // On Windows, rename does not reliably overwrite existing files.
+        if (err && typeof err === "object" && "code" in err && (err.code === "EEXIST" || err.code === "EPERM")) {
+          await fs.rm(finalPath, { force: true });
+          await fs.rename(tmpPath, finalPath);
+          return;
+        }
+        throw err;
+      }
+    } catch (err) {
+      await fs.rm(tmpPath, { force: true }).catch(() => {});
+      throw err;
+    }
+  }
+
+  /**
    * @param {string} key
    * @returns {Promise<CacheEntry | null>}
    */
@@ -333,7 +381,7 @@ export class FileSystemCacheStore {
 
       // Best-effort metadata update; do not fail reads if we can't update access time.
       try {
-        await this.writeFileAtomic(jsonPath, JSON.stringify(parsed), "utf8");
+        await this.writeFileAtomicIfUnchanged(jsonPath, text, JSON.stringify(parsed));
       } catch {
         // ignore
       }
