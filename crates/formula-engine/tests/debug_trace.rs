@@ -192,3 +192,61 @@ fn debug_trace_supports_array_literals() {
     assert_eq!(arr.get(1, 0), Some(&Value::Number(3.0)));
     assert_eq!(arr.get(1, 1), Some(&Value::Number(4.0)));
 }
+
+#[test]
+fn debug_trace_supports_3d_sheet_range_refs() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "A1", 3.0).unwrap();
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet3!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    let dbg = engine.debug_evaluate("Summary", "A1").unwrap();
+    assert_eq!(dbg.value, Value::Number(6.0));
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "SUM(Sheet1:Sheet3!A1)");
+    assert!(matches!(
+        dbg.trace.kind,
+        TraceKind::FunctionCall { ref name } if name == "SUM"
+    ));
+    assert_eq!(dbg.trace.children.len(), 1);
+
+    let arg = &dbg.trace.children[0];
+    assert_eq!(slice(&dbg.formula, arg.span), "Sheet1:Sheet3!A1");
+    assert!(matches!(arg.kind, TraceKind::CellRef));
+    assert_eq!(arg.value, Value::Blank);
+    assert!(
+        arg.reference.is_none(),
+        "3D sheet-range refs resolve to multiple sheets"
+    );
+}
+
+#[test]
+fn debug_trace_supports_single_quoted_3d_sheet_range_refs() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet 1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet 2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet 3", "A1", 3.0).unwrap();
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM('Sheet 1:Sheet 3'!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    let dbg = engine.debug_evaluate("Summary", "A1").unwrap();
+    assert_eq!(dbg.value, Value::Number(6.0));
+    assert_eq!(
+        slice(&dbg.formula, dbg.trace.span),
+        "SUM('Sheet 1:Sheet 3'!A1)"
+    );
+
+    let arg = &dbg.trace.children[0];
+    assert_eq!(slice(&dbg.formula, arg.span), "'Sheet 1:Sheet 3'!A1");
+    assert!(matches!(arg.kind, TraceKind::CellRef));
+    assert_eq!(arg.value, Value::Blank);
+    assert!(
+        arg.reference.is_none(),
+        "3D sheet-range refs resolve to multiple sheets"
+    );
+}

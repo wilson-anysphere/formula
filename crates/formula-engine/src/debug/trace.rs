@@ -513,6 +513,14 @@ fn is_ident_start(ch: char) -> bool {
     ch.is_ascii_alphabetic() || ch == '_' || ch == '$'
 }
 
+fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
+    let (start, end) = name.split_once(':')?;
+    if start.is_empty() || end.is_empty() {
+        return None;
+    }
+    Some((start.to_string(), end.to_string()))
+}
+
 struct ParserImpl {
     tokens: Vec<Token>,
     pos: usize,
@@ -682,7 +690,10 @@ impl ParserImpl {
             TokenKind::Ident(id) => {
                 if matches!(self.peek_n(1).kind, TokenKind::LParen) {
                     self.parse_function_call()
-                } else if matches!(self.peek_n(1).kind, TokenKind::Bang) {
+                } else if matches!(self.peek_n(1).kind, TokenKind::Bang)
+                    || (matches!(self.peek_n(1).kind, TokenKind::Colon)
+                        && matches!(self.peek_n(3).kind, TokenKind::Bang))
+                {
                     self.parse_sheet_ref()
                 } else {
                     self.next();
@@ -714,7 +725,10 @@ impl ParserImpl {
                 }
             }
             TokenKind::SheetName(_name) => {
-                if matches!(self.peek_n(1).kind, TokenKind::Bang) {
+                if matches!(self.peek_n(1).kind, TokenKind::Bang)
+                    || (matches!(self.peek_n(1).kind, TokenKind::Colon)
+                        && matches!(self.peek_n(3).kind, TokenKind::Bang))
+                {
                     self.parse_sheet_ref()
                 } else {
                     self.next();
@@ -857,8 +871,8 @@ impl ParserImpl {
 
     fn parse_sheet_ref(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
         let sheet_tok = self.next();
-        let sheet = match sheet_tok.kind {
-            TokenKind::Ident(s) | TokenKind::SheetName(s) => SheetReference::Sheet(s),
+        let start_name = match sheet_tok.kind {
+            TokenKind::Ident(s) | TokenKind::SheetName(s) => s,
             other => {
                 return Err(FormulaParseError::Expected {
                     expected: "sheet name".to_string(),
@@ -866,7 +880,29 @@ impl ParserImpl {
                 })
             }
         };
-        self.expect(TokenKind::Bang)?;
+
+        let sheet = if matches!(self.peek().kind, TokenKind::Colon) {
+            // Sheet span (3D ref) like `Sheet1:Sheet3!A1` / `'Sheet 1':'Sheet 3'!A1`.
+            self.next(); // ':'
+            let end_tok = self.next();
+            let end_name = match end_tok.kind {
+                TokenKind::Ident(s) | TokenKind::SheetName(s) => s,
+                other => {
+                    return Err(FormulaParseError::Expected {
+                        expected: "sheet name".to_string(),
+                        got: format!("{other:?}"),
+                    })
+                }
+            };
+            self.expect(TokenKind::Bang)?;
+            SheetReference::SheetRange(start_name, end_name)
+        } else {
+            self.expect(TokenKind::Bang)?;
+            match split_sheet_span_name(&start_name) {
+                Some((start, end)) => SheetReference::SheetRange(start, end),
+                None => SheetReference::Sheet(start_name),
+            }
+        };
 
         if matches!(self.peek().kind, TokenKind::Ident(ref id) if id.starts_with('[')) {
             self.next();
@@ -1004,7 +1040,7 @@ impl ResolvedRange {
 #[derive(Debug, Clone)]
 enum EvalValue {
     Scalar(Value),
-    Reference(ResolvedRange),
+    Reference(Vec<ResolvedRange>),
 }
 
 struct TracedEvaluator<'a, R: crate::eval::ValueResolver> {
@@ -1018,8 +1054,8 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         let (v, mut trace) = self.eval_value(expr);
         match v {
             EvalValue::Scalar(v) => (v, trace),
-            EvalValue::Reference(range) => {
-                let scalar = self.deref_reference_scalar(range);
+            EvalValue::Reference(ranges) => {
+                let scalar = self.deref_reference_scalar(&ranges);
                 trace.value = scalar.clone();
                 (scalar, trace)
             }
@@ -1119,7 +1155,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         let (ev, mut trace) = self.eval_value(el);
                         let v = match ev {
                             EvalValue::Scalar(v) => v,
-                            EvalValue::Reference(r) => self.apply_implicit_intersection(r),
+                            EvalValue::Reference(ranges) => {
+                                self.apply_implicit_intersection(&ranges)
+                            }
                         };
                         let v = match v {
                             Value::Array(_) | Value::Spill { .. } => Value::Error(ErrorKind::Value),
@@ -1147,23 +1185,36 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     },
                 )
             }
-            SpannedExprKind::CellRef(r) => match self.resolve_sheet_id(&r.sheet) {
-                Some(sheet_id) if self.resolver.sheet_exists(sheet_id) => {
-                    let range = ResolvedRange {
-                        sheet_id,
-                        start: r.addr,
-                        end: r.addr,
+            SpannedExprKind::CellRef(r) => match self.resolve_sheet_ids(&r.sheet) {
+                Some(sheet_ids)
+                    if !sheet_ids.is_empty()
+                        && sheet_ids.iter().all(|id| self.resolver.sheet_exists(*id)) =>
+                {
+                    let reference = if sheet_ids.len() == 1 {
+                        Some(TraceRef::Cell {
+                            sheet: sheet_ids[0],
+                            addr: r.addr,
+                        })
+                    } else {
+                        None
                     };
+
                     (
-                        EvalValue::Reference(range),
+                        EvalValue::Reference(
+                            sheet_ids
+                                .into_iter()
+                                .map(|sheet_id| ResolvedRange {
+                                    sheet_id,
+                                    start: r.addr,
+                                    end: r.addr,
+                                })
+                                .collect(),
+                        ),
                         TraceNode {
                             kind: TraceKind::CellRef,
                             span: expr.span,
                             value: Value::Blank,
-                            reference: Some(TraceRef::Cell {
-                                sheet: sheet_id,
-                                addr: r.addr,
-                            }),
+                            reference,
                             children: Vec::new(),
                         },
                     )
@@ -1182,24 +1233,37 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     )
                 }
             },
-            SpannedExprKind::RangeRef(r) => match self.resolve_sheet_id(&r.sheet) {
-                Some(sheet_id) if self.resolver.sheet_exists(sheet_id) => {
-                    let range = ResolvedRange {
-                        sheet_id,
-                        start: r.start,
-                        end: r.end,
+            SpannedExprKind::RangeRef(r) => match self.resolve_sheet_ids(&r.sheet) {
+                Some(sheet_ids)
+                    if !sheet_ids.is_empty()
+                        && sheet_ids.iter().all(|id| self.resolver.sheet_exists(*id)) =>
+                {
+                    let reference = if sheet_ids.len() == 1 {
+                        Some(TraceRef::Range {
+                            sheet: sheet_ids[0],
+                            start: r.start,
+                            end: r.end,
+                        })
+                    } else {
+                        None
                     };
+
                     (
-                        EvalValue::Reference(range),
+                        EvalValue::Reference(
+                            sheet_ids
+                                .into_iter()
+                                .map(|sheet_id| ResolvedRange {
+                                    sheet_id,
+                                    start: r.start,
+                                    end: r.end,
+                                })
+                                .collect(),
+                        ),
                         TraceNode {
                             kind: TraceKind::RangeRef,
                             span: expr.span,
                             value: Value::Blank,
-                            reference: Some(TraceRef::Range {
-                                sheet: sheet_id,
-                                start: r.start,
-                                end: r.end,
-                            }),
+                            reference,
                             children: Vec::new(),
                         },
                     )
@@ -1275,7 +1339,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                         })
                                     };
                                     (
-                                        EvalValue::Reference(range),
+                                        EvalValue::Reference(vec![range]),
                                         TraceNode {
                                             kind: TraceKind::NameRef {
                                                 name: nref.name.clone(),
@@ -1357,38 +1421,46 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             SpannedExprKind::SpillRange(inner) => {
                 let (ev, child) = self.eval_value(inner);
                 let (out_ev, reference) = match ev {
-                    EvalValue::Scalar(_) => (EvalValue::Scalar(Value::Error(ErrorKind::Ref)), None),
-                    EvalValue::Reference(range) => {
-                        if !range.is_single_cell() {
-                            (EvalValue::Reference(range), child.reference.clone())
+                    EvalValue::Scalar(Value::Error(e)) => {
+                        (EvalValue::Scalar(Value::Error(e)), None)
+                    }
+                    EvalValue::Scalar(_) => {
+                        (EvalValue::Scalar(Value::Error(ErrorKind::Value)), None)
+                    }
+                    EvalValue::Reference(mut ranges) => {
+                        // Spill-range references are only well-defined for a single-cell reference.
+                        if ranges.len() != 1 {
+                            (EvalValue::Scalar(Value::Error(ErrorKind::Value)), None)
                         } else {
-                            let sheet_id = range.sheet_id;
-                            let addr = range.start;
-                            let origin = self.resolver.spill_origin(sheet_id, addr).unwrap_or(addr);
-                            match self.resolver.spill_range(sheet_id, origin) {
-                                Some((start, end)) => (
-                                    EvalValue::Reference(ResolvedRange {
-                                        sheet_id,
-                                        start,
-                                        end,
-                                    }),
-                                    Some(TraceRef::Range {
-                                        sheet: sheet_id,
-                                        start,
-                                        end,
-                                    }),
-                                ),
-                                None => (
-                                    EvalValue::Reference(ResolvedRange {
-                                        sheet_id,
-                                        start: origin,
-                                        end: origin,
-                                    }),
-                                    Some(TraceRef::Cell {
-                                        sheet: sheet_id,
-                                        addr: origin,
-                                    }),
-                                ),
+                            let range = ranges.pop().expect("checked len() above");
+                            if !range.is_single_cell() {
+                                (EvalValue::Scalar(Value::Error(ErrorKind::Value)), None)
+                            } else {
+                                let sheet_id = range.sheet_id;
+                                let addr = range.start;
+                                match self.resolver.spill_origin(sheet_id, addr) {
+                                    Some(origin) => {
+                                        match self.resolver.spill_range(sheet_id, origin) {
+                                            Some((start, end)) => (
+                                                EvalValue::Reference(vec![ResolvedRange {
+                                                    sheet_id,
+                                                    start,
+                                                    end,
+                                                }]),
+                                                Some(TraceRef::Range {
+                                                    sheet: sheet_id,
+                                                    start,
+                                                    end,
+                                                }),
+                                            ),
+                                            None => (
+                                                EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
+                                                None,
+                                            ),
+                                        }
+                                    }
+                                    None => (EvalValue::Scalar(Value::Error(ErrorKind::Ref)), None),
+                                }
                             }
                         }
                     }
@@ -1583,7 +1655,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 let (v, child) = self.eval_value(inner);
                 let out = match v {
                     EvalValue::Scalar(v) => v,
-                    EvalValue::Reference(range) => self.apply_implicit_intersection(range),
+                    EvalValue::Reference(ranges) => self.apply_implicit_intersection(&ranges),
                 };
                 (
                     EvalValue::Scalar(out.clone()),
@@ -1614,15 +1686,51 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         }
     }
 
-    fn deref_reference_scalar(&self, range: ResolvedRange) -> Value {
-        if range.is_single_cell() {
-            self.resolver.get_cell_value(range.sheet_id, range.start)
-        } else {
-            Value::Error(ErrorKind::Spill)
+    fn resolve_sheet_ids(&self, sheet: &SheetReference<usize>) -> Option<Vec<usize>> {
+        match sheet {
+            SheetReference::Current => Some(vec![self.ctx.current_sheet]),
+            SheetReference::Sheet(id) => Some(vec![*id]),
+            SheetReference::SheetRange(a, b) => {
+                let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
+                Some((start..=end).collect())
+            }
+            SheetReference::External(_) => None,
         }
     }
 
-    fn apply_implicit_intersection(&self, range: ResolvedRange) -> Value {
+    fn deref_reference_scalar(&self, ranges: &[ResolvedRange]) -> Value {
+        match ranges {
+            [only] if only.is_single_cell() => {
+                self.resolver.get_cell_value(only.sheet_id, only.start)
+            }
+            [_only] => Value::Error(ErrorKind::Spill),
+            _ => Value::Error(ErrorKind::Value),
+        }
+    }
+
+    fn apply_implicit_intersection(&self, ranges: &[ResolvedRange]) -> Value {
+        match ranges {
+            [] => Value::Error(ErrorKind::Value),
+            [only] => self.apply_implicit_intersection_single(*only),
+            many => {
+                // If multiple areas intersect, Excel's implicit intersection is ambiguous. We
+                // approximate by succeeding only when exactly one area intersects.
+                let mut hits = Vec::new();
+                for r in many {
+                    let v = self.apply_implicit_intersection_single(*r);
+                    if !matches!(v, Value::Error(ErrorKind::Value)) {
+                        hits.push(v);
+                    }
+                }
+                match hits.as_slice() {
+                    [only] => only.clone(),
+                    _ => Value::Error(ErrorKind::Value),
+                }
+            }
+        }
+    }
+
+    fn apply_implicit_intersection_single(&self, range: ResolvedRange) -> Value {
         if range.is_single_cell() {
             return self.resolver.get_cell_value(range.sheet_id, range.start);
         }
@@ -1769,20 +1877,22 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     Value::Lambda(_) => return (Value::Error(ErrorKind::Value), traces),
                     Value::Spill { .. } => return (Value::Error(ErrorKind::Value), traces),
                 },
-                EvalValue::Reference(range) => {
-                    for addr in range.iter_cells() {
-                        let v = self.resolver.get_cell_value(range.sheet_id, addr);
-                        match v {
-                            Value::Error(e) => return (Value::Error(e), traces),
-                            Value::Number(n) => acc += n,
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Lambda(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
+                EvalValue::Reference(ranges) => {
+                    for range in ranges {
+                        for addr in range.iter_cells() {
+                            let v = self.resolver.get_cell_value(range.sheet_id, addr);
+                            match v {
+                                Value::Error(e) => return (Value::Error(e), traces),
+                                Value::Number(n) => acc += n,
+                                Value::Bool(_)
+                                | Value::Text(_)
+                                | Value::Blank
+                                | Value::Array(_)
+                                | Value::Lambda(_)
+                                | Value::Spill { .. }
+                                | Value::Reference(_)
+                                | Value::ReferenceUnion(_) => {}
+                            }
                         }
                     }
                 }
@@ -1808,7 +1918,10 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         let (table_ev, table_trace) = self.eval_value(&args[1]);
         traces.push(table_trace);
         let table_range = match table_ev {
-            EvalValue::Reference(range) => range.normalized(),
+            EvalValue::Reference(mut ranges) => match ranges.as_mut_slice() {
+                [only] => only.normalized(),
+                _ => return (Value::Error(ErrorKind::Value), traces),
+            },
             EvalValue::Scalar(Value::Error(e)) => return (Value::Error(e), traces),
             EvalValue::Scalar(_) => return (Value::Error(ErrorKind::Value), traces),
         };
