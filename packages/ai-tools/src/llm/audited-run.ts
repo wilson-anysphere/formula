@@ -379,7 +379,16 @@ function appendStrictToolInstruction(messages: any[]): any[] {
 function compactAuditValue(value: unknown, maxChars: number): unknown {
   const limit = typeof maxChars === "number" && Number.isFinite(maxChars) && maxChars > 0 ? Math.floor(maxChars) : 20_000;
   const estimated = estimateJsonLength(value, limit);
-  if (estimated <= limit) return value;
+  if (estimated <= limit) {
+    // Ensure the value is actually JSON-serializable and within the budget.
+    // (Tool call parameters should already be JSON-safe, but we keep this defensive.)
+    try {
+      const json = JSON.stringify(value);
+      if (typeof json === "string" && json.length <= limit) return value;
+    } catch {
+      // fall through to truncation / stringification below
+    }
+  }
 
   const attempts = [
     { maxDepth: 6, maxArrayLength: 100, maxObjectKeys: 100, maxStringLength: 2_000 },
@@ -434,6 +443,39 @@ function estimateJsonLength(value: unknown, limit: number): number {
     if (chars > max) throw stop;
   };
 
+  const estimateString = (text: string) => {
+    // JSON.stringify escapes quotes, backslashes, control characters, and a couple
+    // of line separators. We compute the length without allocating the escaped string.
+    // Includes surrounding quotes.
+    add(1); // opening quote
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      // Control chars.
+      if (code < 0x20) {
+        // \u00XX
+        add(6);
+        continue;
+      }
+      // Quotes / backslash.
+      if (code === 0x22 /* " */ || code === 0x5c /* \\ */) {
+        add(2);
+        continue;
+      }
+      // \b \t \n \f \r
+      if (code === 0x08 || code === 0x09 || code === 0x0a || code === 0x0c || code === 0x0d) {
+        add(2);
+        continue;
+      }
+      // U+2028 / U+2029 are escaped by JSON.stringify.
+      if (code === 0x2028 || code === 0x2029) {
+        add(6);
+        continue;
+      }
+      add(1);
+    }
+    add(1); // closing quote
+  };
+
   const walk = (v: unknown) => {
     if (v === null) {
       add(4); // null
@@ -441,11 +483,15 @@ function estimateJsonLength(value: unknown, limit: number): number {
     }
     const t = typeof v;
     if (t === "string") {
-      add((v as string).length + 2); // quotes
+      estimateString(v as string);
       return;
     }
     if (t === "number") {
-      add(String(v).length);
+      if (!Number.isFinite(v as number)) {
+        add(4); // null
+      } else {
+        add(String(v).length);
+      }
       return;
     }
     if (t === "boolean") {
@@ -481,7 +527,7 @@ function estimateJsonLength(value: unknown, limit: number): number {
     for (let i = 0; i < keys.length; i++) {
       if (i > 0) add(1); // comma
       const key = keys[i]!;
-      add(key.length + 2); // "key"
+      estimateString(key);
       add(1); // :
       walk(obj[key]);
     }
