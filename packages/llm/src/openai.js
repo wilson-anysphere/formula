@@ -292,7 +292,9 @@ export class OpenAIClient {
       }
 
       function* flushPendingToolCalls() {
-        for (const [index, state] of toolCallsByIndex.entries()) {
+        const indexes = Array.from(toolCallsByIndex.keys()).sort((a, b) => a - b);
+        for (const index of indexes) {
+          const state = toolCallsByIndex.get(index);
           if (!state || typeof state !== "object") continue;
           if (state.started) continue;
           if (!state.id && state.name) state.id = `toolcall-${index}`;
