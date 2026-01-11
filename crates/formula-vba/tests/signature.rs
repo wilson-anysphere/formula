@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::io::{Cursor, Write};
 
 use formula_vba::{verify_vba_digital_signature, VbaSignatureVerification};
