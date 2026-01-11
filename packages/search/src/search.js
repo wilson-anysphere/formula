@@ -7,6 +7,7 @@ import {
   getMergedMasterCell,
   getSheetByName,
 } from "./scope.js";
+import { encodeCellId } from "./indexing.js";
 import { getCellText } from "./text.js";
 
 function buildMatcher(query, { matchCase, matchEntireCell, useWildcards }) {
@@ -43,6 +44,7 @@ async function* iterateCellsInScope(
 
   for (const segment of segments) {
     const sheet = getSheetByName(workbook, segment.sheetName);
+    const visited = segment.ranges.length > 1 ? new Set() : null;
 
     for (const range of segment.ranges) {
       if (typeof sheet.iterateCells === "function") {
@@ -50,6 +52,11 @@ async function* iterateCellsInScope(
           await slicer.checkpoint();
           const master = getMergedMasterCell(sheet, row, col);
           if (master && (master.row !== row || master.col !== col)) continue;
+          if (visited) {
+            const id = encodeCellId(row, col);
+            if (visited.has(id)) continue;
+            visited.add(id);
+          }
           yield { sheetName: segment.sheetName, row, col, cell };
         }
         continue;
@@ -68,6 +75,11 @@ async function* iterateCellsInScope(
             await slicer.checkpoint();
             const master = getMergedMasterCell(sheet, row, col);
             if (master && (master.row !== row || master.col !== col)) continue;
+            if (visited) {
+              const id = encodeCellId(row, col);
+              if (visited.has(id)) continue;
+              visited.add(id);
+            }
             yield { sheetName: segment.sheetName, row, col, cell: sheet.getCell(row, col) };
           }
         }
@@ -77,6 +89,11 @@ async function* iterateCellsInScope(
             await slicer.checkpoint();
             const master = getMergedMasterCell(sheet, row, col);
             if (master && (master.row !== row || master.col !== col)) continue;
+            if (visited) {
+              const id = encodeCellId(row, col);
+              if (visited.has(id)) continue;
+              visited.add(id);
+            }
             yield { sheetName: segment.sheetName, row, col, cell: sheet.getCell(row, col) };
           }
         }

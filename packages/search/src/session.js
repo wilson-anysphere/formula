@@ -8,7 +8,7 @@ import {
   getSheetByName,
   rangeContains,
 } from "./scope.js";
-import { decodeCellId } from "./indexing.js";
+import { decodeCellId, encodeCellId } from "./indexing.js";
 import { getCellText } from "./text.js";
 import { applyReplaceToCell } from "./replaceCore.js";
 
@@ -177,6 +177,7 @@ export class SearchSession {
 
           // Process each range in-order (important for multi-area selections).
           const seenCandidateIds = Array.isArray(candidates) ? new Set() : null;
+          const visited = !seenCandidateIds && segment.ranges.length > 1 ? new Set() : null;
           for (const range of segment.ranges) {
             throwIfAborted(effectiveSignal);
 
@@ -212,6 +213,11 @@ export class SearchSession {
 
                 const master = getMergedMasterCell(sheet, row, col);
                 if (master && (master.row !== row || master.col !== col)) continue;
+                if (visited) {
+                  const id = encodeCellId(row, col);
+                  if (visited.has(id)) continue;
+                  visited.add(id);
+                }
 
                 const text = getCellText(cell, { lookIn, valueMode });
                 if (!re.test(text)) continue;
@@ -239,6 +245,11 @@ export class SearchSession {
 
                   const master = getMergedMasterCell(sheet, row, col);
                   if (master && (master.row !== row || master.col !== col)) continue;
+                  if (visited) {
+                    const id = encodeCellId(row, col);
+                    if (visited.has(id)) continue;
+                    visited.add(id);
+                  }
 
                   const cell = sheet.getCell(row, col);
                   const text = getCellText(cell, { lookIn, valueMode });
@@ -259,6 +270,11 @@ export class SearchSession {
 
                   const master = getMergedMasterCell(sheet, row, col);
                   if (master && (master.row !== row || master.col !== col)) continue;
+                  if (visited) {
+                    const id = encodeCellId(row, col);
+                    if (visited.has(id)) continue;
+                    visited.add(id);
+                  }
 
                   const cell = sheet.getCell(row, col);
                   const text = getCellText(cell, { lookIn, valueMode });

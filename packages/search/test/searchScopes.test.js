@@ -45,6 +45,25 @@ test("search scopes: selection vs sheet vs workbook", async () => {
   );
 });
 
+test("search scopes: overlapping selection ranges do not produce duplicate matches", async () => {
+  const wb = new InMemoryWorkbook();
+  const sheet = wb.addSheet("Sheet1");
+
+  sheet.setValue(0, 0, "foo"); // A1
+  sheet.setValue(0, 1, "foo"); // B1
+
+  const matches = await findAll(wb, "foo", {
+    scope: "selection",
+    currentSheetName: "Sheet1",
+    selectionRanges: [
+      { startRow: 0, endRow: 0, startCol: 0, endCol: 1 }, // A1:B1
+      { startRow: 0, endRow: 0, startCol: 1, endCol: 2 }, // B1:C1 (overlaps on B1)
+    ],
+  });
+
+  assert.deepEqual(matches.map((m) => m.address), ["Sheet1!A1", "Sheet1!B1"]);
+});
+
 test("search order: by rows vs by columns", async () => {
   const wb = new InMemoryWorkbook();
   const sheet = wb.addSheet("Sheet1");
