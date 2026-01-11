@@ -1,0 +1,26 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "database",
+    "connection": {
+      "kind": "postgres",
+      "host": "db.example.com",
+      "port": 5432,
+      "database": "analytics"
+    },
+    "query": "select * from sales",
+    "dialect": "postgres"
+  },
+  "steps": [
+    {
+      "id": "s1_selectColumns",
+      "name": "Selected Columns",
+      "operation": {
+        "type": "selectColumns",
+        "columns": ["Region"]
+      }
+    }
+  ]
+}
+

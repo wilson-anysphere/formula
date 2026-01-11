@@ -1,0 +1,24 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "database",
+    "connection": {
+      "kind": "sqlite",
+      "path": "/tmp/test.db"
+    },
+    "query": "select * from t",
+    "dialect": "sqlite"
+  },
+  "steps": [
+    {
+      "id": "s1_selectColumns",
+      "name": "Selected Columns",
+      "operation": {
+        "type": "selectColumns",
+        "columns": ["A"]
+      }
+    }
+  ]
+}
+

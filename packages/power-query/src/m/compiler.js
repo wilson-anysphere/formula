@@ -376,6 +376,62 @@ function compileSourceFunctionCall(ctx, name, expr) {
       const source = { type: "database", connection: { kind: "odbc", connectionString }, query };
       return { source, steps: [], schema: null };
     }
+    case "PostgreSQL.Database": {
+      const serverExpr = expr.args[0];
+      const dbExpr = expr.args[1];
+      if (!serverExpr || !dbExpr) ctx.error(expr, "PostgreSQL.Database requires (server, database, query)");
+      const serverRaw = expectText(ctx, serverExpr);
+      const database = expectText(ctx, dbExpr);
+      let query = null;
+      const third = expr.args[2];
+      if (third) {
+        if (isRecord(third)) {
+          const opts = evaluateRecordOptions(ctx, third);
+          if (typeof opts.query === "string") query = opts.query;
+        } else {
+          query = expectText(ctx, third);
+        }
+      }
+      if (!query) ctx.error(expr, "PostgreSQL.Database requires a query string in this subset");
+
+      // Power Query typically encodes the server as `host` or `host:port`.
+      let host = serverRaw;
+      /** @type {number | undefined} */
+      let port;
+      const match = serverRaw.match(/^(.*):(\d+)$/);
+      if (match) {
+        host = match[1];
+        const parsedPort = Number(match[2]);
+        if (Number.isFinite(parsedPort) && parsedPort > 0) port = parsedPort;
+      }
+
+      /** @type {QuerySource} */
+      const source = {
+        type: "database",
+        connection: { kind: "postgres", host, ...(port != null ? { port } : {}), database },
+        query,
+        dialect: "postgres",
+      };
+      return { source, steps: [], schema: null };
+    }
+    case "SQLite.Database":
+    case "Sqlite.Database": {
+      const path = compileFilePathArg(ctx, expr.args[0], name);
+      let query = null;
+      const second = expr.args[1];
+      if (second) {
+        if (isRecord(second)) {
+          const opts = evaluateRecordOptions(ctx, second);
+          if (typeof opts.query === "string") query = opts.query;
+        } else {
+          query = expectText(ctx, second);
+        }
+      }
+      if (!query) ctx.error(expr, `${name} requires a query string in this subset`);
+      /** @type {QuerySource} */
+      const source = { type: "database", connection: { kind: "sqlite", path }, query, dialect: "sqlite" };
+      return { source, steps: [], schema: null };
+    }
     case "Sql.Database": {
       const serverExpr = expr.args[0];
       const dbExpr = expr.args[1];
