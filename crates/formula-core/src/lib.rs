@@ -733,8 +733,24 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
                     }
 
                     if ch2 == 'e' || ch2 == 'E' {
+                        // Match the JS tokenizer behavior: only treat `e`/`E` as
+                        // exponent if it's followed by an optional sign and at
+                        // least one digit. Otherwise, stop the number token
+                        // before the `e` and let the parser handle the
+                        // remaining tokens.
+                        let mut lookahead = chars.clone();
+                        lookahead.next(); // consume the `e`
+                        if matches!(lookahead.peek(), Some('+') | Some('-')) {
+                            lookahead.next();
+                        }
+
+                        if !lookahead.peek().is_some_and(|next| next.is_ascii_digit()) {
+                            break;
+                        }
+
                         buf.push(ch2);
                         chars.next();
+
                         if let Some(sign) = chars.peek().copied() {
                             if sign == '+' || sign == '-' {
                                 buf.push(sign);
@@ -742,10 +758,8 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
                             }
                         }
 
-                        let mut saw_exp_digit = false;
                         while let Some(exp_ch) = chars.peek().copied() {
                             if exp_ch.is_ascii_digit() {
-                                saw_exp_digit = true;
                                 buf.push(exp_ch);
                                 chars.next();
                             } else {
@@ -753,9 +767,6 @@ fn tokenize_formula(expr: &str) -> Result<Vec<FormulaToken>, &'static str> {
                             }
                         }
 
-                        if !saw_exp_digit {
-                            return Err(ERROR_VALUE);
-                        }
                         continue;
                     }
 
@@ -839,9 +850,6 @@ where
 
     let mut parser = FormulaParser::new(tokens);
     let parsed = parser.parse_expression();
-    if parser.pos != parser.tokens.len() {
-        return Ok(JsonValue::String(ERROR_VALUE.to_string()));
-    }
 
     let value = eval_expr(&parsed, &mut get_cell)?;
     Ok(match value {
@@ -1265,5 +1273,17 @@ mod tests {
         assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(17.0));
         // JS Number("-0x10") is NaN -> ignored by SUM.
         assert_eq!(wb.get_cell("A3", None).unwrap().value, json!(1.0));
+    }
+
+    #[test]
+    fn trailing_tokens_are_ignored_like_js_evaluator() {
+        let mut wb = Workbook::new();
+        wb.set_cell("A1", json!("=1,2"), None).unwrap();
+        wb.set_cell("A2", json!("=1e"), None).unwrap();
+
+        wb.recalculate(None).unwrap();
+
+        assert_eq!(wb.get_cell("A1", None).unwrap().value, json!(1.0));
+        assert_eq!(wb.get_cell("A2", None).unwrap().value, json!(1.0));
     }
 }
