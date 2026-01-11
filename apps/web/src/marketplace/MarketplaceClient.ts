@@ -71,6 +71,18 @@ function normalizeBaseUrl(baseUrl: string): string {
   return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
 }
 
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle?.digest) {
+    throw new Error("Marketplace client requires crypto.subtle.digest() to verify downloads");
+  }
+
+  const hash = new Uint8Array(await subtle.digest("SHA-256", bytes));
+  let out = "";
+  for (const b of hash) out += b.toString(16).padStart(2, "0");
+  return out;
+}
+
 export class MarketplaceClient {
   readonly baseUrl: string;
 
@@ -133,6 +145,17 @@ export class MarketplaceClient {
 
     const signatureBase64 = res.headers.get("x-package-signature");
     const sha256 = res.headers.get("x-package-sha256");
+    if (!sha256) {
+      throw new Error("Marketplace download missing x-package-sha256 (mandatory)");
+    }
+    const expectedSha = String(sha256).trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/i.test(expectedSha)) {
+      throw new Error("Marketplace download has invalid x-package-sha256 (expected 64-char hex)");
+    }
+    const computedSha = await sha256Hex(bytes);
+    if (computedSha !== expectedSha) {
+      throw new Error(`Marketplace download sha256 mismatch: expected ${expectedSha} but got ${computedSha}`);
+    }
     const formatHeader = res.headers.get("x-package-format-version");
     const formatVersion =
       formatHeader && Number.isFinite(Number(formatHeader)) ? Number.parseInt(formatHeader, 10) : null;
@@ -142,7 +165,7 @@ export class MarketplaceClient {
     return {
       bytes,
       signatureBase64: signatureBase64 ? String(signatureBase64) : null,
-      sha256: sha256 ? String(sha256) : null,
+      sha256: expectedSha,
       formatVersion,
       publisher: publisher ? String(publisher) : null,
       publisherKeyId: publisherKeyId ? String(publisherKeyId) : null
