@@ -1470,6 +1470,7 @@ dependencies = [
  "directories",
  "formula-columnar",
  "formula-engine",
+ "formula-format",
  "formula-model",
  "formula-vba",
  "formula-vba-runtime",

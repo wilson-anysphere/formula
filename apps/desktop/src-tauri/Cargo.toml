@@ -32,6 +32,7 @@ calamine = "0.26"
 directories = "5.0"
 formula-columnar = { path = "../../../crates/formula-columnar" }
 formula-engine = { path = "../../../crates/formula-engine" }
+formula-format = { path = "../../../crates/formula-format" }
 formula-model = { path = "../../../crates/formula-model" }
 formula-vba = { path = "../../../crates/formula-vba" }
 formula-vba-runtime = { path = "../../../crates/formula-vba-runtime" }

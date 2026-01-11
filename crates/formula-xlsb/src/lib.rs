@@ -15,6 +15,7 @@ mod parser;
 mod shared_strings;
 mod strings;
 mod writer;
+mod styles;
 
 pub use opc::{OpenOptions, XlsbWorkbook};
 pub use patch::{patch_sheet_bin, CellEdit};
@@ -24,6 +25,7 @@ pub use parser::{
 };
 pub use shared_strings::SharedString;
 pub use strings::{OpaqueRichText, ParsedXlsbString};
+pub use styles::{StyleInfo, Styles};
 
 #[cfg(feature = "write")]
 pub use formula_biff::{encode_rgce as encode_formula_rgce, EncodeRgceError};

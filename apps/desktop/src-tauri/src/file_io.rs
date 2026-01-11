@@ -341,7 +341,6 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             original_print_settings: print_settings,
             cell_input_baseline: HashMap::new(),
         };
-
         // Preserve macros: if the source file contains `xl/vbaProject.bin`, stash it so that
         // `write_xlsx_blocking` can re-inject it when saving as `.xlsm`.
         //
@@ -586,15 +585,22 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
     // If formula-xlsb can detect a formula record but can't decode its RGCE token stream yet,
     // it surfaces the formula without any text. In that case we keep the cached value, but also
     // track the cell so we can fall back to Calamine's formula text extraction.
-    let mut missing_formulas: Vec<(usize, String, Vec<(usize, usize, CellScalar)>)> = Vec::new();
+    let mut missing_formulas: Vec<(usize, String, Vec<(usize, usize, CellScalar, Option<String>)>)> =
+        Vec::new();
 
     for (idx, sheet_meta) in wb.sheet_metas().iter().enumerate() {
         let mut sheet = Sheet::new(sheet_meta.name.clone(), sheet_meta.name.clone());
-        let mut undecoded_formula_cells: Vec<(usize, usize, CellScalar)> = Vec::new();
+        let styles = wb.styles();
+        let mut undecoded_formula_cells: Vec<(usize, usize, CellScalar, Option<String>)> = Vec::new();
 
         wb.for_each_cell(idx, |cell| {
             let row = cell.row as usize;
             let col = cell.col as usize;
+
+            let number_format = styles
+                .get(cell.style)
+                .filter(|info| info.is_date_time)
+                .and_then(|info| info.number_format.clone());
 
             let value = match cell.value {
                 XlsbCellValue::Blank => CellScalar::Empty,
@@ -614,18 +620,21 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
                         };
                         let mut c = Cell::from_formula(normalized);
                         c.computed_value = value;
+                        c.number_format = number_format;
                         sheet.set_cell(row, col, c);
                     }
                     None => {
                         // Preserve the cached value and fill the formula text later (best-effort).
-                        undecoded_formula_cells.push((row, col, value));
+                        undecoded_formula_cells.push((row, col, value, number_format));
                     }
                 },
                 None => {
                     if matches!(value, CellScalar::Empty) {
                         return;
                     }
-                    sheet.set_cell(row, col, Cell::from_literal(Some(value)));
+                    let mut c = Cell::from_literal(Some(value));
+                    c.number_format = number_format;
+                    sheet.set_cell(row, col, c);
                 }
             }
         })
@@ -704,16 +713,19 @@ where
 
 fn apply_xlsb_formula_fallback(
     sheet: &mut Sheet,
-    missing_cells: Vec<(usize, usize, CellScalar)>,
+    missing_cells: Vec<(usize, usize, CellScalar, Option<String>)>,
     formula_lookup: &HashMap<(usize, usize), String>,
 ) {
-    for (row, col, cached_value) in missing_cells {
+    for (row, col, cached_value, number_format) in missing_cells {
         if let Some(formula) = formula_lookup.get(&(row, col)) {
             let mut cell = Cell::from_formula(formula.clone());
             cell.computed_value = cached_value;
+            cell.number_format = number_format;
             sheet.set_cell(row, col, cell);
         } else if !matches!(cached_value, CellScalar::Empty) {
-            sheet.set_cell(row, col, Cell::from_literal(Some(cached_value)));
+            let mut cell = Cell::from_literal(Some(cached_value));
+            cell.number_format = number_format;
+            sheet.set_cell(row, col, cell);
         }
     }
 }
@@ -838,7 +850,11 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 continue;
             }
 
-            match &cell.computed_value {
+            // Persist the underlying inputs for literal cells (not the formatted display value).
+            // This matters for things like XLSB date cells: we keep the numeric serial in
+            // `input_value`, but may display it as a formatted string via `computed_value`.
+            let value = cell.input_value.as_ref().unwrap_or(&cell.computed_value);
+            match value {
                 CellScalar::Empty => {}
                 CellScalar::Number(n) => {
                     worksheet
@@ -868,7 +884,6 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         .save_to_buffer()
         .map_err(|e| anyhow::anyhow!(xlsx_err(e)))
         .with_context(|| "serialize workbook to buffer")?;
-
     let wants_vba =
         workbook.vba_project_bin.is_some() && matches!(extension.as_deref(), Some("xlsm"));
     let wants_preserved_drawings = workbook.preserved_drawing_parts.is_some();
@@ -931,6 +946,7 @@ fn xlsx_err(err: XlsxError) -> String {
 mod tests {
     use super::*;
     use crate::state::AppState;
+    use formula_format::{format_value, FormatOptions, Value as FormatValue};
     use rust_xlsxwriter::{Chart, ChartType};
     use xlsx_diff::{diff_workbooks, Severity};
 
@@ -1019,13 +1035,39 @@ mod tests {
         let mut sheet = Sheet::new("Sheet1".to_string(), "Sheet1".to_string());
         apply_xlsb_formula_fallback(
             &mut sheet,
-            vec![(0, 2, CellScalar::Number(85.0))],
+            vec![(0, 2, CellScalar::Number(85.0), None)],
             &lookup,
         );
 
         let cell = sheet.get_cell(0, 2);
         assert_eq!(cell.formula.as_deref(), Some("=B1*2"));
         assert_eq!(cell.computed_value, CellScalar::Number(85.0));
+    }
+
+    #[test]
+    fn reads_xlsb_date_formats_via_styles_bin() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures_styles/date.xlsb"
+        ));
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read xlsb workbook");
+        assert_eq!(workbook.sheets.len(), 1);
+
+        let mut state = AppState::new();
+        let info = state.load_workbook(workbook);
+        let sheet_id = info.sheets[0].id.clone();
+
+        let expected = format_value(
+            FormatValue::Number(44927.0),
+            Some("m/d/yyyy"),
+            &FormatOptions::default(),
+        )
+        .text;
+        assert_eq!(
+            state.get_cell(&sheet_id, 0, 0).unwrap().value,
+            CellScalar::Text(expected)
+        );
     }
 
     #[test]

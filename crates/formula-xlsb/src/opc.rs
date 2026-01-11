@@ -4,6 +4,7 @@ use crate::parser::{
     SheetMeta, WorkbookProperties,
 };
 use crate::patch::{patch_sheet_bin, CellEdit};
+use crate::styles::Styles;
 use crate::workbook_context::WorkbookContext;
 use crate::SharedString;
 use quick_xml::events::Event;
@@ -57,6 +58,7 @@ pub struct XlsbWorkbook {
     shared_strings_table: Vec<SharedString>,
     workbook_context: WorkbookContext,
     workbook_properties: WorkbookProperties,
+    styles: Styles,
     preserved_parts: HashMap<String, Vec<u8>>,
     preserve_parsed_parts: bool,
 }
@@ -88,9 +90,15 @@ impl XlsbWorkbook {
         );
         let workbook_rels = parse_relationships(&workbook_rels_bytes)?;
 
-        // Styles are required for round-trip, but we don't parse them yet.
-        if let Some(styles) = read_zip_entry(&mut zip, "xl/styles.bin")? {
-            preserved_parts.insert("xl/styles.bin".to_string(), styles);
+        // Styles are required for round-trip. We also parse `cellXfs` so callers can
+        // resolve per-cell `style` indices to number formats (e.g. dates).
+        let styles_bin = read_zip_entry(&mut zip, "xl/styles.bin")?;
+        let styles = match styles_bin.as_deref() {
+            Some(bytes) => Styles::parse(bytes).unwrap_or_default(),
+            None => Styles::default(),
+        };
+        if let Some(bytes) = styles_bin {
+            preserved_parts.insert("xl/styles.bin".to_string(), bytes);
         }
 
         let workbook_bin = {
@@ -167,6 +175,7 @@ impl XlsbWorkbook {
             shared_strings_table,
             workbook_context,
             workbook_properties,
+            styles,
             preserved_parts,
             preserve_parsed_parts: options.preserve_parsed_parts,
         })
@@ -191,6 +200,11 @@ impl XlsbWorkbook {
 
     pub fn workbook_context(&self) -> &WorkbookContext {
         &self.workbook_context
+    }
+
+    /// Workbook styles parsed from `xl/styles.bin`.
+    pub fn styles(&self) -> &Styles {
+        &self.styles
     }
 
     /// Raw bytes for parts that should be preserved on round-trip.

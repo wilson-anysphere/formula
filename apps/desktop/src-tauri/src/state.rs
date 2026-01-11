@@ -17,6 +17,7 @@ use formula_engine::what_if::{
 use formula_engine::{
     Engine as FormulaEngine, ErrorKind, ExternalValueProvider, RecalcMode, Value as EngineValue,
 };
+use formula_format::{format_value, FormatOptions, Value as FormatValue};
 use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
@@ -106,6 +107,7 @@ pub struct Cell {
     pub(crate) input_value: Option<CellScalar>,
     pub(crate) formula: Option<String>,
     pub(crate) computed_value: CellScalar,
+    pub(crate) number_format: Option<String>,
 }
 
 impl Cell {
@@ -114,6 +116,7 @@ impl Cell {
             input_value: None,
             formula: None,
             computed_value: CellScalar::Empty,
+            number_format: None,
         }
     }
 
@@ -123,6 +126,7 @@ impl Cell {
             input_value: value,
             formula: None,
             computed_value,
+            number_format: None,
         }
     }
 
@@ -131,6 +135,7 @@ impl Cell {
             input_value: None,
             formula: Some(formula),
             computed_value: CellScalar::Empty,
+            number_format: None,
         }
     }
 }
@@ -457,6 +462,7 @@ impl AppState {
         let cell = sheet.get_cell(row, col);
         let addr = coord_to_a1(row, col);
         let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
+        let value = format_scalar_for_display(value, cell.number_format.as_deref());
         Ok(CellData {
             value,
             formula: cell.formula,
@@ -494,6 +500,7 @@ impl AppState {
                 let cell = sheet.get_cell(r, c);
                 let addr = coord_to_a1(r, c);
                 let value = engine_value_to_scalar(self.engine.get_cell_value(&sheet.name, &addr));
+                let value = format_scalar_for_display(value, cell.number_format.as_deref());
                 row_out.push(CellData {
                     value,
                     formula: cell.formula,
@@ -1529,12 +1536,19 @@ impl AppState {
                 .sheet_mut(&snap.sheet_id)
                 .ok_or_else(|| AppStateError::UnknownSheet(snap.sheet_id.clone()))?;
             let sheet_name = sheet.name.clone();
+            let existing_format = sheet
+                .cells
+                .get(&(snap.row, snap.col))
+                .and_then(|c| c.number_format.clone());
 
-            let new_cell = match (&snap.formula, &snap.value) {
+            let mut new_cell = match (&snap.formula, &snap.value) {
                 (Some(formula), _) => Cell::from_formula(formula.clone()),
                 (None, Some(value)) => Cell::from_literal(Some(value.clone())),
                 (None, None) => Cell::empty(),
             };
+            if new_cell.number_format.is_none() {
+                new_cell.number_format = existing_format;
+            }
 
             sheet.set_cell(snap.row, snap.col, new_cell);
             apply_snapshot_to_engine(
@@ -1622,11 +1636,13 @@ impl AppState {
 
                 if new_value != cell.computed_value {
                     cell.computed_value = new_value.clone();
+                    let display_value =
+                        format_scalar_for_display(new_value, cell.number_format.as_deref());
                     updates.push(CellUpdateData {
                         sheet_id: sheet_id.clone(),
                         row: *row,
                         col: *col,
-                        value: new_value,
+                        value: display_value,
                         formula: cell.formula.clone(),
                     });
                 }
@@ -1669,6 +1685,7 @@ fn pivot_value_to_scalar(value: &PivotValue) -> CellScalar {
     match value {
         PivotValue::Blank => CellScalar::Empty,
         PivotValue::Number(n) => CellScalar::Number(*n),
+        PivotValue::Date(d) => CellScalar::Text(d.to_string()),
         PivotValue::Text(s) => CellScalar::Text(s.clone()),
         PivotValue::Bool(b) => CellScalar::Bool(*b),
     }
@@ -1817,7 +1834,15 @@ fn refresh_pivot_registration(
     pivot.last_output_range = Some(union_range);
     Ok(updates)
 }
-
+fn format_scalar_for_display(value: CellScalar, number_format: Option<&str>) -> CellScalar {
+    match (value, number_format) {
+        (CellScalar::Number(n), Some(fmt)) => {
+            let formatted = format_value(FormatValue::Number(n), Some(fmt), &FormatOptions::default());
+            CellScalar::Text(formatted.text)
+        }
+        (other, _) => other,
+    }
+}
 fn resolve_cell_ref(
     workbook: &Workbook,
     default_sheet_id: &str,
@@ -2687,9 +2712,7 @@ mod tests {
 
     fn simple_pivot_config() -> PivotConfig {
         PivotConfig {
-            row_fields: vec![PivotField {
-                source_field: "Region".to_string(),
-            }],
+            row_fields: vec![PivotField::new("Region")],
             column_fields: Vec::new(),
             value_fields: vec![ValueField {
                 source_field: "Sales".to_string(),
