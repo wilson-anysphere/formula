@@ -15,6 +15,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -167,6 +168,7 @@ impl WorkbookArchive {
 #[derive(Debug, Clone, Default)]
 pub struct DiffOptions {
     pub ignore_parts: BTreeSet<String>,
+    pub ignore_globs: Vec<String>,
 }
 
 pub fn diff_workbooks(expected: &Path, actual: &Path) -> Result<DiffReport> {
@@ -186,20 +188,22 @@ pub fn diff_archives_with_options(
 ) -> DiffReport {
     let mut report = DiffReport::default();
 
+    let ignore = IgnoreMatcher::new(options);
+
     let expected_parts: BTreeSet<&str> = expected
         .part_names()
         .into_iter()
-        .filter(|part| !options.ignore_parts.contains(*part))
+        .filter(|part| !ignore.matches(part))
         .collect();
     let actual_parts: BTreeSet<&str> = actual
         .part_names()
         .into_iter()
-        .filter(|part| !options.ignore_parts.contains(*part))
+        .filter(|part| !ignore.matches(part))
         .collect();
 
     for part in expected_parts.difference(&actual_parts) {
         report.differences.push(Difference::new(
-            Severity::Critical,
+            severity_for_missing_part(part),
             (*part).to_string(),
             "",
             "missing_part",
@@ -210,7 +214,7 @@ pub fn diff_archives_with_options(
 
     for part in actual_parts.difference(&expected_parts) {
         report.differences.push(Difference::new(
-            Severity::Warning,
+            severity_for_extra_part(part),
             (*part).to_string(),
             "",
             "extra_part",
@@ -259,7 +263,7 @@ pub fn diff_archives_with_options(
                     // For non-standard extensions, fall back to binary compare.
                     if expected_bytes != actual_bytes {
                         report.differences.push(Difference::new(
-                            Severity::Critical,
+                            severity_for_part(part),
                             part.to_string(),
                             "",
                             "binary_diff",
@@ -279,7 +283,7 @@ pub fn diff_archives_with_options(
                 (Err(_), Err(_)) => {
                     if expected_bytes != actual_bytes {
                         report.differences.push(Difference::new(
-                            Severity::Critical,
+                            severity_for_part(part),
                             part.to_string(),
                             "",
                             "binary_diff",
@@ -291,7 +295,7 @@ pub fn diff_archives_with_options(
             }
         } else if expected_bytes != actual_bytes {
             report.differences.push(Difference::new(
-                Severity::Critical,
+                severity_for_part(part),
                 part.to_string(),
                 "",
                 "binary_diff",
@@ -336,11 +340,57 @@ fn severity_for_part(part: &str) -> Severity {
         return Severity::Critical;
     }
 
-    if part.starts_with("xl/theme/") || part == "xl/calcChain.xml" {
+    if part.starts_with("xl/theme/") || is_calc_chain_part(part) {
         return Severity::Warning;
     }
 
     Severity::Critical
+}
+
+fn severity_for_missing_part(part: &str) -> Severity {
+    severity_for_part(part)
+}
+
+fn severity_for_extra_part(part: &str) -> Severity {
+    if part == "[Content_Types].xml" || part.ends_with(".rels") {
+        return Severity::Critical;
+    }
+
+    if part.starts_with("docProps/") {
+        return Severity::Info;
+    }
+
+    Severity::Warning
+}
+
+fn is_calc_chain_part(part: &str) -> bool {
+    part == "xl/calcChain.xml" || part == "xl/calcChain.bin"
+}
+
+struct IgnoreMatcher<'a> {
+    exact: &'a BTreeSet<String>,
+    globs: GlobSet,
+}
+
+impl<'a> IgnoreMatcher<'a> {
+    fn new(options: &'a DiffOptions) -> Self {
+        let mut builder = GlobSetBuilder::new();
+        for pattern in &options.ignore_globs {
+            if let Ok(glob) = Glob::new(pattern) {
+                builder.add(glob);
+            }
+        }
+        let globs = builder.build().unwrap_or_else(|_| GlobSet::empty());
+
+        Self {
+            exact: &options.ignore_parts,
+            globs,
+        }
+    }
+
+    fn matches(&self, part: &str) -> bool {
+        self.exact.contains(part) || self.globs.is_match(part)
+    }
 }
 
 /// A minimal “load → save” round-trip that preserves each part byte-for-byte.

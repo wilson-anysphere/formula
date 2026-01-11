@@ -386,6 +386,7 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         &actual_archive,
         &xlsx_diff::DiffOptions {
             ignore_parts: ignore,
+            ignore_globs: Vec::new(),
         },
     );
 

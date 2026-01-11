@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
+use globset::Glob;
 
 #[derive(Parser)]
 #[command(about = "Diff two XLSX/XLSM workbooks at the OpenXML part level.")]
@@ -12,6 +13,14 @@ struct Args {
     /// Modified workbook (e.g. round-tripped output).
     modified: PathBuf,
 
+    /// Exact part names to ignore (repeatable).
+    #[arg(long = "ignore-part")]
+    ignore_parts: Vec<String>,
+
+    /// Glob patterns to ignore (repeatable).
+    #[arg(long = "ignore-glob")]
+    ignore_globs: Vec<String>,
+
     /// Minimum severity that will cause a non-zero exit code.
     #[arg(long, default_value = "critical")]
     fail_on: String,
@@ -21,11 +30,54 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let threshold = parse_severity(&args.fail_on)?;
 
-    let report = xlsx_diff::diff_workbooks(&args.original, &args.modified)?;
+    let options = xlsx_diff::DiffOptions {
+        ignore_parts: args
+            .ignore_parts
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect(),
+        ignore_globs: args
+            .ignore_globs
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect(),
+    };
+
+    for pattern in &options.ignore_globs {
+        Glob::new(pattern)?;
+    }
+
+    let expected = xlsx_diff::WorkbookArchive::open(&args.original)?;
+    let actual = xlsx_diff::WorkbookArchive::open(&args.modified)?;
+    let report = xlsx_diff::diff_archives_with_options(&expected, &actual, &options);
 
     println!("XLSX diff report");
     println!("  original: {}", args.original.display());
     println!("  modified: {}", args.modified.display());
+    let mut parts: Vec<&str> = options.ignore_parts.iter().map(|s| s.as_str()).collect();
+    parts.sort();
+    println!(
+        "  ignore-part: {}",
+        if parts.is_empty() {
+            "(none)".to_string()
+        } else {
+            parts.join(", ")
+        }
+    );
+    let mut globs: Vec<&str> = options.ignore_globs.iter().map(|s| s.as_str()).collect();
+    globs.sort();
+    println!(
+        "  ignore-glob: {}",
+        if globs.is_empty() {
+            "(none)".to_string()
+        } else {
+            globs.join(", ")
+        }
+    );
     println!();
 
     if report.is_empty() {
