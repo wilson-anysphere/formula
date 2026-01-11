@@ -9,7 +9,7 @@ import { MockEngine } from "../../document/engine.js";
 
 import { applyQueryToDocument } from "../applyToDocument.ts";
 import { dateToExcelSerial } from "../../shared/valueParsing.js";
-import { MS_PER_DAY, PqDecimal, PqDuration, PqTime } from "../../../../../packages/power-query/src/values.js";
+import { MS_PER_DAY, PqDateTimeZone, PqDecimal, PqDuration, PqTime } from "../../../../../packages/power-query/src/values.js";
 
 test("applyQueryToDocument requests non-materializing streaming execution", async () => {
   const engine = {
@@ -182,6 +182,34 @@ test("applyQueryToDocument converts decimal wrapper values into numbers", async 
   await applyQueryToDocument(doc, query, destination, { engine, batchSize: 2 });
 
   assert.equal(doc.getCell("Sheet1", { row: 1, col: 0 }).value, 123.45);
+});
+
+test("applyQueryToDocument converts datetimezone and binary values into document-safe scalars", async () => {
+  const engine = new QueryEngine();
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const dtz = PqDateTimeZone.from("2020-01-01T12:00:00.000+02:00");
+  assert.ok(dtz, "expected datetimezone literal to parse");
+  const bytes = new Uint8Array([1, 2, 3]);
+
+  const query = {
+    id: "q_dtz_binary",
+    name: "Datetimezone/Binary",
+    source: {
+      type: "range",
+      range: {
+        values: [["Zone", "Bin"], [dtz, bytes]],
+        hasHeaders: true,
+      },
+    },
+    steps: [],
+  };
+
+  const destination = { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true };
+  await applyQueryToDocument(doc, query, destination, { engine, batchSize: 2 });
+
+  assert.equal(doc.getCell("Sheet1", { row: 1, col: 0 }).value, dateToExcelSerial(new Date("2020-01-01T10:00:00.000Z")));
+  assert.equal(doc.getCell("Sheet1", { row: 1, col: 1 }).value, "AQID");
 });
 
 test("applyQueryToDocument supports HTTP sources via injected HttpConnector", async () => {
