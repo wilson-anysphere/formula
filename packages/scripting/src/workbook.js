@@ -161,6 +161,10 @@ export class Sheet {
 
   setCellFormatInternal(row, col, format) {
     const cell = this.getCell(row, col);
+    if (format == null) {
+      cell.format = {};
+      return;
+    }
     cell.format = { ...cell.format, ...format };
   }
 }
