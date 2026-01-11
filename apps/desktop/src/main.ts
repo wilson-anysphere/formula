@@ -9,8 +9,11 @@ import { getPanelPlacement } from "./layout/layoutState.js";
 import { getPanelTitle, PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
 import { renderMacroRunner, TauriMacroBackend } from "./macros";
+import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { DocumentWorkbookAdapter } from "./search/documentWorkbookAdapter.js";
+import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
+import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -54,6 +57,7 @@ const gridSplitter = document.getElementById("grid-splitter");
 const openAiPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-ai-panel"]');
 const openAiAuditPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-ai-audit-panel"]');
 const openMacrosPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-macros-panel"]');
+const openScriptEditorPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-script-editor-panel"]');
 const splitVertical = document.querySelector<HTMLButtonElement>('[data-testid="split-vertical"]');
 const splitHorizontal = document.querySelector<HTMLButtonElement>('[data-testid="split-horizontal"]');
 const splitNone = document.querySelector<HTMLButtonElement>('[data-testid="split-none"]');
@@ -70,6 +74,7 @@ if (
   openAiPanel &&
   openAiAuditPanel &&
   openMacrosPanel &&
+  openScriptEditorPanel &&
   splitVertical &&
   splitHorizontal &&
   splitNone
@@ -81,6 +86,39 @@ if (
     workspaceManager,
     primarySheetId: "Sheet1",
     workspaceId: "default",
+  });
+
+  const panelMounts = new Map<string, { container: HTMLElement; dispose: () => void }>();
+
+  const scriptingWorkbook = new DocumentControllerWorkbookAdapter(app.getDocument(), {
+    getActiveSheetName: () => app.getCurrentSheetId(),
+    getSelection: () => {
+      const ranges = app.getSelectionRanges();
+      const first = ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+      return { sheetName: app.getCurrentSheetId(), address: formatRangeAddress(first) };
+    },
+    setSelection: (sheetName, address) => {
+      const range = parseRangeAddress(address);
+      if (range.startRow === range.endRow && range.startCol === range.endCol) {
+        app.activateCell({ sheetId: sheetName, row: range.startRow, col: range.startCol });
+        return;
+      }
+      app.selectRange({
+        sheetId: sheetName,
+        range: { startRow: range.startRow, startCol: range.startCol, endRow: range.endRow, endCol: range.endCol },
+      });
+    },
+    onDidMutate: () => {
+      // SpreadsheetApp doesn't currently subscribe to DocumentController changes; it re-renders
+      // directly after user-initiated edits. Scripts mutate the document out-of-band, so we
+      // force a repaint after each script-side mutation.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const anyApp = app as any;
+      anyApp.renderGrid?.();
+      anyApp.renderCharts?.();
+      anyApp.renderSelection?.();
+      anyApp.updateStatus?.();
+    },
   });
 
   function zoneVisible(zone: { panels: string[]; collapsed: boolean }) {
@@ -163,6 +201,27 @@ if (
       });
     },
   });
+
+  function renderPanelBody(panelId: string, body: HTMLDivElement) {
+    if (panelId === PanelIds.SCRIPT_EDITOR) {
+      let mount = panelMounts.get(panelId);
+      if (!mount) {
+        const container = document.createElement("div");
+        container.style.height = "100%";
+        container.style.display = "flex";
+        container.style.flexDirection = "column";
+        const mounted = mountScriptEditorPanel({ workbook: scriptingWorkbook, container });
+        mount = { container, dispose: mounted.dispose };
+        panelMounts.set(panelId, mount);
+      }
+
+      body.replaceChildren();
+      body.appendChild(mount.container);
+      return;
+    }
+
+    panelBodyRenderer.renderPanelBody(panelId, body);
+  }
 
   function openPanelIds() {
     const layout = layoutController.layout;
@@ -251,7 +310,7 @@ if (
 
     const body = document.createElement("div");
     body.className = "dock-panel__body";
-    panelBodyRenderer.renderPanelBody(active, body);
+    renderPanelBody(active, body);
 
     panel.appendChild(header);
     panel.appendChild(body);
@@ -314,7 +373,7 @@ if (
 
       const body = document.createElement("div");
       body.className = "dock-panel__body";
-      panelBodyRenderer.renderPanelBody(panelId, body);
+      renderPanelBody(panelId, body);
 
       inner.appendChild(header);
       inner.appendChild(body);
@@ -331,7 +390,16 @@ if (
     renderDock(dockRight, layoutController.layout.docks.right, "right");
     renderDock(dockBottom, layoutController.layout.docks.bottom, "bottom");
     renderFloating();
-    panelBodyRenderer.cleanup(openPanelIds());
+
+    const openPanels = openPanelIds();
+    panelBodyRenderer.cleanup(openPanels);
+    const openSet = new Set(openPanels);
+    for (const [panelId, mount] of panelMounts.entries()) {
+      if (openSet.has(panelId)) continue;
+      mount.dispose();
+      mount.container.remove();
+      panelMounts.delete(panelId);
+    }
   }
 
   splitVertical.addEventListener("click", () => layoutController.setSplitDirection("vertical", 0.5));
@@ -354,6 +422,12 @@ if (
     const placement = getPanelPlacement(layoutController.layout, PanelIds.MACROS);
     if (placement.kind === "closed") layoutController.openPanel(PanelIds.MACROS);
     else layoutController.closePanel(PanelIds.MACROS);
+  });
+
+  openScriptEditorPanel.addEventListener("click", () => {
+    const placement = getPanelPlacement(layoutController.layout, PanelIds.SCRIPT_EDITOR);
+    if (placement.kind === "closed") layoutController.openPanel(PanelIds.SCRIPT_EDITOR);
+    else layoutController.closePanel(PanelIds.SCRIPT_EDITOR);
   });
 
   openVbaMigratePanel?.addEventListener("click", () => {

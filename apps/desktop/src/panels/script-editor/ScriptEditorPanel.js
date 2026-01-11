@@ -35,6 +35,7 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
 
   const runButton = document.createElement("button");
   runButton.textContent = "Run";
+  runButton.dataset.testid = "script-editor-run";
   toolbar.appendChild(runButton);
 
   const editorHost = document.createElement("div");
@@ -62,9 +63,29 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
   let editor = null;
   let currentCode = defaultScript();
 
+  const fallbackEditor = document.createElement("textarea");
+  fallbackEditor.value = currentCode;
+  fallbackEditor.dataset.testid = "script-editor-code";
+  fallbackEditor.spellcheck = false;
+  fallbackEditor.style.width = "100%";
+  fallbackEditor.style.height = "100%";
+  fallbackEditor.style.resize = "none";
+  fallbackEditor.style.border = "none";
+  fallbackEditor.style.outline = "none";
+  fallbackEditor.style.padding = "8px";
+  fallbackEditor.style.boxSizing = "border-box";
+  fallbackEditor.style.fontFamily =
+    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+  fallbackEditor.style.fontSize = "13px";
+  fallbackEditor.addEventListener("input", () => {
+    currentCode = fallbackEditor.value;
+  });
+  editorHost.appendChild(fallbackEditor);
+
   const ensureMonaco = async () => {
     if (editor) return;
-    const m = monaco ?? (await import("monaco-editor"));
+    if (!monaco) return;
+    const m = monaco;
     m.languages.typescript.typescriptDefaults.addExtraLib(FORMULA_API_DTS, "file:///formula.d.ts");
     editor = m.editor.create(editorHost, {
       value: currentCode,
@@ -72,6 +93,7 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
       automaticLayout: true,
       minimap: { enabled: false },
     });
+    fallbackEditor.remove();
   };
 
   const updateConsole = (text) => {
@@ -83,7 +105,7 @@ export function mountScriptEditorPanel({ workbook, container, monaco }) {
     updateConsole("");
     try {
       await ensureMonaco();
-      currentCode = editor.getValue();
+      currentCode = editor ? editor.getValue() : fallbackEditor.value;
       const result = await runtime.run(currentCode);
       const logs = result.logs.map((l) => `[${l.level}] ${l.message}`).join("\n");
       updateConsole(logs + (result.error ? `\n[error] ${result.error.message}` : ""));

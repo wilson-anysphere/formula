@@ -1,9 +1,4 @@
-import {
-  formatCellAddress,
-  formatRangeAddress,
-  parseRangeAddress,
-  TypedEventEmitter,
-} from "../../../../packages/scripting/src/index.js";
+import { formatCellAddress, formatRangeAddress, parseRangeAddress, TypedEventEmitter } from "@formula/scripting";
 
 function valueEquals(a, b) {
   if (a === b) return true;
@@ -275,13 +270,20 @@ function scriptFormatPatchFromDocStylePatch(patch) {
  * Exposes a `DocumentController` instance through the `@formula/scripting` Workbook/Sheet/Range
  * surface area.
  *
- * This adapter is intentionally minimal: it focuses on the RPC methods used by `ScriptRuntime`
- * and the events consumed by `MacroRecorder`.
+ * This adapter focuses on:
+ * - The synchronous RPC surface used by `ScriptRuntime` (get/set values, formats, selection)
+ * - The events consumed by `MacroRecorder` (`cellChanged`, `formatChanged`, `selectionChanged`)
  */
 export class DocumentControllerWorkbookAdapter {
   /**
    * @param {import("../document/documentController.js").DocumentController} documentController
-   * @param {{ activeSheetName?: string }} [options]
+   * @param {{
+   *   activeSheetName?: string,
+   *   getActiveSheetName?: () => string,
+   *   getSelection?: () => { sheetName: string, address: string },
+   *   setSelection?: (sheetName: string, address: string) => void,
+   *   onDidMutate?: () => void,
+   * }} [options]
    */
   constructor(documentController, options = {}) {
     this.documentController = documentController;
@@ -292,9 +294,12 @@ export class DocumentControllerWorkbookAdapter {
     /** @type {{ sheetName: string, address: string } | null} */
     this.selection = null;
 
-    this.unsubscribes = [
-      this.documentController.on("change", (payload) => this.#handleDocumentChange(payload)),
-    ];
+    this.getActiveSheetNameImpl = typeof options.getActiveSheetName === "function" ? options.getActiveSheetName : null;
+    this.getSelectionImpl = typeof options.getSelection === "function" ? options.getSelection : null;
+    this.setSelectionImpl = typeof options.setSelection === "function" ? options.setSelection : null;
+    this.onDidMutate = typeof options.onDidMutate === "function" ? options.onDidMutate : null;
+
+    this.unsubscribes = [this.documentController.on("change", (payload) => this.#handleDocumentChange(payload))];
   }
 
   /** @type {import("../document/documentController.js").DocumentController} */
@@ -312,12 +317,28 @@ export class DocumentControllerWorkbookAdapter {
   /** @type {{ sheetName: string, address: string } | null} */
   selection;
 
+  /** @type {(() => string) | null} */
+  getActiveSheetNameImpl;
+
+  /** @type {(() => { sheetName: string, address: string }) | null} */
+  getSelectionImpl;
+
+  /** @type {((sheetName: string, address: string) => void) | null} */
+  setSelectionImpl;
+
+  /** @type {(() => void) | null} */
+  onDidMutate;
+
   /** @type {Array<() => void>} */
   unsubscribes;
 
   dispose() {
     for (const unsub of this.unsubscribes) unsub();
     this.unsubscribes = [];
+  }
+
+  _notifyMutate() {
+    this.onDidMutate?.();
   }
 
   getSheet(name) {
@@ -331,11 +352,12 @@ export class DocumentControllerWorkbookAdapter {
   }
 
   getActiveSheet() {
-    return this.getSheet(this.activeSheetName);
+    const sheetName = this.getActiveSheetNameImpl ? this.getActiveSheetNameImpl() : this.activeSheetName;
+    return this.getSheet(sheetName);
   }
 
   getActiveSheetName() {
-    return this.activeSheetName;
+    return this.getActiveSheet().name;
   }
 
   setActiveSheet(name) {
@@ -343,6 +365,11 @@ export class DocumentControllerWorkbookAdapter {
   }
 
   getSelection() {
+    if (this.getSelectionImpl) {
+      const sel = this.getSelectionImpl();
+      return { sheetName: String(sel.sheetName), address: String(sel.address) };
+    }
+
     if (!this.selection) {
       this.selection = { sheetName: this.getActiveSheet().name, address: "A1" };
     }
@@ -351,11 +378,13 @@ export class DocumentControllerWorkbookAdapter {
 
   setSelection(sheetName, address) {
     const normalizedSheetName = String(sheetName);
+    const normalizedAddress = String(address);
     // Validate address early to keep selection consistent.
-    parseRangeAddress(String(address));
+    parseRangeAddress(normalizedAddress);
 
-    this.selection = { sheetName: normalizedSheetName, address: String(address) };
+    this.selection = { sheetName: normalizedSheetName, address: normalizedAddress };
     this.events.emit("selectionChanged", this.selection);
+    this.setSelectionImpl?.(normalizedSheetName, normalizedAddress);
   }
 
   /**
@@ -438,6 +467,7 @@ export class DocumentControllerWorkbookAdapter {
       }
 
       if (bucket.format.length > 0) {
+        /** @type {Map<string, { patch: any, deltas: any[] }>} */
         const groups = new Map();
         for (const delta of bucket.format) {
           const beforeStyle = this.documentController.styleTable.get(delta.before?.styleId ?? 0);
@@ -560,7 +590,10 @@ class DocumentControllerRangeAdapter {
       );
     }
 
-    this.sheet.workbook.documentController.setRangeValues(this.sheet.name, this.address, values);
+    this.sheet.workbook.documentController.setRangeValues(this.sheet.name, this.address, values, {
+      label: "Script: set values",
+    });
+    this.sheet.workbook._notifyMutate();
   }
 
   getValue() {
@@ -581,16 +614,21 @@ class DocumentControllerRangeAdapter {
 
     if (typeof value === "string") {
       if (value.startsWith("'")) {
-        this.sheet.workbook.documentController.setCellValue(this.sheet.name, coord, value.slice(1));
+        this.sheet.workbook.documentController.setCellValue(this.sheet.name, coord, value.slice(1), {
+          label: "Script: set value",
+        });
+        this.sheet.workbook._notifyMutate();
         return;
       }
       if (isFormulaString(value)) {
-        this.sheet.workbook.documentController.setCellFormula(this.sheet.name, coord, value);
+        this.sheet.workbook.documentController.setCellFormula(this.sheet.name, coord, value, { label: "Script: set value" });
+        this.sheet.workbook._notifyMutate();
         return;
       }
     }
 
-    this.sheet.workbook.documentController.setCellValue(this.sheet.name, coord, value ?? null);
+    this.sheet.workbook.documentController.setCellValue(this.sheet.name, coord, value ?? null, { label: "Script: set value" });
+    this.sheet.workbook._notifyMutate();
   }
 
   getFormat() {
@@ -604,6 +642,7 @@ class DocumentControllerRangeAdapter {
 
   setFormat(format) {
     const patch = docStylePatchFromScriptFormat(format);
-    this.sheet.workbook.documentController.setRangeFormat(this.sheet.name, this.address, patch);
+    this.sheet.workbook.documentController.setRangeFormat(this.sheet.name, this.address, patch, { label: "Script: set format" });
+    this.sheet.workbook._notifyMutate();
   }
 }

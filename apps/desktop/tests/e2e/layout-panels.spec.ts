@@ -2,8 +2,9 @@ import { expect, test } from "@playwright/test";
 
 test.describe("dockable panels layout persistence", () => {
   test("open AI panel, dock left, reload restores layout", async ({ page }) => {
-    await page.addInitScript(() => localStorage.clear());
     await page.goto("/");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
 
     // Open AI panel (defaults to right dock via panel registry).
     await page.getByTestId("open-ai-panel").click();
@@ -21,4 +22,3 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toHaveCount(0);
   });
 });
-

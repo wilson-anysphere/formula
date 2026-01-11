@@ -16,7 +16,7 @@ test.describe("formula bar editing + range insertion", () => {
     await page.keyboard.press("Enter");
 
     // Select C1.
-    await page.click("#grid", { position: { x: 205, y: 5 } });
+    await page.click("#grid", { position: { x: 253, y: 29 } });
     await expect(page.getByTestId("active-cell")).toHaveText("C1");
 
     // Start editing in the formula bar.
@@ -30,9 +30,10 @@ test.describe("formula bar editing + range insertion", () => {
     const gridBox = await page.locator("#grid").boundingBox();
     if (!gridBox) throw new Error("Missing grid bounding box");
 
-    await page.mouse.move(gridBox.x + 5, gridBox.y + 5);
+    // Drag from A1 to A2 inside the cell region (below the column header).
+    await page.mouse.move(gridBox.x + 53, gridBox.y + 29);
     await page.mouse.down();
-    await page.mouse.move(gridBox.x + 5, gridBox.y + 29);
+    await page.mouse.move(gridBox.x + 53, gridBox.y + 53);
     await page.mouse.up();
 
     await expect(input).toHaveValue("=SUM(A1:A2");
@@ -55,7 +56,7 @@ test.describe("formula bar editing + range insertion", () => {
     await page.keyboard.press("Enter");
 
     // Select B1.
-    await page.click("#grid", { position: { x: 105, y: 5 } });
+    await page.click("#grid", { position: { x: 153, y: 29 } });
     await expect(page.getByTestId("active-cell")).toHaveText("B1");
 
     // Enter a division-by-zero formula.
