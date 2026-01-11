@@ -14,7 +14,19 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Use a repo-local cargo home by default to avoid lock contention on ~/.cargo
 # when many agents build in parallel. Preserve any user/CI override.
-if [ -z "${CARGO_HOME:-}" ]; then
+#
+# Note: some agent runners pre-set `CARGO_HOME=$HOME/.cargo`. Treat that value as
+# "unset" for our purposes so we still get per-repo isolation by default.
+# In CI we respect `CARGO_HOME` even if it points at `$HOME/.cargo` so CI can use
+# shared caching.
+# To explicitly keep `CARGO_HOME=$HOME/.cargo` in local runs, set
+# `FORMULA_ALLOW_GLOBAL_CARGO_HOME=1`.
+DEFAULT_GLOBAL_CARGO_HOME="${HOME:-/root}/.cargo"
+if [ -z "${CARGO_HOME:-}" ] || {
+  [ -z "${CI:-}" ] &&
+    [ -z "${FORMULA_ALLOW_GLOBAL_CARGO_HOME:-}" ] &&
+    [ "${CARGO_HOME}" = "${DEFAULT_GLOBAL_CARGO_HOME}" ];
+}; then
   export CARGO_HOME="$REPO_ROOT/target/cargo-home"
 fi
 mkdir -p "$CARGO_HOME"
