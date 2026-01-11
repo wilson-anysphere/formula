@@ -1,4 +1,4 @@
-use formula_xlsb::{OpenOptions, XlsbWorkbook};
+use formula_xlsb::{CellValue, OpenOptions, XlsbWorkbook};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Cursor, Read, Write};
@@ -216,6 +216,17 @@ fn edited_save_removes_calc_chain_and_references() {
         !rels.contains("calcChain"),
         "workbook.bin.rels should not reference calcChain after edit"
     );
+
+    // Sanity-check that the resulting workbook is still readable.
+    let reopened =
+        XlsbWorkbook::open_with_options(&output_path, OpenOptions::default()).expect("reopen");
+    let sheet = reopened.read_sheet(0).expect("read sheet after save");
+    let b1 = sheet
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 1))
+        .expect("B1 exists");
+    assert_eq!(b1.value, CellValue::Number(43.5));
 }
 
 #[test]
