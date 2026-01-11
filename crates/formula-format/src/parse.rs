@@ -358,7 +358,17 @@ fn parse_locale_override(content: &str) -> Option<Locale> {
     locale_for_lcid(lcid)
 }
 
-fn locale_for_lcid(lcid: u32) -> Option<Locale> {
+/// Best-effort mapping from a Windows/Excel LCID (locale identifier) to a
+/// [`Locale`] definition.
+///
+/// Excel format codes sometimes embed locale tags in bracket tokens such as
+/// `[$€-407]` (where `0x0407` is `de-DE`). This helper lets importers map those
+/// LCIDs to a `Locale` so that thousands/decimal/date separators render
+/// correctly.
+///
+/// Note: [`Locale`] only models separators. Many LCIDs differ in other ways
+/// (currency, calendar, month names, date ordering, etc).
+pub fn locale_for_lcid(lcid: u32) -> Option<Locale> {
     // Best-effort LCID -> Locale mapping for the most common locales seen in
     // Excel format codes (e.g. currency tokens like `[$€-407]`).
     //

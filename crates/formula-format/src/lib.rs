@@ -17,7 +17,7 @@ mod parse;
 pub use crate::builtin::builtin_format_code;
 pub use crate::builtin::builtin_format_code_with_locale;
 pub use crate::datetime::DateSystem;
-pub use crate::parse::{FormatCode, ParseError};
+pub use crate::parse::{locale_for_lcid, FormatCode, ParseError};
 
 pub use locale::{format_number, get_locale, NumberLocale, DE_DE, EN_US};
 
