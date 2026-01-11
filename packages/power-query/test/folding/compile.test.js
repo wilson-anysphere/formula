@@ -260,6 +260,23 @@ test("compile: folds addColumn null equality to IS NULL (SQL semantics match loc
   });
 });
 
+test("compile: addColumn with string concatenation breaks folding (JS '+' semantics differ from SQL)", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_add_concat",
+    name: "Add concat",
+    source: { type: "database", connection: {}, query: "SELECT * FROM sales" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Sales"] } },
+      { id: "s2", name: "Add", operation: { type: "addColumn", name: "Text", formula: '=[Sales] + "x"' } },
+    ],
+  };
+
+  const plan = folding.compile(query);
+  assert.equal(plan.type, "hybrid");
+  assert.deepEqual(plan.localSteps.map((s) => s.operation.type), ["addColumn"]);
+});
+
 test("compile: folds addColumn string literals with escapes", () => {
   const folding = new QueryFoldingEngine();
   const payload = 'a"b\\c\n';

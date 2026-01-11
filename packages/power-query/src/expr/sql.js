@@ -107,9 +107,10 @@ export function compileExprToSql(expr, ctx) {
 
   /**
    * @param {ExprNode} node
+   * @param {boolean} castString
    * @returns {string}
    */
-  function toSql(node) {
+  function toSql(node, castString) {
     switch (node.type) {
       case "value":
         throw new Error("Value placeholder '_' is not supported in SQL folding");
@@ -124,7 +125,8 @@ export function compileExprToSql(expr, ctx) {
         if (typeof node.value === "string") {
           // Avoid "could not determine data type of parameter $n" for Postgres
           // when the literal appears without a type context (e.g. SELECT ?).
-          return ctx.dialect.castText(param(node.value));
+          const placeholder = param(node.value);
+          return castString ? ctx.dialect.castText(placeholder) : placeholder;
         }
         if (typeof node.value === "number") {
           return castParam(param(node.value), types.number);
@@ -134,7 +136,7 @@ export function compileExprToSql(expr, ctx) {
         }
         throw new Error(`Unsupported literal type '${typeof node.value}'`);
       case "unary": {
-        const rhs = toSql(node.arg);
+        const rhs = toSql(node.arg, false);
         switch (node.op) {
           case "!":
             return `(NOT ${rhs})`;
@@ -157,21 +159,28 @@ export function compileExprToSql(expr, ctx) {
           }
           if (leftNull || rightNull) {
             const other = leftNull ? node.right : node.left;
-            const otherSql = toSql(other);
+            const otherSql = toSql(other, true);
             const isNotEquals = node.op === "!=" || node.op === "!==";
             return `(${otherSql} IS ${isNotEquals ? "NOT " : ""}NULL)`;
           }
         }
 
-        const left = toSql(node.left);
-        const right = toSql(node.right);
+        const leftIsStringLiteral = node.left.type === "literal" && typeof node.left.value === "string";
+        const rightIsStringLiteral = node.right.type === "literal" && typeof node.right.value === "string";
+        if (node.op === "+" && (leftIsStringLiteral || rightIsStringLiteral)) {
+          throw new Error("String concatenation via '+' is not supported in SQL folding");
+        }
+
+        const castStringOperands = leftIsStringLiteral && rightIsStringLiteral;
+        const left = toSql(node.left, castStringOperands);
+        const right = toSql(node.right, castStringOperands);
         const op = binaryOpToSql(node.op);
         return `(${left} ${op} ${right})`;
       }
       case "ternary": {
-        const test = toSql(node.test);
-        const cons = toSql(node.consequent);
-        const alt = toSql(node.alternate);
+        const test = toSql(node.test, false);
+        const cons = toSql(node.consequent, true);
+        const alt = toSql(node.alternate, true);
         return `(CASE WHEN ${test} THEN ${cons} ELSE ${alt} END)`;
       }
       case "call":
@@ -194,5 +203,5 @@ export function compileExprToSql(expr, ctx) {
     }
   }
 
-  return { sql: toSql(expr), params };
+  return { sql: toSql(expr, true), params };
 }
