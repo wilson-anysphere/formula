@@ -14,6 +14,28 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
     }
 }
 
+fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
+    // `str::cmp` operates on bytes; to match our prior `to_ascii_uppercase().cmp(...)` behavior
+    // without allocating, compare bytewise after ASCII uppercasing.
+    let mut a_iter = a.as_bytes().iter();
+    let mut b_iter = b.as_bytes().iter();
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(&ac), Some(&bc)) => {
+                let ac = ac.to_ascii_uppercase();
+                let bc = bc.to_ascii_uppercase();
+                match ac.cmp(&bc) {
+                    Ordering::Equal => continue,
+                    ord => return ord,
+                }
+            }
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (None, None) => return Ordering::Equal,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchMode {
     /// 0: exact match
@@ -68,15 +90,15 @@ impl TryFrom<i64> for SearchMode {
 
 fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
     // Blank coerces to the other type for comparisons (Excel semantics).
-    let (a, b) = match (a, b) {
-        (Value::Blank, Value::Number(_)) => (Value::Number(0.0), b.clone()),
-        (Value::Number(_), Value::Blank) => (a.clone(), Value::Number(0.0)),
-        (Value::Blank, Value::Bool(_)) => (Value::Bool(false), b.clone()),
-        (Value::Bool(_), Value::Blank) => (a.clone(), Value::Bool(false)),
-        (Value::Blank, Value::Text(_)) => (Value::Text(String::new()), b.clone()),
-        (Value::Text(_), Value::Blank) => (a.clone(), Value::Text(String::new())),
-        _ => (a.clone(), b.clone()),
-    };
+    match (a, b) {
+        (Value::Blank, Value::Number(y)) => return 0.0_f64.partial_cmp(y).unwrap_or(Ordering::Equal),
+        (Value::Number(x), Value::Blank) => return x.partial_cmp(&0.0_f64).unwrap_or(Ordering::Equal),
+        (Value::Blank, Value::Bool(y)) => return false.cmp(y),
+        (Value::Bool(x), Value::Blank) => return x.cmp(&false),
+        (Value::Blank, Value::Text(y)) => return cmp_ascii_case_insensitive("", y),
+        (Value::Text(x), Value::Blank) => return cmp_ascii_case_insensitive(x, ""),
+        _ => {}
+    }
 
     fn type_rank(v: &Value) -> u8 {
         match v {
@@ -93,15 +115,15 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
         }
     }
 
-    let ra = type_rank(&a);
-    let rb = type_rank(&b);
+    let ra = type_rank(a);
+    let rb = type_rank(b);
     if ra != rb {
         return ra.cmp(&rb);
     }
 
-    match (&a, &b) {
+    match (a, b) {
         (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
-        (Value::Text(x), Value::Text(y)) => x.to_ascii_uppercase().cmp(&y.to_ascii_uppercase()),
+        (Value::Text(x), Value::Text(y)) => cmp_ascii_case_insensitive(x, y),
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Error(x), Value::Error(y)) => x.as_code().cmp(y.as_code()),
