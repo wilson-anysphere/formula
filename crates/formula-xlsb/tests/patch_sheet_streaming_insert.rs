@@ -126,6 +126,52 @@ fn cell_coords_in_stream_order(sheet_bin: &[u8]) -> Vec<(u32, u32)> {
     coords
 }
 
+fn find_cell_record(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Option<(u32, Vec<u8>)> {
+    const SHEETDATA: u32 = 0x0191;
+    const SHEETDATA_END: u32 = 0x0192;
+    const ROW: u32 = 0x0000;
+
+    let mut cursor = Cursor::new(sheet_bin);
+    let mut in_sheet_data = false;
+    let mut current_row = 0u32;
+
+    loop {
+        let id = match biff12_varint::read_record_id(&mut cursor).ok().flatten() {
+            Some(id) => id,
+            None => break,
+        };
+        let len = match biff12_varint::read_record_len(&mut cursor).ok().flatten() {
+            Some(len) => len as usize,
+            None => break,
+        };
+        let mut payload = vec![0u8; len];
+        if cursor.read_exact(&mut payload).is_err() {
+            break;
+        }
+
+        match id {
+            SHEETDATA => in_sheet_data = true,
+            SHEETDATA_END => in_sheet_data = false,
+            ROW if in_sheet_data => {
+                if payload.len() >= 4 {
+                    current_row = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                }
+            }
+            _ if in_sheet_data => {
+                if payload.len() >= 4 {
+                    let col = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+                    if current_row == target_row && col == target_col {
+                        return Some((id, payload));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
 #[test]
 fn patch_sheet_bin_streaming_insert_matches_in_memory_insert() {
     let mut builder = XlsbFixtureBuilder::new();
@@ -312,4 +358,68 @@ fn patch_sheet_bin_streaming_is_lossless_for_noop_value_edit() {
 
     assert!(!changed, "expected no-op value edit to report unchanged");
     assert_eq!(patched_stream, sheet_bin);
+}
+
+#[test]
+fn patch_sheet_bin_streaming_inserts_text_cell_as_shared_string_when_isst_provided() {
+    const STRING: u32 = 0x0007;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.add_shared_string("Hello");
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 4,
+        col: 2,
+        new_value: CellValue::Text("Hello".to_string()),
+        new_formula: None,
+        new_rgcb: None,
+        shared_string_index: Some(0),
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (id, payload) = find_cell_record(&patched_stream, 4, 2).expect("find inserted cell");
+    assert_eq!(id, STRING, "expected BrtCellIsst/STRING record id");
+    assert_eq!(
+        u32::from_le_bytes(payload[8..12].try_into().unwrap()),
+        0,
+        "expected inserted cell to reference shared string index 0"
+    );
+}
+
+#[test]
+fn patch_sheet_bin_streaming_inserts_text_cell_as_inline_string_when_isst_missing() {
+    const CELL_ST: u32 = 0x0006;
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let sheet_bin = read_sheet_bin(builder.build_bytes());
+
+    let edits = [CellEdit {
+        row: 4,
+        col: 2,
+        new_value: CellValue::Text("Hello".to_string()),
+        new_formula: None,
+        new_rgcb: None,
+        shared_string_index: None,
+    }];
+
+    let patched_in_mem = patch_sheet_bin(&sheet_bin, &edits).expect("patch_sheet_bin");
+
+    let mut patched_stream = Vec::new();
+    patch_sheet_bin_streaming(Cursor::new(&sheet_bin), &mut patched_stream, &edits)
+        .expect("patch_sheet_bin_streaming");
+
+    assert_eq!(patched_stream, patched_in_mem);
+
+    let (id, _payload) = find_cell_record(&patched_stream, 4, 2).expect("find inserted cell");
+    assert_eq!(id, CELL_ST, "expected BrtCellSt/CELL_ST record id");
 }
