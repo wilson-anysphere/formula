@@ -133,4 +133,41 @@ describe("OpenAIClient.streamChat", () => {
       { type: "done" },
     ]);
   });
+
+  it("buffers tool call argument fragments until the call is started", async () => {
+    const chunks = [
+      // Arguments arrive before the backend provides an id/name (some proxies do this).
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"range\\":\\""}}]},"finish_reason":null}]}\n\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"getData","arguments":"A1\\"}"}}]},"finish_reason":null}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+      "data: [DONE]\n\n",
+    ];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(readableStreamFromChunks(chunks), { status: 200 });
+      }) as any,
+    );
+
+    const client = new OpenAIClient({
+      apiKey: "test",
+      baseUrl: "https://example.com",
+      timeoutMs: 1_000,
+      model: "gpt-test",
+    });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const event of client.streamChat({ messages: [{ role: "user", content: "hi" }] as any })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "tool_call_start", id: "call_1", name: "getData" },
+      { type: "tool_call_delta", id: "call_1", delta: '{"range":"' },
+      { type: "tool_call_delta", id: "call_1", delta: 'A1"}' },
+      { type: "tool_call_end", id: "call_1" },
+      { type: "done" },
+    ]);
+  });
 });

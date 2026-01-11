@@ -265,9 +265,10 @@ export class OpenAIClient {
       /**
        * OpenAI identifies tool calls by a stable `index` and sometimes omits the
        * `id` field on early chunks. Buffer argument fragments by index until we
-       * learn the real `id` so downstream consumers can reliably key by id.
+       * learn the stable `id` + `name`, then emit `tool_call_start` followed by
+       * the buffered `tool_call_delta` fragments.
        *
-       * @type {Map<number, { id?: string, name?: string, started: boolean, bufferedArgs?: string }>}
+       * @type {Map<number, { id?: string, name?: string, started: boolean, pendingArgs: string }>}
        */
       const toolCallsByIndex = new Map();
       /** @type {Set<string>} */
@@ -321,54 +322,41 @@ export class OpenAIClient {
           }
 
           const toolCalls = delta?.tool_calls;
-            if (Array.isArray(toolCalls)) {
-              for (const callDelta of toolCalls) {
-                const index = callDelta?.index;
-                if (typeof index !== "number") continue;
+          if (Array.isArray(toolCalls)) {
+            for (const callDelta of toolCalls) {
+              const index = callDelta?.index;
+              if (typeof index !== "number") continue;
 
-                const state = toolCallsByIndex.get(index) ?? { started: false };
+              const state = toolCallsByIndex.get(index) ?? { started: false, pendingArgs: "" };
+              const idFromDelta = typeof callDelta?.id === "string" ? callDelta.id : null;
+              const nameFromDelta = typeof callDelta?.function?.name === "string" ? callDelta.function.name : null;
+              const argsFragment =
+                typeof callDelta?.function?.arguments === "string" ? callDelta.function.arguments : null;
 
-                const idFromDelta = typeof callDelta?.id === "string" ? callDelta.id : null;
-                const nameFromDelta = typeof callDelta?.function?.name === "string" ? callDelta.function.name : null;
-                const argsFragment =
-                  typeof callDelta?.function?.arguments === "string" ? callDelta.function.arguments : null;
+              if (idFromDelta) state.id = idFromDelta;
+              if (nameFromDelta) state.name = nameFromDelta;
 
-                if (idFromDelta) state.id = idFromDelta;
-                if (nameFromDelta) state.name = nameFromDelta;
-
-                // If the backend hasn't provided the stable `id` yet, buffer args
-                // fragments by index so we can emit them once the id arrives.
-                if (!state.id && argsFragment) {
-                  state.bufferedArgs = (state.bufferedArgs ?? "") + argsFragment;
-                  toolCallsByIndex.set(index, state);
-                  continue;
-                }
-
-                // If we just learned the id (or had it already) and there were
-                // buffered fragments, flush them now.
-                if (state.id && state.bufferedArgs) {
-                  if (!state.started && state.name) {
-                    state.started = true;
-                    openToolCallIds.add(state.id);
-                    yield { type: "tool_call_start", id: state.id, name: state.name };
-                  }
-                  yield { type: "tool_call_delta", id: state.id, delta: state.bufferedArgs };
-                  state.bufferedArgs = "";
-                }
-
-                if (!state.started && state.id && state.name) {
-                  state.started = true;
-                  openToolCallIds.add(state.id);
-                  yield { type: "tool_call_start", id: state.id, name: state.name };
-                }
-
-                toolCallsByIndex.set(index, state);
-
-                if (state.id && argsFragment) {
-                  yield { type: "tool_call_delta", id: state.id, delta: argsFragment };
+              if (!state.started && state.id && state.name) {
+                state.started = true;
+                openToolCallIds.add(state.id);
+                yield { type: "tool_call_start", id: state.id, name: state.name };
+                if (state.pendingArgs) {
+                  yield { type: "tool_call_delta", id: state.id, delta: state.pendingArgs };
+                  state.pendingArgs = "";
                 }
               }
+
+              if (argsFragment) {
+                if (state.id && state.started) {
+                  yield { type: "tool_call_delta", id: state.id, delta: argsFragment };
+                } else {
+                  state.pendingArgs += argsFragment;
+                }
+              }
+
+              toolCallsByIndex.set(index, state);
             }
+          }
 
           if (typeof choice?.finish_reason === "string" && choice.finish_reason === "tool_calls") {
             for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
