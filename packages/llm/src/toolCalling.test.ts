@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { runChatWithTools } from "./toolCalling.js";
 
@@ -160,6 +160,52 @@ describe("runChatWithTools", () => {
 
     expect(result.final).toBe("Okay, I won't make that change.");
     expect(callCount).toBe(2);
+  });
+
+  it("aborts while waiting for approval", async () => {
+    const abortController = new AbortController();
+
+    const client = {
+      async chat() {
+        return {
+          message: {
+            role: "assistant",
+            content: "",
+            toolCalls: [{ id: "call-1", name: "write_cell", arguments: { cell: "A1", value: 1 } }]
+          }
+        };
+      }
+    };
+
+    const toolExecutor = {
+      tools: [
+        {
+          name: "write_cell",
+          description: TOOL_REGISTRY.write_cell.description,
+          parameters: TOOL_REGISTRY.write_cell.jsonSchema,
+          requiresApproval: true
+        }
+      ],
+      execute: vi.fn(async () => ({ ok: true }))
+    };
+
+    const requireApproval = vi.fn(async () => {
+      queueMicrotask(() => abortController.abort());
+      return new Promise<boolean>(() => {});
+    });
+
+    await expect(
+      runChatWithTools({
+        client: client as any,
+        toolExecutor: toolExecutor as any,
+        messages: [{ role: "user", content: "Set A1 to 1" }],
+        requireApproval,
+        signal: abortController.signal
+      })
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(requireApproval).toHaveBeenCalledTimes(1);
+    expect(toolExecutor.execute).not.toHaveBeenCalled();
   });
 
   it("summarizes large tool results before appending them to the model context", async () => {

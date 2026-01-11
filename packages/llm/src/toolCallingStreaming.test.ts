@@ -154,4 +154,49 @@ describe("runChatWithToolsStreaming", () => {
     expect(result.final).toBe("done");
     expect(toolExecutor.execute).toHaveBeenCalledTimes(1);
   });
+
+  it("aborts while waiting for approval (does not surface as approval denied)", async () => {
+    const abortController = new AbortController();
+
+    const toolExecutor: ToolExecutor = {
+      tools: [
+        {
+          name: "write_cell",
+          description: "write",
+          parameters: { type: "object", properties: {} },
+          requiresApproval: true,
+        },
+      ],
+      execute: vi.fn(async () => ({ ok: true })),
+    };
+
+    const requireApproval = vi.fn(async () => {
+      queueMicrotask(() => abortController.abort());
+      return new Promise<boolean>(() => {});
+    });
+
+    const client = {
+      async chat() {
+        throw new Error("chat() should not be called when streamChat is available");
+      },
+      async *streamChat() {
+        yield { type: "tool_call_start", id: "call-1", name: "write_cell" } satisfies ChatStreamEvent;
+        yield { type: "tool_call_delta", id: "call-1", delta: '{"cell":"A1","value":1}' } satisfies ChatStreamEvent;
+        yield { type: "done" } satisfies ChatStreamEvent;
+      },
+    };
+
+    await expect(
+      runChatWithToolsStreaming({
+        client: client as any,
+        toolExecutor,
+        messages: [{ role: "user", content: "Set A1 to 1" }],
+        requireApproval,
+        signal: abortController.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(requireApproval).toHaveBeenCalledTimes(1);
+    expect(toolExecutor.execute).not.toHaveBeenCalled();
+  });
 });

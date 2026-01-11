@@ -9,6 +9,48 @@ import { runChatWithTools } from "./toolCalling.js";
 import { serializeToolResultForModel } from "./toolResultSerialization.js";
 
 /**
+ * @param {string} [message]
+ */
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+/**
+ * @param {AbortSignal | undefined} signal
+ */
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
+/**
+ * @template T
+ * @param {AbortSignal | undefined} signal
+ * @param {Promise<T>} promise
+ * @returns {Promise<T>}
+ */
+async function withAbort(signal, promise) {
+  if (!signal) return promise;
+  throwIfAborted(signal);
+
+  /** @type {(() => void) | null} */
+  let removeListener = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        const onAbort = () => reject(createAbortError());
+        signal.addEventListener("abort", onAbort, { once: true });
+        removeListener = () => signal.removeEventListener("abort", onAbort);
+      }),
+    ]);
+  } finally {
+    removeListener?.();
+  }
+}
+
+/**
  * @param {unknown} input
  */
 function tryParseJson(input) {
@@ -40,9 +82,10 @@ function toolRequiresApproval(tools, name) {
 /**
  * @param {AsyncIterable<ChatStreamEvent>} stream
  * @param {(event: ChatStreamEvent) => void} [onStreamEvent]
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<Extract<LLMMessage, { role: "assistant" }>>}
  */
-async function collectAssistantMessageFromStream(stream, onStreamEvent) {
+async function collectAssistantMessageFromStream(stream, onStreamEvent, signal) {
   /** @type {string} */
   let content = "";
 
@@ -64,6 +107,7 @@ async function collectAssistantMessageFromStream(stream, onStreamEvent) {
   }
 
   for await (const event of stream) {
+    throwIfAborted(signal);
     onStreamEvent?.(event);
     if (!event || typeof event !== "object") continue;
 
@@ -149,6 +193,7 @@ export async function runChatWithToolsStreaming(params) {
   const messages = params.messages.slice();
 
   for (let i = 0; i < maxIterations; i++) {
+    throwIfAborted(params.signal);
     const assistant = await collectAssistantMessageFromStream(
       params.client.streamChat({
         messages,
@@ -160,6 +205,7 @@ export async function runChatWithToolsStreaming(params) {
         signal: params.signal,
       }),
       params.onStreamEvent,
+      params.signal,
     );
 
     messages.push(assistant);
@@ -172,6 +218,7 @@ export async function runChatWithToolsStreaming(params) {
     let denied = false;
     let deniedToolName = null;
     for (const call of toolCalls) {
+      throwIfAborted(params.signal);
       const requiresApproval = toolRequiresApproval(toolDefs, call.name);
       params.onToolCall?.(call, { requiresApproval });
 
@@ -194,8 +241,10 @@ export async function runChatWithToolsStreaming(params) {
       }
 
       if (requiresApproval) {
-        const approved = await requireApproval(call);
+        throwIfAborted(params.signal);
+        const approved = await withAbort(params.signal, requireApproval(call));
         if (!approved) {
+          if (params.signal?.aborted) throw createAbortError();
           const deniedResult = {
             tool: call.name,
             ok: false,
@@ -219,7 +268,8 @@ export async function runChatWithToolsStreaming(params) {
         }
       }
 
-      const result = await params.toolExecutor.execute(call);
+      throwIfAborted(params.signal);
+      const result = await withAbort(params.signal, params.toolExecutor.execute(call));
       params.onToolResult?.(call, result);
 
       messages.push({

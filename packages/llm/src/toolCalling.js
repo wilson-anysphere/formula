@@ -14,6 +14,48 @@
 import { serializeToolResultForModel } from "./toolResultSerialization.js";
 
 /**
+ * @param {string} [message]
+ */
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+/**
+ * @param {AbortSignal | undefined} signal
+ */
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
+/**
+ * @template T
+ * @param {AbortSignal | undefined} signal
+ * @param {Promise<T>} promise
+ * @returns {Promise<T>}
+ */
+async function withAbort(signal, promise) {
+  if (!signal) return promise;
+  throwIfAborted(signal);
+
+  /** @type {(() => void) | null} */
+  let removeListener = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        const onAbort = () => reject(createAbortError());
+        signal.addEventListener("abort", onAbort, { once: true });
+        removeListener = () => signal.removeEventListener("abort", onAbort);
+      }),
+    ]);
+  } finally {
+    removeListener?.();
+  }
+}
+
+/**
  * @param {import("./types.js").ToolDefinition[]} tools
  * @param {string} name
  */
@@ -56,15 +98,19 @@ export async function runChatWithTools(params) {
   const messages = params.messages.slice();
 
   for (let i = 0; i < maxIterations; i++) {
-    const response = await params.client.chat({
-      messages,
-      tools: toolDefs,
-      toolChoice: toolDefs.length ? "auto" : "none",
-      model: params.model,
-      temperature: params.temperature,
-      maxTokens: params.maxTokens,
-      signal: params.signal,
-    });
+    throwIfAborted(params.signal);
+    const response = await withAbort(
+      params.signal,
+      params.client.chat({
+        messages,
+        tools: toolDefs,
+        toolChoice: toolDefs.length ? "auto" : "none",
+        model: params.model,
+        temperature: params.temperature,
+        maxTokens: params.maxTokens,
+        signal: params.signal,
+      }),
+    );
 
     messages.push(response.message);
 
@@ -79,6 +125,7 @@ export async function runChatWithTools(params) {
     let denied = false;
     let deniedToolName = null;
     for (const call of toolCalls) {
+      throwIfAborted(params.signal);
       const requiresApproval = toolRequiresApproval(toolDefs, call.name);
       params.onToolCall?.(call, { requiresApproval });
 
@@ -101,8 +148,10 @@ export async function runChatWithTools(params) {
       }
 
       if (requiresApproval) {
-        const approved = await requireApproval(call);
+        throwIfAborted(params.signal);
+        const approved = await withAbort(params.signal, requireApproval(call));
         if (!approved) {
+          if (params.signal?.aborted) throw createAbortError();
           const deniedResult = {
             tool: call.name,
             ok: false,
@@ -126,7 +175,8 @@ export async function runChatWithTools(params) {
         }
       }
 
-      const result = await params.toolExecutor.execute(call);
+      throwIfAborted(params.signal);
+      const result = await withAbort(params.signal, params.toolExecutor.execute(call));
       params.onToolResult?.(call, result);
 
       messages.push({
