@@ -535,7 +535,6 @@ export function installYwsSecurity(
 
         const preStateVector = Y.encodeStateVector(shadowDoc);
         const touchedCellKeys = new Set<string>();
-        const modifiedByTouchedCellKeys = new Set<string>();
 
         const store = (shadowDoc as any).store as {
           pendingStructs: unknown;
@@ -564,24 +563,17 @@ export function installYwsSecurity(
             // - `[cellKey]` for changes inside a cell's Y.Map (keys are cell fields)
             if (!topCellKey) {
               if (typeof keys.entries === "function") {
-                for (const [key, change] of keys.entries()) {
+                for (const [key] of keys.entries()) {
                   if (typeof key !== "string") continue;
                   touchedCellKeys.add(key);
-                  const action = change?.action;
-                  if (action === "add" || action === "update") {
-                    modifiedByTouchedCellKeys.add(key);
-                  }
                 }
               } else if (typeof keys.keys === "function") {
                 for (const key of keys.keys()) {
                   if (typeof key === "string") {
                     touchedCellKeys.add(key);
-                    modifiedByTouchedCellKeys.add(key);
                   }
                 }
               }
-            } else if (typeof keys.has === "function" && keys.has("modifiedBy")) {
-              modifiedByTouchedCellKeys.add(topCellKey);
             }
           }
         };
@@ -632,30 +624,25 @@ export function installYwsSecurity(
           }
         }
 
-        // Best-effort audit sanitization: if a client tries to spoof `modifiedBy`,
-        // rewrite it to the authenticated user. This avoids mutating otherwise
-        // well-formed updates (and avoids generating extra server-side items) for
-        // honest clients that already set `modifiedBy` correctly.
-        let sawSpoofedModifiedBy = false;
-        if (modifiedByTouchedCellKeys.size > 0) {
-          for (const cellKey of modifiedByTouchedCellKeys) {
-            const cell = shadowCells.get(cellKey);
-            if (!(cell instanceof Y.Map)) continue;
-            const value = cell.get("modifiedBy");
-            if (value != null && value !== userId) {
-              sawSpoofedModifiedBy = true;
-              break;
-            }
+        // Audit sanitization: ensure `modifiedBy` matches the authenticated user
+        // for any touched cell, so clients can't spoof identity by writing a
+        // different userId or by leaving a prior user's value intact.
+        let needsModifiedByRewrite = false;
+        for (const cellKey of touchedCellKeys) {
+          const cell = shadowCells.get(cellKey);
+          if (!(cell instanceof Y.Map)) continue;
+          if (cell.get("modifiedBy") !== userId) {
+            needsModifiedByRewrite = true;
+            break;
           }
         }
 
-        if (sawSpoofedModifiedBy) {
+        if (needsModifiedByRewrite) {
           shadowDoc.transact(() => {
-            for (const cellKey of modifiedByTouchedCellKeys) {
+            for (const cellKey of touchedCellKeys) {
               const cell = shadowCells.get(cellKey);
               if (!(cell instanceof Y.Map)) continue;
-              const value = cell.get("modifiedBy");
-              if (value != null && value !== userId) {
+              if (cell.get("modifiedBy") !== userId) {
                 (cell as any).set("modifiedBy", userId);
               }
             }

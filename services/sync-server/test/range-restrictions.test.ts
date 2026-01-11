@@ -58,6 +58,13 @@ function getCellValue(doc: Y.Doc, cellKey: string): unknown {
   return cell.get("value") ?? null;
 }
 
+function getCellModifiedBy(doc: Y.Doc, cellKey: string): unknown {
+  const cell = doc.getMap("cells").get(cellKey) as any;
+  if (!cell || typeof cell !== "object") return null;
+  if (typeof cell.get !== "function") return null;
+  return cell.get("modifiedBy") ?? null;
+}
+
 test("forbidden cell write is rejected and connection closed", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
   t.after(async () => {
@@ -229,8 +236,14 @@ test("allowed cell write is accepted and syncs", async (t) => {
     docWriter.getMap("cells").set(cellKey, cell);
   });
 
-  await waitForCondition(() => getCellValue(docReader, cellKey) === "ok", 10_000);
+  await waitForCondition(
+    () =>
+      getCellValue(docReader, cellKey) === "ok" &&
+      getCellModifiedBy(docReader, cellKey) === "writer",
+    10_000
+  );
   assert.equal(getCellValue(docReader, cellKey), "ok");
+  assert.equal(getCellModifiedBy(docReader, cellKey), "writer");
 });
 
 test("strict mode rejects updates when cell keys cannot be parsed", async (t) => {
