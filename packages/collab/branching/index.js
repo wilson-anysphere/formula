@@ -27,6 +27,26 @@ export class CollabBranchingWorkflow {
     this.#rootName = rootName ?? "branching";
   }
 
+  /**
+   * Returns the globally checked-out branch name stored in Yjs metadata.
+   *
+   * @returns {string}
+   */
+  getCurrentBranchName() {
+    return this.#getGlobalCurrentBranchName();
+  }
+
+  /**
+   * Sync this workflow's BranchService "current branch" pointer to the globally
+   * checked-out branch stored in Yjs metadata.
+   *
+   * @returns {string} current branch name after sync
+   */
+  syncToGlobalBranch() {
+    this.#syncBranchServiceToGlobalBranch();
+    return this.#branchService.getCurrentBranchName?.() ?? this.#getGlobalCurrentBranchName();
+  }
+
   async listBranches() {
     return this.#branchService.listBranches();
   }
@@ -64,6 +84,20 @@ export class CollabBranchingWorkflow {
       throw new Error("Cannot delete the currently checked-out branch");
     }
     await this.#branchService.deleteBranch(actor, { name });
+  }
+
+  async getCurrentBranch() {
+    // `getCurrentBranch` is read-only, but it depends on the local current-branch pointer.
+    this.#syncBranchServiceToGlobalBranch();
+    return this.#branchService.getCurrentBranch();
+  }
+
+  /**
+   * Returns the state of the globally checked-out branch head.
+   */
+  async getCurrentState() {
+    this.#syncBranchServiceToGlobalBranch();
+    return this.#branchService.getCurrentState();
   }
 
   /**
