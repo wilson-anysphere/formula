@@ -93,3 +93,22 @@ test("YjsVersionStore: base64 encoding round-trips", async () => {
   assert.ok(loaded);
   assert.deepEqual(Array.from(loaded.snapshot), Array.from(v1.snapshot));
 });
+
+test("YjsVersionStore: rejects unknown schemaVersion", async () => {
+  const ydoc = new Y.Doc();
+  const store = new YjsVersionStore({ doc: ydoc });
+
+  const versions = ydoc.getMap("versions");
+  ydoc.transact(() => {
+    const record = new Y.Map();
+    record.set("schemaVersion", 999);
+    record.set("kind", "snapshot");
+    record.set("timestampMs", 1);
+    record.set("compression", "none");
+    record.set("snapshotEncoding", "base64");
+    record.set("snapshotBase64", Buffer.from([1, 2, 3]).toString("base64"));
+    versions.set("bad", record);
+  });
+
+  await assert.rejects(() => store.getVersion("bad"), /unsupported schemaVersion/i);
+});

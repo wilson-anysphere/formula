@@ -283,6 +283,13 @@ export class YjsVersionStore {
     const raw = this.versions.get(versionId);
     if (!isYMap(raw)) return null;
 
+    const schemaVersion = raw.get("schemaVersion") ?? 1;
+    if (schemaVersion !== 1) {
+      throw new Error(
+        `YjsVersionStore: unsupported schemaVersion for ${versionId}: ${String(schemaVersion)}`,
+      );
+    }
+
     const kind = raw.get("kind");
     if (kind !== "snapshot" && kind !== "checkpoint" && kind !== "restore") {
       throw new Error(`YjsVersionStore: invalid kind for ${versionId}: ${String(kind)}`);
@@ -402,4 +409,3 @@ export class YjsVersionStore {
     }, "versioning-store");
   }
 }
-
