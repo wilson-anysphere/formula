@@ -141,8 +141,6 @@ use crate::{
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
 #[cfg(feature = "desktop")]
-use std::sync::Arc;
-#[cfg(feature = "desktop")]
 use tauri::State;
 
 #[cfg(feature = "desktop")]
@@ -279,17 +277,10 @@ pub async fn save_workbook(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Prefer the bytes we just wrote (returned from `write_xlsx`), but fall back to re-reading
-    // from disk if needed.
-    let new_origin_xlsx_bytes = std::fs::read(&save_path)
-        .ok()
-        .map(Arc::<[u8]>::from)
-        .or(Some(written_bytes));
-
     {
         let mut state = state.inner().lock().unwrap();
         state
-            .mark_saved(Some(save_path), new_origin_xlsx_bytes)
+            .mark_saved(Some(save_path), Some(written_bytes))
             .map_err(app_error)?;
     }
 
