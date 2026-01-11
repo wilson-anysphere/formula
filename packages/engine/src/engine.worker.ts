@@ -23,7 +23,7 @@ type WasmModule = {
   WasmWorkbook: {
     new (): WasmWorkbookInstance;
     fromJson(json: string): WasmWorkbookInstance;
-    fromXlsxBytes(bytes: Uint8Array): WasmWorkbookInstance;
+    fromXlsxBytes?: (bytes: Uint8Array) => WasmWorkbookInstance;
   };
 };
 
@@ -240,12 +240,10 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
           } else if (ArrayBuffer.isView(rawBytes) && rawBytes.buffer instanceof ArrayBuffer) {
             bytes = new Uint8Array(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
           } else {
-            throw new Error("loadFromXlsxBytes: expected params.bytes to be a Uint8Array");
+            throw new Error("loadFromXlsxBytes: expected params.bytes to be a Uint8Array/ArrayBuffer/ArrayBufferView");
           }
 
-          const fromXlsxBytes = (mod.WasmWorkbook as any).fromXlsxBytes as
-            | ((bytes: Uint8Array) => WasmWorkbookInstance)
-            | undefined;
+          const fromXlsxBytes = mod.WasmWorkbook.fromXlsxBytes;
           if (typeof fromXlsxBytes !== "function") {
             throw new Error("loadFromXlsxBytes: WasmWorkbook.fromXlsxBytes is not available in this WASM build");
           }
