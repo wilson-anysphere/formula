@@ -20,7 +20,7 @@ services:
       SESSION_COOKIE_NAME: formula_session
       SESSION_TTL_SECONDS: "86400"
       COOKIE_SECURE: "false"
-      SYNC_TOKEN_SECRET: dev-sync-token-secret-change-me
+      SYNC_TOKEN_SECRET: ${SYNC_TOKEN_SECRET:-dev-sync-token-secret-change-me}
       SYNC_TOKEN_TTL_SECONDS: "300"
       # Set to "0" to disable background retention sweeps.
       RETENTION_SWEEP_INTERVAL_MS: "3600000"
@@ -31,17 +31,24 @@ services:
 
   sync-server:
     build:
-      context: ./services/sync-server
+      context: .
+      dockerfile: services/sync-server/Dockerfile
     environment:
       SYNC_SERVER_HOST: 0.0.0.0
       SYNC_SERVER_PORT: "1234"
-      SYNC_SERVER_JWT_SECRET: dev-sync-token-secret-change-me
+      # Keep in sync with api.SYNC_TOKEN_SECRET so JWT validation succeeds.
+      SYNC_SERVER_JWT_SECRET: ${SYNC_TOKEN_SECRET:-dev-sync-token-secret-change-me}
       SYNC_SERVER_JWT_AUDIENCE: formula-sync
+
+      # Persistence
+      SYNC_SERVER_DATA_DIR: /data
+      # `y-leveldb` is optional and not installed in the Docker image; use the
+      # built-in file persistence backend for local docker-compose.
       SYNC_SERVER_PERSISTENCE_BACKEND: file
-    volumes:
-      - sync_server_data:/app/.sync-server-data
     ports:
       - "1234:1234"
+    volumes:
+      - sync_server_data:/data
     depends_on:
       - api
 

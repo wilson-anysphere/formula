@@ -3,7 +3,7 @@
 This repo contains a minimal-but-extensible **enterprise/cloud backend foundation**:
 
 - `services/api`: Fastify + Postgres API service (auth, orgs, docs, RBAC, audit, sync token issuance)
-- `services/sync-server`: y-websocket-based sync server that validates short-lived collaboration tokens (JWT)
+- `services/sync-server`: Yjs sync server (`y-websocket`) that validates short-lived collaboration tokens (JWT)
 
 ## Quickstart
 
@@ -18,7 +18,7 @@ docker-compose up --build
 
 Services:
 - API: http://localhost:3000
-- Sync WS: ws://localhost:1234/<docId>?token=...
+- Sync WS: ws://localhost:1234/<docId>?token=... (y-websocket protocol)
 - Sync health: http://localhost:1234/healthz
 - Postgres: localhost:5432 (user/pass/db = `postgres` / `postgres` / `formula`)
 
@@ -102,16 +102,40 @@ curl -s -X POST http://localhost:3000/docs/<doc-id>/sync-token \
   -H 'cookie: formula_session=...'
 ```
 
-5) Connect to the sync server with the token:
+5) Connect to the sync server with the token using a Yjs client (`y-websocket`):
 
 ```bash
-node - <<'NODE'
-const WebSocket = require('ws')
-const token = process.env.TOKEN
-const docId = process.env.DOC_ID
-const ws = new WebSocket(`ws://localhost:1234/${docId}?token=${encodeURIComponent(token)}`)
-ws.on('message', (m) => console.log('sync:', m.toString()))
-ws.on('open', () => console.log('connected'))
-ws.on('close', (c, r) => console.log('closed', c, r.toString()))
+TOKEN=... DOC_ID=... pnpm -C services/sync-server exec node --input-type=module - <<'NODE'
+import WebSocket from "ws";
+import * as Y from "yjs";
+import { WebsocketProvider } from "y-websocket";
+
+const token = process.env.TOKEN;
+const docId = process.env.DOC_ID;
+if (!token || !docId) throw new Error("Missing TOKEN or DOC_ID env var");
+
+const ydoc = new Y.Doc();
+
+const provider = new WebsocketProvider("ws://localhost:1234", docId, ydoc, {
+  WebSocketPolyfill: WebSocket,
+  disableBc: true,
+  params: { token }
+});
+
+provider.on("status", (event) => console.log("ws status:", event.status));
+provider.on("sync", (isSynced) => console.log("synced:", isSynced));
+
+// Send a trivial update once we're connected.
+const onSync = (isSynced) => {
+  if (!isSynced) return;
+  ydoc.getText("t").insert(0, "hello");
+  provider.off("sync", onSync);
+};
+provider.on("sync", onSync);
+
+setTimeout(() => {
+  provider.destroy();
+  ydoc.destroy();
+}, 2_000);
 NODE
 ```

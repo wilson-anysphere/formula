@@ -2,12 +2,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { newDb } from "pg-mem";
 import type { Pool } from "pg";
 import path from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
+import jwt from "jsonwebtoken";
 import { buildApp } from "../app";
 import type { AppConfig } from "../config";
 import { runMigrations } from "../db/migrations";
-import { createSyncServer } from "../../../sync/src/server";
+import { createLogger } from "../../../sync-server/src/logger";
+import { createSyncServer } from "../../../sync-server/src/server";
+import type { SyncServerConfig } from "../../../sync-server/src/config";
 
 function getMigrationsDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -107,19 +112,72 @@ describe("API e2e: auth + RBAC + sync token", () => {
     const syncToken = (syncTokenRes.json() as any).token as string;
     expect(syncToken).toBeTypeOf("string");
 
-    const syncServer = createSyncServer({ port: 0, syncTokenSecret: config.syncTokenSecret });
-    const syncPort = await syncServer.listen();
+    const decoded = jwt.verify(syncToken, config.syncTokenSecret, {
+      audience: "formula-sync"
+    }) as any;
+    expect(decoded).toMatchObject({ sub: bobId, docId, orgId, role: "editor" });
 
-    const ws = new WebSocket(`ws://localhost:${syncPort}/${docId}?token=${encodeURIComponent(syncToken)}`);
-    const firstMessage = await new Promise<string>((resolve, reject) => {
-      ws.on("message", (data) => resolve(data.toString()));
-      ws.on("error", reject);
-    });
-    const msg = JSON.parse(firstMessage) as any;
-    expect(msg).toMatchObject({ type: "connected", docId, userId: bobId, role: "editor" });
+    const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-api-e2e-"));
+    const syncServerConfig: SyncServerConfig = {
+      host: "127.0.0.1",
+      port: 0,
+      trustProxy: false,
+      gc: true,
+      dataDir,
+      persistence: { backend: "file", compactAfterUpdates: 50 },
+      auth: {
+        mode: "jwt-hs256",
+        secret: config.syncTokenSecret,
+        audience: "formula-sync"
+      },
+      limits: {
+        maxConnections: 100,
+        maxConnectionsPerIp: 100,
+        maxConnAttemptsPerWindow: 500,
+        connAttemptWindowMs: 60_000,
+        maxMessagesPerWindow: 5_000,
+        messageWindowMs: 10_000
+      },
+      logLevel: "silent"
+    };
 
-    ws.close();
-    await syncServer.close();
+    const syncServer = createSyncServer(syncServerConfig, createLogger("silent"));
+    const { port: syncPort } = await syncServer.start();
+
+    const ws = new WebSocket(`ws://127.0.0.1:${syncPort}/${docId}?token=${encodeURIComponent(syncToken)}`);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        ws.once("open", () => resolve());
+        ws.once("error", reject);
+      });
+
+      // y-websocket sends an initial binary sync message on connect. It's enough
+      // for this test to assert that the connection is accepted and we receive
+      // at least one sync frame.
+      const firstMessage = await new Promise<WebSocket.RawData>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Timed out waiting for sync server message")), 5_000);
+        ws.once("message", (data) => {
+          clearTimeout(timeout);
+          resolve(data);
+        });
+        ws.once("error", (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        });
+      });
+      const firstMessageBytes = Buffer.isBuffer(firstMessage)
+        ? firstMessage
+        : firstMessage instanceof ArrayBuffer
+          ? Buffer.from(firstMessage)
+          : Array.isArray(firstMessage)
+            ? Buffer.concat(firstMessage)
+            : Buffer.from(firstMessage as any);
+      expect(firstMessageBytes.byteLength).toBeGreaterThan(0);
+    } finally {
+      ws.close();
+      await syncServer.stop();
+      await rm(dataDir, { recursive: true, force: true });
+    }
   });
 
   it("enforces document share permission (viewer cannot invite)", async () => {
