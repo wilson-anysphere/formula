@@ -21,6 +21,7 @@ import {
   authenticateRequest,
   extractToken,
   type AuthContext,
+  type IntrospectCache,
 } from "./auth.js";
 import { acquireDataDirLock, type DataDirLockHandle } from "./dataDirLock.js";
 import {
@@ -930,6 +931,9 @@ export function createSyncServer(
     maxPayload: config.limits.maxMessageBytes,
   });
 
+  const introspectCache: IntrospectCache | null =
+    config.auth.mode === "introspect" ? new Map() : null;
+
   const handler: http.RequestListener = (req, res) => {
     void (async () => {
       if (!req.url) {
@@ -1263,91 +1267,95 @@ export function createSyncServer(
   });
 
   server.on("upgrade", (req, socket, head) => {
-    try {
-      const ip = pickIp(req, config.trustProxy);
-
-      if (!connectionAttemptLimiter.consume(ip)) {
-        recordUpgradeRejection("rate_limit");
-        sendUpgradeRejection(socket, 429, "Too Many Requests");
-        return;
-      }
-
-      if (!req.url) {
-        sendUpgradeRejection(socket, 400, "Missing URL");
-        return;
-      }
-
-      const url = new URL(req.url, "http://localhost");
-      const docName = url.pathname.replace(/^\//, "");
-      if (!docName) {
-        sendUpgradeRejection(socket, 400, "Missing document id");
-        return;
-      }
-
-      const persistedName = persistedDocNameForLeveldb(docName);
-
-      const purging =
-        retentionManager?.isPurging(persistedName) ||
-        (leveldbDocNameHashingEnabled && retentionManager?.isPurging(docName));
-      if (purging) {
-        recordUpgradeRejection("retention_purging");
-        sendUpgradeRejection(socket, 503, "Document is being purged");
-        return;
-      }
-
-      const token = extractToken(req, url);
-      let authCtx;
+    void (async () => {
       try {
-        authCtx = authenticateRequest(config.auth, token, docName);
-      } catch (err) {
-        if (err instanceof AuthError) {
-          recordUpgradeRejection("auth_failure");
-          sendUpgradeRejection(socket, err.statusCode, err.message);
+        const ip = pickIp(req, config.trustProxy);
+
+        if (!connectionAttemptLimiter.consume(ip)) {
+          recordUpgradeRejection("rate_limit");
+          sendUpgradeRejection(socket, 429, "Too Many Requests");
           return;
         }
-        throw err;
-      }
 
-      const docKey = docKeyFromDocName(docName);
-      if (tombstones.has(docKey)) {
-        recordUpgradeRejection("tombstone");
-        sendUpgradeRejection(socket, 410, "Gone");
-        return;
-      }
-
-      const connResult = connectionTracker.tryRegister(ip);
-      if (!connResult.ok) {
-        recordUpgradeRejection("rate_limit");
-        sendUpgradeRejection(socket, 429, connResult.reason);
-        return;
-      }
-      docConnectionTracker.register(persistedName);
-      if (leveldbDocNameHashingEnabled) {
-        docConnectionTracker.register(docName);
-      }
-
-      (req as IncomingMessage & { auth?: unknown }).auth = authCtx;
-
-      try {
-        wss.handleUpgrade(req, socket, head, (ws) => {
-          wss.emit("connection", ws, req);
-        });
-      } catch (err) {
-        connectionTracker.unregister(ip);
-        docConnectionTracker.unregister(persistedName);
-        if (leveldbDocNameHashingEnabled) {
-          docConnectionTracker.unregister(docName);
+        if (!req.url) {
+          sendUpgradeRejection(socket, 400, "Missing URL");
+          return;
         }
-        throw err;
+
+        const url = new URL(req.url, "http://localhost");
+        const docName = url.pathname.replace(/^\//, "");
+        if (!docName) {
+          sendUpgradeRejection(socket, 400, "Missing document id");
+          return;
+        }
+
+        const persistedName = persistedDocNameForLeveldb(docName);
+
+        const purging =
+          retentionManager?.isPurging(persistedName) ||
+          (leveldbDocNameHashingEnabled && retentionManager?.isPurging(docName));
+        if (purging) {
+          recordUpgradeRejection("retention_purging");
+          sendUpgradeRejection(socket, 503, "Document is being purged");
+          return;
+        }
+
+        const token = extractToken(req, url);
+        let authCtx: AuthContext;
+        try {
+          authCtx = await authenticateRequest(config.auth, token, docName, {
+            introspectCache,
+          });
+        } catch (err) {
+          if (err instanceof AuthError) {
+            recordUpgradeRejection("auth_failure");
+            sendUpgradeRejection(socket, err.statusCode, err.message);
+            return;
+          }
+          throw err;
+        }
+
+        const docKey = docKeyFromDocName(docName);
+        if (tombstones.has(docKey)) {
+          recordUpgradeRejection("tombstone");
+          sendUpgradeRejection(socket, 410, "Gone");
+          return;
+        }
+
+        const connResult = connectionTracker.tryRegister(ip);
+        if (!connResult.ok) {
+          recordUpgradeRejection("rate_limit");
+          sendUpgradeRejection(socket, 429, connResult.reason);
+          return;
+        }
+        docConnectionTracker.register(persistedName);
+        if (leveldbDocNameHashingEnabled) {
+          docConnectionTracker.register(docName);
+        }
+
+        (req as IncomingMessage & { auth?: unknown }).auth = authCtx;
+
+        try {
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit("connection", ws, req);
+          });
+        } catch (err) {
+          connectionTracker.unregister(ip);
+          docConnectionTracker.unregister(persistedName);
+          if (leveldbDocNameHashingEnabled) {
+            docConnectionTracker.unregister(docName);
+          }
+          throw err;
+        }
+      } catch (err) {
+        logger.error({ err }, "upgrade_failed");
+        try {
+          sendUpgradeRejection(socket, 500, "Internal Server Error");
+        } catch {
+          // ignore
+        }
       }
-    } catch (err) {
-      logger.error({ err }, "upgrade_failed");
-      try {
-        sendUpgradeRejection(socket, 500, "Internal Server Error");
-      } catch {
-        // ignore
-      }
-    }
+    })();
   });
 
   const handle: SyncServerHandle = {

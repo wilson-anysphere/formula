@@ -1,4 +1,5 @@
 import type { IncomingMessage } from "node:http";
+import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 
 import { normalizeRestriction } from "../../../packages/collab/permissions/index.js";
@@ -9,7 +10,7 @@ export type SyncRole = "owner" | "admin" | "editor" | "commenter" | "viewer";
 
 export type AuthContext = {
   userId: string;
-  tokenType: "opaque" | "jwt";
+  tokenType: "opaque" | "jwt" | "introspect";
   docId: string;
   orgId: string | null;
   role: SyncRole;
@@ -20,7 +21,7 @@ export type AuthContext = {
 export class AuthError extends Error {
   constructor(
     message: string,
-    public readonly statusCode: 401 | 403 = 401
+    public readonly statusCode: 401 | 403 | 503 = 401
   ) {
     super(message);
     this.name = "AuthError";
@@ -41,6 +42,14 @@ export function extractToken(req: IncomingMessage, url: URL): string | null {
   if (typeof header === "string") return parseBearerAuthorizationHeader(header);
   return null;
 }
+
+export type IntrospectCache = Map<
+  string,
+  {
+    expiresAtMs: number;
+    ctx: AuthContext;
+  }
+>;
 
 function isStringArray(value: unknown): value is string[] {
   return (
@@ -149,11 +158,132 @@ function parseOptionalRangeRestrictionsClaim(
   return value as unknown[];
 }
 
-export function authenticateRequest(
+function sha256Hex(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function parseJwtExpMs(token: string): number | null {
+  try {
+    const decoded = jwt.decode(token);
+    if (!decoded || typeof decoded !== "object") return null;
+    const exp = (decoded as any).exp;
+    return typeof exp === "number" && Number.isFinite(exp) ? exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+async function introspectTokenWithRetry(
+  auth: Extract<AuthMode, { mode: "introspect" }>,
+  token: string,
+  docId: string
+): Promise<{
+  userId: string;
+  orgId: string;
+  role: SyncRole;
+  sessionId?: string | null;
+}> {
+  const url = new URL("/internal/sync/introspect", auth.url).toString();
+
+  const timeoutMs = 5_000;
+  const maxAttempts = 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-internal-admin-token": auth.token,
+        },
+        body: JSON.stringify({ token, docId }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (res.status === 403) {
+        throw new AuthError("Invalid token", 403);
+      }
+
+      if (!res.ok) {
+        // Retry on transient errors (gateway issues, timeouts, 5xx).
+        if (res.status >= 500 && res.status <= 599 && attempt < maxAttempts) {
+          const backoffMs =
+            Math.min(250 * 2 ** (attempt - 1), 2_000) +
+            Math.floor(Math.random() * 100);
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          continue;
+        }
+        throw new AuthError("Authentication service unavailable", 503);
+      }
+
+      let body: any;
+      try {
+        body = (await res.json()) as any;
+      } catch {
+        throw new AuthError("Authentication service unavailable", 503);
+      }
+
+      if (!body || typeof body !== "object" || body.ok !== true) {
+        throw new AuthError("Invalid token", 403);
+      }
+
+      const userId = body.userId;
+      const orgId = body.orgId;
+      const role = body.role;
+      const sessionId = body.sessionId;
+
+      if (typeof userId !== "string" || userId.length === 0) {
+        throw new AuthError("Authentication service unavailable", 503);
+      }
+      if (typeof orgId !== "string" || orgId.length === 0) {
+        throw new AuthError("Authentication service unavailable", 503);
+      }
+      if (
+        role !== "owner" &&
+        role !== "admin" &&
+        role !== "editor" &&
+        role !== "commenter" &&
+        role !== "viewer"
+      ) {
+        throw new AuthError("Authentication service unavailable", 503);
+      }
+
+      if (sessionId !== undefined && sessionId !== null && typeof sessionId !== "string") {
+        throw new AuthError("Authentication service unavailable", 503);
+      }
+
+      return {
+        userId,
+        orgId,
+        role,
+        sessionId: sessionId === undefined ? undefined : sessionId,
+      };
+    } catch (err) {
+      if (err instanceof AuthError) {
+        throw err;
+      }
+
+      if (attempt < maxAttempts) {
+        const backoffMs =
+          Math.min(250 * 2 ** (attempt - 1), 2_000) +
+          Math.floor(Math.random() * 100);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        continue;
+      }
+
+      throw new AuthError("Authentication service unavailable", 503);
+    }
+  }
+
+  throw new AuthError("Authentication service unavailable", 503);
+}
+
+export async function authenticateRequest(
   auth: AuthMode,
   token: string | null,
-  docName: string
-): AuthContext {
+  docName: string,
+  options: { introspectCache?: IntrospectCache | null } = {}
+): Promise<AuthContext> {
   if (!token) throw new AuthError("Missing token", 401);
 
   if (auth.mode === "opaque") {
@@ -165,6 +295,62 @@ export function authenticateRequest(
       orgId: null,
       role: "owner",
     };
+  }
+
+  if (auth.mode === "introspect") {
+    const cache = options.introspectCache ?? null;
+    const tokenHash = cache ? sha256Hex(token) : null;
+    if (cache && tokenHash) {
+      const cached = cache.get(tokenHash);
+      if (cached) {
+        if (cached.expiresAtMs > Date.now()) {
+          if (cached.ctx.docId !== docName) {
+            throw new AuthError("Token is not authorized for this document", 403);
+          }
+          return cached.ctx;
+        }
+        cache.delete(tokenHash);
+      }
+    }
+
+    try {
+      const result = await introspectTokenWithRetry(auth, token, docName);
+      const ctx: AuthContext = {
+        userId: result.userId,
+        tokenType: "introspect",
+        docId: docName,
+        orgId: result.orgId,
+        role: result.role,
+      };
+
+      if (result.sessionId !== undefined) {
+        ctx.sessionId = result.sessionId;
+      }
+
+      if (cache && tokenHash) {
+        const expMs = parseJwtExpMs(token);
+        const now = Date.now();
+        const cacheUntil = now + auth.cacheMs;
+        const expiresAtMs =
+          typeof expMs === "number" && Number.isFinite(expMs)
+            ? Math.min(expMs, cacheUntil)
+            : cacheUntil;
+        cache.set(tokenHash, { expiresAtMs, ctx });
+      }
+
+      return ctx;
+    } catch (err) {
+      if (auth.failOpen && !(err instanceof AuthError && err.statusCode === 403)) {
+        return {
+          userId: "introspect-fail-open",
+          tokenType: "introspect",
+          docId: docName,
+          orgId: null,
+          role: "owner",
+        };
+      }
+      throw err;
+    }
   }
 
   let verifiedPayload: unknown;

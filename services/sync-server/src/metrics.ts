@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
  *
  * `tsx` (used for dev/test) transpiles without typechecking, so a hard runtime
  * import would crash the server. Instead we best-effort load `prom-client` and
- * fall back to a no-op metrics implementation.
+ * fall back to a small in-memory implementation.
  */
 
 type Counter<Labels extends string = string> = {
@@ -24,6 +24,73 @@ type Registry = {
   setDefaultLabels: (labels: Record<string, string>) => void;
   metrics: () => Promise<string>;
 };
+
+type MetricKind = "counter" | "gauge";
+
+type Sample = {
+  labels: Record<string, string>;
+  value: number;
+};
+
+function escapeLabelValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/"/g, '\\"');
+}
+
+function formatLabels(labels: Record<string, string>): string {
+  const keys = Object.keys(labels);
+  if (keys.length === 0) return "";
+  keys.sort();
+  const parts = keys.map((key) => `${key}="${escapeLabelValue(labels[key] ?? "")}"`);
+  return `{${parts.join(",")}}`;
+}
+
+function sampleKey(labels: Record<string, string>): string {
+  const keys = Object.keys(labels);
+  if (keys.length === 0) return "";
+  keys.sort();
+  // Use a delimiter that's unlikely to appear in label values.
+  return keys.map((key) => `${key}\u0000${labels[key] ?? ""}`).join("\u0001");
+}
+
+type SimpleMetric = {
+  name: string;
+  help: string;
+  kind: MetricKind;
+  samples: Map<string, Sample>;
+};
+
+function renderMetric(metric: SimpleMetric, defaultLabels: Record<string, string>): string {
+  const lines: string[] = [];
+  lines.push(`# HELP ${metric.name} ${metric.help}`);
+  lines.push(`# TYPE ${metric.name} ${metric.kind}`);
+  for (const sample of metric.samples.values()) {
+    lines.push(
+      `${metric.name}${formatLabels({ ...defaultLabels, ...sample.labels })} ${sample.value}`
+    );
+  }
+  return lines.join("\n");
+}
+
+function createSimpleRegistry(): Registry & {
+  registerMetric: (metric: SimpleMetric) => void;
+} {
+  const metrics: SimpleMetric[] = [];
+  const defaultLabels: Record<string, string> = {};
+  return {
+    contentType: "text/plain; version=0.0.4; charset=utf-8",
+    setDefaultLabels: (labels) => {
+      Object.assign(defaultLabels, labels);
+    },
+    registerMetric: (metric) => {
+      metrics.push(metric);
+    },
+    metrics: async () => {
+      if (metrics.length === 0) return "";
+      const body = metrics.map((metric) => renderMetric(metric, defaultLabels)).join("\n");
+      return `${body}\n`;
+    },
+  };
+}
 
 function loadPromClient(): {
   Registry: new () => Registry;
@@ -43,45 +110,193 @@ function loadPromClient(): {
   }
 }
 
-function createNoopMetrics(): SyncServerMetrics {
-  const noopCounter: Counter<string> = {
-    inc: () => {
-      // noop
-    },
+function createFallbackMetrics(): SyncServerMetrics {
+  const registry = createSimpleRegistry();
+  registry.setDefaultLabels({ service: "sync-server" });
+
+  const createCounter = <Labels extends string>(opts: {
+    name: string;
+    help: string;
+    labelNames?: Labels[];
+  }): Counter<Labels> => {
+    const labelNames = (opts.labelNames ?? []) as string[];
+    const metric: SimpleMetric = {
+      name: opts.name,
+      help: opts.help,
+      kind: "counter",
+      samples: new Map(),
+    };
+    registry.registerMetric(metric);
+
+    // Match prom-client behavior: unlabelled metrics show up as `0` even before
+    // they're incremented.
+    if (labelNames.length === 0) {
+      metric.samples.set("", { labels: {}, value: 0 });
+    }
+
+    const inc: Counter<Labels>["inc"] = (labels, value) => {
+      const delta = typeof value === "number" ? value : 1;
+
+      const normalizedLabels: Record<string, string> = {};
+      const raw = (labels ?? {}) as Record<string, string>;
+      for (const labelName of labelNames) {
+        const labelValue = raw[labelName];
+        if (typeof labelValue !== "string" || labelValue.length === 0) {
+          return;
+        }
+        normalizedLabels[labelName] = labelValue;
+      }
+
+      const key = sampleKey(normalizedLabels);
+      const current = metric.samples.get(key) ?? { labels: normalizedLabels, value: 0 };
+      metric.samples.set(key, {
+        labels: normalizedLabels,
+        value: current.value + delta,
+      });
+    };
+
+    return { inc };
   };
-  const noopGauge: Gauge<string> = {
-    set: () => {
-      // noop
-    },
-    reset: () => {
-      // noop
-    },
+
+  const createGauge = <Labels extends string>(opts: {
+    name: string;
+    help: string;
+    labelNames?: Labels[];
+  }): Gauge<Labels> => {
+    const labelNames = (opts.labelNames ?? []) as string[];
+    const metric: SimpleMetric = {
+      name: opts.name,
+      help: opts.help,
+      kind: "gauge",
+      samples: new Map(),
+    };
+    registry.registerMetric(metric);
+
+    const set: Gauge<Labels>["set"] = (labelsOrValue, value) => {
+      if (typeof labelsOrValue === "number") {
+        if (labelNames.length > 0) return;
+        metric.samples.set("", { labels: {}, value: labelsOrValue });
+        return;
+      }
+
+      const normalizedLabels: Record<string, string> = {};
+      const raw = labelsOrValue as Record<string, string>;
+      for (const labelName of labelNames) {
+        const labelValue = raw[labelName];
+        if (typeof labelValue !== "string" || labelValue.length === 0) {
+          return;
+        }
+        normalizedLabels[labelName] = labelValue;
+      }
+
+      const v = typeof value === "number" ? value : 0;
+      metric.samples.set(sampleKey(normalizedLabels), { labels: normalizedLabels, value: v });
+    };
+
+    const reset: Gauge<Labels>["reset"] = () => {
+      metric.samples.clear();
+    };
+
+    return { set, reset };
   };
-  const registry: Registry = {
-    // Match prom-client default.
-    contentType: "text/plain; version=0.0.4; charset=utf-8",
-    setDefaultLabels: () => {
-      // noop
-    },
-    metrics: async () => "",
+
+  const wsConnectionsTotal = createCounter({
+    name: "sync_server_ws_connections_total",
+    help: "Total accepted WebSocket connections.",
+  });
+
+  const wsConnectionsCurrent = createGauge({
+    name: "sync_server_ws_connections_current",
+    help: "Current active WebSocket connections.",
+  });
+  wsConnectionsCurrent.set(0);
+
+  const wsConnectionsRejectedTotal = createCounter<"reason">({
+    name: "sync_server_ws_connections_rejected_total",
+    help: "Total rejected WebSocket upgrade attempts.",
+    labelNames: ["reason"],
+  });
+  wsConnectionsRejectedTotal.inc({ reason: "rate_limit" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "auth_failure" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "tombstone" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "retention_purging" }, 0);
+
+  const wsClosesTotal = createCounter<"code">({
+    name: "sync_server_ws_closes_total",
+    help: "Total WebSocket close events by close code.",
+    labelNames: ["code"],
+  });
+  // Pre-initialize common codes used by the server.
+  for (const code of ["1000", "1003", "1006", "1008", "1009", "1011", "1013", "other"]) {
+    wsClosesTotal.inc({ code }, 0);
+  }
+
+  const wsMessagesRateLimitedTotal = createCounter({
+    name: "sync_server_ws_messages_rate_limited_total",
+    help: "Total WebSocket messages rejected due to message rate limits.",
+  });
+
+  const wsMessagesTooLargeTotal = createCounter({
+    name: "sync_server_ws_messages_too_large_total",
+    help: "Total WebSocket messages rejected due to message size limits.",
+  });
+
+  const retentionSweepsTotal = createCounter<"sweep">({
+    name: "sync_server_retention_sweeps_total",
+    help: "Total retention sweeps executed.",
+    labelNames: ["sweep"],
+  });
+  retentionSweepsTotal.inc({ sweep: "leveldb" }, 0);
+  retentionSweepsTotal.inc({ sweep: "tombstone" }, 0);
+
+  const retentionDocsPurgedTotal = createCounter<"sweep">({
+    name: "sync_server_retention_docs_purged_total",
+    help: "Total documents purged by retention sweeps.",
+    labelNames: ["sweep"],
+  });
+  retentionDocsPurgedTotal.inc({ sweep: "leveldb" }, 0);
+  retentionDocsPurgedTotal.inc({ sweep: "tombstone" }, 0);
+
+  const retentionSweepErrorsTotal = createCounter<"sweep">({
+    name: "sync_server_retention_sweep_errors_total",
+    help: "Total retention sweep errors.",
+    labelNames: ["sweep"],
+  });
+  retentionSweepErrorsTotal.inc({ sweep: "leveldb" }, 0);
+  retentionSweepErrorsTotal.inc({ sweep: "tombstone" }, 0);
+
+  const persistenceInfo = createGauge<"backend" | "encryption">({
+    name: "sync_server_persistence_info",
+    help:
+      "Persistence backend and at-rest encryption configuration (set to 1 for the active config).",
+    labelNames: ["backend", "encryption"],
+  });
+
+  const setPersistenceInfo: SyncServerMetrics["setPersistenceInfo"] = (params) => {
+    persistenceInfo.reset();
+    persistenceInfo.set(
+      {
+        backend: params.backend,
+        encryption: params.encryptionEnabled ? "on" : "off",
+      },
+      1
+    );
   };
 
   return {
     registry,
-    wsConnectionsTotal: noopCounter,
-    wsConnectionsCurrent: noopGauge,
-    wsConnectionsRejectedTotal: noopCounter as Counter<"reason">,
-    wsClosesTotal: noopCounter as Counter<"code">,
-    wsMessagesRateLimitedTotal: noopCounter,
-    wsMessagesTooLargeTotal: noopCounter,
-    retentionSweepsTotal: noopCounter as Counter<"sweep">,
-    retentionDocsPurgedTotal: noopCounter as Counter<"sweep">,
-    retentionSweepErrorsTotal: noopCounter as Counter<"sweep">,
-    persistenceInfo: noopGauge as Gauge<"backend" | "encryption">,
-    setPersistenceInfo: () => {
-      // noop
-    },
-    metricsText: async () => "",
+    wsConnectionsTotal,
+    wsConnectionsCurrent,
+    wsConnectionsRejectedTotal,
+    wsClosesTotal,
+    wsMessagesRateLimitedTotal,
+    wsMessagesTooLargeTotal,
+    retentionSweepsTotal,
+    retentionDocsPurgedTotal,
+    retentionSweepErrorsTotal,
+    persistenceInfo,
+    setPersistenceInfo,
+    metricsText: async () => await registry.metrics(),
   };
 }
 
@@ -120,7 +335,7 @@ export type SyncServerMetrics = {
 
 export function createSyncServerMetrics(): SyncServerMetrics {
   const promClient = loadPromClient();
-  if (!promClient) return createNoopMetrics();
+  if (!promClient) return createFallbackMetrics();
 
   const registry = new promClient.Registry();
   registry.setDefaultLabels({ service: "sync-server" });

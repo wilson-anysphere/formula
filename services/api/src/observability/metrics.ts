@@ -12,6 +12,7 @@ export type ApiMetrics = {
   authFailuresTotal: Counter<"reason">;
   rateLimitedTotal: Counter<"route" | "reason">;
   dataResidencyBlockedTotal: Counter<"operation">;
+  syncTokenIntrospectFailuresTotal: Counter;
   siemBatchesTotal: Counter<"status">;
   siemEventsTotal: Counter<"status">;
   siemBatchDurationSeconds: Histogram;
@@ -97,6 +98,12 @@ export function createMetrics(): ApiMetrics {
     registers: [registry]
   });
 
+  const syncTokenIntrospectFailuresTotal = new Counter({
+    name: "sync_token_introspect_failures_total",
+    help: "Sync token introspection failures",
+    registers: [registry]
+  });
+
   const siemBatchesTotal = new Counter({
     name: "siem_batches_total",
     help: "SIEM export batches processed",
@@ -133,6 +140,7 @@ export function createMetrics(): ApiMetrics {
     authFailuresTotal,
     rateLimitedTotal,
     dataResidencyBlockedTotal,
+    syncTokenIntrospectFailuresTotal,
     siemBatchesTotal,
     siemEventsTotal,
     siemBatchDurationSeconds,

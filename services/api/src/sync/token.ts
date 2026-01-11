@@ -31,3 +31,47 @@ export function signSyncToken(params: {
   });
   return { token, expiresAt };
 }
+
+function isDocumentRole(value: unknown): value is DocumentRole {
+  return value === "owner" || value === "admin" || value === "editor" || value === "commenter" || value === "viewer";
+}
+
+export function verifySyncToken(params: { token: string; secret: string }): SyncTokenClaims {
+  const jwt = loadJwt();
+  const verified = jwt.verify(params.token, params.secret, {
+    algorithms: ["HS256"],
+    audience: "formula-sync"
+  });
+
+  if (!verified || typeof verified !== "object") {
+    throw new Error("invalid_sync_token");
+  }
+
+  const payload = verified as Record<string, unknown>;
+  const sub = payload.sub;
+  const docId = payload.docId;
+  const orgId = payload.orgId;
+  const role = payload.role;
+  const sessionId = payload.sessionId;
+
+  if (typeof sub !== "string" || sub.length === 0) throw new Error("invalid_sync_token");
+  if (typeof docId !== "string" || docId.length === 0) throw new Error("invalid_sync_token");
+  if (typeof orgId !== "string" || orgId.length === 0) throw new Error("invalid_sync_token");
+  if (!isDocumentRole(role)) throw new Error("invalid_sync_token");
+  if (sessionId !== undefined && (typeof sessionId !== "string" || sessionId.length === 0)) {
+    throw new Error("invalid_sync_token");
+  }
+
+  const claims: SyncTokenClaims = {
+    sub,
+    docId,
+    orgId,
+    role
+  };
+
+  if (sessionId !== undefined) {
+    claims.sessionId = sessionId;
+  }
+
+  return claims;
+}

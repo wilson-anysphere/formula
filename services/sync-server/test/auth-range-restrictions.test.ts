@@ -18,7 +18,7 @@ function signJwt(payload: Record<string, unknown>): string {
 
 const auth: AuthMode = { mode: "jwt-hs256", secret: JWT_SECRET, audience: JWT_AUDIENCE };
 
-test("authenticateRequest accepts JWT rangeRestrictions claim", () => {
+test("authenticateRequest accepts JWT rangeRestrictions claim", async () => {
   const docId = "doc-1";
   const token = signJwt({
     sub: "u1",
@@ -38,7 +38,7 @@ test("authenticateRequest accepts JWT rangeRestrictions claim", () => {
     ],
   });
 
-  const ctx = authenticateRequest(auth, token, docId);
+  const ctx = await authenticateRequest(auth, token, docId);
   assert.equal(ctx.userId, "u1");
   assert.equal(ctx.docId, docId);
   assert.equal(ctx.role, "editor");
@@ -46,7 +46,7 @@ test("authenticateRequest accepts JWT rangeRestrictions claim", () => {
   assert.equal(ctx.rangeRestrictions.length, 1);
 });
 
-test("authenticateRequest accepts rangeRestrictions sheetName alias", () => {
+test("authenticateRequest accepts rangeRestrictions sheetName alias", async () => {
   const docId = "doc-1b";
   const token = signJwt({
     sub: "u1",
@@ -64,12 +64,12 @@ test("authenticateRequest accepts rangeRestrictions sheetName alias", () => {
     ],
   });
 
-  const ctx = authenticateRequest(auth, token, docId);
+  const ctx = await authenticateRequest(auth, token, docId);
   assert.ok(Array.isArray(ctx.rangeRestrictions));
   assert.equal(ctx.rangeRestrictions.length, 1);
 });
 
-test("authenticateRequest rejects rangeRestrictions when it is not an array", () => {
+test("authenticateRequest rejects rangeRestrictions when it is not an array", async () => {
   const docId = "doc-2";
   const token = signJwt({
     sub: "u1",
@@ -78,13 +78,13 @@ test("authenticateRequest rejects rangeRestrictions when it is not an array", ()
     rangeRestrictions: { not: "an-array" },
   });
 
-  assert.throws(
-    () => authenticateRequest(auth, token, docId),
+  await assert.rejects(
+    authenticateRequest(auth, token, docId),
     (err) => err instanceof AuthError && err.statusCode === 403
   );
 });
 
-test("authenticateRequest rejects invalid rangeRestrictions entries", () => {
+test("authenticateRequest rejects invalid rangeRestrictions entries", async () => {
   const docId = "doc-3";
   const token = signJwt({
     sub: "u1",
@@ -101,8 +101,8 @@ test("authenticateRequest rejects invalid rangeRestrictions entries", () => {
     ],
   });
 
-  assert.throws(
-    () => authenticateRequest(auth, token, docId),
+  await assert.rejects(
+    authenticateRequest(auth, token, docId),
     (err) => err instanceof AuthError && err.statusCode === 403
   );
 });

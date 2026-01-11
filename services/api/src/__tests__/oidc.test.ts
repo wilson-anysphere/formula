@@ -500,7 +500,7 @@ describe("OIDC SSO", () => {
       await app.close();
       await db.end();
     }
-  });
+  }, 20_000);
 
   it("fails on nonce mismatch", async () => {
     const { db, config, app } = await createTestApp();

@@ -13,6 +13,24 @@ export type AuthMode =
       secret: string;
       issuer?: string;
       audience?: string;
+    }
+  | {
+      mode: "introspect";
+      /**
+       * Base URL for the API internal endpoint (e.g. https://api.internal.example.com).
+       */
+      url: string;
+      /**
+       * Shared secret matching API `INTERNAL_ADMIN_TOKEN` (sent as `x-internal-admin-token`).
+       */
+      token: string;
+      cacheMs: number;
+      /**
+       * If true, allow connections when the introspection endpoint is unavailable.
+       *
+       * This is only honored in non-production environments.
+       */
+      failOpen: boolean;
     };
 
 export type SyncServerConfig = {
@@ -217,8 +235,14 @@ export function loadConfigFromEnv(): SyncServerConfig {
     0
   );
 
+  const authModeEnv = process.env.SYNC_SERVER_AUTH_MODE?.trim();
   const opaqueToken = process.env.SYNC_SERVER_AUTH_TOKEN;
   const jwtSecret = process.env.SYNC_SERVER_JWT_SECRET;
+  const introspectUrl = process.env.SYNC_SERVER_INTROSPECT_URL;
+  const introspectToken = process.env.SYNC_SERVER_INTROSPECT_TOKEN;
+  const introspectCacheMs = envInt(process.env.SYNC_SERVER_INTROSPECT_CACHE_MS, 30_000);
+  const introspectFailOpenEnv = envBool(process.env.SYNC_SERVER_INTROSPECT_FAIL_OPEN, false);
+  const introspectFailOpen = nodeEnv === "production" ? false : introspectFailOpenEnv;
 
   const internalAdminTokenEnv = process.env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN;
   const internalAdminToken =
@@ -236,7 +260,36 @@ export function loadConfigFromEnv(): SyncServerConfig {
         : defaultTombstoneTtlMs;
 
   let auth: AuthMode;
-  if (opaqueToken) {
+  if (authModeEnv === "introspect") {
+    if (!introspectUrl || introspectUrl.trim().length === 0) {
+      throw new Error("SYNC_SERVER_AUTH_MODE=introspect requires SYNC_SERVER_INTROSPECT_URL");
+    }
+    if (!introspectToken || introspectToken.trim().length === 0) {
+      throw new Error("SYNC_SERVER_AUTH_MODE=introspect requires SYNC_SERVER_INTROSPECT_TOKEN");
+    }
+    auth = {
+      mode: "introspect",
+      url: introspectUrl,
+      token: introspectToken,
+      cacheMs: introspectCacheMs,
+      failOpen: introspectFailOpen,
+    };
+  } else if (authModeEnv === "opaque") {
+    if (!opaqueToken) {
+      throw new Error("SYNC_SERVER_AUTH_MODE=opaque requires SYNC_SERVER_AUTH_TOKEN");
+    }
+    auth = { mode: "opaque", token: opaqueToken };
+  } else if (authModeEnv === "jwt-hs256" || authModeEnv === "jwt") {
+    if (!jwtSecret) {
+      throw new Error("SYNC_SERVER_AUTH_MODE=jwt-hs256 requires SYNC_SERVER_JWT_SECRET");
+    }
+    auth = {
+      mode: "jwt-hs256",
+      secret: jwtSecret,
+      issuer: process.env.SYNC_SERVER_JWT_ISSUER,
+      audience: process.env.SYNC_SERVER_JWT_AUDIENCE ?? "formula-sync",
+    };
+  } else if (opaqueToken) {
     auth = { mode: "opaque", token: opaqueToken };
   } else if (jwtSecret) {
     auth = {
@@ -248,7 +301,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
   } else {
     if (nodeEnv === "production") {
       throw new Error(
-        "Auth is required in production. Set SYNC_SERVER_AUTH_TOKEN or SYNC_SERVER_JWT_SECRET."
+        "Auth is required in production. Set SYNC_SERVER_AUTH_TOKEN, SYNC_SERVER_JWT_SECRET, or SYNC_SERVER_AUTH_MODE=introspect."
       );
     }
     // Dev default: force auth (still), but with a known token.
