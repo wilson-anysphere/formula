@@ -288,6 +288,13 @@
         border-radius: 6px;
         cursor: pointer;
       }
+
+      .statusbar select {
+        padding: 4px 8px;
+        border: 1px solid #d4d4d4;
+        background: #ffffff;
+        border-radius: 6px;
+      }
     </style>
   </head>
   <body>
@@ -314,6 +321,10 @@
          <div>
            Active:
            <code data-testid="active-cell">A1</code>
+         </div>
+         <div>
+           Sheet:
+           <select data-testid="sheet-switcher"></select>
          </div>
          <div>
            Selection:

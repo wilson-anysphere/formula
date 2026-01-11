@@ -5,7 +5,8 @@ test.describe("formula bar editing + range insertion", () => {
     await page.goto("/");
 
     // Seed numeric inputs in A1 and A2 (so SUM has a visible result).
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    // Click within the first grid cell (accounting for row/column headers).
+    await page.click("#grid", { position: { x: 53, y: 29 } });
     await page.keyboard.press("F2");
     const cellEditor = page.locator("textarea.cell-editor");
     await cellEditor.fill("1");
@@ -49,7 +50,7 @@ test.describe("formula bar editing + range insertion", () => {
     await page.goto("/");
 
     // Seed A1 = 0.
-    await page.click("#grid", { position: { x: 5, y: 5 } });
+    await page.click("#grid", { position: { x: 53, y: 29 } });
     await page.keyboard.press("F2");
     const cellEditor = page.locator("textarea.cell-editor");
     await cellEditor.fill("0");

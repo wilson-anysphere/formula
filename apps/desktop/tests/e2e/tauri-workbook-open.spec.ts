@@ -1,0 +1,90 @@
+import { expect, test } from "@playwright/test";
+
+test.describe("tauri workbook integration", () => {
+  test("file-dropped event opens a workbook and populates the document", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, any> = {};
+      (window as any).__tauriListeners = listeners;
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            switch (cmd) {
+              case "open_workbook":
+                return {
+                  path: args?.path ?? null,
+                  origin_path: args?.path ?? null,
+                  sheets: [{ id: "Sheet1", name: "Sheet1" }]
+                };
+
+              case "get_range": {
+                const startRow = Number(args?.start_row ?? 0);
+                const endRow = Number(args?.end_row ?? startRow);
+                const startCol = Number(args?.start_col ?? 0);
+                const endCol = Number(args?.end_col ?? startCol);
+                const rows = Math.max(0, endRow - startRow + 1);
+                const cols = Math.max(0, endCol - startCol + 1);
+
+                const values = Array.from({ length: rows }, (_v, r) =>
+                  Array.from({ length: cols }, (_w, c) => {
+                    const row = startRow + r;
+                    const col = startCol + c;
+                    if (row === 0 && col === 0) {
+                      return { value: "Hello", formula: null, display_value: "Hello" };
+                    }
+                    return { value: null, formula: null, display_value: "" };
+                  })
+                );
+
+                return { values, start_row: startRow, start_col: startCol };
+              }
+
+              case "set_cell":
+              case "set_range":
+              case "save_workbook":
+                return null;
+
+              default:
+                throw new Error(`Unexpected invoke: ${cmd} ${JSON.stringify(args)}`);
+            }
+          }
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            listeners[name] = handler;
+            return () => {
+              delete listeners[name];
+            };
+          }
+        },
+        window: {
+          getCurrentWebviewWindow: () => ({
+            hide: async () => {
+              (window as any).__tauriHidden = true;
+            },
+            close: async () => {
+              (window as any).__tauriClosed = true;
+            }
+          })
+        }
+      };
+    });
+
+    await page.goto("/");
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await page.waitForFunction(() => (window as any).__formulaApp.getCellValueA1("A1") === "Hello");
+
+    await expect(page.getByTestId("sheet-switcher")).toHaveValue("Sheet1");
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await expect(page.getByTestId("active-value")).toHaveText("Hello");
+
+    const a1 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1).toBe("Hello");
+  });
+});
+

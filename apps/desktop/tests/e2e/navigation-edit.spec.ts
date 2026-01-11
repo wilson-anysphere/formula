@@ -84,6 +84,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     expect(recalcAfterCancel).toBe(recalcAfterCommit);
 
     const a2Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2"));
+    // A2 is part of the seeded demo chart data; cancel should restore the original value.
     expect(a2Value).toBe("A");
     await expect(page.getByTestId("active-cell")).toHaveText("A2");
 

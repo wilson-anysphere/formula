@@ -10,10 +10,12 @@ import { getPanelTitle, PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
 import { renderMacroRunner, TauriMacroBackend } from "./macros";
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
+import { installUnsavedChangesPrompt } from "./document/index.js";
 import { DocumentWorkbookAdapter } from "./search/documentWorkbookAdapter.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
+import { TauriWorkbookBackend, type RangeCellEdit, type WorkbookInfo } from "./tauri/workbookBackend";
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -38,6 +40,9 @@ if (!openComments) {
 }
 
 const app = new SpreadsheetApp(gridRoot, { activeCell, selectionRange, activeValue }, { formulaBar: formulaBarRoot });
+// Treat the seeded demo workbook as an initial "saved" baseline so web reloads
+// and Playwright tests aren't blocked by unsaved-changes prompts.
+app.getDocument().markSaved();
 app.focus();
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
 
@@ -462,6 +467,335 @@ registerFindReplaceShortcuts({
   setActiveCell: ({ sheetName, row, col }) => app.activateCell({ sheetId: sheetName, row, col }),
   selectRange: ({ sheetName, range }) => app.selectRange({ sheetId: sheetName, range })
 });
+
+installUnsavedChangesPrompt(window, app.getDocument());
+
+const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
+if (!sheetSwitcher) {
+  throw new Error("Missing sheet switcher element");
+}
+
+function renderSheetSwitcher(sheets: { id: string; name: string }[], activeId: string) {
+  sheetSwitcher.replaceChildren();
+  for (const sheet of sheets) {
+    const option = document.createElement("option");
+    option.value = sheet.id;
+    option.textContent = sheet.name;
+    sheetSwitcher.appendChild(option);
+  }
+  sheetSwitcher.value = activeId;
+}
+
+renderSheetSwitcher([{ id: app.getCurrentSheetId(), name: app.getCurrentSheetId() }], app.getCurrentSheetId());
+sheetSwitcher.addEventListener("change", () => {
+  app.activateSheet(sheetSwitcher.value);
+  app.focus();
+});
+
+type TauriListen = (event: string, handler: (event: any) => void) => Promise<() => void>;
+
+function getTauriListen(): TauriListen {
+  const listen = (globalThis as any).__TAURI__?.event?.listen as TauriListen | undefined;
+  if (!listen) {
+    throw new Error("Tauri event API not available");
+  }
+  return listen;
+}
+
+function getTauriWindowHandle(): any {
+  const winApi = (globalThis as any).__TAURI__?.window;
+  if (!winApi) {
+    throw new Error("Tauri window API not available");
+  }
+
+  // Tauri v2 exposes window handles via helper functions; keep this flexible since
+  // we intentionally avoid a hard dependency on `@tauri-apps/api`.
+  const handle =
+    (typeof winApi.getCurrentWebviewWindow === "function" ? winApi.getCurrentWebviewWindow() : null) ??
+    (typeof winApi.getCurrentWindow === "function" ? winApi.getCurrentWindow() : null) ??
+    (typeof winApi.getCurrent === "function" ? winApi.getCurrent() : null) ??
+    winApi.appWindow ??
+    null;
+
+  if (!handle) {
+    throw new Error("Tauri window handle not available");
+  }
+  return handle;
+}
+
+async function hideTauriWindow(): Promise<void> {
+  try {
+    const win = getTauriWindowHandle();
+    if (typeof win.hide === "function") {
+      await win.hide();
+      return;
+    }
+    if (typeof win.close === "function") {
+      await win.close();
+      return;
+    }
+  } catch {
+    // Ignore window API errors and fall back to the browser call below.
+  }
+  // Best-effort fallback; browsers may ignore this, but the call is harmless.
+  window.close();
+}
+
+function encodeDocumentSnapshot(snapshot: unknown): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(snapshot));
+}
+
+function normalizeSheetList(info: WorkbookInfo): { id: string; name: string }[] {
+  const sheets = Array.isArray(info.sheets) ? info.sheets : [];
+  return sheets
+    .map((s) => ({ id: String((s as any).id ?? ""), name: String((s as any).name ?? (s as any).id ?? "") }))
+    .filter((s) => s.id.trim() !== "");
+}
+
+function cellEditFromDelta(after: { value: unknown; formula: string | null }): RangeCellEdit {
+  if (after.formula != null && String(after.formula).trim() !== "") {
+    return { value: null, formula: String(after.formula) };
+  }
+  return { value: after.value ?? null, formula: null };
+}
+
+let tauriBackend: TauriWorkbookBackend | null = null;
+let activeWorkbook: WorkbookInfo | null = null;
+let suppressBackendSync = false;
+let pendingBackendSync: Promise<void> = Promise.resolve();
+
+function enqueueBackendSync(op: () => Promise<void>): void {
+  pendingBackendSync = pendingBackendSync.then(op).catch((err) => {
+    console.error("Failed to sync workbook changes to host:", err);
+  });
+}
+
+async function syncDeltasToBackend(deltas: any[]): Promise<void> {
+  if (!tauriBackend) return;
+  if (!activeWorkbook) return;
+  if (!Array.isArray(deltas) || deltas.length === 0) return;
+
+  /** @type {Map<string, any[]>} */
+  const bySheet = new Map<string, any[]>();
+  for (const delta of deltas) {
+    const sheetId = String(delta?.sheetId ?? "");
+    if (!sheetId) continue;
+    let list = bySheet.get(sheetId);
+    if (!list) {
+      list = [];
+      bySheet.set(sheetId, list);
+    }
+    list.push(delta);
+  }
+
+  for (const [sheetId, list] of bySheet) {
+    let minRow = Infinity;
+    let maxRow = -Infinity;
+    let minCol = Infinity;
+    let maxCol = -Infinity;
+    for (const d of list) {
+      const row = Number(d?.row);
+      const col = Number(d?.col);
+      if (!Number.isInteger(row) || row < 0) continue;
+      if (!Number.isInteger(col) || col < 0) continue;
+      minRow = Math.min(minRow, row);
+      maxRow = Math.max(maxRow, row);
+      minCol = Math.min(minCol, col);
+      maxCol = Math.max(maxCol, col);
+    }
+
+    if (!Number.isFinite(minRow) || !Number.isFinite(minCol)) continue;
+
+    const rows = maxRow - minRow + 1;
+    const cols = maxCol - minCol + 1;
+    const area = rows * cols;
+
+    // If the change set is a dense rectangle, batch with `set_range`.
+    if (area === list.length && area > 1 && area <= 10_000) {
+      const values: RangeCellEdit[][] = Array.from({ length: rows }, () =>
+        Array.from({ length: cols }, () => ({ value: null, formula: null })),
+      );
+
+      for (const d of list) {
+        const row = Number(d?.row);
+        const col = Number(d?.col);
+        const after = d?.after as { value: unknown; formula: string | null } | undefined;
+        if (!Number.isInteger(row) || row < 0) continue;
+        if (!Number.isInteger(col) || col < 0) continue;
+        if (!after) continue;
+        values[row - minRow][col - minCol] = cellEditFromDelta(after);
+      }
+
+      await tauriBackend.setRange({
+        sheetId,
+        startRow: minRow,
+        startCol: minCol,
+        endRow: maxRow,
+        endCol: maxCol,
+        values
+      });
+      continue;
+    }
+
+    for (const d of list) {
+      const row = Number(d?.row);
+      const col = Number(d?.col);
+      const after = d?.after as { value: unknown; formula: string | null } | undefined;
+      if (!Number.isInteger(row) || row < 0) continue;
+      if (!Number.isInteger(col) || col < 0) continue;
+      if (!after) continue;
+      const edit = cellEditFromDelta(after);
+      await tauriBackend.setCell({
+        sheetId,
+        row,
+        col,
+        value: edit.value,
+        formula: edit.formula
+      });
+    }
+  }
+}
+
+async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
+  if (!tauriBackend) {
+    throw new Error("Workbook backend not available");
+  }
+
+  const doc = app.getDocument();
+  const sheets = normalizeSheetList(info);
+  if (sheets.length === 0) {
+    throw new Error("Workbook contains no sheets");
+  }
+
+  const MAX_COLS = 200;
+  const CHUNK_ROWS = 200;
+  const MAX_ROWS = 2000;
+  const EMPTY_CHUNKS_BEFORE_STOP = 2;
+
+  const snapshotSheets: Array<{ id: string; cells: any[] }> = [];
+
+  for (const sheet of sheets) {
+    const cells: Array<{ row: number; col: number; value: unknown | null; formula: string | null; format: null }> = [];
+
+    let seenData = false;
+    let emptyChunks = 0;
+
+    for (let startRow = 0; startRow < MAX_ROWS; startRow += CHUNK_ROWS) {
+      const range = await tauriBackend.getRange({
+        sheetId: sheet.id,
+        startRow,
+        startCol: 0,
+        endRow: startRow + CHUNK_ROWS - 1,
+        endCol: MAX_COLS - 1
+      });
+
+      const rows = Array.isArray(range?.values) ? range.values : [];
+      let chunkHasData = false;
+
+      for (let r = 0; r < rows.length; r++) {
+        const rowValues = Array.isArray(rows[r]) ? rows[r] : [];
+        for (let c = 0; c < rowValues.length; c++) {
+          const cell = rowValues[c] as any;
+          const formula = typeof cell?.formula === "string" ? cell.formula : null;
+          const value = cell?.value ?? null;
+          if (formula == null && value == null) continue;
+
+          chunkHasData = true;
+          cells.push({
+            row: startRow + r,
+            col: c,
+            value: formula != null ? null : value,
+            formula,
+            format: null
+          });
+        }
+      }
+
+      if (chunkHasData) {
+        seenData = true;
+        emptyChunks = 0;
+      } else if (seenData) {
+        emptyChunks += 1;
+        if (emptyChunks >= EMPTY_CHUNKS_BEFORE_STOP) break;
+      }
+    }
+
+    snapshotSheets.push({ id: sheet.id, cells });
+  }
+
+  const snapshot = encodeDocumentSnapshot({ schemaVersion: 1, sheets: snapshotSheets });
+  doc.applyState(snapshot);
+
+  // Ensure sheets exist even if they were empty (DocumentController lazily creates models).
+  for (const sheet of sheets) {
+    doc.getCell(sheet.id, { row: 0, col: 0 });
+  }
+
+  doc.markSaved();
+
+  const firstSheetId = sheets[0].id;
+  renderSheetSwitcher(sheets, firstSheetId);
+  app.activateSheet(firstSheetId);
+  app.activateCell({ sheetId: firstSheetId, row: 0, col: 0 });
+  app.refresh();
+}
+
+async function handleSave(): Promise<void> {
+  if (!tauriBackend) return;
+  if (!activeWorkbook) return;
+
+  await pendingBackendSync;
+  await tauriBackend.saveWorkbook();
+  app.getDocument().markSaved();
+}
+
+try {
+  tauriBackend = new TauriWorkbookBackend();
+
+  const listen = getTauriListen();
+  void listen("file-dropped", async (event) => {
+    const paths = (event as any)?.payload;
+    const first = Array.isArray(paths) ? paths[0] : null;
+    if (typeof first !== "string" || first.trim() === "") return;
+    suppressBackendSync = true;
+    pendingBackendSync = Promise.resolve();
+    try {
+      activeWorkbook = await tauriBackend!.openWorkbook(first);
+      await loadWorkbookIntoDocument(activeWorkbook);
+    } catch (err) {
+      console.error("Failed to open workbook:", err);
+      window.alert(`Failed to open workbook: ${String(err)}`);
+    } finally {
+      suppressBackendSync = false;
+    }
+  });
+
+  void listen("unsaved-changes", async () => {
+    const discard = window.confirm("You have unsaved changes. Discard them?");
+    if (discard) {
+      await hideTauriWindow();
+    }
+  });
+
+  app.getDocument().on("change", ({ deltas }: any) => {
+    if (!tauriBackend) return;
+    if (!activeWorkbook) return;
+    if (suppressBackendSync) return;
+    enqueueBackendSync(() => syncDeltasToBackend(deltas));
+  });
+
+  window.addEventListener("keydown", (e) => {
+    const isSaveCombo = (e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S");
+    if (!isSaveCombo) return;
+    e.preventDefault();
+    void handleSave().catch((err) => {
+      console.error("Failed to save workbook:", err);
+      window.alert(`Failed to save workbook: ${String(err)}`);
+    });
+  });
+} catch {
+  // Not running under Tauri; desktop host integration is unavailable.
+}
 
 // Expose a small API for Playwright assertions.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
