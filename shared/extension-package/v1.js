@@ -79,8 +79,12 @@ function readExtensionPackageV1(packageBytes) {
 }
 
 function safeJoin(baseDir, relPath) {
-  const normalized = relPath.replace(/\\/g, "/");
-  if (normalized.startsWith("/") || normalized.includes("..")) {
+  const normalized = String(relPath).replace(/\\/g, "/");
+  if (normalized.startsWith("/") || normalized.includes("\0")) {
+    throw new Error(`Invalid path in extension package: ${relPath}`);
+  }
+  const parts = normalized.split("/");
+  if (parts.some((p) => p === "" || p === "." || p === "..")) {
     throw new Error(`Invalid path in extension package: ${relPath}`);
   }
   const full = path.join(baseDir, normalized);

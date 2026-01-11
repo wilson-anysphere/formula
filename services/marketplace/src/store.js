@@ -167,7 +167,9 @@ function isAllowedFilePath(filePath) {
   const normalized = String(filePath || "").replace(/\\/g, "/");
   if (normalized.length === 0) return false;
   if (normalized.startsWith("/")) return false;
-  if (normalized.includes("..")) return false;
+  if (normalized.includes("\0")) return false;
+  const parts = normalized.split("/");
+  if (parts.some((p) => p === "" || p === "." || p === "..")) return false;
 
   const lower = normalized.toLowerCase();
   const ext = path.extname(lower);

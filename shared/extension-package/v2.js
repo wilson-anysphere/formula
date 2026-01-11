@@ -216,6 +216,10 @@ function* iterateTarEntries(archiveBytes) {
     const size = parseTarOctal(header, 124, 12);
     const typeflag = parseTarString(header, 156, 1) || "0";
 
+    if (!Number.isFinite(size) || size < 0) {
+      throw new Error(`Invalid tar entry size: ${fullName}`);
+    }
+
     const dataStart = offset;
     const dataEnd = dataStart + size;
     if (dataEnd > archiveBytes.length) {
@@ -230,10 +234,7 @@ function* iterateTarEntries(archiveBytes) {
 }
 
 function safeJoin(baseDir, relPath) {
-  const normalized = relPath.replace(/\\/g, "/");
-  if (normalized.startsWith("/") || normalized.includes("..")) {
-    throw new Error(`Invalid path in extension package: ${relPath}`);
-  }
+  const normalized = normalizePath(relPath);
   const full = path.join(baseDir, normalized);
   const relative = path.relative(baseDir, full);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
