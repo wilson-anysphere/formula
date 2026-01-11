@@ -118,6 +118,9 @@ describe("API e2e: audit ingestion + streaming", () => {
     config = {
       port: 0,
       databaseUrl: "postgres://unused",
+      publicBaseUrl: "http://localhost",
+      publicBaseUrlHostAllowlist: ["localhost"],
+      trustProxy: false,
       sessionCookieName: "formula_session",
       sessionTtlSeconds: 60 * 60,
       cookieSecure: false,
@@ -130,7 +133,8 @@ describe("API e2e: audit ingestion + streaming", () => {
       },
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
-      retentionSweepIntervalMs: null
+      retentionSweepIntervalMs: null,
+      oidcAuthStateCleanupIntervalMs: null
     };
 
     app = buildApp({ db, config });

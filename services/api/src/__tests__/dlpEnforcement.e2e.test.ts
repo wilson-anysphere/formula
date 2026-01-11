@@ -51,6 +51,9 @@ describe("API e2e: DLP enforcement on external share links", () => {
     config = {
       port: 0,
       databaseUrl: "postgres://unused",
+      publicBaseUrl: "http://localhost",
+      publicBaseUrlHostAllowlist: ["localhost"],
+      trustProxy: false,
       sessionCookieName: "formula_session",
       sessionTtlSeconds: 60 * 60,
       cookieSecure: false,
@@ -64,6 +67,7 @@ describe("API e2e: DLP enforcement on external share links", () => {
       localKmsMasterKey: "test-local-kms-master-key",
       awsKmsEnabled: false,
       retentionSweepIntervalMs: null,
+      oidcAuthStateCleanupIntervalMs: null,
     };
 
     app = buildApp({ db, config });

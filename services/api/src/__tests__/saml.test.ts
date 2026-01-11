@@ -202,6 +202,8 @@ async function createTestApp(): Promise<{
     sessionTtlSeconds: 60 * 60,
     cookieSecure: false,
     publicBaseUrl: "http://localhost",
+    publicBaseUrlHostAllowlist: ["localhost"],
+    trustProxy: false,
     corsAllowedOrigins: [],
     syncTokenSecret: "test-sync-secret",
     syncTokenTtlSeconds: 60,
@@ -211,7 +213,8 @@ async function createTestApp(): Promise<{
     },
     localKmsMasterKey: "test-local-kms-master-key",
     awsKmsEnabled: false,
-    retentionSweepIntervalMs: null
+    retentionSweepIntervalMs: null,
+    oidcAuthStateCleanupIntervalMs: null
   };
 
   const app = buildApp({ db, config });
