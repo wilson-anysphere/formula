@@ -156,6 +156,28 @@ test("audit-core postgres adapter persists actor/correlation via details meta an
   assert.equal(reconstructed.resource.name, "User record");
   assert.ok(!("__audit" in reconstructed.details));
 
+  // Regression: some Postgres drivers/parsers may return jsonb columns as strings.
+  const reconstructedFromString = auditLogRowToAuditEvent({
+    id: event.id,
+    org_id: event.context.orgId,
+    user_id: event.context.userId ?? null,
+    user_email: event.context.userEmail ?? null,
+    event_type: event.eventType,
+    resource_type: event.resource.type,
+    resource_id: event.resource.id,
+    ip_address: event.context.ipAddress ?? null,
+    user_agent: event.context.userAgent ?? null,
+    session_id: event.context.sessionId ?? null,
+    success: event.success,
+    error_code: event.error.code ?? null,
+    error_message: event.error.message ?? null,
+    details: JSON.stringify(storedDetails),
+    created_at: event.timestamp
+  });
+  assert.equal(reconstructedFromString.actor.type, "anonymous");
+  assert.equal(reconstructedFromString.correlation.requestId, "req_1");
+  assert.ok(!("__audit" in reconstructedFromString.details));
+
   const exported = JSON.parse(serializeBatch([reconstructed]).body.toString("utf8"));
   assert.equal(exported[0].details.token, "[REDACTED]");
   assert.equal(exported[0].details.nested.password, "[REDACTED]");
