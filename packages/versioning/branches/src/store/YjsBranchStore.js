@@ -290,6 +290,13 @@ export class YjsBranchStore {
 
       this.#branches.delete(oldName);
       this.#branches.set(newName, next);
+
+      // Keep the global checked-out branch pointer consistent within the same
+      // transaction so other collaborators never observe a dangling
+      // `currentBranchName` that points at a non-existent branch.
+      if (this.#meta.get("currentBranchName") === oldName) {
+        this.#meta.set("currentBranchName", newName);
+      }
     });
   }
 
@@ -303,6 +310,12 @@ export class YjsBranchStore {
       if (!branchMap) return;
       if (String(branchMap.get("docId") ?? "") !== docId) return;
       this.#branches.delete(name);
+
+      // Defensive: if a caller bypasses BranchService and deletes the
+      // checked-out branch, fall back to main.
+      if (this.#meta.get("currentBranchName") === name) {
+        this.#meta.set("currentBranchName", "main");
+      }
     });
   }
 
