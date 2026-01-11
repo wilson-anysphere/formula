@@ -198,22 +198,24 @@ export class EngineGridProvider implements CellProvider {
         this.pendingPrefetchRanges = [];
         this.pendingPrefetchResolvers = [];
 
-        const merged = mergeRange0(ranges);
+        const coalesced = coalesceRange0(ranges);
+        const offset = this.headers ? 1 : 0;
 
-        const isCached = this.cache.isRangeCached(merged, this.sheet);
-        if (!isCached) {
+        for (const range of coalesced) {
+          const isCached = this.cache.isRangeCached(range, this.sheet);
+          if (isCached) continue;
+
           try {
-            await this.cache.prefetch(merged, this.sheet);
+            await this.cache.prefetch(range, this.sheet);
           } catch {
             // Engine fetch failures should not crash the grid; the next scroll/prefetch will retry.
           }
 
-          const offset = this.headers ? 1 : 0;
           this.queueInvalidation({
-            startRow: merged.startRow0 + offset,
-            endRow: merged.endRow0Exclusive + offset,
-            startCol: merged.startCol0 + offset,
-            endCol: merged.endCol0Exclusive + offset
+            startRow: range.startRow0 + offset,
+            endRow: range.endRow0Exclusive + offset,
+            startCol: range.startCol0 + offset,
+            endCol: range.endCol0Exclusive + offset
           });
         }
 
@@ -223,28 +225,62 @@ export class EngineGridProvider implements CellProvider {
       this.prefetchInFlight = null;
     });
 
-    return this.prefetchInFlight;
+  return this.prefetchInFlight;
   }
 }
 
-function mergeRange0(ranges: Range0[]): Range0 {
-  let startRow0 = Number.POSITIVE_INFINITY;
-  let endRow0Exclusive = 0;
-  let startCol0 = Number.POSITIVE_INFINITY;
-  let endCol0Exclusive = 0;
+function coalesceRange0(ranges: Range0[]): Range0[] {
+  const normalized = ranges
+    .filter((r) => r.endRow0Exclusive > r.startRow0 && r.endCol0Exclusive > r.startCol0)
+    .map((r) => ({
+      startRow0: Math.min(r.startRow0, r.endRow0Exclusive),
+      endRow0Exclusive: Math.max(r.startRow0, r.endRow0Exclusive),
+      startCol0: Math.min(r.startCol0, r.endCol0Exclusive),
+      endCol0Exclusive: Math.max(r.startCol0, r.endCol0Exclusive)
+    }));
 
-  for (const range of ranges) {
-    startRow0 = Math.min(startRow0, range.startRow0);
-    endRow0Exclusive = Math.max(endRow0Exclusive, range.endRow0Exclusive);
-    startCol0 = Math.min(startCol0, range.startCol0);
-    endCol0Exclusive = Math.max(endCol0Exclusive, range.endCol0Exclusive);
+  let pending = normalized;
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    const next: Range0[] = [];
+
+    for (const range of pending) {
+      let merged = range;
+
+      for (let i = 0; i < next.length; ) {
+        const other = next[i];
+        if (canMergeRange0(merged, other)) {
+          merged = {
+            startRow0: Math.min(merged.startRow0, other.startRow0),
+            endRow0Exclusive: Math.max(merged.endRow0Exclusive, other.endRow0Exclusive),
+            startCol0: Math.min(merged.startCol0, other.startCol0),
+            endCol0Exclusive: Math.max(merged.endCol0Exclusive, other.endCol0Exclusive)
+          };
+          next.splice(i, 1);
+          changed = true;
+          continue;
+        }
+        i++;
+      }
+
+      next.push(merged);
+    }
+
+    pending = next;
   }
 
-  if (!Number.isFinite(startRow0) || !Number.isFinite(startCol0)) {
-    throw new Error("mergeRange0: expected at least one range");
-  }
+  return pending;
+}
 
-  return { startRow0, endRow0Exclusive, startCol0, endCol0Exclusive };
+function canMergeRange0(a: Range0, b: Range0): boolean {
+  const rowOverlap = a.startRow0 < b.endRow0Exclusive && b.startRow0 < a.endRow0Exclusive;
+  const colOverlap = a.startCol0 < b.endCol0Exclusive && b.startCol0 < a.endCol0Exclusive;
+  const rowNoGap = a.startRow0 <= b.endRow0Exclusive && b.startRow0 <= a.endRow0Exclusive;
+  const colNoGap = a.startCol0 <= b.endCol0Exclusive && b.startCol0 <= a.endCol0Exclusive;
+
+  return (rowOverlap && colNoGap) || (colOverlap && rowNoGap);
 }
 
 function coalesceRanges(ranges: CellRange[]): CellRange[] {

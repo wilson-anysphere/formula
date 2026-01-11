@@ -134,6 +134,34 @@ describe("EngineGridProvider", () => {
     expect(updates).toEqual([{ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 2 } }]);
   });
 
+  it("does not merge disjoint prefetch ranges into a huge bounding box", async () => {
+    const values = new Map<string, CellScalar>();
+    values.set("Sheet1!A1", 1);
+    values.set("Sheet1!A101", 2);
+
+    const engine = new FakeEngine(values) as any;
+    const cache = new EngineCellCache(engine);
+    const provider = new EngineGridProvider({ cache, rowCount: 1_000, colCount: 10 });
+
+    const updates: CellProviderUpdate[] = [];
+    provider.subscribe((update) => updates.push(update));
+
+    const p1 = provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+    const p2 = provider.prefetchAsync({ startRow: 100, endRow: 101, startCol: 0, endCol: 1 });
+    await Promise.all([p1, p2]);
+    await flushMicrotasks();
+
+    expect(engine.calls.map((c) => c.range).sort()).toEqual(["A1", "A101"]);
+
+    expect(provider.getCell(0, 0)?.value).toBe(1);
+    expect(provider.getCell(100, 0)?.value).toBe(2);
+
+    expect(updates).toHaveLength(2);
+    const ranges = updates.map((u) => (u.type === "cells" ? u.range : null)).filter(Boolean);
+    expect(ranges).toContainEqual({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+    expect(ranges).toContainEqual({ startRow: 100, endRow: 101, startCol: 0, endCol: 1 });
+  });
+
   it("supports header row/col offset mode", async () => {
     const values = new Map<string, CellScalar>();
     values.set("Sheet1!A1", 1);
