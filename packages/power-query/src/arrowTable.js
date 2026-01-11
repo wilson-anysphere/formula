@@ -171,6 +171,11 @@ export class ArrowTableAdapter {
     this.table = table;
     this.arrowTypes = (table.schema?.fields ?? []).map((field) => String(field.type));
 
+    const fieldCount = table.schema?.fields?.length;
+    if (Array.isArray(columns) && typeof fieldCount === "number" && columns.length !== fieldCount) {
+      throw new Error(`ArrowTableAdapter column metadata length mismatch (expected ${fieldCount}, got ${columns.length})`);
+    }
+
     /** @type {Column[]} */
     this.columns = (columns ?? columnsFromArrow(table)).map((c) => ({ name: c.name, type: c.type ?? "any" }));
 
