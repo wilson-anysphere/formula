@@ -270,6 +270,20 @@ class ExtensionHost {
     this._broadcastEvent("workbookOpened", { workbook: this._getWorkbookSnapshot() });
   }
 
+  async startupExtension(extensionId) {
+    const id = String(extensionId);
+    const extension = this._extensions.get(id);
+    if (!extension) throw new Error(`Extension not loaded: ${id}`);
+
+    if ((extension.manifest.activationEvents ?? []).includes("onStartupFinished") && !extension.active) {
+      await this._activateExtension(extension, "onStartupFinished");
+      // Mirror the behavior of `startup()` but only for this extension: newly-activated
+      // startup extensions should receive the initial workbook event, without re-broadcasting
+      // it to every other already-running extension.
+      this._sendEventToExtension(extension, "workbookOpened", { workbook: this._getWorkbookSnapshot() });
+    }
+  }
+
   _getWorkbookSnapshot() {
     const sheets =
       typeof this._spreadsheet.listSheets === "function" ? this._spreadsheet.listSheets() : [];

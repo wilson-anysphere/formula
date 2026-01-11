@@ -146,11 +146,15 @@ test("desktop runtime: auto-load installed extensions + hot reload on update", a
     const distText = await fs.readFile(distPath, "utf8");
     const sumValuesIdx = distText.indexOf("function sumValues");
     assert.ok(sumValuesIdx >= 0);
-    const distBefore = distText.slice(0, sumValuesIdx);
-    const distAfter = distText.slice(sumValuesIdx);
-    const distAfterPatched = distAfter.replace("return sum;", "return sum + 1;");
-    assert.notEqual(distAfterPatched, distAfter);
-    await fs.writeFile(distPath, distBefore + distAfterPatched);
+    const sumValuesEnd = distText.indexOf("\n\nasync function getSelectionSum", sumValuesIdx);
+    assert.ok(sumValuesEnd >= 0);
+    const sumFn = distText.slice(sumValuesIdx, sumValuesEnd);
+    const needle = "return sum;";
+    const lastReturnIdx = sumFn.lastIndexOf(needle);
+    assert.ok(lastReturnIdx >= 0);
+    const sumFnPatched = sumFn.slice(0, lastReturnIdx) + "return sum + 1;" + sumFn.slice(lastReturnIdx + needle.length);
+    assert.notEqual(sumFnPatched, sumFn);
+    await fs.writeFile(distPath, distText.slice(0, sumValuesIdx) + sumFnPatched + distText.slice(sumValuesEnd));
 
     await publishExtension({
       extensionDir: extSourceV11,

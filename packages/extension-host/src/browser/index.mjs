@@ -523,6 +523,18 @@ class BrowserExtensionHost {
     this._broadcastEvent("workbookOpened", { workbook: await this._getActiveWorkbook() });
   }
 
+  async startupExtension(extensionId) {
+    const id = String(extensionId);
+    const extension = this._extensions.get(id);
+    if (!extension) throw new Error(`Extension not loaded: ${id}`);
+
+    if ((extension.manifest.activationEvents ?? []).includes("onStartupFinished") && !extension.active) {
+      await this._activateExtension(extension, "onStartupFinished");
+      const workbook = await this._getActiveWorkbook();
+      this._sendEventToExtension(extension, "workbookOpened", { workbook });
+    }
+  }
+
   async activateView(viewId) {
     const activationEvent = `onView:${viewId}`;
     const targets = [];

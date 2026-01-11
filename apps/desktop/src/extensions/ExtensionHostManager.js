@@ -177,6 +177,54 @@ export class ExtensionHostManager {
     this._started = false;
   }
 
+  async syncInstalledExtensions() {
+    const state = await this._loadInstalledState();
+    const installed = state.installed ?? {};
+    const installedIds = new Set(Object.keys(installed));
+
+    const loadedExtensions = this._host.listExtensions();
+    const loadedById = new Map(loadedExtensions.map((ext) => [ext.id, ext]));
+
+    const toUnload = [];
+    const toReload = [];
+    const toLoad = [];
+
+    for (const ext of loadedExtensions) {
+      if (!installedIds.has(ext.id)) {
+        toUnload.push(ext.id);
+        continue;
+      }
+
+      const expectedVersion = installed[ext.id]?.version;
+      const loadedVersion = ext.manifest?.version;
+      if (expectedVersion && loadedVersion && expectedVersion !== loadedVersion) {
+        toReload.push(ext.id);
+      }
+    }
+
+    for (const id of installedIds) {
+      if (!loadedById.has(id)) {
+        toLoad.push(id);
+      }
+    }
+
+    for (const id of toUnload) {
+      await this._host.unloadExtension(id);
+    }
+
+    for (const id of toReload) {
+      await this.reloadExtension(id);
+    }
+
+    for (const id of toLoad) {
+      const extensionPath = path.join(this.extensionsDir, id);
+      await this._host.loadExtension(extensionPath);
+      if (this._started && typeof this._host.startupExtension === "function") {
+        await this._host.startupExtension(id);
+      }
+    }
+  }
+
   async executeCommand(commandId, ...args) {
     return this._host.executeCommand(String(commandId), ...args);
   }
@@ -220,9 +268,7 @@ export class ExtensionHostManager {
     const extensionPath = path.join(this.extensionsDir, id);
     await this._host.loadExtension(extensionPath);
     if (this._started) {
-      // Ensure extensions that activate on `onStartupFinished` get a chance to run
-      // when they are installed/updated after the runtime has already started.
-      await this._host.startup();
+      await this._host.startupExtension?.(id);
     }
   }
 
