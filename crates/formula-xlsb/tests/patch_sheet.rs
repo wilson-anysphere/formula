@@ -448,6 +448,63 @@ fn patch_sheet_bin_can_update_formula_rgcb_bytes() {
 }
 
 #[test]
+fn cell_edit_with_formula_text_with_context_can_patch_rgcb_formulas() {
+    let ctx = formula_xlsb::workbook_context::WorkbookContext::default();
+
+    let encoded_123 =
+        encode_rgce_with_context("=SUM({1,2,3})", &ctx, CellCoord::new(0, 0)).expect("encode rgce");
+    assert!(
+        !encoded_123.rgcb.is_empty(),
+        "expected array formula encoding to produce rgcb bytes"
+    );
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("ArrayRgcb");
+    builder.set_cell_formula_num(
+        0,
+        0,
+        6.0,
+        encoded_123.rgce.clone(),
+        encoded_123.rgcb.clone(),
+    );
+
+    let xlsb_bytes = builder.build_bytes();
+    let mut zip = zip::ZipArchive::new(Cursor::new(xlsb_bytes)).expect("open in-memory xlsb zip");
+    let mut entry = zip
+        .by_name("xl/worksheets/sheet1.bin")
+        .expect("find sheet1.bin");
+    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
+
+    let edit = CellEdit::with_formula_text_with_context(
+        0,
+        0,
+        CellValue::Number(9.0),
+        "=SUM({4,5})",
+        &ctx,
+    )
+    .expect("encode formula with context");
+    let patched = patch_sheet_bin(&sheet_bin, &[edit]).expect("patch sheet bin");
+
+    let parsed = formula_xlsb::parse_sheet_bin_with_context(&mut Cursor::new(&patched), &[], &ctx)
+        .expect("parse patched sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 0))
+        .expect("A1 exists");
+    assert_eq!(cell.value, CellValue::Number(9.0));
+
+    let formula = cell.formula.as_ref().expect("formula metadata");
+    assert_eq!(formula.text.as_deref(), Some("SUM({4,5})"));
+
+    let encoded_45 =
+        encode_rgce_with_context("=SUM({4,5})", &ctx, CellCoord::new(0, 0)).expect("encode rgce");
+    assert_eq!(formula.rgce, encoded_45.rgce);
+    assert_eq!(formula.extra, encoded_45.rgcb);
+}
+
+#[test]
 fn patch_sheet_bin_preserves_formula_rgcb_when_updating_cached_value_only() {
     let ctx = formula_xlsb::workbook_context::WorkbookContext::default();
 
