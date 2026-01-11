@@ -48,6 +48,17 @@ interface Selection {
 }
 
 export type ScrollToCellAlign = "auto" | "start" | "center" | "end";
+interface GridRenderQuadrant {
+  originX: number;
+  originY: number;
+  rect: Rect;
+  minRow: number;
+  maxRowExclusive: number;
+  minCol: number;
+  maxColExclusive: number;
+  scrollBaseX: number;
+  scrollBaseY: number;
+}
 
 function isSameCellRange(a: CellRange | null, b: CellRange | null): boolean {
   if (a === b) return true;
@@ -188,6 +199,53 @@ export class CanvasGridRenderer {
     dirtyRects: { background: 0, content: 0, selection: 0, total: 0 },
     blitUsed: false
   };
+
+  private readonly gridQuadrantScratch: [GridRenderQuadrant, GridRenderQuadrant, GridRenderQuadrant, GridRenderQuadrant] = [
+    {
+      originX: 0,
+      originY: 0,
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+      minRow: 0,
+      maxRowExclusive: 0,
+      minCol: 0,
+      maxColExclusive: 0,
+      scrollBaseX: 0,
+      scrollBaseY: 0
+    },
+    {
+      originX: 0,
+      originY: 0,
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+      minRow: 0,
+      maxRowExclusive: 0,
+      minCol: 0,
+      maxColExclusive: 0,
+      scrollBaseX: 0,
+      scrollBaseY: 0
+    },
+    {
+      originX: 0,
+      originY: 0,
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+      minRow: 0,
+      maxRowExclusive: 0,
+      minCol: 0,
+      maxColExclusive: 0,
+      scrollBaseX: 0,
+      scrollBaseY: 0
+    },
+    {
+      originX: 0,
+      originY: 0,
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+      minRow: 0,
+      maxRowExclusive: 0,
+      minCol: 0,
+      maxColExclusive: 0,
+      scrollBaseX: 0,
+      scrollBaseY: 0
+    }
+  ];
 
   constructor(options: {
     provider: CellProvider;
@@ -887,50 +945,76 @@ export class CanvasGridRenderer {
     const frozenWidthPx = Math.round(viewport.frozenWidth * dpr);
     const frozenHeightPx = Math.round(viewport.frozenHeight * dpr);
 
-    const quadrants = [
-      {
-        rect: { x: frozenWidthPx, y: 0, width: widthPx - frozenWidthPx, height: frozenHeightPx },
-        shiftX: dx,
-        shiftY: 0
-      },
-      {
-        rect: { x: 0, y: frozenHeightPx, width: frozenWidthPx, height: heightPx - frozenHeightPx },
-        shiftX: 0,
-        shiftY: dy
-      },
-      {
-        rect: {
-          x: frozenWidthPx,
-          y: frozenHeightPx,
-          width: widthPx - frozenWidthPx,
-          height: heightPx - frozenHeightPx
-        },
-        shiftX: dx,
-        shiftY: dy
-      }
-    ];
-
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    for (const quadrant of quadrants) {
-      const { rect, shiftX, shiftY } = quadrant;
-      if (rect.width <= 0 || rect.height <= 0) continue;
-      if (shiftX === 0 && shiftY === 0) continue;
+    // Frozen rows + scrollable columns quadrant (top-right): horizontal-only shift.
+    {
+      const rectX = frozenWidthPx;
+      const rectY = 0;
+      const rectW = widthPx - frozenWidthPx;
+      const rectH = frozenHeightPx;
+      if (rectW > 0 && rectH > 0 && dx !== 0) {
+        if (layer === "background") {
+          ctx.fillStyle = this.theme.gridBg;
+          ctx.fillRect(rectX, rectY, rectW, rectH);
+        } else {
+          ctx.clearRect(rectX, rectY, rectW, rectH);
+        }
 
-      if (layer === "background") {
-        ctx.fillStyle = this.theme.gridBg;
-        ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-      } else {
-        ctx.clearRect(rect.x, rect.y, rect.width, rect.height);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(rectX, rectY, rectW, rectH);
+        ctx.clip();
+        ctx.drawImage(this.blitCanvas, dx, 0);
+        ctx.restore();
       }
+    }
 
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(rect.x, rect.y, rect.width, rect.height);
-      ctx.clip();
-      ctx.drawImage(this.blitCanvas, shiftX, shiftY);
-      ctx.restore();
+    // Scrollable rows + frozen columns quadrant (bottom-left): vertical-only shift.
+    {
+      const rectX = 0;
+      const rectY = frozenHeightPx;
+      const rectW = frozenWidthPx;
+      const rectH = heightPx - frozenHeightPx;
+      if (rectW > 0 && rectH > 0 && dy !== 0) {
+        if (layer === "background") {
+          ctx.fillStyle = this.theme.gridBg;
+          ctx.fillRect(rectX, rectY, rectW, rectH);
+        } else {
+          ctx.clearRect(rectX, rectY, rectW, rectH);
+        }
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(rectX, rectY, rectW, rectH);
+        ctx.clip();
+        ctx.drawImage(this.blitCanvas, 0, dy);
+        ctx.restore();
+      }
+    }
+
+    // Scrollable quadrant (main): both-axis shift.
+    {
+      const rectX = frozenWidthPx;
+      const rectY = frozenHeightPx;
+      const rectW = widthPx - frozenWidthPx;
+      const rectH = heightPx - frozenHeightPx;
+      if (rectW > 0 && rectH > 0 && (dx !== 0 || dy !== 0)) {
+        if (layer === "background") {
+          ctx.fillStyle = this.theme.gridBg;
+          ctx.fillRect(rectX, rectY, rectW, rectH);
+        } else {
+          ctx.clearRect(rectX, rectY, rectW, rectH);
+        }
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(rectX, rectY, rectW, rectH);
+        ctx.clip();
+        ctx.drawImage(this.blitCanvas, dx, dy);
+        ctx.restore();
+      }
     }
 
     ctx.restore();
@@ -1290,52 +1374,63 @@ export class CanvasGridRenderer {
     const absScrollX = frozenWidth + viewport.scrollX;
     const absScrollY = frozenHeight + viewport.scrollY;
 
-    const quadrants = [
-      {
-        originX: 0,
-        originY: 0,
-        rect: { x: 0, y: 0, width: frozenWidth, height: frozenHeight },
-        minRow: 0,
-        maxRowExclusive: frozenRows,
-        minCol: 0,
-        maxColExclusive: frozenCols,
-        scrollBaseX: 0,
-        scrollBaseY: 0
-      },
-      {
-        originX: frozenWidth,
-        originY: 0,
-        rect: { x: frozenWidth, y: 0, width: width - frozenWidth, height: frozenHeight },
-        minRow: 0,
-        maxRowExclusive: frozenRows,
-        minCol: frozenCols,
-        maxColExclusive: colCount,
-        scrollBaseX: absScrollX,
-        scrollBaseY: 0
-      },
-      {
-        originX: 0,
-        originY: frozenHeight,
-        rect: { x: 0, y: frozenHeight, width: frozenWidth, height: height - frozenHeight },
-        minRow: frozenRows,
-        maxRowExclusive: rowCount,
-        minCol: 0,
-        maxColExclusive: frozenCols,
-        scrollBaseX: 0,
-        scrollBaseY: absScrollY
-      },
-      {
-        originX: frozenWidth,
-        originY: frozenHeight,
-        rect: { x: frozenWidth, y: frozenHeight, width: width - frozenWidth, height: height - frozenHeight },
-        minRow: frozenRows,
-        maxRowExclusive: rowCount,
-        minCol: frozenCols,
-        maxColExclusive: colCount,
-        scrollBaseX: absScrollX,
-        scrollBaseY: absScrollY
-      }
-    ];
+    const quadrants = this.gridQuadrantScratch;
+
+    const q0 = quadrants[0];
+    q0.originX = 0;
+    q0.originY = 0;
+    q0.rect.x = 0;
+    q0.rect.y = 0;
+    q0.rect.width = frozenWidth;
+    q0.rect.height = frozenHeight;
+    q0.minRow = 0;
+    q0.maxRowExclusive = frozenRows;
+    q0.minCol = 0;
+    q0.maxColExclusive = frozenCols;
+    q0.scrollBaseX = 0;
+    q0.scrollBaseY = 0;
+
+    const q1 = quadrants[1];
+    q1.originX = frozenWidth;
+    q1.originY = 0;
+    q1.rect.x = frozenWidth;
+    q1.rect.y = 0;
+    q1.rect.width = width - frozenWidth;
+    q1.rect.height = frozenHeight;
+    q1.minRow = 0;
+    q1.maxRowExclusive = frozenRows;
+    q1.minCol = frozenCols;
+    q1.maxColExclusive = colCount;
+    q1.scrollBaseX = absScrollX;
+    q1.scrollBaseY = 0;
+
+    const q2 = quadrants[2];
+    q2.originX = 0;
+    q2.originY = frozenHeight;
+    q2.rect.x = 0;
+    q2.rect.y = frozenHeight;
+    q2.rect.width = frozenWidth;
+    q2.rect.height = height - frozenHeight;
+    q2.minRow = frozenRows;
+    q2.maxRowExclusive = rowCount;
+    q2.minCol = 0;
+    q2.maxColExclusive = frozenCols;
+    q2.scrollBaseX = 0;
+    q2.scrollBaseY = absScrollY;
+
+    const q3 = quadrants[3];
+    q3.originX = frozenWidth;
+    q3.originY = frozenHeight;
+    q3.rect.x = frozenWidth;
+    q3.rect.y = frozenHeight;
+    q3.rect.width = width - frozenWidth;
+    q3.rect.height = height - frozenHeight;
+    q3.minRow = frozenRows;
+    q3.maxRowExclusive = rowCount;
+    q3.minCol = frozenCols;
+    q3.maxColExclusive = colCount;
+    q3.scrollBaseX = absScrollX;
+    q3.scrollBaseY = absScrollY;
 
     const gridCtx = this.gridCtx;
     const contentCtx = this.contentCtx;
