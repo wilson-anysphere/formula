@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
-use formula_model::charts::{Chart, ChartType};
+use formula_model::charts::{Chart, ChartKind, ChartType};
 use roxmltree::Document;
 
 use crate::charts::parse_chart;
 use crate::drawingml::charts::{
-    extract_chart_object_refs, ChartDiagnostic, ChartDiagnosticSeverity, ChartObject, ChartParts,
+    extract_chart_object_refs, parse_chart_ex, parse_chart_space, ChartDiagnostic,
+    ChartDiagnosticSeverity, ChartExParseError, ChartObject, ChartParts, ChartSpaceParseError,
     OpcPart,
 };
 use crate::drawingml::extract_chart_refs;
@@ -274,6 +275,59 @@ impl XlsxPackage {
                     }
                 });
 
+                let model = if let Some(chart_ex_part) = chart_ex.as_ref() {
+                    match parse_chart_ex(&chart_ex_part.bytes, &chart_ex_part.path) {
+                        Ok(model) => {
+                            if let ChartKind::Unknown { name } = &model.chart_kind {
+                                if let Some(kind) = name.strip_prefix("ChartEx:") {
+                                    if kind.trim().is_empty() || kind == "unknown" {
+                                        diagnostics.push(ChartDiagnostic {
+                                            severity: ChartDiagnosticSeverity::Warning,
+                                            message: "chartEx part detected but chart kind could not be inferred"
+                                                .to_string(),
+                                            part: Some(chart_ex_part.path.clone()),
+                                            xpath: None,
+                                        });
+                                    }
+                                }
+                            }
+                            Some(model)
+                        }
+                        Err(err) => {
+                            diagnostics.push(ChartDiagnostic {
+                                severity: ChartDiagnosticSeverity::Warning,
+                                message: format!(
+                                    "failed to parse ChartEx part {}: {}",
+                                    chart_ex_part.path,
+                                    format_chart_ex_error(&err)
+                                ),
+                                part: Some(chart_ex_part.path.clone()),
+                                xpath: None,
+                            });
+                            None
+                        }
+                    }
+                } else if chart.path.is_empty() || chart.bytes.is_empty() {
+                    None
+                } else {
+                    match parse_chart_space(&chart.bytes, &chart.path) {
+                        Ok(model) => Some(model),
+                        Err(err) => {
+                            diagnostics.push(ChartDiagnostic {
+                                severity: ChartDiagnosticSeverity::Warning,
+                                message: format!(
+                                    "failed to parse chartSpace part {}: {}",
+                                    chart.path,
+                                    format_chart_space_error(&err)
+                                ),
+                                part: Some(chart.path.clone()),
+                                xpath: None,
+                            });
+                            None
+                        }
+                    }
+                };
+
                 chart_objects.push(ChartObject {
                     sheet_name: sheet_name.clone(),
                     sheet_part: sheet_part.clone(),
@@ -286,6 +340,7 @@ impl XlsxPackage {
                         style,
                         colors,
                     },
+                    model,
                     diagnostics,
                 });
             }
@@ -417,4 +472,12 @@ fn is_chart_colors_relationship(rel_type: &str, rel_target: &str) -> bool {
         return true;
     }
     rel_target.ends_with(".xml") && rel_target.contains("colors")
+}
+
+fn format_chart_space_error(err: &ChartSpaceParseError) -> String {
+    err.to_string()
+}
+
+fn format_chart_ex_error(err: &ChartExParseError) -> String {
+    err.to_string()
 }

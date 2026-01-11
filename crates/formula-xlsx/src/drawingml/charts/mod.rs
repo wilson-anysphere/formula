@@ -1,11 +1,14 @@
+use formula_model::charts::ChartModel;
 use formula_model::drawings::{Anchor, AnchorPoint, CellOffset, EmuSize};
 use formula_model::CellRef;
 use roxmltree::Document;
 
 use crate::workbook::ChartExtractionError;
 
+mod parse_chart_ex;
 mod parse_chart_space;
 
+pub use parse_chart_ex::{parse_chart_ex, ChartExParseError};
 pub use parse_chart_space::{parse_chart_space, ChartSpaceParseError};
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -25,7 +28,7 @@ pub struct ChartParts {
     pub colors: Option<OpcPart>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChartObject {
     pub sheet_name: Option<String>,
     pub sheet_part: Option<String>,
@@ -34,6 +37,8 @@ pub struct ChartObject {
     /// Raw XML for the `<xdr:graphicFrame>` subtree inside the drawing part.
     pub drawing_frame_xml: String,
     pub parts: ChartParts,
+    /// Parsed chart model (optional; set when a parser is available).
+    pub model: Option<ChartModel>,
     pub diagnostics: Vec<ChartDiagnostic>,
 }
 
@@ -65,8 +70,8 @@ pub(crate) fn extract_chart_object_refs(
 ) -> Result<Vec<DrawingChartObjectRef>, ChartExtractionError> {
     let xml = std::str::from_utf8(drawing_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
-    let doc = Document::parse(xml)
-        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let doc =
+        Document::parse(xml).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
 
     let mut out = Vec::new();
     for anchor in doc.descendants().filter(|n| n.is_element()) {
@@ -188,3 +193,4 @@ fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
     let range = node.range();
     doc.get(range).map(|s| s.to_string())
 }
+
