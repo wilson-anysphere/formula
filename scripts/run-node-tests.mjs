@@ -93,6 +93,17 @@ if (runnableTestFiles.length === 0) {
 
 const nodeArgs = ["--no-warnings"];
 if (canStripTypes) nodeArgs.push("--experimental-strip-types");
+// Node's test runner defaults `--test-concurrency` to the number of available CPU
+// cores. On large/shared runners this can massively over-parallelize heavyweight
+// integration tests (sync-server, extension sandboxing, python runtime) and lead
+// to spurious timeouts. Keep a conservative default, with an escape hatch for
+// CI/local tuning.
+const envConcurrency = Number.parseInt(
+  process.env.FORMULA_NODE_TEST_CONCURRENCY ?? process.env.NODE_TEST_CONCURRENCY ?? "",
+  10,
+);
+const testConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 2;
+nodeArgs.push(`--test-concurrency=${testConcurrency}`);
 nodeArgs.push("--test", ...runnableTestFiles);
 
 const child = spawn(process.execPath, nodeArgs, {

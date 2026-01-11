@@ -104,7 +104,9 @@ test("data connectors: registration rejected when connector not declared in mani
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
-    activationTimeoutMs: 1000
+    // Activation can be slow on contended runners; keep this high enough to
+    // avoid flaking while still exercising the "undeclared connector" guard.
+    activationTimeoutMs: 5000
   });
 
   t.after(async () => {
