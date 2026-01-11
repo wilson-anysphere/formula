@@ -14,6 +14,8 @@ use encoding_rs::{
 };
 use formula_model::{CellRef, ColProperties, DateSystem, RowProperties, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
+mod record_reader;
+
 #[derive(Debug, Default)]
 pub(crate) struct SheetRowColProperties {
     pub(crate) rows: BTreeMap<u32, RowProperties>,
@@ -157,6 +159,7 @@ pub(crate) struct BiffWorkbookGlobals {
     pub(crate) date_system: DateSystem,
     formats: HashMap<u16, String>,
     xfs: Vec<BiffXf>,
+    pub(crate) warnings: Vec<String>,
 }
 
 impl Default for BiffWorkbookGlobals {
@@ -165,6 +168,7 @@ impl Default for BiffWorkbookGlobals {
             date_system: DateSystem::Excel1900,
             formats: HashMap::new(),
             xfs: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 }
@@ -219,29 +223,34 @@ impl BiffWorkbookGlobals {
 
 pub(crate) fn parse_biff_workbook_globals(
     workbook_stream: &[u8],
-    _biff: BiffVersion,
+    biff: BiffVersion,
 ) -> Result<BiffWorkbookGlobals, String> {
     let encoding = encoding_for_codepage(biff_codepage(workbook_stream));
 
     let mut out = BiffWorkbookGlobals::default();
 
-    let mut offset = 0usize;
     let mut saw_eof = false;
-    loop {
-        let Some((record_id, data)) = read_biff_record(workbook_stream, offset) else {
-            break;
-        };
-        // BOF indicates the start of a new substream; the workbook globals
-        // contain a single BOF at offset 0, so a second BOF means we're past
-        // the globals section (even if the EOF record is missing).
-        if offset != 0 && (record_id == 0x0809 || record_id == 0x0009) {
+    let mut continuation_parse_failed = false;
+
+    let allows_continuation: fn(u16) -> bool = match biff {
+        BiffVersion::Biff5 => workbook_globals_allows_continuation_biff5,
+        BiffVersion::Biff8 => workbook_globals_allows_continuation_biff8,
+    };
+
+    let iter = record_reader::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
+
+    for record in iter {
+        let record = record?;
+        let record_id = record.record_id;
+        let data = record.data.as_ref();
+
+        // BOF indicates the start of a new substream; the workbook globals contain
+        // a single BOF at offset 0, so a second BOF means we're past the globals
+        // section (even if the EOF record is missing).
+        if record.offset != 0 && (record_id == 0x0809 || record_id == 0x0009) {
             saw_eof = true;
             break;
         }
-        offset = offset
-            .checked_add(4)
-            .and_then(|o| o.checked_add(data.len()))
-            .ok_or_else(|| "BIFF record offset overflow".to_string())?;
 
         match record_id {
             // 1904 [MS-XLS 2.4.169]
@@ -255,8 +264,19 @@ pub(crate) fn parse_biff_workbook_globals(
             }
             // FORMAT / FORMAT2 [MS-XLS 2.4.90]
             0x041E | 0x001E => {
-                if let Ok((num_fmt_id, code)) = parse_biff_format_record(record_id, data, encoding) {
-                    out.formats.insert(num_fmt_id, code);
+                match parse_biff_format_record_strict(&record, encoding) {
+                    Ok((num_fmt_id, code)) => {
+                        out.formats.insert(num_fmt_id, code);
+                    }
+                    Err(_) if record.is_continued() => {
+                        continuation_parse_failed = true;
+                        if let Some((num_fmt_id, code)) =
+                            parse_biff_format_record_best_effort(&record, encoding)
+                        {
+                            out.formats.insert(num_fmt_id, code);
+                        }
+                    }
+                    Err(_) => {}
                 }
             }
             // XF [MS-XLS 2.4.353]
@@ -274,11 +294,28 @@ pub(crate) fn parse_biff_workbook_globals(
         }
     }
 
+    if continuation_parse_failed {
+        out.warnings.push(
+            "failed to parse one or more continued BIFF FORMAT records; number format codes may be truncated"
+                .to_string(),
+        );
+    }
+
     if !saw_eof {
         return Err("unexpected end of workbook globals stream (missing EOF)".to_string());
     }
 
     Ok(out)
+}
+
+fn workbook_globals_allows_continuation_biff5(record_id: u16) -> bool {
+    // FORMAT2 [MS-XLS 2.4.90]
+    record_id == 0x001E
+}
+
+fn workbook_globals_allows_continuation_biff8(record_id: u16) -> bool {
+    // FORMAT [MS-XLS 2.4.88]
+    record_id == 0x041E
 }
 
 fn parse_biff_xf_record(data: &[u8]) -> Result<BiffXf, String> {
@@ -301,28 +338,281 @@ fn parse_biff_xf_record(data: &[u8]) -> Result<BiffXf, String> {
     Ok(BiffXf { num_fmt_id, kind })
 }
 
-fn parse_biff_format_record(
-    record_id: u16,
-    data: &[u8],
+fn parse_biff_format_record_strict(
+    record: &record_reader::LogicalBiffRecord<'_>,
     encoding: &'static Encoding,
 ) -> Result<(u16, String), String> {
+    let record_id = record.record_id;
+    let data = record.data.as_ref();
     if data.len() < 2 {
         return Err("FORMAT record too short".to_string());
     }
+
     let num_fmt_id = u16::from_le_bytes([data[0], data[1]]);
     let rest = &data[2..];
 
-    let (mut code, _) = match record_id {
-        // BIFF8 FORMAT uses `XLUnicodeString` (16-bit length).
-        0x041E => parse_biff8_unicode_string(rest, encoding)?,
+    let mut code = match record_id {
+        // BIFF8 FORMAT uses `XLUnicodeString` (16-bit length) and may be split
+        // across one or more `CONTINUE` records.
+        0x041E => {
+            if record.is_continued() {
+                let fragments: Vec<&[u8]> = record.fragments().collect();
+                parse_biff8_unicode_string_continued(&fragments, 2, encoding)?
+            } else {
+                parse_biff8_unicode_string(rest, encoding)?.0
+            }
+        }
         // BIFF5 FORMAT2 uses a short ANSI string (8-bit length).
-        0x001E => parse_biff5_short_string(rest, encoding)?,
+        0x001E => parse_biff5_short_string(rest, encoding)?.0,
         _ => return Err(format!("unexpected FORMAT record id 0x{record_id:04X}")),
     };
 
     // Excel stores some strings with embedded NUL bytes; follow BoundSheet parsing and strip them.
     code = code.replace('\0', "");
     Ok((num_fmt_id, code))
+}
+
+fn parse_biff_format_record_best_effort(
+    record: &record_reader::LogicalBiffRecord<'_>,
+    encoding: &'static Encoding,
+) -> Option<(u16, String)> {
+    let first = record.first_fragment();
+    if first.len() < 2 {
+        return None;
+    }
+    let num_fmt_id = u16::from_le_bytes([first[0], first[1]]);
+    let rest = first.get(2..).unwrap_or_default();
+
+    let mut code = match record.record_id {
+        0x041E => parse_biff8_unicode_string_best_effort(rest, encoding)?,
+        0x001E => parse_biff5_short_string_best_effort(rest, encoding)?,
+        _ => return None,
+    };
+    code = code.replace('\0', "");
+    Some((num_fmt_id, code))
+}
+
+fn parse_biff5_short_string_best_effort(
+    input: &[u8],
+    encoding: &'static Encoding,
+) -> Option<String> {
+    let (&len, rest) = input.split_first()?;
+    let take = (len as usize).min(rest.len());
+    Some(decode_ansi(&rest[..take], encoding))
+}
+
+fn parse_biff8_unicode_string_best_effort(
+    input: &[u8],
+    encoding: &'static Encoding,
+) -> Option<String> {
+    if input.len() < 3 {
+        return None;
+    }
+
+    let cch = u16::from_le_bytes([input[0], input[1]]) as usize;
+    let flags = input[2];
+    let mut offset = 3usize;
+
+    if flags & 0x08 != 0 {
+        // cRun (optional)
+        if input.len() < offset + 2 {
+            return Some(String::new());
+        }
+        offset += 2;
+    }
+
+    if flags & 0x04 != 0 {
+        // cbExtRst (optional)
+        if input.len() < offset + 4 {
+            return Some(String::new());
+        }
+        offset += 4;
+    }
+
+    let is_unicode = (flags & 0x01) != 0;
+    let bytes_per_char = if is_unicode { 2 } else { 1 };
+    let bytes = input.get(offset..).unwrap_or_default();
+    let available_chars = bytes.len() / bytes_per_char;
+    let take_chars = cch.min(available_chars);
+    let take_bytes = take_chars * bytes_per_char;
+    let bytes = &bytes[..take_bytes];
+
+    Some(if is_unicode {
+        let mut u16s = Vec::with_capacity(take_chars);
+        for chunk in bytes.chunks_exact(2) {
+            u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+        }
+        String::from_utf16_lossy(&u16s)
+    } else {
+        decode_ansi(bytes, encoding)
+    })
+}
+
+fn parse_biff8_unicode_string_continued(
+    fragments: &[&[u8]],
+    start_offset: usize,
+    encoding: &'static Encoding,
+) -> Result<String, String> {
+    let mut cursor = FragmentCursor::new(fragments, 0, start_offset);
+    cursor.read_biff8_unicode_string(encoding)
+}
+
+struct FragmentCursor<'a> {
+    fragments: &'a [&'a [u8]],
+    frag_idx: usize,
+    offset: usize,
+}
+
+impl<'a> FragmentCursor<'a> {
+    fn new(fragments: &'a [&'a [u8]], frag_idx: usize, offset: usize) -> Self {
+        Self {
+            fragments,
+            frag_idx,
+            offset,
+        }
+    }
+
+    fn remaining_in_fragment(&self) -> usize {
+        self.fragments
+            .get(self.frag_idx)
+            .map(|f| f.len().saturating_sub(self.offset))
+            .unwrap_or(0)
+    }
+
+    fn advance_fragment(&mut self) -> Result<(), String> {
+        self.frag_idx = self
+            .frag_idx
+            .checked_add(1)
+            .ok_or_else(|| "fragment index overflow".to_string())?;
+        self.offset = 0;
+        if self.frag_idx >= self.fragments.len() {
+            return Err("unexpected end of record".to_string());
+        }
+        Ok(())
+    }
+
+    fn read_u8(&mut self) -> Result<u8, String> {
+        loop {
+            let frag = self
+                .fragments
+                .get(self.frag_idx)
+                .ok_or_else(|| "unexpected end of record".to_string())?;
+            if self.offset < frag.len() {
+                let b = frag[self.offset];
+                self.offset += 1;
+                return Ok(b);
+            }
+            self.advance_fragment()?;
+        }
+    }
+
+    fn read_u16_le(&mut self) -> Result<u16, String> {
+        let lo = self.read_u8()?;
+        let hi = self.read_u8()?;
+        Ok(u16::from_le_bytes([lo, hi]))
+    }
+
+    fn read_u32_le(&mut self) -> Result<u32, String> {
+        let b0 = self.read_u8()?;
+        let b1 = self.read_u8()?;
+        let b2 = self.read_u8()?;
+        let b3 = self.read_u8()?;
+        Ok(u32::from_le_bytes([b0, b1, b2, b3]))
+    }
+
+    fn read_exact_from_current(&mut self, n: usize) -> Result<&'a [u8], String> {
+        let frag = self
+            .fragments
+            .get(self.frag_idx)
+            .ok_or_else(|| "unexpected end of record".to_string())?;
+        let end = self
+            .offset
+            .checked_add(n)
+            .ok_or_else(|| "offset overflow".to_string())?;
+        if end > frag.len() {
+            return Err("unexpected end of record".to_string());
+        }
+        let out = &frag[self.offset..end];
+        self.offset = end;
+        Ok(out)
+    }
+
+    fn skip_bytes(&mut self, mut n: usize) -> Result<(), String> {
+        while n > 0 {
+            let available = self.remaining_in_fragment();
+            if available == 0 {
+                self.advance_fragment()?;
+                continue;
+            }
+            let take = n.min(available);
+            self.offset += take;
+            n -= take;
+        }
+        Ok(())
+    }
+
+    fn read_biff8_unicode_string(&mut self, encoding: &'static Encoding) -> Result<String, String> {
+        // XLUnicodeString [MS-XLS 2.5.268]
+        let cch = self.read_u16_le()? as usize;
+        let flags = self.read_u8()?;
+
+        let richtext_runs = if flags & 0x08 != 0 {
+            self.read_u16_le()? as usize
+        } else {
+            0
+        };
+
+        let ext_size = if flags & 0x04 != 0 {
+            self.read_u32_le()? as usize
+        } else {
+            0
+        };
+
+        let mut is_unicode = (flags & 0x01) != 0;
+        let mut remaining_chars = cch;
+        let mut out = String::new();
+
+        while remaining_chars > 0 {
+            if self.remaining_in_fragment() == 0 {
+                // Continuing character bytes into a new CONTINUE fragment: first
+                // byte is option flags for the continued segment (fHighByte).
+                self.advance_fragment()?;
+                let cont_flags = self.read_u8()?;
+                is_unicode = (cont_flags & 0x01) != 0;
+                continue;
+            }
+
+            let bytes_per_char = if is_unicode { 2 } else { 1 };
+            let available_bytes = self.remaining_in_fragment();
+            let available_chars = available_bytes / bytes_per_char;
+            if available_chars == 0 {
+                return Err("string continuation split mid-character".to_string());
+            }
+
+            let take_chars = remaining_chars.min(available_chars);
+            let take_bytes = take_chars * bytes_per_char;
+            let bytes = self.read_exact_from_current(take_bytes)?;
+
+            if is_unicode {
+                let mut u16s = Vec::with_capacity(take_chars);
+                for chunk in bytes.chunks_exact(2) {
+                    u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                }
+                out.push_str(&String::from_utf16_lossy(&u16s));
+            } else {
+                out.push_str(&decode_ansi(bytes, encoding));
+            }
+
+            remaining_chars -= take_chars;
+        }
+
+        let richtext_bytes = richtext_runs
+            .checked_mul(4)
+            .ok_or_else(|| "rich text run count overflow".to_string())?;
+        self.skip_bytes(richtext_bytes + ext_size)?;
+
+        Ok(out)
+    }
 }
 
 pub(crate) fn parse_biff_bound_sheets(
@@ -776,6 +1066,47 @@ mod tests {
         let stream = [r_codepage, r_fmt, r_xf, record(0x000A, &[])].concat();
         let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
         assert_eq!(globals.resolve_number_format_code(0).as_deref(), Some("Ђ"));
+    }
+
+    #[test]
+    fn parses_continued_biff8_format_record() {
+        let format_string = "yyyy-mm-dd hh:mm:ss";
+        let num_fmt_id = 164u16;
+
+        // FORMAT record payload:
+        // - numFmtId (2 bytes)
+        // - XLUnicodeString: cch (2), flags (1), char bytes...
+        let split_at = 10usize;
+        let mut fmt_part1 = Vec::new();
+        fmt_part1.extend_from_slice(&num_fmt_id.to_le_bytes());
+        fmt_part1.extend_from_slice(&(format_string.len() as u16).to_le_bytes()); // cch
+        fmt_part1.push(0); // flags (compressed)
+        fmt_part1.extend_from_slice(&format_string.as_bytes()[..split_at]);
+
+        // CONTINUE payload starts with the option flags byte for the continued
+        // character data, followed by the remaining character bytes.
+        let mut fmt_cont = Vec::new();
+        fmt_cont.push(0); // continued segment is also compressed
+        fmt_cont.extend_from_slice(&format_string.as_bytes()[split_at..]);
+
+        // XF record referencing numFmtId=164.
+        let mut xf_payload = vec![0u8; 20];
+        xf_payload[2..4].copy_from_slice(&num_fmt_id.to_le_bytes());
+        let r_xf = record(0x00E0, &xf_payload);
+
+        let stream = [
+            record(0x041E, &fmt_part1),
+            record(record_reader::RECORD_CONTINUE, &fmt_cont),
+            r_xf,
+            record(0x000A, &[]),
+        ]
+        .concat();
+
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
+        assert_eq!(
+            globals.resolve_number_format_code(0).as_deref(),
+            Some(format_string)
+        );
     }
 
     #[test]

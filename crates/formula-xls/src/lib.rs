@@ -179,8 +179,9 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         let biff_version = biff::detect_biff_version(workbook_stream);
 
         match biff::parse_biff_workbook_globals(workbook_stream, biff_version) {
-            Ok(globals) => {
+            Ok(mut globals) => {
                 out.date_system = globals.date_system;
+                warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
 
                 let mut cache: HashMap<String, u32> = HashMap::new();
                 let mut style_ids = Vec::with_capacity(globals.xf_count());
