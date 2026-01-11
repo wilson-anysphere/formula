@@ -369,6 +369,16 @@ const ui = {
     await rpcCall("ui", "showMessage", [String(message), String(type)]);
   },
 
+  async showInputBox(options) {
+    const result = await rpcCall("ui", "showInputBox", [options ?? {}]);
+    if (result === null || result === undefined) return undefined;
+    return String(result);
+  },
+
+  async showQuickPick(items, options) {
+    return rpcCall("ui", "showQuickPick", [Array.isArray(items) ? items : [], options ?? {}]);
+  },
+
   async createPanel(id, options) {
     const result = await rpcCall("ui", "createPanel", [String(id), options ?? {}]);
     return new PanelImpl(result?.id ?? String(id));

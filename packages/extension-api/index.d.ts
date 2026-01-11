@@ -113,6 +113,23 @@ export namespace clipboard {
 export namespace ui {
   type MessageType = "info" | "warning" | "error";
 
+  interface InputBoxOptions {
+    prompt?: string;
+    value?: string;
+    placeHolder?: string;
+  }
+
+  interface QuickPickItem<T = any> {
+    label: string;
+    value: T;
+    description?: string;
+    detail?: string;
+  }
+
+  interface QuickPickOptions {
+    placeHolder?: string;
+  }
+
   interface PanelOptions {
     title: string;
     icon?: string;
@@ -120,6 +137,8 @@ export namespace ui {
   }
 
   function showMessage(message: string, type?: MessageType): Promise<void>;
+  function showInputBox(options: InputBoxOptions): Promise<string | undefined>;
+  function showQuickPick<T>(items: QuickPickItem<T>[], options?: QuickPickOptions): Promise<T | undefined>;
   function createPanel(id: string, options: PanelOptions): Promise<Panel>;
 }
 

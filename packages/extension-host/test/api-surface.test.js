@@ -799,3 +799,54 @@ test("api surface: workbook.close resets to default workbook and emits workbookO
     workbook: { name: "MockWorkbook", path: null }
   });
 });
+
+test("api surface: ui.showInputBox/showQuickPick return deterministic placeholder values", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-ui-prompts-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "uiExt.prompts";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "ui-prompts-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "UI Prompts" }] },
+      permissions: ["ui.commands"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          const input = await formula.ui.showInputBox({ prompt: "Name", value: "Alice" });
+          const pick = await formula.ui.showQuickPick([
+            { label: "One", value: 1 },
+            { label: "Two", value: 2 }
+          ]);
+          return { input, pick };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+  const result = await host.executeCommand(commandId);
+  assert.deepEqual(result, { input: "Alice", pick: 1 });
+});

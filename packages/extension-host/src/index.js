@@ -819,6 +819,24 @@ class ExtensionHost {
         this._messages.push({ message: args[0], type: args[1] });
         return null;
 
+      case "ui.showInputBox": {
+        // Placeholder implementation until the desktop UI wires actual input prompts.
+        const options = args[0] ?? {};
+        const value = options && typeof options === "object" ? options.value : undefined;
+        return typeof value === "string" ? value : null;
+      }
+
+      case "ui.showQuickPick": {
+        // Placeholder implementation: choose the first entry.
+        const items = Array.isArray(args[0]) ? args[0] : [];
+        if (items.length === 0) return null;
+        const first = items[0];
+        if (first && typeof first === "object" && Object.prototype.hasOwnProperty.call(first, "value")) {
+          return first.value;
+        }
+        return first;
+      }
+
       case "ui.createPanel": {
         const panelId = String(args[0]);
         const options = args[1] ?? {};
