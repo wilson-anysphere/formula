@@ -502,6 +502,19 @@ function getTauriListen(): TauriListen {
   return listen;
 }
 
+type TauriDialogOpen = (options?: Record<string, unknown>) => Promise<string | string[] | null>;
+type TauriDialogSave = (options?: Record<string, unknown>) => Promise<string | null>;
+
+function getTauriDialog(): { open: TauriDialogOpen; save: TauriDialogSave } {
+  const dialog = (globalThis as any).__TAURI__?.dialog;
+  const open = dialog?.open as TauriDialogOpen | undefined;
+  const save = dialog?.save as TauriDialogSave | undefined;
+  if (!open || !save) {
+    throw new Error("Tauri dialog API not available");
+  }
+  return { open, save };
+}
+
 function getTauriWindowHandle(): any {
   const winApi = (globalThis as any).__TAURI__?.window;
   if (!winApi) {
@@ -563,6 +576,12 @@ let tauriBackend: TauriWorkbookBackend | null = null;
 let activeWorkbook: WorkbookInfo | null = null;
 let suppressBackendSync = false;
 let pendingBackendSync: Promise<void> = Promise.resolve();
+
+async function confirmDiscardDirtyState(actionLabel: string): Promise<boolean> {
+  const doc = app.getDocument();
+  if (!doc.isDirty) return true;
+  return window.confirm(`You have unsaved changes. Discard them and ${actionLabel}?`);
+}
 
 function enqueueBackendSync(op: () => Promise<void>): void {
   pendingBackendSync = pendingBackendSync.then(op).catch((err) => {
@@ -740,12 +759,65 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   app.refresh();
 }
 
+async function openWorkbookFromPath(path: string): Promise<void> {
+  if (!tauriBackend) return;
+  if (typeof path !== "string" || path.trim() === "") return;
+  const ok = await confirmDiscardDirtyState("open another workbook");
+  if (!ok) return;
+
+  suppressBackendSync = true;
+  try {
+    // Flush any pending host sync before swapping the workbook state. Otherwise stale
+    // `set_cell` / `set_range` calls could land in the newly-opened workbook.
+    await pendingBackendSync;
+    pendingBackendSync = Promise.resolve();
+
+    activeWorkbook = await tauriBackend.openWorkbook(path);
+    await loadWorkbookIntoDocument(activeWorkbook);
+  } finally {
+    suppressBackendSync = false;
+  }
+}
+
+async function promptOpenWorkbook(): Promise<void> {
+  if (!tauriBackend) return;
+  const { open } = getTauriDialog();
+  const selection = await open({
+    multiple: false,
+    filters: [
+      { name: "Spreadsheets", extensions: ["xlsx", "xlsm", "xls", "xlsb", "csv"] },
+      { name: "Excel", extensions: ["xlsx", "xlsm", "xls", "xlsb"] },
+      { name: "CSV", extensions: ["csv"] },
+    ],
+  });
+
+  const path = Array.isArray(selection) ? selection[0] : selection;
+  if (typeof path !== "string" || path.trim() === "") return;
+  await openWorkbookFromPath(path);
+}
+
 async function handleSave(): Promise<void> {
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
 
   await pendingBackendSync;
   await tauriBackend.saveWorkbook();
+  app.getDocument().markSaved();
+}
+
+async function handleSaveAs(): Promise<void> {
+  if (!tauriBackend) return;
+  if (!activeWorkbook) return;
+
+  const { save } = getTauriDialog();
+  const path = await save({
+    filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }],
+  });
+  if (!path) return;
+
+  await pendingBackendSync;
+  await tauriBackend.saveWorkbook(path);
+  activeWorkbook = { ...activeWorkbook, path };
   app.getDocument().markSaved();
 }
 
@@ -757,17 +829,26 @@ try {
     const paths = (event as any)?.payload;
     const first = Array.isArray(paths) ? paths[0] : null;
     if (typeof first !== "string" || first.trim() === "") return;
-    suppressBackendSync = true;
-    pendingBackendSync = Promise.resolve();
     try {
-      activeWorkbook = await tauriBackend!.openWorkbook(first);
-      await loadWorkbookIntoDocument(activeWorkbook);
+      await openWorkbookFromPath(first);
     } catch (err) {
       console.error("Failed to open workbook:", err);
       window.alert(`Failed to open workbook: ${String(err)}`);
-    } finally {
-      suppressBackendSync = false;
     }
+  });
+
+  void listen("tray-open", () => {
+    void promptOpenWorkbook().catch((err) => {
+      console.error("Failed to open workbook:", err);
+      window.alert(`Failed to open workbook: ${String(err)}`);
+    });
+  });
+
+  void listen("shortcut-quick-open", () => {
+    void promptOpenWorkbook().catch((err) => {
+      console.error("Failed to open workbook:", err);
+      window.alert(`Failed to open workbook: ${String(err)}`);
+    });
   });
 
   void listen("unsaved-changes", async () => {
@@ -786,6 +867,15 @@ try {
 
   window.addEventListener("keydown", (e) => {
     const isSaveCombo = (e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S");
+    const isSaveAsCombo = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "S" || e.key === "s");
+    if (isSaveAsCombo) {
+      e.preventDefault();
+      void handleSaveAs().catch((err) => {
+        console.error("Failed to save workbook:", err);
+        window.alert(`Failed to save workbook: ${String(err)}`);
+      });
+      return;
+    }
     if (!isSaveCombo) return;
     e.preventDefault();
     void handleSave().catch((err) => {
