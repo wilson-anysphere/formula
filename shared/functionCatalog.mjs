@@ -482,7 +482,7 @@ export default {
     },
     {
       "name": "DROP",
-      "min_args": 2,
+      "min_args": 1,
       "max_args": 3,
       "volatility": "non_volatile",
       "return_type": "any",
@@ -1945,7 +1945,7 @@ export default {
     },
     {
       "name": "TAKE",
-      "min_args": 2,
+      "min_args": 1,
       "max_args": 3,
       "volatility": "non_volatile",
       "return_type": "any",
