@@ -18,6 +18,10 @@ export function resolveIndexURL(indexURL) {
 }
  
 const scriptLoadPromises = new Map();
+// Cache the loaded runtime per `loadPyodide` function reference. Some hosts/test
+// harnesses may swap the global `loadPyodide`, so we keep caches scoped to the
+// loader identity.
+const pyodideLoadPromisesByLoader = new WeakMap();
  
 function ensureDocumentAvailable() {
   if (typeof document === "undefined") {
@@ -98,6 +102,12 @@ export async function ensurePyodideScript(resolvedIndexURL) {
 export async function loadPyodideMainThread(options = {}) {
   const resolvedIndexURL = resolveIndexURL(options.indexURL);
 
+  if (typeof globalThis.loadPyodide === "function") {
+    const loader = globalThis.loadPyodide;
+    const cached = pyodideLoadPromisesByLoader.get(loader)?.get(resolvedIndexURL);
+    if (cached) return await cached;
+  }
+
   if (typeof globalThis.loadPyodide !== "function") {
     await ensurePyodideScript(resolvedIndexURL);
   }
@@ -107,7 +117,20 @@ export async function loadPyodideMainThread(options = {}) {
     throw new Error("PyodideRuntime mainThread mode could not find globalThis.loadPyodide after loading pyodide.js");
   }
 
-  return await loader({ indexURL: resolvedIndexURL });
+  let byIndexURL = pyodideLoadPromisesByLoader.get(loader);
+  if (!byIndexURL) {
+    byIndexURL = new Map();
+    pyodideLoadPromisesByLoader.set(loader, byIndexURL);
+  }
+
+  const cached = byIndexURL.get(resolvedIndexURL);
+  if (cached) return await cached;
+
+  const promise = loader({ indexURL: resolvedIndexURL });
+  byIndexURL.set(resolvedIndexURL, promise);
+  promise.catch(() => byIndexURL.delete(resolvedIndexURL));
+
+  return await promise;
 }
  
 // --- Runtime helpers ---------------------------------------------------------
@@ -270,6 +293,11 @@ const BRIDGE_API_KEY = "__formulaPyodideBridgeApi";
 const BRIDGE_REGISTERED_KEY = "__formulaPyodideBridgeRegistered";
 
 export function setFormulaBridgeApi(runtime, api) {
+  if (Object.prototype.hasOwnProperty.call(runtime, BRIDGE_API_KEY)) {
+    runtime[BRIDGE_API_KEY] = api;
+    return;
+  }
+
   Object.defineProperty(runtime, BRIDGE_API_KEY, {
     value: api,
     writable: true,
