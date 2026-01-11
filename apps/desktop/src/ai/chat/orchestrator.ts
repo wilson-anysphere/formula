@@ -163,6 +163,12 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     const attachments = params.attachments ?? [];
 
     const dlp = getAiCloudDlpOptions({ documentId: options.workbookId, sheetId: activeSheetId });
+    // DLP context building triggers a full workbook scan for redaction before indexing.
+    // Preserve the desktop RAG service's incremental indexing fast path when there are
+    // no classifications and the policy doesn't outright forbid cloud processing.
+    const aiRule = (dlp as any)?.policy?.rules?.["ai.cloudProcessing"];
+    const shouldApplyDlpToContext = dlp.classificationRecords.length > 0 || aiRule?.maxAllowed == null;
+    const dlpForContext = shouldApplyDlpToContext ? dlp : undefined;
 
     let workbookContext: any;
     try {
@@ -171,7 +177,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         workbookId: options.workbookId,
         query: text,
         attachments,
-        dlp
+        dlp: dlpForContext
       });
     } catch (error) {
       // Hard stop: DLP says we cannot send any workbook content to a cloud model.
