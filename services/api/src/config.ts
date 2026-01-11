@@ -209,7 +209,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   const syncServerInternalUrl = readStringEnv(env.SYNC_SERVER_INTERNAL_URL, "");
   const syncServerInternalAdminToken = readStringEnv(env.SYNC_SERVER_INTERNAL_ADMIN_TOKEN, "");
-  const localKmsMasterKey = readStringEnv(env.LOCAL_KMS_MASTER_KEY, DEV_LOCAL_KMS_MASTER_KEY);
+  // Legacy-only: required to decrypt/migrate historical envelope schema v1 rows.
+  // New deployments using the canonical DB-backed local KMS do not need it.
+  const localKmsMasterKey = readStringEnv(env.LOCAL_KMS_MASTER_KEY, "");
   const awsKmsEnabled = env.AWS_KMS_ENABLED === "true";
   const awsRegion = readStringEnv(env.AWS_REGION, "");
   const retentionSweepIntervalMs =
@@ -254,7 +256,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     if (usingDevSecretStoreKey) {
       invalidSecrets.push(rawJsonIsEmpty(env) ? "SECRET_STORE_KEY" : "SECRET_STORE_KEYS_JSON");
     }
-    if (config.localKmsMasterKey === DEV_LOCAL_KMS_MASTER_KEY) invalidSecrets.push("LOCAL_KMS_MASTER_KEY");
+    const rawLocalKmsMasterKey =
+      typeof env.LOCAL_KMS_MASTER_KEY === "string" ? env.LOCAL_KMS_MASTER_KEY.trim() : "";
+    if (rawLocalKmsMasterKey === DEV_LOCAL_KMS_MASTER_KEY) invalidSecrets.push("LOCAL_KMS_MASTER_KEY");
     if (invalidSecrets.length > 0) {
       throw new Error(
         `Refusing to start with default development secrets in production: ${invalidSecrets.join(", ")}`

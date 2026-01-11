@@ -41,7 +41,7 @@ production requires:
 - `COOKIE_SECURE=true`
 - `SYNC_TOKEN_SECRET` set to a non-dev value
 - `SECRET_STORE_KEYS_JSON` configured (recommended), or `SECRET_STORE_KEY` set to a non-dev value
-- `LOCAL_KMS_MASTER_KEY` set to a non-dev value
+- (Legacy-only) `LOCAL_KMS_MASTER_KEY` set to a non-dev value if you need to decrypt/migrate historical encrypted rows
 
 For OIDC SSO deployments, also set:
 
