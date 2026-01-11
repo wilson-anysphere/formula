@@ -212,14 +212,18 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
     // canonicalized to a *different* built-in id when exporting as XLSX.
     let mut xf_to_style_id: Vec<u32> = Vec::with_capacity(wb.styles().len());
     for xf_idx in 0..wb.styles().len() {
-        if xf_idx == 0 {
-            xf_to_style_id.push(0);
-            continue;
-        }
         let info = wb
             .styles()
             .get(xf_idx as u32)
             .expect("xf index within wb.styles().len()");
+        if info.num_fmt_id == 0 {
+            // The default "General" format doesn't need a distinct style id in
+            // `formula-model` and would otherwise cause us to store many
+            // formatting-only blank cells that we can't faithfully reproduce
+            // (fonts/fills/etc are not yet exposed by `formula-xlsb::Styles`).
+            xf_to_style_id.push(0);
+            continue;
+        }
         let number_format = match info.number_format.as_deref() {
             Some(fmt)
                 if fmt.starts_with(formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX) =>
