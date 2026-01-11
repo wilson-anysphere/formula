@@ -108,6 +108,7 @@ const openAiPanel = document.querySelector<HTMLButtonElement>('[data-testid="ope
 const openAiAuditPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-ai-audit-panel"]');
 const openMacrosPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-macros-panel"]');
 const openScriptEditorPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-script-editor-panel"]');
+const openPythonPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-python-panel"]');
 const splitVertical = document.querySelector<HTMLButtonElement>('[data-testid="split-vertical"]');
 const splitHorizontal = document.querySelector<HTMLButtonElement>('[data-testid="split-horizontal"]');
 const splitNone = document.querySelector<HTMLButtonElement>('[data-testid="split-none"]');
@@ -295,6 +296,46 @@ if (
         const mounted = mountScriptEditorPanel({ workbook: scriptingWorkbook, container });
         mount = { container, dispose: mounted.dispose };
         panelMounts.set(panelId, mount);
+      }
+
+      body.replaceChildren();
+      body.appendChild(mount.container);
+      return;
+    }
+
+    if (panelId === PanelIds.PYTHON) {
+      let mount = panelMounts.get(panelId);
+      if (!mount) {
+        const container = document.createElement("div");
+        container.style.height = "100%";
+        container.style.display = "flex";
+        container.style.flexDirection = "column";
+        container.textContent = "Loading Python runtime…";
+
+        let disposed = false;
+        mount = {
+          container,
+          dispose: () => {
+            disposed = true;
+            container.innerHTML = "";
+          },
+        };
+        panelMounts.set(panelId, mount);
+
+        import("./panels/python/pythonPanelMount.js")
+          .then(({ mountPythonPanel }) => {
+            if (disposed) return;
+            const mounted = mountPythonPanel({
+              doc: app.getDocument(),
+              container,
+              getActiveSheetId: () => app.getCurrentSheetId(),
+            });
+            mount!.dispose = mounted.dispose;
+          })
+          .catch((err) => {
+            if (disposed) return;
+            container.textContent = `Failed to load Python runtime: ${String(err)}`;
+          });
       }
 
       body.replaceChildren();
@@ -510,6 +551,12 @@ if (
     const placement = getPanelPlacement(layoutController.layout, PanelIds.SCRIPT_EDITOR);
     if (placement.kind === "closed") layoutController.openPanel(PanelIds.SCRIPT_EDITOR);
     else layoutController.closePanel(PanelIds.SCRIPT_EDITOR);
+  });
+
+  openPythonPanel?.addEventListener("click", () => {
+    const placement = getPanelPlacement(layoutController.layout, PanelIds.PYTHON);
+    if (placement.kind === "closed") layoutController.openPanel(PanelIds.PYTHON);
+    else layoutController.closePanel(PanelIds.PYTHON);
   });
 
   openVbaMigratePanel?.addEventListener("click", () => {
