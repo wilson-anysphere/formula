@@ -927,6 +927,25 @@ mod tests {
     }
 
     #[test]
+    fn decodes_boundsheet_names_using_codepage() {
+        // CODEPAGE=1251 (Windows Cyrillic).
+        let r_codepage = record(0x0042, &1251u16.to_le_bytes());
+
+        // BoundSheet8 with a compressed 8-bit name (fHighByte=0).
+        let mut bs_payload = Vec::new();
+        bs_payload.extend_from_slice(&0x1234u32.to_le_bytes()); // sheet offset
+        bs_payload.extend_from_slice(&[0, 0]); // visibility/type
+        bs_payload.push(1); // cch
+        bs_payload.push(0); // flags (compressed)
+        bs_payload.push(0x80); // "Ђ" in cp1251
+        let r_bs = record(0x0085, &bs_payload);
+
+        let stream = [r_codepage, r_bs, record(0x000A, &[])].concat();
+        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
+        assert_eq!(sheets, vec![("Ђ".to_string(), 0x1234)]);
+    }
+
+    #[test]
     fn parses_globals_date_system_formats_and_xfs_biff8() {
         // 1904 record payload: f1904 = 1.
         let r_1904 = record(0x0022, &[1, 0]);
