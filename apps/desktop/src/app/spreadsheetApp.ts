@@ -3471,6 +3471,17 @@ export class SpreadsheetApp {
   }
 
   private getCellComputedValue(cell: CellCoord): SpreadsheetValue {
+    const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null } | null;
+    // Prefer local evaluation for formulas stored in the DocumentController. The WASM engine
+    // worker is best-effort and can produce incorrect results for some reference patterns
+    // (e.g. SUM over a range), which would otherwise override our local evaluator via
+    // `computedValues`.
+    if (state?.formula != null) {
+      const memo = new Map<string, SpreadsheetValue>();
+      const stack = new Set<string>();
+      return this.computeCellValue(this.sheetId, cell, memo, stack);
+    }
+
     const cacheKey = this.computedKey(this.sheetId, cellToA1(cell));
     if (this.computedValues.has(cacheKey)) {
       return this.computedValues.get(cacheKey) ?? null;
