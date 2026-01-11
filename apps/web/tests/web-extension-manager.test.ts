@@ -104,7 +104,7 @@ class TestSpreadsheetApi {
   }
 }
 
-function createMockMarketplace({ extensionId, latestVersion, publicKeyPem, packages }: any) {
+function createMockMarketplace({ extensionId, latestVersion, publicKeyPem, packages, publisherKeys = null, publisherKeyIds = null }: any) {
   return {
     async getExtension(id: string) {
       if (id !== extensionId) return null;
@@ -125,6 +125,7 @@ function createMockMarketplace({ extensionId, latestVersion, publicKeyPem, packa
         versions: [],
         readme: "",
         publisherPublicKeyPem: publicKeyPem,
+        publisherKeys: Array.isArray(publisherKeys) ? publisherKeys : undefined,
         createdAt: new Date().toISOString(),
         deprecated: false,
         blocked: false,
@@ -140,7 +141,11 @@ function createMockMarketplace({ extensionId, latestVersion, publicKeyPem, packa
         signatureBase64: null,
         sha256: null,
         formatVersion: 2,
-        publisher: id.split(".")[0]
+        publisher: id.split(".")[0],
+        publisherKeyId:
+          publisherKeyIds && typeof publisherKeyIds === "object" && typeof publisherKeyIds[version] === "string"
+            ? publisherKeyIds[version]
+            : null
       };
     }
   };
@@ -305,6 +310,72 @@ test("update flow replaces installed version and reloads when loaded", async () 
     extensionId: "test.test-ext",
     latestVersion: "1.0.1",
     publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgV1, "1.0.1": pkgV2 }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host });
+
+  await manager.install("test.test-ext", "1.0.0");
+  await manager.loadInstalled("test.test-ext");
+  expect(await host.executeCommand("test.version")).toBe("v1");
+
+  await manager.update("test.test-ext");
+  expect(await manager.getInstalled("test.test-ext")).toMatchObject({ version: "1.0.1" });
+  expect(await host.executeCommand("test.version")).toBe("v2");
+
+  await manager.dispose();
+  await host.dispose();
+  await fs.rm(tmpRoot, { recursive: true, force: true });
+});
+
+test("install supports publisher signing key rotation via publisherKeys + per-version key id", async () => {
+  const keysA = generateEd25519KeyPair();
+  const keysB = generateEd25519KeyPair();
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-key-rotation-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const writeVersion = async (version: string, marker: string, privateKeyPem: string) => {
+    const manifest = {
+      name: "test-ext",
+      publisher: "test",
+      version,
+      main: "./dist/extension.mjs",
+      browser: "./dist/extension.mjs",
+      engines: { formula: "^1.0.0" },
+      activationEvents: ["onCommand:test.version"],
+      permissions: ["ui.commands"],
+      contributes: { commands: [{ command: "test.version", title: "Version" }] }
+    };
+    await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+    await fs.writeFile(
+      path.join(extDir, "dist", "extension.mjs"),
+      `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  await formula.commands.registerCommand("test.version", () => "${marker}");\n}\n`
+    );
+    return createExtensionPackageV2(extDir, { privateKeyPem });
+  };
+
+  const pkgV1 = await writeVersion("1.0.0", "v1", keysA.privateKeyPem);
+  const pkgV2 = await writeVersion("1.0.1", "v2", keysB.privateKeyPem);
+
+  // Simulate rotation: publisherPublicKeyPem points at the *new* key, but the publisherKeys
+  // set contains both keys. The download response provides the per-version key id so clients
+  // can prefer the correct key immediately.
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.test-ext",
+    latestVersion: "1.0.1",
+    publicKeyPem: keysB.publicKeyPem,
+    publisherKeys: [
+      { id: "keyB", publicKeyPem: keysB.publicKeyPem, revoked: false },
+      { id: "keyA", publicKeyPem: keysA.publicKeyPem, revoked: false }
+    ],
+    publisherKeyIds: { "1.0.0": "keyA", "1.0.1": "keyB" },
     packages: { "1.0.0": pkgV1, "1.0.1": pkgV2 }
   });
 

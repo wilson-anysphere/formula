@@ -293,13 +293,39 @@ export class WebExtensionManager {
       throw new Error("Marketplace did not provide latestVersion");
     }
 
-    const publicKeyPem = ext.publisherPublicKeyPem;
-    if (!publicKeyPem) {
-      throw new Error("Marketplace did not provide publisher public key (mandatory)");
+    const rawPublisherKeys = Array.isArray((ext as any).publisherKeys)
+      ? ((ext as any).publisherKeys as Array<{ id: unknown; publicKeyPem: unknown; revoked?: unknown }>)
+      : [];
+    const hasPublisherKeySet = rawPublisherKeys.length > 0;
+
+    let candidateKeys: Array<{ id: string | null; publicKeyPem: string }> = [];
+    if (hasPublisherKeySet) {
+      candidateKeys = rawPublisherKeys
+        .filter((k) => k && typeof k.publicKeyPem === "string" && typeof k.id === "string")
+        .filter((k) => !k.revoked)
+        .map((k) => ({ id: k.id, publicKeyPem: k.publicKeyPem }));
+
+      if (candidateKeys.length === 0) {
+        throw new Error("All publisher signing keys are revoked (refusing to install)");
+      }
+    } else {
+      const publicKeyPem = ext.publisherPublicKeyPem;
+      if (!publicKeyPem) {
+        throw new Error("Marketplace did not provide publisher public key (mandatory)");
+      }
+      candidateKeys = [{ id: null, publicKeyPem }];
     }
 
     const download = await this.marketplaceClient.downloadPackage(id, resolvedVersion);
     if (!download) throw new Error(`Package not found: ${id}@${resolvedVersion}`);
+
+    if (hasPublisherKeySet && download.publisherKeyId) {
+      const keyId = String(download.publisherKeyId);
+      const preferred = candidateKeys.find((k) => k.id === keyId);
+      if (preferred) {
+        candidateKeys = [preferred, ...candidateKeys.filter((k) => k.id !== keyId)];
+      }
+    }
 
     const formatVersion =
       typeof download.formatVersion === "number" && Number.isFinite(download.formatVersion)
@@ -309,11 +335,29 @@ export class WebExtensionManager {
       throw new Error(`Unsupported extension package formatVersion: ${formatVersion}`);
     }
 
-    let verified: VerifiedExtensionPackageV2;
-    try {
-      verified = await verifyExtensionPackageV2Browser(download.bytes, publicKeyPem);
-    } catch (error) {
-      throw new Error(`Extension signature verification failed (mandatory): ${String((error as Error)?.message ?? error)}`);
+    let verified: VerifiedExtensionPackageV2 | null = null;
+    let lastSignatureError: unknown = null;
+    for (const key of candidateKeys) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        verified = await verifyExtensionPackageV2Browser(download.bytes, key.publicKeyPem);
+        break;
+      } catch (error) {
+        const msg = String((error as Error)?.message ?? error);
+        if (msg.toLowerCase().includes("signature verification failed")) {
+          lastSignatureError = error;
+          continue;
+        }
+        throw new Error(`Extension signature verification failed (mandatory): ${msg}`);
+      }
+    }
+
+    if (!verified) {
+      throw new Error(
+        `Extension signature verification failed (mandatory): ${String(
+          (lastSignatureError as Error)?.message ?? lastSignatureError ?? "unknown error"
+        )}`
+      );
     }
 
     const manifest = verified.manifest;

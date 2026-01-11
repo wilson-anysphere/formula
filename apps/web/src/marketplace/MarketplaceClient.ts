@@ -27,10 +27,17 @@ export interface MarketplaceExtensionVersion {
   yanked: boolean;
 }
 
+export interface MarketplacePublisherKey {
+  id: string;
+  publicKeyPem: string;
+  revoked: boolean;
+}
+
 export interface MarketplaceExtensionDetails extends MarketplaceExtensionSummary {
   versions: MarketplaceExtensionVersion[];
   readme: string;
   publisherPublicKeyPem: string | null;
+  publisherKeys?: MarketplacePublisherKey[];
   createdAt: string;
   deprecated: boolean;
   blocked: boolean;
@@ -43,6 +50,7 @@ export interface MarketplaceDownloadResult {
   sha256: string | null;
   formatVersion: number | null;
   publisher: string | null;
+  publisherKeyId: string | null;
 }
 
 export interface MarketplaceClientOptions {
@@ -129,14 +137,15 @@ export class MarketplaceClient {
     const formatVersion =
       formatHeader && Number.isFinite(Number(formatHeader)) ? Number.parseInt(formatHeader, 10) : null;
     const publisher = res.headers.get("x-publisher");
+    const publisherKeyId = res.headers.get("x-publisher-key-id");
 
     return {
       bytes,
       signatureBase64: signatureBase64 ? String(signatureBase64) : null,
       sha256: sha256 ? String(sha256) : null,
       formatVersion,
-      publisher: publisher ? String(publisher) : null
+      publisher: publisher ? String(publisher) : null,
+      publisherKeyId: publisherKeyId ? String(publisherKeyId) : null
     };
   }
 }
-
