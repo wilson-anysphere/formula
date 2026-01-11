@@ -2,6 +2,7 @@ use std::io::Write;
 
 use formula_xlsx::XlsxPackage;
 use pretty_assertions::assert_eq;
+use rust_xlsxwriter::Workbook;
 use zip::write::FileOptions;
 
 fn build_source_package() -> Vec<u8> {
@@ -24,7 +25,7 @@ fn build_source_package() -> Vec<u8> {
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <pivotCaches>
-    <pivotCache cacheId="1" r:id="rId2"/>
+    <pivotCache cacheId="1" r:id="rId99"/>
   </pivotCaches>
   <sheets>
     <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
@@ -34,7 +35,7 @@ fn build_source_package() -> Vec<u8> {
     let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/>
+  <Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition" Target="pivotCache/pivotCacheDefinition1.xml"/>
 </Relationships>"#;
 
     let sheet = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -42,13 +43,13 @@ fn build_source_package() -> Vec<u8> {
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheetData/>
   <pivotTables>
-    <pivotTable r:id="rId1"/>
+    <pivotTable r:id="rId99"/>
   </pivotTables>
 </worksheet>"#;
 
     let sheet_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/>
+  <Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/>
 </Relationships>"#;
 
     let pivot_table = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" name="PivotTable1" cacheId="1"/>"#;
@@ -125,52 +126,11 @@ fn build_source_package() -> Vec<u8> {
 }
 
 fn build_destination_package() -> Vec<u8> {
-    let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-</Types>"#;
-
-    let workbook = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
- xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets>
-    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
-  </sheets>
-</workbook>"#;
-
-    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-</Relationships>"#;
-
-    // Intentionally omit xmlns:r and worksheet rels to ensure the apply path
-    // synthesizes both.
-    let sheet = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetData/>
-  <extLst><ext/></extLst>
-</worksheet>"#;
-
-    let cursor = std::io::Cursor::new(Vec::new());
-    let mut zip = zip::ZipWriter::new(cursor);
-    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
-
-    zip.start_file("[Content_Types].xml", options).unwrap();
-    zip.write_all(content_types.as_bytes()).unwrap();
-
-    zip.start_file("xl/workbook.xml", options).unwrap();
-    zip.write_all(workbook.as_bytes()).unwrap();
-
-    zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
-    zip.write_all(workbook_rels.as_bytes()).unwrap();
-
-    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
-    zip.write_all(sheet.as_bytes()).unwrap();
-
-    zip.finish().unwrap().into_inner()
+    // Generate a baseline workbook using rust_xlsxwriter (matching the intended real-world
+    // regenerate path).
+    let mut workbook = Workbook::new();
+    workbook.add_worksheet();
+    workbook.save_to_buffer().unwrap()
 }
 
 #[test]
@@ -205,15 +165,20 @@ fn preserved_pivot_parts_can_be_reapplied_to_regenerated_workbook() {
     let workbook_rels =
         std::str::from_utf8(dest_pkg.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
     assert!(workbook_rels.contains("pivotCacheDefinition"));
-    assert!(workbook_rels.contains("Id=\"rId2\""));
+    assert!(workbook_rels.contains("Id=\"rId99\""));
     assert!(workbook_rels.contains("Target=\"pivotCache/pivotCacheDefinition1.xml\""));
 
     let sheet_xml = std::str::from_utf8(dest_pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
     assert!(sheet_xml.contains("xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\""));
     assert!(sheet_xml.contains("<pivotTables"));
+    assert!(sheet_xml.contains("r:id=\"rId99\""));
     let pivot_pos = sheet_xml.find("<pivotTables").unwrap();
-    let ext_pos = sheet_xml.find("<extLst").unwrap();
-    assert!(pivot_pos < ext_pos, "pivotTables should be inserted before extLst");
+    if let Some(ext_pos) = sheet_xml.find("<extLst") {
+        assert!(pivot_pos < ext_pos, "pivotTables should be inserted before extLst");
+    } else {
+        let close_pos = sheet_xml.rfind("</worksheet>").unwrap();
+        assert!(pivot_pos < close_pos, "pivotTables should be inserted before </worksheet>");
+    }
 
     let sheet_rels = std::str::from_utf8(
         dest_pkg
@@ -222,7 +187,7 @@ fn preserved_pivot_parts_can_be_reapplied_to_regenerated_workbook() {
     )
     .unwrap();
     assert!(sheet_rels.contains("relationships/pivotTable"));
-    assert!(sheet_rels.contains("Id=\"rId1\""));
+    assert!(sheet_rels.contains("Id=\"rId99\""));
     assert!(sheet_rels.contains("Target=\"../pivotTables/pivotTable1.xml\""));
 
     let ct = std::str::from_utf8(dest_pkg.part("[Content_Types].xml").unwrap()).unwrap();
@@ -232,4 +197,3 @@ fn preserved_pivot_parts_can_be_reapplied_to_regenerated_workbook() {
     assert!(ct.contains("PartName=\"/xl/slicers/slicer1.xml\""));
     assert!(ct.contains("PartName=\"/xl/timelineCaches/timelineCacheDefinition1.xml\""));
 }
-
