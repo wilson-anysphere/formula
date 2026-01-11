@@ -126,12 +126,16 @@ export class CellConflictMonitor {
       if (!change) continue;
 
       const cellMap = /** @type {Y.Map<any>} */ (event.target);
+      const modifiedByChange = event.changes.keys.get("modifiedBy");
+      const oldModifiedBy = (modifiedByChange?.oldValue ?? "").toString();
       const oldValue = change.oldValue ?? null;
       const newValue = cellMap.get("value") ?? null;
       const remoteUserId = (cellMap.get("modifiedBy") ?? "").toString();
       const action = change.action;
       const itemId = getItemId(cellMap, "value");
       const newItemOriginId = getItemOriginId(cellMap, "value");
+      const itemLeftId = getItemLeftId(cellMap, "value");
+      const currentFormula = (cellMap.get("formula") ?? "").toString();
 
       this._handleValueChange({
         cellKey,
@@ -139,9 +143,12 @@ export class CellConflictMonitor {
         newValue,
         action,
         remoteUserId,
+        oldModifiedBy,
         origin: transaction.origin,
         itemId,
-        newItemOriginId
+        newItemOriginId,
+        itemLeftId,
+        currentFormula
       });
     }
   }
@@ -153,18 +160,66 @@ export class CellConflictMonitor {
    * @param {any} input.newValue
    * @param {"add" | "update" | "delete"} input.action
    * @param {string} input.remoteUserId
+   * @param {string} [input.oldModifiedBy]
    * @param {any} input.origin
    * @param {{ client: number, clock: number } | null} input.itemId
    * @param {{ client: number, clock: number } | null} input.newItemOriginId
+   * @param {{ client: number, clock: number } | null} [input.itemLeftId]
+   * @param {string} [input.currentFormula]
    */
   _handleValueChange(input) {
-    const { cellKey, oldValue, newValue, action, remoteUserId, origin, itemId, newItemOriginId } = input;
+    const {
+      cellKey,
+      oldValue,
+      newValue,
+      action,
+      remoteUserId,
+      oldModifiedBy = "",
+      origin,
+      itemId,
+      newItemOriginId,
+      itemLeftId = null,
+      currentFormula = ""
+    } = input;
 
     const isLocal = this.localOrigins.has(origin);
     if (isLocal) return;
 
     const lastLocal = this._lastLocalEditByCellKey.get(cellKey);
-    if (!lastLocal) return;
+    if (!lastLocal) {
+      // Fallback for monitor restarts (e.g. app reload): infer "this was my local
+      // value" from the previous `modifiedBy` value and the overwritten value
+      // itself.
+      if (oldModifiedBy !== this.localUserId) return;
+      // Deletes don't create new Items, so we can't reliably distinguish sequential
+      // deletes from concurrent clears without in-memory item ids.
+      if (action === "delete") return;
+      // Value changes that accompany formula writes are represented as value=null
+      // markers; don't treat those as value conflicts.
+      if (currentFormula.trim()) return;
+
+      // Sequential overwrite (remote saw our write) - ignore.
+      if (itemLeftId && idsEqual(newItemOriginId, itemLeftId)) return;
+
+      // Auto-resolve when the values are deep-equal.
+      if (valuesDeeplyEqual(newValue, oldValue)) return;
+
+      const cell = cellRefFromKey(cellKey);
+      const conflict = /** @type {CellConflict} */ ({
+        id: crypto.randomUUID(),
+        cell,
+        cellKey,
+        field: "value",
+        localValue: oldValue,
+        remoteValue: newValue,
+        remoteUserId,
+        detectedAt: Date.now()
+      });
+
+      this._conflicts.set(conflict.id, conflict);
+      this.onConflict(conflict);
+      return;
+    }
 
     // Did this remote update overwrite the last value we wrote locally?
     if (!valuesDeeplyEqual(oldValue, lastLocal.value)) return;
@@ -251,6 +306,31 @@ function getItemId(ymap, key) {
   const item = ymap?._map?.get?.(key);
   if (!item) return null;
   const id = item.id;
+  if (!id || typeof id !== "object") return null;
+  const client = id.client;
+  const clock = id.clock;
+  if (typeof client !== "number" || typeof clock !== "number") return null;
+  return { client, clock };
+}
+
+/**
+ * Extract the id for the Item immediately to the left of the currently visible
+ * value of a Y.Map key.
+ *
+ * @param {Y.Map<any>} ymap
+ * @param {string} key
+ * @returns {{ client: number, clock: number } | null}
+ */
+function getItemLeftId(ymap, key) {
+  // @ts-ignore - accessing Yjs internals
+  const item = ymap?._map?.get?.(key);
+  if (!item) return null;
+
+  /** @type {any} */
+  const left = item.left;
+  if (!left) return null;
+
+  const id = left.lastId ?? left.id;
   if (!id || typeof id !== "object") return null;
   const client = id.client;
   const clock = id.clock;

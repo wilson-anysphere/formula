@@ -90,6 +90,69 @@ test("CollabSession cell value conflict monitor detects long-offline concurrent 
   docB.destroy();
 });
 
+test("CollabSession cell value conflict monitor still detects conflicts after recreating the session (restart)", async () => {
+  // For concurrent overwrites, Yjs deterministically breaks ties using clientID (higher wins).
+  // Ensure the remote value writer wins the value key.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  let sessionA = createCollabSession({
+    doc: docA,
+    cellValueConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    cellValueConflicts: {
+      localUserId: "user-b",
+      onConflict: () => {},
+    },
+  });
+
+  // Establish base.
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "base");
+
+  // Offline concurrent edits.
+  disconnect();
+  await sessionA.setCellValue("Sheet1:0:0", "ours");
+
+  // Simulate app reload: recreate the session (and its conflict monitor) before reconnecting.
+  sessionA.destroy();
+  conflictsA.length = 0;
+  sessionA = createCollabSession({
+    doc: docA,
+    cellValueConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+
+  await sessionB.setCellValue("Sheet1:0:0", "theirs");
+
+  // Reconnect.
+  disconnect = connectDocs(docA, docB);
+
+  assert.ok(conflictsA.length >= 1, "expected at least one conflict after restart");
+  const conflict = conflictsA[0];
+  assert.equal(conflict.localValue, "ours");
+  assert.equal(conflict.remoteValue, "theirs");
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession cell value conflict monitor does not flag sequential value edits", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
