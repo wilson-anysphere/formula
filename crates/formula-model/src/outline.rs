@@ -89,6 +89,27 @@ impl OutlineAxis {
         }
     }
 
+    /// Sets whether the row/column at `index` is user-hidden (eg via "Hide row").
+    ///
+    /// This toggles only the `user` hidden bit, preserving outline/filter hidden state.
+    /// When clearing (`hidden = false`), the entry is removed entirely if it becomes
+    /// the default (no outline level, no hidden bits, not collapsed) to keep the
+    /// serialized representation compact.
+    pub fn set_user_hidden(&mut self, index: u32, hidden: bool) {
+        if hidden {
+            self.entry_mut(index).hidden.user = true;
+            return;
+        }
+
+        let Some(entry) = self.entries.get_mut(&index) else {
+            return;
+        };
+        entry.hidden.user = false;
+        if *entry == OutlineEntry::default() {
+            self.entries.remove(&index);
+        }
+    }
+
     /// Sets whether the row/column at `index` is hidden by an AutoFilter.
     ///
     /// This toggles only the `filter` hidden bit, preserving user/outline hidden state.
@@ -167,6 +188,7 @@ impl Outline {
             let entry = self.rows.entry_mut(index);
             entry.level = (entry.level + 1).min(7);
         }
+        self.recompute_outline_hidden_rows();
     }
 
     pub fn ungroup_rows(&mut self, start: u32, end: u32) {
@@ -185,6 +207,7 @@ impl Outline {
             let entry = self.cols.entry_mut(index);
             entry.level = (entry.level + 1).min(7);
         }
+        self.recompute_outline_hidden_cols();
     }
 
     pub fn ungroup_cols(&mut self, start: u32, end: u32) {

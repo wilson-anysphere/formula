@@ -10,7 +10,7 @@ use crate::drawings::DrawingObject;
 use crate::{
     A1ParseError, Cell, CellKey, CellRef, CellValue, Comment, CommentError, CommentPatch,
     DataValidation, DataValidationAssignment, DataValidationId, Hyperlink, MergeError, MergedRegions,
-    Range, Reply, SheetProtection, SheetProtectionAction, StyleTable, Table,
+    Outline, OutlineEntry, Range, Reply, SheetProtection, SheetProtectionAction, StyleTable, Table,
 };
 
 /// Identifier for a worksheet within a workbook.
@@ -69,6 +69,10 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+fn is_default_outline(outline: &Outline) -> bool {
+    outline == &Outline::default()
+}
+
 /// Sheet visibility state (Excel-compatible).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -90,7 +94,11 @@ pub struct RowProperties {
     /// Row height in points.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<f32>,
-    /// Whether the row is hidden.
+    /// Whether the row is user-hidden (eg via "Hide row").
+    ///
+    /// This is treated as the persisted "user hidden" bit for row visibility. When using
+    /// [`Worksheet::set_row_hidden`], this flag is kept in sync with
+    /// `Worksheet::outline.rows[*].hidden.user`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
 }
@@ -101,7 +109,11 @@ pub struct ColProperties {
     /// Column width in Excel "character" units.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<f32>,
-    /// Whether the column is hidden.
+    /// Whether the column is user-hidden (eg via "Hide column").
+    ///
+    /// This is treated as the persisted "user hidden" bit for column visibility. When using
+    /// [`Worksheet::set_col_hidden`], this flag is kept in sync with
+    /// `Worksheet::outline.cols[*].hidden.user`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
 }
@@ -173,6 +185,13 @@ pub struct Worksheet {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub col_properties: BTreeMap<u32, ColProperties>,
 
+    /// Excel-style row/column outline (grouping) metadata.
+    ///
+    /// Indexes within the outline are 1-based (matching Excel / OOXML), whereas the sheet's
+    /// cell grid and `row_properties`/`col_properties` are 0-based.
+    #[serde(default, skip_serializing_if = "is_default_outline")]
+    pub outline: Outline,
+
     /// Frozen pane row count (top).
     #[serde(default)]
     pub frozen_rows: u32,
@@ -233,6 +252,7 @@ impl Worksheet {
             col_count: default_col_count(),
             row_properties: BTreeMap::new(),
             col_properties: BTreeMap::new(),
+            outline: Outline::default(),
             frozen_rows: 0,
             frozen_cols: 0,
             zoom: default_zoom(),
@@ -401,6 +421,153 @@ impl Worksheet {
         self.col_properties.get(&col)
     }
 
+    /// Returns the outline entry for a row using 1-based Excel indexing.
+    ///
+    /// Note: `RowProperties.hidden` is treated as the persisted "user hidden" bit and is
+    /// kept in sync with `OutlineEntry.hidden.user` when using [`Worksheet::set_row_hidden`].
+    pub fn row_outline_entry(&self, row_1based: u32) -> OutlineEntry {
+        assert!(row_1based >= 1, "row_1based must be >= 1 (got {row_1based})");
+        let mut entry = self.outline.rows.entry(row_1based);
+        let row_0based = row_1based - 1;
+        if self
+            .row_properties
+            .get(&row_0based)
+            .map(|p| p.hidden)
+            .unwrap_or(false)
+        {
+            entry.hidden.user = true;
+        }
+        entry
+    }
+
+    /// Returns the outline entry for a column using 1-based Excel indexing.
+    ///
+    /// Note: `ColProperties.hidden` is treated as the persisted "user hidden" bit and is
+    /// kept in sync with `OutlineEntry.hidden.user` when using [`Worksheet::set_col_hidden`].
+    pub fn col_outline_entry(&self, col_1based: u32) -> OutlineEntry {
+        assert!(col_1based >= 1, "col_1based must be >= 1 (got {col_1based})");
+        let mut entry = self.outline.cols.entry(col_1based);
+        let col_0based = col_1based - 1;
+        if self
+            .col_properties
+            .get(&col_0based)
+            .map(|p| p.hidden)
+            .unwrap_or(false)
+        {
+            entry.hidden.user = true;
+        }
+        entry
+    }
+
+    /// Returns whether the row is effectively hidden under Excel semantics.
+    ///
+    /// Effective hidden combines:
+    /// - user-hidden (`RowProperties.hidden` / `OutlineEntry.hidden.user`)
+    /// - outline-hidden (`OutlineEntry.hidden.outline`)
+    /// - filter-hidden (`OutlineEntry.hidden.filter`)
+    pub fn is_row_hidden_effective(&self, row_1based: u32) -> bool {
+        self.row_outline_entry(row_1based).hidden.is_hidden()
+    }
+
+    /// Returns whether the column is effectively hidden under Excel semantics.
+    pub fn is_col_hidden_effective(&self, col_1based: u32) -> bool {
+        self.col_outline_entry(col_1based).hidden.is_hidden()
+    }
+
+    /// Group a row range, increasing the outline level by 1 for each row.
+    pub fn group_rows(&mut self, start_1based: u32, end_1based: u32) {
+        assert!(
+            start_1based >= 1 && end_1based >= 1,
+            "row indexes must be 1-based (got {start_1based}..={end_1based})"
+        );
+        let max = start_1based.max(end_1based);
+        self.row_count = self.row_count.max(max);
+        self.outline.group_rows(start_1based, end_1based);
+    }
+
+    /// Ungroup a row range, decreasing the outline level by 1 for each row.
+    pub fn ungroup_rows(&mut self, start_1based: u32, end_1based: u32) {
+        assert!(
+            start_1based >= 1 && end_1based >= 1,
+            "row indexes must be 1-based (got {start_1based}..={end_1based})"
+        );
+        let max = start_1based.max(end_1based);
+        self.row_count = self.row_count.max(max);
+        self.outline.ungroup_rows(start_1based, end_1based);
+    }
+
+    /// Collapse or expand a row outline group.
+    pub fn toggle_row_group(&mut self, summary_index_1based: u32) -> bool {
+        assert!(
+            summary_index_1based >= 1,
+            "summary_index_1based must be >= 1 (got {summary_index_1based})"
+        );
+        self.row_count = self.row_count.max(summary_index_1based);
+        self.outline.toggle_row_group(summary_index_1based)
+    }
+
+    /// Group a column range, increasing the outline level by 1 for each column.
+    pub fn group_cols(&mut self, start_1based: u32, end_1based: u32) {
+        assert!(
+            start_1based >= 1 && end_1based >= 1,
+            "col indexes must be 1-based (got {start_1based}..={end_1based})"
+        );
+        let max = start_1based.max(end_1based);
+        assert!(
+            max <= crate::cell::EXCEL_MAX_COLS,
+            "col out of Excel bounds: {max}"
+        );
+        self.col_count = self.col_count.max(max);
+        self.outline.group_cols(start_1based, end_1based);
+    }
+
+    /// Ungroup a column range, decreasing the outline level by 1 for each column.
+    pub fn ungroup_cols(&mut self, start_1based: u32, end_1based: u32) {
+        assert!(
+            start_1based >= 1 && end_1based >= 1,
+            "col indexes must be 1-based (got {start_1based}..={end_1based})"
+        );
+        let max = start_1based.max(end_1based);
+        assert!(
+            max <= crate::cell::EXCEL_MAX_COLS,
+            "col out of Excel bounds: {max}"
+        );
+        self.col_count = self.col_count.max(max);
+        self.outline.ungroup_cols(start_1based, end_1based);
+    }
+
+    /// Collapse or expand a column outline group.
+    pub fn toggle_col_group(&mut self, summary_index_1based: u32) -> bool {
+        assert!(
+            summary_index_1based >= 1,
+            "summary_index_1based must be >= 1 (got {summary_index_1based})"
+        );
+        assert!(
+            summary_index_1based <= crate::cell::EXCEL_MAX_COLS,
+            "col out of Excel bounds: {summary_index_1based}"
+        );
+        self.col_count = self.col_count.max(summary_index_1based);
+        self.outline.toggle_col_group(summary_index_1based)
+    }
+
+    /// Sets whether the row at `row_1based` is hidden by an AutoFilter.
+    pub fn set_filter_hidden_row(&mut self, row_1based: u32, hidden: bool) {
+        assert!(row_1based >= 1, "row_1based must be >= 1 (got {row_1based})");
+        self.row_count = self.row_count.max(row_1based);
+        self.outline.rows.set_filter_hidden(row_1based, hidden);
+    }
+
+    /// Clears filter-hidden flags within `[start_1based, end_1based]`.
+    pub fn clear_filter_hidden_range(&mut self, start_1based: u32, end_1based: u32) {
+        assert!(
+            start_1based >= 1 && end_1based >= 1,
+            "row indexes must be 1-based (got {start_1based}..={end_1based})"
+        );
+        self.outline
+            .rows
+            .clear_filter_hidden_range(start_1based, end_1based);
+    }
+
     /// Set (or clear) the height override for a row.
     ///
     /// Passing `None` removes the height override. If the row has no overrides
@@ -435,6 +602,7 @@ impl Worksheet {
     /// is removed from the map.
     pub fn set_row_hidden(&mut self, row: u32, hidden: bool) {
         self.row_count = self.row_count.max(row.saturating_add(1));
+        self.outline.rows.set_user_hidden(row.saturating_add(1), hidden);
         match self.row_properties.get_mut(&row) {
             Some(props) => {
                 props.hidden = hidden;
@@ -493,6 +661,7 @@ impl Worksheet {
             "col out of Excel bounds: {col}"
         );
         self.col_count = self.col_count.max(col.saturating_add(1));
+        self.outline.cols.set_user_hidden(col.saturating_add(1), hidden);
         match self.col_properties.get_mut(&col) {
             Some(props) => {
                 props.hidden = hidden;
@@ -1247,6 +1416,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             #[serde(default)]
             col_properties: BTreeMap<u32, ColProperties>,
             #[serde(default)]
+            outline: Outline,
+            #[serde(default)]
             frozen_rows: u32,
             #[serde(default)]
             frozen_cols: u32,
@@ -1301,6 +1472,18 @@ impl<'de> Deserialize<'de> for Worksheet {
             col_count = col_count.max(max_col.saturating_add(1));
         }
 
+        if let Some(max_row_1based) = helper.outline.rows.iter().map(|(k, _)| k).max() {
+            row_count = row_count.max(max_row_1based);
+        }
+        if let Some(max_col_1based) = helper.outline.cols.iter().map(|(k, _)| k).max() {
+            col_count = col_count.max(max_col_1based);
+        }
+        if col_count > crate::cell::EXCEL_MAX_COLS {
+            return Err(D::Error::custom(format!(
+                "col_count out of Excel bounds: {col_count}"
+            )));
+        }
+
         if helper.frozen_rows > row_count {
             return Err(D::Error::custom(format!(
                 "frozen_rows exceeds row_count: {} > {row_count}",
@@ -1329,6 +1512,10 @@ impl<'de> Deserialize<'de> for Worksheet {
             .unwrap_or(0)
             .wrapping_add(1);
 
+        let mut outline = helper.outline;
+        outline.recompute_outline_hidden_rows();
+        outline.recompute_outline_hidden_cols();
+
         let mut sheet = Worksheet {
             id: helper.id,
             name: helper.name,
@@ -1344,6 +1531,7 @@ impl<'de> Deserialize<'de> for Worksheet {
             col_count,
             row_properties: helper.row_properties,
             col_properties: helper.col_properties,
+            outline,
             frozen_rows: helper.frozen_rows,
             frozen_cols: helper.frozen_cols,
             zoom: helper.zoom,
@@ -1356,11 +1544,71 @@ impl<'de> Deserialize<'de> for Worksheet {
             sheet_protection: helper.sheet_protection,
         };
 
-        sheet
-            .normalize_comment_storage()
-            .map_err(D::Error::custom)?;
-
+        sheet.normalize_comment_storage().map_err(D::Error::custom)?;
+        sheet.sync_user_hidden_bits();
         Ok(sheet)
+    }
+}
+
+impl Worksheet {
+    fn sync_user_hidden_bits(&mut self) {
+        // RowProperties/ColProperties carry the persisted "user hidden" bit; keep the
+        // outline's user-hidden state in sync for Excel visibility semantics.
+        for (&row, props) in &self.row_properties {
+            if props.hidden {
+                self.outline.rows.set_user_hidden(row.saturating_add(1), true);
+            }
+        }
+        for (&col, props) in &self.col_properties {
+            if props.hidden {
+                self.outline.cols.set_user_hidden(col.saturating_add(1), true);
+            }
+        }
+
+        // Also sync in the other direction to support payloads that only store
+        // `OutlineEntry.hidden.user` (e.g. XLSX round-trip) without corresponding
+        // row/col properties.
+        let user_hidden_rows: Vec<u32> = self
+            .outline
+            .rows
+            .iter()
+            .filter_map(|(row_1based, entry)| entry.hidden.user.then_some(row_1based))
+            .collect();
+        for row_1based in user_hidden_rows {
+            if row_1based == 0 {
+                continue;
+            }
+            let row_0based = row_1based - 1;
+            self.row_count = self.row_count.max(row_0based.saturating_add(1));
+            self.row_properties
+                .entry(row_0based)
+                .and_modify(|p| p.hidden = true)
+                .or_insert_with(|| RowProperties {
+                    height: None,
+                    hidden: true,
+                });
+        }
+
+        let user_hidden_cols: Vec<u32> = self
+            .outline
+            .cols
+            .iter()
+            .filter_map(|(col_1based, entry)| entry.hidden.user.then_some(col_1based))
+            .collect();
+        for col_1based in user_hidden_cols {
+            if col_1based == 0 {
+                continue;
+            }
+            let col_0based = col_1based - 1;
+            self.col_count = self.col_count.max(col_0based.saturating_add(1));
+            self.col_properties
+                .entry(col_0based)
+                .and_modify(|p| p.hidden = true)
+                .or_insert_with(|| ColProperties {
+                    width: None,
+                    hidden: true,
+                });
+        }
     }
 }
 
