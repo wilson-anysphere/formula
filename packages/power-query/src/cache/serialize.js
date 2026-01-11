@@ -2,9 +2,31 @@
 let arrowTableToIPC = null;
 /** @type {((bytes: Uint8Array | ArrayBuffer) => any) | null} */
 let arrowTableFromIPC = null;
+/** @type {((columns: Record<string, any[] | ArrayLike<any>>) => any) | null} */
+let arrowTableFromColumns = null;
 
 try {
-  ({ arrowTableFromIPC, arrowTableToIPC } = await import("../../../data-io/src/index.js"));
+  ({ arrowTableFromIPC, arrowTableToIPC, arrowTableFromColumns } = await import("../../../data-io/src/index.js"));
+
+  // `@formula/data-io` can be present without the heavy optional `apache-arrow`
+  // dependency installed (e.g. in some test sandboxes). In that case the module
+  // loads, but calling Arrow helpers throws. Treat that as "Arrow IPC unavailable"
+  // so callers can fall back to row-backed serialization.
+  if (typeof arrowTableToIPC === "function" && typeof arrowTableFromColumns === "function") {
+    try {
+      const probe = arrowTableFromColumns({ __probe: [1] });
+      arrowTableToIPC(probe);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("optional 'apache-arrow'")) {
+        arrowTableFromIPC = null;
+        arrowTableToIPC = null;
+        arrowTableFromColumns = null;
+      } else {
+        throw err;
+      }
+    }
+  }
 } catch (err) {
   // Arrow IPC caching is optional; allow Power Query to run without Arrow
   // dependencies installed (e.g. lightweight environments that only use SQL/CSV).
@@ -13,6 +35,7 @@ try {
   }
   arrowTableFromIPC = null;
   arrowTableToIPC = null;
+  arrowTableFromColumns = null;
 }
 
 import { ArrowTableAdapter } from "../arrowTable.js";
