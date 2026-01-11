@@ -975,9 +975,8 @@ export async function bindCollabSessionToDocumentController(options: {
     userId,
     canReadCell: (cell) => session.canReadCell(cell),
     canEditCell: (cell) => session.canEditCell(cell),
-    // The binder will only call this when canReadCell() is false, but use the session
-    // helper to keep masking behavior consistent.
-    maskCellValue: (value, cell) =>
-      cell ? session.maskValueIfUnreadable({ ...cell, value }) : maskCellValue(value),
+    // Use the standard enterprise mask. The binder also uses this hook for
+    // encrypted cells that cannot be decrypted.
+    maskCellValue: (value) => maskCellValue(value),
   }) as DocumentControllerBinder;
 }
