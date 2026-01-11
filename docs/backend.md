@@ -32,6 +32,12 @@ The API issues short-lived JWT sync tokens via `POST /docs/:docId/sync-token`.
 - Sync-server verification secret: `SYNC_SERVER_JWT_SECRET` (must match `SYNC_TOKEN_SECRET`)
 - JWT audience: `SYNC_SERVER_JWT_AUDIENCE` (must match the token `aud`, default: `formula-sync`)
 
+In `docker-compose.yml`, the sync server is configured to reuse the API secret by default, so you can override both by setting `SYNC_TOKEN_SECRET`:
+
+```bash
+SYNC_TOKEN_SECRET=my-local-sync-secret docker-compose up --build
+```
+
 ## Persistence (local docker-compose)
 
 The docker-compose stack configures the sync server with:
