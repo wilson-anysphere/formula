@@ -23,12 +23,14 @@ function extractSessionToken(request: FastifyRequest): string | null {
 async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = extractSessionToken(request);
   if (!token) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "missing_token" });
     reply.code(401).send({ error: "unauthorized" });
     return;
   }
 
   const found = await lookupSessionByToken(request.server.db, token);
   if (!found) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "invalid_token" });
     reply.code(401).send({ error: "unauthorized" });
     return;
   }
@@ -157,6 +159,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     );
 
     if (found.rowCount !== 1) {
+      app.metrics.authFailuresTotal.inc({ reason: "invalid_credentials" });
       await writeAuditEvent(app.db, {
         userEmail: email,
         eventType: "auth.login_failed",
@@ -181,6 +184,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     };
 
     if (!row.password_hash) {
+      app.metrics.authFailuresTotal.inc({ reason: "password_login_disabled" });
       await writeAuditEvent(app.db, {
         userId: row.id,
         userEmail: row.email,
@@ -198,6 +202,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
     const ok = await verifyPassword(password, row.password_hash);
     if (!ok) {
+      app.metrics.authFailuresTotal.inc({ reason: "invalid_credentials" });
       await writeAuditEvent(app.db, {
         userId: row.id,
         userEmail: row.email,
@@ -216,6 +221,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     if (row.mfa_totp_enabled) {
       const code = body.data.mfaCode;
       if (!code || !row.mfa_totp_secret || !verifyTotpCode(row.mfa_totp_secret, code)) {
+        app.metrics.authFailuresTotal.inc({ reason: "mfa_required" });
         await writeAuditEvent(app.db, {
           userId: row.id,
           userEmail: row.email,

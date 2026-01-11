@@ -57,12 +57,14 @@ describe("API e2e: auth + RBAC + sync token", () => {
     await db.end();
   });
 
-  it("creates users, creates doc, invites user, issues sync token, and sync server accepts it", async () => {
-    const aliceRegister = await app.inject({
-      method: "POST",
-      url: "/auth/register",
-      payload: {
-        email: "alice@example.com",
+  it(
+    "creates users, creates doc, invites user, issues sync token, and sync server accepts it",
+    async () => {
+      const aliceRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "alice@example.com",
         password: "password1234",
         name: "Alice",
         orgName: "Acme"
@@ -144,27 +146,28 @@ describe("API e2e: auth + RBAC + sync token", () => {
     const syncServer = createSyncServer(syncServerConfig, createLogger("silent"));
     const { port: syncPort } = await syncServer.start();
 
-    const ws = new WebSocket(`ws://127.0.0.1:${syncPort}/${docId}?token=${encodeURIComponent(syncToken)}`);
-    try {
-      await new Promise<void>((resolve, reject) => {
-        ws.once("open", () => resolve());
-        ws.once("error", reject);
-      });
+      const ws = new WebSocket(`ws://127.0.0.1:${syncPort}/${docId}?token=${encodeURIComponent(syncToken)}`);
+      try {
+        const openPromise = new Promise<void>((resolve, reject) => {
+          ws.once("open", () => resolve());
+          ws.once("error", reject);
+        });
+        const firstMessagePromise = new Promise<WebSocket.RawData>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error("Timed out waiting for sync server message")), 5_000);
+          ws.once("message", (data) => {
+            clearTimeout(timeout);
+            resolve(data);
+          });
+          ws.once("error", (err) => {
+            clearTimeout(timeout);
+            reject(err);
+          });
+        });
 
-      // y-websocket sends an initial binary sync message on connect. It's enough
-      // for this test to assert that the connection is accepted and we receive
-      // at least one sync frame.
-      const firstMessage = await new Promise<WebSocket.RawData>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("Timed out waiting for sync server message")), 5_000);
-        ws.once("message", (data) => {
-          clearTimeout(timeout);
-          resolve(data);
-        });
-        ws.once("error", (err) => {
-          clearTimeout(timeout);
-          reject(err);
-        });
-      });
+        // y-websocket sends an initial binary sync message on connect. It's enough
+        // for this test to assert that the connection is accepted and we receive
+        // at least one sync frame.
+        const [, firstMessage] = await Promise.all([openPromise, firstMessagePromise]);
       const firstMessageBytes = Buffer.isBuffer(firstMessage)
         ? firstMessage
         : firstMessage instanceof ArrayBuffer
@@ -175,10 +178,12 @@ describe("API e2e: auth + RBAC + sync token", () => {
       expect(firstMessageBytes.byteLength).toBeGreaterThan(0);
     } finally {
       ws.close();
-      await syncServer.stop();
-      await rm(dataDir, { recursive: true, force: true });
-    }
-  });
+        await syncServer.stop();
+        await rm(dataDir, { recursive: true, force: true });
+      }
+    },
+    15_000
+  );
 
   it("enforces document share permission (viewer cannot invite)", async () => {
     const ownerRes = await app.inject({

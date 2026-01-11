@@ -1,8 +1,11 @@
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { AppConfig } from "./config";
+import { createLogger } from "./observability/logger";
+import { createMetrics, instrumentDb, registerMetrics } from "./observability/metrics";
+import { genRequestId, registerRequestId } from "./observability/request-id";
 import { registerAuditRoutes } from "./routes/audit";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerDocRoutes } from "./routes/docs";
@@ -12,15 +15,25 @@ import { registerOrgRoutes } from "./routes/orgs";
 export interface BuildAppOptions {
   db: Pool;
   config: AppConfig;
+  logger?: FastifyBaseLogger;
 }
 
 export function buildApp(options: BuildAppOptions): FastifyInstance {
+  const metrics = createMetrics();
+  instrumentDb(options.db, metrics);
+
   const app = Fastify({
-    logger: true
+    loggerInstance: (options.logger ?? createLogger()) as FastifyBaseLogger,
+    genReqId: genRequestId,
+    requestIdLogLabel: "requestId"
   });
 
   app.decorate("db", options.db);
   app.decorate("config", options.config);
+  app.decorate("metrics", metrics);
+
+  registerRequestId(app);
+  registerMetrics(app, metrics);
 
   app.register(cookie);
   app.register(cors, {
@@ -38,4 +51,3 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   return app;
 }
-

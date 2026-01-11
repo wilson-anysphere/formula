@@ -1,11 +1,12 @@
 import path from "node:path";
-import { buildApp } from "./app";
 import { loadConfig } from "./config";
 import { createPool } from "./db/pool";
 import { runMigrations } from "./db/migrations";
+import { initOpenTelemetry } from "./observability/otel";
 import { runRetentionSweep } from "./retention";
 
 const config = loadConfig();
+const otel = initOpenTelemetry({ serviceName: "api" });
 const pool = createPool(config.databaseUrl);
 
 // Resolve relative to the current working directory so this works in:
@@ -28,6 +29,7 @@ async function main(): Promise<void> {
     }
   }
 
+  const { buildApp } = await import("./app");
   const app = buildApp({ db: pool, config });
 
   if (config.retentionSweepIntervalMs) {
@@ -49,4 +51,5 @@ main().catch((err) => {
   // eslint-disable-next-line no-console
   console.error(err);
   process.exitCode = 1;
+  void otel.shutdown();
 });
