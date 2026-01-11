@@ -387,6 +387,12 @@ function EngineDemoApp() {
     const range = getCopyRange();
     if (!range) return;
 
+    const rows = range.endRow - range.startRow;
+    const cols = range.endCol - range.startCol;
+    const cellCount = rows * cols;
+    const maxClipboardCells = 100_000;
+    if (cellCount > maxClipboardCells) return;
+
     // Web preview behavior: copy the displayed value grid (not formulas).
     // This matches what the canvas grid currently renders and makes TSV/HTML
     // interoperability predictable.
@@ -459,13 +465,17 @@ function EngineDemoApp() {
       const pasteCols = Math.max(0, ...grid.map((row) => row.length));
       if (pasteRows === 0 || pasteCols === 0) return;
 
+      const maxRows = Math.max(0, Math.min(pasteRows, rowCount - selection.row));
+      const maxCols = Math.max(0, Math.min(pasteCols, colCount - selection.col));
+      if (maxRows === 0 || maxCols === 0) return;
+
       const values: CellScalar[][] = [];
       const directChanges: CellChange[] = [];
 
-      for (let r = 0; r < pasteRows; r++) {
+      for (let r = 0; r < maxRows; r++) {
         const row = grid[r] ?? [];
         const outRow: CellScalar[] = [];
-        for (let c = 0; c < pasteCols; c++) {
+        for (let c = 0; c < maxCols; c++) {
           const raw = row[c] ?? "";
           const value = parseCellScalarInput(raw);
           outRow.push(value);
@@ -480,8 +490,8 @@ function EngineDemoApp() {
       const rangeA1 = range0ToA1({
         startRow0,
         startCol0,
-        endRow0Exclusive: startRow0 + pasteRows,
-        endCol0Exclusive: startCol0 + pasteCols
+        endRow0Exclusive: startRow0 + maxRows,
+        endCol0Exclusive: startCol0 + maxCols
       });
 
       await engine.setRange(rangeA1, values, activeSheet);
@@ -490,9 +500,9 @@ function EngineDemoApp() {
 
       api.setSelectionRange({
         startRow: selection.row,
-        endRow: Math.min(rowCount, selection.row + pasteRows),
+        endRow: selection.row + maxRows,
         startCol: selection.col,
-        endCol: Math.min(colCount, selection.col + pasteCols)
+        endCol: selection.col + maxCols
       });
 
       await syncFormulaBar(toA1(startRow0, startCol0));

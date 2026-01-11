@@ -1,4 +1,5 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, firefox } from "@playwright/test";
+import { existsSync } from "node:fs";
 
 const port = (() => {
   const raw = process.env.PLAYWRIGHT_WEB_PORT;
@@ -10,6 +11,10 @@ export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
   retries: 0,
+  projects: [
+    { name: "chromium", use: { browserName: "chromium" } },
+    ...(existsSync(firefox.executablePath()) ? [{ name: "firefox", use: { browserName: "firefox" } }] : [])
+  ],
   use: {
     baseURL: `http://localhost:${port}`,
     headless: true
