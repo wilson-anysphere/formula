@@ -182,7 +182,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
       };
 
       const onStreamEvent = (event: ChatStreamEvent) => {
-        if (event.type === "tool_call_start") {
+        if (event.type === "tool_call_start" || event.type === "tool_call_delta") {
           // We only display the final assistant answer. Clear any pre-tool chatter so the
           // pending assistant message doesn't briefly show "planning" text that will be
           // replaced after tool execution.

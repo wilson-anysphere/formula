@@ -262,8 +262,15 @@ export class OllamaChatClient {
       /** @type {{ promptTokens?: number, completionTokens?: number, totalTokens?: number } | null} */
       let usage = null;
 
-      /** @type {Map<string, { name?: string, args: string, pendingArgs: string, started: boolean }>} */
-      const toolCallsById = new Map();
+      /**
+       * Ollama's streamed tool calls are newline-delimited JSON objects. Some
+       * backends can omit tool call ids on early chunks, so we buffer tool call
+       * state by array index until we learn a stable id (or synthesize one at
+       * stream end).
+       *
+       * @type {Map<number, { id?: string, name?: string, args: string, pendingArgs: string, started: boolean }>}
+       */
+      const toolCallsByIndex = new Map();
       /** @type {Set<string>} */
       const openToolCalls = new Set();
 
@@ -273,12 +280,31 @@ export class OllamaChatClient {
         return ids;
       }
 
-      function getOrCreateToolCall(id) {
-        const existing = toolCallsById.get(id);
+      /**
+       * @param {number} index
+       */
+      function getOrCreateToolCall(index) {
+        const existing = toolCallsByIndex.get(index);
         if (existing) return existing;
         const next = { args: "", pendingArgs: "", started: false };
-        toolCallsById.set(id, next);
+        toolCallsByIndex.set(index, next);
         return next;
+      }
+
+      /**
+       * @param {{ id?: string, name?: string, args: string, pendingArgs: string, started: boolean }} state
+       */
+      function* flushToolCallState(state) {
+        if (!state.id || !state.name) return;
+        if (!state.started) {
+          state.started = true;
+          openToolCalls.add(state.id);
+          yield { type: "tool_call_start", id: state.id, name: state.name };
+          if (state.pendingArgs) {
+            yield { type: "tool_call_delta", id: state.id, delta: state.pendingArgs };
+            state.pendingArgs = "";
+          }
+        }
       }
 
       while (true) {
@@ -304,22 +330,17 @@ export class OllamaChatClient {
           if (Array.isArray(toolCalls)) {
             for (let idx = 0; idx < toolCalls.length; idx++) {
               const c = toolCalls[idx];
-              const id = typeof c.id === "string" ? c.id : `toolcall-${idx}`;
-              const name = typeof c.function?.name === "string" ? c.function.name : undefined;
-              const args = typeof c.function?.arguments === "string" ? c.function.arguments : "";
+              const state = getOrCreateToolCall(idx);
 
-              const state = getOrCreateToolCall(id);
+              const id = typeof c?.id === "string" ? c.id : null;
+              const name = typeof c?.function?.name === "string" ? c.function.name : null;
+              const args = typeof c?.function?.arguments === "string" ? c.function.arguments : "";
+
+              if (id && !state.id) state.id = id;
               if (name) state.name = name;
 
-              if (!state.started && state.name) {
-                state.started = true;
-                openToolCalls.add(id);
-                yield { type: "tool_call_start", id, name: state.name };
-                if (state.pendingArgs) {
-                  yield { type: "tool_call_delta", id, delta: state.pendingArgs };
-                  state.pendingArgs = "";
-                }
-              }
+              // Start + flush any buffered argument deltas as soon as we have a stable id + name.
+              for (const ev of flushToolCallState(state)) yield ev;
 
               if (typeof args === "string" && args.length > 0) {
                 const prev = state.args;
@@ -327,8 +348,8 @@ export class OllamaChatClient {
                 const delta = args.startsWith(prev) ? args.slice(prev.length) : args;
                 state.args = args;
                 if (delta) {
-                  if (state.started) {
-                    yield { type: "tool_call_delta", id, delta };
+                  if (state.started && state.id) {
+                    yield { type: "tool_call_delta", id: state.id, delta };
                   } else {
                     state.pendingArgs += delta;
                   }
@@ -338,6 +359,14 @@ export class OllamaChatClient {
           }
 
           if (json.done) {
+            // If the backend never provided an id for a tool call, synthesize one
+            // so the tool loop can still execute it (mirrors the non-streaming
+            // `chat()` fallback behavior).
+            for (const [idx, state] of toolCallsByIndex.entries()) {
+              if (!state.id && (state.name || state.pendingArgs || state.args)) state.id = `toolcall-${idx}`;
+              for (const ev of flushToolCallState(state)) yield ev;
+            }
+
             for (const id of closeOpenToolCalls()) yield { type: "tool_call_end", id };
             const promptTokens = json.prompt_eval_count;
             const completionTokens = json.eval_count;
