@@ -60,7 +60,7 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
     await server?.stop();
   });
 
-  const createClient = ({ wsUrl: wsBaseUrl, docId, token, user, activeSheet }) => {
+  const createClient = ({ wsUrl: wsBaseUrl, docId, token, user, activeSheet, encryption = null }) => {
     const session = createCollabSession({
       connection: {
         wsUrl: wsBaseUrl,
@@ -71,6 +71,7 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
       },
       presence: { user, activeSheet, throttleMs: 0 },
       defaultSheetId: activeSheet,
+      encryption,
     });
 
     const ydoc = session.doc;
@@ -83,6 +84,7 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
       undoService: undo,
       defaultSheetId: activeSheet,
       userId: user.id,
+      encryption,
     });
 
     let destroyed = false;
@@ -101,12 +103,22 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
 
   const wsUrl = server.wsUrl;
 
+  const secretKeyBytes = new Uint8Array(32).fill(7);
+  const keyForSecret = (cell) => {
+    // Encrypt D1 only (Sheet1 row 0 col 3).
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 3) {
+      return { keyId: "k-range-1", keyBytes: secretKeyBytes };
+    }
+    return null;
+  };
+
   const clientA = createClient({
     wsUrl,
     docId,
     token: "test-token",
     user: { id: "u-a", name: "User A", color: "#ff0000" },
     activeSheet: "Sheet1",
+    encryption: { keyForCell: keyForSecret },
   });
   const clientB = createClient({
     wsUrl,
@@ -160,6 +172,19 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
   assert.equal(clientA.documentController.getCell("Sheet1", "C1").value, 123);
   assert.equal(clientB.documentController.getCell("Sheet1", "C1").value, 123);
 
+  // --- Encrypted cells: authorized clients see plaintext, unauthorized clients see masked ---
+  clientA.documentController.setCellValue("Sheet1", "D1", "top-secret");
+
+  await waitForCell(clientB.documentController, "Sheet1", "D1", { value: "###", formula: null });
+  assert.equal(clientA.documentController.getCell("Sheet1", "D1").value, "top-secret");
+
+  {
+    const cell = await clientB.session.getCell("Sheet1:0:3");
+    assert.equal(cell?.value, "###");
+    assert.equal(cell?.formula, null);
+    assert.equal(cell?.encrypted, true);
+  }
+
   // Tear down clients and restart the server, keeping the same data directory.
   clientA.destroy();
   clientB.destroy();
@@ -192,6 +217,14 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
   await waitForCell(clientC.documentController, "Sheet1", "B1", { value: null, formula: "=1+1" });
   await waitForCell(clientC.documentController, "Sheet1", "C1", { value: 123, formula: null });
   await waitForCell(clientC.documentController, "Sheet1", "A1", { value: null, formula: null });
+  await waitForCell(clientC.documentController, "Sheet1", "D1", { value: "###", formula: null });
+
+  {
+    const cell = await clientC.session.getCell("Sheet1:0:3");
+    assert.equal(cell?.value, "###");
+    assert.equal(cell?.formula, null);
+    assert.equal(cell?.encrypted, true);
+  }
 });
 
 test("sync-server + Yjs↔DocumentController binder: sync format-only cells", async (t) => {
