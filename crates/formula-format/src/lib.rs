@@ -201,7 +201,24 @@ fn resolve_builtin_placeholder_format_code(
 ) -> Option<std::borrow::Cow<'static, str>> {
     let rest = code.strip_prefix(BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX)?;
     let id = rest.parse::<u16>().ok()?;
-    Some(crate::builtin_format_code_with_locale(id, locale).unwrap_or_else(|| "General".into()))
+
+    // If the ID is one of the standard OOXML built-ins (0–49), we can resolve it directly.
+    if let Some(resolved) = crate::builtin_format_code_with_locale(id, locale) {
+        return Some(resolved);
+    }
+
+    // Excel uses additional reserved built-in ids (not standardized in OOXML) for
+    // locale-specific date/time formats. When a file references those ids without
+    // providing a formatCode, we fall back to a reasonable default so date serials
+    // still render as dates instead of raw numbers.
+    //
+    // Note: this is best-effort; we preserve the original id separately for
+    // round-tripping via the placeholder itself.
+    if matches!(id, 50..=58) {
+        return crate::builtin_format_code_with_locale(14, locale);
+    }
+
+    Some("General".into())
 }
 
 /// Render a value using an Excel number format code, returning additional render hints.

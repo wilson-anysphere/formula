@@ -219,6 +219,18 @@ fn builtin_num_fmt_id_placeholders_are_resolved_by_formatter() {
         "1.3.1900"
     );
 
+    // Reserved date/time built-ins (e.g. 50..=58) are not part of OOXML's 0–49
+    // table, but Excel files can still reference them without an explicit code.
+    // We fall back to the short-date built-in so serials render as dates.
+    assert_eq!(
+        format_value(Value::Number(61.0), Some("__builtin_numFmtId:50"), &en_opts).text,
+        "3/1/1900"
+    );
+    assert_eq!(
+        format_value(Value::Number(61.0), Some("__builtin_numFmtId:50"), &de_opts).text,
+        "1.3.1900"
+    );
+
     // Currency (id 7) should substitute symbol and separators based on locale.
     assert_eq!(
         format_value(Value::Number(1234.5), Some("__builtin_numFmtId:7"), &de_opts).text,
