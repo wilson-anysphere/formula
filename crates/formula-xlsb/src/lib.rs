@@ -5,6 +5,7 @@
 pub mod biff12_varint;
 pub mod format;
 pub mod rgce;
+pub mod workbook_context;
 mod opc;
 mod patch;
 mod parser;
