@@ -47,7 +47,34 @@ pub struct DependencyTrace {
 
 impl DependencyTrace {
     pub fn record_reference(&mut self, reference: FnReference) {
-        self.precedents.insert(reference.normalized());
+        let reference = reference.normalized();
+
+        // Keep the trace compact by discarding precedents that are fully subsumed by a larger
+        // rectangle on the same sheet.
+        //
+        // This matters for reference-returning functions like INDEX: callers may record the
+        // entire input range as a dynamic precedent while the evaluator later dereferences the
+        // selected single-cell reference for the final value. In that case, the single cell is
+        // redundant once the full range has been recorded.
+        if self.precedents.iter().any(|existing| {
+            existing.sheet_id == reference.sheet_id
+                && existing.start.row <= reference.start.row
+                && existing.start.col <= reference.start.col
+                && existing.end.row >= reference.end.row
+                && existing.end.col >= reference.end.col
+        }) {
+            return;
+        }
+
+        self.precedents.retain(|existing| {
+            !(existing.sheet_id == reference.sheet_id
+                && reference.start.row <= existing.start.row
+                && reference.start.col <= existing.start.col
+                && reference.end.row >= existing.end.row
+                && reference.end.col >= existing.end.col)
+        });
+
+        self.precedents.insert(reference);
     }
 
     #[must_use]
