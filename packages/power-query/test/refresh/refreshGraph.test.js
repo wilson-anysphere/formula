@@ -121,6 +121,52 @@ test("RefreshOrchestrator: query references work when the dependency id is '__pr
   assert.deepEqual(Object.keys(results), ["B"]);
 });
 
+test("RefreshOrchestrator: merge step reuses dependency when rightQuery id is '__proto__'", async () => {
+  let reads = 0;
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        reads += 1;
+        return ["Key,Value", "1,a", "2,b"].join("\n");
+      },
+    },
+  });
+
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("__proto__", { type: "csv", path: "file.csv", options: { hasHeaders: true } }));
+  orchestrator.registerQuery(
+    makeQuery("B", { type: "range", range: { values: [["Key"], [1]], hasHeaders: true } }, [
+      { id: "merge", name: "Merge", operation: { type: "merge", rightQuery: "__proto__", joinType: "left", leftKey: "Key", rightKey: "Key" } },
+    ]),
+  );
+
+  await orchestrator.refreshAll(["B"]).promise;
+  assert.equal(reads, 1);
+});
+
+test("RefreshOrchestrator: append step reuses dependencies when appended query id is '__proto__'", async () => {
+  let reads = 0;
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        reads += 1;
+        return "Value\n1\n";
+      },
+    },
+  });
+
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("__proto__", { type: "csv", path: "file.csv", options: { hasHeaders: true } }));
+  orchestrator.registerQuery(
+    makeQuery("B", { type: "range", range: { values: [["Value"], [2]], hasHeaders: true } }, [
+      { id: "append", name: "Append", operation: { type: "append", queries: ["__proto__"] } },
+    ]),
+  );
+
+  await orchestrator.refreshAll(["B"]).promise;
+  assert.equal(reads, 1);
+});
+
 test("RefreshOrchestrator: refresh(queryId) refreshes dependencies and returns the target result", async () => {
   const engine = new ControlledEngine();
   const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
