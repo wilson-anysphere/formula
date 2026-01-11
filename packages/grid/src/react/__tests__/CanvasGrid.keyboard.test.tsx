@@ -591,7 +591,7 @@ describe("CanvasGrid keyboard navigation", () => {
     host.remove();
   });
 
-  it("treats frozen header rows/cols as the navigation origin", async () => {
+  it("treats header rows/cols as the navigation origin", async () => {
     const apiRef = React.createRef<GridApi>();
     const onSelectionChange = vi.fn();
     const onSelectionRangeChange = vi.fn();
@@ -606,6 +606,8 @@ describe("CanvasGrid keyboard navigation", () => {
           provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
           rowCount={20}
           colCount={20}
+          headerRows={1}
+          headerCols={1}
           frozenRows={1}
           frozenCols={1}
           apiRef={apiRef}

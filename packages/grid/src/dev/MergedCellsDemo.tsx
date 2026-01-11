@@ -110,7 +110,17 @@ export function MergedCellsDemo(): React.ReactElement {
       </div>
 
       <div style={{ flex: 1, position: "relative" }}>
-        <CanvasGrid provider={provider} rowCount={40} colCount={15} frozenRows={1} frozenCols={1} defaultRowHeight={24} defaultColWidth={80} />
+        <CanvasGrid
+          provider={provider}
+          rowCount={40}
+          colCount={15}
+          headerRows={1}
+          headerCols={1}
+          frozenRows={1}
+          frozenCols={1}
+          defaultRowHeight={24}
+          defaultColWidth={80}
+        />
       </div>
     </div>
   );

@@ -123,7 +123,16 @@ export function GridPerformanceHarness(props?: {
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
-      <CanvasGrid provider={provider} rowCount={rowCount} colCount={colCount} frozenRows={1} frozenCols={1} apiRef={apiRef} />
+      <CanvasGrid
+        provider={provider}
+        rowCount={rowCount}
+        colCount={colCount}
+        headerRows={1}
+        headerCols={1}
+        frozenRows={1}
+        frozenCols={1}
+        apiRef={apiRef}
+      />
     </div>
   );
 }

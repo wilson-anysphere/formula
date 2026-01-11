@@ -51,6 +51,34 @@ export interface CanvasGridProps {
   provider: CellProvider;
   rowCount: number;
   colCount: number;
+  /**
+   * Number of header rows at the top of the grid.
+   *
+   * Header rows are treated as non-data UI (e.g. column labels). Selection ranges
+   * produced by header interactions exclude the header region and instead target
+   * the data region `[headerRows, rowCount)`.
+   *
+   * The default selection overlay also follows the selection range, so header
+   * cells are not highlighted when selecting a full row/column via headers.
+   *
+   * Note: header rows are typically also frozen via `frozenRows` for best UX,
+   * but this is not required.
+   */
+  headerRows?: number;
+  /**
+   * Number of header columns at the left side of the grid.
+   *
+   * Header columns are treated as non-data UI (e.g. row labels). Selection ranges
+   * produced by header interactions exclude the header region and instead target
+   * the data region `[headerCols, colCount)`.
+   *
+   * The default selection overlay also follows the selection range, so header
+   * cells are not highlighted when selecting a full row/column via headers.
+   *
+   * Note: header columns are typically also frozen via `frozenCols` for best UX,
+   * but this is not required.
+   */
+  headerCols?: number;
   frozenRows?: number;
   frozenCols?: number;
   theme?: Partial<GridTheme>;
@@ -229,15 +257,25 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     target: CellRange;
   } | null>(null);
 
-  const frozenRows = props.frozenRows ?? 0;
-  const frozenCols = props.frozenCols ?? 0;
+  const sanitizeHeaderCount = (value: number | undefined, max: number) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(max, Math.floor(value)));
+  };
 
-  const headerRows = frozenRows > 0 ? 1 : 0;
-  const headerCols = frozenCols > 0 ? 1 : 0;
+  const headerRows = sanitizeHeaderCount(props.headerRows, props.rowCount);
+  const headerCols = sanitizeHeaderCount(props.headerCols, props.colCount);
   const headerRowsRef = useRef(headerRows);
   const headerColsRef = useRef(headerCols);
   headerRowsRef.current = headerRows;
   headerColsRef.current = headerCols;
+
+  const rowCountRef = useRef(props.rowCount);
+  const colCountRef = useRef(props.colCount);
+  rowCountRef.current = props.rowCount;
+  colCountRef.current = props.colCount;
+
+  const frozenRows = props.frozenRows ?? 0;
+  const frozenCols = props.frozenCols ?? 0;
 
   const providerRef = useRef(props.provider);
   providerRef.current = props.provider;
@@ -1669,7 +1707,6 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         renderer.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto", padding: 8 });
         syncScrollbars();
       }
-
       if (
         (prevSelection?.row ?? null) !== (nextSelection?.row ?? null) ||
         (prevSelection?.col ?? null) !== (nextSelection?.col ?? null)

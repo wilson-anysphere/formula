@@ -914,6 +914,8 @@ function EngineDemoApp() {
               provider={provider}
               rowCount={rowCount}
               colCount={colCount}
+              headerRows={headerRowOffset}
+              headerCols={headerColOffset}
               frozenRows={frozenRows}
               frozenCols={frozenCols}
               enableResize

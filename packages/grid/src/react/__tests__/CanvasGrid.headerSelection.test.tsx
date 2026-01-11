@@ -99,6 +99,8 @@ describe("CanvasGrid header selection", () => {
           provider={{ getCell: () => null }}
           rowCount={20}
           colCount={20}
+          headerRows={1}
+          headerCols={1}
           frozenRows={1}
           frozenCols={1}
           defaultRowHeight={10}
