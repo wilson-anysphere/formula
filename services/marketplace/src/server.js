@@ -1,5 +1,6 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
+const fs = require("node:fs");
 
 const { MarketplaceStore } = require("./store");
 
@@ -357,8 +358,46 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           return;
         }
 
-        const pkg = await store.getPackage(id, version);
+        const pkg = await store.getPackage(id, version, { includeBytes: false, includePath: true });
         if (!pkg) {
+          statusCode = 404;
+          return sendJson(res, 404, { error: "Not found" });
+        }
+
+        // Prefer streaming from disk to avoid buffering package bytes in memory.
+        if (pkg.packagePath) {
+          let stat = null;
+          try {
+            stat = await fs.promises.stat(pkg.packagePath);
+          } catch {
+            stat = null;
+          }
+          if (!stat || !stat.isFile()) {
+            statusCode = 404;
+            return sendJson(res, 404, { error: "Not found" });
+          }
+
+          statusCode = 200;
+          res.writeHead(200, {
+            "Content-Type": "application/vnd.formula.extension-package",
+            "Content-Length": stat.size,
+            ETag: etag,
+            "Cache-Control": CACHE_CONTROL_REVALIDATE,
+            "X-Package-Signature": pkg.signatureBase64,
+            "X-Package-Sha256": pkg.sha256,
+            "X-Package-Format-Version": String(pkg.formatVersion ?? 1),
+            "X-Publisher": pkg.publisher,
+          });
+
+          const stream = fs.createReadStream(pkg.packagePath);
+          res.on("close", () => stream.destroy());
+          stream.on("error", (error) => res.destroy(error));
+          stream.pipe(res);
+          return;
+        }
+
+        const pkgBytes = await store.getPackage(id, version, { includeBytes: true, incrementDownloadCount: false });
+        if (!pkgBytes) {
           statusCode = 404;
           return sendJson(res, 404, { error: "Not found" });
         }
@@ -366,15 +405,15 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
         statusCode = 200;
         res.writeHead(200, {
           "Content-Type": "application/vnd.formula.extension-package",
-          "Content-Length": pkg.bytes.length,
+          "Content-Length": pkgBytes.bytes.length,
           ETag: etag,
           "Cache-Control": CACHE_CONTROL_REVALIDATE,
-          "X-Package-Signature": pkg.signatureBase64,
-          "X-Package-Sha256": pkg.sha256,
-          "X-Package-Format-Version": String(pkg.formatVersion ?? 1),
-          "X-Publisher": pkg.publisher,
+          "X-Package-Signature": pkgBytes.signatureBase64,
+          "X-Package-Sha256": pkgBytes.sha256,
+          "X-Package-Format-Version": String(pkgBytes.formatVersion ?? 1),
+          "X-Publisher": pkgBytes.publisher,
         });
-        res.end(pkg.bytes);
+        res.end(pkgBytes.bytes);
         return;
       }
 

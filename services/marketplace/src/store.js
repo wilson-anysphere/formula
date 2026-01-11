@@ -1147,7 +1147,7 @@ class MarketplaceStore {
     });
   }
 
-  async getPackage(id, version, { includeBytes = true, incrementDownloadCount = true } = {}) {
+  async getPackage(id, version, { includeBytes = true, incrementDownloadCount = true, includePath = false } = {}) {
     const meta = await this.db.withRead((db) => {
       const stmt = db.prepare(
         `SELECT e.publisher, e.blocked, e.malicious,
@@ -1209,6 +1209,7 @@ class MarketplaceStore {
       sha256: meta.sha256,
       formatVersion: meta.formatVersion,
       publisher: meta.publisher,
+      packagePath: includePath && meta.packagePath ? resolvePackagePath(this.dataDir, meta.packagePath) : null,
     };
   }
 
