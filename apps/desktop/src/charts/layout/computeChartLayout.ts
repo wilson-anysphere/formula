@@ -132,11 +132,18 @@ export function computeChartLayout(
     const maxWidth = contentRect.width * 0.4;
     const width = Math.max(0, Math.min(requiredWidth, maxWidth));
 
+    const entriesHeight =
+      entriesText.length * legendLineHeight +
+      Math.max(0, entriesText.length - 1) * LEGEND_ENTRY_GAP_PX;
+    const desiredHeight = entriesHeight + LEGEND_PADDING_PX * 2;
+    const height = Math.min(contentRect.height, desiredHeight);
+    const legendY = contentRect.y + Math.max(0, (contentRect.height - height) / 2);
+
     legendRect = {
       x: round(rectRight(contentRect) - width),
-      y: contentRect.y,
+      y: round(legendY),
       width: round(width),
-      height: contentRect.height,
+      height: round(height),
     };
 
     const entries: LegendEntryLayout[] = [];
