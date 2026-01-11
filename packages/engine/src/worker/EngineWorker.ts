@@ -119,9 +119,17 @@ export class EngineWorker {
     await this.invoke("loadFromJson", { json }, options);
   }
 
+  /**
+   * Load a workbook from raw `.xlsx` bytes.
+   *
+   * Note: the underlying `ArrayBuffer` is transferred to the worker to avoid an
+   * extra structured-clone copy. This *detaches* `bytes.buffer` on the calling
+   * side. If you need to keep using the data, pass a copy (e.g. `bytes.slice()`)
+   * instead.
+   */
   async loadWorkbookFromXlsxBytes(bytes: Uint8Array, options?: RpcOptions): Promise<void> {
     await this.flush();
-    await this.invoke("loadFromXlsxBytes", { bytes }, options);
+    await this.invoke("loadFromXlsxBytes", { bytes }, options, [bytes.buffer]);
   }
 
   async toJson(options?: RpcOptions): Promise<string> {
@@ -211,7 +219,12 @@ export class EngineWorker {
     await this.invoke("setCells", { updates });
   }
 
-  private invoke(method: string, params: unknown, options?: RpcOptions): Promise<unknown> {
+  private invoke(
+    method: string,
+    params: unknown,
+    options?: RpcOptions,
+    transfer?: Transferable[]
+  ): Promise<unknown> {
     const id = this.nextId++;
     const request: RpcRequest = { type: "request", id, method, params };
 
@@ -235,7 +248,11 @@ export class EngineWorker {
         options.signal.addEventListener("abort", pending.abortListener, { once: true });
       }
 
-      this.port.postMessage(request);
+      if (transfer && transfer.length > 0) {
+        this.port.postMessage(request, transfer);
+      } else {
+        this.port.postMessage(request);
+      }
     });
   }
 

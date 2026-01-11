@@ -12,7 +12,11 @@ export interface EngineClient {
   newWorkbook(): Promise<void>;
   loadWorkbookFromJson(json: string): Promise<void>;
   /**
-   * Load a workbook by passing raw `.xlsx` bytes directly to the WASM engine.
+   * Load a workbook from raw `.xlsx` bytes.
+   *
+   * The underlying `ArrayBuffer` may be transferred to a Worker thread to avoid
+   * an extra structured-clone copy. This detaches `bytes.buffer` on the calling
+   * side; callers that need to retain the original buffer should pass a copy.
    */
   loadWorkbookFromXlsxBytes(bytes: Uint8Array, options?: RpcOptions): Promise<void>;
   toJson(): Promise<string>;

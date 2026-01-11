@@ -46,6 +46,13 @@ export interface RpcRequest {
   type: "request";
   id: number;
   method: string;
+  /**
+   * Params are structured-cloned across the MessagePort.
+   *
+   * Some calls may include large binary payloads (e.g. `Uint8Array` workbook bytes)
+   * that are posted with an explicit transfer list so their underlying
+   * `ArrayBuffer` moves ownership to the worker without an extra copy.
+   */
   params: unknown;
 }
 

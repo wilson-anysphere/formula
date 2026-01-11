@@ -10,6 +10,7 @@ import type {
 
 class MockMessagePort {
   onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+  public readonly sent: Array<{ message: unknown; transfer?: Transferable[] }> = [];
   private listeners = new Set<(event: MessageEvent<unknown>) => void>();
   private other: MockMessagePort | null = null;
 
@@ -17,7 +18,8 @@ class MockMessagePort {
     this.other = other;
   }
 
-  postMessage(message: unknown): void {
+  postMessage(message: unknown, transfer?: Transferable[]): void {
+    this.sent.push({ message, transfer });
     queueMicrotask(() => {
       this.other?.dispatchMessage(message);
     });
@@ -128,12 +130,13 @@ describe("EngineWorker RPC", () => {
     ]);
   });
 
-  it("sends loadFromXlsxBytes when loading workbook from xlsx bytes", async () => {
+  it("transfers xlsx ArrayBuffer when loading workbooks from bytes", async () => {
     const worker = new MockWorker();
+    const channel = createMockChannel();
     const engine = await EngineWorker.connect({
       worker,
       wasmModuleUrl: "mock://wasm",
-      channelFactory: createMockChannel
+      channelFactory: () => channel
     });
 
     const bytes = new Uint8Array([1, 2, 3, 4]);
@@ -144,7 +147,15 @@ describe("EngineWorker RPC", () => {
     );
 
     expect(requests).toHaveLength(1);
-    expect((requests[0].params as any).bytes).toEqual(bytes);
+
+    const clientPort = channel.port1 as unknown as MockMessagePort;
+    const call = clientPort.sent.find((entry) => {
+      const msg = entry.message as any;
+      return msg?.type === "request" && msg?.method === "loadFromXlsxBytes";
+    });
+
+    expect(call?.transfer).toHaveLength(1);
+    expect(call?.transfer?.[0]).toBe(bytes.buffer);
   });
 
   it("flushes pending setCell batches before loading workbook from xlsx bytes", async () => {

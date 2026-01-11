@@ -231,7 +231,7 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
         break;
       case "loadFromXlsxBytes":
         {
-          const next = mod.WasmWorkbook.fromXlsxBytes(params.bytes);
+          const next = mod.WasmWorkbook.fromXlsxBytes(params.bytes as Uint8Array);
           freeWorkbook(workbook);
           workbook = next;
         }
