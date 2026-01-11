@@ -31,6 +31,17 @@ fn worksheet_cell_formula(sheet_xml: &str, cell_ref: &str) -> Option<String> {
     Some(f.text().unwrap_or_default().to_string())
 }
 
+fn worksheet_cell_value(sheet_xml: &str, cell_ref: &str) -> Option<String> {
+    let xml_doc = roxmltree::Document::parse(sheet_xml).ok()?;
+    let cell = xml_doc.descendants().find(|n| {
+        n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some(cell_ref)
+    })?;
+    let v = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "v")?;
+    Some(v.text().unwrap_or_default().to_string())
+}
+
 fn worksheet_dimension_ref(sheet_xml: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
     let xml = std::str::from_utf8(sheet_xml)?;
     let doc = roxmltree::Document::parse(xml)?;
@@ -108,6 +119,76 @@ fn apply_cell_patches_preserves_unrelated_parts_for_xlsx() -> Result<(), Box<dyn
     assert_eq!(
         parts,
         BTreeSet::from(["xl/worksheets/sheet1.xml".to_string()])
+    );
+    Ok(())
+}
+
+#[test]
+fn apply_cell_patches_resolve_worksheet_part_selector() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/basic/multi-sheet.xlsx");
+    let bytes = std::fs::read(&fixture)?;
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "xl/worksheets/sheet2.xml",
+        CellRef::from_a1("A1")?,
+        CellPatch::set_value(CellValue::Number(123.0)),
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let out_bytes = pkg.write_to_bytes()?;
+    let pkg2 = XlsxPackage::from_bytes(&out_bytes)?;
+    let sheet_xml = std::str::from_utf8(
+        pkg2.part("xl/worksheets/sheet2.xml")
+            .expect("worksheet part exists"),
+    )?;
+    assert_eq!(worksheet_cell_value(sheet_xml, "A1"), Some("123".to_string()));
+
+    let tmpdir = tempfile::tempdir()?;
+    let out = tmpdir.path().join("patched.xlsx");
+    std::fs::write(&out, out_bytes)?;
+
+    let parts = diff_parts(&fixture, &out);
+    assert_eq!(
+        parts,
+        BTreeSet::from(["xl/worksheets/sheet2.xml".to_string()])
+    );
+    Ok(())
+}
+
+#[test]
+fn apply_cell_patches_resolve_rel_id_selector() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/basic/multi-sheet.xlsx");
+    let bytes = std::fs::read(&fixture)?;
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "rId2",
+        CellRef::from_a1("A1")?,
+        CellPatch::set_value(CellValue::Number(321.0)),
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let out_bytes = pkg.write_to_bytes()?;
+    let pkg2 = XlsxPackage::from_bytes(&out_bytes)?;
+    let sheet_xml = std::str::from_utf8(
+        pkg2.part("xl/worksheets/sheet2.xml")
+            .expect("worksheet part exists"),
+    )?;
+    assert_eq!(worksheet_cell_value(sheet_xml, "A1"), Some("321".to_string()));
+
+    let tmpdir = tempfile::tempdir()?;
+    let out = tmpdir.path().join("patched.xlsx");
+    std::fs::write(&out, out_bytes)?;
+
+    let parts = diff_parts(&fixture, &out);
+    assert_eq!(
+        parts,
+        BTreeSet::from(["xl/worksheets/sheet2.xml".to_string()])
     );
     Ok(())
 }

@@ -31,6 +31,11 @@ use crate::macro_trust::compute_macro_fingerprint;
 pub struct Sheet {
     pub id: String,
     pub name: String,
+    /// Stable worksheet identifier for XLSX/XLSM inputs (`xl/worksheets/sheetN.xml`).
+    ///
+    /// We prefer this over `name` when writing cell patches so in-app sheet renames don't break
+    /// patch application (the source `workbook.xml` might not be rewritten yet).
+    pub xlsx_worksheet_part: Option<String>,
     pub(crate) origin_ordinal: Option<usize>,
     pub(crate) cells: HashMap<(usize, usize), Cell>,
     pub(crate) dirty_cells: HashSet<(usize, usize)>,
@@ -63,6 +68,7 @@ impl Sheet {
         Self {
             id,
             name,
+            xlsx_worksheet_part: None,
             origin_ordinal: None,
             cells: HashMap::new(),
             dirty_cells: HashSet::new(),
@@ -411,12 +417,18 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         // `write_xlsx_blocking` can re-inject it when saving as `.xlsm`.
         //
         // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
+        let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
         if let Ok(pkg) = XlsxPackage::from_bytes(origin_xlsx_bytes.as_ref()) {
             out.vba_project_bin = pkg.vba_project_bin().map(|b| b.to_vec());
             if let (Some(origin), Some(vba)) =
                 (out.origin_path.as_deref(), out.vba_project_bin.as_deref())
             {
                 out.macro_fingerprint = Some(compute_macro_fingerprint(origin, vba));
+            }
+            if let Ok(parts) = pkg.worksheet_parts() {
+                for part in parts {
+                    worksheet_parts_by_name.insert(part.name, part.worksheet_part);
+                }
             }
             if let Ok(preserved) = pkg.preserve_drawing_parts() {
                 if !preserved.is_empty() {
@@ -438,6 +450,9 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             .iter()
             .map(formula_model_sheet_to_app_sheet)
             .collect::<anyhow::Result<Vec<_>>>()?;
+        for sheet in &mut out.sheets {
+            sheet.xlsx_worksheet_part = worksheet_parts_by_name.get(&sheet.name).cloned();
+        }
 
         let sheet_names_by_id: HashMap<WorksheetId, String> = workbook_model
             .sheets
@@ -892,6 +907,10 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
 
         let mut patches = WorkbookCellPatches::default();
         for sheet in &workbook.sheets {
+            let sheet_selector = sheet
+                .xlsx_worksheet_part
+                .clone()
+                .unwrap_or_else(|| sheet.name.clone());
             for (row, col) in &sheet.dirty_cells {
                 if let Some((baseline_value, baseline_formula)) = workbook
                     .cell_input_baseline
@@ -909,7 +928,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
 
                 let cell_ref = formula_model::CellRef::new(*row as u32, *col as u32);
                 let Some(cell) = sheet.cells.get(&(*row, *col)) else {
-                    patches.set_cell(sheet.name.clone(), cell_ref, XlsxCellPatch::clear());
+                    patches.set_cell(sheet_selector.clone(), cell_ref, XlsxCellPatch::clear());
                     continue;
                 };
 
@@ -927,7 +946,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                     None => XlsxCellPatch::set_value(scalar_to_model_value(&scalar)),
                 };
 
-                patches.set_cell(sheet.name.clone(), cell_ref, patch);
+                patches.set_cell(sheet_selector.clone(), cell_ref, patch);
             }
         }
 
@@ -2148,6 +2167,42 @@ mod tests {
         let workbook = read_xlsx_blocking(fixture_path).expect("read multi-sheet workbook");
         let sheet_names: Vec<_> = workbook.sheets.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(sheet_names, vec!["Sheet1", "Sheet2"]);
+    }
+
+    #[test]
+    fn save_after_sheet_rename_uses_stable_worksheet_part() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/multi-sheet.xlsx"
+        ));
+        let original_bytes = std::fs::read(fixture_path).expect("read fixture bytes");
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read multi-sheet workbook");
+        assert_eq!(
+            workbook.sheets[1].xlsx_worksheet_part.as_deref(),
+            Some("xl/worksheets/sheet2.xml"),
+            "expected read_xlsx_blocking to record worksheet part names for xlsx inputs"
+        );
+
+        // Simulate in-app sheet rename without rewriting `workbook.xml`.
+        workbook.sheets[1].name = "Renamed".to_string();
+        workbook.sheets[1].set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("renamed.xlsx");
+        let written_bytes = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        assert_non_worksheet_parts_preserved(&original_bytes, written_bytes.as_ref());
+
+        let doc =
+            formula_xlsx::load_from_bytes(written_bytes.as_ref()).expect("load saved workbook from bytes");
+        let sheet = doc
+            .workbook
+            .sheet_by_name("Sheet2")
+            .expect("original sheet name should still exist in workbook.xml");
+        assert_eq!(
+            sheet.value(formula_model::CellRef::new(0, 0)),
+            ModelCellValue::Number(123.0)
+        );
     }
 
     #[test]

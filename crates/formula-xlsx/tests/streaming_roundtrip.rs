@@ -43,6 +43,17 @@ fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
+fn worksheet_cell_value(sheet_xml: &str, cell_ref: &str) -> Option<String> {
+    let xml_doc = roxmltree::Document::parse(sheet_xml).ok()?;
+    let cell = xml_doc.descendants().find(|n| {
+        n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some(cell_ref)
+    })?;
+    let v = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "v")?;
+    Some(v.text().unwrap_or_default().to_string())
+}
+
 #[test]
 fn streaming_noop_roundtrip_has_no_critical_diffs() -> Result<(), Box<dyn std::error::Error>> {
     let fixtures = [
@@ -508,6 +519,99 @@ fn streaming_workbook_cell_patches_resolve_sheet_names() -> Result<(), Box<dyn s
         changed_parts,
         std::collections::BTreeSet::from(["xl/worksheets/sheet1.xml".to_string()])
     );
+
+    Ok(())
+}
+
+#[test]
+fn streaming_workbook_cell_patches_resolve_worksheet_part(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/multi-sheet.xlsx");
+    let bytes = fs::read(&fixture)?;
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "xl/worksheets/sheet2.xml",
+        CellRef::from_a1("A1")?,
+        CellPatch::set_value(CellValue::Number(123.0)),
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches(Cursor::new(bytes), &mut out, &patches)?;
+
+    let tmpdir = tempfile::tempdir()?;
+    let out_path = tmpdir.path().join("patched.xlsx");
+    fs::write(&out_path, out.get_ref())?;
+
+    let report = xlsx_diff::diff_workbooks(&fixture, &out_path)?;
+    for diff in &report.differences {
+        assert_ne!(diff.kind, "missing_part", "missing part {}", diff.part);
+        assert_ne!(diff.kind, "extra_part", "extra part {}", diff.part);
+    }
+
+    let changed_parts: std::collections::BTreeSet<String> = report
+        .differences
+        .iter()
+        .map(|d| d.part.clone())
+        .collect();
+    assert_eq!(
+        changed_parts,
+        std::collections::BTreeSet::from(["xl/worksheets/sheet2.xml".to_string()])
+    );
+
+    let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet2.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    assert_eq!(worksheet_cell_value(&sheet_xml, "A1"), Some("123".to_string()));
+
+    Ok(())
+}
+
+#[test]
+fn streaming_workbook_cell_patches_resolve_rel_id() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/multi-sheet.xlsx");
+    let bytes = fs::read(&fixture)?;
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "rId2",
+        CellRef::from_a1("A1")?,
+        CellPatch::set_value(CellValue::Number(321.0)),
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches(Cursor::new(bytes), &mut out, &patches)?;
+
+    let tmpdir = tempfile::tempdir()?;
+    let out_path = tmpdir.path().join("patched.xlsx");
+    fs::write(&out_path, out.get_ref())?;
+
+    let report = xlsx_diff::diff_workbooks(&fixture, &out_path)?;
+    for diff in &report.differences {
+        assert_ne!(diff.kind, "missing_part", "missing part {}", diff.part);
+        assert_ne!(diff.kind, "extra_part", "extra part {}", diff.part);
+    }
+
+    let changed_parts: std::collections::BTreeSet<String> = report
+        .differences
+        .iter()
+        .map(|d| d.part.clone())
+        .collect();
+    assert_eq!(
+        changed_parts,
+        std::collections::BTreeSet::from(["xl/worksheets/sheet2.xml".to_string()])
+    );
+
+    let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet2.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    assert_eq!(worksheet_cell_value(&sheet_xml, "A1"), Some("321".to_string()));
 
     Ok(())
 }

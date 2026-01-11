@@ -31,7 +31,12 @@ const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/
 
 /// An owned set of cell edits to apply to an existing workbook package.
 ///
-/// Patches are keyed by **worksheet (tab) name**, then by cell address.
+/// Patches are keyed by a worksheet selector, then by cell address.
+///
+/// Supported worksheet selectors:
+/// - Worksheet (tab) name (case-insensitive, as in Excel)
+/// - Worksheet part name (any key containing `/`, e.g. `xl/worksheets/sheet2.xml`)
+/// - Workbook relationship id (e.g. `rId2`) when no sheet name matches
 #[derive(Debug, Clone, Default)]
 pub struct WorkbookCellPatches {
     sheets: BTreeMap<String, WorksheetCellPatches>,
@@ -406,13 +411,7 @@ fn apply_cell_patches_to_package_inner(
             continue;
         }
 
-        // Excel treats sheet names as case-insensitive; accept patches keyed by any casing.
-        let sheet = workbook_sheets
-            .iter()
-            .find(|s| s.name.eq_ignore_ascii_case(sheet_name))
-            .ok_or_else(|| XlsxError::Invalid(format!("unknown sheet name: {sheet_name}")))?;
-
-        let worksheet_part = resolve_worksheet_part(pkg, sheet)?;
+        let worksheet_part = resolve_worksheet_part_for_selector(pkg, &workbook_sheets, sheet_name)?;
         let original = pkg
             .part(&worksheet_part)
             .ok_or_else(|| XlsxError::MissingPart(worksheet_part.clone()))?;
@@ -445,6 +444,44 @@ fn apply_cell_patches_to_package_inner(
     }
 
     Ok(())
+}
+
+fn resolve_worksheet_part_for_selector(
+    pkg: &XlsxPackage,
+    workbook_sheets: &[WorkbookSheetInfo],
+    selector: &str,
+) -> Result<String, XlsxError> {
+    let selector = selector.strip_prefix('/').unwrap_or(selector);
+
+    // Worksheet part selector: any string containing `/` cannot be an Excel sheet name, and is
+    // treated as an explicit part name.
+    if selector.contains('/') {
+        return Ok(selector.to_string());
+    }
+
+    // Sheet name selector (case-insensitive, matching Excel).
+    if let Some(sheet) = workbook_sheets
+        .iter()
+        .find(|s| s.name.eq_ignore_ascii_case(selector))
+    {
+        return resolve_worksheet_part(pkg, sheet);
+    }
+
+    // RelId selector: if no sheet name matches, treat the key as a workbook relationship Id.
+    if let Some(part) = resolve_relationship_target(pkg, WORKBOOK_PART, selector)? {
+        return Ok(part);
+    }
+
+    let rels_name = rels_part_name(WORKBOOK_PART);
+    let rels_hint = if pkg.part(&rels_name).is_some() {
+        rels_name
+    } else {
+        format!("{rels_name} (missing)")
+    };
+
+    Err(XlsxError::Invalid(format!(
+        "unknown sheet selector: {selector} (tried sheet name match against {WORKBOOK_PART} and relId lookup in {rels_hint}; worksheet part selectors contain '/' e.g. xl/worksheets/sheet2.xml)"
+    )))
 }
 
 fn resolve_shared_strings_part_name(pkg: &XlsxPackage) -> Result<Option<String>, XlsxError> {

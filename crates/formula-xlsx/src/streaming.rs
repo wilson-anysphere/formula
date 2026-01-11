@@ -150,8 +150,13 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
 /// Apply [`WorkbookCellPatches`] (the part-preserving cell patch DSL) using the streaming ZIP
 /// rewriter.
 ///
-/// Patches are keyed by worksheet (tab) name, matching [`XlsxPackage::apply_cell_patches`] but
+/// Patches are keyed by a worksheet selector, matching [`XlsxPackage::apply_cell_patches`] but
 /// without loading every part into memory.
+///
+/// Supported worksheet selectors:
+/// - Worksheet (tab) name (case-insensitive, as in Excel)
+/// - Worksheet part name (any key containing `/`, e.g. `xl/worksheets/sheet2.xml`)
+/// - Workbook relationship id (e.g. `rId2`) when no sheet name matches
 pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + Seek>(
     input: R,
     output: W,
@@ -194,19 +199,15 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
 
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
     let mut saw_formula_patch = false;
-    for (sheet_name, sheet_patches) in patches.sheets() {
+    for (sheet_selector, sheet_patches) in patches.sheets() {
         if sheet_patches.is_empty() {
             continue;
         }
-        let sheet = workbook_sheets
-            .iter()
-            .find(|s| s.name.eq_ignore_ascii_case(sheet_name))
-            .ok_or_else(|| {
-                crate::XlsxError::Invalid(format!("unknown sheet name: {sheet_name}"))
-            })?;
-        let worksheet_part = rel_targets.get(&sheet.rel_id).cloned().ok_or_else(|| {
-            crate::XlsxError::Invalid(format!("missing worksheet relationship for {}", sheet.name))
-        })?;
+        let worksheet_part = resolve_worksheet_part_for_selector(
+            sheet_selector,
+            &workbook_sheets,
+            &rel_targets,
+        )?;
 
         for (cell_ref, patch) in sheet_patches.iter() {
             let (value, formula) = match patch {
@@ -325,19 +326,15 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
 
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
     let mut saw_formula_patch = false;
-    for (sheet_name, sheet_patches) in patches.sheets() {
+    for (sheet_selector, sheet_patches) in patches.sheets() {
         if sheet_patches.is_empty() {
             continue;
         }
-        let sheet = workbook_sheets
-            .iter()
-            .find(|s| s.name.eq_ignore_ascii_case(sheet_name))
-            .ok_or_else(|| {
-                crate::XlsxError::Invalid(format!("unknown sheet name: {sheet_name}"))
-            })?;
-        let worksheet_part = rel_targets.get(&sheet.rel_id).cloned().ok_or_else(|| {
-            crate::XlsxError::Invalid(format!("missing worksheet relationship for {}", sheet.name))
-        })?;
+        let worksheet_part = resolve_worksheet_part_for_selector(
+            sheet_selector,
+            &workbook_sheets,
+            &rel_targets,
+        )?;
 
         for (cell_ref, patch) in sheet_patches.iter() {
             let (value, formula) = match patch {
@@ -396,6 +393,45 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
         recalc_policy,
     )?;
     Ok(())
+}
+
+fn resolve_worksheet_part_for_selector(
+    selector: &str,
+    workbook_sheets: &[crate::WorkbookSheetInfo],
+    rel_targets: &HashMap<String, String>,
+) -> Result<String, crate::XlsxError> {
+    let selector = selector.strip_prefix('/').unwrap_or(selector);
+
+    // Worksheet part selector: any string containing `/` cannot be an Excel sheet name, and is
+    // treated as an explicit part name.
+    if selector.contains('/') {
+        return Ok(selector.to_string());
+    }
+
+    // Sheet name selector (case-insensitive, matching Excel).
+    if let Some(sheet) = workbook_sheets
+        .iter()
+        .find(|s| s.name.eq_ignore_ascii_case(selector))
+    {
+        return rel_targets
+            .get(&sheet.rel_id)
+            .cloned()
+            .ok_or_else(|| {
+                crate::XlsxError::Invalid(format!(
+                    "missing worksheet relationship for {}",
+                    sheet.name
+                ))
+            });
+    }
+
+    // RelId selector: if no sheet name matches, treat the key as a workbook relationship Id.
+    if let Some(part) = rel_targets.get(selector) {
+        return Ok(part.clone());
+    }
+
+    Err(crate::XlsxError::Invalid(format!(
+        "unknown sheet selector: {selector} (tried sheet name match against xl/workbook.xml and relId lookup in xl/_rels/workbook.xml.rels; worksheet part selectors contain '/' e.g. xl/worksheets/sheet2.xml)"
+    )))
 }
 
 fn plan_shared_strings<R: Read + Seek>(
