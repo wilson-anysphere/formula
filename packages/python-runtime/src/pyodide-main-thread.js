@@ -263,6 +263,13 @@ export async function runWithTimeout(runtime, code, timeoutMs, interruptView) {
   }
 }
  
+const BRIDGE_API_KEY = "__formulaPyodideBridgeApi";
+const BRIDGE_REGISTERED_KEY = "__formulaPyodideBridgeRegistered";
+
+export function setFormulaBridgeApi(runtime, api) {
+  runtime[BRIDGE_API_KEY] = api;
+}
+
 function coercePyProxy(value) {
   if (!value || (typeof value !== "object" && typeof value !== "function")) return value;
   if (typeof value.toJs !== "function") return value;
@@ -336,10 +343,11 @@ function dispatchRpcSync(api, method, params) {
   throw new Error(`Spreadsheet API does not implement RPC method "${method}"`);
 }
  
-export function registerFormulaBridge(runtime, getApi) {
+export function registerFormulaBridge(runtime) {
+  if (runtime[BRIDGE_REGISTERED_KEY]) return;
   const call = (method, params) => {
     const normalizedParams = normalizeRpcParams(params);
-    const api = getApi?.();
+    const api = runtime[BRIDGE_API_KEY];
     if (!api) {
       throw new Error("PyodideRuntime has no spreadsheet API configured");
     }
@@ -366,6 +374,7 @@ export function registerFormulaBridge(runtime, getApi) {
     set_range_format: (range, format) => call("set_range_format", { range, format }),
     get_range_format: (range) => call("get_range_format", { range }),
   });
+  runtime[BRIDGE_REGISTERED_KEY] = true;
 }
  
 export function installFormulaFiles(runtime, formulaFiles) {

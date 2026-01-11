@@ -19,6 +19,7 @@ import {
   installFormulaFiles,
   loadPyodideMainThread,
   registerFormulaBridge,
+  setFormulaBridgeApi,
   resolveIndexURL,
   runWithTimeout,
   withCapturedOutput,
@@ -231,9 +232,11 @@ export class PyodideRuntime {
       this.pyodide.setInterruptBuffer(this._interruptView);
     }
 
+    setFormulaBridgeApi(this.pyodide, this.api);
+
     if (!this._mainThreadReady) {
       const rootDir = installFormulaFiles(this.pyodide, this.formulaFiles);
-      registerFormulaBridge(this.pyodide, () => this.api);
+      registerFormulaBridge(this.pyodide);
       await bootstrapFormulaBridge(this.pyodide, rootDir);
       this._mainThreadReady = true;
     }
@@ -380,6 +383,7 @@ export class PyodideRuntime {
     const run = async () => {
       let stdout = "";
       let stderr = "";
+      setFormulaBridgeApi(this.pyodide, this.api);
       const beforeMem = getWasmMemoryBytes(this.pyodide);
       const restoreNetworkSandbox = applyMainThreadNetworkSandbox(effectivePermissions);
 
