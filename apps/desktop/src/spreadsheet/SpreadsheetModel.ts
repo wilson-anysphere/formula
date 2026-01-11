@@ -124,7 +124,14 @@ export class SpreadsheetModel {
     const surroundingCells = {
       getCellValue: (row: number, col: number): SpreadsheetValue => {
         const addr = toA1({ row, col });
-        return this.getCellValue(addr);
+        const cell = this.getCell(addr);
+        // Treat formulas as non-empty even if their computed value is blank. This
+        // matches the production adapter that uses DocumentController's `formula`
+        // field to ensure range detection considers formula-filled tables.
+        if (cell.input.trimStart().startsWith("=") && (cell.value == null || cell.value === "")) {
+          return cell.input;
+        }
+        return cell.value;
       },
       getCacheKey: () => `${this.#cellsVersion}:${this.#cells.size}`,
     };

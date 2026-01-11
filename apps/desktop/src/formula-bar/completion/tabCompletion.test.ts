@@ -39,6 +39,24 @@ describe("Formula bar tab completion", () => {
     expect(sheet.formulaBar.draft).toBe("=SUM(A1:A10)");
   });
 
+  it("treats blank-valued formulas as non-empty when suggesting ranges", async () => {
+    const initial: Record<string, string> = {};
+    for (let row = 1; row <= 10; row += 1) {
+      // Formula that evaluates to empty string.
+      initial[`A${row}`] = '=""';
+    }
+
+    const sheet = new SpreadsheetModel(initial);
+    sheet.selectCell("B11");
+    sheet.beginFormulaEdit();
+    sheet.typeInFormulaBar("=SUM(A", 6);
+
+    await sheet.flushTabCompletion();
+
+    expect(sheet.formulaBar.aiSuggestion()).toBe("=SUM(A1:A10)");
+    expect(sheet.formulaBar.aiGhostText()).toBe("1:A10)");
+  });
+
   it("suggests TODAY() for zero-arg functions", async () => {
     const sheet = new SpreadsheetModel();
 
