@@ -3,6 +3,7 @@ import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable } from "./table.js";
 
 import { hashValue } from "./cache/key.js";
+import { valueKey } from "./valueKey.js";
 import { deserializeAnyTable, deserializeTable, serializeAnyTable } from "./cache/serialize.js";
 import { FileConnector } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
@@ -1918,10 +1919,10 @@ export class QueryEngine {
     const leftKeyIdx = left.getColumnIndex(op.leftKey);
     const rightKeyIdx = right.getColumnIndex(op.rightKey);
 
-    /** @type {Map<unknown, number[]>} */
+    /** @type {Map<string, number[]>} */
     const rightIndex = new Map();
     for (let rowIndex = 0; rowIndex < right.rowCount; rowIndex++) {
-      const key = right.getCell(rowIndex, rightKeyIdx);
+      const key = valueKey(right.getCell(rowIndex, rightKeyIdx));
       const bucket = rightIndex.get(key);
       if (bucket) bucket.push(rowIndex);
       else rightIndex.set(key, [rowIndex]);
@@ -1968,7 +1969,7 @@ export class QueryEngine {
       const matchedRight = new Set();
 
       for (let leftRowIndex = 0; leftRowIndex < left.rowCount; leftRowIndex++) {
-        const matchIndices = rightIndex.get(left.getCell(leftRowIndex, leftKeyIdx)) ?? [];
+        const matchIndices = rightIndex.get(valueKey(left.getCell(leftRowIndex, leftKeyIdx))) ?? [];
         if (matchIndices.length === 0) {
           if (op.joinType !== "inner") emit(leftRowIndex, null);
           continue;
@@ -1994,17 +1995,17 @@ export class QueryEngine {
     }
 
     if (op.joinType === "right") {
-      /** @type {Map<unknown, number[]>} */
+      /** @type {Map<string, number[]>} */
       const leftIndex = new Map();
       for (let rowIndex = 0; rowIndex < left.rowCount; rowIndex++) {
-        const key = left.getCell(rowIndex, leftKeyIdx);
+        const key = valueKey(left.getCell(rowIndex, leftKeyIdx));
         const bucket = leftIndex.get(key);
         if (bucket) bucket.push(rowIndex);
         else leftIndex.set(key, [rowIndex]);
       }
 
       for (let rightRowIndex = 0; rightRowIndex < right.rowCount; rightRowIndex++) {
-        const matchIndices = leftIndex.get(right.getCell(rightRowIndex, rightKeyIdx)) ?? [];
+        const matchIndices = leftIndex.get(valueKey(right.getCell(rightRowIndex, rightKeyIdx))) ?? [];
         if (matchIndices.length === 0) {
           emit(null, rightRowIndex);
           continue;

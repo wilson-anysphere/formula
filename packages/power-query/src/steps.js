@@ -1,6 +1,7 @@
 import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable, inferColumnType, makeUniqueColumnNames } from "./table.js";
 import { compilePredicate } from "./predicate.js";
+import { valueKey } from "./valueKey.js";
 import { bindExprColumns, collectExprColumnRefs, evaluateExpr, parseFormula } from "./expr/index.js";
 
 /** @type {((columns: Record<string, any[] | ArrayLike<any>>) => any) | null} */
@@ -362,13 +363,6 @@ function toNumberOrNull(value) {
  * @param {unknown} value
  * @returns {unknown}
  */
-function distinctKey(value) {
-  if (value == null) return null;
-  if (isDate(value)) return `__date__:${value.toISOString()}`;
-  if (typeof value === "object") return `__json__:${JSON.stringify(value)}`;
-  return value;
-}
-
 /**
  * @param {ITable} table
  * @param {string[]} groupColumns
@@ -460,7 +454,7 @@ function groupBy(table, groupColumns, aggregations) {
           }
           break;
         case "countDistinct":
-          state.set.add(distinctKey(value));
+          state.set.add(valueKey(value));
           break;
         default: {
           /** @type {never} */
@@ -749,9 +743,7 @@ function pivot(table, op) {
    * @returns {string}
    */
   const pivotKey = (value) => {
-    if (value == null) return "__null__";
-    if (isDate(value)) return `__date__:${value.toISOString()}`;
-    return `__${typeof value}__:${String(value)}`;
+    return valueKey(value);
   };
 
   /**
