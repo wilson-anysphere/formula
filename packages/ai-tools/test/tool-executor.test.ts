@@ -359,7 +359,7 @@ describe("ToolExecutor", () => {
     ]);
     const payloadBytes = Buffer.byteLength(payload);
 
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: any) => {
       return new Response(payload, {
         status: 200,
         headers: {
@@ -381,6 +381,12 @@ describe("ToolExecutor", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      redirect: "manual"
+    });
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("fetch_external_data");
     if (!result.ok || result.tool !== "fetch_external_data") throw new Error("Unexpected tool result");

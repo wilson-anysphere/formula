@@ -940,6 +940,7 @@ export class ToolExecutor {
         headers: requestHeaders ?? undefined,
         credentials: "omit",
         cache: "no-store",
+        referrerPolicy: "no-referrer",
         redirect: "manual"
       });
 
@@ -954,6 +955,7 @@ export class ToolExecutor {
           headers: undefined,
           credentials: "omit",
           cache: "no-store",
+          referrerPolicy: "no-referrer",
           redirect: "follow"
         });
         const resolved = response.url ? new URL(response.url) : currentUrl;
