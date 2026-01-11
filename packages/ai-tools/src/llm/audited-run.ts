@@ -3,6 +3,7 @@ import type { AIAuditStore, AIMode, TokenUsage } from "@formula/ai-audit";
 
 import { runChatWithToolsStreaming } from "../../../llm/src/toolCallingStreaming.js";
 import { serializeToolResultForModel } from "../../../llm/src/toolResultSerialization.js";
+import type { ChatStreamEvent } from "../../../llm/src/types.js";
 
 import type { LLMToolCall } from "./integration.js";
 import { classifyQueryNeedsTools, verifyAssistantClaims, verifyToolUsage, type VerificationResult } from "./verification.js";
@@ -36,7 +37,7 @@ export interface AuditedRunOptions {
 }
 
 export interface AuditedRunParams {
-  client: { chat: (request: any) => Promise<any>; streamChat?: (request: any) => AsyncIterable<any> };
+  client: { chat: (request: any) => Promise<any>; streamChat?: (request: any) => AsyncIterable<ChatStreamEvent> };
   tool_executor: { tools: any[]; execute: (call: any) => Promise<any> };
   messages: any[];
   audit: AuditedRunOptions;
@@ -56,7 +57,7 @@ export interface AuditedRunParams {
   /**
    * Optional stream hook for UI surfaces that want partial assistant output.
    */
-  on_stream_event?: (event: unknown) => void;
+  on_stream_event?: (event: ChatStreamEvent) => void;
   /**
    * Optional LLM request parameters forwarded to `runChatWithTools`.
    * If omitted, `audit.model` is used as the request model (providers may ignore it).
@@ -171,7 +172,7 @@ export async function runChatWithToolsAuditedVerified(
         messages: messages as any,
         maxIterations: params.max_iterations,
         continueOnApprovalDenied: params.continue_on_approval_denied,
-        onStreamEvent: params.on_stream_event as any,
+        onStreamEvent: params.on_stream_event,
         model: params.model ?? params.audit.model,
         temperature: params.temperature,
         maxTokens: params.max_tokens,
