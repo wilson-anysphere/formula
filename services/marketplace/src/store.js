@@ -269,6 +269,33 @@ function isAllowedFilePath(filePath) {
   return false;
 }
 
+function normalizeManifestFilePath(filePath) {
+  const normalized = String(filePath || "").trim().replace(/\\/g, "/");
+  if (!normalized) return "";
+  if (normalized.startsWith("/")) throw new Error(`Manifest file path must be relative (got ${filePath})`);
+  if (normalized.includes("\0")) throw new Error("Manifest file path contains NUL byte");
+  let rel = normalized;
+  while (rel.startsWith("./")) rel = rel.slice(2);
+  const parts = rel.split("/");
+  if (parts.some((p) => p === "" || p === "." || p === "..")) {
+    throw new Error(`Invalid manifest file path: ${filePath}`);
+  }
+  return parts.join("/");
+}
+
+function validateEntrypoint(manifest, fileRecords) {
+  const main = normalizeManifestFilePath(manifest?.main);
+  if (!main) throw new Error("Manifest main entrypoint is required");
+  if (!isAllowedFilePath(main)) {
+    throw new Error(`Manifest main entrypoint must be an allowed file type (got ${manifest.main})`);
+  }
+
+  const files = new Set((fileRecords || []).map((f) => String(f?.path || "")));
+  if (!files.has(main)) {
+    throw new Error(`Manifest main entrypoint is missing from extension package: ${manifest.main}`);
+  }
+}
+
 class MarketplaceStore {
   constructor({ dataDir }) {
     this.dataDir = dataDir;
@@ -655,6 +682,7 @@ class MarketplaceStore {
     }
 
     validateManifest(manifest);
+    validateEntrypoint(manifest, fileRecords);
 
     if (manifest.publisher !== publisher) {
       throw new Error("Manifest publisher does not match authenticated publisher");

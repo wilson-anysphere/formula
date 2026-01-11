@@ -365,3 +365,50 @@ test("marketplace store accepts v1 packages during transition", async (t) => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("marketplace store rejects packages with missing manifest.main entrypoint", async (t) => {
+  try {
+    requireFromHere.resolve("sql.js");
+  } catch {
+    t.skip("sql.js dependency not installed in this environment");
+    return;
+  }
+
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-missing-main-"));
+  const dataDir = path.join(tmpRoot, "data");
+  const { dir, manifest } = await createTempExtensionDir();
+
+  try {
+    const keys = generateEd25519KeyPair();
+
+    // Create a package where manifest.main points at a file that's not included.
+    const packageJsonPath = path.join(dir, "package.json");
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+    packageJson.main = "./dist/missing.js";
+    await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+
+    const store = new MarketplaceStore({ dataDir });
+    await store.init();
+    await store.registerPublisher({
+      publisher: manifest.publisher,
+      tokenSha256: "ignored-for-unit-test",
+      publicKeyPem: keys.publicKeyPem,
+      verified: true,
+    });
+
+    const pkgBytes = await createExtensionPackageV2(dir, { privateKeyPem: keys.privateKeyPem });
+
+    await assert.rejects(
+      () =>
+        store.publishExtension({
+          publisher: manifest.publisher,
+          packageBytes: pkgBytes,
+          signatureBase64: null,
+        }),
+      /main entrypoint is missing/i
+    );
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
