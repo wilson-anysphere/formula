@@ -2,20 +2,23 @@ use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
+use formula_model::{
+    import::{import_csv_to_columnar_table, CsvOptions},
+    CellValue as ModelCellValue,
+};
 use formula_xlsb::{CellValue as XlsbCellValue, XlsbWorkbook};
-use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
 use formula_xlsx::drawingml::PreservedDrawingParts;
 use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
 };
-use formula_xlsx::XlsxPackage;
+use formula_xlsx::{load_from_bytes, XlsxPackage};
 use rust_xlsxwriter::{Workbook as XlsxWorkbook, XlsxError};
 use std::collections::HashMap;
 use std::io::BufReader;
 use std::path::Path;
-use std::sync::Arc;
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::macro_trust::compute_macro_fingerprint;
 
@@ -282,40 +285,29 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         return read_xlsb_blocking(path);
     }
 
-    let mut workbook =
-        open_workbook_auto(path).with_context(|| format!("open workbook {:?}", path))?;
-    let sheet_names = workbook.sheet_names().to_owned();
-
-    let print_settings = match extension.as_deref() {
-        Some(ext) if matches!(ext, "xlsx" | "xlsm") => {
-            std::fs::read(path)
-                .ok()
-                .and_then(|bytes| read_workbook_print_settings(&bytes).ok())
-                .unwrap_or_default()
-        }
-        _ => WorkbookPrintSettings::default(),
-    };
-
-    let mut out = Workbook {
-        path: Some(path.to_string_lossy().to_string()),
-        origin_path: Some(path.to_string_lossy().to_string()),
-        vba_project_bin: None,
-        macro_fingerprint: None,
-        preserved_drawing_parts: None,
-        sheets: Vec::new(),
-        print_settings,
-    };
-
-    // Preserve macros: if the source file contains `xl/vbaProject.bin`, stash it so that
-    // `write_xlsx_blocking` can re-inject it when saving as `.xlsm`.
-    //
-    // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
-    if matches!(
-        extension.as_deref(),
-        Some("xlsx") | Some("xlsm")
-    ) {
+    if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {
         let bytes =
             std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?;
+        let document = load_from_bytes(&bytes).with_context(|| format!("parse xlsx {:?}", path))?;
+
+        let print_settings = read_workbook_print_settings(&bytes)
+            .ok()
+            .unwrap_or_default();
+
+        let mut out = Workbook {
+            path: Some(path.to_string_lossy().to_string()),
+            origin_path: Some(path.to_string_lossy().to_string()),
+            vba_project_bin: None,
+            macro_fingerprint: None,
+            preserved_drawing_parts: None,
+            sheets: Vec::new(),
+            print_settings,
+        };
+
+        // Preserve macros: if the source file contains `xl/vbaProject.bin`, stash it so that
+        // `write_xlsx_blocking` can re-inject it when saving as `.xlsm`.
+        //
+        // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
         if let Ok(pkg) = XlsxPackage::from_bytes(&bytes) {
             out.vba_project_bin = pkg.vba_project_bin().map(|b| b.to_vec());
             if let (Some(origin), Some(vba)) = (out.origin_path.as_deref(), out.vba_project_bin.as_deref()) {
@@ -327,7 +319,31 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
                 }
             }
         }
+
+        out.sheets = document
+            .workbook
+            .sheets
+            .iter()
+            .map(formula_model_sheet_to_app_sheet)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        out.ensure_sheet_ids();
+        return Ok(out);
     }
+
+    let mut workbook =
+        open_workbook_auto(path).with_context(|| format!("open workbook {:?}", path))?;
+    let sheet_names = workbook.sheet_names().to_owned();
+
+    let mut out = Workbook {
+        path: Some(path.to_string_lossy().to_string()),
+        origin_path: Some(path.to_string_lossy().to_string()),
+        vba_project_bin: None,
+        macro_fingerprint: None,
+        preserved_drawing_parts: None,
+        sheets: Vec::new(),
+        print_settings: WorkbookPrintSettings::default(),
+    };
 
     for sheet_name in sheet_names {
         let range = workbook
@@ -401,6 +417,56 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
 
     out.ensure_sheet_ids();
     Ok(out)
+}
+
+fn formula_model_sheet_to_app_sheet(sheet: &formula_model::Worksheet) -> anyhow::Result<Sheet> {
+    let mut out = Sheet::new(sheet.name.clone(), sheet.name.clone());
+
+    for (cell_ref, cell) in sheet.iter_cells() {
+        let row = cell_ref.row as usize;
+        let col = cell_ref.col as usize;
+
+        let cached_value = formula_model_value_to_scalar(&cell.value);
+        if let Some(formula) = cell.formula.as_deref() {
+            if formula.trim().is_empty() {
+                continue;
+            }
+            let normalized = normalize_formula_text(formula);
+            let mut c = Cell::from_formula(normalized);
+            c.computed_value = cached_value;
+            out.set_cell(row, col, c);
+            continue;
+        }
+
+        if matches!(cached_value, CellScalar::Empty) {
+            continue;
+        }
+
+        out.set_cell(row, col, Cell::from_literal(Some(cached_value)));
+    }
+
+    Ok(out)
+}
+
+fn normalize_formula_text(formula: &str) -> String {
+    if formula.starts_with('=') {
+        formula.to_string()
+    } else {
+        format!("={formula}")
+    }
+}
+
+fn formula_model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
+    match value {
+        ModelCellValue::Empty => CellScalar::Empty,
+        ModelCellValue::Number(n) => CellScalar::Number(*n),
+        ModelCellValue::String(s) => CellScalar::Text(s.clone()),
+        ModelCellValue::Boolean(b) => CellScalar::Bool(*b),
+        ModelCellValue::Error(e) => CellScalar::Error(e.to_string()),
+        ModelCellValue::RichText(rt) => CellScalar::Text(rt.text.clone()),
+        ModelCellValue::Array(arr) => CellScalar::Text(format!("{:?}", arr.data)),
+        ModelCellValue::Spill(_) => CellScalar::Error("#SPILL!".to_string()),
+    }
 }
 
 pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
@@ -567,15 +633,13 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<(
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
 
-    let wants_vba = workbook.vba_project_bin.is_some()
-        && matches!(
-            extension.as_deref(),
-            Some("xlsm")
-        );
+    let wants_vba =
+        workbook.vba_project_bin.is_some() && matches!(extension.as_deref(), Some("xlsm"));
     let wants_preserved_drawings = workbook.preserved_drawing_parts.is_some();
 
     if wants_vba || wants_preserved_drawings {
-        let mut pkg = XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
+        let mut pkg =
+            XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
 
         if wants_vba {
             pkg.set_part(
@@ -629,9 +693,58 @@ mod tests {
             sheet.get_cell(0, 0).computed_value,
             CellScalar::Text("Hello".to_string())
         );
-        assert_eq!(sheet.get_cell(0, 1).computed_value, CellScalar::Number(42.5));
-        assert_eq!(sheet.get_cell(0, 2).computed_value, CellScalar::Number(85.0));
+        assert_eq!(
+            sheet.get_cell(0, 1).computed_value,
+            CellScalar::Number(42.5)
+        );
+        assert_eq!(
+            sheet.get_cell(0, 2).computed_value,
+            CellScalar::Number(85.0)
+        );
         assert_eq!(sheet.get_cell(0, 2).formula.as_deref(), Some("=B1*2"));
+    }
+
+    #[test]
+    fn reads_rich_text_shared_strings_fixture_as_plain_text() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/styles/rich-text-shared-strings.xlsx"
+        ));
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read rich-text fixture");
+        assert_eq!(workbook.sheets.len(), 1);
+
+        let sheet = &workbook.sheets[0];
+        assert_eq!(
+            sheet.get_cell(0, 0).computed_value,
+            CellScalar::Text("Hello Bold Italic".to_string())
+        );
+    }
+
+    #[test]
+    fn reads_multi_sheet_fixture_preserves_sheet_order() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/multi-sheet.xlsx"
+        ));
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read multi-sheet workbook");
+        let sheet_names: Vec<_> = workbook.sheets.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(sheet_names, vec!["Sheet1", "Sheet2"]);
+    }
+
+    #[test]
+    fn reads_formula_fixture_with_equals_prefix() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/formulas/formulas.xlsx"
+        ));
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read formula workbook");
+        assert_eq!(workbook.sheets.len(), 1);
+        let sheet = &workbook.sheets[0];
+        assert_eq!(sheet.get_cell(0, 2).formula.as_deref(), Some("=A1+B1"));
+        assert_eq!(sheet.get_cell(0, 2).computed_value, CellScalar::Number(3.0));
     }
 
     #[test]
