@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 import { applyPatch, diffDocumentStates } from "../patch.js";
-import { emptyDocumentState } from "../state.js";
+import { emptyDocumentState, normalizeDocumentState } from "../state.js";
 import { randomUUID } from "../uuid.js";
 
 /**
@@ -10,6 +10,8 @@ import { randomUUID } from "../uuid.js";
  * @typedef {import("../types.js").DocumentState} DocumentState
  * @typedef {import("../patch.js").Patch} Patch
  */
+
+const UTF8_ENCODER = new TextEncoder();
 
 /**
  * @param {unknown} value
@@ -45,17 +47,30 @@ export class YjsBranchStore {
   #commits;
   /** @type {Y.Map<any>} */
   #meta;
+  /** @type {number | null} */
+  #snapshotEveryNCommits;
+  /** @type {number | null} */
+  #snapshotWhenPatchExceedsBytes;
 
   /**
-   * @param {{ ydoc: Y.Doc, rootName?: string }} input
+   * @param {{
+   *   ydoc: Y.Doc,
+   *   rootName?: string,
+   *   snapshotEveryNCommits?: number,
+   *   snapshotWhenPatchExceedsBytes?: number
+   * }} input
    */
-  constructor({ ydoc, rootName }) {
+  constructor({ ydoc, rootName, snapshotEveryNCommits, snapshotWhenPatchExceedsBytes }) {
     if (!ydoc) throw new Error("YjsBranchStore requires { ydoc }");
     this.#ydoc = ydoc;
     this.#rootName = rootName ?? "branching";
     this.#branches = ydoc.getMap(`${this.#rootName}:branches`);
     this.#commits = ydoc.getMap(`${this.#rootName}:commits`);
     this.#meta = ydoc.getMap(`${this.#rootName}:meta`);
+    this.#snapshotEveryNCommits =
+      snapshotEveryNCommits == null ? 50 : snapshotEveryNCommits;
+    this.#snapshotWhenPatchExceedsBytes =
+      snapshotWhenPatchExceedsBytes == null ? null : snapshotWhenPatchExceedsBytes;
   }
 
   /**
@@ -76,6 +91,22 @@ export class YjsBranchStore {
           this.#meta.set("currentBranchName", "main");
         });
       }
+
+      // Migration: older docs may not have stored commit snapshots.
+      const rootCommitMap = getYMap(this.#commits.get(existingRoot));
+      if (rootCommitMap && rootCommitMap.get("snapshot") === undefined) {
+        const patch = rootCommitMap.get("patch");
+        if (patch) {
+          const snapshot = this._applyPatch(emptyDocumentState(), patch);
+          this.#ydoc.transact(() => {
+            const commit = getYMap(this.#commits.get(existingRoot));
+            if (!commit) return;
+            if (commit.get("snapshot") !== undefined) return;
+            commit.set("snapshot", structuredClone(snapshot));
+          });
+        }
+      }
+
       return;
     }
 
@@ -85,6 +116,7 @@ export class YjsBranchStore {
 
     /** @type {Patch} */
     const patch = diffDocumentStates(emptyDocumentState(), initialState);
+    const snapshot = this._applyPatch(emptyDocumentState(), patch);
 
     this.#ydoc.transact(() => {
       const rootAfter = this.#meta.get("rootCommitId");
@@ -99,6 +131,7 @@ export class YjsBranchStore {
       commit.set("createdAt", now);
       commit.set("message", "root");
       commit.set("patch", structuredClone(patch));
+      commit.set("snapshot", structuredClone(snapshot));
       this.#commits.set(rootCommitId, commit);
 
       const main = new Y.Map();
@@ -275,11 +308,25 @@ export class YjsBranchStore {
   }
 
   /**
-   * @param {{ docId: string, parentCommitId: string | null, mergeParentCommitId: string | null, createdBy: string, createdAt: number, message: string | null, patch: Patch }} input
+   * @param {{ docId: string, parentCommitId: string | null, mergeParentCommitId: string | null, createdBy: string, createdAt: number, message: string | null, patch: Patch, nextState?: DocumentState }} input
    * @returns {Promise<Commit>}
    */
-  async createCommit({ docId, parentCommitId, mergeParentCommitId, createdBy, createdAt, message, patch }) {
+  async createCommit({
+    docId,
+    parentCommitId,
+    mergeParentCommitId,
+    createdBy,
+    createdAt,
+    message,
+    patch,
+    nextState,
+  }) {
     const id = randomUUID();
+
+    const shouldSnapshot = await this.#shouldSnapshotCommit({ parentCommitId, patch });
+    const snapshotState = shouldSnapshot
+      ? await this.#resolveSnapshotState({ parentCommitId, patch, nextState })
+      : null;
 
     this.#ydoc.transact(() => {
       const commit = new Y.Map();
@@ -291,6 +338,7 @@ export class YjsBranchStore {
       commit.set("createdAt", createdAt);
       commit.set("message", message ?? null);
       commit.set("patch", structuredClone(patch));
+      if (snapshotState) commit.set("snapshot", structuredClone(snapshotState));
       this.#commits.set(id, commit);
     });
 
@@ -321,27 +369,89 @@ export class YjsBranchStore {
    * @returns {Promise<DocumentState>}
    */
   async getDocumentStateAtCommit(commitId) {
-    const commit = await this.getCommit(commitId);
-    if (!commit) throw new Error(`Commit not found: ${commitId}`);
+    const direct = getYMap(this.#commits.get(commitId));
+    if (!direct) throw new Error(`Commit not found: ${commitId}`);
 
-    /** @type {Commit[]} */
+    const directSnapshot = direct.get("snapshot");
+    if (directSnapshot !== undefined) {
+      return normalizeDocumentState(structuredClone(directSnapshot));
+    }
+
+    /** @type {Patch[]} */
     const chain = [];
-    let current = commit;
-    while (current) {
-      chain.push(current);
-      if (!current.parentCommitId) break;
-      const parent = await this.getCommit(current.parentCommitId);
-      if (!parent) throw new Error(`Commit not found: ${current.parentCommitId}`);
-      current = parent;
+    let currentId = commitId;
+    /** @type {any} */
+    let baseSnapshot = null;
+
+    while (currentId) {
+      const commitMap = getYMap(this.#commits.get(currentId));
+      if (!commitMap) throw new Error(`Commit not found: ${currentId}`);
+
+      const snapshot = commitMap.get("snapshot");
+      if (snapshot !== undefined) {
+        baseSnapshot = snapshot;
+        break;
+      }
+
+      chain.push(structuredClone(commitMap.get("patch") ?? {}));
+
+      const parent = commitMap.get("parentCommitId");
+      if (!parent) break;
+      currentId = parent;
     }
 
     chain.reverse();
 
     /** @type {DocumentState} */
-    let state = emptyDocumentState();
-    for (const c of chain) {
-      state = applyPatch(state, c.patch);
+    let state = baseSnapshot !== null ? normalizeDocumentState(structuredClone(baseSnapshot)) : emptyDocumentState();
+    for (const patch of chain) {
+      state = this._applyPatch(state, patch);
     }
     return state;
+  }
+
+  /**
+   * @param {DocumentState} state
+   * @param {Patch} patch
+   * @returns {DocumentState}
+   */
+  _applyPatch(state, patch) {
+    return applyPatch(state, patch);
+  }
+
+  async #shouldSnapshotCommit({ parentCommitId, patch }) {
+    if (this.#snapshotWhenPatchExceedsBytes != null && this.#snapshotWhenPatchExceedsBytes > 0) {
+      const patchBytes = UTF8_ENCODER.encode(JSON.stringify(patch)).length;
+      if (patchBytes > this.#snapshotWhenPatchExceedsBytes) return true;
+    }
+
+    if (this.#snapshotEveryNCommits != null && this.#snapshotEveryNCommits > 0) {
+      const distance = this.#distanceFromSnapshotCommit(parentCommitId);
+      if (distance + 1 >= this.#snapshotEveryNCommits) return true;
+    }
+
+    return false;
+  }
+
+  #distanceFromSnapshotCommit(startCommitId) {
+    if (!startCommitId) return 0;
+    let distance = 0;
+    let currentId = startCommitId;
+    while (currentId) {
+      const commitMap = getYMap(this.#commits.get(currentId));
+      if (!commitMap) throw new Error(`Commit not found: ${currentId}`);
+      if (commitMap.get("snapshot") !== undefined) return distance;
+      const parentId = commitMap.get("parentCommitId");
+      if (!parentId) return distance;
+      distance += 1;
+      currentId = parentId;
+    }
+    return distance;
+  }
+
+  async #resolveSnapshotState({ parentCommitId, patch, nextState }) {
+    if (nextState) return normalizeDocumentState(nextState);
+    const base = parentCommitId ? await this.getDocumentStateAtCommit(parentCommitId) : emptyDocumentState();
+    return this._applyPatch(base, patch);
   }
 }
