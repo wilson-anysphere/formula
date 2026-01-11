@@ -80,7 +80,10 @@ pub use crate::minimal::write_minimal_xlsx;
 pub use workbook::ChartExtractionError;
 pub use writer::{write_workbook, write_workbook_to_writer, XlsxWriteError};
 pub use xml::XmlDomError;
-pub use streaming::{patch_xlsx_streaming, StreamingPatchError, WorksheetCellPatch};
+pub use streaming::{
+    patch_xlsx_streaming, patch_xlsx_streaming_workbook_cell_patches, StreamingPatchError,
+    WorksheetCellPatch,
+};
 
 use formula_model::rich_text::RichText;
 use formula_model::{CellRef, CellValue, Workbook, WorksheetId};

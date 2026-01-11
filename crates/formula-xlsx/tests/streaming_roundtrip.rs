@@ -3,7 +3,10 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use formula_model::{CellRef, CellValue};
-use formula_xlsx::{patch_xlsx_streaming, load_from_bytes, WorksheetCellPatch, XlsxDocument};
+use formula_xlsx::{
+    load_from_bytes, patch_xlsx_streaming, patch_xlsx_streaming_workbook_cell_patches, CellPatch,
+    WorkbookCellPatches, WorksheetCellPatch, XlsxDocument,
+};
 use zip::ZipArchive;
 
 #[test]
@@ -203,6 +206,46 @@ fn streaming_patch_detaches_textless_shared_formula() -> Result<(), Box<dyn std:
         "patched textless shared formula should become a standalone formula"
     );
     assert_eq!(f.attribute("si"), None);
+
+    Ok(())
+}
+
+#[test]
+fn streaming_workbook_cell_patches_resolve_sheet_names() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/basic.xlsx");
+    let bytes = fs::read(&fixture)?;
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        // Sheet names are case-insensitive in Excel; accept patches keyed by any casing.
+        "sheet1",
+        CellRef::from_a1("A1")?,
+        CellPatch::set_value(CellValue::Number(42.0)),
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches(Cursor::new(bytes), &mut out, &patches)?;
+
+    let tmpdir = tempfile::tempdir()?;
+    let out_path = tmpdir.path().join("patched.xlsx");
+    fs::write(&out_path, out.get_ref())?;
+
+    let report = xlsx_diff::diff_workbooks(&fixture, &out_path)?;
+    for diff in &report.differences {
+        assert_ne!(diff.kind, "missing_part", "missing part {}", diff.part);
+        assert_ne!(diff.kind, "extra_part", "extra part {}", diff.part);
+    }
+
+    let changed_parts: std::collections::BTreeSet<String> = report
+        .differences
+        .iter()
+        .map(|d| d.part.clone())
+        .collect();
+    assert_eq!(
+        changed_parts,
+        std::collections::BTreeSet::from(["xl/worksheets/sheet1.xml".to_string()])
+    );
 
     Ok(())
 }

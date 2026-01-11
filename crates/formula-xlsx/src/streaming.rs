@@ -8,6 +8,9 @@ use thiserror::Error;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+use crate::openxml::{parse_relationships, resolve_target};
+use crate::{parse_workbook_sheets, CellPatch, WorkbookCellPatches};
+
 #[derive(Debug, Error)]
 pub enum StreamingPatchError {
     #[error("io error: {0}")]
@@ -26,6 +29,8 @@ pub enum StreamingPatchError {
     MissingWorksheetPart(String),
     #[error("worksheet xml is missing required <sheetData> section: {0}")]
     MissingSheetData(String),
+    #[error("xlsx error: {0}")]
+    Xlsx(#[from] crate::XlsxError),
 }
 
 /// Patch a single cell in a worksheet part (`xl/worksheets/sheetN.xml`).
@@ -81,12 +86,90 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
         patches.sort_by_key(|p| (p.cell.row, p.cell.col));
     }
 
-    let mut missing_parts: BTreeMap<String, ()> = patches_by_part
-        .keys()
-        .map(|k| (k.clone(), ()))
-        .collect();
+    let mut archive = ZipArchive::new(input)?;
+    patch_xlsx_streaming_with_archive(&mut archive, output, &patches_by_part, &HashMap::new())?;
+    Ok(())
+}
+
+/// Apply [`WorkbookCellPatches`] (the part-preserving cell patch DSL) using the streaming ZIP
+/// rewriter.
+///
+/// Patches are keyed by worksheet (tab) name, matching [`XlsxPackage::apply_cell_patches`] but
+/// without loading every part into memory.
+pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + Seek>(
+    input: R,
+    output: W,
+    patches: &WorkbookCellPatches,
+) -> Result<(), StreamingPatchError> {
+    if patches.is_empty() {
+        return patch_xlsx_streaming(input, output, &[]);
+    }
 
     let mut archive = ZipArchive::new(input)?;
+
+    let mut pre_read_parts: HashMap<String, Vec<u8>> = HashMap::new();
+    let workbook_xml = read_zip_part(&mut archive, "xl/workbook.xml", &mut pre_read_parts)?;
+    let workbook_xml = String::from_utf8(workbook_xml).map_err(crate::XlsxError::from)?;
+    let workbook_sheets = parse_workbook_sheets(&workbook_xml)?;
+
+    let workbook_rels_bytes =
+        read_zip_part(&mut archive, "xl/_rels/workbook.xml.rels", &mut pre_read_parts)?;
+    let rels = parse_relationships(&workbook_rels_bytes)?;
+    let mut rel_targets: HashMap<String, String> = HashMap::new();
+    for rel in rels {
+        rel_targets.insert(rel.id, resolve_target("xl/workbook.xml", &rel.target));
+    }
+
+    let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
+    for (sheet_name, sheet_patches) in patches.sheets() {
+        if sheet_patches.is_empty() {
+            continue;
+        }
+        let sheet = workbook_sheets
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(sheet_name))
+            .ok_or_else(|| crate::XlsxError::Invalid(format!("unknown sheet name: {sheet_name}")))?;
+        let worksheet_part = rel_targets.get(&sheet.rel_id).cloned().ok_or_else(|| {
+            crate::XlsxError::Invalid(format!(
+                "missing worksheet relationship for {}",
+                sheet.name
+            ))
+        })?;
+
+        for (cell_ref, patch) in sheet_patches.iter() {
+            let (value, formula) = match patch {
+                CellPatch::Clear { .. } => (CellValue::Empty, None),
+                CellPatch::Set { value, formula, .. } => (value.clone(), formula.clone()),
+            };
+            patches_by_part
+                .entry(worksheet_part.clone())
+                .or_default()
+                .push(WorksheetCellPatch::new(
+                    worksheet_part.clone(),
+                    cell_ref,
+                    value,
+                    formula,
+                ));
+        }
+    }
+
+    for patches in patches_by_part.values_mut() {
+        patches.sort_by_key(|p| (p.cell.row, p.cell.col));
+    }
+
+    patch_xlsx_streaming_with_archive(&mut archive, output, &patches_by_part, &pre_read_parts)?;
+    Ok(())
+}
+
+fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
+    archive: &mut ZipArchive<R>,
+    output: W,
+    patches_by_part: &HashMap<String, Vec<WorksheetCellPatch>>,
+    pre_read_parts: &HashMap<String, Vec<u8>>,
+) -> Result<(), StreamingPatchError> {
+    let mut missing_parts: BTreeMap<String, ()> =
+        patches_by_part.keys().map(|k| (k.clone(), ())).collect();
+
     let mut zip = ZipWriter::new(output);
     let options =
         FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
@@ -98,11 +181,18 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
         }
 
         let name = file.name().to_string();
+        if patches_by_part.contains_key(&name) || pre_read_parts.contains_key(&name) {
+            // Avoid reading entries that we already buffered for metadata resolution.
+            // We'll write the regenerated/cached bytes instead.
+        }
+
         zip.start_file(name.clone(), options)?;
 
         if let Some(patches) = patches_by_part.get(&name) {
             missing_parts.remove(&name);
             patch_worksheet_xml_streaming(&mut file, &mut zip, &name, patches)?;
+        } else if let Some(bytes) = pre_read_parts.get(&name) {
+            zip.write_all(bytes)?;
         } else {
             std::io::copy(&mut file, &mut zip)?;
         }
@@ -116,8 +206,23 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
     Ok(())
 }
 
+fn read_zip_part<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+    cache: &mut HashMap<String, Vec<u8>>,
+) -> Result<Vec<u8>, StreamingPatchError> {
+    if let Some(bytes) = cache.get(name) {
+        return Ok(bytes.clone());
+    }
+    let mut file = archive.by_name(name)?;
+    let mut buf = Vec::with_capacity(file.size() as usize);
+    file.read_to_end(&mut buf)?;
+    cache.insert(name.to_string(), buf.clone());
+    Ok(buf)
+}
+
 #[derive(Debug, Clone)]
-struct CellPatch {
+struct CellPatchInternal {
     row_1: u32,
     col_0: u32,
     value: CellValue,
@@ -126,7 +231,7 @@ struct CellPatch {
 
 struct RowState {
     row_1: u32,
-    pending: Vec<CellPatch>,
+    pending: Vec<CellPatchInternal>,
     next_idx: usize,
 }
 
@@ -138,14 +243,14 @@ fn patch_worksheet_xml_streaming<R: Read, W: Write>(
 ) -> Result<(), StreamingPatchError> {
     let patch_bounds = bounds_for_patches(patches);
 
-    let mut patches_by_row: BTreeMap<u32, Vec<CellPatch>> = BTreeMap::new();
+    let mut patches_by_row: BTreeMap<u32, Vec<CellPatchInternal>> = BTreeMap::new();
     for patch in patches {
         let row_1 = patch.cell.row + 1;
         let col_0 = patch.cell.col;
         patches_by_row
             .entry(row_1)
             .or_default()
-            .push(CellPatch {
+            .push(CellPatchInternal {
                 row_1,
                 col_0,
                 value: patch.value.clone(),
@@ -369,7 +474,7 @@ fn parse_cell_ref_and_col(e: &BytesStart<'_>) -> Result<(CellRef, u32), Streamin
 
 fn write_pending_rows<W: Write>(
     writer: &mut Writer<W>,
-    patches_by_row: &mut BTreeMap<u32, Vec<CellPatch>>,
+    patches_by_row: &mut BTreeMap<u32, Vec<CellPatchInternal>>,
 ) -> Result<(), StreamingPatchError> {
     while let Some((&row_1, _)) = patches_by_row.iter().next() {
         let pending = patches_by_row.remove(&row_1).unwrap_or_default();
@@ -381,7 +486,7 @@ fn write_pending_rows<W: Write>(
 fn write_inserted_row<W: Write>(
     writer: &mut Writer<W>,
     row_1: u32,
-    patches: &[CellPatch],
+    patches: &[CellPatchInternal],
 ) -> Result<(), StreamingPatchError> {
     let mut row = BytesStart::new("row");
     let row_num = row_1.to_string();
@@ -394,7 +499,7 @@ fn write_inserted_row<W: Write>(
 
 fn write_inserted_cells<W: Write>(
     writer: &mut Writer<W>,
-    patches: &[CellPatch],
+    patches: &[CellPatchInternal],
 ) -> Result<(), StreamingPatchError> {
     for patch in patches {
         let cell_ref = CellRef::new(patch.row_1 - 1, patch.col_0);
@@ -405,7 +510,7 @@ fn write_inserted_cells<W: Write>(
 
 fn write_remaining_row_cells<W: Write>(
     writer: &mut Writer<W>,
-    pending: &[CellPatch],
+    pending: &[CellPatchInternal],
     next_idx: usize,
 ) -> Result<(), StreamingPatchError> {
     if next_idx >= pending.len() {
@@ -450,7 +555,7 @@ fn insert_pending_before_non_cell<W: Write>(
     Ok(())
 }
 
-fn take_patch_for_col(state: &mut RowState, col_0: u32) -> Option<CellPatch> {
+fn take_patch_for_col(state: &mut RowState, col_0: u32) -> Option<CellPatchInternal> {
     if state.next_idx >= state.pending.len() {
         return None;
     }
@@ -469,7 +574,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     writer: &mut Writer<W>,
     cell_start: &BytesStart<'_>,
     cell_ref: &CellRef,
-    patch: &CellPatch,
+    patch: &CellPatchInternal,
 ) -> Result<(), StreamingPatchError> {
     let (cell_t, body_kind) = cell_representation(&patch.value, patch.formula.as_deref())?;
     let patch_formula = patch.formula.as_deref();
@@ -725,7 +830,7 @@ fn write_patched_cell<W: Write>(
     writer: &mut Writer<W>,
     original: Option<&BytesStart<'_>>,
     cell_ref: &CellRef,
-    patch: &CellPatch,
+    patch: &CellPatchInternal,
 ) -> Result<(), StreamingPatchError> {
     let (cell_t, body_kind) = cell_representation(&patch.value, patch.formula.as_deref())?;
 
