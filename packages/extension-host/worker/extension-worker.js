@@ -177,11 +177,23 @@ const installSandboxTimers = vm.runInContext(
   `
 ((hostSetTimeout, hostClearTimeout, hostSetInterval, hostClearInterval, hostSetImmediate, hostClearImmediate) => {
   return {
-    setTimeout: (cb, delay, ...args) => hostSetTimeout(cb, delay, ...args),
+    // Never pass extension callbacks directly to host timers. If we do, the callback's
+    // arguments.callee.caller chain can expose a host function, whose
+    // constructor.constructor(...) bypasses codeGeneration: { strings: false }.
+    setTimeout: (cb, delay, ...args) => {
+      const wrapped = (...innerArgs) => cb(...innerArgs);
+      return hostSetTimeout(wrapped, delay, ...args);
+    },
     clearTimeout: (id) => hostClearTimeout(id),
-    setInterval: (cb, delay, ...args) => hostSetInterval(cb, delay, ...args),
+    setInterval: (cb, delay, ...args) => {
+      const wrapped = (...innerArgs) => cb(...innerArgs);
+      return hostSetInterval(wrapped, delay, ...args);
+    },
     clearInterval: (id) => hostClearInterval(id),
-    setImmediate: (cb, ...args) => hostSetImmediate(cb, ...args),
+    setImmediate: (cb, ...args) => {
+      const wrapped = (...innerArgs) => cb(...innerArgs);
+      return hostSetImmediate(wrapped, ...args);
+    },
     clearImmediate: (id) => hostClearImmediate(id)
   };
 })
