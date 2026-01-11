@@ -1141,6 +1141,81 @@ test("desktop client uses on-disk cache + If-None-Match for package downloads", 
   }
 });
 
+test("desktop client uses on-disk cache + If-None-Match for extension metadata", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-client-meta-cache-"));
+  const dataDir = path.join(tmpRoot, "marketplace-data");
+  const cacheDir = path.join(tmpRoot, "client-cache");
+
+  const adminToken = "admin-secret";
+  const { server } = await createMarketplaceServer({ dataDir, adminToken, rateLimits: { getExtensionPerIpPerMinute: 0 } });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    const publisherToken = "publisher-token";
+    const privateKeyPath = path.join(tmpRoot, "publisher-private.pem");
+    await fs.writeFile(privateKeyPath, privateKeyPem);
+
+    const sampleExtensionSrc = path.join(repoRoot, "extensions", "sample-hello");
+    const extSource = path.join(tmpRoot, "ext");
+    await copyDir(sampleExtensionSrc, extSource);
+
+    const manifest = JSON.parse(await fs.readFile(path.join(extSource, "package.json"), "utf8"));
+    const extensionId = `${manifest.publisher}.${manifest.name}`;
+
+    const regRes = await fetch(`${baseUrl}/api/publishers/register`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        publisher: manifest.publisher,
+        token: publisherToken,
+        publicKeyPem,
+        verified: true,
+      }),
+    });
+    assert.equal(regRes.status, 200);
+
+    await publishExtension({
+      extensionDir: extSource,
+      marketplaceUrl: baseUrl,
+      token: publisherToken,
+      privateKeyPemOrPath: privateKeyPath,
+    });
+
+    const client = new MarketplaceClient({ baseUrl, cacheDir });
+    const first = await client.getExtension(extensionId);
+    assert.ok(first);
+
+    const second = await client.getExtension(extensionId);
+    assert.ok(second);
+    assert.equal(second.id, extensionId);
+
+    const metricsRes = await fetch(`${baseUrl}/api/internal/metrics`);
+    assert.equal(metricsRes.status, 200);
+    const metricsText = await metricsRes.text();
+    assert.match(
+      metricsText,
+      /marketplace_http_requests_total\{method="GET",route="\/api\/extensions\/:id",status="200"\} 1/
+    );
+    assert.match(
+      metricsText,
+      /marketplace_http_requests_total\{method="GET",route="\/api\/extensions\/:id",status="304"\} 1/
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("search matches multi-token queries across different fields", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-marketplace-search-tokens-"));
   const dataDir = path.join(tmpRoot, "marketplace-data");

@@ -74,10 +74,39 @@ export class MarketplaceClient {
   }
 
   async getExtension(id) {
-    const response = await fetch(`${this.baseUrl}/api/extensions/${encodeURIComponent(id)}`);
+    const url = `${this.baseUrl}/api/extensions/${encodeURIComponent(id)}`;
+
+    let cached = null;
+    if (this.cacheDir) {
+      const safeId = safePathComponent(id);
+      cached = await readJsonIfExists(path.join(this.cacheDir, "extensions", safeId, "index.json"));
+      if (!cached || typeof cached !== "object" || !cached.body || typeof cached.body !== "object") {
+        cached = null;
+      }
+    }
+
+    const headers = cached?.etag ? { "If-None-Match": String(cached.etag) } : undefined;
+    let response = await fetch(url, { headers });
+    if (response.status === 304) {
+      if (cached?.body) return cached.body;
+      response = await fetch(url);
+    }
+
     if (response.status === 404) return null;
     if (!response.ok) throw new Error(`Get extension failed (${response.status})`);
-    return response.json();
+    const body = await response.json();
+
+    if (this.cacheDir) {
+      const safeId = safePathComponent(id);
+      const cacheBase = path.join(this.cacheDir, "extensions", safeId);
+      const etag = response.headers.get("etag");
+      await atomicWriteJson(path.join(cacheBase, "index.json"), {
+        etag: etag || null,
+        body,
+      });
+    }
+
+    return body;
   }
 
   async downloadPackage(id, version) {
