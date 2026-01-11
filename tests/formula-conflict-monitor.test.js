@@ -32,9 +32,13 @@ function syncDocs(docA, docB) {
 
 /**
  * @param {string} userId
+ * @param {{ clientID?: number, mode?: "formula" | "formula+value" }} [opts]
  */
-function createClient(userId) {
+function createClient(userId, opts = {}) {
   const doc = new Y.Doc();
+  if (typeof opts.clientID === "number") {
+    doc.clientID = opts.clientID;
+  }
   const cells = doc.getMap("cells");
   const origin = { type: "local", userId };
   const undo = createUndoService({ mode: "collab", doc, scope: cells, origin, captureTimeoutMs: 10_000 });
@@ -47,6 +51,7 @@ function createClient(userId) {
     localUserId: userId,
     origin,
     localOrigins: undo.localOrigins,
+    mode: opts.mode,
     onConflict: (c) => conflicts.push(c)
   });
 
@@ -193,4 +198,37 @@ test("sequential remote deletes that use key deletion do not surface conflicts",
 
   assert.equal(alice.conflicts.length, 0);
   assert.equal(getFormula(alice.cells, "s:0:0"), "");
+});
+
+test("choosing remote value in a value conflict does not clobber a concurrent formula", () => {
+  // Ensure deterministic tie-breaking for concurrent value writes:
+  // higher clientID wins in Yjs.
+  const alice = createClient("alice", { clientID: 2, mode: "formula+value" });
+  const bob = createClient("bob", { clientID: 1, mode: "formula+value" });
+
+  // Establish a shared base cell map so concurrent edits race on keys (not on cell insertion).
+  alice.monitor.setLocalValue("s:0:0", "base");
+  syncDocs(alice.doc, bob.doc);
+
+  // Offline concurrent edits: alice sets a formula; bob sets a literal value.
+  // Alice's formula write also sets value=null, which will win and overwrite bob's value
+  // (clientID 2 > 1), producing a value conflict on bob's side.
+  alice.monitor.setLocalFormula("s:0:0", "=1");
+  bob.monitor.setLocalValue("s:0:0", "bob");
+
+  syncDocs(alice.doc, bob.doc);
+
+  const conflict = bob.conflicts.find((c) => c.kind === "value") ?? null;
+  assert.ok(conflict, "expected a value conflict on bob");
+
+  // The concurrently-written formula should be present in the doc at conflict time.
+  assert.equal(getFormula(bob.cells, "s:0:0"), "=1");
+
+  // Choosing the remote value is a no-op (remote state is already applied) and must not
+  // clear the formula via setLocalValue().
+  assert.ok(bob.monitor.resolveConflict(conflict.id, conflict.remoteValue));
+  syncDocs(alice.doc, bob.doc);
+
+  assert.equal(getFormula(alice.cells, "s:0:0"), "=1");
+  assert.equal(getFormula(bob.cells, "s:0:0"), "=1");
 });

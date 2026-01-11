@@ -174,9 +174,19 @@ export class FormulaConflictMonitor {
     if (!conflict) return false;
 
     if (conflict.kind === "value") {
-      this.setLocalValue(conflict.cellKey, chosen);
+      // The remote value is already applied in the doc at conflict time, so
+      // choosing it is a no-op (and importantly should not clear unrelated state
+      // like a concurrently-written formula).
+      if (!valuesDeeplyEqual(chosen, conflict.remoteValue)) {
+        this.setLocalValue(conflict.cellKey, chosen);
+      }
     } else {
-      this.setLocalFormula(conflict.cellKey, String(chosen ?? ""));
+      const chosenFormula = String(chosen ?? "");
+      // The remote formula is already applied in the doc at conflict time, so
+      // choosing it is a no-op.
+      if (!formulasRoughlyEqual(chosenFormula, conflict.remoteFormula)) {
+        this.setLocalFormula(conflict.cellKey, chosenFormula);
+      }
     }
     this._conflicts.delete(conflictId);
     return true;
