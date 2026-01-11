@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import tls from "node:tls";
-import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
+import { Agent, type Dispatcher } from "undici";
 
 export type CheckServerIdentity = (hostname: string, cert: tls.PeerCertificate) => Error | undefined;
 
@@ -157,7 +157,7 @@ export async function fetchWithOrgTls(
   init: RequestInit = {},
   { tls: policy }: { tls?: OrgTlsPolicy } = {}
 ): Promise<Response> {
-  if (!policy) return undiciFetch(url, init);
+  if (!policy) return fetch(url, init);
 
   const parsed = typeof url === "string" ? new URL(url) : url;
   if (parsed.protocol !== "https:") {
@@ -166,11 +166,11 @@ export async function fetchWithOrgTls(
       (err as { retriable?: boolean }).retriable = false;
       throw err;
     }
-    return undiciFetch(url, init);
+    return fetch(url, init);
   }
 
   const dispatcher: Dispatcher = getOrCreateAgent(policy);
-  return undiciFetch(url, { ...init, dispatcher } as RequestInit);
+  return fetch(url, { ...init, dispatcher } as RequestInit);
 }
 
 export async function closeCachedOrgTlsAgentsForTests(): Promise<void> {
