@@ -1130,7 +1130,15 @@ function addIndexColumn(table, op) {
 function combineColumns(table, op) {
   const indices = indicesForColumns(table, op.columns);
   const remove = new Set(indices);
-  const insertAt = Math.min(...indices);
+  if (indices.length === 0) {
+    throw new Error("combineColumns requires at least one column");
+  }
+  // Avoid `Math.min(...indices)` because spreading large arrays can exceed the
+  // VM argument limit / call stack on very wide datasets.
+  let insertAt = indices[0];
+  for (const idx of indices) {
+    if (idx < insertAt) insertAt = idx;
+  }
 
   if (table.columns.some((col, idx) => !remove.has(idx) && col.name === op.newColumnName)) {
     throw new Error(`Column '${op.newColumnName}' already exists`);
@@ -1598,7 +1606,15 @@ export function compileStreamingPipeline(operations, inputColumns) {
       case "combineColumns": {
         const indices = op.columns.map((name) => getColumnIndex(name));
         const remove = new Set(indices);
-        const insertAt = Math.min(...indices);
+        if (indices.length === 0) {
+          throw new Error("combineColumns requires at least one column");
+        }
+        // Avoid `Math.min(...indices)` because spreading large arrays can exceed the
+        // VM argument limit / call stack on very wide datasets.
+        let insertAt = indices[0];
+        for (const idx of indices) {
+          if (idx < insertAt) insertAt = idx;
+        }
 
         if (columns.some((col, idx) => !remove.has(idx) && col.name === op.newColumnName)) {
           throw new Error(`Column '${op.newColumnName}' already exists`);
