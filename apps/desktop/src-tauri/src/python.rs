@@ -110,14 +110,12 @@ fn dedupe_updates(updates: Vec<CellUpdateData>) -> Vec<CellUpdateData> {
 }
 
 fn normalize_formula_text(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
+    let display = formula_model::display_formula_text(raw);
+    if display.is_empty() {
+        None
+    } else {
+        Some(display)
     }
-    if trimmed.starts_with('=') {
-        return Some(trimmed.to_string());
-    }
-    Some(format!("={trimmed}"))
 }
 
 fn parse_cell_input(input: &JsonValue) -> (Option<JsonValue>, Option<String>) {

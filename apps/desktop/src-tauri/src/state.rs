@@ -2541,14 +2541,13 @@ fn resolve_cell_ref(
 }
 
 fn normalize_formula(formula: Option<String>) -> Option<String> {
-    let mut formula = formula?.trim().to_string();
-    if formula.is_empty() {
-        return None;
+    let formula = formula?;
+    let display = formula_model::display_formula_text(&formula);
+    if display.is_empty() {
+        None
+    } else {
+        Some(display)
     }
-    if !formula.starts_with('=') {
-        formula.insert(0, '=');
-    }
-    Some(formula)
 }
 
 fn coord_to_a1(row: usize, col: usize) -> String {
@@ -2775,6 +2774,32 @@ mod tests {
     };
     use formula_engine::what_if::monte_carlo::{Distribution, InputDistribution};
     use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
+
+    #[test]
+    fn normalize_formula_matches_formula_model_display_semantics() {
+        assert_eq!(normalize_formula(None), None);
+        assert_eq!(normalize_formula(Some("".to_string())), None);
+        assert_eq!(normalize_formula(Some("   ".to_string())), None);
+        assert_eq!(normalize_formula(Some("=".to_string())), None);
+        assert_eq!(normalize_formula(Some("   =   ".to_string())), None);
+
+        assert_eq!(
+            normalize_formula(Some("=1+1".to_string())),
+            Some("=1+1".to_string())
+        );
+        assert_eq!(
+            normalize_formula(Some("1+1".to_string())),
+            Some("=1+1".to_string())
+        );
+        assert_eq!(
+            normalize_formula(Some("  =  SUM(A1:A3)  ".to_string())),
+            Some("=SUM(A1:A3)".to_string())
+        );
+        assert_eq!(
+            normalize_formula(Some("==1+1".to_string())),
+            Some("==1+1".to_string())
+        );
+    }
 
     #[test]
     fn set_cell_recalculates_dependents() {

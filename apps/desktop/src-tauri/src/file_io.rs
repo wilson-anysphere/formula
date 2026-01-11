@@ -590,10 +590,10 @@ fn formula_model_sheet_to_app_sheet(sheet: &formula_model::Worksheet) -> anyhow:
 
         let cached_value = formula_model_value_to_scalar(&cell.value);
         if let Some(formula) = cell.formula.as_deref() {
-            if formula.trim().is_empty() {
+            let normalized = formula_model::display_formula_text(formula);
+            if normalized.is_empty() {
                 continue;
             }
-            let normalized = normalize_formula_text(formula);
             let mut c = Cell::from_formula(normalized);
             c.computed_value = cached_value;
             out.set_cell(row, col, c);
@@ -608,14 +608,6 @@ fn formula_model_sheet_to_app_sheet(sheet: &formula_model::Worksheet) -> anyhow:
     }
 
     Ok(out)
-}
-
-fn normalize_formula_text(formula: &str) -> String {
-    if formula.starts_with('=') {
-        formula.to_string()
-    } else {
-        format!("={formula}")
-    }
 }
 
 fn formula_model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
