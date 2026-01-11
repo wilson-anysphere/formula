@@ -35,7 +35,7 @@ function connectDocs(docA, docB) {
   };
 }
 
-test("CollabSession permissions gate reads/writes + mask unreadable values (API rangeRestrictions shape)", () => {
+test("CollabSession permissions gate reads/writes + mask unreadable values (API rangeRestrictions shape)", async () => {
   const session = createCollabSession({ doc: new Y.Doc() });
 
   session.setPermissions({
@@ -60,12 +60,12 @@ test("CollabSession permissions gate reads/writes + mask unreadable values (API 
     "###"
   );
 
-  const wrote = session.safeSetCellValue("Sheet1:0:0", "secret");
+  const wrote = await session.safeSetCellValue("Sheet1:0:0", "secret");
   assert.equal(wrote, false);
   assert.equal(session.cells.has("Sheet1:0:0"), false);
 });
 
-test("CollabSession integration: sync + presence (in-memory)", () => {
+test("CollabSession integration: sync + presence (in-memory)", async () => {
   const doc1 = new Y.Doc();
   const doc2 = new Y.Doc();
   const disconnect = connectDocs(doc1, doc2);
@@ -94,8 +94,8 @@ test("CollabSession integration: sync + presence (in-memory)", () => {
     },
   });
 
-  session1.setCellFormula("Sheet1:0:0", "=1");
-  assert.equal(session2.getCell("Sheet1:0:0")?.formula, "=1");
+  await session1.setCellFormula("Sheet1:0:0", "=1");
+  assert.equal((await session2.getCell("Sheet1:0:0"))?.formula, "=1");
 
   session1.presence?.setCursor({ row: 0, col: 0 });
   const remote = session2.presence?.getRemotePresences() ?? [];
@@ -109,4 +109,3 @@ test("CollabSession integration: sync + presence (in-memory)", () => {
   doc1.destroy();
   doc2.destroy();
 });
-

@@ -1,0 +1,149 @@
+import {
+  AES_GCM_IV_BYTES,
+  AES_GCM_TAG_BYTES,
+  CELL_ENCRYPTION_ALG,
+  CELL_ENCRYPTION_VERSION,
+  aadBytesFromContext,
+  assertKeyBytes,
+  assertTagBytes,
+  assertIvBytes,
+  base64ToBytes,
+  bytesToBase64,
+  concatBytes,
+  utf8Decode,
+  utf8Encode,
+  type CellEncryptionContext,
+  type CellEncryptionKey,
+  type CellPlaintext,
+  type EncryptedCellPayloadV1,
+} from "./shared.ts";
+
+function requireCrypto(): Crypto {
+  const cryptoObj = globalThis.crypto;
+  if (!cryptoObj?.getRandomValues) {
+    throw new Error("WebCrypto is required for cell encryption (globalThis.crypto.getRandomValues missing)");
+  }
+  return cryptoObj;
+}
+
+function requireSubtleCrypto(): SubtleCrypto {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    throw new Error("WebCrypto SubtleCrypto is required for cell encryption (globalThis.crypto.subtle missing)");
+  }
+  return subtle;
+}
+
+const keyCache = new Map<string, CryptoKey>();
+
+async function importAesGcmKey(key: CellEncryptionKey): Promise<CryptoKey> {
+  const cached = keyCache.get(key.keyId);
+  if (cached) return cached;
+
+  assertKeyBytes(key.keyBytes);
+  const subtle = requireSubtleCrypto();
+  const cryptoKey = await subtle.importKey("raw", key.keyBytes, { name: "AES-GCM", length: 256 }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+  keyCache.set(key.keyId, cryptoKey);
+  return cryptoKey;
+}
+
+export async function encryptCellPlaintext(opts: {
+  plaintext: CellPlaintext;
+  key: CellEncryptionKey;
+  context: CellEncryptionContext;
+}): Promise<EncryptedCellPayloadV1> {
+  const { plaintext, key, context } = opts;
+  assertKeyBytes(key.keyBytes);
+
+  const cryptoObj = requireCrypto();
+  const iv = cryptoObj.getRandomValues(new Uint8Array(AES_GCM_IV_BYTES));
+  assertIvBytes(iv);
+  const aad = aadBytesFromContext(context);
+
+  const bytes = utf8Encode(JSON.stringify(plaintext));
+
+  const cryptoKey = await importAesGcmKey(key);
+  const subtle = requireSubtleCrypto();
+  const ciphertextWithTag = new Uint8Array(
+    await subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: aad, tagLength: AES_GCM_TAG_BYTES * 8 },
+      cryptoKey,
+      bytes
+    )
+  );
+
+  const tag = ciphertextWithTag.slice(ciphertextWithTag.byteLength - AES_GCM_TAG_BYTES);
+  const ciphertext = ciphertextWithTag.slice(0, ciphertextWithTag.byteLength - AES_GCM_TAG_BYTES);
+
+  assertTagBytes(tag);
+
+  return {
+    v: CELL_ENCRYPTION_VERSION,
+    alg: CELL_ENCRYPTION_ALG,
+    keyId: key.keyId,
+    ivBase64: bytesToBase64(iv),
+    tagBase64: bytesToBase64(tag),
+    ciphertextBase64: bytesToBase64(ciphertext),
+  };
+}
+
+export async function decryptCellPlaintext(opts: {
+  encrypted: EncryptedCellPayloadV1;
+  key: CellEncryptionKey;
+  context: CellEncryptionContext;
+}): Promise<CellPlaintext> {
+  const { encrypted, key, context } = opts;
+  assertKeyBytes(key.keyBytes);
+
+  if (encrypted.keyId !== key.keyId) {
+    throw new Error(`Key id mismatch (payload=${encrypted.keyId}, resolver=${key.keyId})`);
+  }
+
+  const iv = base64ToBytes(encrypted.ivBase64);
+  const tag = base64ToBytes(encrypted.tagBase64);
+  const ciphertext = base64ToBytes(encrypted.ciphertextBase64);
+  assertIvBytes(iv);
+  assertTagBytes(tag);
+
+  const aad = aadBytesFromContext(context);
+
+  const cryptoKey = await importAesGcmKey(key);
+  const subtle = requireSubtleCrypto();
+  const combined = concatBytes(ciphertext, tag);
+  const plaintextBytes = new Uint8Array(
+    await subtle.decrypt(
+      { name: "AES-GCM", iv, additionalData: aad, tagLength: AES_GCM_TAG_BYTES * 8 },
+      cryptoKey,
+      combined
+    )
+  );
+
+  const parsed = JSON.parse(utf8Decode(plaintextBytes));
+  return parsed as CellPlaintext;
+}
+
+export {
+  AES_256_KEY_BYTES,
+  AES_GCM_IV_BYTES,
+  AES_GCM_TAG_BYTES,
+  CELL_ENCRYPTION_ALG,
+  CELL_ENCRYPTION_VERSION,
+  aadBytesFromContext,
+  base64ToBytes,
+  bytesToBase64,
+  concatBytes,
+  canonicalJson,
+  isEncryptedCellPayload,
+  utf8Decode,
+  utf8Encode,
+} from "./shared.ts";
+export type {
+  CellEncryptionContext,
+  CellEncryptionKey,
+  CellPlaintext,
+  EncryptedCellPayload,
+  EncryptedCellPayloadV1,
+} from "./shared.ts";

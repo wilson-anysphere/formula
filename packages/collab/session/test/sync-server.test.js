@@ -75,13 +75,13 @@ test("CollabSession integration: sync + presence (sync-server)", async (t) => {
 
   await Promise.all([sessionA.whenSynced(), sessionB.whenSynced()]);
 
-  sessionA.setCellValue("Sheet1:0:0", 123);
-  await waitForCondition(() => sessionB.getCell("Sheet1:0:0")?.value === 123, 10_000);
-  assert.equal(sessionB.getCell("Sheet1:0:0")?.value, 123);
+  await sessionA.setCellValue("Sheet1:0:0", 123);
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === 123, 10_000);
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, 123);
 
-  sessionA.setCellFormula("Sheet1:0:1", "=1+1");
-  await waitForCondition(() => sessionB.getCell("Sheet1:0:1")?.formula === "=1+1", 10_000);
-  assert.equal(sessionB.getCell("Sheet1:0:1")?.formula, "=1+1");
+  await sessionA.setCellFormula("Sheet1:0:1", "=1+1");
+  await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:1"))?.formula === "=1+1", 10_000);
+  assert.equal((await sessionB.getCell("Sheet1:0:1"))?.formula, "=1+1");
 
   sessionA.presence?.setCursor({ row: 5, col: 7 });
   await waitForCondition(() => {
@@ -95,4 +95,3 @@ test("CollabSession integration: sync + presence (sync-server)", async (t) => {
     assert.deepEqual(remote[0].cursor, { row: 5, col: 7 });
   }
 });
-

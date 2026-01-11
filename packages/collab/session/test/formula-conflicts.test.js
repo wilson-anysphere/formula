@@ -64,13 +64,13 @@ test("CollabSession formula conflict monitor detects offline concurrent edits an
 
   // Establish a shared base cell map so concurrent edits race on the formula key
   // (not on the `cells[cellKey] = new Y.Map()` insertion).
-  sessionA.setCellFormula("Sheet1:0:0", "=0");
-  assert.equal(sessionB.getCell("Sheet1:0:0")?.formula, "=0");
+  await sessionA.setCellFormula("Sheet1:0:0", "=0");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, "=0");
 
   // Simulate offline concurrent edits (same cell, different formulas).
   disconnect();
-  sessionA.setCellFormula("Sheet1:0:0", "=1");
-  sessionB.setCellFormula("Sheet1:0:0", "=2");
+  await sessionA.setCellFormula("Sheet1:0:0", "=1");
+  await sessionB.setCellFormula("Sheet1:0:0", "=2");
 
   // Reconnect and sync state.
   disconnect = connectDocs(docA, docB);
@@ -87,8 +87,8 @@ test("CollabSession formula conflict monitor detects offline concurrent edits an
 
   assert.ok(conflictSide.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.localFormula));
 
-  assert.equal(sessionA.getCell("Sheet1:0:0")?.formula, conflict.localFormula.trim());
-  assert.equal(sessionB.getCell("Sheet1:0:0")?.formula, conflict.localFormula.trim());
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.formula, conflict.localFormula.trim());
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, conflict.localFormula.trim());
 
   sessionA.destroy();
   sessionB.destroy();

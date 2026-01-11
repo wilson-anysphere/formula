@@ -135,18 +135,18 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
   });
 
   // --- Edits propagate A -> B ---
-  clientA.session.setCellFormula("Sheet1:0:1", "=1+1");
+  await clientA.session.setCellFormula("Sheet1:0:1", "=1+1");
   clientA.documentController.setCellValue("Sheet1", "A1", "hello");
 
   await waitForCell(clientB.documentController, "Sheet1", "B1", { value: null, formula: "=1+1" });
   await waitForCell(clientB.documentController, "Sheet1", "A1", { value: "hello", formula: null });
-  assert.equal(clientB.session.getCell("Sheet1:0:1")?.formula, "=1+1");
-  assert.equal(clientB.session.getCell("Sheet1:0:0")?.value, "hello");
+  assert.equal((await clientB.session.getCell("Sheet1:0:1"))?.formula, "=1+1");
+  assert.equal((await clientB.session.getCell("Sheet1:0:0"))?.value, "hello");
 
   // --- Edits propagate B -> A ---
   clientB.documentController.setCellValue("Sheet1", "C1", 123);
   await waitForCell(clientA.documentController, "Sheet1", "C1", { value: 123, formula: null });
-  assert.equal(clientA.session.getCell("Sheet1:0:2")?.value, 123);
+  assert.equal((await clientA.session.getCell("Sheet1:0:2"))?.value, 123);
 
   // --- Undo only affects local-origin changes ---
   clientA.undo.undo();

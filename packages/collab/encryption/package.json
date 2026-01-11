@@ -1,0 +1,16 @@
+{
+  "name": "@formula/collab-encryption",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "browser": "./src/index.ts",
+      "node": "./src/index.node.ts",
+      "default": "./src/index.ts"
+    },
+    "./browser": "./src/index.ts",
+    "./node": "./src/index.node.ts"
+  }
+}
+

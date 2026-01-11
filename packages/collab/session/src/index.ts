@@ -4,6 +4,13 @@ import { PresenceManager } from "@formula/collab-presence";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
 import { FormulaConflictMonitor, type FormulaConflict } from "@formula/collab-conflicts";
 import { ensureWorkbookSchema } from "@formula/collab-workbook";
+import {
+  decryptCellPlaintext,
+  encryptCellPlaintext,
+  isEncryptedCellPayload,
+  type CellEncryptionKey,
+  type CellPlaintext,
+} from "@formula/collab-encryption";
 
 import { assertValidRole, getCellPermissions, maskCellValue } from "../../permissions/index.js";
 import {
@@ -117,6 +124,21 @@ export interface CollabSessionOptions {
     onConflict: (conflict: FormulaConflict) => void;
     concurrencyWindowMs?: number;
   };
+  /**
+   * Optional end-to-end encryption configuration for protecting specific cells.
+   *
+   * When enabled, cell values/formulas are encrypted *before* they are written
+   * into the Yjs CRDT so unauthorized collaborators (and the sync server) cannot
+   * read protected content.
+   */
+  encryption?: {
+    keyForCell: (cell: CellAddress) => CellEncryptionKey | null;
+    /**
+     * Optional override for deciding whether a cell should be encrypted.
+     * Defaults to `true` when `keyForCell` returns a non-null key.
+     */
+    shouldEncryptCell?: (cell: CellAddress) => boolean;
+  };
 }
 
 export interface CollabCell {
@@ -124,6 +146,11 @@ export interface CollabCell {
   formula: string | null;
   modified: number | null;
   modifiedBy: string | null;
+  /**
+   * True when the cell is stored encrypted and this session cannot decrypt it
+   * (so `value` is masked and `formula` is null).
+   */
+  encrypted?: boolean;
 }
 
 export function makeCellKey(cell: CellAddress): string {
@@ -195,9 +222,20 @@ export class CollabSession {
 
   private permissions: SessionPermissions | null = null;
   private readonly defaultSheetId: string;
+  private readonly encryption:
+    | {
+        keyForCell: (cell: CellAddress) => CellEncryptionKey | null;
+        shouldEncryptCell?: (cell: CellAddress) => boolean;
+      }
+    | null;
+  private readonly docIdForEncryption: string;
 
   constructor(options: CollabSessionOptions = {}) {
-    this.doc = options.doc ?? new Y.Doc();
+    // When connecting to a sync provider, use the provider document id as the
+    // Y.Doc guid to make encryption AAD stable across clients by default.
+    this.doc =
+      options.doc ??
+      new Y.Doc(options.connection?.docId ? { guid: options.connection.docId } : undefined);
 
     if (options.connection && options.provider) {
       throw new Error("CollabSession cannot be constructed with both `connection` and `provider` options");
@@ -226,6 +264,10 @@ export class CollabSession {
     this.sheets = this.doc.getArray<Y.Map<unknown>>("sheets");
     this.metadata = this.doc.getMap<unknown>("metadata");
     this.namedRanges = this.doc.getMap<unknown>("namedRanges");
+
+    this.encryption = options.encryption ?? null;
+    // Bind AAD to the document id so ciphertext cannot be replayed between docs.
+    this.docIdForEncryption = options.connection?.docId ?? this.doc.guid;
 
     // Stable origin token for local edits. This must be unique per-session; if
     // multiple clients share an origin, collaborative undo would treat all edits
@@ -396,10 +438,60 @@ export class CollabSession {
     return maskCellValue(value);
   }
 
-  getCell(cellKey: string): CollabCell | null {
+  async getCell(cellKey: string): Promise<CollabCell | null> {
     const cellData = this.cells.get(cellKey);
     const cell = getYMapCell(cellData);
     if (!cell) return null;
+
+    const encRaw = cell.get("enc");
+    if (encRaw !== undefined) {
+      if (isEncryptedCellPayload(encRaw)) {
+        const parsed = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
+        if (!parsed) {
+          return {
+            value: maskCellValue(null),
+            formula: null,
+            modified: (cell.get("modified") ?? null) as number | null,
+            modifiedBy: (cell.get("modifiedBy") ?? null) as string | null,
+            encrypted: true,
+          };
+        }
+
+        const key = this.encryption?.keyForCell(parsed) ?? null;
+        if (key && key.keyId === encRaw.keyId) {
+          try {
+            const plaintext = (await decryptCellPlaintext({
+              encrypted: encRaw,
+              key,
+              context: {
+                docId: this.docIdForEncryption,
+                sheetId: parsed.sheetId,
+                row: parsed.row,
+                col: parsed.col,
+              },
+            })) as CellPlaintext;
+
+            return {
+              value: (plaintext as any)?.value ?? null,
+              formula: typeof (plaintext as any)?.formula === "string" ? (plaintext as any).formula : null,
+              modified: (cell.get("modified") ?? null) as number | null,
+              modifiedBy: (cell.get("modifiedBy") ?? null) as string | null,
+            };
+          } catch {
+            // Decryption failed (wrong key, tampered payload, or AAD mismatch).
+          }
+        }
+      }
+
+      // `enc` is present but we can't decrypt (missing key, wrong key id, corrupt payload, etc).
+      return {
+        value: maskCellValue(null),
+        formula: null,
+        modified: (cell.get("modified") ?? null) as number | null,
+        modifiedBy: (cell.get("modifiedBy") ?? null) as string | null,
+        encrypted: true,
+      };
+    }
 
     return {
       value: cell.get("value") ?? null,
@@ -418,8 +510,38 @@ export class CollabSession {
     this.doc.transact(fn, this.origin);
   }
 
-  setCellValue(cellKey: string, value: unknown): void {
+  async setCellValue(cellKey: string, value: unknown): Promise<void> {
     const userId = this.permissions?.userId ?? null;
+
+    const cellData = this.cells.get(cellKey);
+    const existingCell = getYMapCell(cellData);
+    const existingEnc = existingCell?.get("enc");
+
+    const needsCellAddress = this.encryption != null || existingEnc !== undefined;
+    const parsed = needsCellAddress ? parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId }) : null;
+    if (needsCellAddress && !parsed) throw new Error(`Invalid cellKey: ${cellKey}`);
+
+    const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
+    const shouldEncrypt =
+      existingEnc !== undefined ||
+      (parsed
+        ? (typeof this.encryption?.shouldEncryptCell === "function" ? this.encryption.shouldEncryptCell(parsed) : key != null)
+        : false);
+
+    let encryptedPayload = null;
+    if (shouldEncrypt) {
+      if (!key) throw new Error(`Missing encryption key for cell ${cellKey}`);
+      encryptedPayload = await encryptCellPlaintext({
+        plaintext: { value: value ?? null, formula: null },
+        key,
+        context: {
+          docId: this.docIdForEncryption,
+          sheetId: parsed!.sheetId,
+          row: parsed!.row,
+          col: parsed!.col,
+        },
+      });
+    }
 
     this.transactLocal(() => {
       let cellData = this.cells.get(cellKey);
@@ -429,17 +551,87 @@ export class CollabSession {
         this.cells.set(cellKey, cell);
       }
 
-      cell.set("value", value ?? null);
-      cell.delete("formula");
+      // Re-check inside the transaction to avoid racing with remote updates that
+      // may have encrypted this cell while we were preparing a plaintext write.
+      if (!encryptedPayload && cell.get("enc") !== undefined) {
+        throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
+      }
+
+      if (encryptedPayload) {
+        cell.set("enc", encryptedPayload);
+        cell.delete("value");
+        cell.delete("formula");
+      } else {
+        cell.delete("enc");
+        cell.set("value", value ?? null);
+        cell.delete("formula");
+      }
       cell.set("modified", Date.now());
       if (userId) cell.set("modifiedBy", userId);
     });
   }
 
-  setCellFormula(cellKey: string, formula: string | null): void {
+  async setCellFormula(cellKey: string, formula: string | null): Promise<void> {
+    const cellData = this.cells.get(cellKey);
+    const existingCell = getYMapCell(cellData);
+    const existingEnc = existingCell?.get("enc");
+
+    const needsCellAddress = this.encryption != null || existingEnc !== undefined;
+    const parsed = needsCellAddress ? parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId }) : null;
+    if (needsCellAddress && !parsed) throw new Error(`Invalid cellKey: ${cellKey}`);
+
+    const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
+    const wantsEncryption =
+      existingEnc !== undefined ||
+      (parsed
+        ? (typeof this.encryption?.shouldEncryptCell === "function" ? this.encryption.shouldEncryptCell(parsed) : key != null)
+        : false);
+
+    const nextFormula = (formula ?? "").trim();
+    if (wantsEncryption) {
+      if (!key) throw new Error(`Missing encryption key for cell ${cellKey}`);
+
+      const encryptedPayload = await encryptCellPlaintext({
+        plaintext: { value: null, formula: nextFormula || null },
+        key,
+        context: {
+          docId: this.docIdForEncryption,
+          sheetId: parsed.sheetId,
+          row: parsed.row,
+          col: parsed.col,
+        },
+      });
+
+      const userId = this.permissions?.userId ?? null;
+      this.transactLocal(() => {
+        let cellData = this.cells.get(cellKey);
+        let cell = getYMapCell(cellData);
+        if (!cell) {
+          cell = new Y.Map();
+          this.cells.set(cellKey, cell);
+        }
+
+        cell.set("enc", encryptedPayload);
+        cell.delete("value");
+        cell.delete("formula");
+
+        cell.set("modified", Date.now());
+        if (userId) cell.set("modifiedBy", userId);
+      });
+      return;
+    }
+
     const monitor = this.formulaConflictMonitor;
     if (monitor) {
       this.transactLocal(() => {
+        // Ensure we never write plaintext formula updates into an encrypted cell
+        // (old clients could otherwise overwrite encrypted content).
+        const cellData = this.cells.get(cellKey);
+        const cell = getYMapCell(cellData);
+        if (cell && cell.get("enc") !== undefined) {
+          throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
+        }
+
         monitor.setLocalFormula(cellKey, formula ?? "");
         // We don't sync calculated values. Clearing `value` marks the cell dirty
         // for the local formula engine to recompute.
@@ -464,7 +656,14 @@ export class CollabSession {
         this.cells.set(cellKey, cell);
       }
 
-      const nextFormula = (formula ?? "").trim();
+      // Re-check inside the transaction to avoid racing with remote updates that
+      // may have encrypted this cell while we were preparing a plaintext write.
+      if (cell.get("enc") !== undefined) {
+        throw new Error(`Refusing to write plaintext to encrypted cell ${cellKey}`);
+      }
+
+      cell.delete("enc");
+
       if (nextFormula) cell.set("formula", nextFormula);
       else cell.delete("formula");
 
@@ -474,21 +673,21 @@ export class CollabSession {
     });
   }
 
-  safeSetCellValue(cellKey: string, value: unknown): boolean {
+  async safeSetCellValue(cellKey: string, value: unknown): Promise<boolean> {
     const parsed = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
     if (!parsed) throw new Error(`Invalid cellKey: ${cellKey}`);
     if (!this.canEditCell(parsed)) return false;
 
-    this.setCellValue(makeCellKey(parsed), value);
+    await this.setCellValue(makeCellKey(parsed), value);
     return true;
   }
 
-  safeSetCellFormula(cellKey: string, formula: string | null): boolean {
+  async safeSetCellFormula(cellKey: string, formula: string | null): Promise<boolean> {
     const parsed = parseCellKey(cellKey, { defaultSheetId: this.defaultSheetId });
     if (!parsed) throw new Error(`Invalid cellKey: ${cellKey}`);
     if (!this.canEditCell(parsed)) return false;
 
-    this.setCellFormula(makeCellKey(parsed), formula);
+    await this.setCellFormula(makeCellKey(parsed), formula);
     return true;
   }
 }

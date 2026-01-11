@@ -7,6 +7,7 @@
   "types": "src/index.ts",
   "dependencies": {
     "@formula/collab-conflicts": "workspace:*",
+    "@formula/collab-encryption": "workspace:*",
     "@formula/collab-presence": "workspace:*",
     "@formula/collab-undo": "workspace:*",
     "@formula/collab-workbook": "workspace:*",

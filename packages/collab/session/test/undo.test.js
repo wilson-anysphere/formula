@@ -33,7 +33,7 @@ function connectDocs(docA, docB) {
   };
 }
 
-test("CollabSession undo only reverts local edits (in-memory sync)", () => {
+test("CollabSession undo only reverts local edits (in-memory sync)", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
   const disconnect = connectDocs(docA, docB);
@@ -41,20 +41,20 @@ test("CollabSession undo only reverts local edits (in-memory sync)", () => {
   const sessionA = createCollabSession({ doc: docA, undo: {} });
   const sessionB = createCollabSession({ doc: docB, undo: {} });
 
-  sessionA.setCellValue("Sheet1:0:0", "from-a");
-  sessionB.setCellValue("Sheet1:0:1", "from-b");
+  await sessionA.setCellValue("Sheet1:0:0", "from-a");
+  await sessionB.setCellValue("Sheet1:0:1", "from-b");
 
-  assert.equal(sessionA.getCell("Sheet1:0:0")?.value, "from-a");
-  assert.equal(sessionB.getCell("Sheet1:0:0")?.value, "from-a");
-  assert.equal(sessionA.getCell("Sheet1:0:1")?.value, "from-b");
-  assert.equal(sessionB.getCell("Sheet1:0:1")?.value, "from-b");
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.value, "from-a");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "from-a");
+  assert.equal((await sessionA.getCell("Sheet1:0:1"))?.value, "from-b");
+  assert.equal((await sessionB.getCell("Sheet1:0:1"))?.value, "from-b");
 
   sessionA.undo?.undo();
 
-  assert.equal(sessionA.getCell("Sheet1:0:0"), null);
-  assert.equal(sessionB.getCell("Sheet1:0:0"), null);
-  assert.equal(sessionA.getCell("Sheet1:0:1")?.value, "from-b");
-  assert.equal(sessionB.getCell("Sheet1:0:1")?.value, "from-b");
+  assert.equal(await sessionA.getCell("Sheet1:0:0"), null);
+  assert.equal(await sessionB.getCell("Sheet1:0:0"), null);
+  assert.equal((await sessionA.getCell("Sheet1:0:1"))?.value, "from-b");
+  assert.equal((await sessionB.getCell("Sheet1:0:1"))?.value, "from-b");
 
   sessionA.destroy();
   sessionB.destroy();
@@ -62,4 +62,3 @@ test("CollabSession undo only reverts local edits (in-memory sync)", () => {
   docA.destroy();
   docB.destroy();
 });
-
