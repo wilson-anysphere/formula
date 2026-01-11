@@ -5,8 +5,8 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use formula_engine::{Engine, ErrorKind, Value as EngineValue};
-use formula_model::{CellRef, CellValue, ErrorValue};
+use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value as EngineValue};
+use formula_model::{CellRef, CellValue, DefinedNameScope, ErrorValue};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -318,7 +318,10 @@ fn main() -> Result<()> {
             Err(err) => {
                 output.steps.insert(
                     "recalc".to_string(),
-                    StepResult::skipped(format!("engine_error: {err}")),
+                    StepResult::skipped(format!(
+                        "engine_error (sha256={})",
+                        sha256_text(&err.to_string())
+                    )),
                 );
                 output.result.calculate_ok = None;
             }
@@ -465,6 +468,43 @@ fn recalc_against_cached(doc: &formula_xlsx::XlsxDocument) -> Result<Option<Reca
     }
 
     let mut engine = Engine::new();
+    engine.set_date_system(match doc.workbook.date_system {
+        formula_model::DateSystem::Excel1900 => formula_engine::date::ExcelDateSystem::EXCEL_1900,
+        formula_model::DateSystem::Excel1904 => formula_engine::date::ExcelDateSystem::Excel1904,
+    });
+
+    // Ensure sheets exist up-front so cross-sheet references compile correctly.
+    for sheet in &doc.workbook.sheets {
+        engine.ensure_sheet(&sheet.name);
+    }
+
+    // Best-effort defined name support (named ranges/constants) used by many workbooks.
+    if !doc.workbook.defined_names.is_empty() {
+        let mut sheet_names_by_id = BTreeMap::new();
+        for sheet in &doc.workbook.sheets {
+            sheet_names_by_id.insert(sheet.id, sheet.name.as_str());
+        }
+
+        for name in &doc.workbook.defined_names {
+            let scope = match name.scope {
+                DefinedNameScope::Workbook => NameScope::Workbook,
+                DefinedNameScope::Sheet(sheet_id) => {
+                    let sheet_name = sheet_names_by_id
+                        .get(&sheet_id)
+                        .context("defined name references unknown worksheet id")?;
+                    NameScope::Sheet(sheet_name)
+                }
+            };
+
+            // Defined names are stored without a leading '=' in `formula-model`; the engine parser
+            // accepts canonical formula/refs in the same format.
+            engine.define_name(
+                &name.name,
+                scope,
+                NameDefinition::Formula(name.refers_to.clone()),
+            )?;
+        }
+    }
 
     // Feed values + formulas into the engine.
     for sheet in &doc.workbook.sheets {
@@ -634,6 +674,12 @@ fn hash_cell_value(hasher: &mut Sha256, addr: &str, value: &NormalizedValue) {
         }
     }
     hasher.update([0u8]);
+}
+
+fn sha256_text(text: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 fn render_smoke(doc: &formula_xlsx::XlsxDocument) -> Result<RenderDetails> {
