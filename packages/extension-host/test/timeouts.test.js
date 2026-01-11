@@ -169,3 +169,58 @@ test("timeouts: terminating a hung worker rejects other in-flight requests and a
   // The next command should automatically spin up a fresh worker and re-activate the extension.
   assert.equal(await host.executeCommand("test.quick"), "ok");
 });
+
+test("timeouts: custom function timeout terminates a hanging handler", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-timeout-custom-fn-"));
+  const extDir = path.join(dir, "ext");
+
+  await writeExtension(
+    extDir,
+    {
+      name: "hang-custom-fn",
+      version: "1.0.0",
+      publisher: "test",
+      main: "extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: ["onCustomFunction:TEST_HANG"],
+      contributes: {
+        customFunctions: [
+          {
+            name: "TEST_HANG",
+            description: "Always hangs",
+            parameters: [],
+            result: { type: "number" }
+          }
+        ]
+      }
+    },
+    `
+      const formula = require("formula");
+
+      module.exports.activate = async () => {
+        await formula.functions.register("TEST_HANG", {
+          handler: async () => {
+            await new Promise(() => {});
+          }
+        });
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true,
+    activationTimeoutMs: 1000,
+    customFunctionTimeoutMs: 100
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  await assert.rejects(() => host.invokeCustomFunction("TEST_HANG"), /custom function.*timed out/i);
+});
