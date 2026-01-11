@@ -360,59 +360,37 @@ class ChatPanelEngine {
 =AI.TRANSLATE("Spanish", D1)
 ```
 
-**Implementation:**
+**Implementation (desktop):**
+
+Cell functions are implemented as an async cell-evaluator + cache:
+- Evaluator: `apps/desktop/src/spreadsheet/evaluateFormula.ts`
+  - Parses `AI()`, `AI.EXTRACT`, `AI.CLASSIFY`, `AI.TRANSLATE`
+  - Preserves provenance for direct cell/range references passed to AI functions:
+    - Cell ref: `{ __cellRef: "Sheet1!A1", value: ... }`
+    - Range ref: array of provenance cell values, tagged with `__rangeRef` + `__totalCells`
+  - Direct range references are sampled (default 200 cells) to avoid materializing unbounded arrays.
+- Engine: `apps/desktop/src/spreadsheet/AiCellFunctionEngine.ts`
+  - Returns `#GETTING_DATA` while an LLM request is pending, and reuses cached results.
+  - **DLP enforcement**: evaluates `ai.cloudProcessing` policy using per-cell/range classification metadata.
+    - BLOCK: returns `#DLP!` without calling the LLM.
+    - REDACT: replaces disallowed cell values with `[REDACTED]` before calling the LLM.
+  - **Input budgeting**: prompts are built from bounded JSON “compactions” (previews + deterministic samples),
+    and include `{ total_cells, sampled_cells, truncated:true }` when ranges are sampled.
+  - **Bounded audit logs**: audit entries store hashes + compacted metadata (never full range payloads);
+    blocked runs are sanitized.
 
 ```typescript
-// Register as spreadsheet function
-const AI_FUNCTION: FunctionSpec = {
-  name: "AI",
-  minArgs: 1,
-  maxArgs: 2,
-  returnType: "any",
-  isVolatile: false,  // Don't recalc automatically
-  isAsync: true,
-  implementation: async (prompt: string, contextRange?: Range) => {
-    // Get context data if provided
-    let context = "";
-    if (contextRange) {
-      const data = getrangeValues(contextRange);
-      context = formatDataForPrompt(data);
-    }
-    
-    // Call LLM
-    const result = await llm.complete({
-      prompt: `${prompt}\n\nContext:\n${context}`,
-      maxTokens: 1000
-    });
-    
-    // Parse result
-    return parseAIResult(result);
-  }
-};
-
-// Specialized variants
-const AI_EXTRACT: FunctionSpec = {
-  name: "AI.EXTRACT",
-  implementation: async (pattern: string, value: CellValue) => {
-    const result = await llm.complete({
-      prompt: `Extract "${pattern}" from: ${value}`,
-      maxTokens: 100
-    });
-    return result.trim();
-  }
-};
-
-const AI_CLASSIFY: FunctionSpec = {
-  name: "AI.CLASSIFY",
-  implementation: async (categories: string, value: CellValue) => {
-    const cats = categories.split("/");
-    const result = await llm.complete({
-      prompt: `Classify into one of [${cats.join(", ")}]: ${value}`,
-      maxTokens: 20
-    });
-    return cats.find(c => result.toLowerCase().includes(c.toLowerCase())) || cats[0];
-  }
-};
+// Pseudocode (high-level):
+//
+// - `evaluateFormula()` parses the formula and calls the AI engine synchronously:
+//   - If the request is new: returns `#GETTING_DATA` and starts async work.
+//   - If the request is cached: returns the cached value.
+//
+// - `AiCellFunctionEngine` handles:
+//   - DLP classification from provenance (cell/range refs) + policy enforcement.
+//   - Range sampling / prompt compaction (bounded previews + deterministic samples).
+//   - Audit logging (hashes + small previews only).
+//   - Caching keyed by hashes (prompt + inputs) to keep storage bounded.
 ```
 
 ### Mode 5: Agent Mode
