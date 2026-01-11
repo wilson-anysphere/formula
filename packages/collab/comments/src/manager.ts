@@ -14,6 +14,50 @@ export type CommentsRoot =
   | { kind: "array"; array: YCommentsArray };
 
 /**
+ * Duck-type helpers to tolerate multiple `yjs` module instances (ESM/CJS).
+ *
+ * In some environments updates can be applied using a different Yjs build,
+ * resulting in roots and nested types that fail `instanceof` checks. Avoid
+ * calling `doc.getMap/getArray` in those cases because Yjs performs strict
+ * constructor equality checks and can throw.
+ */
+function getYMap(value: unknown): Y.Map<any> | null {
+  if (value instanceof Y.Map) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (maybe.constructor?.name !== "YMap") return null;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.set !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.keys !== "function") return null;
+  if (typeof maybe.forEach !== "function") return null;
+  return maybe as Y.Map<any>;
+}
+
+function getYArray(value: unknown): Y.Array<any> | null {
+  if (value instanceof Y.Array) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (maybe.constructor?.name !== "YArray") return null;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.toArray !== "function") return null;
+  if (typeof maybe.push !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  return maybe as Y.Array<any>;
+}
+
+function isYText(value: unknown): value is Y.Text {
+  if (value instanceof Y.Text) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = value as any;
+  if (maybe.constructor?.name !== "YText") return false;
+  if (typeof maybe.toString !== "function") return false;
+  if (typeof maybe.toDelta !== "function") return false;
+  if (typeof maybe.applyDelta !== "function") return false;
+  return true;
+}
+
+/**
  * Safely determine whether the `comments` root is a `Y.Map` (current schema) or a
  * legacy `Y.Array` (older docs).
  *
@@ -33,12 +77,11 @@ export function getCommentsRoot(doc: Y.Doc): CommentsRoot {
     return { kind: "map", map: doc.getMap("comments") as YCommentsMap };
   }
 
-  if (existing instanceof Y.Map) {
-    return { kind: "map", map: existing as YCommentsMap };
-  }
-  if (existing instanceof Y.Array) {
-    return { kind: "array", array: existing as YCommentsArray };
-  }
+  const existingMap = getYMap(existing);
+  if (existingMap) return { kind: "map", map: existingMap as YCommentsMap };
+
+  const existingArray = getYArray(existing);
+  if (existingArray) return { kind: "array", array: existingArray as YCommentsArray };
 
   // Root types may be a generic `AbstractType` placeholder until a constructor is
   // chosen. Peek at its internal structure before choosing a constructor.
@@ -125,6 +168,8 @@ export class CommentManager {
 
     const id = input.id ?? createId();
     const now = input.now ?? Date.now();
+    const mapConstructor =
+      replies instanceof Y.Array ? undefined : (yComment as any)?.constructor?.name === "YMap" ? ((yComment as any).constructor as any) : undefined;
 
     this.transact(() => {
       replies.push([
@@ -133,7 +178,7 @@ export class CommentManager {
           author: input.author,
           now,
           content: input.content,
-        }),
+        }, mapConstructor ? { mapConstructor } : undefined),
       ]);
       yComment.set("updatedAt", now);
     });
@@ -193,7 +238,7 @@ export class CommentManager {
   private getYComment(commentId: string): Y.Map<unknown> {
     const root = getCommentsRoot(this.doc);
     if (root.kind === "map") {
-      const yComment = root.map.get(commentId);
+      const yComment = getYMap(root.map.get(commentId));
       if (!yComment) {
         // Some historical docs used a legacy array schema and were later
         // "clobbered" by instantiating the root as a Map. In that case the
@@ -237,9 +282,8 @@ export class CommentManager {
     // Canonical Map entries (keyed by id).
     const byId = new Map<string, { yComment: Y.Map<unknown>; mapKey?: string }>();
     root.map.forEach((value, key) => {
-      if (value instanceof Y.Map) {
-        byId.set(key, { yComment: value, mapKey: key });
-      }
+      const map = getYMap(value);
+      if (map) byId.set(key, { yComment: map, mapKey: key });
     });
 
     // Legacy array items that ended up inside a Map root (see comment in
@@ -312,7 +356,8 @@ function iterLegacyListComments(type: any): Y.Map<unknown>[] {
     if (!item.deleted && item.parentSub === null) {
       const content = item.content?.getContent?.() ?? [];
       for (const value of content) {
-        if (value instanceof Y.Map) out.push(value);
+        const map = getYMap(value);
+        if (map) out.push(map);
       }
     }
     item = item.right;
@@ -336,7 +381,8 @@ function iterMapEntryComments(type: any): Array<{ key: string; value: Y.Map<unkn
     if (!item || item.deleted) continue;
     const content = item.content?.getContent?.() ?? [];
     const value = content[content.length - 1];
-    if (value instanceof Y.Map) out.push({ key, value });
+    const yMap = getYMap(value);
+    if (yMap) out.push({ key, value: yMap });
   }
   out.sort((a, b) => a.key.localeCompare(b.key));
   return out;
@@ -349,7 +395,7 @@ function findMapEntryCommentByKey(type: any, key: string): Y.Map<unknown> | null
   if (!item || item.deleted) return null;
   const content = item.content?.getContent?.() ?? [];
   const value = content[content.length - 1];
-  return value instanceof Y.Map ? value : null;
+  return getYMap(value);
 }
 
 export function yReplyToReply(yReply: Y.Map<unknown>): Reply {
@@ -394,8 +440,19 @@ export function createYReply(input: {
   author: CommentAuthor;
   now: number;
   content: string;
-}): Y.Map<unknown> {
-  const yReply = new Y.Map<unknown>();
+}): Y.Map<unknown>;
+
+export function createYReply(
+  input: {
+    id: string;
+    author: CommentAuthor;
+    now: number;
+    content: string;
+  },
+  opts: { mapConstructor?: new () => any } = {},
+): Y.Map<unknown> {
+  const MapCtor = opts.mapConstructor ?? Y.Map;
+  const yReply = new MapCtor();
   yReply.set("id", input.id);
   yReply.set("authorId", input.author.id);
   yReply.set("authorName", input.author.name);
@@ -441,8 +498,9 @@ export function migrateCommentsArrayToMap(doc: Y.Doc, opts: { origin?: unknown }
       // Canonical Map entries (if present).
       if (root.kind === "map") {
         root.map.forEach((value, key) => {
-          if (!(value instanceof Y.Map)) return;
-          entries.set(key, cloneYjsValue(value) as Y.Map<unknown>);
+          const map = getYMap(value);
+          if (!map) return;
+          entries.set(key, cloneYjsValue(map) as Y.Map<unknown>);
         });
       }
 
@@ -456,11 +514,12 @@ export function migrateCommentsArrayToMap(doc: Y.Doc, opts: { origin?: unknown }
 
       // Legacy list entries (array schema, or clobbered Map schema).
       for (const item of legacyList) {
-        if (!(item instanceof Y.Map)) continue;
-        const id = String(item.get("id") ?? "");
+        const map = getYMap(item);
+        if (!map) continue;
+        const id = String(map.get("id") ?? "");
         if (!id) continue;
         if (entries.has(id)) continue;
-        entries.set(id, cloneYjsValue(item) as Y.Map<unknown>);
+        entries.set(id, cloneYjsValue(map) as Y.Map<unknown>);
       }
 
       // Root types are schema-defined by name; once "comments" is instantiated as
@@ -494,23 +553,25 @@ function findAvailableLegacyRootName(doc: Y.Doc): string {
 }
 
 function cloneYjsValue(value: any): any {
-  if (value instanceof Y.Map) {
+  const map = getYMap(value);
+  if (map) {
     const out = new Y.Map();
-    value.forEach((v: any, k: string) => {
+    map.forEach((v: any, k: string) => {
       out.set(k, cloneYjsValue(v));
     });
     return out;
   }
 
-  if (value instanceof Y.Array) {
+  const array = getYArray(value);
+  if (array) {
     const out = new Y.Array();
-    for (const item of value.toArray()) {
+    for (const item of array.toArray()) {
       out.push([cloneYjsValue(item)]);
     }
     return out;
   }
 
-  if (value instanceof Y.Text) {
+  if (isYText(value)) {
     const out = new Y.Text();
     out.applyDelta(structuredClone(value.toDelta()));
     return out;

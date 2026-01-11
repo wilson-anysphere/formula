@@ -899,89 +899,34 @@ class DiffRenderer {
 > they won't be captured by the UndoManager's tracked origins.
 
 ```typescript
-interface Comment {
-  id: string;
-  cellRef: CellRef;
-  author: string;
-  authorId: string;
-  content: string;
-  createdAt: Date;
-  resolved: boolean;
-  replies: Reply[];
-}
+import type { CommentAuthor } from "@formula/collab-comments";
+import { CommentManager, migrateCommentsArrayToMap } from "@formula/collab-comments";
 
-interface Reply {
-  id: string;
-  author: string;
-  authorId: string;
-  content: string;
-  createdAt: Date;
-}
+// Optional: normalize legacy `comments` array roots to the canonical Map schema.
+// Call this immediately after loading/applying a snapshot, before any code calls
+// `doc.getMap("comments")` directly.
+migrateCommentsArrayToMap(doc);
 
-class CommentManager {
-  // Keyed by comment id
-  private comments: Y.Map<Y.Map<any>>;
-  
-  constructor(doc: Y.Doc) {
-    this.comments = doc.getMap("comments");
-  }
-  
-  addComment(cellRef: CellRef, content: string): Comment {
-    const comment: Comment = {
-      id: crypto.randomUUID(),
-      cellRef,
-      author: this.currentUserName,
-      authorId: this.currentUserId,
-      content,
-      createdAt: new Date(),
-      resolved: false,
-      replies: []
-    };
-    
-    const yComment = new Y.Map();
-    Object.entries(comment).forEach(([key, value]) => {
-      yComment.set(key, value);
-    });
-    
-    this.comments.set(comment.id, yComment);
-    return comment;
-  }
-  
-  addReply(commentId: string, content: string): Reply {
-    const comment = this.findComment(commentId);
-    if (!comment) throw new Error("Comment not found");
-    
-    const reply: Reply = {
-      id: crypto.randomUUID(),
-      author: this.currentUserName,
-      authorId: this.currentUserId,
-      content,
-      createdAt: new Date()
-    };
-    
-    const replies = comment.get("replies") as Y.Array<Y.Map<any>>;
-    const yReply = new Y.Map();
-    Object.entries(reply).forEach(([key, value]) => {
-      yReply.set(key, value);
-    });
-    replies.push([yReply]);
-    
-    return reply;
-  }
-  
-  resolveComment(commentId: string): void {
-    const comment = this.findComment(commentId);
-    if (comment) {
-      comment.set("resolved", true);
-    }
-  }
-  
-  getCommentsForCell(cellRef: CellRef): Comment[] {
-    return Array.from(this.comments.values())
-      .filter(c => this.cellRefsEqual(c.get("cellRef"), cellRef))
-      .map(c => this.yMapToComment(c));
-  }
-}
+const author: CommentAuthor = { id: "u1", name: "Alice" };
+
+const mgr = new CommentManager(doc);
+
+const commentId = mgr.addComment({
+  cellRef: "A1",
+  kind: "threaded",
+  content: "Hello",
+  author,
+});
+
+mgr.addReply({
+  commentId,
+  content: "First reply",
+  author,
+});
+
+mgr.setResolved({ commentId, resolved: true });
+
+const commentsForA1 = mgr.listForCell("A1");
 ```
 
 ---
