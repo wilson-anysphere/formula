@@ -125,3 +125,17 @@ fn corrupting_signature_bytes_marks_signature_invalid() {
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedInvalid);
 }
+
+#[test]
+fn pkcs7_signature_with_prefix_is_still_verified() {
+    let pkcs7 = make_pkcs7_signed_message(b"formula-vba-test");
+    let mut prefixed = b"VBA\0SIG\0".to_vec();
+    prefixed.extend_from_slice(&pkcs7);
+    let vba = build_vba_project_bin_with_signature(Some(&prefixed));
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+}

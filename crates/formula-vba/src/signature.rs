@@ -143,9 +143,27 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
     use openssl::x509::store::X509StoreBuilder;
 
     #[cfg(not(target_arch = "wasm32"))]
-    let pkcs7 = match Pkcs7::from_der(signature) {
-        Ok(pkcs7) => pkcs7,
-        Err(_) => return VbaSignatureVerification::SignedParseError,
+    let pkcs7 = {
+        // Some producers include a small header before the DER-encoded PKCS#7
+        // payload. Try parsing from the start first, then scan for an embedded
+        // DER SEQUENCE that parses as PKCS#7.
+        let mut parsed = Pkcs7::from_der(signature).ok();
+        if parsed.is_none() {
+            for start in 0..signature.len() {
+                if signature[start] != 0x30 {
+                    continue;
+                }
+                if let Ok(pkcs7) = Pkcs7::from_der(&signature[start..]) {
+                    parsed = Some(pkcs7);
+                    break;
+                }
+            }
+        }
+
+        match parsed {
+            Some(pkcs7) => pkcs7,
+            None => return VbaSignatureVerification::SignedParseError,
+        }
     };
 
     #[cfg(not(target_arch = "wasm32"))]
