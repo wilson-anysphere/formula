@@ -109,4 +109,49 @@ describe("CanvasGrid zoom", () => {
     });
     host.remove();
   });
+
+  it("accumulates ctrl+wheel zoom gestures while zoom is controlled", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onZoomChange = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: () => null }}
+          rowCount={100}
+          colCount={10}
+          apiRef={apiRef}
+          zoom={1}
+          onZoomChange={onZoomChange}
+        />
+      );
+    });
+
+    const container = host.querySelector('[data-testid="canvas-grid"]') as HTMLDivElement;
+    expect(container).toBeTruthy();
+
+    await act(async () => {
+      container.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, clientX: 100, clientY: 100, bubbles: true, cancelable: true })
+      );
+      container.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, clientX: 100, clientY: 100, bubbles: true, cancelable: true })
+      );
+    });
+
+    expect(onZoomChange).toHaveBeenCalledTimes(2);
+    const first = onZoomChange.mock.calls[0]?.[0];
+    const second = onZoomChange.mock.calls[1]?.[0];
+    expect(first).toBeCloseTo(Math.exp(0.1), 3);
+    expect(second).toBeCloseTo(Math.exp(0.2), 3);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
 });
