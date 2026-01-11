@@ -15,7 +15,8 @@ import { DocumentWorkbookAdapter } from "./search/documentWorkbookAdapter.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
-import { TauriWorkbookBackend, type RangeCellEdit, type WorkbookInfo } from "./tauri/workbookBackend";
+import { startWorkbookSync } from "./tauri/workbookSync";
+import { TauriWorkbookBackend, type WorkbookInfo } from "./tauri/workbookBackend";
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -586,17 +587,12 @@ function normalizeSheetList(info: WorkbookInfo): { id: string; name: string }[] 
     .filter((s) => s.id.trim() !== "");
 }
 
-function cellEditFromDelta(after: { value: unknown; formula: string | null }): RangeCellEdit {
-  if (after.formula != null && String(after.formula).trim() !== "") {
-    return { value: null, formula: String(after.formula) };
-  }
-  return { value: after.value ?? null, formula: null };
-}
-
 let tauriBackend: TauriWorkbookBackend | null = null;
 let activeWorkbook: WorkbookInfo | null = null;
-let suppressBackendSync = false;
 let pendingBackendSync: Promise<void> = Promise.resolve();
+type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
+let queuedInvoke: TauriInvoke | null = null;
+let workbookSync: ReturnType<typeof startWorkbookSync> | null = null;
 
 async function confirmDiscardDirtyState(actionLabel: string): Promise<boolean> {
   const doc = app.getDocument();
@@ -604,96 +600,12 @@ async function confirmDiscardDirtyState(actionLabel: string): Promise<boolean> {
   return window.confirm(`You have unsaved changes. Discard them and ${actionLabel}?`);
 }
 
-function enqueueBackendSync(op: () => Promise<void>): void {
-  pendingBackendSync = pendingBackendSync.then(op).catch((err) => {
+function queueBackendOp<T>(op: () => Promise<T>): Promise<T> {
+  const result = pendingBackendSync.then(op);
+  pendingBackendSync = result.then(() => undefined).catch((err) => {
     console.error("Failed to sync workbook changes to host:", err);
   });
-}
-
-async function syncDeltasToBackend(deltas: any[]): Promise<void> {
-  if (!tauriBackend) return;
-  if (!activeWorkbook) return;
-  if (!Array.isArray(deltas) || deltas.length === 0) return;
-
-  /** @type {Map<string, any[]>} */
-  const bySheet = new Map<string, any[]>();
-  for (const delta of deltas) {
-    const sheetId = String(delta?.sheetId ?? "");
-    if (!sheetId) continue;
-    let list = bySheet.get(sheetId);
-    if (!list) {
-      list = [];
-      bySheet.set(sheetId, list);
-    }
-    list.push(delta);
-  }
-
-  for (const [sheetId, list] of bySheet) {
-    let minRow = Infinity;
-    let maxRow = -Infinity;
-    let minCol = Infinity;
-    let maxCol = -Infinity;
-    for (const d of list) {
-      const row = Number(d?.row);
-      const col = Number(d?.col);
-      if (!Number.isInteger(row) || row < 0) continue;
-      if (!Number.isInteger(col) || col < 0) continue;
-      minRow = Math.min(minRow, row);
-      maxRow = Math.max(maxRow, row);
-      minCol = Math.min(minCol, col);
-      maxCol = Math.max(maxCol, col);
-    }
-
-    if (!Number.isFinite(minRow) || !Number.isFinite(minCol)) continue;
-
-    const rows = maxRow - minRow + 1;
-    const cols = maxCol - minCol + 1;
-    const area = rows * cols;
-
-    // If the change set is a dense rectangle, batch with `set_range`.
-    if (area === list.length && area > 1 && area <= 10_000) {
-      const values: RangeCellEdit[][] = Array.from({ length: rows }, () =>
-        Array.from({ length: cols }, () => ({ value: null, formula: null })),
-      );
-
-      for (const d of list) {
-        const row = Number(d?.row);
-        const col = Number(d?.col);
-        const after = d?.after as { value: unknown; formula: string | null } | undefined;
-        if (!Number.isInteger(row) || row < 0) continue;
-        if (!Number.isInteger(col) || col < 0) continue;
-        if (!after) continue;
-        values[row - minRow][col - minCol] = cellEditFromDelta(after);
-      }
-
-      await tauriBackend.setRange({
-        sheetId,
-        startRow: minRow,
-        startCol: minCol,
-        endRow: maxRow,
-        endCol: maxCol,
-        values
-      });
-      continue;
-    }
-
-    for (const d of list) {
-      const row = Number(d?.row);
-      const col = Number(d?.col);
-      const after = d?.after as { value: unknown; formula: string | null } | undefined;
-      if (!Number.isInteger(row) || row < 0) continue;
-      if (!Number.isInteger(col) || col < 0) continue;
-      if (!after) continue;
-      const edit = cellEditFromDelta(after);
-      await tauriBackend.setCell({
-        sheetId,
-        row,
-        col,
-        value: edit.value,
-        formula: edit.formula
-      });
-    }
-  }
+  return result;
 }
 
 async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
@@ -789,17 +701,36 @@ async function openWorkbookFromPath(path: string): Promise<void> {
   const ok = await confirmDiscardDirtyState("open another workbook");
   if (!ok) return;
 
-  suppressBackendSync = true;
+  // Drain any queued workbook sync IPC before swapping the backend workbook.
+  // Otherwise stale `set_cell` / `set_range` calls could land in the newly-opened workbook.
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+  const hadActiveWorkbook = activeWorkbook != null;
+
+  workbookSync?.stop();
+  workbookSync = null;
+
   try {
-    // Flush any pending host sync before swapping the workbook state. Otherwise stale
-    // `set_cell` / `set_range` calls could land in the newly-opened workbook.
     await pendingBackendSync;
     pendingBackendSync = Promise.resolve();
 
     activeWorkbook = await tauriBackend.openWorkbook(path);
     await loadWorkbookIntoDocument(activeWorkbook);
-  } finally {
-    suppressBackendSync = false;
+
+    workbookSync = startWorkbookSync({
+      document: app.getDocument(),
+      engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
+    });
+  } catch (err) {
+    // If we were unable to swap workbooks, restore syncing for the previously-active
+    // workbook so edits remain persistable.
+    if (hadActiveWorkbook) {
+      workbookSync = startWorkbookSync({
+        document: app.getDocument(),
+        engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
+      });
+    }
+    throw err;
   }
 }
 
@@ -821,12 +752,8 @@ async function promptOpenWorkbook(): Promise<void> {
 }
 
 async function handleSave(): Promise<void> {
-  if (!tauriBackend) return;
-  if (!activeWorkbook) return;
-
-  await pendingBackendSync;
-  await tauriBackend.saveWorkbook();
-  app.getDocument().markSaved();
+  if (!workbookSync) return;
+  await workbookSync.markSaved();
 }
 
 async function handleSaveAs(): Promise<void> {
@@ -839,6 +766,8 @@ async function handleSaveAs(): Promise<void> {
   });
   if (!path) return;
 
+  // Ensure any pending microtask-batched workbook edits are flushed before saving.
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
   await pendingBackendSync;
   await tauriBackend.saveWorkbook(path);
   activeWorkbook = { ...activeWorkbook, path };
@@ -847,6 +776,11 @@ async function handleSaveAs(): Promise<void> {
 
 try {
   tauriBackend = new TauriWorkbookBackend();
+  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+  if (invoke) {
+    queuedInvoke = (cmd, args) => queueBackendOp(() => invoke(cmd, args));
+  }
+  window.addEventListener("unload", () => workbookSync?.stop());
 
   const listen = getTauriListen();
   void listen("file-dropped", async (event) => {
@@ -880,13 +814,6 @@ try {
     if (discard) {
       await hideTauriWindow();
     }
-  });
-
-  app.getDocument().on("change", ({ deltas }: any) => {
-    if (!tauriBackend) return;
-    if (!activeWorkbook) return;
-    if (suppressBackendSync) return;
-    enqueueBackendSync(() => syncDeltasToBackend(deltas));
   });
 
   window.addEventListener("keydown", (e) => {
