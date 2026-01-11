@@ -24,6 +24,7 @@ export interface AIChatPanelSendMessageArgs {
   userText: string;
   attachments: Attachment[];
   onToolCall: (call: ToolCall, meta: { requiresApproval: boolean }) => void;
+  onToolResult?: (call: ToolCall, result: unknown) => void;
 }
 
 export type AIChatPanelSendMessage = (args: AIChatPanelSendMessageArgs) => Promise<{ messages: LLMMessage[]; final: string }>;
@@ -40,6 +41,22 @@ export function AIChatPanel(props: AIChatPanelProps) {
       "You are an AI assistant inside a spreadsheet app. Prefer using tools to read data before making claims.",
     [props.systemPrompt],
   );
+
+  function safeStringify(value: unknown): string {
+    if (typeof value === "string") return value;
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
+  function formatToolResult(result: unknown): string {
+    const rendered = safeStringify(result);
+    const limit = 2_000;
+    if (rendered.length <= limit) return rendered;
+    return `${rendered.slice(0, limit)}\n…(truncated)`;
+  }
 
   async function send() {
     if (sending) return;
@@ -86,14 +103,26 @@ export function AIChatPanel(props: AIChatPanelProps) {
         ]);
       };
 
+      const onToolResult = (call: ToolCall, result: unknown) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "tool",
+            content: `${call.name} result:\n${formatToolResult(result)}`,
+          },
+        ]);
+      };
+
       const runner =
         props.sendMessage ??
-        (async ({ messages, onToolCall }: AIChatPanelSendMessageArgs) =>
+        (async ({ messages, onToolCall, onToolResult }: AIChatPanelSendMessageArgs) =>
           runChatWithTools({
             client: props.client,
             toolExecutor: props.toolExecutor,
             messages: messages as any,
             onToolCall,
+            onToolResult,
             requireApproval: props.onRequestToolApproval ?? (async () => true),
           }) as any);
 
@@ -102,6 +131,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
         userText: text,
         attachments,
         onToolCall,
+        onToolResult,
       });
 
       setMessages((prev) => {

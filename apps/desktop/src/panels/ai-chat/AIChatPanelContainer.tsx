@@ -169,6 +169,7 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
         attachments: args.attachments as any,
         history: llmHistory.current,
         onToolCall: args.onToolCall as any,
+        onToolResult: args.onToolResult as any,
       });
 
       llmHistory.current = stripSystemPrompt(result.messages);
