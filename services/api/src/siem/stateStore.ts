@@ -39,7 +39,22 @@ function sanitizeError(err: unknown): string {
           ? (err as any).message
           : String(err);
 
-  return message.replace(/\s+/g, " ").trim().slice(0, 500);
+  const cause = err instanceof Error ? err.cause : err && typeof err === "object" && "cause" in err ? (err as any).cause : null;
+  const causeMessage =
+    cause && typeof cause === "object" && "message" in cause && typeof (cause as any).message === "string"
+      ? (cause as any).message
+      : null;
+  const causeCode =
+    cause && typeof cause === "object" && "code" in cause && typeof (cause as any).code === "string"
+      ? (cause as any).code
+      : null;
+
+  const full =
+    causeMessage && causeMessage !== message
+      ? `${message} (cause${causeCode ? ` ${causeCode}` : ""}: ${causeMessage})`
+      : message;
+
+  return full.replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
 function failureBackoffUntil(now: Date, consecutiveFailures: number): Date {
@@ -134,4 +149,3 @@ export class OrgSiemExportStateStore {
     };
   }
 }
-
