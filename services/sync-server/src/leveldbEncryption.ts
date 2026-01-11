@@ -139,7 +139,9 @@ function wrapValueEncoding(params: {
     },
     decode(value: unknown): unknown {
       const bytes = asBuffer(value, "valueEncoding.decode()");
-      if (!isEncryptedBytes(bytes, magic)) {
+      const hasMagic =
+        bytes.length >= magic.length && bytes.subarray(0, magic.length).equals(magic);
+      if (!hasMagic) {
         if (strict) {
           throw new Error(
             `Encountered unencrypted LevelDB value (missing ${magic.toString("ascii")} header). ` +
@@ -147,6 +149,12 @@ function wrapValueEncoding(params: {
           );
         }
         return upstreamDecode(bytes);
+      }
+
+      // If the magic header is present, treat truncation as corruption even in
+      // non-strict mode (non-strict is only for legacy plaintext values).
+      if (!isEncryptedBytes(bytes, magic)) {
+        throw new Error("Encrypted LevelDB value is truncated (missing header bytes).");
       }
 
       const payload = decodeEncryptedBytes(bytes, magic);
@@ -192,4 +200,3 @@ export function createEncryptedLevelAdapter(
     };
   };
 }
-
