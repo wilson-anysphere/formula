@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { enforceOrgIpAllowlistForSessionWithAllowlist } from "../auth/orgIpAllowlist";
 import { DLP_ACTION } from "../dlp/dlp";
 import { evaluateDocumentDlpPolicy } from "../dlp/effective";
@@ -58,6 +59,9 @@ export function registerDlpRoutes(app: FastifyInstance): void {
     const docId = (request.params as { docId: string }).docId;
     const membership = await requireDocRead(request, reply, docId);
     if (!membership) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const parsed = EvaluateDlpBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
