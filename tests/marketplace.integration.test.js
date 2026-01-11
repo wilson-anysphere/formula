@@ -1400,6 +1400,7 @@ test("revoked signing keys are rejected for publish + install", async () => {
     const keyB = crypto.generateKeyPairSync("ed25519");
     const publicKeyPemB = keyB.publicKey.export({ type: "spki", format: "pem" });
     const privateKeyPemB = keyB.privateKey.export({ type: "pkcs8", format: "pem" });
+    const keyIdB = keyIdFromPublicKeyPem(publicKeyPemB);
 
     const publisherToken = "publisher-token";
 
@@ -1501,6 +1502,41 @@ test("revoked signing keys are rejected for publish + install", async () => {
     const marketplaceClient = new MarketplaceClient({ baseUrl });
     const manager = new ExtensionManager({ marketplaceClient, extensionsDir, statePath });
     await assert.rejects(() => manager.install(extensionId, "1.0.0"), /signature verification failed/i);
+
+    // If *all* signing keys are revoked, publishing should fail (and must not fall back to
+    // publishers.public_key_pem, which is now stale).
+    const revokeB = await fetch(
+      `${baseUrl}/api/publishers/${encodeURIComponent(manifest.publisher)}/keys/${encodeURIComponent(keyIdB)}/revoke`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      }
+    );
+    assert.equal(revokeB.status, 200);
+
+    const extV2B2 = path.join(tmpRoot, "ext-v2-b2");
+    await copyDir(sampleExtensionSrc, extV2B2);
+    await writeManifestVersion(extV2B2, "1.2.1");
+    const packagedB2 = await packageExtension(extV2B2, { privateKeyPem: privateKeyPemB });
+    const publishB2 = await fetch(`${baseUrl}/api/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${publisherToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        packageBase64: packagedB2.packageBytes.toString("base64"),
+      }),
+    });
+    assert.equal(publishB2.status, 400);
+
+    const extMeta = await marketplaceClient.getExtension(extensionId);
+    assert.ok(extMeta);
+    assert.equal(extMeta.publisherPublicKeyPem, null);
+    assert.ok(Array.isArray(extMeta.publisherKeys));
+    assert.equal(extMeta.publisherKeys.filter((k) => k.revoked).length, extMeta.publisherKeys.length);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmpRoot, { recursive: true, force: true });
