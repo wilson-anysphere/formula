@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::io;
+use std::io::{self, Cursor};
 
+use crate::biff12_varint;
 use crate::parser::{biff12, CellValue, Error};
 use crate::writer::Biff12Writer;
 
@@ -75,7 +76,9 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 current_row = Some(read_u32(payload, 0)?);
                 writer.write_raw(&sheet_bin[record_start..record_end])?;
             }
-            biff12::FLOAT | biff12::STRING | biff12::CELL_ST | biff12::FORMULA_FLOAT if in_sheet_data => {
+            biff12::FLOAT | biff12::STRING | biff12::CELL_ST | biff12::FORMULA_FLOAT
+                if in_sheet_data =>
+            {
                 let row = current_row.unwrap_or(0);
                 let col = read_u32(payload, 0)?;
                 let style = read_u32(payload, 4)?;
@@ -121,14 +124,22 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
         missing.sort();
         return Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("cell edits not applied (cells not found): {}", missing.join(", ")),
+            format!(
+                "cell edits not applied (cells not found): {}",
+                missing.join(", ")
+            ),
         )));
     }
 
     Ok(out)
 }
 
-fn patch_value_cell<W: io::Write>(writer: &mut Biff12Writer<W>, col: u32, style: u32, edit: &CellEdit) -> Result<(), Error> {
+fn patch_value_cell<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    col: u32,
+    style: u32,
+    edit: &CellEdit,
+) -> Result<(), Error> {
     match &edit.new_value {
         CellValue::Number(v) => {
             let mut payload = [0u8; 16];
@@ -175,7 +186,9 @@ fn patch_fmla_num<W: io::Write>(
     let cce = read_u32(payload, 18)? as usize;
     let rgce_offset = 22usize;
     let rgce_end = rgce_offset.checked_add(cce).ok_or(Error::UnexpectedEof)?;
-    let rgce = payload.get(rgce_offset..rgce_end).ok_or(Error::UnexpectedEof)?;
+    let rgce = payload
+        .get(rgce_offset..rgce_end)
+        .ok_or(Error::UnexpectedEof)?;
 
     let new_rgce: &[u8] = edit.new_formula.as_deref().unwrap_or(rgce);
     let cached = match &edit.new_value {
@@ -224,27 +237,33 @@ fn read_u32(data: &[u8], offset: usize) -> Result<u32, Error> {
 }
 
 fn read_record_id(data: &[u8], offset: &mut usize) -> Result<u32, Error> {
-    let mut v: u32 = 0;
-    for i in 0..4 {
-        let byte = *data.get(*offset).ok_or(Error::UnexpectedEof)?;
-        *offset += 1;
-        v |= (byte as u32) << (8 * i);
-        if byte & 0x80 == 0 {
-            break;
-        }
-    }
-    Ok(v)
+    let mut cursor = Cursor::new(data.get(*offset..).ok_or(Error::UnexpectedEof)?);
+    let id = biff12_varint::read_record_id(&mut cursor).map_err(map_io_error)?;
+    let Some(id) = id else {
+        return Err(Error::UnexpectedEof);
+    };
+    *offset = offset
+        .checked_add(cursor.position() as usize)
+        .ok_or(Error::UnexpectedEof)?;
+    Ok(id)
 }
 
 fn read_record_len(data: &[u8], offset: &mut usize) -> Result<u32, Error> {
-    let mut v: u32 = 0;
-    for i in 0..4 {
-        let byte = *data.get(*offset).ok_or(Error::UnexpectedEof)?;
-        *offset += 1;
-        v |= ((byte & 0x7F) as u32) << (7 * i);
-        if byte & 0x80 == 0 {
-            break;
-        }
+    let mut cursor = Cursor::new(data.get(*offset..).ok_or(Error::UnexpectedEof)?);
+    let len = biff12_varint::read_record_len(&mut cursor).map_err(map_io_error)?;
+    let Some(len) = len else {
+        return Err(Error::UnexpectedEof);
+    };
+    *offset = offset
+        .checked_add(cursor.position() as usize)
+        .ok_or(Error::UnexpectedEof)?;
+    Ok(len)
+}
+
+fn map_io_error(err: io::Error) -> Error {
+    if err.kind() == io::ErrorKind::UnexpectedEof {
+        Error::UnexpectedEof
+    } else {
+        Error::Io(err)
     }
-    Ok(v)
 }
