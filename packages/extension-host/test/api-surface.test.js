@@ -483,12 +483,12 @@ test("permissions: workbook.openWorkbook requires workbook.manage", async (t) =>
   await assert.rejects(() => host.executeCommand(commandId), /Permission denied: workbook\.manage/);
 });
 
-test("events: host.saveWorkbook emits beforeSave with stable payload", async (t) => {
+test("events: workbook.save emits beforeSave with stable payload", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-before-save-"));
   const extDir = path.join(dir, "ext");
   await fs.mkdir(extDir);
 
-  const commandId = "beforeSaveExt.getCount";
+  const commandId = "beforeSaveExt.save";
   await writeExtensionFixture(
     extDir,
     {
@@ -497,25 +497,26 @@ test("events: host.saveWorkbook emits beforeSave with stable payload", async (t)
       publisher: "formula-test",
       main: "./dist/extension.js",
       engines: { formula: "^1.0.0" },
-      activationEvents: ["onStartupFinished", `onCommand:${commandId}`],
-      contributes: { commands: [{ command: commandId, title: "Before Save Count" }] },
-      permissions: ["ui.commands"]
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Before Save" }] },
+      permissions: ["ui.commands", "workbook.manage"]
     },
     `
       const formula = require("@formula/extension-api");
-      let count = 0;
-      let last = null;
 
       exports.activate = async (context) => {
-        context.subscriptions.push(formula.events.onBeforeSave((e) => {
-          count += 1;
-          last = e && e.workbook ? e.workbook : null;
-        }));
-
         context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
           commandId
         )}, async () => {
-          return { count, last };
+          const eventPromise = new Promise((resolve) => {
+            const disp = formula.events.onBeforeSave((e) => {
+              disp.dispose();
+              resolve(e);
+            });
+          });
+
+          await formula.workbook.save();
+          return eventPromise;
         }));
       };
     `
@@ -533,21 +534,9 @@ test("events: host.saveWorkbook emits beforeSave with stable payload", async (t)
   });
 
   await host.loadExtension(extDir);
-  await host.startup();
 
   const workbookPath = path.join(dir, "Book2.xlsx");
   host.openWorkbook(workbookPath);
-  host.saveWorkbook();
-
-  const deadline = Date.now() + 500;
-  while (Date.now() < deadline) {
-    const result = await host.executeCommand(commandId);
-    if (result.count === 1) {
-      assert.deepEqual(result.last, { name: "Book2.xlsx", path: workbookPath });
-      return;
-    }
-    await new Promise((r) => setTimeout(r, 10));
-  }
-
-  assert.fail("Timed out waiting for beforeSave event to be delivered");
+  const evt = await host.executeCommand(commandId);
+  assert.deepEqual(evt, { workbook: { name: "Book2.xlsx", path: workbookPath } });
 });

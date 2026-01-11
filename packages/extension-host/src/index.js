@@ -13,6 +13,9 @@ const API_PERMISSIONS = {
   "workbook.getActiveWorkbook": [],
   "workbook.openWorkbook": ["workbook.manage"],
   "workbook.createWorkbook": ["workbook.manage"],
+  "workbook.save": ["workbook.manage"],
+  "workbook.saveAs": ["workbook.manage"],
+  "workbook.close": ["workbook.manage"],
   "sheets.getActiveSheet": [],
 
   "cells.getSelection": ["cells.read"],
@@ -231,6 +234,23 @@ class ExtensionHost {
     // Stub implementation: the application will eventually perform real persistence
     // and may await extensions for edits. For now we just emit a stable event payload.
     this._broadcastEvent("beforeSave", { workbook: this._workbook });
+    return true;
+  }
+
+  saveWorkbookAs(workbookPath) {
+    const workbookPathStr = workbookPath == null ? null : String(workbookPath);
+    if (workbookPathStr == null || workbookPathStr.trim().length === 0) {
+      throw new Error("Workbook path must be a non-empty string");
+    }
+
+    const name = path.basename(workbookPathStr);
+    this._workbook = { name, path: workbookPathStr };
+    this._broadcastEvent("beforeSave", { workbook: this._workbook });
+    return true;
+  }
+
+  closeWorkbook() {
+    this.openWorkbook(null);
     return true;
   }
 
@@ -720,6 +740,15 @@ class ExtensionHost {
         return this.openWorkbook(args[0]);
       case "workbook.createWorkbook":
         return this.openWorkbook(null);
+      case "workbook.save":
+        this.saveWorkbook();
+        return null;
+      case "workbook.saveAs":
+        this.saveWorkbookAs(args[0]);
+        return null;
+      case "workbook.close":
+        this.closeWorkbook();
+        return null;
       case "sheets.getActiveSheet":
         return this._spreadsheet.getActiveSheet?.() ?? { id: "sheet1", name: "Sheet1" };
       case "sheets.getSheet":

@@ -44,6 +44,9 @@ export namespace workbook {
   function getActiveWorkbook(): Promise<Workbook>;
   function openWorkbook(path: string): Promise<Workbook>;
   function createWorkbook(): Promise<Workbook>;
+  function save(): Promise<void>;
+  function saveAs(path: string): Promise<void>;
+  function close(): Promise<void>;
 }
 
 export namespace sheets {

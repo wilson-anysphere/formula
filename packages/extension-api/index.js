@@ -274,6 +274,18 @@ const workbook = {
 
   async createWorkbook() {
     return rpcCall("workbook", "createWorkbook", []);
+  },
+
+  async save() {
+    await rpcCall("workbook", "save", []);
+  },
+
+  async saveAs(workbookPath) {
+    await rpcCall("workbook", "saveAs", [String(workbookPath)]);
+  },
+
+  async close() {
+    await rpcCall("workbook", "close", []);
   }
 };
 
