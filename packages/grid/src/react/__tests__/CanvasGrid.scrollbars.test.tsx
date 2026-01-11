@@ -286,4 +286,59 @@ describe("CanvasGrid scrollbars", () => {
     });
     host.remove();
   });
+
+  it("dragging the vertical scrollbar thumb respects zoom-scaled minimum thumb size", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 200,
+      width: 200,
+      height: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    } as unknown as DOMRect);
+
+    const apiRef = React.createRef<GridApi>();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<CanvasGrid provider={{ getCell: () => null }} rowCount={100} colCount={10} defaultRowHeight={10} defaultColWidth={10} apiRef={apiRef} />);
+    });
+
+    await act(async () => {
+      apiRef.current?.setZoom(2);
+    });
+
+    expect(apiRef.current?.getZoom()).toBe(2);
+
+    const container = host.querySelector('[data-testid="canvas-grid"]') as HTMLDivElement;
+    const tracks = Array.from(container.querySelectorAll<HTMLDivElement>('div[aria-hidden="true"]'));
+    const vTrack = tracks[0];
+    expect(vTrack).toBeTruthy();
+    const vThumb = vTrack.querySelector("div") as HTMLDivElement;
+    expect(vThumb).toBeTruthy();
+
+    expect(apiRef.current?.getScroll().y).toBe(0);
+
+    // With zoom=2: totalHeight = 100 * (10 * 2) = 2000, viewportHeight=200, maxScrollY=1800.
+    // TrackSize is mocked to 200. rawThumb = (200/2000)*200 = 20, minThumb = 24*2=48 -> thumbSize=48
+    // thumbTravel = 200 - 48 = 152. Dragging by thumbTravel should reach max scroll.
+    await act(async () => {
+      vThumb.dispatchEvent(createPointerEvent("pointerdown", { clientX: 0, clientY: 0, pointerId: 1 }));
+      window.dispatchEvent(createPointerEvent("pointermove", { clientX: 0, clientY: 152, pointerId: 1 }));
+      window.dispatchEvent(createPointerEvent("pointerup", { clientX: 0, clientY: 152, pointerId: 1 }));
+    });
+
+    expect(apiRef.current?.getScroll().y).toBe(1800);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
 });

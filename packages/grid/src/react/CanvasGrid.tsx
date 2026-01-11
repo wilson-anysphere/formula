@@ -1754,12 +1754,14 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const viewport = renderer.scroll.getViewportState();
       const maxScrollY = viewport.maxScrollY;
       const trackRect = vTrack.getBoundingClientRect();
+      const minThumbSize = 24 * zoomRef.current;
 
       const thumb = computeScrollbarThumb({
         scrollPos: renderer.scroll.getScroll().y,
         viewportSize: Math.max(0, viewport.height - viewport.frozenHeight),
         contentSize: Math.max(0, viewport.totalHeight - viewport.frozenHeight),
-        trackSize: trackRect.height
+        trackSize: trackRect.height,
+        minThumbSize
       });
 
       const thumbTravel = Math.max(0, trackRect.height - thumb.size);
@@ -1805,12 +1807,14 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const viewport = renderer.scroll.getViewportState();
       const maxScrollY = viewport.maxScrollY;
       const trackRect = vTrack.getBoundingClientRect();
+      const minThumbSize = 24 * zoomRef.current;
 
       const thumb = computeScrollbarThumb({
         scrollPos: renderer.scroll.getScroll().y,
         viewportSize: Math.max(0, viewport.height - viewport.frozenHeight),
         contentSize: Math.max(0, viewport.totalHeight - viewport.frozenHeight),
-        trackSize: trackRect.height
+        trackSize: trackRect.height,
+        minThumbSize
       });
 
       const thumbTravel = Math.max(0, trackRect.height - thumb.size);
@@ -1843,12 +1847,14 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const viewport = renderer.scroll.getViewportState();
       const maxScrollX = viewport.maxScrollX;
       const trackRect = hTrack.getBoundingClientRect();
+      const minThumbSize = 24 * zoomRef.current;
 
       const thumb = computeScrollbarThumb({
         scrollPos: renderer.scroll.getScroll().x,
         viewportSize: Math.max(0, viewport.width - viewport.frozenWidth),
         contentSize: Math.max(0, viewport.totalWidth - viewport.frozenWidth),
-        trackSize: trackRect.width
+        trackSize: trackRect.width,
+        minThumbSize
       });
 
       const thumbTravel = Math.max(0, trackRect.width - thumb.size);
@@ -1894,12 +1900,14 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const viewport = renderer.scroll.getViewportState();
       const maxScrollX = viewport.maxScrollX;
       const trackRect = hTrack.getBoundingClientRect();
+      const minThumbSize = 24 * zoomRef.current;
 
       const thumb = computeScrollbarThumb({
         scrollPos: renderer.scroll.getScroll().x,
         viewportSize: Math.max(0, viewport.width - viewport.frozenWidth),
         contentSize: Math.max(0, viewport.totalWidth - viewport.frozenWidth),
-        trackSize: trackRect.width
+        trackSize: trackRect.width,
+        minThumbSize
       });
 
       const thumbTravel = Math.max(0, trackRect.width - thumb.size);
