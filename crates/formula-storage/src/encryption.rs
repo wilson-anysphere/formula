@@ -1,6 +1,6 @@
 use aes_gcm::aead::{AeadInPlace, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce, Tag};
-use base64::engine::general_purpose::STANDARD_NO_PAD;
+use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
 use base64::Engine;
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -9,14 +9,21 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use thiserror::Error;
 
-const CONTAINER_MAGIC: &[u8; 8] = b"FSTORAGE";
-const CONTAINER_VERSION: u8 = 1;
+/// Matches the JS `packages/security/crypto/encryptedFile.js` magic header for encrypted blobs.
+/// The trailing two digits encode the container version.
+const MAGIC_FMLENC_V1: &[u8; 8] = b"FMLENC01";
+const MAGIC_FMLENC_PREFIX: &[u8; 6] = b"FMLENC";
+
+/// Legacy container magic used by earlier `formula-storage` versions.
+const LEGACY_MAGIC: &[u8; 8] = b"FSTORAGE";
+const LEGACY_CONTAINER_VERSION: u8 = 1;
 
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 const TAG_LEN: usize = 16;
 
-const HEADER_LEN: usize = 8 /* magic */
+const HEADER_LEN_FMLENC_V1: usize = 8 /* magic */ + 4 /* key version */ + NONCE_LEN + TAG_LEN;
+const HEADER_LEN_LEGACY_V1: usize = 8 /* magic */
     + 1 /* container version */
     + 4 /* key version */
     + NONCE_LEN
@@ -118,14 +125,18 @@ impl KeyBytes {
 
 impl Serialize for KeyBytes {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&STANDARD_NO_PAD.encode(self.0))
+        serializer.serialize_str(&STANDARD.encode(self.0))
     }
 }
 
 impl<'de> Deserialize<'de> for KeyBytes {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let encoded = String::deserialize(deserializer)?;
-        let decoded = STANDARD_NO_PAD.decode(encoded).map_err(D::Error::custom)?;
+        // Accept both padded (Node/JS) and unpadded (older Rust) base64 encodings.
+        let decoded = STANDARD
+            .decode(encoded.as_bytes())
+            .or_else(|_| STANDARD_NO_PAD.decode(encoded.as_bytes()))
+            .map_err(D::Error::custom)?;
         if decoded.len() != KEY_LEN {
             return Err(D::Error::custom(format!(
                 "expected {KEY_LEN} bytes, got {}",
@@ -193,7 +204,13 @@ impl KeyRing {
 }
 
 pub fn is_encrypted_container(bytes: &[u8]) -> bool {
-    bytes.len() >= CONTAINER_MAGIC.len() && &bytes[..CONTAINER_MAGIC.len()] == CONTAINER_MAGIC
+    if bytes.len() < 8 {
+        return false;
+    }
+    let magic: [u8; 8] = bytes[..8].try_into().expect("slice length checked");
+    magic == *MAGIC_FMLENC_V1
+        || magic == *LEGACY_MAGIC
+        || parse_fmlenc_version(&magic).is_some()
 }
 
 pub fn encrypt_sqlite_bytes(plaintext: &[u8], keyring: &KeyRing) -> Result<Vec<u8>, EncryptionError> {
@@ -212,11 +229,11 @@ fn encrypt_sqlite_bytes_with_key(
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key_bytes));
     let mut buffer = plaintext.to_vec();
-    let tag = cipher.encrypt_in_place_detached(nonce, &aad_for_key_version(key_version), &mut buffer)?;
+    let aad = aad_for_magic(MAGIC_FMLENC_V1, None, key_version);
+    let tag = cipher.encrypt_in_place_detached(nonce, &aad, &mut buffer)?;
 
-    let mut out = Vec::with_capacity(HEADER_LEN + buffer.len());
-    out.extend_from_slice(CONTAINER_MAGIC);
-    out.push(CONTAINER_VERSION);
+    let mut out = Vec::with_capacity(HEADER_LEN_FMLENC_V1 + buffer.len());
+    out.extend_from_slice(MAGIC_FMLENC_V1);
     out.extend_from_slice(&key_version.to_be_bytes());
     out.extend_from_slice(&nonce_bytes);
     out.extend_from_slice(tag.as_slice());
@@ -233,17 +250,29 @@ pub fn decrypt_sqlite_bytes(container: &[u8], keyring: &KeyRing) -> Result<Vec<u
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
     let mut buffer = parsed.ciphertext.to_vec();
     let nonce = Nonce::from_slice(&parsed.nonce);
+    let aad = match parsed.format {
+        ContainerFormat::Fmlenc { .. } => aad_for_magic(&parsed.magic, None, parsed.key_version),
+        ContainerFormat::Legacy { version } => aad_for_magic(&parsed.magic, Some(version), parsed.key_version),
+    };
     cipher.decrypt_in_place_detached(
         nonce,
-        &aad_for_key_version(parsed.key_version),
+        &aad,
         &mut buffer,
         Tag::from_slice(&parsed.tag),
     )?;
     Ok(buffer)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContainerFormat {
+    Fmlenc { version: u8 },
+    Legacy { version: u8 },
+}
+
 #[derive(Debug)]
 struct ParsedContainer<'a> {
+    magic: [u8; 8],
+    format: ContainerFormat,
     key_version: u32,
     nonce: [u8; NONCE_LEN],
     tag: [u8; TAG_LEN],
@@ -251,38 +280,76 @@ struct ParsedContainer<'a> {
 }
 
 fn parse_container(bytes: &[u8]) -> Result<ParsedContainer<'_>, EncryptionError> {
-    if bytes.len() < HEADER_LEN {
+    if bytes.len() < 8 {
         return Err(EncryptionError::TruncatedContainer);
     }
-    if &bytes[..CONTAINER_MAGIC.len()] != CONTAINER_MAGIC {
-        return Err(EncryptionError::InvalidMagic);
+
+    let magic: [u8; 8] = bytes[..8].try_into().expect("slice length checked");
+
+    if magic == *MAGIC_FMLENC_V1 {
+        if bytes.len() < HEADER_LEN_FMLENC_V1 {
+            return Err(EncryptionError::TruncatedContainer);
+        }
+        let key_version = u32::from_be_bytes(bytes[8..12].try_into().expect("u32 bytes"));
+        let nonce: [u8; NONCE_LEN] = bytes[12..24].try_into().expect("nonce bytes");
+        let tag: [u8; TAG_LEN] = bytes[24..40].try_into().expect("tag bytes");
+        return Ok(ParsedContainer {
+            magic,
+            format: ContainerFormat::Fmlenc { version: 1 },
+            key_version,
+            nonce,
+            tag,
+            ciphertext: &bytes[HEADER_LEN_FMLENC_V1..],
+        });
     }
-    let version = bytes[CONTAINER_MAGIC.len()];
-    if version != CONTAINER_VERSION {
+
+    if magic == *LEGACY_MAGIC {
+        if bytes.len() < HEADER_LEN_LEGACY_V1 {
+            return Err(EncryptionError::TruncatedContainer);
+        }
+        let version = bytes[8];
+        if version != LEGACY_CONTAINER_VERSION {
+            return Err(EncryptionError::UnsupportedContainerVersion(version));
+        }
+        let key_version = u32::from_be_bytes(bytes[9..13].try_into().expect("u32 bytes"));
+        let nonce: [u8; NONCE_LEN] = bytes[13..25].try_into().expect("nonce bytes");
+        let tag: [u8; TAG_LEN] = bytes[25..41].try_into().expect("tag bytes");
+        return Ok(ParsedContainer {
+            magic,
+            format: ContainerFormat::Legacy { version },
+            key_version,
+            nonce,
+            tag,
+            ciphertext: &bytes[HEADER_LEN_LEGACY_V1..],
+        });
+    }
+
+    if let Some(version) = parse_fmlenc_version(&magic) {
         return Err(EncryptionError::UnsupportedContainerVersion(version));
     }
-    let mut key_version_bytes = [0u8; 4];
-    key_version_bytes.copy_from_slice(&bytes[9..13]);
-    let key_version = u32::from_be_bytes(key_version_bytes);
 
-    let mut nonce = [0u8; NONCE_LEN];
-    nonce.copy_from_slice(&bytes[13..25]);
-    let mut tag = [0u8; TAG_LEN];
-    tag.copy_from_slice(&bytes[25..41]);
-
-    Ok(ParsedContainer {
-        key_version,
-        nonce,
-        tag,
-        ciphertext: &bytes[HEADER_LEN..],
-    })
+    Err(EncryptionError::InvalidMagic)
 }
 
-fn aad_for_key_version(key_version: u32) -> [u8; 8 + 1 + 4] {
-    let mut aad = [0u8; 13];
-    aad[..8].copy_from_slice(CONTAINER_MAGIC);
-    aad[8] = CONTAINER_VERSION;
-    aad[9..13].copy_from_slice(&key_version.to_be_bytes());
+fn parse_fmlenc_version(magic: &[u8; 8]) -> Option<u8> {
+    if magic[..MAGIC_FMLENC_PREFIX.len()] != *MAGIC_FMLENC_PREFIX {
+        return None;
+    }
+    let tens = magic[6];
+    let ones = magic[7];
+    if !tens.is_ascii_digit() || !ones.is_ascii_digit() {
+        return None;
+    }
+    Some(((tens - b'0') * 10) + (ones - b'0'))
+}
+
+fn aad_for_magic(magic: &[u8; 8], version_byte: Option<u8>, key_version: u32) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(8 + version_byte.map_or(0, |_| 1) + 4);
+    aad.extend_from_slice(magic);
+    if let Some(version) = version_byte {
+        aad.push(version);
+    }
+    aad.extend_from_slice(&key_version.to_be_bytes());
     aad
 }
 
@@ -313,6 +380,7 @@ mod tests {
         let plaintext = b"sqlite bytes go here";
         let encrypted = encrypt_sqlite_bytes(plaintext, &keyring).expect("encrypt");
         assert!(is_encrypted_container(&encrypted));
+        assert_eq!(&encrypted[..8], MAGIC_FMLENC_V1);
         let decrypted = decrypt_sqlite_bytes(&encrypted, &keyring).expect("decrypt");
         assert_eq!(decrypted, plaintext);
     }
@@ -346,5 +414,25 @@ mod tests {
             EncryptionError::Aead => {}
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn keyring_json_is_compatible_with_padded_and_unpadded_base64() {
+        let keyring = KeyRing::from_key(1, [0u8; KEY_LEN]);
+        let mut json: serde_json::Value =
+            serde_json::to_value(&keyring).expect("serialize keyring json");
+
+        let key_str = json["keys"]["1"].as_str().expect("key string");
+        assert!(
+            key_str.ends_with('='),
+            "expected padded base64 to match JS keyring encoding"
+        );
+
+        // Ensure we also accept unpadded base64 for backwards compatibility.
+        let unpadded = key_str.trim_end_matches('=').to_string();
+        json["keys"]["1"] = serde_json::Value::String(unpadded);
+        let decoded: KeyRing = serde_json::from_value(json).expect("deserialize keyring json");
+        assert_eq!(decoded.current_version, 1);
+        assert_eq!(decoded.key(1).expect("key bytes"), [0u8; KEY_LEN]);
     }
 }
