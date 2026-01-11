@@ -47,6 +47,9 @@ cargo run -p formula-xlsx --bin dump_chart_models -- fixtures/charts/xlsx/bar.xl
 By default the tool writes files under `fixtures/charts/models/<workbook-stem>/`.
 See `--help` for options.
 
+The JSON payload includes the chart index, sheet name, anchor, and the parsed
+`ChartModel` (see `formula_model::charts::ChartModel`).
+
 After regenerating, run:
 
 ```bash

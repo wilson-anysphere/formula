@@ -86,6 +86,7 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
         DateSystem::V1900 => formula_model::DateSystem::Excel1900,
         DateSystem::V1904 => formula_model::DateSystem::Excel1904,
     };
+    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::with_capacity(sheets.len());
 
     let styles_part_name = rels_info
         .styles_target
@@ -106,7 +107,6 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
         None => Vec::new(),
     };
 
-    let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> = Vec::new();
     for sheet in sheets {
         let ws_id = workbook.add_sheet(sheet.name.clone())?;
         worksheet_ids_by_index.push(ws_id);

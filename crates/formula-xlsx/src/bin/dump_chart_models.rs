@@ -2,15 +2,30 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use formula_model::charts::Chart;
+use formula_model::charts::ChartModel;
+use formula_model::drawings::Anchor;
+use formula_xlsx::drawingml::charts::parse_chart_space;
 use formula_xlsx::XlsxPackage;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ChartParts {
+    drawing_part: String,
+    chart_part: String,
+    chart_ex_part: Option<String>,
+    style_part: Option<String>,
+    colors_part: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ChartFixtureModel {
     chart_index: usize,
-    chart: Chart,
+    sheet_name: Option<String>,
+    anchor: Anchor,
+    parts: ChartParts,
+    model: ChartModel,
 }
 
 fn usage() -> &'static str {
@@ -66,13 +81,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let bytes = fs::read(&xlsx_path)?;
     let pkg = XlsxPackage::from_bytes(&bytes)?;
-    let charts = pkg.extract_charts()?;
+    let charts = pkg.extract_chart_objects()?;
 
     if print_parts {
         for (idx, chart) in charts.iter().enumerate() {
             eprintln!(
-                "chart[{idx}]: sheet={:?} drawing_part={} chart_part={:?} rel_id={}",
-                chart.sheet_name, chart.drawing_part, chart.chart_part, chart.rel_id
+                "chart[{idx}]: sheet={:?} drawing_part={} chart_part={} chart_ex_part={:?} style_part={:?} colors_part={:?}",
+                chart.sheet_name,
+                chart.drawing_part,
+                chart.parts.chart.path,
+                chart.parts.chart_ex.as_ref().map(|p| p.path.as_str()),
+                chart.parts.style.as_ref().map(|p| p.path.as_str()),
+                chart.parts.colors.as_ref().map(|p| p.path.as_str()),
             );
         }
     }
@@ -82,11 +102,21 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for (idx, chart) in charts.into_iter().enumerate() {
         let out_path = workbook_out_dir.join(format!("chart{idx}.json"));
-        let model = ChartFixtureModel {
+        let model = parse_chart_space(&chart.parts.chart.bytes, &chart.parts.chart.path)?;
+        let fixture_model = ChartFixtureModel {
             chart_index: idx,
-            chart,
+            sheet_name: chart.sheet_name,
+            anchor: chart.anchor,
+            parts: ChartParts {
+                drawing_part: chart.drawing_part,
+                chart_part: chart.parts.chart.path,
+                chart_ex_part: chart.parts.chart_ex.map(|p| p.path),
+                style_part: chart.parts.style.map(|p| p.path),
+                colors_part: chart.parts.colors.map(|p| p.path),
+            },
+            model,
         };
-        let mut json = serde_json::to_string_pretty(&model)?;
+        let mut json = serde_json::to_string_pretty(&fixture_model)?;
         json.push('\n');
         fs::write(&out_path, json)?;
     }
@@ -102,4 +132,3 @@ fn recreate_dir(path: &Path) -> std::io::Result<()> {
     }
     fs::create_dir_all(path)
 }
-

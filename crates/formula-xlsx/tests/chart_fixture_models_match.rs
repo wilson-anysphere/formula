@@ -1,15 +1,29 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use formula_model::charts::Chart;
+use formula_model::charts::ChartModel;
+use formula_model::drawings::Anchor;
 use pretty_assertions::assert_eq;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ChartParts {
+    drawing_part: String,
+    chart_part: String,
+    chart_ex_part: Option<String>,
+    style_part: Option<String>,
+    colors_part: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ChartFixtureModel {
     chart_index: usize,
-    chart: Chart,
+    sheet_name: Option<String>,
+    anchor: Anchor,
+    parts: ChartParts,
+    model: ChartModel,
 }
 
 #[test]
@@ -31,7 +45,7 @@ fn chart_fixture_models_match() -> Result<(), Box<dyn std::error::Error>> {
 
         let bytes = fs::read(&fixture)?;
         let pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes)?;
-        let charts = pkg.extract_charts()?;
+        let charts = pkg.extract_chart_objects()?;
 
         // Validate that we have an expected JSON file for every parsed chart and
         // no extra files lingering in the directory.
@@ -59,9 +73,22 @@ fn chart_fixture_models_match() -> Result<(), Box<dyn std::error::Error>> {
                 )
             })?;
 
+            let model = formula_xlsx::drawingml::charts::parse_chart_space(
+                &chart.parts.chart.bytes,
+                &chart.parts.chart.path,
+            )?;
             let actual = ChartFixtureModel {
                 chart_index: idx,
-                chart,
+                sheet_name: chart.sheet_name,
+                anchor: chart.anchor,
+                parts: ChartParts {
+                    drawing_part: chart.drawing_part,
+                    chart_part: chart.parts.chart.path,
+                    chart_ex_part: chart.parts.chart_ex.map(|p| p.path),
+                    style_part: chart.parts.style.map(|p| p.path),
+                    colors_part: chart.parts.colors.map(|p| p.path),
+                },
+                model,
             };
             assert_eq!(expected, actual, "fixture {stem}: chart model mismatch");
         }
@@ -93,4 +120,3 @@ fn expected_chart_paths(dir: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::
     });
     Ok(paths)
 }
-

@@ -1,35 +1,127 @@
 {
   "chartIndex": 0,
-  "chart": {
-    "sheetName": "Sheet1",
-    "sheetPart": "xl/worksheets/sheet1.xml",
+  "sheetName": "Sheet1",
+  "anchor": {
+    "TwoCell": {
+      "from": {
+        "cell": {
+          "row": 1,
+          "col": 3
+        },
+        "offset": {
+          "x_emu": 0,
+          "y_emu": 0
+        }
+      },
+      "to": {
+        "cell": {
+          "row": 15,
+          "col": 10
+        },
+        "offset": {
+          "x_emu": 304800,
+          "y_emu": 76200
+        }
+      }
+    }
+  },
+  "parts": {
     "drawingPart": "xl/drawings/drawing1.xml",
     "chartPart": "xl/charts/chart1.xml",
-    "relId": "rId1",
-    "chartType": {
+    "chartExPart": "xl/charts/chartEx1.xml",
+    "stylePart": null,
+    "colorsPart": null
+  },
+  "model": {
+    "chartKind": {
       "kind": "unknown",
       "name": "sunburstChart"
     },
-    "title": "Sunburst",
-    "series": [
+    "title": {
+      "richText": {
+        "text": "Sunburst",
+        "runs": []
+      },
+      "formula": null
+    },
+    "legend": {
+      "position": "bottom",
+      "overlay": false
+    },
+    "plotArea": {
+      "kind": "unknown",
+      "name": "sunburstChart"
+    },
+    "axes": [
       {
-        "name": "Sheet1!$B$1",
-        "categories": "Sheet1!$A$2:$A$5",
-        "values": "Sheet1!$B$2:$B$5",
-        "xValues": null,
-        "yValues": null
+        "id": 50010001,
+        "kind": "category",
+        "position": "bottom",
+        "scaling": {
+          "min": null,
+          "max": null,
+          "logBase": null,
+          "reverse": false
+        },
+        "numFmt": null,
+        "tickLabelPosition": "nextTo",
+        "majorGridlines": false
+      },
+      {
+        "id": 50010002,
+        "kind": "value",
+        "position": "left",
+        "scaling": {
+          "min": null,
+          "max": null,
+          "logBase": null,
+          "reverse": false
+        },
+        "numFmt": {
+          "formatCode": "#,##0",
+          "sourceLinked": false
+        },
+        "tickLabelPosition": "nextTo",
+        "majorGridlines": true
       }
     ],
-    "anchor": {
-      "kind": "twoCell",
-      "from_col": 3,
-      "from_row": 1,
-      "from_col_off_emu": 0,
-      "from_row_off_emu": 0,
-      "to_col": 10,
-      "to_row": 15,
-      "to_col_off_emu": 304800,
-      "to_row_off_emu": 76200
-    }
+    "series": [
+      {
+        "name": {
+          "richText": {
+            "text": "",
+            "runs": []
+          },
+          "formula": "Sheet1!$B$1"
+        },
+        "categories": {
+          "formula": "Sheet1!$A$2:$A$5",
+          "cache": null
+        },
+        "values": {
+          "formula": "Sheet1!$B$2:$B$5",
+          "cache": null,
+          "formatCode": null
+        },
+        "xValues": null,
+        "yValues": null,
+        "points": [
+          {
+            "idx": 0,
+            "style": {
+              "fill": {
+                "color": "#FFFF0000"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "level": "warning",
+        "message": "unsupported chart type sunburstChart; rendering may be incomplete"
+      }
+    ]
   }
 }
