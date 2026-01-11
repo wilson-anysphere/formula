@@ -90,7 +90,8 @@ export interface AppConfig {
    */
   retentionSweepIntervalMs: number | null;
   /**
-   * Interval for deleting stale `oidc_auth_states` rows.
+   * Interval for deleting stale auth state rows (`oidc_auth_states`, `saml_auth_states`)
+   * plus SAML request cache entries (`saml_request_cache`).
    *
    * If null, cleanup is disabled.
    *
@@ -322,4 +323,3 @@ function rawJsonIsEmpty(env: NodeJS.ProcessEnv): boolean {
   const rawJson = typeof env.SECRET_STORE_KEYS_JSON === "string" ? env.SECRET_STORE_KEYS_JSON.trim() : "";
   return rawJson.length === 0;
 }
-

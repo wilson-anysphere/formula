@@ -2,7 +2,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { SAML, ValidateInResponseTo, type CacheItem, type CacheProvider } from "@node-saml/node-saml";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { createAuditEvent, writeAuditEvent } from "../../audit/audit";
 import { withTransaction } from "../../db/tx";
 import { getClientIp, getUserAgent } from "../../http/request-meta";
@@ -43,9 +43,21 @@ const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 type RequestCacheRow = { value: string; created_at: Date };
 
-type DbClient = Pick<Pool, "query">;
+type Queryable = Pick<Pool, "query"> | Pick<PoolClient, "query">;
 
-function createSamlRequestCacheProvider(db: DbClient): CacheProvider {
+export async function cleanupSamlAuthStates(db: Queryable): Promise<number> {
+  const cutoff = new Date(Date.now() - AUTH_STATE_TTL_MS);
+  const res = await db.query("DELETE FROM saml_auth_states WHERE created_at < $1", [cutoff]);
+  return typeof res?.rowCount === "number" ? res.rowCount : 0;
+}
+
+export async function cleanupSamlRequestCache(db: Queryable): Promise<number> {
+  const cutoff = new Date(Date.now() - AUTH_STATE_TTL_MS);
+  const res = await db.query("DELETE FROM saml_request_cache WHERE created_at < $1", [cutoff]);
+  return typeof res?.rowCount === "number" ? res.rowCount : 0;
+}
+
+function createSamlRequestCacheProvider(db: Queryable): CacheProvider {
   return {
     async saveAsync(key: string, value: string): Promise<CacheItem | null> {
       await db.query(

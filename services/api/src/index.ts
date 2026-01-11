@@ -3,6 +3,7 @@ import { loadConfig } from "./config";
 import { createPool } from "./db/pool";
 import { runMigrations } from "./db/migrations";
 import { cleanupOidcAuthStates } from "./auth/oidc/oidc";
+import { cleanupSamlAuthStates, cleanupSamlRequestCache } from "./auth/saml/saml";
 import { initOpenTelemetry } from "./observability/otel";
 import { runRetentionSweep } from "./retention";
 import { DbSiemConfigProvider } from "./siem/configProvider";
@@ -106,6 +107,16 @@ async function main(): Promise<void> {
       const deleted = await cleanupOidcAuthStates(pool);
       if (deleted > 0) {
         app.log.debug({ deleted }, "oidc_auth_state_cleanup");
+      }
+
+      const samlStatesDeleted = await cleanupSamlAuthStates(pool);
+      if (samlStatesDeleted > 0) {
+        app.log.debug({ deleted: samlStatesDeleted }, "saml_auth_state_cleanup");
+      }
+
+      const samlRequestCacheDeleted = await cleanupSamlRequestCache(pool);
+      if (samlRequestCacheDeleted > 0) {
+        app.log.debug({ deleted: samlRequestCacheDeleted }, "saml_request_cache_cleanup");
       }
     };
 
