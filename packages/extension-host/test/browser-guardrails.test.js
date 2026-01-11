@@ -441,3 +441,93 @@ test("BrowserExtensionHost: custom function timeout terminates worker and allows
 
   assert.equal(await host.invokeCustomFunction("TEST_HANG"), 42);
 });
+
+test("BrowserExtensionHost: worker termination removes extension-owned context menu registrations", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  const scenarios = [
+    // First worker: activation succeeds; command hangs.
+    {
+      onPostMessage(msg, worker) {
+        if (msg?.type === "init") return;
+        if (msg?.type === "activate") {
+          worker.emitMessage({ type: "activate_result", id: msg.id });
+          return;
+        }
+        if (msg?.type === "execute_command") return;
+      }
+    },
+    // Second worker: activation succeeds; commands resolve.
+    {
+      onPostMessage(msg, worker) {
+        if (msg?.type === "init") return;
+        if (msg?.type === "activate") {
+          worker.emitMessage({ type: "activate_result", id: msg.id });
+          return;
+        }
+        if (msg?.type === "execute_command") {
+          worker.emitMessage({ type: "command_result", id: msg.id, result: "ok" });
+        }
+      }
+    }
+  ];
+
+  const PrevWorker = globalThis.Worker;
+  globalThis.Worker = createWorkerCtor(scenarios);
+  t.after(() => {
+    globalThis.Worker = PrevWorker;
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async getSelection() {
+        return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] };
+      },
+      async getCell() {
+        return null;
+      },
+      async setCell() {
+        // noop
+      }
+    },
+    permissionPrompt: async () => true,
+    activationTimeoutMs: 1000,
+    commandTimeoutMs: 50
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.context-menu-cleanup";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "context-menu-cleanup",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: {
+        commands: [{ command: "test.hang", title: "Hang" }],
+        customFunctions: []
+      },
+      activationEvents: ["onCommand:test.hang"],
+      permissions: ["ui.commands", "ui.menus"]
+    }
+  });
+
+  const registration = await host._executeApi("ui", "registerContextMenu", [
+    "cell/context",
+    [{ command: "test.hang" }]
+  ], host._extensions.get(extensionId));
+  assert.ok(registration?.id);
+  assert.equal(host._contextMenus.size, 1);
+
+  await assert.rejects(() => host.executeCommand("test.hang"), /timed out/i);
+  assert.equal(host._contextMenus.size, 0);
+
+  assert.equal(await host.executeCommand("test.hang"), "ok");
+});
