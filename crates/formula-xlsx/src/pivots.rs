@@ -11,6 +11,7 @@ pub mod cache_records;
 pub mod graph;
 pub mod pivot_charts;
 pub mod preserve;
+pub mod refresh;
 pub mod slicers;
 pub mod table_definition;
 

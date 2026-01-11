@@ -1,0 +1,572 @@
+use std::collections::{BTreeMap, HashMap};
+use std::io::Cursor;
+
+use formula_model::{CellRef, Range};
+use quick_xml::events::Event;
+use quick_xml::Reader;
+
+use crate::openxml::{local_name, parse_relationships, rels_part_name, resolve_target};
+use crate::package::{XlsxError, XlsxPackage};
+use crate::shared_strings::parse_shared_strings_xml;
+use crate::xml::{QName, XmlElement, XmlNode};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorksheetSource {
+    sheet: String,
+    reference: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum PivotCacheValue {
+    String(String),
+    Number(String),
+    Bool(bool),
+    Missing,
+}
+
+impl PivotCacheValue {
+    fn is_blank(&self) -> bool {
+        match self {
+            PivotCacheValue::Missing => true,
+            PivotCacheValue::String(s) => s.is_empty(),
+            PivotCacheValue::Number(_) | PivotCacheValue::Bool(_) => false,
+        }
+    }
+
+    fn header_text(&self) -> String {
+        match self {
+            PivotCacheValue::String(s) => s.clone(),
+            PivotCacheValue::Number(n) => n.clone(),
+            PivotCacheValue::Bool(true) => "TRUE".to_string(),
+            PivotCacheValue::Bool(false) => "FALSE".to_string(),
+            PivotCacheValue::Missing => String::new(),
+        }
+    }
+}
+
+impl XlsxPackage {
+    /// Refresh a pivot cache's cache definition/records from the referenced worksheet source range.
+    ///
+    /// This helper is intentionally conservative: it updates `recordCount`, `cacheFields`, and
+    /// rewrites the cache records payload, while preserving unrelated XML nodes/attributes where
+    /// possible.
+    pub fn refresh_pivot_cache_from_worksheet(
+        &mut self,
+        cache_definition_part: &str,
+    ) -> Result<(), XlsxError> {
+        let cache_definition_bytes = self
+            .part(cache_definition_part)
+            .ok_or_else(|| XlsxError::MissingPart(cache_definition_part.to_string()))?
+            .to_vec();
+
+        let worksheet_source = parse_worksheet_source_from_cache_definition(&cache_definition_bytes)?;
+        let range = Range::from_a1(&worksheet_source.reference).map_err(|e| {
+            XlsxError::Invalid(format!(
+                "invalid worksheetSource ref {ref_:?}: {e}",
+                ref_ = worksheet_source.reference
+            ))
+        })?;
+
+        let worksheet_part = resolve_worksheet_part(self, &worksheet_source.sheet)?;
+        let worksheet_xml = self
+            .part(&worksheet_part)
+            .ok_or_else(|| XlsxError::MissingPart(worksheet_part.clone()))?;
+
+        let shared_strings = load_shared_strings(self)?;
+        let cells = parse_worksheet_cells_in_range(worksheet_xml, range, &shared_strings)?;
+        let (field_names, records) = build_cache_fields_and_records(range, &cells);
+
+        let record_count = records.len() as u64;
+
+        let cache_records_part = resolve_cache_records_part(self, cache_definition_part)?;
+        let cache_records_bytes = self
+            .part(&cache_records_part)
+            .ok_or_else(|| XlsxError::MissingPart(cache_records_part.clone()))?
+            .to_vec();
+
+        let updated_cache_definition = refresh_cache_definition_xml(
+            &cache_definition_bytes,
+            &field_names,
+            record_count,
+        )?;
+        let updated_cache_records =
+            refresh_cache_records_xml(&cache_records_bytes, &records, record_count)?;
+
+        self.set_part(cache_definition_part.to_string(), updated_cache_definition);
+        self.set_part(cache_records_part, updated_cache_records);
+        Ok(())
+    }
+}
+
+fn parse_worksheet_source_from_cache_definition(xml: &[u8]) -> Result<WorksheetSource, XlsxError> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut sheet = None;
+    let mut reference = None;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e) => {
+                if local_name(e.name().as_ref()) == b"worksheetSource" {
+                    for attr in e.attributes().with_checks(false) {
+                        let attr = attr?;
+                        match local_name(attr.key.as_ref()) {
+                            b"sheet" => sheet = Some(attr.unescape_value()?.into_owned()),
+                            b"ref" => reference = Some(attr.unescape_value()?.into_owned()),
+                            _ => {}
+                        }
+                    }
+                    break;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    let sheet = sheet.ok_or(XlsxError::MissingAttr("worksheetSource@sheet"))?;
+    let reference = reference.ok_or(XlsxError::MissingAttr("worksheetSource@ref"))?;
+    Ok(WorksheetSource { sheet, reference })
+}
+
+fn resolve_worksheet_part(package: &XlsxPackage, sheet_name: &str) -> Result<String, XlsxError> {
+    let sheets = package.workbook_sheets()?;
+    let sheet = sheets
+        .iter()
+        .find(|s| s.name == sheet_name)
+        .ok_or_else(|| XlsxError::Invalid(format!("sheet {sheet_name:?} not found in workbook")))?;
+
+    let rels_part = rels_part_name("xl/workbook.xml");
+    let rels_bytes = package
+        .part(&rels_part)
+        .ok_or_else(|| XlsxError::MissingPart(rels_part.clone()))?;
+    let rels = parse_relationships(rels_bytes)?;
+    let rel = rels.iter().find(|r| r.id == sheet.rel_id).ok_or_else(|| {
+        XlsxError::Invalid(format!(
+            "missing workbook relationship {rid:?} for sheet {sheet_name:?}",
+            rid = sheet.rel_id
+        ))
+    })?;
+
+    Ok(resolve_target("xl/workbook.xml", &rel.target))
+}
+
+fn resolve_cache_records_part(
+    package: &XlsxPackage,
+    cache_definition_part: &str,
+) -> Result<String, XlsxError> {
+    let rels_part = rels_part_name(cache_definition_part);
+    let rels_bytes = package
+        .part(&rels_part)
+        .ok_or_else(|| XlsxError::MissingPart(rels_part.clone()))?;
+    let rels = parse_relationships(rels_bytes)?;
+
+    let Some(rel) = rels
+        .into_iter()
+        .find(|r| r.type_uri.ends_with("/pivotCacheRecords"))
+    else {
+        return Err(XlsxError::Invalid(format!(
+            "pivot cache definition {cache_definition_part:?} does not reference a pivotCacheRecords relationship"
+        )));
+    };
+
+    Ok(resolve_target(cache_definition_part, &rel.target))
+}
+
+fn load_shared_strings(package: &XlsxPackage) -> Result<Vec<String>, XlsxError> {
+    let Some(bytes) = package.part("xl/sharedStrings.xml") else {
+        return Ok(Vec::new());
+    };
+
+    let xml = std::str::from_utf8(bytes).map_err(|e| {
+        XlsxError::Invalid(format!(
+            "xl/sharedStrings.xml is not valid UTF-8: {e}"
+        ))
+    })?;
+    let parsed = parse_shared_strings_xml(xml).map_err(|e| {
+        XlsxError::Invalid(format!("failed to parse xl/sharedStrings.xml: {e}"))
+    })?;
+
+    Ok(parsed.items.into_iter().map(|rt| rt.text).collect())
+}
+
+fn parse_worksheet_cells_in_range(
+    worksheet_xml: &[u8],
+    range: Range,
+    shared_strings: &[String],
+) -> Result<HashMap<CellRef, PivotCacheValue>, XlsxError> {
+    let mut reader = Reader::from_reader(Cursor::new(worksheet_xml));
+    reader.config_mut().trim_text(false);
+
+    let mut buf = Vec::new();
+    let mut in_sheet_data = false;
+
+    let mut current_ref: Option<CellRef> = None;
+    let mut current_t: Option<String> = None;
+    let mut current_value_text: Option<String> = None;
+    let mut current_inline_text: Option<String> = None;
+    let mut in_v = false;
+    let mut in_inline_t = false;
+
+    let mut cells = HashMap::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if local_name(e.name().as_ref()) == b"sheetData" => in_sheet_data = true,
+            Event::End(e) if local_name(e.name().as_ref()) == b"sheetData" => in_sheet_data = false,
+            Event::Empty(e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                in_sheet_data = false;
+                drop(e);
+            }
+
+            Event::Start(e) if in_sheet_data && local_name(e.name().as_ref()) == b"c" => {
+                current_ref = None;
+                current_t = None;
+                current_value_text = None;
+                current_inline_text = None;
+                in_v = false;
+                in_inline_t = false;
+
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    match local_name(attr.key.as_ref()) {
+                        b"r" => {
+                            let a1 = attr.unescape_value()?.into_owned();
+                            let parsed = CellRef::from_a1(&a1).map_err(|e| {
+                                XlsxError::Invalid(format!("invalid cell reference {a1:?}: {e}"))
+                            })?;
+                            current_ref = Some(parsed);
+                        }
+                        b"t" => current_t = Some(attr.unescape_value()?.into_owned()),
+                        _ => {}
+                    }
+                }
+            }
+            Event::Empty(e) if in_sheet_data && local_name(e.name().as_ref()) == b"c" => {
+                // We only care about values; empty `<c/>` entries represent blanks (possibly styled).
+                drop(e);
+            }
+
+            Event::End(e) if in_sheet_data && local_name(e.name().as_ref()) == b"c" => {
+                if let Some(cell_ref) = current_ref.take() {
+                    if range.contains(cell_ref) {
+                        let value = interpret_worksheet_cell_value(
+                            current_t.as_deref(),
+                            current_value_text.as_deref(),
+                            current_inline_text.as_deref(),
+                            shared_strings,
+                        );
+                        if !matches!(value, PivotCacheValue::Missing) {
+                            cells.insert(cell_ref, value);
+                        }
+                    }
+                }
+
+                current_t = None;
+                current_value_text = None;
+                current_inline_text = None;
+                in_v = false;
+                in_inline_t = false;
+            }
+
+            Event::Start(e) if in_sheet_data && current_ref.is_some() && local_name(e.name().as_ref()) == b"v" => {
+                in_v = true;
+            }
+            Event::End(e) if in_sheet_data && local_name(e.name().as_ref()) == b"v" => in_v = false,
+            Event::Text(e) if in_sheet_data && in_v => {
+                current_value_text = Some(e.unescape()?.into_owned());
+            }
+
+            Event::Start(e)
+                if in_sheet_data
+                    && current_ref.is_some()
+                    && current_t.as_deref() == Some("inlineStr")
+                    && local_name(e.name().as_ref()) == b"t" =>
+            {
+                in_inline_t = true;
+            }
+            Event::End(e)
+                if in_sheet_data
+                    && current_t.as_deref() == Some("inlineStr")
+                    && local_name(e.name().as_ref()) == b"t" =>
+            {
+                in_inline_t = false;
+            }
+            Event::Text(e) if in_sheet_data && in_inline_t => {
+                let t = e.unescape()?.into_owned();
+                match current_inline_text.as_mut() {
+                    Some(existing) => existing.push_str(&t),
+                    None => current_inline_text = Some(t),
+                }
+            }
+
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(cells)
+}
+
+fn interpret_worksheet_cell_value(
+    t: Option<&str>,
+    v_text: Option<&str>,
+    inline_text: Option<&str>,
+    shared_strings: &[String],
+) -> PivotCacheValue {
+    match t {
+        Some("s") => {
+            let raw = v_text.unwrap_or_default();
+            let idx = raw.parse::<usize>().unwrap_or(0);
+            let text = shared_strings.get(idx).cloned().unwrap_or_default();
+            PivotCacheValue::String(text)
+        }
+        Some("b") => {
+            let raw = v_text.unwrap_or_default();
+            PivotCacheValue::Bool(raw == "1" || raw.eq_ignore_ascii_case("true"))
+        }
+        Some("str") => PivotCacheValue::String(v_text.unwrap_or_default().to_string()),
+        Some("inlineStr") => PivotCacheValue::String(inline_text.unwrap_or_default().to_string()),
+        Some(_) | None => {
+            let Some(raw) = v_text else {
+                return PivotCacheValue::Missing;
+            };
+
+            if raw.parse::<f64>().is_ok() {
+                PivotCacheValue::Number(raw.to_string())
+            } else {
+                PivotCacheValue::String(raw.to_string())
+            }
+        }
+    }
+}
+
+fn build_cache_fields_and_records(
+    range: Range,
+    cells: &HashMap<CellRef, PivotCacheValue>,
+) -> (Vec<String>, Vec<Vec<PivotCacheValue>>) {
+    let mut fields = Vec::new();
+    for col in range.start.col..=range.end.col {
+        let cell = CellRef::new(range.start.row, col);
+        let value = cells
+            .get(&cell)
+            .cloned()
+            .unwrap_or(PivotCacheValue::Missing);
+        fields.push(value.header_text());
+    }
+
+    let mut records = Vec::new();
+    if range.start.row < range.end.row {
+        for row in (range.start.row + 1)..=range.end.row {
+            let mut record = Vec::new();
+            let mut all_blank = true;
+            for col in range.start.col..=range.end.col {
+                let cell = CellRef::new(row, col);
+                let value = cells
+                    .get(&cell)
+                    .cloned()
+                    .unwrap_or(PivotCacheValue::Missing);
+                if !value.is_blank() {
+                    all_blank = false;
+                }
+                record.push(value);
+            }
+            if !all_blank {
+                records.push(record);
+            }
+        }
+    }
+
+    (fields, records)
+}
+
+fn refresh_cache_definition_xml(
+    existing: &[u8],
+    field_names: &[String],
+    record_count: u64,
+) -> Result<Vec<u8>, XlsxError> {
+    let mut root = XmlElement::parse(existing)
+        .map_err(|e| XlsxError::Invalid(format!("failed to parse pivot cache definition xml: {e}")))?;
+
+    root.set_attr("recordCount", record_count.to_string());
+
+    if let Some(cache_fields) = root.child_mut("cacheFields") {
+        cache_fields.set_attr("count", field_names.len().to_string());
+
+        let old_children = std::mem::take(&mut cache_fields.children);
+        let mut new_children = Vec::new();
+        let mut field_idx = 0usize;
+        for child in old_children {
+            match child {
+                XmlNode::Element(mut el) if el.name.local == "cacheField" => {
+                    if field_idx >= field_names.len() {
+                        continue;
+                    }
+                    el.set_attr("name", field_names[field_idx].clone());
+                    field_idx += 1;
+                    new_children.push(XmlNode::Element(el));
+                }
+                other => new_children.push(other),
+            }
+        }
+
+        while field_idx < field_names.len() {
+            new_children.push(XmlNode::Element(build_cache_field_element(
+                cache_fields.name.ns.clone(),
+                &field_names[field_idx],
+            )));
+            field_idx += 1;
+        }
+
+        cache_fields.children = new_children;
+    } else {
+        root.children.push(XmlNode::Element(build_cache_fields_element(
+            root.name.ns.clone(),
+            field_names,
+        )));
+    }
+
+    Ok(root.to_xml_string().into_bytes())
+}
+
+fn build_cache_fields_element(ns: Option<String>, field_names: &[String]) -> XmlElement {
+    let mut attrs = BTreeMap::new();
+    attrs.insert(
+        QName {
+            ns: None,
+            local: "count".to_string(),
+        },
+        field_names.len().to_string(),
+    );
+
+    let mut children = Vec::new();
+    for name in field_names {
+        children.push(XmlNode::Element(build_cache_field_element(ns.clone(), name)));
+    }
+
+    XmlElement {
+        name: QName {
+            ns,
+            local: "cacheFields".to_string(),
+        },
+        attrs,
+        children,
+    }
+}
+
+fn build_cache_field_element(ns: Option<String>, name: &str) -> XmlElement {
+    let mut attrs = BTreeMap::new();
+    attrs.insert(
+        QName {
+            ns: None,
+            local: "name".to_string(),
+        },
+        name.to_string(),
+    );
+    attrs.insert(
+        QName {
+            ns: None,
+            local: "numFmtId".to_string(),
+        },
+        "0".to_string(),
+    );
+
+    XmlElement {
+        name: QName {
+            ns,
+            local: "cacheField".to_string(),
+        },
+        attrs,
+        children: Vec::new(),
+    }
+}
+
+fn refresh_cache_records_xml(
+    existing: &[u8],
+    records: &[Vec<PivotCacheValue>],
+    record_count: u64,
+) -> Result<Vec<u8>, XlsxError> {
+    let mut root = XmlElement::parse(existing).map_err(|e| {
+        XlsxError::Invalid(format!("failed to parse pivot cache records xml: {e}"))
+    })?;
+    root.set_attr("count", record_count.to_string());
+
+    let ns = root.name.ns.clone();
+    let mut new_r_nodes: Vec<XmlNode> = records
+        .iter()
+        .map(|record| XmlNode::Element(build_record_element(ns.clone(), record)))
+        .collect();
+
+    let old_children = std::mem::take(&mut root.children);
+    let mut children = Vec::new();
+    let mut inserted = false;
+
+    for child in old_children {
+        let is_r = matches!(child, XmlNode::Element(ref el) if el.name.local == "r");
+        if is_r {
+            if !inserted {
+                children.append(&mut new_r_nodes);
+                inserted = true;
+            }
+            continue;
+        }
+        children.push(child);
+    }
+
+    if !inserted {
+        children.append(&mut new_r_nodes);
+    }
+    root.children = children;
+
+    Ok(root.to_xml_string().into_bytes())
+}
+
+fn build_record_element(ns: Option<String>, record: &[PivotCacheValue]) -> XmlElement {
+    let mut out = XmlElement {
+        name: QName {
+            ns: ns.clone(),
+            local: "r".to_string(),
+        },
+        attrs: BTreeMap::new(),
+        children: Vec::new(),
+    };
+
+    for value in record {
+        out.children.push(XmlNode::Element(match value {
+            PivotCacheValue::String(s) => build_value_element(ns.clone(), "s", Some(s.as_str())),
+            PivotCacheValue::Number(n) => build_value_element(ns.clone(), "n", Some(n.as_str())),
+            PivotCacheValue::Bool(b) => {
+                build_value_element(ns.clone(), "b", Some(if *b { "1" } else { "0" }))
+            }
+            PivotCacheValue::Missing => build_value_element(ns.clone(), "m", None),
+        }));
+    }
+
+    out
+}
+
+fn build_value_element(ns: Option<String>, tag: &str, value: Option<&str>) -> XmlElement {
+    let mut attrs = BTreeMap::new();
+    if let Some(value) = value {
+        attrs.insert(
+            QName {
+                ns: None,
+                local: "v".to_string(),
+            },
+            value.to_string(),
+        );
+    }
+
+    XmlElement {
+        name: QName {
+            ns,
+            local: tag.to_string(),
+        },
+        attrs,
+        children: Vec::new(),
+    }
+}
