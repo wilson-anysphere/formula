@@ -171,6 +171,12 @@ export function mountPythonPanel({ documentController, container, getActiveSheet
   runButton.addEventListener("click", async () => {
     if (disposed) return;
 
+    // The runtime may reset itself after timeouts/memory errors. Keep our local
+    // initialization flag in sync so users can run again without reloading.
+    if ((runtime as any).initialized !== true) {
+      initialized = false;
+    }
+
     output.textContent =
       runtime.getBackendMode() === "mainThread"
         ? "SharedArrayBuffer unavailable; running Pyodide on main thread (UI may freeze during execution).\n\n"

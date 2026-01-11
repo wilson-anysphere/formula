@@ -2,13 +2,16 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@formula/python-runtime", () => ({
-  PyodideRuntime: class {
-    initialize = vi.fn(async () => {});
-    execute = vi.fn(async () => ({ stdout: "", stderr: "" }));
-    destroy = vi.fn();
-  },
-}));
+vi.mock("@formula/python-runtime", () => {
+  const initialize = vi.fn(async () => {});
+  const execute = vi.fn(async () => ({ stdout: "", stderr: "" }));
+  const destroy = vi.fn();
+
+  return {
+    PyodideRuntime: vi.fn().mockImplementation(() => ({ initialize, execute, destroy })),
+    __pyodideMocks: { initialize, execute, destroy },
+  };
+});
 
 vi.mock("@formula/python-runtime/document-controller", () => ({
   DocumentControllerBridge: class {
@@ -86,5 +89,50 @@ describe("pythonPanelMount", () => {
       code: expect.any(String),
     });
   });
-});
 
+  it("falls back to main-thread Pyodide when SharedArrayBuffer is unavailable", async () => {
+    const originalSab = (globalThis as any).SharedArrayBuffer;
+    const originalIsolation = (globalThis as any).crossOriginIsolated;
+    delete (globalThis as any).__TAURI__;
+    delete (globalThis as any).SharedArrayBuffer;
+    (globalThis as any).crossOriginIsolated = false;
+
+    try {
+      const { __pyodideMocks } = await import("@formula/python-runtime");
+
+      const container = document.createElement("div");
+      const doc: any = {};
+
+      mountPythonPanel({
+        doc,
+        container,
+        getActiveSheetId: () => "Sheet1",
+        getSelection: () => ({ sheet_id: "Sheet1", start_row: 0, start_col: 0, end_row: 0, end_col: 0 }),
+      });
+
+      const runtimeSelect = container.querySelector<HTMLSelectElement>('[data-testid="python-panel-runtime"]');
+      expect(runtimeSelect).not.toBeNull();
+      expect(runtimeSelect?.value).toBe("pyodide");
+
+      const isolationLabel = container.querySelector<HTMLElement>('[data-testid="python-panel-isolation"]');
+      expect(isolationLabel?.textContent).toBe(
+        "SharedArrayBuffer unavailable — running Pyodide on main thread (may freeze UI)",
+      );
+
+      const runButton = container.querySelector<HTMLButtonElement>('[data-testid="python-panel-run"]');
+      expect(runButton).not.toBeNull();
+      runButton?.dispatchEvent(new MouseEvent("click"));
+
+      for (let i = 0; i < 10 && __pyodideMocks.initialize.mock.calls.length === 0; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      expect(__pyodideMocks.initialize).toHaveBeenCalledTimes(1);
+      expect(__pyodideMocks.execute).toHaveBeenCalledTimes(1);
+    } finally {
+      (globalThis as any).SharedArrayBuffer = originalSab;
+      (globalThis as any).crossOriginIsolated = originalIsolation;
+    }
+  });
+});

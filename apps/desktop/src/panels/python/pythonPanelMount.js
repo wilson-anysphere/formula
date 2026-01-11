@@ -188,8 +188,8 @@ export function mountPythonPanel({
     const backendMode = effectivePyodideBackendMode();
     isolationLabel.textContent =
       backendMode === "worker"
-        ? "Pyodide worker (SharedArrayBuffer enabled)"
-        : "Pyodide main thread (SharedArrayBuffer unavailable)";
+        ? "SharedArrayBuffer enabled"
+        : "SharedArrayBuffer unavailable — running Pyodide on main thread (may freeze UI)";
     degradedBanner.style.display = backendMode === "mainThread" ? "block" : "none";
   };
 
@@ -240,32 +240,33 @@ export function mountPythonPanel({
     }
   }
   async function ensureInitialized() {
-    if (pyodideRuntime) {
-      if (initPromise) return await initPromise;
-      initPromise = pyodideRuntime.initialize().catch((err) => {
-        initPromise = null;
-        throw err;
+    if (!pyodideRuntime) {
+      pyodideBridge = new PanelBridge(doc, {
+        activeSheetId: getActiveSheetId?.() ?? "Sheet1",
+        getActiveSheetId,
+        getSelection,
+        setSelection,
       });
-      return await initPromise;
+      pyodideRuntime = new PyodideRuntime({
+        api: pyodideBridge,
+        indexURL: PYODIDE_INDEX_URL,
+        rpcTimeoutMs: 5_000,
+      });
+      updateRuntimeStatus();
     }
+
     if (initPromise) return await initPromise;
-    pyodideBridge = new PanelBridge(doc, {
-      activeSheetId: getActiveSheetId?.() ?? "Sheet1",
-      getActiveSheetId,
-      getSelection,
-      setSelection,
-    });
-    pyodideRuntime = new PyodideRuntime({
-      api: pyodideBridge,
-      indexURL: PYODIDE_INDEX_URL,
-      rpcTimeoutMs: 5_000,
-    });
-    updateRuntimeStatus();
-    if (initPromise) return await initPromise;
-    initPromise = pyodideRuntime.initialize().catch((err) => {
-      initPromise = null;
-      throw err;
-    });
+
+    // `PyodideRuntime.initialize()` is idempotent and will return quickly when
+    // already initialized. We only memoize the in-flight promise so callers can
+    // retry after the runtime resets itself (timeouts/memory errors).
+    initPromise = pyodideRuntime
+      .initialize()
+      .finally(() => {
+        initPromise = null;
+        updateRuntimeStatus();
+      });
+
     return await initPromise;
   }
 

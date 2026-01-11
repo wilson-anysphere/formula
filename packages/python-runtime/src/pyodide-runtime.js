@@ -404,12 +404,29 @@ export class PyodideRuntime {
       try {
         await applyPythonSandbox(this.pyodide, effectivePermissions);
 
-        const { value: result, stdout: capturedStdout, stderr: capturedStderr } = await withCapturedOutput(this.pyodide, () =>
-          runWithTimeout(this.pyodide, code, effectiveTimeout, this._interruptView),
+        const startedAt = Date.now();
+        const { value: result, stdout: capturedStdout, stderr: capturedStderr } = await withCapturedOutput(
+          this.pyodide,
+          () => runWithTimeout(this.pyodide, code, effectiveTimeout, this._interruptView),
         );
 
         stdout = capturedStdout;
         stderr = capturedStderr;
+
+        // Without SharedArrayBuffer we can't use Pyodide's interrupt buffer to
+        // stop runaway execution. Best-effort: if execution completes but ran
+        // longer than the requested timeout, treat it as a timeout and reset the
+        // runtime so the UI can recover.
+        const durationMs = Date.now() - startedAt;
+        if (!this._interruptView && Number.isFinite(effectiveTimeout) && effectiveTimeout > 0 && durationMs > effectiveTimeout) {
+          const err = new Error(
+            `Pyodide script exceeded timeout (${durationMs}ms > ${effectiveTimeout}ms). SharedArrayBuffer is unavailable so execution cannot be interrupted; the UI may have been unresponsive and the runtime was reset.`,
+          );
+          err.stdout = stdout;
+          err.stderr = stderr;
+          this.destroy();
+          throw err;
+        }
 
         const afterMem = getWasmMemoryBytes(this.pyodide);
         if (Number.isFinite(effectiveMaxMemory) && effectiveMaxMemory > 0 && afterMem != null && afterMem > effectiveMaxMemory) {
