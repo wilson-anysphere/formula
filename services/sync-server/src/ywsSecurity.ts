@@ -214,6 +214,8 @@ function patchWebSocketMessageHandlers(ws: WebSocket, guard: MessageGuard): void
   const originalOn = ws.on.bind(ws);
   const originalAddListener = ws.addListener.bind(ws);
   const originalOnce = ws.once.bind(ws);
+  const originalPrependListener = ws.prependListener.bind(ws);
+  const originalPrependOnceListener = ws.prependOnceListener.bind(ws);
   const originalOff = ws.off ? ws.off.bind(ws) : ws.removeListener.bind(ws);
   const originalRemoveListener = ws.removeListener.bind(ws);
 
@@ -253,6 +255,22 @@ function patchWebSocketMessageHandlers(ws: WebSocket, guard: MessageGuard): void
     }
     return originalOnce(event, listener);
   }) as typeof ws.once;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ws.prependListener = ((event: any, listener: any) => {
+    if (event === "message" && typeof listener === "function") {
+      return originalPrependListener(event, wrap(listener as MessageListener));
+    }
+    return originalPrependListener(event, listener);
+  }) as typeof ws.prependListener;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ws.prependOnceListener = ((event: any, listener: any) => {
+    if (event === "message" && typeof listener === "function") {
+      return originalPrependOnceListener(event, wrap(listener as MessageListener));
+    }
+    return originalPrependOnceListener(event, listener);
+  }) as typeof ws.prependOnceListener;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ws.off = ((event: any, listener: any) => {
