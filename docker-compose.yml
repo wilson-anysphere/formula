@@ -41,14 +41,15 @@ services:
       SYNC_SERVER_JWT_AUDIENCE: formula-sync
 
       # Persistence
-      SYNC_SERVER_DATA_DIR: /data
       # `y-leveldb` is optional and not installed in the Docker image; use the
       # built-in file persistence backend for local docker-compose.
       SYNC_SERVER_PERSISTENCE_BACKEND: file
     ports:
       - "${SYNC_WS_PORT:-1234}:1234"
     volumes:
-      - sync_server_data:/data
+      # Mount at the default data dir inside the image (owned by the `node` user)
+      # so file persistence works without permission issues.
+      - sync_server_data:/app/services/sync-server/.sync-server-data
     depends_on:
       - api
 
