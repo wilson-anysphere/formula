@@ -3,49 +3,29 @@ const path = require("node:path");
 
 const { createExtensionPackage, loadExtensionManifest, readExtensionPackage } = require("../../../shared/extension-package");
 const { signBytes, sha256 } = require("../../../shared/crypto/signing");
-const { isValidSemver } = require("../../../shared/semver");
+const { validateExtensionManifest } = require("../../../shared/extension-manifest");
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 function validateManifest(manifest) {
   if (!manifest || typeof manifest !== "object") throw new Error("Manifest must be an object");
 
-  const required = ["name", "publisher", "version", "main"];
-  for (const field of required) {
-    if (!manifest[field] || typeof manifest[field] !== "string") {
-      throw new Error(`Manifest missing required string field: ${field}`);
-    }
+  const validated = validateExtensionManifest(manifest, { enforceEngine: false });
+
+  if (!NAME_RE.test(validated.name)) {
+    throw new Error(`Invalid extension name "${validated.name}" (expected ${NAME_RE})`);
   }
 
-  if (manifest.module !== undefined && manifest.module !== null && typeof manifest.module !== "string") {
-    throw new Error("Manifest field 'module' must be a string when present");
-  }
-  if (manifest.browser !== undefined && manifest.browser !== null && typeof manifest.browser !== "string") {
-    throw new Error("Manifest field 'browser' must be a string when present");
+  if (!NAME_RE.test(validated.publisher)) {
+    throw new Error(`Invalid publisher "${validated.publisher}" (expected ${NAME_RE})`);
   }
 
-  if (!NAME_RE.test(manifest.name)) {
-    throw new Error(`Invalid extension name "${manifest.name}" (expected ${NAME_RE})`);
-  }
-
-  if (!NAME_RE.test(manifest.publisher)) {
-    throw new Error(`Invalid publisher "${manifest.publisher}" (expected ${NAME_RE})`);
-  }
-
-  if (!isValidSemver(manifest.version)) {
-    throw new Error(`Invalid version "${manifest.version}" (expected semver)`);
-  }
-
-  if (!manifest.engines || typeof manifest.engines !== "object" || typeof manifest.engines.formula !== "string") {
-    throw new Error("Manifest missing required engines.formula string field");
-  }
-
-  return true;
+  return validated;
 }
 
 async function packageExtension(extensionDir, { privateKeyPem, formatVersion = 2 } = {}) {
-  const manifest = await loadExtensionManifest(extensionDir);
-  validateManifest(manifest);
+  let manifest = await loadExtensionManifest(extensionDir);
+  manifest = validateManifest(manifest);
 
   // Ensure the declared entrypoint exists before packaging. This prevents publishing
   // broken extensions when build output (e.g. dist/extension.js) is missing.
