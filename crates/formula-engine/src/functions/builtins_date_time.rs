@@ -1,5 +1,6 @@
-use chrono::{Datelike, Timelike};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 
+use crate::coercion::ValueLocaleConfig;
 use crate::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
 use crate::eval::CompiledExpr;
@@ -235,7 +236,8 @@ inventory::submit! {
 }
 
 fn hour_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v) {
+    let cfg = ValueLocaleConfig::en_us();
+    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v, cfg) {
         Ok((h, _, _)) => Value::Number(h as f64),
         Err(e) => Value::Error(e),
     })
@@ -256,7 +258,8 @@ inventory::submit! {
 }
 
 fn minute_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v) {
+    let cfg = ValueLocaleConfig::en_us();
+    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v, cfg) {
         Ok((_, m, _)) => Value::Number(m as f64),
         Err(e) => Value::Error(e),
     })
@@ -277,7 +280,8 @@ inventory::submit! {
 }
 
 fn second_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v) {
+    let cfg = ValueLocaleConfig::en_us();
+    map_unary(array_lift::eval_arg(ctx, &args[0]), |v| match time_components_from_value(&v, cfg) {
         Ok((_, _, s)) => Value::Number(s as f64),
         Err(e) => Value::Error(e),
     })
@@ -298,7 +302,8 @@ inventory::submit! {
 }
 
 fn timevalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    map_unary(eval_scalar_arg(ctx, &args[0]), |v| match timevalue_from_value(&v) {
+    let cfg = ValueLocaleConfig::en_us();
+    map_unary(eval_scalar_arg(ctx, &args[0]), |v| match timevalue_from_value(&v, cfg) {
         Ok(n) => Value::Number(n),
         Err(e) => Value::Error(e),
     })
@@ -320,7 +325,9 @@ inventory::submit! {
 
 fn datevalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let system = ctx.date_system();
-    map_unary(eval_scalar_arg(ctx, &args[0]), |v| match datevalue_from_value(&v, system) {
+    let now_utc = ctx.now_utc();
+    let cfg = ValueLocaleConfig::en_us();
+    map_unary(eval_scalar_arg(ctx, &args[0]), |v| match datevalue_from_value(&v, system, cfg, now_utc) {
         Ok(n) => Value::Number(n as f64),
         Err(e) => Value::Error(e),
     })
@@ -344,12 +351,14 @@ fn days_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let end_date = eval_scalar_arg(ctx, &args[0]);
     let start_date = eval_scalar_arg(ctx, &args[1]);
     let system = ctx.date_system();
+    let now_utc = ctx.now_utc();
+    let cfg = ValueLocaleConfig::en_us();
     broadcast_map2(end_date, start_date, |end_date, start_date| {
-        let end_serial = match datevalue_from_value(&end_date, system) {
+        let end_serial = match datevalue_from_value(&end_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let start_serial = match datevalue_from_value(&start_date, system) {
+        let start_serial = match datevalue_from_value(&start_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -380,13 +389,15 @@ fn days360_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Value::Blank
     };
     let system = ctx.date_system();
+    let now_utc = ctx.now_utc();
+    let cfg = ValueLocaleConfig::en_us();
 
     broadcast_map3(start_date, end_date, method, |start_date, end_date, method| {
-        let start_serial = match datevalue_from_value(&start_date, system) {
+        let start_serial = match datevalue_from_value(&start_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let end_serial = match datevalue_from_value(&end_date, system) {
+        let end_serial = match datevalue_from_value(&end_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -424,13 +435,15 @@ fn yearfrac_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Value::Blank
     };
     let system = ctx.date_system();
+    let now_utc = ctx.now_utc();
+    let cfg = ValueLocaleConfig::en_us();
 
     broadcast_map3(start_date, end_date, basis, |start_date, end_date, basis| {
-        let start_serial = match datevalue_from_value(&start_date, system) {
+        let start_serial = match datevalue_from_value(&start_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let end_serial = match datevalue_from_value(&end_date, system) {
+        let end_serial = match datevalue_from_value(&end_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -470,13 +483,15 @@ fn datedif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let end_date = eval_scalar_arg(ctx, &args[1]);
     let unit = eval_scalar_arg(ctx, &args[2]);
     let system = ctx.date_system();
+    let now_utc = ctx.now_utc();
+    let cfg = ValueLocaleConfig::en_us();
 
     broadcast_map3(start_date, end_date, unit, |start_date, end_date, unit| {
-        let start_serial = match datevalue_from_value(&start_date, system) {
+        let start_serial = match datevalue_from_value(&start_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
-        let end_serial = match datevalue_from_value(&end_date, system) {
+        let end_serial = match datevalue_from_value(&end_date, system, cfg, now_utc) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         };
@@ -1044,7 +1059,7 @@ fn time_from_parts(hour: &Value, minute: &Value, second: &Value) -> Result<f64, 
     date_time::time(hour_i32, minute_i32, second_i32).map_err(excel_error_kind)
 }
 
-fn timevalue_from_value(value: &Value) -> Result<f64, ErrorKind> {
+fn timevalue_from_value(value: &Value, cfg: ValueLocaleConfig) -> Result<f64, ErrorKind> {
     if let Ok(n) = value.coerce_to_number() {
         if !n.is_finite() {
             return Err(ErrorKind::Num);
@@ -1053,11 +1068,16 @@ fn timevalue_from_value(value: &Value) -> Result<f64, ErrorKind> {
     }
 
     let s = value.coerce_to_string()?;
-    let n = date_time::timevalue(&s).map_err(excel_error_kind)?;
+    let n = date_time::timevalue(&s, cfg).map_err(excel_error_kind)?;
     Ok(n.rem_euclid(1.0))
 }
 
-fn datevalue_from_value(value: &Value, system: ExcelDateSystem) -> Result<i32, ErrorKind> {
+fn datevalue_from_value(
+    value: &Value,
+    system: ExcelDateSystem,
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
+) -> Result<i32, ErrorKind> {
     if let Ok(n) = value.coerce_to_number() {
         if !n.is_finite() {
             return Err(ErrorKind::Num);
@@ -1070,11 +1090,11 @@ fn datevalue_from_value(value: &Value, system: ExcelDateSystem) -> Result<i32, E
     }
 
     let s = value.coerce_to_string()?;
-    date_time::datevalue(&s, system).map_err(excel_error_kind)
+    date_time::datevalue(&s, cfg, now_utc, system).map_err(excel_error_kind)
 }
 
-fn time_components_from_value(value: &Value) -> Result<(i32, i32, i32), ErrorKind> {
-    let mut fraction = timevalue_from_value(value)?;
+fn time_components_from_value(value: &Value, cfg: ValueLocaleConfig) -> Result<(i32, i32, i32), ErrorKind> {
+    let mut fraction = timevalue_from_value(value, cfg)?;
     fraction = fraction.rem_euclid(1.0);
     let mut total = (fraction * 86_400.0).floor();
     if total >= 86_400.0 {

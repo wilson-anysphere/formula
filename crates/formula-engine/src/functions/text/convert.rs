@@ -1,13 +1,27 @@
+use chrono::{DateTime, Utc};
+
+use crate::coercion::datetime::parse_value_text;
+use crate::coercion::ValueLocaleConfig;
+use crate::date::ExcelDateSystem;
 use crate::error::{ExcelError, ExcelResult};
 use crate::coercion::number::parse_number_strict;
 
 /// VALUE(text)
 ///
-/// Implements numeric parsing with the common US-style separators (`,` thousands,
-/// `.` decimal). Excel's full VALUE function also parses dates/times based on
-/// locale; that will be added when the calculation engine has locale context.
+/// Implements a subset of Excel's VALUE function:
+/// - Numeric parsing with locale-aware separators
+/// - Date/time text parsing (via DATEVALUE/TIMEVALUE rules)
 pub fn value(text: &str) -> ExcelResult<f64> {
-    numbervalue(text, Some('.'), Some(','))
+    value_with_locale(text, ValueLocaleConfig::en_us(), Utc::now(), ExcelDateSystem::EXCEL_1900)
+}
+
+pub fn value_with_locale(
+    text: &str,
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
+    system: ExcelDateSystem,
+) -> ExcelResult<f64> {
+    parse_value_text(text, cfg, now_utc, system)
 }
 
 /// NUMBERVALUE(number_text, [decimal_separator], [group_separator])

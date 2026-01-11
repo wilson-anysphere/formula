@@ -87,6 +87,11 @@ fn time_and_timevalue_conversions() {
 
     assert_number(&sheet.eval("=TIMEVALUE(\"1:30\")"), 0.0625);
     assert_number(&sheet.eval("=TIMEVALUE(\"1:30 PM\")"), 0.5625);
+    assert_number(&sheet.eval("=TIMEVALUE(\"1 PM\")"), 13.0 / 24.0);
+    assert_number(
+        &sheet.eval("=TIMEVALUE(\"2020-01-01 1:30 PM\")"),
+        13.5 / 24.0,
+    );
     assert_eq!(sheet.eval("=TIMEVALUE(\"nope\")"), Value::Error(ErrorKind::Value));
 }
 
@@ -97,9 +102,21 @@ fn datevalue_edate_and_eomonth() {
         sheet.eval("=DATEVALUE(\"2020-01-01\")"),
         sheet.eval("=DATE(2020,1,1)")
     );
+    assert_eq!(
+        sheet.eval("=DATEVALUE(\"1/2/2020\")"),
+        sheet.eval("=DATE(2020,1,2)")
+    );
+    assert_eq!(
+        sheet.eval("=DATEVALUE(\"January 2, 2020\")"),
+        sheet.eval("=DATE(2020,1,2)")
+    );
     assert_eq!(sheet.eval("=DATEVALUE(\"nope\")"), Value::Error(ErrorKind::Value));
     assert_eq!(
         sheet.eval("=DATEVALUE(\"2019-02-29\")"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=DATEVALUE(\"2020-02-30\")"),
         Value::Error(ErrorKind::Value)
     );
 
@@ -108,6 +125,15 @@ fn datevalue_edate_and_eomonth() {
 
     assert_number(&sheet.eval("=MONTH(EDATE(DATE(2020,1,31),1))"), 2.0);
     assert_number(&sheet.eval("=DAY(EDATE(DATE(2020,1,31),1))"), 29.0);
+}
+
+#[test]
+fn value_parses_datetime_text() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=VALUE(\"2020-01-01 1:30 PM\")"),
+        sheet.eval("=DATEVALUE(\"2020-01-01\")+TIMEVALUE(\"1:30 PM\")")
+    );
 }
 
 #[test]

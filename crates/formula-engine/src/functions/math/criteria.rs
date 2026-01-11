@@ -1,3 +1,6 @@
+use chrono::Utc;
+
+use crate::coercion::ValueLocaleConfig;
 use crate::date::ExcelDateSystem;
 use crate::functions::date_time::{datevalue, timevalue};
 use crate::functions::wildcard::WildcardPattern;
@@ -313,8 +316,10 @@ fn parse_error_kind(raw: &str) -> Option<ErrorKind> {
 }
 
 fn parse_date_time_criteria(raw: &str, system: ExcelDateSystem) -> Option<f64> {
-    let date = datevalue(raw, system).ok().map(|d| d as f64);
-    let time = timevalue(raw).ok();
+    let cfg = ValueLocaleConfig::en_us();
+    let now_utc = Utc::now();
+    let date = datevalue(raw, cfg, now_utc, system).ok().map(|d| d as f64);
+    let time = timevalue(raw, cfg).ok();
     match (date, time) {
         (Some(d), Some(t)) => Some(d + t),
         (Some(d), None) => Some(d),

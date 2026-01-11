@@ -1,5 +1,9 @@
 use std::collections::HashSet;
 
+use chrono::{DateTime, Utc};
+
+use crate::coercion::datetime::{parse_datevalue_text, parse_timevalue_text};
+use crate::coercion::ValueLocaleConfig;
 use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::{ExcelError, ExcelResult};
 
@@ -15,131 +19,18 @@ pub fn time(hour: i32, minute: i32, second: i32) -> ExcelResult<f64> {
 }
 
 /// TIMEVALUE(time_text)
-pub fn timevalue(time_text: &str) -> ExcelResult<f64> {
-    let raw = time_text.trim();
-    if raw.is_empty() {
-        return Err(ExcelError::Value);
-    }
-
-    // Find the portion that looks like a time (contains ':') and preserve an
-    // optional "AM"/"PM" suffix even when separated by whitespace.
-    let parts: Vec<&str> = raw.split_whitespace().collect();
-    if let Some((idx, token)) = parts
-        .iter()
-        .enumerate()
-        .find(|(_, part)| part.contains(':'))
-    {
-        if idx + 1 < parts.len() {
-            let suffix = parts[idx + 1];
-            if suffix.eq_ignore_ascii_case("AM") || suffix.eq_ignore_ascii_case("PM") {
-                let combined = format!("{token} {suffix}");
-                return parse_time_token(&combined);
-            }
-        }
-        return parse_time_token(token);
-    }
-
-    parse_time_token(raw)
-}
-
-fn parse_time_token(token: &str) -> ExcelResult<f64> {
-    let mut s = token.trim().to_string();
-    let mut ampm: Option<&str> = None;
-    if s.to_ascii_uppercase().ends_with("AM") {
-        ampm = Some("AM");
-        s = s[..s.len() - 2].trim().to_string();
-    } else if s.to_ascii_uppercase().ends_with("PM") {
-        ampm = Some("PM");
-        s = s[..s.len() - 2].trim().to_string();
-    }
-
-    let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() < 2 || parts.len() > 3 {
-        return Err(ExcelError::Value);
-    }
-
-    let mut hour: i32 = parts[0].trim().parse().map_err(|_| ExcelError::Value)?;
-    let minute: i32 = parts[1].trim().parse().map_err(|_| ExcelError::Value)?;
-    let second: i32 = if parts.len() == 3 {
-        parts[2].trim().parse().map_err(|_| ExcelError::Value)?
-    } else {
-        0
-    };
-
-    if minute < 0 || minute >= 60 || second < 0 || second >= 60 {
-        return Err(ExcelError::Value);
-    }
-
-    if let Some(ampm) = ampm {
-        if hour < 0 || hour > 12 {
-            return Err(ExcelError::Value);
-        }
-        if hour == 12 {
-            hour = 0;
-        }
-        if ampm == "PM" {
-            hour += 12;
-        }
-    }
-
-    if hour < 0 {
-        return Err(ExcelError::Value);
-    }
-
-    time(hour, minute, second)
+pub fn timevalue(time_text: &str, cfg: ValueLocaleConfig) -> ExcelResult<f64> {
+    parse_timevalue_text(time_text, cfg)
 }
 
 /// DATEVALUE(date_text)
-pub fn datevalue(date_text: &str, system: ExcelDateSystem) -> ExcelResult<i32> {
-    let raw = date_text.trim();
-    if raw.is_empty() {
-        return Err(ExcelError::Value);
-    }
-
-    let token = raw
-        .split_whitespace()
-        .find(|part| part.contains('-') || part.contains('/') || part.contains('.'))
-        .unwrap_or(raw);
-
-    let (year, month, day) = parse_date_token(token)?;
-    // Excel's DATEVALUE treats invalid date text as a #VALUE! error, even when the string is
-    // parseable but represents an invalid date (e.g. 2019-02-29).
-    ymd_to_serial(ExcelDate::new(year, month, day), system).map_err(|_| ExcelError::Value)
-}
-
-fn parse_date_token(token: &str) -> ExcelResult<(i32, u8, u8)> {
-    let separators = ['-', '/', '.'];
-    let sep = separators
-        .iter()
-        .copied()
-        .find(|c| token.contains(*c))
-        .ok_or(ExcelError::Value)?;
-
-    let parts: Vec<&str> = token.split(sep).collect();
-    if parts.len() != 3 {
-        return Err(ExcelError::Value);
-    }
-
-    let a = parts[0].trim();
-    let b = parts[1].trim();
-    let c = parts[2].trim();
-
-    if a.len() == 4 {
-        // ISO-ish: yyyy-mm-dd
-        let year: i32 = a.parse().map_err(|_| ExcelError::Value)?;
-        let month: u8 = b.parse().map_err(|_| ExcelError::Value)?;
-        let day: u8 = c.parse().map_err(|_| ExcelError::Value)?;
-        return Ok((year, month, day));
-    }
-
-    // Default to US-style: mm/dd/yy(yy)
-    let month: u8 = a.parse().map_err(|_| ExcelError::Value)?;
-    let day: u8 = b.parse().map_err(|_| ExcelError::Value)?;
-    let mut year: i32 = c.parse().map_err(|_| ExcelError::Value)?;
-    if (0..100).contains(&year) {
-        year = if year <= 29 { 2000 + year } else { 1900 + year };
-    }
-    Ok((year, month, day))
+pub fn datevalue(
+    date_text: &str,
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
+    parse_datevalue_text(date_text, cfg, now_utc, system)
 }
 
 /// EOMONTH(start_date, months)

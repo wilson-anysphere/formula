@@ -1,3 +1,4 @@
+use crate::coercion::ValueLocaleConfig;
 use crate::error::ExcelError;
 use crate::eval::CompiledExpr;
 use crate::functions::array_lift;
@@ -416,6 +417,10 @@ fn value_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
+    let cfg = ValueLocaleConfig::en_us();
+    let now_utc = ctx.now_utc();
+    let system = ctx.date_system();
+
     elementwise_unary(arg, |v| match v {
         Value::Error(e) => Value::Error(*e),
         Value::Number(n) => {
@@ -430,7 +435,7 @@ fn value_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Ok(s) => s,
                 Err(e) => return Value::Error(e),
             };
-            match crate::functions::text::value(&text) {
+            match crate::functions::text::value_with_locale(&text, cfg, now_utc, system) {
                 Ok(n) => Value::Number(n),
                 Err(e) => Value::Error(excel_error_to_kind(e)),
             }

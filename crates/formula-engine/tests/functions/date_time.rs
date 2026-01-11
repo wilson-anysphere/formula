@@ -1,3 +1,6 @@
+use chrono::{TimeZone, Utc};
+
+use formula_engine::coercion::ValueLocaleConfig;
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::functions::date_time;
 use formula_engine::ExcelError;
@@ -11,26 +14,34 @@ fn time_builds_fractional_days() {
 
 #[test]
 fn timevalue_parses_common_formats() {
-    assert!((date_time::timevalue("1:30").unwrap() - 0.0625).abs() < 1.0e-12);
-    assert!((date_time::timevalue("1:30 PM").unwrap() - 0.5625).abs() < 1.0e-12);
+    let cfg = ValueLocaleConfig::en_us();
+    assert!((date_time::timevalue("1:30", cfg).unwrap() - 0.0625).abs() < 1.0e-12);
+    assert!((date_time::timevalue("1:30 PM", cfg).unwrap() - 0.5625).abs() < 1.0e-12);
 }
 
 #[test]
 fn datevalue_parses_iso_and_us_formats() {
     let system = ExcelDateSystem::EXCEL_1900;
+    let now = Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap();
+    let cfg = ValueLocaleConfig::en_us();
     let expected = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
     assert_eq!(
-        date_time::datevalue("2020-01-01", system).unwrap(),
+        date_time::datevalue("2020-01-01", cfg, now, system).unwrap(),
         expected
     );
-    assert_eq!(date_time::datevalue("1/1/2020", system).unwrap(), expected);
+    assert_eq!(
+        date_time::datevalue("1/1/2020", cfg, now, system).unwrap(),
+        expected
+    );
 }
 
 #[test]
 fn datevalue_returns_value_error_for_invalid_dates() {
     let system = ExcelDateSystem::EXCEL_1900;
+    let now = Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap();
+    let cfg = ValueLocaleConfig::en_us();
     assert_eq!(
-        date_time::datevalue("2019-02-29", system).unwrap_err(),
+        date_time::datevalue("2019-02-29", cfg, now, system).unwrap_err(),
         ExcelError::Value
     );
 }

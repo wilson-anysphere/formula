@@ -1,0 +1,556 @@
+use chrono::{DateTime, Datelike, Utc};
+
+use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+use crate::error::{ExcelError, ExcelResult};
+
+use super::{DateOrder, ValueLocaleConfig};
+
+pub fn parse_datevalue_text(
+    text: &str,
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
+    match try_parse_date(text, cfg, now_utc, system) {
+        Some(result) => result,
+        None => Err(ExcelError::Value),
+    }
+}
+
+pub fn parse_timevalue_text(text: &str, _cfg: ValueLocaleConfig) -> ExcelResult<f64> {
+    match try_parse_time(text) {
+        Some(result) => result,
+        None => Err(ExcelError::Value),
+    }
+}
+
+pub fn parse_value_text(
+    text: &str,
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
+    system: ExcelDateSystem,
+) -> ExcelResult<f64> {
+    match crate::functions::text::numbervalue(text, Some(cfg.decimal_separator), Some(cfg.group_separator)) {
+        Ok(n) => return Ok(n),
+        Err(ExcelError::Num) => return Err(ExcelError::Num),
+        Err(ExcelError::Div0) => return Err(ExcelError::Div0),
+        Err(ExcelError::Value) => {}
+    }
+
+    let date = match try_parse_date(text, cfg, now_utc, system) {
+        Some(Ok(serial)) => Some(serial as f64),
+        Some(Err(e)) => return Err(e),
+        None => None,
+    };
+
+    let time = match try_parse_time(text) {
+        Some(Ok(fraction)) => Some(fraction),
+        Some(Err(e)) => return Err(e),
+        None => None,
+    };
+
+    match (date, time) {
+        (Some(d), Some(t)) => Ok(d + t),
+        (Some(d), None) => Ok(d),
+        (None, Some(t)) => Ok(t),
+        (None, None) => Err(ExcelError::Value),
+    }
+}
+
+fn try_parse_date(
+    text: &str,
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
+    system: ExcelDateSystem,
+) -> Option<ExcelResult<i32>> {
+    let raw = text.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let now_year = now_utc.year();
+    let tokens: Vec<&str> = raw.split_whitespace().collect();
+
+    // Token-based patterns like `2020-01-01`, `1/2/2020`, `2-Jan-2020`.
+    for token in &tokens {
+        if let Some(result) = parse_date_token(token, cfg, now_year) {
+            return Some(result.and_then(|(y, m, d)| date_parts_to_serial(y, m, d, system)));
+        }
+    }
+
+    // Month name forms that span tokens like `Jan 2 2020` or `2 Jan 2020`.
+    for i in 0..tokens.len() {
+        if let Some(result) = parse_month_name_sequence(&tokens, i, now_year) {
+            return Some(result.and_then(|(y, m, d)| date_parts_to_serial(y, m, d, system)));
+        }
+    }
+
+    None
+}
+
+fn date_parts_to_serial(year: i32, month: u8, day: u8, system: ExcelDateSystem) -> ExcelResult<i32> {
+    ymd_to_serial(ExcelDate::new(year, month, day), system).map_err(|_| ExcelError::Value)
+}
+
+fn parse_date_token(token: &str, cfg: ValueLocaleConfig, now_year: i32) -> Option<ExcelResult<(i32, u8, u8)>> {
+    let token = token.trim_matches(',');
+    if token.is_empty() {
+        return None;
+    }
+
+    for sep in ['-', '/', '.'] {
+        if !token.contains(sep) {
+            continue;
+        }
+
+        let parts: Vec<&str> = token.split(sep).collect();
+        if parts.len() == 3 {
+            let numeric_parts = parts.iter().filter(|p| is_ascii_digit_str(p)).count();
+            let month_parts = parts.iter().filter(|p| parse_month_name(p).is_some()).count();
+            if numeric_parts == 0 && month_parts == 0 {
+                return None;
+            }
+
+            if parts.iter().all(|p| is_ascii_digit_str(p)) {
+                return Some(parse_numeric_3part_date(&parts, cfg));
+            }
+            if let Some(result) = parse_month_name_parts(&parts, now_year) {
+                return Some(result);
+            }
+
+            // Date-ish pattern, but invalid.
+            if numeric_parts >= 2 || month_parts >= 1 {
+                return Some(Err(ExcelError::Value));
+            }
+
+            return None;
+        }
+
+        if parts.len() == 2 {
+            // Excel accepts `m/d` or `d/m` without a year, using the current year.
+            // Restrict this to `/` to avoid confusing decimal numbers like `1.5`.
+            if sep != '/' {
+                continue;
+            }
+
+            if parts.iter().all(|p| is_ascii_digit_str(p)) {
+                return Some(parse_numeric_2part_date(&parts, cfg, now_year));
+            }
+
+            if let Some(result) = parse_month_name_parts(&parts, now_year) {
+                return Some(result);
+            }
+
+            let numeric_parts = parts.iter().filter(|p| is_ascii_digit_str(p)).count();
+            let month_parts = parts.iter().filter(|p| parse_month_name(p).is_some()).count();
+            if numeric_parts == 0 && month_parts == 0 {
+                return None;
+            }
+
+            if numeric_parts >= 1 || month_parts >= 1 {
+                return Some(Err(ExcelError::Value));
+            }
+
+            return None;
+        }
+    }
+
+    None
+}
+
+fn parse_numeric_3part_date(parts: &[&str], cfg: ValueLocaleConfig) -> ExcelResult<(i32, u8, u8)> {
+    debug_assert_eq!(parts.len(), 3);
+    let a = parts[0].trim();
+    let b = parts[1].trim();
+    let c = parts[2].trim();
+
+    if a.len() == 4 {
+        // ISO-ish: yyyy-mm-dd
+        let year = parse_year_component(a)?;
+        let month = parse_u8_component(b)?;
+        let day = parse_u8_component(c)?;
+        return Ok((year, month, day));
+    }
+
+    match cfg.date_order {
+        DateOrder::Mdy => {
+            let month = parse_u8_component(a)?;
+            let day = parse_u8_component(b)?;
+            let year = parse_year_component(c)?;
+            Ok((year, month, day))
+        }
+        DateOrder::Dmy => {
+            let day = parse_u8_component(a)?;
+            let month = parse_u8_component(b)?;
+            let year = parse_year_component(c)?;
+            Ok((year, month, day))
+        }
+    }
+}
+
+fn parse_numeric_2part_date(parts: &[&str], cfg: ValueLocaleConfig, now_year: i32) -> ExcelResult<(i32, u8, u8)> {
+    debug_assert_eq!(parts.len(), 2);
+    let a = parts[0].trim();
+    let b = parts[1].trim();
+
+    match cfg.date_order {
+        DateOrder::Mdy => {
+            let month = parse_u8_component(a)?;
+            let day = parse_u8_component(b)?;
+            Ok((now_year, month, day))
+        }
+        DateOrder::Dmy => {
+            let day = parse_u8_component(a)?;
+            let month = parse_u8_component(b)?;
+            Ok((now_year, month, day))
+        }
+    }
+}
+
+fn parse_month_name_parts(parts: &[&str], now_year: i32) -> Option<ExcelResult<(i32, u8, u8)>> {
+    match parts.len() {
+        3 => {
+            let a = parts[0].trim();
+            let b = parts[1].trim();
+            let c = parts[2].trim();
+
+            if let Some(month) = parse_month_name(a) {
+                let day = match parse_u8_component(b) {
+                    Ok(v) => v,
+                    Err(e) => return Some(Err(e)),
+                };
+                let year = match parse_year_component(c) {
+                    Ok(v) => v,
+                    Err(e) => return Some(Err(e)),
+                };
+                return Some(Ok((year, month, day)));
+            }
+
+            if let Some(month) = parse_month_name(b) {
+                if !is_ascii_digit_str(a) || !is_ascii_digit_str(c) {
+                    return Some(Err(ExcelError::Value));
+                }
+
+                let (year_str, day_str) = if a.len() == 4 { (a, c) } else { (c, a) };
+                let year = match parse_year_component(year_str) {
+                    Ok(v) => v,
+                    Err(e) => return Some(Err(e)),
+                };
+                let day = match parse_u8_component(day_str) {
+                    Ok(v) => v,
+                    Err(e) => return Some(Err(e)),
+                };
+                return Some(Ok((year, month, day)));
+            }
+
+            None
+        }
+        2 => {
+            let a = parts[0].trim();
+            let b = parts[1].trim();
+
+            if let Some(month) = parse_month_name(a) {
+                let day = match parse_u8_component(b) {
+                    Ok(v) => v,
+                    Err(e) => return Some(Err(e)),
+                };
+                return Some(Ok((now_year, month, day)));
+            }
+
+            if let Some(month) = parse_month_name(b) {
+                let day = match parse_u8_component(a) {
+                    Ok(v) => v,
+                    Err(e) => return Some(Err(e)),
+                };
+                return Some(Ok((now_year, month, day)));
+            }
+
+            None
+        }
+        _ => None,
+    }
+}
+
+fn parse_month_name_sequence(
+    tokens: &[&str],
+    start: usize,
+    now_year: i32,
+) -> Option<ExcelResult<(i32, u8, u8)>> {
+    let month_token = tokens.get(start)?;
+    let month_token_clean = month_token.trim_matches(|c: char| matches!(c, ',' | '.'));
+    if let Some(month) = parse_month_name(month_token_clean) {
+        let day_token = tokens.get(start + 1)?;
+        let day = match parse_u8_component(day_token.trim_matches(',')) {
+            Ok(v) => v,
+            Err(e) => return Some(Err(e)),
+        };
+
+        if let Some(year_token) = tokens.get(start + 2) {
+            if year_token.chars().all(|c| c.is_ascii_digit() || c == ',') {
+                let year = match parse_year_component(year_token.trim_matches(',')) {
+                    Ok(v) => v,
+                    Err(e) => return Some(Err(e)),
+                };
+                return Some(Ok((year, month, day)));
+            }
+        }
+
+        return Some(Ok((now_year, month, day)));
+    }
+
+    let day_token = tokens.get(start)?;
+    if !is_ascii_digit_str(day_token.trim_matches(',')) {
+        return None;
+    }
+    let day = match parse_u8_component(day_token.trim_matches(',')) {
+        Ok(v) => v,
+        Err(e) => return Some(Err(e)),
+    };
+
+    let month_token = tokens.get(start + 1)?;
+    let month_token_clean = month_token.trim_matches(|c: char| matches!(c, ',' | '.'));
+    let month = parse_month_name(month_token_clean)?;
+
+    if let Some(year_token) = tokens.get(start + 2) {
+        if year_token.chars().all(|c| c.is_ascii_digit() || c == ',') {
+            let year = match parse_year_component(year_token.trim_matches(',')) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            return Some(Ok((year, month, day)));
+        }
+    }
+
+    Some(Ok((now_year, month, day)))
+}
+
+fn parse_month_name(token: &str) -> Option<u8> {
+    let token = token.trim_matches(|c: char| !c.is_ascii_alphabetic());
+    if token.is_empty() {
+        return None;
+    }
+    match token.to_ascii_lowercase().as_str() {
+        "jan" | "january" => Some(1),
+        "feb" | "february" => Some(2),
+        "mar" | "march" => Some(3),
+        "apr" | "april" => Some(4),
+        "may" => Some(5),
+        "jun" | "june" => Some(6),
+        "jul" | "july" => Some(7),
+        "aug" | "august" => Some(8),
+        "sep" | "sept" | "september" => Some(9),
+        "oct" | "october" => Some(10),
+        "nov" | "november" => Some(11),
+        "dec" | "december" => Some(12),
+        _ => None,
+    }
+}
+
+fn parse_year_component(s: &str) -> ExcelResult<i32> {
+    let raw: i32 = s.parse().map_err(|_| ExcelError::Value)?;
+    if raw < 0 {
+        return Err(ExcelError::Value);
+    }
+    if (0..100).contains(&raw) {
+        Ok(if raw <= 29 { 2000 + raw } else { 1900 + raw })
+    } else {
+        Ok(raw)
+    }
+}
+
+fn parse_u8_component(s: &str) -> ExcelResult<u8> {
+    let raw: u8 = s.parse().map_err(|_| ExcelError::Value)?;
+    if raw == 0 {
+        return Err(ExcelError::Value);
+    }
+    Ok(raw)
+}
+
+fn is_ascii_digit_str(s: &str) -> bool {
+    let s = s.trim();
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
+}
+
+fn try_parse_time(text: &str) -> Option<ExcelResult<f64>> {
+    let raw = text.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let tokens: Vec<&str> = raw.split_whitespace().collect();
+
+    for (idx, token) in tokens.iter().enumerate() {
+        let token = token.trim_matches(',');
+        if token.is_empty() {
+            continue;
+        }
+
+        if token.contains(':') {
+            let mut combined = token.to_string();
+            if let Some(next) = tokens.get(idx + 1) {
+                let suffix = next.trim_matches(',');
+                if suffix.eq_ignore_ascii_case("AM") || suffix.eq_ignore_ascii_case("PM") {
+                    combined = format!("{combined} {suffix}");
+                }
+            }
+            return Some(parse_time_candidate(&combined));
+        }
+
+        if looks_like_ampm_suffix(token) {
+            return Some(parse_time_candidate(token));
+        }
+
+        if is_ascii_digit_str(token) {
+            if let Some(next) = tokens.get(idx + 1) {
+                let suffix = next.trim_matches(',');
+                if suffix.eq_ignore_ascii_case("AM") || suffix.eq_ignore_ascii_case("PM") {
+                    return Some(parse_time_candidate(&format!("{token} {suffix}")));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn looks_like_ampm_suffix(token: &str) -> bool {
+    let upper = token.to_ascii_uppercase();
+    (upper.ends_with("AM") || upper.ends_with("PM")) && upper.chars().any(|c| c.is_ascii_digit())
+}
+
+fn parse_time_candidate(candidate: &str) -> ExcelResult<f64> {
+    let mut s = candidate.trim().to_string();
+    if s.is_empty() {
+        return Err(ExcelError::Value);
+    }
+
+    let mut ampm: Option<&str> = None;
+    let upper = s.to_ascii_uppercase();
+    if upper.ends_with("AM") {
+        ampm = Some("AM");
+        s.truncate(s.len().saturating_sub(2));
+        s = s.trim().to_string();
+    } else if upper.ends_with("PM") {
+        ampm = Some("PM");
+        s.truncate(s.len().saturating_sub(2));
+        s = s.trim().to_string();
+    }
+
+    if s.is_empty() {
+        return Err(ExcelError::Value);
+    }
+
+    let (mut hour, minute, second) = if s.contains(':') {
+        parse_colon_time(&s)?
+    } else {
+        if ampm.is_none() {
+            return Err(ExcelError::Value);
+        }
+        let hour: i32 = s.parse().map_err(|_| ExcelError::Value)?;
+        (hour, 0, 0.0)
+    };
+
+    if minute < 0 || minute >= 60 || second < 0.0 || second >= 60.0 {
+        return Err(ExcelError::Value);
+    }
+
+    if let Some(ampm) = ampm {
+        if hour < 0 || hour > 12 {
+            return Err(ExcelError::Value);
+        }
+        if hour == 12 {
+            hour = 0;
+        }
+        if ampm == "PM" {
+            hour += 12;
+        }
+    }
+
+    if hour < 0 {
+        return Err(ExcelError::Value);
+    }
+
+    let total_seconds = (hour as f64) * 3600.0 + (minute as f64) * 60.0 + second;
+    Ok(total_seconds / 86_400.0)
+}
+
+fn parse_colon_time(s: &str) -> ExcelResult<(i32, i32, f64)> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() < 2 || parts.len() > 3 {
+        return Err(ExcelError::Value);
+    }
+
+    let hour: i32 = parts[0].trim().parse().map_err(|_| ExcelError::Value)?;
+    let minute: i32 = parts[1].trim().parse().map_err(|_| ExcelError::Value)?;
+    let second = if parts.len() == 3 {
+        parse_seconds_component(parts[2].trim())?
+    } else {
+        0.0
+    };
+
+    Ok((hour, minute, second))
+}
+
+fn parse_seconds_component(s: &str) -> ExcelResult<f64> {
+    if s.is_empty() {
+        return Err(ExcelError::Value);
+    }
+    let seconds: f64 = s.parse().map_err(|_| ExcelError::Value)?;
+    if !seconds.is_finite() {
+        return Err(ExcelError::Value);
+    }
+    let whole = seconds.trunc();
+    if whole < 0.0 || whole >= 60.0 {
+        return Err(ExcelError::Value);
+    }
+    Ok(seconds)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+
+    use super::*;
+    use crate::date::ExcelDateSystem;
+
+    #[test]
+    fn parses_missing_year_using_now_year() {
+        let now = Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap();
+        let cfg = ValueLocaleConfig::en_us();
+        let serial = parse_datevalue_text("1/2", cfg, now, ExcelDateSystem::EXCEL_1900).unwrap();
+        let expected = date_parts_to_serial(2024, 1, 2, ExcelDateSystem::EXCEL_1900).unwrap();
+        assert_eq!(serial, expected);
+    }
+
+    #[test]
+    fn respects_dmy_order() {
+        let now = Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap();
+        let cfg = ValueLocaleConfig {
+            date_order: DateOrder::Dmy,
+            ..ValueLocaleConfig::en_us()
+        };
+        let serial =
+            parse_datevalue_text("1/2/2020", cfg, now, ExcelDateSystem::EXCEL_1900).unwrap();
+        let expected = date_parts_to_serial(2020, 2, 1, ExcelDateSystem::EXCEL_1900).unwrap();
+        assert_eq!(serial, expected);
+    }
+
+    #[test]
+    fn parses_month_names() {
+        let now = Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap();
+        let cfg = ValueLocaleConfig::en_us();
+        let serial =
+            parse_datevalue_text("January 2, 2020", cfg, now, ExcelDateSystem::EXCEL_1900).unwrap();
+        let expected = date_parts_to_serial(2020, 1, 2, ExcelDateSystem::EXCEL_1900).unwrap();
+        assert_eq!(serial, expected);
+        let serial = parse_datevalue_text("2-Jan-2020", cfg, now, ExcelDateSystem::EXCEL_1900).unwrap();
+        assert_eq!(serial, expected);
+    }
+
+    #[test]
+    fn parses_timevalue_hour_only_ampm() {
+        let cfg = ValueLocaleConfig::en_us();
+        assert_eq!(parse_timevalue_text("1 PM", cfg).unwrap(), 13.0 / 24.0);
+        assert_eq!(parse_timevalue_text("1PM", cfg).unwrap(), 13.0 / 24.0);
+    }
+}
