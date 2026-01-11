@@ -164,6 +164,13 @@ fn pkcs7_signature_with_prefix_is_still_verified() {
         .expect("signature should be present");
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert!(
+        sig.signer_subject
+            .as_deref()
+            .is_some_and(|s| s.contains("Formula VBA Test")),
+        "expected signer subject to mention test CN, got: {:?}",
+        sig.signer_subject
+    );
 }
 
 #[test]
@@ -179,6 +186,13 @@ fn detached_pkcs7_signature_with_prefixed_content_is_verified() {
         .expect("signature should be present");
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert!(
+        sig.signer_subject
+            .as_deref()
+            .is_some_and(|s| s.contains("Formula VBA Test")),
+        "expected signer subject to mention test CN, got: {:?}",
+        sig.signer_subject
+    );
 }
 
 #[test]
@@ -203,5 +217,12 @@ fn prefers_verified_signature_stream_over_invalid_candidate() {
         sig.stream_path.contains("DigitalSignatureEx"),
         "expected to pick verified signature stream, got {}",
         sig.stream_path
+    );
+    assert!(
+        sig.signer_subject
+            .as_deref()
+            .is_some_and(|s| s.contains("Formula VBA Test")),
+        "expected signer subject to mention test CN, got: {:?}",
+        sig.signer_subject
     );
 }

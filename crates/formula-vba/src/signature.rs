@@ -156,6 +156,28 @@ fn signature_path_rank(path: &str) -> u8 {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, usize)> {
+    use openssl::pkcs7::Pkcs7;
+
+    // Some producers include a small header before the DER-encoded PKCS#7 payload. Try parsing
+    // from the start first, then scan for an embedded DER SEQUENCE that parses as PKCS#7.
+    if let Ok(pkcs7) = Pkcs7::from_der(signature) {
+        return Some((pkcs7, 0));
+    }
+
+    for start in 0..signature.len() {
+        if signature[start] != 0x30 {
+            continue;
+        }
+        if let Ok(pkcs7) = Pkcs7::from_der(&signature[start..]) {
+            return Some((pkcs7, start));
+        }
+    }
+
+    None
+}
+
 fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
     #[cfg(target_arch = "wasm32")]
     {
@@ -166,35 +188,15 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    use openssl::pkcs7::{Pkcs7, Pkcs7Flags};
+    use openssl::pkcs7::Pkcs7Flags;
     #[cfg(not(target_arch = "wasm32"))]
     use openssl::stack::Stack;
     #[cfg(not(target_arch = "wasm32"))]
     use openssl::x509::store::X509StoreBuilder;
 
     #[cfg(not(target_arch = "wasm32"))]
-    let (pkcs7, pkcs7_offset) = {
-        // Some producers include a small header before the DER-encoded PKCS#7
-        // payload. Try parsing from the start first, then scan for an embedded
-        // DER SEQUENCE that parses as PKCS#7.
-        let mut parsed: Option<(Pkcs7, usize)> = Pkcs7::from_der(signature).ok().map(|p| (p, 0));
-
-        if parsed.is_none() {
-            for start in 0..signature.len() {
-                if signature[start] != 0x30 {
-                    continue;
-                }
-                if let Ok(pkcs7) = Pkcs7::from_der(&signature[start..]) {
-                    parsed = Some((pkcs7, start));
-                    break;
-                }
-            }
-        }
-
-        match parsed {
-            Some(found) => found,
-            None => return VbaSignatureVerification::SignedParseError,
-        }
+    let Some((pkcs7, pkcs7_offset)) = parse_pkcs7_with_offset(signature) else {
+        return VbaSignatureVerification::SignedParseError;
     };
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -243,12 +245,38 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn extract_signer_subject_from_pkcs7(bytes: &[u8]) -> Option<String> {
+    use openssl::pkcs7::Pkcs7Flags;
+    use openssl::stack::Stack;
+    use openssl::x509::X509;
+    use x509_parser::prelude::parse_x509_certificate;
+
+    let (pkcs7, _) = parse_pkcs7_with_offset(bytes)?;
+    let signers = if let Some(certs) = pkcs7.signed().and_then(|s| s.certificates()) {
+        pkcs7.signers(certs, Pkcs7Flags::empty()).ok()
+    } else {
+        let empty = Stack::<X509>::new().ok()?;
+        pkcs7.signers(&empty, Pkcs7Flags::empty()).ok()
+    }?;
+
+    let signer_cert = signers.get(0)?;
+    let der = signer_cert.to_der().ok()?;
+    let (_, cert) = parse_x509_certificate(&der).ok()?;
+    Some(cert.subject().to_string())
+}
+
 fn extract_first_certificate_subject(bytes: &[u8]) -> Option<String> {
     use x509_parser::prelude::parse_x509_certificate;
 
     // Try parsing from the beginning first (some producers store a raw cert).
     if let Ok((_, cert)) = parse_x509_certificate(bytes) {
         return Some(cert.subject().to_string());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(subject) = extract_signer_subject_from_pkcs7(bytes) {
+        return Some(subject);
     }
 
     // Otherwise, scan for embedded certificates inside a CMS/PKCS#7 blob. This
