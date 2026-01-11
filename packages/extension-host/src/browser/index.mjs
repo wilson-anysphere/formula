@@ -22,6 +22,7 @@ const API_PERMISSIONS = {
   "functions.unregister": [],
 
   "network.fetch": ["network"],
+  "network.openWebSocket": ["network"],
 
   "clipboard.readText": ["clipboard"],
   "clipboard.writeText": ["clipboard"],
@@ -474,6 +475,11 @@ class BrowserExtensionHost {
           bodyText
         };
       }
+
+      case "network.openWebSocket":
+        // WebSocket connections are initiated directly inside the worker after the host
+        // confirms the extension has been granted the `network` permission.
+        return null;
 
       case "clipboard.readText":
         return this._clipboardApi.readText();
