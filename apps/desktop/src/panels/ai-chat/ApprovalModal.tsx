@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 
 import type { LLMToolCall } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
@@ -21,11 +21,29 @@ function safeStringify(value: unknown): string {
 export function ApprovalModal(props: ApprovalModalProps): React.ReactElement {
   const { call, preview } = props.request;
   const summary = preview.summary;
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        props.onReject();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [props.onReject]);
 
   return (
     <div
       role="dialog"
       aria-modal="true"
+      tabIndex={-1}
+      ref={dialogRef}
       style={{
         position: "absolute",
         inset: 0,

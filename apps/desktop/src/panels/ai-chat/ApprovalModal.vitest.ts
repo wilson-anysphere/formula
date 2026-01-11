@@ -3,7 +3,7 @@
 import React from "react";
 import { act } from "react-dom/test-utils";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApprovalModal } from "./ApprovalModal.js";
 
@@ -16,6 +16,8 @@ describe("ApprovalModal", () => {
     document.body.appendChild(host);
 
     const root = createRoot(host);
+
+    const onReject = vi.fn();
 
     await act(async () => {
       root.render(
@@ -33,7 +35,7 @@ describe("ApprovalModal", () => {
             },
           },
           onApprove: () => {},
-          onReject: () => {},
+          onReject,
         }),
       );
     });
@@ -41,6 +43,11 @@ describe("ApprovalModal", () => {
     expect(host.textContent).toContain("Approve AI changes?");
     expect(host.textContent).toContain("write_cell");
     expect(host.textContent).toContain("Sheet1!A1");
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(onReject).toHaveBeenCalledTimes(1);
 
     act(() => {
       root.unmount();
