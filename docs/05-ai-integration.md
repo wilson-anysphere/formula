@@ -415,6 +415,18 @@ const AI_CLASSIFY: FunctionSpec = {
 **Latency requirement:** Minutes (complex workflows)
 **Model:** Cloud with extensive tool use
 
+**Status:** Implemented in the desktop app.
+
+Implementation notes:
+- Orchestrator: `apps/desktop/src/ai/agent/agentOrchestrator.ts` (`runAgentTask`)
+  - Builds workbook RAG context via `ContextManager.buildWorkbookContextFromSpreadsheetApi`
+  - Runs the tool-calling loop via `runChatWithToolsAudited` with `mode: "agent"`
+  - Emits progress events (`planning`, `tool_call`, `tool_result`, `assistant_message`, `complete` / `cancelled` / `error`)
+- UI surface: `apps/desktop/src/panels/ai-chat/AIChatPanelContainer.tsx`
+  - Agent tab (goal + constraints + run/cancel + live step log)
+  - Preview-based approval gating via `PreviewEngine` + the shared approval modal
+  - Audit trail viewable in the AI Audit panel
+
 **Capabilities:**
 - Multi-step data gathering
 - Complex analysis workflows
