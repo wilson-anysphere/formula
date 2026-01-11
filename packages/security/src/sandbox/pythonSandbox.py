@@ -691,13 +691,56 @@ def _main():
             setattr(_posix, name, guard_automation(getattr(_posix, name), f"posix.{name}"))
 
     import socket as _socket
+    import weakref
 
-    original_create_connection = _socket.create_connection
-    original_connect = _socket.socket.connect
-    original_connect_ex = getattr(_socket.socket, "connect_ex", None)
-    original_bind = _socket.socket.bind
-    original_sendto = _socket.socket.sendto
-    original_sendmsg = getattr(_socket.socket, "sendmsg", None)
+    # The stdlib `socket` module is backed by the C extension `_socket`. Monkeypatching
+    # `socket.socket.connect` is not sufficient because untrusted code can reach the
+    # underlying base type (`socket.socket.__mro__[1]`) or import `_socket` directly.
+    #
+    # We therefore replace `socket.socket`/`SocketType` with a pure-Python wrapper that
+    # delegates to an internal real socket object, and then block `_socket` import.
+
+    raw_socket_backend = getattr(_socket, "_socket", None)
+    original_socket_class = _socket.socket
+
+    # `socket.socket` is a Python subclass of the `_socket.socket` C extension type. Many
+    # stdlib modules (urllib/http.client) rely on it (e.g. for `.makefile()`).
+    #
+    # The stdlib `socket.socket.__init__` implementation calls `_socket.socket.__init__`
+    # where `_socket` is a *module global* inside the `socket` module. We replace
+    # `socket._socket` below to hide the raw C extension from user code, so we must patch
+    # `socket.socket.__init__` first to avoid depending on that mutable global.
+    if raw_socket_backend is not None:
+        raw_backend_socket_type = getattr(raw_socket_backend, "socket", None)
+        if raw_backend_socket_type is not None:
+            AF_INET_DEFAULT = getattr(_socket, "AF_INET", 2)
+            SOCK_STREAM_DEFAULT = getattr(_socket, "SOCK_STREAM", 1)
+
+            def _patched_socket_init(
+                self,
+                family=-1,
+                type=-1,
+                proto=-1,
+                fileno=None,
+                _base_socket=raw_backend_socket_type,
+                _af_inet=AF_INET_DEFAULT,
+                _sock_stream=SOCK_STREAM_DEFAULT,
+            ):
+                if fileno is None:
+                    if family == -1:
+                        family = _af_inet
+                    if type == -1:
+                        type = _sock_stream
+                    if proto == -1:
+                        proto = 0
+                _base_socket.__init__(self, family, type, proto, fileno)
+                # Mirror the stdlib `socket.socket` bookkeeping fields used by SocketIO/makefile.
+                self._io_refs = 0
+                self._closed = False
+
+            original_socket_class.__init__ = _patched_socket_init
+
+    raw_by_wrapper = weakref.WeakKeyDictionary()
 
     def _ensure_network_allowed(address, protocol: str = "tcp", method: str = "CONNECT"):
         if not isinstance(address, tuple) or len(address) < 2:
@@ -709,41 +752,113 @@ def _main():
         ensure({"kind": "network", "url": url})
         audit("security.network.request", True, {"url": url, "method": method})
 
-    def guarded_create_connection(address, *args, **kwargs):
-        _ensure_network_allowed(address, protocol="tcp", method="CONNECT")
-        return original_create_connection(address, *args, **kwargs)
+    class SandboxSocket:
+        def __init__(self, family=_socket.AF_INET, type=_socket.SOCK_STREAM, proto=0, fileno=None):
+            raw_by_wrapper[self] = original_socket_class(family, type, proto, fileno)
 
-    def guarded_connect(self, address):
-        _ensure_network_allowed(address, protocol="tcp", method="CONNECT")
-        return original_connect(self, address)
+        @classmethod
+        def _from_raw(cls, raw):
+            inst = object.__new__(cls)
+            raw_by_wrapper[inst] = raw
+            return inst
 
-    def guarded_connect_ex(self, address):
-        _ensure_network_allowed(address, protocol="tcp", method="CONNECT")
-        return original_connect_ex(self, address)  # type: ignore[misc]
+        def connect(self, address):
+            _ensure_network_allowed(address, protocol="tcp", method="CONNECT")
+            return raw_by_wrapper[self].connect(address)
 
-    def guarded_bind(self, address):
-        protocol = "udp" if (self.type & _socket.SOCK_DGRAM) else "tcp"
-        _ensure_network_allowed(address, protocol=protocol, method="BIND")
-        return original_bind(self, address)
+        def connect_ex(self, address):
+            _ensure_network_allowed(address, protocol="tcp", method="CONNECT")
+            return raw_by_wrapper[self].connect_ex(address)
 
-    def guarded_sendto(self, data, address):
-        _ensure_network_allowed(address, protocol="udp", method="SENDTO")
-        return original_sendto(self, data, address)
+        def bind(self, address):
+            raw = raw_by_wrapper[self]
+            protocol = "udp" if (raw.type & _socket.SOCK_DGRAM) else "tcp"
+            _ensure_network_allowed(address, protocol=protocol, method="BIND")
+            return raw.bind(address)
 
-    def guarded_sendmsg(self, *args):
-        # sendmsg(buffers[, ancdata[, flags[, address]]])
-        if len(args) >= 4:
-            _ensure_network_allowed(args[3], protocol="udp", method="SENDMSG")
-        return original_sendmsg(self, *args)  # type: ignore[misc]
+        def sendto(self, data, address, *args):
+            _ensure_network_allowed(address, protocol="udp", method="SENDTO")
+            return raw_by_wrapper[self].sendto(data, address, *args)
 
-    _socket.create_connection = guarded_create_connection
-    _socket.socket.connect = guarded_connect
-    if original_connect_ex is not None:
-        _socket.socket.connect_ex = guarded_connect_ex  # type: ignore[assignment]
-    _socket.socket.bind = guarded_bind
-    _socket.socket.sendto = guarded_sendto
-    if original_sendmsg is not None:
-        _socket.socket.sendmsg = guarded_sendmsg  # type: ignore[assignment]
+        def sendmsg(self, *args):
+            # sendmsg(buffers[, ancdata[, flags[, address]]])
+            if len(args) >= 4:
+                _ensure_network_allowed(args[3], protocol="udp", method="SENDMSG")
+            return raw_by_wrapper[self].sendmsg(*args)
+
+        def dup(self):
+            return SandboxSocket._from_raw(raw_by_wrapper[self].dup())
+
+        def accept(self):
+            raw, addr = raw_by_wrapper[self].accept()
+            return SandboxSocket._from_raw(raw), addr
+
+        def __enter__(self):
+            raw_by_wrapper[self].__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return raw_by_wrapper[self].__exit__(exc_type, exc, tb)
+
+        def __getattr__(self, name):
+            return getattr(raw_by_wrapper[self], name)
+
+    # Install the wrapper socket type.
+    _socket.socket = SandboxSocket
+    _socket.SocketType = SandboxSocket
+
+    # Provide a minimal `_socket` backend proxy so remaining stdlib helpers that reference
+    # `socket._socket` still work without exposing the raw C extension module to user code.
+    if raw_socket_backend is not None:
+        def _make_socket_backend_proxy():
+            raw_getaddrinfo = getattr(raw_socket_backend, "getaddrinfo", None)
+            raw_socketpair = getattr(raw_socket_backend, "socketpair", None)
+
+            class SocketBackendProxy:
+                def getaddrinfo(self, *args, **kwargs):
+                    host = args[0] if args else None
+                    if host:
+                        ensure({"kind": "network", "url": f"dns://{host}"})
+                    return raw_getaddrinfo(*args, **kwargs)
+
+                def socket(self, *args, **kwargs):
+                    return SandboxSocket(*args, **kwargs)
+
+                def socketpair(self, *args, **kwargs):
+                    if raw_socketpair is None:
+                        raise AttributeError("socketpair unavailable")
+                    a, b = raw_socketpair(*args, **kwargs)
+                    return SandboxSocket(fileno=a.detach()), SandboxSocket(fileno=b.detach())
+
+                def fromfd(self, fd, family, type, proto=0):
+                    return SandboxSocket(family, type, proto, fd)
+
+                def __getattr__(self, name):
+                    # Delegate safe attributes (constants, helper fns) to the real backend while
+                    # keeping raw socket constructors hidden behind our SandboxSocket wrapper.
+                    if name in {"socket", "socketpair", "fromfd"}:
+                        raise AttributeError(name)
+                    return getattr(raw_socket_backend, name)
+
+            return SocketBackendProxy()
+
+        _socket._socket = _make_socket_backend_proxy()
+
+        # Override getaddrinfo so it no longer depends on socket._socket internals like
+        # _intenum_converter/AddressFamily/SocketKind (which we intentionally hide).
+        raw_getaddrinfo = getattr(raw_socket_backend, "getaddrinfo", None)
+        if raw_getaddrinfo is not None:
+            def sandbox_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+                if host:
+                    ensure({"kind": "network", "url": f"dns://{host}"})
+                return raw_getaddrinfo(host, port, family, type, proto, flags)
+
+            _socket.getaddrinfo = sandbox_getaddrinfo
+
+    # Remove the raw C extension module from sys.modules and block future imports.
+    if "_socket" in sys.modules:
+        del sys.modules["_socket"]
+    blocked.add("_socket")
 
     ok = False
     result = None
