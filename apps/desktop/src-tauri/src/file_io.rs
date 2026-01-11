@@ -11,7 +11,10 @@ use formula_xlsx::drawingml::PreservedDrawingParts;
 use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
 };
-use formula_xlsx::{load_from_bytes, CellPatch as XlsxCellPatch, WorkbookCellPatches, XlsxPackage};
+use formula_xlsx::{
+    load_from_bytes, CellPatch as XlsxCellPatch, PreservedPivotParts, WorkbookCellPatches,
+    XlsxPackage,
+};
 use rust_xlsxwriter::{Workbook as XlsxWorkbook, XlsxError};
 use std::collections::{HashMap, HashSet};
 use std::io::BufReader;
@@ -187,6 +190,7 @@ pub struct Workbook {
     /// Stable identifier used for macro trust decisions (hash of workbook identity + `vbaProject.bin`).
     pub macro_fingerprint: Option<String>,
     pub preserved_drawing_parts: Option<PreservedDrawingParts>,
+    pub preserved_pivot_parts: Option<PreservedPivotParts>,
     pub sheets: Vec<Sheet>,
     pub print_settings: WorkbookPrintSettings,
     pub(crate) original_print_settings: WorkbookPrintSettings,
@@ -208,6 +212,7 @@ impl Workbook {
             vba_project_bin: None,
             macro_fingerprint: None,
             preserved_drawing_parts: None,
+            preserved_pivot_parts: None,
             sheets: Vec::new(),
             print_settings: WorkbookPrintSettings::default(),
             original_print_settings: WorkbookPrintSettings::default(),
@@ -324,6 +329,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             vba_project_bin: None,
             macro_fingerprint: None,
             preserved_drawing_parts: None,
+            preserved_pivot_parts: None,
             sheets: Vec::new(),
             print_settings: print_settings.clone(),
             original_print_settings: print_settings,
@@ -344,6 +350,11 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             if let Ok(preserved) = pkg.preserve_drawing_parts() {
                 if !preserved.is_empty() {
                     out.preserved_drawing_parts = Some(preserved);
+                }
+            }
+            if let Ok(preserved) = pkg.preserve_pivot_parts() {
+                if !preserved.is_empty() {
+                    out.preserved_pivot_parts = Some(preserved);
                 }
             }
         }
@@ -373,6 +384,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         vba_project_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
+        preserved_pivot_parts: None,
         sheets: Vec::new(),
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
@@ -529,6 +541,7 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         vba_project_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
+        preserved_pivot_parts: None,
         sheets: vec![sheet],
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
@@ -551,6 +564,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         vba_project_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
+        preserved_pivot_parts: None,
         sheets: Vec::new(),
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
@@ -856,8 +870,9 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
     let wants_vba =
         workbook.vba_project_bin.is_some() && matches!(extension.as_deref(), Some("xlsm"));
     let wants_preserved_drawings = workbook.preserved_drawing_parts.is_some();
+    let wants_preserved_pivots = workbook.preserved_pivot_parts.is_some();
 
-    if wants_vba || wants_preserved_drawings {
+    if wants_vba || wants_preserved_drawings || wants_preserved_pivots {
         let mut pkg =
             XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
 
@@ -871,6 +886,11 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         if let Some(preserved) = workbook.preserved_drawing_parts.as_ref() {
             pkg.apply_preserved_drawing_parts(preserved)
                 .context("apply preserved drawing/chart parts")?;
+        }
+
+        if let Some(preserved) = workbook.preserved_pivot_parts.as_ref() {
+            pkg.apply_preserved_pivot_parts(preserved)
+                .context("apply preserved pivot parts")?;
         }
 
         bytes = pkg
