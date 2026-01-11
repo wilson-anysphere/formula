@@ -39,7 +39,7 @@ Defaults are:
 - `POSTGRES_PORT=5432`
 
 The examples below also read `SYNC_WS_PORT` (default `1234`) so they keep working if you override ports.
-If you override `API_PORT`, update the `http://localhost:3000/...` URLs below accordingly.
+The curl examples use `API_BASE` derived from `API_PORT` (default `3000`).
 
 ## Token configuration (API ↔ sync-server)
 
@@ -97,14 +97,21 @@ The API runs a periodic retention sweep (configurable via `RETENTION_SWEEP_INTER
 
 ## Example: register → create doc → invite → sync token → connect
 
+If you overrode `API_PORT`, set `API_BASE` so the commands below keep working:
+
+```bash
+API_PORT=${API_PORT:-3000}
+API_BASE="http://localhost:${API_PORT}"
+```
+
 1) Register two users:
 
 ```bash
-curl -i http://localhost:3000/auth/register \
+curl -i "$API_BASE/auth/register" \
   -H 'content-type: application/json' \
   -d '{"email":"alice@example.com","password":"password1234","name":"Alice","orgName":"Acme"}'
 
-curl -i http://localhost:3000/auth/register \
+curl -i "$API_BASE/auth/register" \
   -H 'content-type: application/json' \
   -d '{"email":"bob@example.com","password":"password1234","name":"Bob"}'
 ```
@@ -112,7 +119,7 @@ curl -i http://localhost:3000/auth/register \
 2) Create a document (use Alice's `Set-Cookie` session):
 
 ```bash
-curl -i http://localhost:3000/docs \
+curl -i "$API_BASE/docs" \
   -H 'content-type: application/json' \
   -H 'cookie: formula_session=...' \
   -d '{"orgId":"<alice-org-id>","title":"Q1 Plan"}'
@@ -121,7 +128,7 @@ curl -i http://localhost:3000/docs \
 3) Invite Bob to the document:
 
 ```bash
-curl -i http://localhost:3000/docs/<doc-id>/invite \
+curl -i "$API_BASE/docs/<doc-id>/invite" \
   -H 'content-type: application/json' \
   -H 'cookie: formula_session=...' \
   -d '{"email":"bob@example.com","role":"editor"}'
@@ -130,7 +137,7 @@ curl -i http://localhost:3000/docs/<doc-id>/invite \
 4) Bob requests a sync token (use Bob's session cookie):
 
 ```bash
-curl -s -X POST http://localhost:3000/docs/<doc-id>/sync-token \
+curl -s -X POST "$API_BASE/docs/<doc-id>/sync-token" \
   -H 'content-type: application/json' \
   -H 'cookie: formula_session=...' \
   -d '{}'
