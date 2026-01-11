@@ -339,7 +339,88 @@ fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String
 
                 let a = format_cell_ref_from_field(row_first0, col_first);
                 let b = format_cell_ref_from_field(row_last0, col_last);
-                stack.push(format!("{a}:{b}"));
+                let is_single_cell = row_first0 == row_last0
+                    && (col_first & COL_INDEX_MASK) == (col_last & COL_INDEX_MASK);
+                let is_value_class = (ptg & 0x60) == 0x40;
+
+                let mut out = String::new();
+                if is_value_class && !is_single_cell {
+                    // Legacy implicit intersection: Excel encodes this by using a value-class
+                    // range token; modern formula text uses an explicit `@` operator.
+                    out.push('@');
+                }
+                if is_single_cell {
+                    out.push_str(&a);
+                } else {
+                    out.push_str(&a);
+                    out.push(':');
+                    out.push_str(&b);
+                }
+                stack.push(out);
+            }
+            0x2C | 0x4C | 0x6C => {
+                // PtgRefN: [row: u32][col: u16]
+                //
+                // In BIFF, *N tokens are typically used for relative references in contexts like
+                // defined names and shared formulas. In BIFF12, Excel still stores row/col fields
+                // plus relative flags; for now we decode them the same way as `PtgRef`.
+                if rgce.len().saturating_sub(i) < 6 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 6,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+
+                let row0 = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
+                let col_field = u16::from_le_bytes([rgce[i + 4], rgce[i + 5]]);
+                i += 6;
+                stack.push(format_cell_ref_from_field(row0, col_field));
+            }
+            0x2D | 0x4D | 0x6D => {
+                // PtgAreaN: [rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+                //
+                // Same caveat as `PtgRefN` above; decode as absolute row/col with relative flags.
+                if rgce.len().saturating_sub(i) < 12 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 12,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+
+                let row_first0 =
+                    u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
+                let row_last0 = u32::from_le_bytes([
+                    rgce[i + 4],
+                    rgce[i + 5],
+                    rgce[i + 6],
+                    rgce[i + 7],
+                ]);
+                let col_first = u16::from_le_bytes([rgce[i + 8], rgce[i + 9]]);
+                let col_last = u16::from_le_bytes([rgce[i + 10], rgce[i + 11]]);
+                i += 12;
+
+                let a = format_cell_ref_from_field(row_first0, col_first);
+                let b = format_cell_ref_from_field(row_last0, col_last);
+                let is_single_cell = row_first0 == row_last0
+                    && (col_first & COL_INDEX_MASK) == (col_last & COL_INDEX_MASK);
+                let is_value_class = (ptg & 0x60) == 0x40;
+
+                let mut out = String::new();
+                if is_value_class && !is_single_cell {
+                    out.push('@');
+                }
+                if is_single_cell {
+                    out.push_str(&a);
+                } else {
+                    out.push_str(&a);
+                    out.push(':');
+                    out.push_str(&b);
+                }
+                stack.push(out);
             }
             0x3A | 0x5A | 0x7A => {
                 // PtgRef3d: [ixti: u16][row: u32][col: u16]
@@ -405,7 +486,23 @@ fn decode_rgce_impl(rgce: &[u8], ctx: Option<&WorkbookContext>) -> Result<String
 
                 let a = format_cell_ref_from_field(row_first0, col_first);
                 let b = format_cell_ref_from_field(row_last0, col_last);
-                stack.push(format!("{prefix}{a}:{b}"));
+                let is_single_cell = row_first0 == row_last0
+                    && (col_first & COL_INDEX_MASK) == (col_last & COL_INDEX_MASK);
+                let is_value_class = (ptg & 0x60) == 0x40;
+
+                let mut out = String::new();
+                if is_value_class && !is_single_cell {
+                    out.push('@');
+                }
+                out.push_str(&prefix);
+                if is_single_cell {
+                    out.push_str(&a);
+                } else {
+                    out.push_str(&a);
+                    out.push(':');
+                    out.push_str(&b);
+                }
+                stack.push(out);
             }
             0x23 | 0x43 | 0x63 => {
                 // PtgName: [nameId: u32][reserved: u16]
@@ -605,6 +702,22 @@ const PTG_AREA: u8 = 0x25;
 const PTG_REF3D: u8 = 0x3A;
 const PTG_AREA3D: u8 = 0x3B;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PtgClass {
+    Ref,
+    Value,
+    #[allow(dead_code)]
+    Array,
+}
+
+fn ptg_with_class(base: u8, class: PtgClass) -> u8 {
+    match class {
+        PtgClass::Ref => base,
+        PtgClass::Value => base.wrapping_add(0x20),
+        PtgClass::Array => base.wrapping_add(0x40),
+    }
+}
+
 const COL_RELATIVE_MASK: u16 = 0x8000;
 const ROW_RELATIVE_MASK: u16 = 0x4000;
 const COL_INDEX_MASK: u16 = 0x3FFF;
@@ -623,6 +736,7 @@ enum Expr {
 enum UnaryOp {
     Plus,
     Minus,
+    ImplicitIntersection,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -668,8 +782,8 @@ struct NameRef {
 fn emit_expr(expr: &Expr, ctx: &WorkbookContext, out: &mut Vec<u8>) -> Result<(), EncodeError> {
     match expr {
         Expr::Number(n) => emit_number(*n, out),
-        Expr::Ref(r) => emit_ref(r, ctx, out)?,
-        Expr::Name(n) => emit_name(n, ctx, out)?,
+        Expr::Ref(r) => emit_ref(r, ctx, out, PtgClass::Ref)?,
+        Expr::Name(n) => emit_name(n, ctx, out, PtgClass::Ref)?,
         Expr::Func { name, args } => {
             for arg in args {
                 emit_expr(arg, ctx, out)?;
@@ -677,11 +791,28 @@ fn emit_expr(expr: &Expr, ctx: &WorkbookContext, out: &mut Vec<u8>) -> Result<()
             emit_func(name, args.len(), out)?;
         }
         Expr::Unary { op, expr } => {
-            emit_expr(expr, ctx, out)?;
-            out.push(match op {
-                UnaryOp::Plus => PTG_UPLUS,
-                UnaryOp::Minus => PTG_UMINUS,
-            });
+            match op {
+                UnaryOp::ImplicitIntersection => match expr.as_ref() {
+                    // Encode `@` by emitting value-class reference tokens. This matches Excel's
+                    // legacy implicit-intersection encoding, and round-trips through
+                    // `decode_rgce*` as an explicit `@`.
+                    Expr::Ref(r) => emit_ref(r, ctx, out, PtgClass::Value)?,
+                    Expr::Name(n) => emit_name(n, ctx, out, PtgClass::Value)?,
+                    _ => {
+                        return Err(EncodeError::Parse(
+                            "implicit intersection (@) is only supported on references".to_string(),
+                        ))
+                    }
+                },
+                UnaryOp::Plus => {
+                    emit_expr(expr, ctx, out)?;
+                    out.push(PTG_UPLUS);
+                }
+                UnaryOp::Minus => {
+                    emit_expr(expr, ctx, out)?;
+                    out.push(PTG_UMINUS);
+                }
+            }
         }
         Expr::Binary { op, left, right } => {
             emit_expr(left, ctx, out)?;
@@ -727,27 +858,32 @@ fn emit_func(name: &str, argc: usize, out: &mut Vec<u8>) -> Result<(), EncodeErr
     Ok(())
 }
 
-fn emit_name(name: &NameRef, ctx: &WorkbookContext, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+fn emit_name(
+    name: &NameRef,
+    ctx: &WorkbookContext,
+    out: &mut Vec<u8>,
+    class: PtgClass,
+) -> Result<(), EncodeError> {
     let idx = ctx
         .name_index(&name.name, name.sheet.as_deref())
         .ok_or_else(|| EncodeError::UnknownName {
             name: name.name.clone(),
         })?;
 
-    out.push(PTG_NAME);
+    out.push(ptg_with_class(PTG_NAME, class));
     out.extend_from_slice(&idx.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
     Ok(())
 }
 
-fn emit_ref(r: &Ref, ctx: &WorkbookContext, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+fn emit_ref(r: &Ref, ctx: &WorkbookContext, out: &mut Vec<u8>, class: PtgClass) -> Result<(), EncodeError> {
     match (&r.sheet, &r.kind) {
         (None, RefKind::Cell(cell)) => {
-            out.push(PTG_REF);
+            out.push(ptg_with_class(PTG_REF, class));
             emit_cell_ref_fields(cell, out);
         }
         (None, RefKind::Area(a, b)) => {
-            out.push(PTG_AREA);
+            out.push(ptg_with_class(PTG_AREA, class));
             emit_area_fields(a, b, out);
         }
         (Some(sheet), RefKind::Cell(cell)) => {
@@ -759,7 +895,7 @@ fn emit_ref(r: &Ref, ctx: &WorkbookContext, out: &mut Vec<u8>) -> Result<(), Enc
                 .extern_sheet_range_index(first, last)
                 .ok_or_else(|| EncodeError::UnknownSheet(format!("{first}:{last}")))?;
 
-            out.push(PTG_REF3D);
+            out.push(ptg_with_class(PTG_REF3D, class));
             out.extend_from_slice(&ixti.to_le_bytes());
             emit_cell_ref_fields(cell, out);
         }
@@ -772,7 +908,7 @@ fn emit_ref(r: &Ref, ctx: &WorkbookContext, out: &mut Vec<u8>) -> Result<(), Enc
                 .extern_sheet_range_index(first, last)
                 .ok_or_else(|| EncodeError::UnknownSheet(format!("{first}:{last}")))?;
 
-            out.push(PTG_AREA3D);
+            out.push(ptg_with_class(PTG_AREA3D, class));
             out.extend_from_slice(&ixti.to_le_bytes());
             emit_area_fields(a, b, out);
         }
@@ -882,6 +1018,13 @@ impl<'a> FormulaParser<'a> {
                 self.next_char();
                 Ok(Expr::Unary {
                     op: UnaryOp::Minus,
+                    expr: Box::new(self.parse_unary()?),
+                })
+            }
+            Some('@') => {
+                self.next_char();
+                Ok(Expr::Unary {
+                    op: UnaryOp::ImplicitIntersection,
                     expr: Box::new(self.parse_unary()?),
                 })
             }

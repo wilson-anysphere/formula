@@ -1640,6 +1640,7 @@ dependencies = [
  "assert_cmd",
  "calamine 0.26.1",
  "formula-biff",
+ "formula-engine",
  "pretty_assertions",
  "proptest",
  "quick-xml 0.31.0",
