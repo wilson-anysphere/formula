@@ -154,6 +154,55 @@ test("CollabSession formula conflict monitor does not emit conflicts for sequent
   docB.destroy();
 });
 
+test("CollabSession formula conflict monitor does not resurrect formulas on sequential deletes", async () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  const disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+  /** @type {Array<any>} */
+  const conflictsB = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      concurrencyWindowMs: 1,
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    formulaConflicts: {
+      localUserId: "user-b",
+      concurrencyWindowMs: 1,
+      onConflict: (c) => conflictsB.push(c),
+    },
+  });
+
+  // Establish the cell in both docs.
+  await sessionA.setCellFormula("Sheet1:0:0", "=0");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, "=0");
+
+  // Sequential: B sees A's formula before deleting it.
+  await sessionA.setCellFormula("Sheet1:0:0", "=1");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, "=1");
+  await sessionB.setCellFormula("Sheet1:0:0", null);
+
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.formula, null);
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, null);
+
+  assert.equal(conflictsA.length, 0);
+  assert.equal(conflictsB.length, 0);
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession value conflicts surface when enabled (formula+value mode)", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();

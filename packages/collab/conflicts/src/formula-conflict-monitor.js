@@ -108,6 +108,7 @@ export class FormulaConflictMonitor {
     const ts = Date.now();
     const localClientId = this.doc.clientID;
     const startClock = Y.getState(this.doc.store, localClientId);
+    const deletedItemId = nextFormula ? null : getItemId(cell, "formula");
 
     this.doc.transact(() => {
       if (nextFormula) {
@@ -122,7 +123,7 @@ export class FormulaConflictMonitor {
     // Track locally so we can detect "remote overwrote my just-written formula".
     this._lastLocalFormulaEditByCellKey.set(cellKey, {
       formula: nextFormula,
-      itemId: nextFormula ? { client: localClientId, clock: startClock } : null
+      itemId: nextFormula ? { client: localClientId, clock: startClock } : deletedItemId
     });
   }
 
@@ -194,14 +195,18 @@ export class FormulaConflictMonitor {
       if (formulaChange) {
         const oldFormula = (formulaChange.oldValue ?? "").toString();
         const newFormula = (cellMap.get("formula") ?? "").toString();
+        const action = formulaChange.action;
+        const itemId = getItemId(cellMap, "formula");
         const newItemOriginId = getItemOriginId(cellMap, "formula");
 
         this._handleFormulaChange({
           cellKey,
           oldFormula,
           newFormula,
+          action,
           remoteUserId,
           origin: transaction.origin,
+          itemId,
           newItemOriginId
         });
       }
@@ -231,12 +236,14 @@ export class FormulaConflictMonitor {
    * @param {string} input.cellKey
    * @param {string} input.oldFormula
    * @param {string} input.newFormula
+   * @param {"add" | "update" | "delete"} input.action
    * @param {string} input.remoteUserId
    * @param {any} input.origin
+   * @param {{ client: number, clock: number } | null} input.itemId
    * @param {{ client: number, clock: number } | null} input.newItemOriginId
    */
   _handleFormulaChange(input) {
-    const { cellKey, oldFormula, newFormula, remoteUserId, origin, newItemOriginId } = input;
+    const { cellKey, oldFormula, newFormula, action, remoteUserId, origin, itemId, newItemOriginId } = input;
 
     const isLocal = this.localOrigins.has(origin);
     if (isLocal) return;
@@ -246,6 +253,13 @@ export class FormulaConflictMonitor {
 
     // Did this remote update overwrite the last formula we wrote locally?
     if (!formulasRoughlyEqual(oldFormula, lastLocal.formula)) return;
+
+    // Sequential delete: remote explicitly deleted the exact item we wrote.
+    // Map deletes don't create a new Item, so we can't use origin ids like we do for overwrites.
+    if (action === "delete" && lastLocal.itemId && idsEqual(itemId, lastLocal.itemId)) {
+      this._lastLocalFormulaEditByCellKey.delete(cellKey);
+      return;
+    }
 
     // Sequential overwrite (remote saw our write) - ignore.
     if (lastLocal.itemId && idsEqual(newItemOriginId, lastLocal.itemId)) {
@@ -404,6 +418,25 @@ function getItemOriginId(ymap, key) {
 }
 
 /**
+ * Extract the item id for the currently visible (or most recent tombstoned) value of a Y.Map key.
+ *
+ * @param {Y.Map<any>} ymap
+ * @param {string} key
+ * @returns {{ client: number, clock: number } | null}
+ */
+function getItemId(ymap, key) {
+  // @ts-ignore - accessing Yjs internals
+  const item = ymap?._map?.get?.(key);
+  if (!item) return null;
+  const id = item.id;
+  if (!id || typeof id !== "object") return null;
+  const client = id.client;
+  const clock = id.clock;
+  if (typeof client !== "number" || typeof clock !== "number") return null;
+  return { client, clock };
+}
+
+/**
  * @param {{ client: number, clock: number } | null | undefined} a
  * @param {{ client: number, clock: number } | null | undefined} b
  */
@@ -472,4 +505,3 @@ function valuesDeeplyEqual(a, b, seen = new Map()) {
   }
   return true;
 }
-

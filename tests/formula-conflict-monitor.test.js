@@ -123,3 +123,21 @@ test("extension/subset concurrent edits auto-resolve to the extension", () => {
   assert.equal(getFormula(a.cells, "s:0:0"), "=A1+1+1");
   assert.equal(getFormula(b.cells, "s:0:0"), "=A1+1+1");
 });
+
+test("sequential deletes do not resurrect formulas or surface conflicts", () => {
+  const a = createClient("alice");
+  const b = createClient("bob");
+
+  // Alice writes a formula and Bob syncs it.
+  a.monitor.setLocalFormula("s:0:0", "=1");
+  syncDocs(a.doc, b.doc);
+
+  // Bob deletes after seeing Alice's write (sequential overwrite, not a conflict).
+  b.monitor.setLocalFormula("s:0:0", "");
+  syncDocs(a.doc, b.doc);
+
+  assert.equal(a.conflicts.length, 0);
+  assert.equal(b.conflicts.length, 0);
+  assert.equal(getFormula(a.cells, "s:0:0"), "");
+  assert.equal(getFormula(b.cells, "s:0:0"), "");
+});
