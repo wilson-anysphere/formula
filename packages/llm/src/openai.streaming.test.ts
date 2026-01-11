@@ -59,4 +59,41 @@ describe("OpenAIClient.streamChat", () => {
       { type: "done", usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 } },
     ]);
   });
+
+  it("retries without stream_options when a backend rejects it", async () => {
+    const chunks = ['data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}\n\n', "data: [DONE]\n\n"];
+
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async () => new Response("Unrecognized request argument supplied: stream_options", { status: 400 }))
+      .mockImplementationOnce(async (_url: string, init: any) => {
+        const body = JSON.parse(init.body as string);
+        expect(body.stream_options).toBeUndefined();
+        return new Response(readableStreamFromChunks(chunks), { status: 200 });
+      });
+
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const client = new OpenAIClient({
+      apiKey: "test",
+      baseUrl: "https://example.com",
+      timeoutMs: 1_000,
+      model: "gpt-test",
+    });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const event of client.streamChat({ messages: [{ role: "user", content: "hi" }] as any })) {
+      events.push(event);
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const firstBody = JSON.parse((fetchMock.mock.calls[0]?.[1] as any).body as string);
+    expect(firstBody.stream_options).toEqual({ include_usage: true });
+
+    expect(events).toEqual([
+      { type: "text", delta: "Hi" },
+      { type: "done" },
+    ]);
+  });
 });
