@@ -21,7 +21,7 @@ import {
   waitForCondition,
 } from "../services/sync-server/test/test-helpers.ts";
 
-test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedRanges (+ comments) and survives restart", async (t) => {
+test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedRanges + metadata (+ comments) and survives restart", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-branching-"));
   t.after(async () => {
     await rm(dataDir, { recursive: true, force: true });
@@ -108,6 +108,7 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
   featureNext.sheets.metaById.Sheet2 = { id: "Sheet2", name: "AddedSheet" };
   featureNext.cells.Sheet2 = {};
   featureNext.sheets.order = ["Sheet1", "Sheet2"];
+  featureNext.metadata.title = "Budget";
   featureNext.namedRanges.NR1 = { sheetId: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } };
   featureNext.comments.c1 = { id: "c1", cellRef: "A1", content: "hello", resolved: false, replies: [] };
   await branchService.commit(actor, { nextState: featureNext, message: "feature edits" });
@@ -144,6 +145,7 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
       stateB.sheets.order.join(",") === "Sheet1,Sheet2" &&
       stateB.sheets.metaById.Sheet1?.name === "FeatureName" &&
       stateB.sheets.metaById.Sheet2?.name === "AddedSheet" &&
+      stateB.metadata.title === "Budget" &&
       stateB.namedRanges.NR1?.sheetId === "Sheet1" &&
       stateB.comments.c1?.content === "hello"
     );
@@ -176,6 +178,7 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
       stateC.sheets.order.join(",") === "Sheet1,Sheet2" &&
       stateC.sheets.metaById.Sheet1?.name === "FeatureName" &&
       stateC.sheets.metaById.Sheet2?.name === "AddedSheet" &&
+      stateC.metadata.title === "Budget" &&
       stateC.namedRanges.NR1?.sheetId === "Sheet1" &&
       stateC.comments.c1?.content === "hello"
     );
