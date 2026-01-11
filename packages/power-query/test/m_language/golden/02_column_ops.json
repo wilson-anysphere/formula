@@ -1,0 +1,70 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "range",
+    "range": {
+      "values": [
+        ["Region", "Sales", "Product"],
+        ["East", "100", "A"],
+        ["West", "200", "B"]
+      ],
+      "hasHeaders": true
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_changeType",
+      "name": "Changed Type",
+      "operation": {
+        "type": "changeType",
+        "column": "Sales",
+        "newType": "number"
+      }
+    },
+    {
+      "id": "s2_addColumn",
+      "name": "Added Column",
+      "operation": {
+        "type": "addColumn",
+        "name": "Double",
+        "formula": "(([Sales]) * (2))"
+      }
+    },
+    {
+      "id": "s3_removeColumns",
+      "name": "Removed Columns",
+      "operation": {
+        "type": "removeColumns",
+        "columns": ["Product"]
+      }
+    },
+    {
+      "id": "s4_selectColumns",
+      "name": "Selected Columns",
+      "operation": {
+        "type": "selectColumns",
+        "columns": ["Region", "Sales", "Double"]
+      }
+    },
+    {
+      "id": "s5_renameColumn",
+      "name": "Renamed Columns (1)",
+      "operation": {
+        "type": "renameColumn",
+        "oldName": "Double",
+        "newName": "Double Sales"
+      }
+    },
+    {
+      "id": "s6_renameColumn",
+      "name": "Renamed Columns",
+      "operation": {
+        "type": "renameColumn",
+        "oldName": "Region",
+        "newName": "Area"
+      }
+    }
+  ]
+}
+

@@ -1,0 +1,23 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "database",
+    "connection": {
+      "kind": "odbc",
+      "connectionString": "dsn=mydb"
+    },
+    "query": "select * from sales"
+  },
+  "steps": [
+    {
+      "id": "s1_selectColumns",
+      "name": "Selected Columns",
+      "operation": {
+        "type": "selectColumns",
+        "columns": ["Region"]
+      }
+    }
+  ]
+}
+

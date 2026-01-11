@@ -1,0 +1,20 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "json",
+    "path": "/tmp/data.json",
+    "jsonPath": "items"
+  },
+  "steps": [
+    {
+      "id": "s1_selectColumns",
+      "name": "Selected Columns",
+      "operation": {
+        "type": "selectColumns",
+        "columns": ["id", "name"]
+      }
+    }
+  ]
+}
+

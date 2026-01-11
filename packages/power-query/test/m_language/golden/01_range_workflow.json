@@ -1,0 +1,71 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "range",
+    "range": {
+      "values": [
+        ["Date", "Region", "Sales"],
+        ["2024-01-01T00:00:00.000Z", "East", 100],
+        ["2024-01-02T00:00:00.000Z", "East", 150],
+        ["2024-01-03T00:00:00.000Z", "West", 200]
+      ],
+      "hasHeaders": true
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_filterRows",
+      "name": "Filtered Rows",
+      "operation": {
+        "type": "filterRows",
+        "predicate": {
+          "type": "and",
+          "predicates": [
+            {
+              "type": "comparison",
+              "column": "Date",
+              "operator": "greaterThanOrEqual",
+              "value": "2024-01-02T00:00:00.000Z"
+            },
+            {
+              "type": "comparison",
+              "column": "Region",
+              "operator": "equals",
+              "value": "East"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "s2_groupBy",
+      "name": "Grouped Rows",
+      "operation": {
+        "type": "groupBy",
+        "groupColumns": ["Region"],
+        "aggregations": [
+          {
+            "column": "Sales",
+            "op": "sum",
+            "as": "Total Sales"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s3_sortRows",
+      "name": "Sorted Rows",
+      "operation": {
+        "type": "sortRows",
+        "sortBy": [
+          {
+            "column": "Total Sales",
+            "direction": "descending"
+          }
+        ]
+      }
+    }
+  ]
+}
+

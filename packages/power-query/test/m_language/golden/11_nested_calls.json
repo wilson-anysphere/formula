@@ -1,0 +1,39 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "range",
+    "range": {
+      "values": [
+        ["A", "B"],
+        [1, "x"],
+        [2, "y"]
+      ],
+      "hasHeaders": true
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_filterRows",
+      "name": "Filtered Rows",
+      "operation": {
+        "type": "filterRows",
+        "predicate": {
+          "type": "comparison",
+          "column": "A",
+          "operator": "greaterThan",
+          "value": 1
+        }
+      }
+    },
+    {
+      "id": "s2_selectColumns",
+      "name": "Selected Columns",
+      "operation": {
+        "type": "selectColumns",
+        "columns": ["B"]
+      }
+    }
+  ]
+}
+

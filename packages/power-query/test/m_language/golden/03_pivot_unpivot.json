@@ -1,0 +1,40 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "range",
+    "range": {
+      "values": [
+        ["Region", "Metric", "Value"],
+        ["East", "Sales", 100],
+        ["East", "Profit", 20],
+        ["West", "Sales", 200],
+        ["West", "Profit", 50]
+      ],
+      "hasHeaders": true
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_pivot",
+      "name": "Pivoted",
+      "operation": {
+        "type": "pivot",
+        "rowColumn": "Metric",
+        "valueColumn": "Value",
+        "aggregation": "sum"
+      }
+    },
+    {
+      "id": "s2_unpivot",
+      "name": "Unpivoted",
+      "operation": {
+        "type": "unpivot",
+        "columns": ["Sales", "Profit"],
+        "nameColumn": "Metric",
+        "valueColumn": "Value"
+      }
+    }
+  ]
+}
+

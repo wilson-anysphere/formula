@@ -1,0 +1,24 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "database",
+    "connection": {
+      "kind": "sql",
+      "server": "server1",
+      "database": "db1"
+    },
+    "query": "select * from t"
+  },
+  "steps": [
+    {
+      "id": "s1_selectColumns",
+      "name": "Selected Columns",
+      "operation": {
+        "type": "selectColumns",
+        "columns": ["A"]
+      }
+    }
+  ]
+}
+

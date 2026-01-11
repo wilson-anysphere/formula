@@ -1,0 +1,24 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "table",
+    "table": "Sales"
+  },
+  "steps": [
+    {
+      "id": "s1_filterRows",
+      "name": "Filtered Rows",
+      "operation": {
+        "type": "filterRows",
+        "predicate": {
+          "type": "comparison",
+          "column": "Region",
+          "operator": "notEquals",
+          "value": "West"
+        }
+      }
+    }
+  ]
+}
+

@@ -1,0 +1,23 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "api",
+    "url": "https://example.com/data",
+    "method": "POST",
+    "headers": {
+      "Authorization": "Bearer token"
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_removeColumns",
+      "name": "Removed Columns",
+      "operation": {
+        "type": "removeColumns",
+        "columns": ["Secret"]
+      }
+    }
+  ]
+}
+

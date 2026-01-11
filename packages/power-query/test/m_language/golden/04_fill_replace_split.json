@@ -1,0 +1,46 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "range",
+    "range": {
+      "values": [
+        ["Region", "FullName"],
+        ["East", "A,B"],
+        [null, "C,D"],
+        ["West", "E,F"]
+      ],
+      "hasHeaders": true
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_fillDown",
+      "name": "Filled Down",
+      "operation": {
+        "type": "fillDown",
+        "columns": ["Region"]
+      }
+    },
+    {
+      "id": "s2_replaceValues",
+      "name": "Replaced Value",
+      "operation": {
+        "type": "replaceValues",
+        "column": "Region",
+        "find": "West",
+        "replace": "W"
+      }
+    },
+    {
+      "id": "s3_splitColumn",
+      "name": "Split Column",
+      "operation": {
+        "type": "splitColumn",
+        "column": "FullName",
+        "delimiter": ","
+      }
+    }
+  ]
+}
+
