@@ -184,7 +184,7 @@ fn print_cell(cell: formula_xlsb::Cell, args: &Args) {
 
     match cell.formula {
         None => println!("{addr}: {value}"),
-        Some(Formula { rgce, text }) => {
+        Some(Formula { rgce, text, .. }) => {
             match text {
                 Some(text) => {
                     if args.rgce {
@@ -233,4 +233,3 @@ fn format_cell_value(value: &CellValue) -> String {
         CellValue::Text(s) => format!("{s:?}"),
     }
 }
-

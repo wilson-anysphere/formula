@@ -84,6 +84,32 @@ pub struct Formula {
     pub rgce: Vec<u8>,
     /// Best-effort decoded Excel formula text (without leading `=`).
     pub text: Option<String>,
+    /// Raw `grbitFmla` flags from the `BrtFmla*` record.
+    ///
+    /// We currently treat this as opaque and preserve it for round-trip
+    /// fidelity. Excel uses it for semantics like "always recalc", shared
+    /// formula markers, array indicators, etc.
+    pub flags: u16,
+    /// Any trailing bytes in the `BrtFmla*` record that we don't currently
+    /// interpret but must preserve for round-tripping.
+    pub extra: Vec<u8>,
+}
+
+impl Formula {
+    /// Construct a new formula payload with default XLSB flags (`0`) and no
+    /// extra bytes.
+    ///
+    /// When *writing* new formulas we currently do not know how to populate
+    /// `flags` for advanced Excel features (shared/array formulas, etc), so we
+    /// default to `0` and rely on Excel to fill them in if needed.
+    pub fn new(rgce: Vec<u8>, text: Option<String>) -> Self {
+        Self {
+            rgce,
+            text,
+            flags: 0,
+            extra: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -378,61 +404,73 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                     biff12::FORMULA_STRING => {
                         // BrtFmlaString: [cch: u32][flags: u16][utf16 chars][cce: u32][rgce bytes...]
                         let cch = rr.read_u32()? as usize;
-                        let _flags = rr.read_u16()?;
+                        let flags = rr.read_u16()?;
                         let v = rr.read_utf16_chars(cch)?;
                         let cce = rr.read_u32()? as usize;
                         let rgce = rr.read_slice(cce)?.to_vec();
                         let text = crate::rgce::decode_rgce(&rgce).ok();
+                        let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Text(v),
                             Some(Formula {
                                 rgce,
                                 text,
+                                flags,
+                                extra,
                             }),
                         )
                     }
                     biff12::FORMULA_FLOAT => {
                         // BrtFmlaNum: [value: f64][flags: u16][cce: u32][rgce bytes...]
                         let v = rr.read_f64()?;
-                        let _flags = rr.read_u16()?;
+                        let flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let rgce = rr.read_slice(cce)?.to_vec();
                         let text = crate::rgce::decode_rgce(&rgce).ok();
+                        let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Number(v),
                             Some(Formula {
                                 rgce,
                                 text,
+                                flags,
+                                extra,
                             }),
                         )
                     }
                     biff12::FORMULA_BOOL => {
                         // BrtFmlaBool: [value: u8][flags: u16][cce: u32][rgce bytes...]
                         let v = rr.read_u8()? != 0;
-                        let _flags = rr.read_u16()?;
+                        let flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let rgce = rr.read_slice(cce)?.to_vec();
                         let text = crate::rgce::decode_rgce(&rgce).ok();
+                        let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Bool(v),
                             Some(Formula {
                                 rgce,
                                 text,
+                                flags,
+                                extra,
                             }),
                         )
                     }
                     biff12::FORMULA_BOOLERR => {
                         // BrtFmlaError: [value: u8][flags: u16][cce: u32][rgce bytes...]
                         let v = rr.read_u8()?;
-                        let _flags = rr.read_u16()?;
+                        let flags = rr.read_u16()?;
                         let cce = rr.read_u32()? as usize;
                         let rgce = rr.read_slice(cce)?.to_vec();
                         let text = crate::rgce::decode_rgce(&rgce).ok();
+                        let extra = rr.data[rr.offset..].to_vec();
                         (
                             CellValue::Error(v),
                             Some(Formula {
                                 rgce,
                                 text,
+                                flags,
+                                extra,
                             }),
                         )
                     }
