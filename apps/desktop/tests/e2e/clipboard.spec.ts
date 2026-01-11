@@ -51,6 +51,22 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     const c2Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"));
     expect(c2Value).toBe("World");
 
+    // Paste should be undoable as a single history entry.
+    await page.keyboard.press(`${modifier}+Z`);
+    await waitForIdle(page);
+    const c1AfterUndo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"));
+    expect(c1AfterUndo).toBe("");
+    const c2AfterUndo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"));
+    expect(c2AfterUndo).toBe("");
+
+    // Redo should restore the pasted values.
+    await page.keyboard.press(`${modifier}+Shift+Z`);
+    await waitForIdle(page);
+    const c1AfterRedo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"));
+    expect(c1AfterRedo).toBe("Hello");
+    const c2AfterRedo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"));
+    expect(c2AfterRedo).toBe("World");
+
     // Cut A1 and paste to B1.
     await page.click("#grid", { position: { x: 53, y: 29 } });
     await page.keyboard.press(`${modifier}+X`);
