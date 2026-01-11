@@ -101,6 +101,10 @@ function etagMatches(ifNoneMatch, etag) {
     });
 }
 
+function isSha256Hex(value) {
+  return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value.trim());
+}
+
 function parsePath(pathname) {
   return pathname.split("/").filter(Boolean);
 }
@@ -458,9 +462,16 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
             : Array.isArray(expectedShaHeader)
               ? expectedShaHeader[0] || null
               : null;
-        if (expectedSha256 && String(expectedSha256).toLowerCase() !== sha256) {
-          statusCode = 400;
-          return sendJson(res, 400, { error: "X-Package-Sha256 does not match uploaded bytes" });
+        const expectedShaNormalized = expectedSha256 ? String(expectedSha256).trim().toLowerCase() : null;
+        if (expectedShaNormalized) {
+          if (!isSha256Hex(expectedShaNormalized)) {
+            statusCode = 400;
+            return sendJson(res, 400, { error: "Invalid X-Package-Sha256 header (expected 64-char hex)" });
+          }
+          if (expectedShaNormalized !== sha256) {
+            statusCode = 400;
+            return sendJson(res, 400, { error: "X-Package-Sha256 does not match uploaded bytes" });
+          }
         }
         const isV1 = packageBytes.length >= 2 && packageBytes[0] === 0x1f && packageBytes[1] === 0x8b;
         const signatureHeader = req.headers["x-package-signature"];

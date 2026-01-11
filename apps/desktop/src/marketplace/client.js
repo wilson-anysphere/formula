@@ -6,6 +6,10 @@ function sha256Hex(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
+function isSha256Hex(value) {
+  return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value.trim());
+}
+
 function safePathComponent(value) {
   return String(value || "").replace(/[^a-zA-Z0-9._-]/g, "_");
 }
@@ -134,7 +138,10 @@ export class MarketplaceClient {
     if (!sha256) {
       throw new Error("Marketplace download missing x-package-sha256 (mandatory)");
     }
-    const expectedSha = String(sha256).toLowerCase();
+    const expectedSha = String(sha256).trim().toLowerCase();
+    if (!isSha256Hex(expectedSha)) {
+      throw new Error("Marketplace download has invalid x-package-sha256 (expected 64-char hex)");
+    }
     const formatVersion = Number(response.headers.get("x-package-format-version") || "1");
     const publisher = response.headers.get("x-publisher");
     const bytes = Buffer.from(await response.arrayBuffer());
