@@ -246,12 +246,6 @@ export function createSyncServer(
     if (createLeveldbPersistence) {
       const ldb = createLeveldbPersistence(config.dataDir);
       persistenceBackend = "leveldb";
-      retentionManager = new LeveldbRetentionManager(
-        ldb,
-        docConnectionTracker,
-        logger,
-        config.retention.ttlMs
-      );
 
       const queues = new Map<string, Promise<void>>();
       const enqueue = (docName: string, task: () => Promise<void>) => {
@@ -267,6 +261,22 @@ export function createSyncServer(
         });
         return next;
       };
+
+      const retentionProvider: LeveldbPersistenceLike = {
+        getAllDocNames: () => ldb.getAllDocNames(),
+        clearDocument: (docName: string) =>
+          enqueue(docName, () => ldb.clearDocument(docName)),
+        getMeta: (docName: string, metaKey: string) => ldb.getMeta(docName, metaKey),
+        setMeta: (docName: string, metaKey: string, value: unknown) =>
+          ldb.setMeta(docName, metaKey, value),
+      };
+
+      retentionManager = new LeveldbRetentionManager(
+        retentionProvider,
+        docConnectionTracker,
+        logger,
+        config.retention.ttlMs
+      );
 
       persistenceInitialized = true;
       persistenceCleanup = async () => {
@@ -284,6 +294,7 @@ export function createSyncServer(
           ydoc.on("update", (update: Uint8Array, origin: unknown) => {
             if (origin === persistenceOrigin) return;
             if (!shouldPersist(docName)) return;
+            if (retentionManager?.isPurging(docName)) return;
             void enqueue(docName, async () => {
               await ldb.storeUpdate(docName, update);
             });
@@ -303,6 +314,7 @@ export function createSyncServer(
         },
         writeState: async (docName: string) => {
           if (!shouldPersist(docName)) return;
+          if (retentionManager?.isPurging(docName)) return;
           await enqueue(docName, () => ldb.flushDocument(docName));
           void retentionManager?.markFlushed(docName);
         },
@@ -381,12 +393,6 @@ export function createSyncServer(
       try {
         const ldb = new LeveldbPersistenceCtor(config.dataDir);
         persistenceBackend = "leveldb";
-        retentionManager = new LeveldbRetentionManager(
-          ldb,
-          docConnectionTracker,
-          logger,
-          config.retention.ttlMs
-        );
 
         const queues = new Map<string, Promise<void>>();
         const enqueue = (docName: string, task: () => Promise<void>) => {
@@ -402,6 +408,23 @@ export function createSyncServer(
           });
           return next;
         };
+
+        const retentionProvider: LeveldbPersistenceLike = {
+          getAllDocNames: () => ldb.getAllDocNames(),
+          clearDocument: (docName: string) =>
+            enqueue(docName, () => ldb.clearDocument(docName)),
+          getMeta: (docName: string, metaKey: string) =>
+            ldb.getMeta(docName, metaKey),
+          setMeta: (docName: string, metaKey: string, value: unknown) =>
+            ldb.setMeta(docName, metaKey, value),
+        };
+
+        retentionManager = new LeveldbRetentionManager(
+          retentionProvider,
+          docConnectionTracker,
+          logger,
+          config.retention.ttlMs
+        );
 
         persistenceInitialized = true;
         persistenceCleanup = async () => {
@@ -421,6 +444,7 @@ export function createSyncServer(
             ydoc.on("update", (update: Uint8Array, origin: unknown) => {
               if (origin === persistenceOrigin) return;
               if (!shouldPersist(docName)) return;
+              if (retentionManager?.isPurging(docName)) return;
               void enqueue(docName, async () => {
                 await ldb.storeUpdate(docName, update);
               });
@@ -440,6 +464,7 @@ export function createSyncServer(
           writeState: async (docName: string) => {
             // Compact updates on last client disconnect to keep DB size bounded.
             if (!shouldPersist(docName)) return;
+            if (retentionManager?.isPurging(docName)) return;
             await enqueue(docName, () => ldb.flushDocument(docName));
             void retentionManager?.markFlushed(docName);
           },
