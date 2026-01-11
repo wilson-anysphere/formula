@@ -158,6 +158,37 @@ test("WorkbookSearchIndex: auto strategy does not build a full-sheet index for s
   assert.equal(index.getSheetModeIndex("Sheet1", "values:display"), null);
 });
 
+test("WorkbookSearchIndex: auto strategy reuses an already-built index even for small selections", async () => {
+  const wb = new InMemoryWorkbook();
+  const sheet = wb.addSheet("Sheet1");
+
+  sheet.setValue(0, 0, "needle");
+  sheet.setValue(999, 999, "haystack");
+
+  const index = new WorkbookSearchIndex(wb, { autoThresholdCells: 0 });
+
+  // Force index build once.
+  const builder = new SearchSession(wb, "needle", {
+    scope: "sheet",
+    currentSheetName: "Sheet1",
+    index,
+    indexStrategy: "always",
+  });
+  await builder.findNext();
+
+  const session = new SearchSession(wb, "needle", {
+    scope: "selection",
+    currentSheetName: "Sheet1",
+    selectionRanges: [{ startRow: 0, endRow: 0, startCol: 0, endCol: 0 }],
+    index,
+    indexStrategy: "auto",
+  });
+  const match = await session.findNext();
+  assert.equal(match.address, "Sheet1!A1");
+  assert.equal(session.stats.indexCellsVisited, 0);
+  assert.ok(session.stats.cellsScanned <= 5);
+});
+
 test("WorkbookSearchIndex: updateCell normalizes merged interior addresses to the master cell", async () => {
   const wb = new InMemoryWorkbook();
   const sheet = wb.addSheet("Sheet1");
