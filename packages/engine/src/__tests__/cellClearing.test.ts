@@ -283,6 +283,36 @@ describe("EngineWorker null clear semantics", () => {
     }
   });
 
+  it("clears spill output cells when the spill origin is edited", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setCell("A1", "=SEQUENCE(1,2)");
+      await engine.recalculate();
+      expect((await engine.getCell("B1")).value).toBe(2);
+
+      // Edit the spill origin formula so it no longer spills; the previous spill output should be
+      // cleared (blank/null) in the next recalc change list.
+      await engine.setCell("A1", "=1");
+      const changes = await engine.recalculate();
+      expect(changes).toEqual([
+        { sheet: "Sheet1", address: "A1", value: 1 },
+        { sheet: "Sheet1", address: "B1", value: null }
+      ]);
+      expect((await engine.getCell("B1")).value).toBeNull();
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("clears spill output cells when a spill shrinks", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);
