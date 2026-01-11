@@ -1424,6 +1424,18 @@ fn patch_workbook_xml(
     original: &[u8],
     sheets: &[SheetMeta],
 ) -> Result<Vec<u8>, WriteError> {
+    let mut rel_id_to_index: HashMap<&str, usize> = HashMap::with_capacity(sheets.len());
+    for (idx, sheet) in sheets.iter().enumerate() {
+        rel_id_to_index.insert(sheet.relationship_id.as_str(), idx);
+    }
+    let old_sheet_index_to_new_index: Vec<Option<usize>> = doc
+        .meta
+        .sheets
+        .iter()
+        .map(|meta| rel_id_to_index.get(meta.relationship_id.as_str()).copied())
+        .collect();
+    let new_sheet_len = sheets.len();
+
     let mut reader = Reader::from_reader(original);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
@@ -1432,8 +1444,25 @@ fn patch_workbook_xml(
     let mut skipping_sheets = false;
     let mut skipping_workbook_pr = false;
     let mut skipping_calc_pr = false;
+    let mut skipping_defined_name: usize = 0;
     loop {
-        match reader.read_event_into(&mut buf)? {
+        let event = reader.read_event_into(&mut buf)?;
+
+        if skipping_defined_name > 0 {
+            match event {
+                Event::Start(_) => {
+                    skipping_defined_name += 1;
+                }
+                Event::End(_) => {
+                    skipping_defined_name = skipping_defined_name.saturating_sub(1);
+                }
+                _ => {}
+            }
+            buf.clear();
+            continue;
+        }
+
+        match event {
             Event::Start(e) if e.name().as_ref() == b"workbookPr" => {
                 skipping_workbook_pr = true;
                 let empty = Event::Empty(e.into_owned());
@@ -1466,6 +1495,65 @@ fn patch_workbook_xml(
                 } else {
                     writer.write_event(Event::End(e.into_owned()))?;
                 }
+            }
+
+            Event::Start(e) if e.name().as_ref() == b"workbookView" => {
+                writer.get_mut().extend_from_slice(b"<workbookView");
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    writer.get_mut().push(b' ');
+                    writer.get_mut().extend_from_slice(attr.key.as_ref());
+                    writer.get_mut().extend_from_slice(b"=\"");
+                    let value = match attr.key.as_ref() {
+                        b"activeTab" | b"firstSheet" => {
+                            let old = attr.unescape_value()?.into_owned().parse::<usize>().ok();
+                            old.and_then(|idx| {
+                                old_sheet_index_to_new_index
+                                    .get(idx)
+                                    .copied()
+                                    .flatten()
+                                    .or_else(|| (new_sheet_len > 0).then_some(0))
+                            })
+                            .map(|idx| idx.to_string())
+                            .unwrap_or_else(|| attr.unescape_value().map(|v| v.into_owned()).unwrap_or_default())
+                        }
+                        _ => attr.unescape_value()?.into_owned(),
+                    };
+                    writer
+                        .get_mut()
+                        .extend_from_slice(escape_attr(&value).as_bytes());
+                    writer.get_mut().push(b'"');
+                }
+                writer.get_mut().push(b'>');
+            }
+            Event::Empty(e) if e.name().as_ref() == b"workbookView" => {
+                writer.get_mut().extend_from_slice(b"<workbookView");
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    writer.get_mut().push(b' ');
+                    writer.get_mut().extend_from_slice(attr.key.as_ref());
+                    writer.get_mut().extend_from_slice(b"=\"");
+                    let value = match attr.key.as_ref() {
+                        b"activeTab" | b"firstSheet" => {
+                            let old = attr.unescape_value()?.into_owned().parse::<usize>().ok();
+                            old.and_then(|idx| {
+                                old_sheet_index_to_new_index
+                                    .get(idx)
+                                    .copied()
+                                    .flatten()
+                                    .or_else(|| (new_sheet_len > 0).then_some(0))
+                            })
+                            .map(|idx| idx.to_string())
+                            .unwrap_or_else(|| attr.unescape_value().map(|v| v.into_owned()).unwrap_or_default())
+                        }
+                        _ => attr.unescape_value()?.into_owned(),
+                    };
+                    writer
+                        .get_mut()
+                        .extend_from_slice(escape_attr(&value).as_bytes());
+                    writer.get_mut().push(b'"');
+                }
+                writer.get_mut().extend_from_slice(b"/>");
             }
 
             Event::Start(e) if e.name().as_ref() == b"sheets" => {
@@ -1561,6 +1649,85 @@ fn patch_workbook_xml(
             Event::End(e) if e.name().as_ref() == b"sheets" => {
                 skipping_sheets = false;
                 writer.get_mut().extend_from_slice(b"</sheets>");
+            }
+
+            Event::Start(e) if e.name().as_ref() == b"definedName" => {
+                let mut local_sheet_id: Option<usize> = None;
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"localSheetId" {
+                        local_sheet_id = attr.unescape_value()?.into_owned().parse::<usize>().ok();
+                        break;
+                    }
+                }
+
+                if let Some(old_idx) = local_sheet_id {
+                    if let Some(new_idx) = old_sheet_index_to_new_index
+                        .get(old_idx)
+                        .copied()
+                        .flatten()
+                    {
+                        writer.get_mut().extend_from_slice(b"<definedName");
+                        for attr in e.attributes().with_checks(false) {
+                            let attr = attr?;
+                            writer.get_mut().push(b' ');
+                            writer.get_mut().extend_from_slice(attr.key.as_ref());
+                            writer.get_mut().extend_from_slice(b"=\"");
+                            let value = if attr.key.as_ref() == b"localSheetId" {
+                                new_idx.to_string()
+                            } else {
+                                attr.unescape_value()?.into_owned()
+                            };
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&value).as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        writer.get_mut().push(b'>');
+                    } else {
+                        skipping_defined_name = 1;
+                    }
+                } else {
+                    writer.write_event(Event::Start(e.into_owned()))?;
+                }
+            }
+            Event::Empty(e) if e.name().as_ref() == b"definedName" => {
+                let mut local_sheet_id: Option<usize> = None;
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"localSheetId" {
+                        local_sheet_id = attr.unescape_value()?.into_owned().parse::<usize>().ok();
+                        break;
+                    }
+                }
+
+                if let Some(old_idx) = local_sheet_id {
+                    if let Some(new_idx) = old_sheet_index_to_new_index
+                        .get(old_idx)
+                        .copied()
+                        .flatten()
+                    {
+                        writer.get_mut().extend_from_slice(b"<definedName");
+                        for attr in e.attributes().with_checks(false) {
+                            let attr = attr?;
+                            writer.get_mut().push(b' ');
+                            writer.get_mut().extend_from_slice(attr.key.as_ref());
+                            writer.get_mut().extend_from_slice(b"=\"");
+                            let value = if attr.key.as_ref() == b"localSheetId" {
+                                new_idx.to_string()
+                            } else {
+                                attr.unescape_value()?.into_owned()
+                            };
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&value).as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        writer.get_mut().extend_from_slice(b"/>");
+                    }
+                } else {
+                    writer.write_event(Event::Empty(e.into_owned()))?;
+                }
             }
 
             Event::Eof => break,
