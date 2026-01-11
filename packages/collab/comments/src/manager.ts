@@ -547,6 +547,7 @@ export function migrateCommentsArrayToMap(doc: Y.Doc, opts: { origin?: unknown }
   const legacyRoot: Y.AbstractType<any> = root.kind === "array" ? root.array : root.map;
   doc.transact(
     () => {
+      const ctors = getDocTypeConstructors(doc);
       /** @type {Map<string, Y.Map<unknown>>} */
       const entries = new Map<string, Y.Map<unknown>>();
 
@@ -555,7 +556,7 @@ export function migrateCommentsArrayToMap(doc: Y.Doc, opts: { origin?: unknown }
         root.map.forEach((value, key) => {
           const map = getYMap(value);
           if (!map) return;
-          entries.set(key, cloneYjsValue(map) as Y.Map<unknown>);
+          entries.set(key, cloneYjsValue(map, ctors) as Y.Map<unknown>);
         });
       }
 
@@ -563,7 +564,7 @@ export function migrateCommentsArrayToMap(doc: Y.Doc, opts: { origin?: unknown }
       if (root.kind === "array") {
         for (const { key, value } of iterMapEntryComments(root.array)) {
           if (entries.has(key)) continue;
-          entries.set(key, cloneYjsValue(value) as Y.Map<unknown>);
+          entries.set(key, cloneYjsValue(value, ctors) as Y.Map<unknown>);
         }
       }
 
@@ -574,7 +575,7 @@ export function migrateCommentsArrayToMap(doc: Y.Doc, opts: { origin?: unknown }
         const id = String(map.get("id") ?? "");
         if (!id) continue;
         if (entries.has(id)) continue;
-        entries.set(id, cloneYjsValue(map) as Y.Map<unknown>);
+        entries.set(id, cloneYjsValue(map, ctors) as Y.Map<unknown>);
       }
 
       // Root types are schema-defined by name; once "comments" is instantiated as
@@ -626,32 +627,55 @@ function getDocMapConstructor(doc: any): new () => any {
   return ctor;
 }
 
-function cloneYjsValue(value: any): any {
+type DocTypeConstructors = {
+  MapCtor: new () => any;
+  ArrayCtor: new () => any;
+  TextCtor: new () => any;
+};
+
+function getDocTypeConstructors(doc: any): DocTypeConstructors {
+  return {
+    MapCtor: getDocMapConstructor(doc),
+    ArrayCtor: getDocArrayConstructor(doc),
+    TextCtor: getDocTextConstructor(doc),
+  };
+}
+
+function getDocTextConstructor(doc: any): new () => any {
+  const name = findAvailableRootName(doc, "__comments_tmp_text");
+  const tmp = doc.getText(name);
+  const ctor = tmp.constructor as new () => any;
+  doc.share.delete(name);
+  return ctor;
+}
+
+function cloneYjsValue(value: any, ctors: DocTypeConstructors): any {
   const map = getYMap(value);
   if (map) {
-    const MapCtor = map.constructor as new () => any;
-    const out = new MapCtor();
+    const out = new ctors.MapCtor();
     map.forEach((v: any, k: string) => {
-      out.set(k, cloneYjsValue(v));
+      out.set(k, cloneYjsValue(v, ctors));
     });
     return out;
   }
 
   const array = getYArray(value);
   if (array) {
-    const ArrayCtor = array.constructor as new () => any;
-    const out = new ArrayCtor();
+    const out = new ctors.ArrayCtor();
     for (const item of array.toArray()) {
-      out.push([cloneYjsValue(item)]);
+      out.push([cloneYjsValue(item, ctors)]);
     }
     return out;
   }
 
   if (isYText(value)) {
-    const TextCtor = (value as any).constructor as new () => any;
-    const out = new TextCtor();
+    const out = new ctors.TextCtor();
     out.applyDelta(structuredClone(value.toDelta()));
     return out;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((v) => cloneYjsValue(v, ctors));
   }
 
   if (value && typeof value === "object") {

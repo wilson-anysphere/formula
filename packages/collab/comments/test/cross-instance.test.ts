@@ -178,4 +178,59 @@ describe("collab comments cross-instance Yjs roots (ESM doc + CJS applyUpdate)",
     expect(listed[0]?.replies).toHaveLength(1);
     expect(listed[0]?.replies[0]?.content).toBe("Reply");
   });
+
+  it("migrates a legacy comments array root containing foreign maps (CJS applyUpdate into ESM Doc)", () => {
+    const require = createRequire(import.meta.url);
+    // eslint-disable-next-line import/no-named-as-default-member
+    const Ycjs = require("yjs");
+
+    const remote = new Ycjs.Doc();
+    const comments = remote.getArray("comments");
+    remote.transact(() => {
+      const comment = new Ycjs.Map();
+      comment.set("id", "c1");
+      comment.set("cellRef", "A1");
+      comment.set("kind", "threaded");
+      comment.set("authorId", "u1");
+      comment.set("authorName", "Alice");
+      comment.set("createdAt", 1);
+      comment.set("updatedAt", 1);
+      comment.set("resolved", false);
+      comment.set("content", "Hello");
+      comment.set("mentions", []);
+
+      const replies = new Ycjs.Array();
+      const reply = new Ycjs.Map();
+      reply.set("id", "r1");
+      reply.set("authorId", "u1");
+      reply.set("authorName", "Alice");
+      reply.set("createdAt", 1);
+      reply.set("updatedAt", 1);
+      reply.set("content", "Reply");
+      reply.set("mentions", []);
+      replies.push([reply]);
+      comment.set("replies", replies);
+
+      comments.push([comment]);
+    });
+
+    const update = Ycjs.encodeStateAsUpdate(remote);
+
+    const doc = new Y.Doc();
+    // Apply update with the CJS build so nested Y.Maps are from the CJS instance.
+    Ycjs.applyUpdate(doc, update);
+
+    const mgr = new CommentManager(doc);
+    expect(mgr.listAll().map((c) => c.id)).toEqual(["c1"]);
+    expect(mgr.listAll()[0]?.replies).toHaveLength(1);
+
+    expect(migrateCommentsArrayToMap(doc)).toBe(true);
+    expect(getCommentsRoot(doc).kind).toBe("map");
+
+    // After migration, comments should be stored as *local* Y.Maps/Y.Arrays.
+    const root = doc.getMap("comments");
+    const c1 = root.get("c1");
+    expect(c1).toBeInstanceOf(Y.Map);
+    expect(c1?.get("replies")).toBeInstanceOf(Y.Array);
+  });
 });
