@@ -28,6 +28,5 @@ test("expr security: treats 'constructor' as a column name when bracketed", () =
 });
 
 test("expr security: rejects function calls (Function)", () => {
-  const expr = parseFormula(`=Function("return 1")`);
-  assert.throws(() => evaluateExpr(expr, []), /Unsupported function 'Function'/);
+  assert.throws(() => parseFormula(`=Function("return 1")`), /Unsupported function 'Function'/);
 });

@@ -192,6 +192,10 @@ class Parser {
         if (ident === "null") return { type: "literal", value: null };
 
         if (this.match("operator", "(")) {
+          // Only allow a small, explicitly whitelisted set of safe functions.
+          if (ident !== "date") {
+            parseError(`Unsupported function '${raw}'`, this.input, tok);
+          }
           /** @type {ExprNode[]} */
           const args = [];
           if (!this.match("operator", ")")) {
