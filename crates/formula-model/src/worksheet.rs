@@ -8,8 +8,8 @@ use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as Colum
 
 use crate::drawings::DrawingObject;
 use crate::{
-    A1ParseError, Cell, CellKey, CellRef, CellValue, Hyperlink, MergeError, MergedRegions, Range,
-    Table,
+    A1ParseError, Cell, CellKey, CellRef, CellValue, DataValidation, DataValidationAssignment,
+    DataValidationId, Hyperlink, MergeError, MergedRegions, Range, Table,
 };
 
 /// Identifier for a worksheet within a workbook.
@@ -197,6 +197,14 @@ pub struct Worksheet {
     /// Hyperlinks anchored to cells/ranges in this worksheet.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hyperlinks: Vec<Hyperlink>,
+
+    /// Data validation rules assigned to ranges on this worksheet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub data_validations: Vec<DataValidationAssignment>,
+
+    /// Next data validation id to allocate (runtime-only).
+    #[serde(skip)]
+    next_data_validation_id: DataValidationId,
 }
 
 impl Worksheet {
@@ -223,7 +231,54 @@ impl Worksheet {
             tables: Vec::new(),
             columnar: None,
             hyperlinks: Vec::new(),
+            data_validations: Vec::new(),
+            next_data_validation_id: 1,
         }
+    }
+
+    /// Assign a data validation rule to the given ranges.
+    ///
+    /// Returns the allocated data validation id.
+    pub fn add_data_validation(
+        &mut self,
+        ranges: Vec<Range>,
+        validation: DataValidation,
+    ) -> DataValidationId {
+        let id = self.next_data_validation_id;
+        self.next_data_validation_id = self.next_data_validation_id.wrapping_add(1);
+        self.data_validations
+            .push(DataValidationAssignment { id, ranges, validation });
+        id
+    }
+
+    /// Remove a data validation rule by id.
+    pub fn remove_data_validation(&mut self, id: DataValidationId) -> bool {
+        let before = self.data_validations.len();
+        self.data_validations.retain(|dv| dv.id != id);
+        before != self.data_validations.len()
+    }
+
+    /// Return all data validation assignments that apply to `cell`.
+    ///
+    /// If `cell` is inside a merged region, validations applied to any part of the merged region
+    /// are treated as applying to the anchor cell (Excel-like behavior).
+    pub fn data_validations_for_cell(&self, cell: CellRef) -> Vec<&DataValidationAssignment> {
+        if cell.row >= crate::cell::EXCEL_MAX_ROWS || cell.col >= crate::cell::EXCEL_MAX_COLS {
+            return Vec::new();
+        }
+
+        let anchor = self.merged_regions.resolve_cell(cell);
+        let merged_range = self.merged_regions.containing_range(cell);
+
+        self.data_validations
+            .iter()
+            .filter(|assignment| {
+                assignment.ranges.iter().any(|range| {
+                    range.contains(anchor)
+                        || merged_range.is_some_and(|merged| range.intersects(&merged))
+                })
+            })
+            .collect()
     }
 
     /// Find the first table containing `cell`.
@@ -877,6 +932,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             zoom: f32,
             #[serde(default)]
             hyperlinks: Vec<Hyperlink>,
+            #[serde(default)]
+            data_validations: Vec<DataValidationAssignment>,
         }
 
         let helper = Helper::deserialize(deserializer)?;
@@ -938,6 +995,14 @@ impl<'de> Deserialize<'de> for Worksheet {
             )));
         }
 
+        let next_data_validation_id = helper
+            .data_validations
+            .iter()
+            .map(|dv| dv.id)
+            .max()
+            .unwrap_or(0)
+            .wrapping_add(1);
+
         Ok(Worksheet {
             id: helper.id,
             name: helper.name,
@@ -959,6 +1024,8 @@ impl<'de> Deserialize<'de> for Worksheet {
             tables: helper.tables,
             columnar: None,
             hyperlinks: helper.hyperlinks,
+            data_validations: helper.data_validations,
+            next_data_validation_id,
         })
     }
 }

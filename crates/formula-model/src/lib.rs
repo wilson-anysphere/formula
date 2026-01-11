@@ -11,6 +11,7 @@ mod cell;
 pub mod charts;
 mod comments;
 pub mod conditional_formatting;
+mod data_validation;
 mod display;
 /// Drawing primitives (images, shapes, charts, etc.).
 pub mod drawings;
@@ -34,6 +35,7 @@ pub use calc_settings::{CalcSettings, CalculationMode, IterativeCalculationSetti
 pub use cell::{Cell, CellId, CellKey, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 pub use comments::{Comment, CommentAuthor, CommentKind, Mention, Reply, TimestampMs};
 pub use conditional_formatting::*;
+pub use data_validation::*;
 pub use display::{format_cell_display, CellDisplay};
 pub use error::ErrorValue;
 pub use hyperlinks::{Hyperlink, HyperlinkTarget};
