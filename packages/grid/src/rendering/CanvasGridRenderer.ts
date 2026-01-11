@@ -87,6 +87,7 @@ export class CanvasGridRenderer {
 
   private readonly prefetchOverscanRows: number;
   private readonly prefetchOverscanCols: number;
+  private lastPrefetchRange: CellRange | null = null;
 
   private gridCanvas?: HTMLCanvasElement;
   private gridCtx?: CanvasRenderingContext2D;
@@ -370,7 +371,7 @@ export class CanvasGridRenderer {
     this.dirty.content.markDirty(full);
     this.dirty.selection.markDirty(full);
     this.forceFullRedraw = true;
-    this.prefetchVisibleRange(viewport);
+    this.prefetchVisibleRange(viewport, { force: true });
     this.requestRender();
   }
 
@@ -428,23 +429,39 @@ export class CanvasGridRenderer {
     this.requestRender();
   }
 
-  private prefetchVisibleRange(viewport: GridViewportState): void {
+  private prefetchVisibleRange(viewport: GridViewportState, options?: { force?: boolean }): void {
     if (!this.provider.prefetch) return;
 
     const rowCount = this.getRowCount();
     const colCount = this.getColCount();
 
-    this.provider.prefetch({
+    const nextRange: CellRange = {
       startRow: Math.max(0, viewport.main.rows.start - this.prefetchOverscanRows),
       endRow: Math.min(rowCount, viewport.main.rows.end + this.prefetchOverscanRows),
       startCol: Math.max(0, viewport.main.cols.start - this.prefetchOverscanCols),
       endCol: Math.min(colCount, viewport.main.cols.end + this.prefetchOverscanCols)
-    });
+    };
+
+    if (!options?.force && this.lastPrefetchRange && CanvasGridRenderer.rangesEqual(this.lastPrefetchRange, nextRange)) {
+      return;
+    }
+
+    this.lastPrefetchRange = nextRange;
+    this.provider.prefetch(nextRange);
   }
 
   private static sanitizeOverscan(value: number | undefined): number {
     if (!Number.isFinite(value)) return 0;
     return Math.max(0, Math.floor(value));
+  }
+
+  private static rangesEqual(a: CellRange, b: CellRange): boolean {
+    return (
+      a.startRow === b.startRow &&
+      a.endRow === b.endRow &&
+      a.startCol === b.startCol &&
+      a.endCol === b.endCol
+    );
   }
 
   private alignScrollToDevicePixels(pos: { x: number; y: number }): { x: number; y: number } {
