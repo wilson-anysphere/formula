@@ -112,4 +112,47 @@ describe("ai chat orchestrator (desktop integration)", () => {
     expect(entries[0]?.tool_calls?.[0]?.name).toBe("write_cell");
     expect(entries[0]?.tool_calls?.[0]?.approved).toBe(true);
   });
+
+  it("can be cancelled while building workbook context (does not call model)", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", 1);
+
+    const auditStore = new MemoryAIAuditStore();
+    const chat = vi.fn(async () => {
+      throw new Error("should not call model when cancelled before context is ready");
+    });
+
+    const ragService = {
+      async getContextManager() {
+        return new ContextManager({ tokenBudgetTokens: 800 });
+      },
+      async buildWorkbookContextFromSpreadsheetApi() {
+        return new Promise(() => {});
+      },
+      async dispose() {}
+    };
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_abort",
+      llmClient: { chat } as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      auditStore,
+      sessionId: "session_abort",
+      ragService: ragService as any,
+    });
+
+    const abortController = new AbortController();
+    const promise = orchestrator.sendMessage({
+      text: "Hello",
+      history: [],
+      signal: abortController.signal,
+    });
+
+    abortController.abort();
+
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+    expect(chat).not.toHaveBeenCalled();
+  });
 });

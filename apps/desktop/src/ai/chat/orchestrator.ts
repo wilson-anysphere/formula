@@ -196,7 +196,50 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     options.systemPrompt ??
     "You are an AI assistant inside a spreadsheet app. Prefer using tools to read data before making claims.";
 
+  /**
+   * @param {string} [message]
+   */
+  function createAbortError(message = "Aborted") {
+    const err = new Error(message);
+    err.name = "AbortError";
+    return err;
+  }
+
+  /**
+   * @param {AbortSignal | undefined} signal
+   */
+  function throwIfAborted(signal) {
+    if (signal?.aborted) throw createAbortError();
+  }
+
+  /**
+   * @template T
+   * @param {AbortSignal | undefined} signal
+   * @param {Promise<T>} promise
+   * @returns {Promise<T>}
+   */
+  async function withAbort(signal, promise) {
+    if (!signal) return promise;
+    throwIfAborted(signal);
+
+    /** @type {(() => void) | null} */
+    let removeListener = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          const onAbort = () => reject(createAbortError());
+          signal.addEventListener("abort", onAbort, { once: true });
+          removeListener = () => signal.removeEventListener("abort", onAbort);
+        }),
+      ]);
+    } finally {
+      removeListener?.();
+    }
+  }
+
   async function sendMessage(params: SendAiChatMessageParams): Promise<SendAiChatMessageResult> {
+    const signal = params.signal;
     const text = params.text.trim();
     if (!text) throw new Error("sendMessage requires non-empty text");
 
@@ -207,13 +250,17 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
     let workbookContext: any;
     try {
-      workbookContext = await contextProvider.buildWorkbookContextFromSpreadsheetApi({
-        spreadsheet,
-        workbookId: options.workbookId,
-        query: text,
-        attachments,
-        dlp
-      });
+      throwIfAborted(signal);
+      workbookContext = await withAbort(
+        signal,
+        contextProvider.buildWorkbookContextFromSpreadsheetApi({
+          spreadsheet,
+          workbookId: options.workbookId,
+          query: text,
+          attachments,
+          dlp
+        })
+      );
     } catch (error) {
       // Hard stop: DLP says we cannot send any workbook content to a cloud model.
       // IMPORTANT: do not call the LLM in this case.
