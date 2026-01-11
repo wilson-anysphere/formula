@@ -1,6 +1,6 @@
 import { paintToRgba, rgbaToCss } from "./color.js";
 import { applyPathToCanvas } from "./path.js";
-import { applyTransformToCanvas } from "./transform.js";
+import { applyInverseTransformToCanvas, applyTransformToCanvas } from "./transform.js";
 import type { ClipShape, Node, Paint, PathNode, RectNode, Scene, Stroke, TextNode } from "./types.js";
 import { fontSpecToCss } from "./text.js";
 
@@ -22,9 +22,32 @@ function applyStroke(ctx: CanvasRenderingContext2D, stroke: Stroke | undefined):
   return true;
 }
 
+function drawRoundedRect(ctx: CanvasRenderingContext2D, node: Pick<RectNode, "x" | "y" | "width" | "height" | "rx" | "ry">): void {
+  const { x, y, width, height } = node;
+  const rx = node.rx ?? node.ry ?? 0;
+  const ry = node.ry ?? node.rx ?? 0;
+  const r = Math.max(0, Math.min(rx, ry, width / 2, height / 2));
+
+  if (!r) {
+    ctx.rect(x, y, width, height);
+    return;
+  }
+
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.arcTo(x + width, y, x + width, y + r, r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.arcTo(x + width, y + height, x + width - r, y + height, r);
+  ctx.lineTo(x + r, y + height);
+  ctx.arcTo(x, y + height, x, y + height - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
 function drawClipShape(ctx: CanvasRenderingContext2D, shape: ClipShape): void {
   if (shape.kind === "rect") {
-    ctx.rect(shape.x, shape.y, shape.width, shape.height);
+    drawRoundedRect(ctx, shape);
     return;
   }
   applyPathToCanvas(ctx, shape.path);
@@ -58,7 +81,7 @@ export function renderSceneToCanvas(scene: Scene, ctx: CanvasRenderingContext2D)
     ctx.save();
     applyTransformToCanvas(ctx, node.transform);
     ctx.beginPath();
-    ctx.rect(node.x, node.y, node.width, node.height);
+    drawRoundedRect(ctx, node);
     if (applyFill(ctx, node.fill)) ctx.fill();
     if (applyStroke(ctx, node.stroke)) ctx.stroke();
     ctx.restore();
@@ -107,13 +130,14 @@ export function renderSceneToCanvas(scene: Scene, ctx: CanvasRenderingContext2D)
   const renderClip = (node: Extract<Node, { kind: "clip" }>): void => {
     ctx.save();
     applyTransformToCanvas(ctx, node.transform);
+    applyTransformToCanvas(ctx, node.clip.transform);
     ctx.beginPath();
     drawClipShape(ctx, node.clip);
     ctx.clip(node.clip.kind === "path" ? node.clip.fillRule : undefined);
+    applyInverseTransformToCanvas(ctx, node.clip.transform);
     for (const child of node.children) renderNode(child);
     ctx.restore();
   };
 
   for (const node of scene.nodes) renderNode(node);
 }
-

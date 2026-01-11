@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createDemoScene, renderSceneToCanvas, renderSceneToSvg } from "../scene/index.js";
+import type { Scene } from "../scene/index.js";
 
 function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: string[] } {
   const calls: string[] = [];
@@ -57,5 +58,37 @@ describe("charts scene graph", () => {
     expect(() => renderSceneToCanvas(scene, ctx)).not.toThrow();
     expect(calls.length).toBeGreaterThan(0);
   });
-});
 
+  it("supports rounded rects + clip-shape transforms on Canvas", () => {
+    const scene: Scene = {
+      nodes: [
+        {
+          kind: "clip",
+          clip: {
+            kind: "rect",
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 40,
+            rx: 6,
+            transform: [{ kind: "translate", x: 5, y: 5 }],
+          },
+          children: [
+            {
+              kind: "rect",
+              x: 0,
+              y: 0,
+              width: 100,
+              height: 100,
+              rx: 10,
+              fill: { color: "#00ff00" },
+            },
+          ],
+        },
+      ],
+    };
+
+    const { ctx } = createStubCanvasContext();
+    expect(() => renderSceneToCanvas(scene, ctx)).not.toThrow();
+  });
+});

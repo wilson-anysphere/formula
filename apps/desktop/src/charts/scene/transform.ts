@@ -48,3 +48,32 @@ export function applyTransformToCanvas(ctx: CanvasRenderingContext2D, transform:
   }
 }
 
+export function applyInverseTransformToCanvas(ctx: CanvasRenderingContext2D, transform: Transform[] | undefined): void {
+  if (!transform?.length) return;
+  for (let i = transform.length - 1; i >= 0; i -= 1) {
+    const t = transform[i]!;
+    switch (t.kind) {
+      case "translate":
+        ctx.translate(-t.x, -t.y);
+        break;
+      case "scale": {
+        const sx = t.x;
+        const sy = t.y ?? t.x;
+        if (sx === 0 || sy === 0) break;
+        ctx.scale(1 / sx, 1 / sy);
+        break;
+      }
+      case "rotate": {
+        const radians = -t.radians;
+        if (t.cx == null || t.cy == null) {
+          ctx.rotate(radians);
+          break;
+        }
+        ctx.translate(t.cx, t.cy);
+        ctx.rotate(radians);
+        ctx.translate(-t.cx, -t.cy);
+        break;
+      }
+    }
+  }
+}
