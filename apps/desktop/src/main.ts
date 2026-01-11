@@ -28,6 +28,7 @@ import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend, type WorkbookInfo } from "./tauri/workbookBackend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
+import { refreshTableSignaturesFromBackend } from "./power-query/tableSignatures";
 
 const workbookSheetNames = new Map<string, string>();
 
@@ -1214,6 +1215,13 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     tauriBackend.listTables().catch(() => []),
   ]);
 
+  const normalizedTables = tables.map((table) => {
+    const rawSheetId = typeof (table as any)?.sheet_id === "string" ? String((table as any).sheet_id) : "";
+    const sheet_id = rawSheetId ? sheetIdByName.get(rawSheetId) ?? rawSheetId : rawSheetId;
+    return { ...(table as any), sheet_id };
+  });
+  refreshTableSignaturesFromBackend(doc, normalizedTables as any);
+
   for (const entry of definedNames) {
     const name = typeof (entry as any)?.name === "string" ? String((entry as any).name) : "";
     const refersTo =
@@ -1238,7 +1246,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     workbook.defineName(name, { sheetName, range });
   }
 
-  for (const table of tables) {
+  for (const table of normalizedTables) {
     const name = typeof (table as any)?.name === "string" ? String((table as any).name) : "";
     const rawSheetName = typeof (table as any)?.sheet_id === "string" ? String((table as any).sheet_id) : "";
     const sheetName = rawSheetName ? sheetIdByName.get(rawSheetName) ?? rawSheetName : "";

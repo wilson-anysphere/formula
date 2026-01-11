@@ -8,7 +8,7 @@ import { parseA1 } from "../../document/coords.js";
 
 import { applyQueryToDocument, type QuerySheetDestination } from "../../power-query/applyToDocument.js";
 import { maybeGetPowerQueryDlpContext } from "../../power-query/dlpContext.js";
-import { createDesktopQueryEngine } from "../../power-query/engine.js";
+import { createDesktopQueryEngine, getContextForDocument } from "../../power-query/engine.js";
 import { DesktopPowerQueryRefreshManager } from "../../power-query/refresh.js";
 import { createPowerQueryRefreshStateStore } from "../../power-query/refreshStateStore.js";
 import { DesktopPowerQueryRefreshOrchestrator } from "../../power-query/refreshAll.js";
@@ -136,6 +136,7 @@ export function QueryEditorPanelContainer(props: Props) {
   });
 
   const doc = props.getDocumentController();
+  const queryContext = useMemo(() => getContextForDocument(doc), [doc]);
   const refreshStateStore = useMemo(() => {
     return createPowerQueryRefreshStateStore({ workbookId: props.workbookId });
   }, [props.workbookId]);
@@ -143,22 +144,22 @@ export function QueryEditorPanelContainer(props: Props) {
     return new DesktopPowerQueryRefreshManager({
       engine,
       document: doc,
-      getContext: () => ({}),
+      getContext: () => queryContext,
       concurrency: 1,
       batchSize: 1024,
       stateStore: refreshStateStore,
     });
-  }, [doc, engine, refreshStateStore]);
+  }, [doc, engine, queryContext, refreshStateStore]);
 
   const refreshOrchestrator = useMemo(() => {
     return new DesktopPowerQueryRefreshOrchestrator({
       engine,
       document: doc,
-      getContext: () => ({}),
+      getContext: () => queryContext,
       concurrency: 2,
       batchSize: 1024,
     });
-  }, [doc, engine]);
+  }, [doc, engine, queryContext]);
 
   const [query, setQuery] = useState<Query>(() => {
     if (typeof localStorage === "undefined") return defaultQuery();
@@ -450,6 +451,7 @@ export function QueryEditorPanelContainer(props: Props) {
       setRefreshEvent({ type: "apply:started", jobId, queryId: current.id, destination });
       const result = await applyQueryToDocument(doc, current, destination, {
         engine,
+        context: queryContext,
         batchSize: 1024,
         signal: controller.signal,
         onProgress: (evt) => {
@@ -556,7 +558,7 @@ export function QueryEditorPanelContainer(props: Props) {
       <QueryEditorPanel
         query={query}
         engine={engine}
-        context={{}}
+        context={queryContext}
         refreshEvent={refreshEvent}
         onQueryChange={(next) => setQuery(next)}
         onLoadToSheet={loadToSheet}

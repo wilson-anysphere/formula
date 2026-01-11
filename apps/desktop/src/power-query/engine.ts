@@ -6,10 +6,14 @@ import { HttpConnector } from "../../../../packages/power-query/src/connectors/h
 import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
 import { DataTable } from "../../../../packages/power-query/src/table.js";
 import type { OAuth2Manager } from "../../../../packages/power-query/src/oauth2/manager.js";
+import type { QueryExecutionContext } from "../../../../packages/power-query/src/engine.js";
 
 import { enforceExternalConnector } from "../dlp/enforceExternalConnector.js";
 import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
 import { effectiveDocumentClassification, effectiveRangeClassification } from "../../../../packages/security/dlp/src/selectors.js";
+
+import type { DocumentController } from "../document/documentController.js";
+import { getTableSignatureRegistry } from "./tableSignatures.ts";
 
 type DlpContext = {
   documentId: string;
@@ -721,4 +725,11 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
     },
     { levelsBySourceId: defaultPrivacyLevelsBySourceId, workbookLevel: workbookPrivacyLevel },
   );
+}
+
+export function getContextForDocument(doc: DocumentController): QueryExecutionContext {
+  const registry = getTableSignatureRegistry(doc);
+  return {
+    getTableSignature: (tableName) => registry.getTableSignature(tableName),
+  };
 }
