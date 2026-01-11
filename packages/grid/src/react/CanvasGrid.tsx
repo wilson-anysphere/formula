@@ -165,6 +165,18 @@ function partialThemeEqual(a: Partial<GridTheme>, b: Partial<GridTheme>): boolea
   return true;
 }
 
+const SR_ONLY_STYLE: React.CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0, 0, 0, 0)",
+  whiteSpace: "nowrap",
+  border: 0
+};
+
 type ResizeHit = { kind: "col"; index: number } | { kind: "row"; index: number };
 
 type ResizeDragState =
@@ -239,15 +251,36 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   enableResizeRef.current = props.enableResize ?? false;
 
   const statusId = useId();
+  const activeCellId = useMemo(() => `formula-grid-active-cell-${statusId.replace(/:/g, "")}`, [statusId]);
   const [cssTheme, setCssTheme] = useState<Partial<GridTheme>>({});
   const resolvedTheme = useMemo(() => resolveGridTheme(cssTheme, props.theme), [cssTheme, props.theme]);
   const [a11yStatusText, setA11yStatusText] = useState<string>(() =>
     describeCell(null, null, providerRef.current, headerRowsRef.current, headerColsRef.current)
   );
+  const [a11yActiveCell, setA11yActiveCell] = useState<{ row: number; col: number; label: string } | null>(null);
 
   const announceSelection = useCallback((selection: { row: number; col: number } | null, range: CellRange | null) => {
     const text = describeCell(selection, range, providerRef.current, headerRowsRef.current, headerColsRef.current);
     setA11yStatusText((prev) => (prev === text ? prev : text));
+
+    setA11yActiveCell((prev) => {
+      if (!selection) return prev === null ? prev : null;
+
+      const row0 = selection.row - headerRowsRef.current;
+      const col0 = selection.col - headerColsRef.current;
+      const address =
+        row0 >= 0 && col0 >= 0
+          ? toA1Address(row0, col0)
+          : `row ${selection.row + 1}, column ${selection.col + 1}`;
+
+      const cell = providerRef.current.getCell(selection.row, selection.col);
+      const valueText = formatCellDisplayText(cell?.value ?? null);
+      const valueDescription = valueText.trim() === "" ? "blank" : valueText;
+      const label = `Cell ${address}, value ${valueDescription}.`;
+
+      if (prev && prev.row === selection.row && prev.col === selection.col && prev.label === label) return prev;
+      return { row: selection.row, col: selection.col, label };
+    });
   }, []);
 
   const rendererFactory = useMemo(
@@ -1973,6 +2006,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       aria-rowcount={props.rowCount}
       aria-colcount={props.colCount}
       aria-multiselectable="true"
+      aria-activedescendant={a11yActiveCell ? activeCellId : undefined}
       aria-label={ariaLabel}
       aria-labelledby={props.ariaLabelledBy}
       aria-describedby={statusId}
@@ -1984,20 +2018,23 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         role="status"
         aria-live="polite"
         aria-atomic="true"
-        style={{
-          position: "absolute",
-          width: 1,
-          height: 1,
-          padding: 0,
-          margin: -1,
-          overflow: "hidden",
-          clip: "rect(0, 0, 0, 0)",
-          whiteSpace: "nowrap",
-          border: 0
-        }}
+        style={SR_ONLY_STYLE}
       >
         {a11yStatusText}
       </div>
+      {a11yActiveCell ? (
+        <div
+          id={activeCellId}
+          data-testid="canvas-grid-a11y-active-cell"
+          role="gridcell"
+          aria-rowindex={a11yActiveCell.row + 1}
+          aria-colindex={a11yActiveCell.col + 1}
+          aria-selected="true"
+          style={SR_ONLY_STYLE}
+        >
+          {a11yActiveCell.label}
+        </div>
+      ) : null}
       <canvas
         ref={gridCanvasRef}
         style={{ ...canvasStyle, pointerEvents: "none" }}

@@ -27,8 +27,22 @@ test("grid container is focusable and announces selection via live region", asyn
   await expect(status).toContainText("Active cell A1");
   await expect(status).toContainText("value 1");
 
+  const activeDescendant = await gridContainer.getAttribute("aria-activedescendant");
+  expect(activeDescendant).toBeTruthy();
+
+  const activeCell = page.getByTestId("canvas-grid-a11y-active-cell");
+  await expect(activeCell).toHaveAttribute("id", activeDescendant!);
+  await expect(activeCell).toHaveAttribute("role", "gridcell");
+  await expect(activeCell).toHaveAttribute("aria-rowindex", "2");
+  await expect(activeCell).toHaveAttribute("aria-colindex", "2");
+  await expect(activeCell).toContainText("Cell A1, value 1");
+
   // Keyboard navigation should move the active cell and update the live region.
   await page.keyboard.press("ArrowRight"); // B1
   await expect(status).toContainText("Active cell B1");
   await expect(status).toContainText("value 3");
+
+  await expect(activeCell).toHaveAttribute("aria-rowindex", "2");
+  await expect(activeCell).toHaveAttribute("aria-colindex", "3");
+  await expect(activeCell).toContainText("Cell B1, value 3");
 });
