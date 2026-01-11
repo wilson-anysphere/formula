@@ -22,6 +22,7 @@ test("BranchService (YjsBranchStore): current branch name is shared via Yjs meta
   await serviceA.init(owner, { sheets: {} });
   await serviceA.createBranch(owner, { name: "feature" });
   await serviceA.checkoutBranch(owner, { name: "feature" });
+  assert.equal(await serviceB.getCurrentBranchName(), "feature");
 
   // Editor cannot checkout branches, but should still commit to the globally checked-out branch.
   await assert.rejects(serviceB.checkoutBranch(editor, { name: "main" }), {
