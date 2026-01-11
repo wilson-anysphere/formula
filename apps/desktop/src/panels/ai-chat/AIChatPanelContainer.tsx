@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { LLMMessage } from "../../../../../packages/llm/src/types.js";
 import { OpenAIClient } from "../../../../../packages/llm/src/openai.js";
@@ -6,8 +6,11 @@ import { OpenAIClient } from "../../../../../packages/llm/src/openai.js";
 import { createAiChatOrchestrator } from "../../ai/chat/orchestrator.js";
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
 import { HashEmbedder, InMemoryVectorStore } from "../../../../../packages/ai-rag/src/index.js";
+import type { LLMToolCall } from "../../../../../packages/ai-tools/src/llm/integration.js";
+import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 
 import { AIChatPanel, type AIChatPanelSendMessage } from "./AIChatPanel.js";
+import { ApprovalModal } from "./ApprovalModal.js";
 import { confirmPreviewApproval } from "./previewApproval.js";
 
 const API_KEY_STORAGE_KEY = "formula:openaiApiKey";
@@ -45,6 +48,41 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
 
   const sessionId = useRef<string>(generateSessionId());
   const llmHistory = useRef<LLMMessage[] | undefined>(undefined);
+
+  const [approvalRequest, setApprovalRequest] = useState<{ call: LLMToolCall; preview: ToolPlanPreview } | null>(null);
+  const approvalResolver = useRef<((approved: boolean) => void) | null>(null);
+
+  const onApprovalRequired = useCallback(async (request: { call: LLMToolCall; preview: ToolPlanPreview }) => {
+    // If we're not in a browser DOM environment, fall back to `window.confirm`.
+    if (typeof document === "undefined") return confirmPreviewApproval(request as any);
+
+    if (approvalResolver.current) {
+      // Shouldn't happen because tool calls are sequential, but be safe.
+      return false;
+    }
+
+    setApprovalRequest(request);
+    return new Promise<boolean>((resolve) => {
+      approvalResolver.current = resolve;
+    });
+  }, []);
+
+  const resolveApproval = useCallback((approved: boolean) => {
+    const resolve = approvalResolver.current;
+    approvalResolver.current = null;
+    setApprovalRequest(null);
+    resolve?.(approved);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      // Ensure we never leave an awaited approval promise hanging on unmount.
+      if (approvalResolver.current) {
+        approvalResolver.current(false);
+        approvalResolver.current = null;
+      }
+    };
+  }, []);
 
   if (!apiKey) {
     return (
@@ -117,12 +155,12 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
       llmClient: client as any,
       model: (client as any).model ?? "gpt-4o-mini",
       getActiveSheetId: props.getActiveSheetId,
-      onApprovalRequired: confirmPreviewApproval,
+      onApprovalRequired,
       previewOptions: { approval_cell_threshold: 0 },
       sessionId: `${workbookId}:${sessionId.current}`,
       contextManager,
     });
-  }, [client, contextManager, props.getActiveSheetId, props.getDocumentController, workbookId]);
+  }, [client, contextManager, onApprovalRequired, props.getActiveSheetId, props.getDocumentController, workbookId]);
 
   const sendMessage: AIChatPanelSendMessage = useMemo(() => {
     return async (args) => {
@@ -139,11 +177,20 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
   }, [orchestrator]);
 
   return (
-    <AIChatPanel
-      client={client as any}
-      toolExecutor={{ tools: [], execute: async () => ({ ok: false, error: { message: "Tool executor not initialized" } }) } as any}
-      sendMessage={sendMessage}
-    />
+    <div style={{ position: "relative", height: "100%" }}>
+      <AIChatPanel
+        client={client as any}
+        toolExecutor={{ tools: [], execute: async () => ({ ok: false, error: { message: "Tool executor not initialized" } }) } as any}
+        sendMessage={sendMessage}
+      />
+      {approvalRequest ? (
+        <ApprovalModal
+          request={approvalRequest}
+          onApprove={() => resolveApproval(true)}
+          onReject={() => resolveApproval(false)}
+        />
+      ) : null}
+    </div>
   );
 }
 

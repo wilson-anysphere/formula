@@ -32,6 +32,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [sending, setSending] = useState(false);
 
   const systemPrompt = useMemo(
     () =>
@@ -41,8 +42,10 @@ export function AIChatPanel(props: AIChatPanelProps) {
   );
 
   async function send() {
+    if (sending) return;
     const text = input.trim();
     if (!text) return;
+    setSending(true);
 
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -118,6 +121,8 @@ export function AIChatPanel(props: AIChatPanelProps) {
         ...prev,
         { id: crypto.randomUUID(), role: "assistant", content: tWithVars("chat.errorWithMessage", { message }) },
       ]);
+    } finally {
+      setSending(false);
     }
   }
 
@@ -176,6 +181,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
           style={{ flex: 1, padding: 8 }}
           placeholder={t("chat.input.placeholder")}
           value={input}
+          disabled={sending}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -184,7 +190,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
             }
           }}
         />
-        <button onClick={() => void send()} style={{ padding: "8px 12px" }}>
+        <button onClick={() => void send()} style={{ padding: "8px 12px" }} disabled={sending}>
           {t("chat.send")}
         </button>
       </div>
