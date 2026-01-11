@@ -3,7 +3,7 @@ use formula_model::{
     DefinedNameScope, Font, Range, RichText, SheetVisibility, SpillValue, Style, TabColor,
     ThemePalette, WorkbookProtection, WorkbookView, WorkbookWindow, WorkbookWindowState,
 };
-use formula_model::{ColProperties, Comment, CommentAuthor, CommentKind, RowProperties, SheetSelection};
+use formula_model::{Comment, CommentAuthor, CommentKind, SheetSelection};
 use formula_model::drawings::{
     Anchor, AnchorPoint, CellOffset, DrawingObject, DrawingObjectId, DrawingObjectKind, EmuSize,
     ImageData, ImageId,
@@ -157,20 +157,9 @@ fn model_workbook_import_export_round_trips() {
             CellRef::new(5, 5),
             vec![Range::new(CellRef::new(5, 5), CellRef::new(6, 6))],
         ));
-        sheet.row_properties.insert(
-            10,
-            RowProperties {
-                height: Some(20.0),
-                hidden: true,
-            },
-        );
-        sheet.col_properties.insert(
-            3,
-            ColProperties {
-                width: Some(12.0),
-                hidden: false,
-            },
-        );
+        sheet.set_row_height(10, Some(20.0));
+        sheet.set_row_hidden(10, true);
+        sheet.set_col_width(3, Some(12.0));
         sheet.merged_regions
             .add(Range::new(CellRef::new(10, 10), CellRef::new(11, 11)))
             .expect("add merge");
