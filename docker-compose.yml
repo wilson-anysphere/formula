@@ -12,7 +12,8 @@ services:
 
   api:
     build:
-      context: ./services/api
+      context: .
+      dockerfile: services/api/Dockerfile
     environment:
       PORT: "3000"
       DATABASE_URL: postgres://postgres:postgres@db:5432/formula
