@@ -174,7 +174,10 @@ impl BiffWorkbookGlobals {
             return Some(code.to_string());
         }
 
-        Some(format!("__builtin_numFmtId:{num_fmt_id}"))
+        Some(format!(
+            "{}{num_fmt_id}",
+            formula_format::BUILTIN_NUM_FMT_ID_PLACEHOLDER_PREFIX
+        ))
     }
 
     pub(crate) fn xf_count(&self) -> usize {
