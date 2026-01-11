@@ -1873,6 +1873,18 @@ function dataTypeToSqlType(dialect, type) {
           return "BIT";
         case "date":
           return "DATETIME2";
+        case "datetime":
+          return "DATETIME2";
+        case "datetimezone":
+          return "DATETIMEOFFSET";
+        case "time":
+          return "TIME";
+        case "duration":
+          return null;
+        case "decimal":
+          return "DECIMAL";
+        case "binary":
+          return "VARBINARY(MAX)";
         default: {
           /** @type {never} */
           const exhausted = type;
@@ -1920,7 +1932,8 @@ function safeCastDateTimeToSql(dialect, colRef, newType) {
   // Local `changeType` semantics map unparseable inputs to `null` instead of
   // throwing. We approximate that behavior by regex-gating the cast. Dialects
   // without a regex operator (e.g. SQLite) fall back to local execution.
-  const trimmed = `TRIM(${dialect.castText(colRef)})`;
+  const trimmed =
+    dialect.name === "sqlserver" ? `LTRIM(RTRIM(${dialect.castText(colRef)}))` : `TRIM(${dialect.castText(colRef)})`;
   const pattern =
     "'^\\\\d{4}-\\\\d{2}-\\\\d{2}([ T]\\\\d{2}:\\\\d{2}(:\\\\d{2}(\\\\.\\\\d{1,9})?)?([zZ]|[+-]\\\\d{2}(:?\\\\d{2})?)?)?$'";
   const casted = `CAST(${trimmed} AS ${sqlType})`;
@@ -1932,6 +1945,8 @@ function safeCastDateTimeToSql(dialect, colRef, newType) {
       return `CASE WHEN ${trimmed} = '' THEN NULL WHEN ${trimmed} REGEXP ${pattern} THEN ${casted} ELSE NULL END`;
     case "sqlite":
       return null;
+    case "sqlserver":
+      return `TRY_CAST(NULLIF(${trimmed}, '') AS ${sqlType})`;
     default: {
       /** @type {never} */
       const exhausted = dialect.name;

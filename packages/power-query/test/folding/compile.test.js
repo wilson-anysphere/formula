@@ -236,6 +236,22 @@ test("compile: folds addColumn with dialect-specific quoting/casts (MySQL)", () 
   });
 });
 
+test("compile: folds changeType datetime via TRY_CAST (SQL Server)", () => {
+  const folding = new QueryFoldingEngine();
+  const query = {
+    id: "q_cast_sqlserver",
+    name: "Cast sqlserver",
+    source: { type: "database", connection: {}, query: "SELECT * FROM raw", columns: ["When"] },
+    steps: [{ id: "s1", name: "Type", operation: { type: "changeType", column: "When", newType: "datetime" } }],
+  };
+
+  const plan = folding.compile(query, { dialect: "sqlserver" });
+  assert.equal(plan.type, "sql");
+  assert.ok(plan.sql.includes("TRY_CAST"), "expected TRY_CAST for SQL Server datetime casts");
+  assert.ok(plan.sql.includes("DATETIME2"), "expected DATETIME2 cast for SQL Server datetime");
+  assert.deepEqual(plan.params, []);
+});
+
 test("compile: folds addColumn with exponent number literals", () => {
   const folding = new QueryFoldingEngine();
   const query = {
