@@ -12,21 +12,22 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
 
     // Seed A1 = Hello, A2 = World.
-    await page.click("#grid", { position: { x: 53, y: 29 } });
-    await page.keyboard.press("F2");
-    const editor = page.locator("textarea.cell-editor");
-    await expect(editor).toBeVisible();
-    await editor.fill("Hello");
-    await page.keyboard.press("Enter");
-    await waitForIdle(page);
-
-    await page.keyboard.press("F2");
-    await expect(editor).toBeVisible();
-    await editor.fill("World");
-    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => (window as any).__formulaApp);
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.beginBatch({ label: "Seed clipboard cells" });
+      doc.setCellValue(sheetId, "A1", "Hello");
+      doc.setCellValue(sheetId, "A2", "World");
+      doc.endBatch();
+      app.refresh();
+    });
     await waitForIdle(page);
 
     // Select A1:A2 via drag.
+    await page.click("#grid", { position: { x: 53, y: 29 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
     const gridBox = await page.locator("#grid").boundingBox();
     if (!gridBox) throw new Error("Missing grid bounding box");
     await page.mouse.move(gridBox.x + 60, gridBox.y + 40); // A1
