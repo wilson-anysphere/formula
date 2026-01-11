@@ -4,6 +4,7 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use formula_xlsb::{biff12_varint, patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
+use formula_xlsb::rgce::{encode_rgce_with_context, CellCoord};
 use tempfile::tempdir;
 
 mod fixture_builder;
@@ -193,6 +194,73 @@ fn patch_sheet_bin_can_insert_into_missing_row_and_expand_dimension() {
         .find(|c| (c.row, c.col) == (5, 3))
         .expect("inserted cell exists");
     assert_eq!(inserted.value, CellValue::Number(99.0));
+
+    let dim = sheet.dimension.expect("dimension exists");
+    let (end_row, end_col) = dim_end_row_col(&dim);
+    assert_eq!(dim.start_row, 0);
+    assert_eq!(dim.start_col, 0);
+    assert_eq!(end_row, 5);
+    assert_eq!(end_col, 3);
+}
+
+#[test]
+fn patch_sheet_bin_can_insert_formula_with_rgcb_and_expand_dimension() {
+    let ctx = formula_xlsb::workbook_context::WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context("=SUM({4,5})", &ctx, CellCoord::new(5, 3)).expect("encode rgce");
+    assert!(
+        !encoded.rgcb.is_empty(),
+        "expected array formula encoding to produce rgcb bytes"
+    );
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+
+    let bytes = builder.build_bytes();
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("insert-formula-rgcb-input.xlsb");
+    let output_path = tmpdir.path().join("insert-formula-rgcb-output.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    let sheet_bin = read_zip_part(&input_path, &sheet_part);
+
+    let patched_sheet_bin = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 5,
+            col: 3,
+            new_value: CellValue::Number(9.0),
+            new_formula: Some(encoded.rgce.clone()),
+            new_rgcb: Some(encoded.rgcb.clone()),
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet bin");
+
+    wb.save_with_part_overrides(
+        &output_path,
+        &HashMap::from([(sheet_part.clone(), patched_sheet_bin)]),
+    )
+    .expect("write patched workbook");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open patched workbook");
+    let sheet = wb2.read_sheet(0).expect("read patched sheet");
+
+    let coords: Vec<(u32, u32)> = sheet.cells.iter().map(|c| (c.row, c.col)).collect();
+    assert_eq!(coords, vec![(0, 0), (5, 3)]);
+
+    let inserted = sheet
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (5, 3))
+        .expect("inserted cell exists");
+    assert_eq!(inserted.value, CellValue::Number(9.0));
+    let formula = inserted.formula.as_ref().expect("inserted formula");
+    assert_eq!(formula.extra, encoded.rgcb);
+    assert_eq!(formula.text.as_deref(), Some("SUM({4,5})"));
 
     let dim = sheet.dimension.expect("dimension exists");
     let (end_row, end_col) = dim_end_row_col(&dim);
