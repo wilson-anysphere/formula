@@ -4,6 +4,8 @@
 //! Current scope (per `docs/08-macro-compatibility.md`):
 //! - L1: Preserve `vbaProject.bin` bytes (handled by the XLSX layer).
 //! - L2: Parse enough of `vbaProject.bin` to enumerate modules and show source.
+//! - Inspect and (best-effort) cryptographically verify VBA project digital signatures
+//!   (PKCS#7/CMS) for desktop Trust Center policy.
 
 mod compression;
 mod dir;
