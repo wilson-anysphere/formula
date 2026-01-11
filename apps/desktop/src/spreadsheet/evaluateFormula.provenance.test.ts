@@ -24,13 +24,13 @@ describe("evaluateFormula (AI provenance)", () => {
 
     const args = calls[0]?.args;
     expect(args[0]).toBe("summarize");
-    expect(args[1]).toEqual([
-      { __cellRef: "Sheet1!A1", value: "hello" },
-      { __cellRef: "Sheet1!A2", value: "world" },
-    ]);
+    expect(args[1]).toHaveLength(2);
+    expect(args[1][0]).toEqual({ __cellRef: "Sheet1!A1", value: "hello" });
+    expect(args[1][1]).toEqual({ __cellRef: "Sheet1!A2", value: "world" });
+    expect((args[1] as any).__rangeRef).toBe("Sheet1!A1:A2");
   });
 
-  it("does not affect non-AI functions (SUM still receives plain scalars/arrays)", () => {
+  it("preserves provenance on derived values inside AI arguments (e.g. SUM)", () => {
     const calls: any[] = [];
     const ai = {
       evaluateAiFunction: (params: any) => {
@@ -41,11 +41,11 @@ describe("evaluateFormula (AI provenance)", () => {
 
     const getCellValue = (addr: string) => (addr === "A1" ? 1 : addr === "A2" ? 2 : null);
 
-    // Nested SUM should evaluate normally inside AI arguments.
+    // Nested SUM should evaluate normally inside AI arguments, while still preserving provenance for DLP enforcement.
     const result = evaluateFormula('=AI("sum", SUM(A1:A2))', getCellValue, { ai, cellAddress: "Sheet1!B1" });
     expect(result).toBe("ok");
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.args?.[1]).toBe(3);
+    expect(calls[0]?.args?.[1]).toEqual({ __cellRef: "Sheet1!A1:A2", value: 3 });
   });
 
   it("preserves provenance through nested expressions inside AI arguments (e.g. IF)", () => {

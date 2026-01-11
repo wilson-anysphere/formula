@@ -35,6 +35,32 @@ function unwrapProvenance(value: CellValue): CellValue {
   return isProvenanceCellValue(value) ? value.value : value;
 }
 
+function splitProvenanceRefs(refs: string): string[] {
+  return String(refs)
+    .split(";")
+    .map((ref) => ref.trim())
+    .filter(Boolean);
+}
+
+function rangeRefFromArray(value: CellValue): string | null {
+  if (!Array.isArray(value)) return null;
+  const ref = (value as any).__rangeRef;
+  return typeof ref === "string" && ref.trim() ? ref.trim() : null;
+}
+
+function provenanceRefs(value: CellValue): string[] {
+  if (isProvenanceCellValue(value)) return splitProvenanceRefs(value.__cellRef);
+  const rangeRef = rangeRefFromArray(value);
+  if (rangeRef) return [rangeRef];
+  return [];
+}
+
+function wrapWithProvenance(value: SpreadsheetValue, refs: string[]): CellValue {
+  const uniq = [...new Set(refs.map((r) => r.trim()).filter(Boolean))];
+  if (uniq.length === 0) return value;
+  return { __cellRef: uniq.join(";"), value };
+}
+
 function toNumber(value: CellValue): number | null {
   const unwrapped = unwrapProvenance(value);
   if (Array.isArray(unwrapped)) return null;
@@ -180,7 +206,8 @@ function evalFunction(
   name: string,
   args: CellValue[],
   getCellValue: GetCellValue,
-  options: EvaluateFormulaOptions
+  options: EvaluateFormulaOptions,
+  context: EvalContext
 ): CellValue {
   const upper = name.toUpperCase();
   if (upper === "AI" || upper === "AI.EXTRACT" || upper === "AI.CLASSIFY" || upper === "AI.TRANSLATE") {
@@ -190,7 +217,10 @@ function evalFunction(
     const nums: number[] = [];
     const err = flattenNumbers(args, nums);
     if (err) return err;
-    return nums.reduce((a, b) => a + b, 0);
+    const value = nums.reduce((a, b) => a + b, 0);
+    if (!context.preserveReferenceProvenance) return value;
+    const refs = args.flatMap((arg) => provenanceRefs(arg));
+    return wrapWithProvenance(value, refs);
   }
 
   if (upper === "AVERAGE") {
@@ -198,7 +228,10 @@ function evalFunction(
     const err = flattenNumbers(args, nums);
     if (err) return err;
     if (nums.length === 0) return 0;
-    return nums.reduce((a, b) => a + b, 0) / nums.length;
+    const value = nums.reduce((a, b) => a + b, 0) / nums.length;
+    if (!context.preserveReferenceProvenance) return value;
+    const refs = args.flatMap((arg) => provenanceRefs(arg));
+    return wrapWithProvenance(value, refs);
   }
 
   if (upper === "IF") {
@@ -264,6 +297,10 @@ function readReference(
       values.push({ __cellRef: cellRef, value: readCell(addr) });
     }
   }
+  const start = toA1(range.start);
+  const end = toA1(range.end);
+  const rangeRef = start === end ? start : `${start}:${end}`;
+  (values as any).__rangeRef = provenanceSheet ? `${provenanceSheet}!${rangeRef}` : rangeRef;
   return values;
 }
 
@@ -333,7 +370,7 @@ function parsePrimary(
       }
     }
 
-    return evalFunction(name, args, getCellValue, options);
+    return evalFunction(name, args, getCellValue, options, context);
   }
 
   if (tok.type === "paren" && tok.value === "(") {
@@ -361,7 +398,9 @@ function parseUnary(
     if (Array.isArray(rhsScalar)) return "#VALUE!";
     const num = toNumber(rhsScalar);
     if (num === null) return "#VALUE!";
-    return tok.value === "-" ? -num : num;
+    const result = tok.value === "-" ? -num : num;
+    if (!context.preserveReferenceProvenance) return result;
+    return wrapWithProvenance(result, provenanceRefs(rhs));
   }
   return parsePrimary(parser, getCellValue, options, context);
 }
@@ -386,11 +425,14 @@ function parseTerm(
     const leftNum = toNumber(leftScalar);
     const rightNum = toNumber(rightScalar);
     if (leftNum === null || rightNum === null) return "#VALUE!";
+    const refs = context.preserveReferenceProvenance ? [...provenanceRefs(left), ...provenanceRefs(right)] : [];
     if (tok.value === "/") {
       if (rightNum === 0) return "#DIV/0!";
-      left = leftNum / rightNum;
+      const value = leftNum / rightNum;
+      left = context.preserveReferenceProvenance ? wrapWithProvenance(value, refs) : value;
     } else {
-      left = leftNum * rightNum;
+      const value = leftNum * rightNum;
+      left = context.preserveReferenceProvenance ? wrapWithProvenance(value, refs) : value;
     }
   }
   return left;
@@ -416,7 +458,9 @@ function parseExpression(
     const leftNum = toNumber(leftScalar);
     const rightNum = toNumber(rightScalar);
     if (leftNum === null || rightNum === null) return "#VALUE!";
-    left = tok.value === "+" ? leftNum + rightNum : leftNum - rightNum;
+    const refs = context.preserveReferenceProvenance ? [...provenanceRefs(left), ...provenanceRefs(right)] : [];
+    const value = tok.value === "+" ? leftNum + rightNum : leftNum - rightNum;
+    left = context.preserveReferenceProvenance ? wrapWithProvenance(value, refs) : value;
   }
   return left;
 }

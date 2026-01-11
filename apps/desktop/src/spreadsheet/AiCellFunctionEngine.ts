@@ -8,7 +8,7 @@ import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
 import { DEFAULT_CLASSIFICATION, maxClassification, normalizeClassification } from "../../../../packages/security/dlp/src/classification.js";
 import { createDefaultOrgPolicy } from "../../../../packages/security/dlp/src/policy.js";
 import { DLP_DECISION, evaluatePolicy } from "../../../../packages/security/dlp/src/policyEngine.js";
-import { effectiveCellClassification, a1ToCell } from "../../../../packages/security/dlp/src/selectors.js";
+import { effectiveCellClassification, effectiveRangeClassification, a1ToCell } from "../../../../packages/security/dlp/src/selectors.js";
 
 import type { AiFunctionEvaluator, CellValue, ProvenanceCellValue, SpreadsheetValue } from "./evaluateFormula.js";
 import { getDesktopAIAuditStore } from "../ai/audit/auditStore.js";
@@ -423,28 +423,60 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     if (!this.dlpDocumentId) return valueClassification;
 
     const cleaned = String(cellRef).replaceAll("$", "").trim();
-    const bang = cleaned.indexOf("!");
-    const rawSheet = bang === -1 ? null : cleaned.slice(0, bang).trim();
-    const a1 = bang === -1 ? cleaned : cleaned.slice(bang + 1);
+    if (!cleaned) return valueClassification;
 
-    const sheetIdRaw = rawSheet
-      ? rawSheet.startsWith("'") && rawSheet.endsWith("'")
-        ? rawSheet.slice(1, -1)
-        : rawSheet
-      : null;
-    const sheetId = sheetIdRaw ?? defaultSheetId;
-    if (!sheetId) return valueClassification;
+    const refs = cleaned
+      .split(";")
+      .map((part) => part.trim())
+      .filter(Boolean);
 
-    try {
-      const cell = a1ToCell(a1);
-      const storeClassification = effectiveCellClassification(
-        { documentId: this.dlpDocumentId, sheetId, row: cell.row, col: cell.col },
-        records,
-      );
-      return maxClassification(storeClassification, valueClassification);
-    } catch {
-      return valueClassification;
+    let storeClassification = { ...DEFAULT_CLASSIFICATION };
+
+    for (const ref of refs) {
+      const bang = ref.indexOf("!");
+      const rawSheet = bang === -1 ? null : ref.slice(0, bang).trim();
+      const a1 = bang === -1 ? ref : ref.slice(bang + 1);
+
+      const sheetIdRaw = rawSheet
+        ? rawSheet.startsWith("'") && rawSheet.endsWith("'")
+          ? rawSheet.slice(1, -1)
+          : rawSheet
+        : null;
+      const sheetId = sheetIdRaw ?? defaultSheetId;
+      if (!sheetId) continue;
+
+      const colon = a1.indexOf(":");
+      if (colon !== -1) {
+        const [startA1, endA1] = a1.split(":", 2);
+        if (!startA1 || !endA1) continue;
+        try {
+          const start = a1ToCell(startA1);
+          const end = a1ToCell(endA1);
+          storeClassification = maxClassification(
+            storeClassification,
+            effectiveRangeClassification(
+              { documentId: this.dlpDocumentId, sheetId, range: { start, end } },
+              records,
+            ),
+          );
+        } catch {
+          // ignore invalid ref fragments
+        }
+        continue;
+      }
+
+      try {
+        const cell = a1ToCell(a1);
+        storeClassification = maxClassification(
+          storeClassification,
+          effectiveCellClassification({ documentId: this.dlpDocumentId, sheetId, row: cell.row, col: cell.col }, records),
+        );
+      } catch {
+        // ignore invalid ref fragments
+      }
     }
+
+    return maxClassification(storeClassification, valueClassification);
   }
 
   private prepareRequest(params: {
