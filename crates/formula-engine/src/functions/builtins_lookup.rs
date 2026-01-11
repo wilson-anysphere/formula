@@ -1503,6 +1503,37 @@ fn excel_ge(a: &Value, b: &Value) -> Option<bool> {
 
 fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
     match (a, b) {
+        // Blank compares like the other type (Excel semantics).
+        (Value::Blank, Value::Number(y)) => match 0.0_f64.partial_cmp(y)? {
+            std::cmp::Ordering::Less => Some(-1),
+            std::cmp::Ordering::Equal => Some(0),
+            std::cmp::Ordering::Greater => Some(1),
+        },
+        (Value::Number(x), Value::Blank) => match x.partial_cmp(&0.0_f64)? {
+            std::cmp::Ordering::Less => Some(-1),
+            std::cmp::Ordering::Equal => Some(0),
+            std::cmp::Ordering::Greater => Some(1),
+        },
+        (Value::Blank, Value::Text(y)) => Some(match cmp_case_insensitive("", y) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }),
+        (Value::Text(x), Value::Blank) => Some(match cmp_case_insensitive(x, "") {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }),
+        (Value::Blank, Value::Bool(y)) => Some(match false.cmp(y) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }),
+        (Value::Bool(x), Value::Blank) => Some(match x.cmp(&false) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }),
         (Value::Number(x), Value::Number(y)) => match x.partial_cmp(y)? {
             std::cmp::Ordering::Less => Some(-1),
             std::cmp::Ordering::Equal => Some(0),
@@ -1516,6 +1547,11 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
                 std::cmp::Ordering::Greater => 1,
             })
         }
+        (Value::Bool(x), Value::Bool(y)) => Some(match x.cmp(y) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }),
         _ => None,
     }
 }

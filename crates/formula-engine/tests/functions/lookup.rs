@@ -461,6 +461,32 @@ fn vlookup_approximate_match() {
 }
 
 #[test]
+fn match_and_vlookup_approximate_treat_blanks_like_zero_or_empty_string() {
+    let mut sheet = TestSheet::new();
+
+    // Numeric: blank behaves like 0.
+    sheet.set("A1", Value::Blank);
+    sheet.set("A2", 1.0);
+    sheet.set("A3", 2.0);
+    sheet.set("B1", "zero");
+    sheet.set("B2", "one");
+    sheet.set("B3", "two");
+    assert_eq!(sheet.eval("=MATCH(0.5, A1:A3, 1)"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=MATCH(0, A1:A3, 1)"), Value::Number(1.0));
+    assert_eq!(
+        sheet.eval("=VLOOKUP(0.5, A1:B3, 2)"),
+        Value::Text("zero".to_string())
+    );
+
+    // Text: blank behaves like empty string.
+    sheet.set("C1", Value::Blank);
+    sheet.set("C2", "B");
+    sheet.set("C3", "C");
+    assert_eq!(sheet.eval("=MATCH(\"A\", C1:C3, 1)"), Value::Number(1.0));
+    assert_eq!(sheet.eval("=MATCH(\"\", C1:C3, 1)"), Value::Number(1.0));
+}
+
+#[test]
 fn hlookup_exact_match() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);
