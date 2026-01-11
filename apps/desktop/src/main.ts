@@ -8,7 +8,7 @@ import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
 import { getPanelTitle, PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
-import { renderMacroRunner, TauriMacroBackend } from "./macros";
+import { renderMacroRunner, TauriMacroBackend, type MacroRunRequest } from "./macros";
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
 import { DocumentWorkbookAdapter } from "./search/documentWorkbookAdapter.js";
@@ -241,7 +241,16 @@ if (
       body.textContent = "Loading macros…";
       queueMicrotask(() => {
         try {
-          const backend = new TauriMacroBackend();
+          const baseBackend = new TauriMacroBackend({ invoke: queuedInvoke ?? undefined });
+          const backend = {
+            listMacros: (id: string) => baseBackend.listMacros(id),
+            runMacro: async (request: MacroRunRequest) => {
+              // Allow any microtask-batched workbook edits to enqueue before the
+              // macro runs so backend state reflects the latest grid changes.
+              await new Promise<void>((resolve) => queueMicrotask(resolve));
+              return baseBackend.runMacro(request);
+            },
+          };
           void renderMacroRunner(body, backend, workbookId, {
             onApplyUpdates: async (updates) => {
               const document = app.getDocument();

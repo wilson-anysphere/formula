@@ -31,8 +31,8 @@ function normalizeUpdates(raw: any[] | undefined): MacroCellUpdate[] | undefined
 export class TauriMacroBackend implements MacroBackend {
   private readonly invoke: TauriInvoke;
 
-  constructor() {
-    this.invoke = getTauriInvoke();
+  constructor(options: { invoke?: TauriInvoke } = {}) {
+    this.invoke = options.invoke ?? getTauriInvoke();
   }
 
   async listMacros(workbookId: string): Promise<MacroInfo[]> {
@@ -56,4 +56,3 @@ export class TauriMacroBackend implements MacroBackend {
     };
   }
 }
-
