@@ -42,6 +42,18 @@ function getYArray(value: unknown): any | null {
   return maybe;
 }
 
+function getYText(value: unknown): any | null {
+  if (value instanceof Y.Text) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (maybe.constructor?.name !== "YText") return null;
+  if (typeof maybe.toDelta !== "function") return null;
+  if (typeof maybe.applyDelta !== "function") return null;
+  if (typeof maybe.insert !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  return maybe;
+}
+
 function isYAbstractType(value: unknown): value is Y.AbstractType<any> {
   if (value instanceof Y.AbstractType) return true;
   if (!value || typeof value !== "object") return false;
@@ -95,6 +107,16 @@ function getMapRoot<T>(doc: Y.Doc, name: string): Y.Map<T> {
       : (replaceForeignRootType({ doc, name, existing: map, create: () => new Y.Map() }) as any);
   }
 
+  const array = getYArray(existing);
+  if (array) {
+    throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Map but found a Y.Array`);
+  }
+
+  const text = getYText(existing);
+  if (text) {
+    throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Map but found a Y.Text`);
+  }
+
   if (existing instanceof Y.AbstractType) {
     return doc.getMap<T>(name);
   }
@@ -115,6 +137,16 @@ function getArrayRoot<T>(doc: Y.Doc, name: string): Y.Array<T> {
     return arr instanceof Y.Array
       ? (arr as Y.Array<T>)
       : (replaceForeignRootType({ doc, name, existing: arr, create: () => new Y.Array() }) as any);
+  }
+
+  const map = getYMap(existing);
+  if (map) {
+    throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Array but found a Y.Map`);
+  }
+
+  const text = getYText(existing);
+  if (text) {
+    throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Array but found a Y.Text`);
   }
 
   if (existing instanceof Y.AbstractType) {
