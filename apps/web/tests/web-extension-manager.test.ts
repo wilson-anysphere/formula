@@ -145,7 +145,9 @@ function createMockMarketplace({ extensionId, latestVersion, publicKeyPem, packa
         publisherKeyId:
           publisherKeyIds && typeof publisherKeyIds === "object" && typeof publisherKeyIds[version] === "string"
             ? publisherKeyIds[version]
-            : null
+            : null,
+        scanStatus: null,
+        filesSha256: null
       };
     }
   };

@@ -1116,9 +1116,13 @@ test("marketplace responses include ETag and honor If-None-Match (304)", async (
     assert.equal(dlRes.headers.get("cache-control"), "public, max-age=0, must-revalidate");
     const pkgEtag = dlRes.headers.get("etag");
     const pkgSha = dlRes.headers.get("x-package-sha256");
+    const pkgScanStatus = dlRes.headers.get("x-package-scan-status");
+    const pkgFilesSha = dlRes.headers.get("x-package-files-sha256");
     const pkgKeyId = dlRes.headers.get("x-publisher-key-id");
     assert.ok(pkgEtag);
     assert.ok(pkgSha);
+    assert.ok(pkgScanStatus);
+    assert.ok(pkgFilesSha);
     assert.ok(pkgKeyId);
     await dlRes.arrayBuffer();
 
@@ -1127,6 +1131,8 @@ test("marketplace responses include ETag and honor If-None-Match (304)", async (
     assert.equal(dlRes304.headers.get("cache-control"), "public, max-age=0, must-revalidate");
     assert.equal(dlRes304.headers.get("etag"), pkgEtag);
     assert.equal(dlRes304.headers.get("x-package-sha256"), pkgSha);
+    assert.equal(dlRes304.headers.get("x-package-scan-status"), pkgScanStatus);
+    assert.equal(dlRes304.headers.get("x-package-files-sha256"), pkgFilesSha);
     assert.equal(dlRes304.headers.get("x-publisher-key-id"), pkgKeyId);
     assert.equal(await dlRes304.arrayBuffer().then((b) => b.byteLength), 0);
   } finally {
@@ -1771,12 +1777,16 @@ test("desktop client uses on-disk cache + If-None-Match for package downloads", 
     const first = await client.downloadPackage(extensionId, manifest.version);
     assert.ok(first);
     assert.ok(first.publisherKeyId);
+    assert.equal(first.scanStatus, "passed");
+    assert.match(String(first.filesSha256 || ""), /^[0-9a-f]{64}$/i);
 
     const second = await client.downloadPackage(extensionId, manifest.version);
     assert.ok(second);
     assert.equal(second.sha256, first.sha256);
     assert.ok(second.bytes.equals(first.bytes));
     assert.equal(second.publisherKeyId, first.publisherKeyId);
+    assert.equal(second.scanStatus, first.scanStatus);
+    assert.equal(second.filesSha256, first.filesSha256);
 
     const metricsRes = await fetch(`${baseUrl}/api/internal/metrics`);
     assert.equal(metricsRes.status, 200);

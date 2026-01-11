@@ -35,6 +35,7 @@ function sha256Hex(bytes: Uint8Array): string {
 test("MarketplaceClient.downloadPackage verifies x-package-sha256", async () => {
   const payload = new Uint8Array([1, 2, 3, 4]);
   const expectedSha = sha256Hex(payload);
+  const filesSha = "0".repeat(64);
 
   // eslint-disable-next-line no-global-assign
   globalThis.fetch = async () =>
@@ -43,6 +44,8 @@ test("MarketplaceClient.downloadPackage verifies x-package-sha256", async () => 
       status: 200,
       headers: new Headers({
         "x-package-sha256": expectedSha,
+        "x-package-scan-status": "passed",
+        "x-package-files-sha256": filesSha,
         "x-package-format-version": "2",
         "x-publisher": "test"
       }),
@@ -52,6 +55,8 @@ test("MarketplaceClient.downloadPackage verifies x-package-sha256", async () => 
   const client = new MarketplaceClient({ baseUrl: "/api" });
   const res = await client.downloadPackage("test.ext", "1.0.0");
   expect(res?.sha256).toBe(expectedSha);
+  expect(res?.scanStatus).toBe("passed");
+  expect(res?.filesSha256).toBe(filesSha);
 });
 
 test("MarketplaceClient.downloadPackage rejects sha mismatch", async () => {
@@ -73,4 +78,3 @@ test("MarketplaceClient.downloadPackage rejects sha mismatch", async () => {
   const client = new MarketplaceClient({ baseUrl: "/api" });
   await expect(client.downloadPackage("test.ext", "1.0.0")).rejects.toThrow(/sha256 mismatch/i);
 });
-
