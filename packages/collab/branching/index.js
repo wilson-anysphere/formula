@@ -37,16 +37,8 @@ export class CollabBranchingWorkflow {
   }
 
   /**
-   * Sync this workflow's BranchService "current branch" pointer to the globally
-   * checked-out branch stored in Yjs metadata.
-   *
-   * @returns {string} current branch name after sync
+   * @returns {Promise<ReturnType<BranchService["listBranches"]>>}
    */
-  syncToGlobalBranch() {
-    this.#syncBranchServiceToGlobalBranch();
-    return this.#branchService.getCurrentBranchName?.() ?? this.#getGlobalCurrentBranchName();
-  }
-
   async listBranches() {
     return this.#branchService.listBranches();
   }
@@ -56,7 +48,6 @@ export class CollabBranchingWorkflow {
    * @param {{ name: string, description?: string }} input
    */
   async createBranch(actor, input) {
-    this.#syncBranchServiceToGlobalBranch();
     return this.#branchService.createBranch(actor, input);
   }
 
@@ -65,11 +56,7 @@ export class CollabBranchingWorkflow {
    * @param {{ oldName: string, newName: string }} input
    */
   async renameBranch(actor, { oldName, newName }) {
-    this.#syncBranchServiceToGlobalBranch();
     await this.#branchService.renameBranch(actor, { oldName, newName });
-
-    const current = this.#getGlobalCurrentBranchName();
-    if (current === oldName) this.#setGlobalCurrentBranchName(newName);
   }
 
   /**
@@ -77,18 +64,10 @@ export class CollabBranchingWorkflow {
    * @param {{ name: string }} input
    */
   async deleteBranch(actor, { name }) {
-    this.#syncBranchServiceToGlobalBranch();
-    const current = this.#getGlobalCurrentBranchName();
-    if (current === name) {
-      // Match BranchService semantics, but against the *global* checked-out branch.
-      throw new Error("Cannot delete the currently checked-out branch");
-    }
     await this.#branchService.deleteBranch(actor, { name });
   }
 
   async getCurrentBranch() {
-    // `getCurrentBranch` is read-only, but it depends on the local current-branch pointer.
-    this.#syncBranchServiceToGlobalBranch();
     return this.#branchService.getCurrentBranch();
   }
 
@@ -96,7 +75,6 @@ export class CollabBranchingWorkflow {
    * Returns the state of the globally checked-out branch head.
    */
   async getCurrentState() {
-    this.#syncBranchServiceToGlobalBranch();
     return this.#branchService.getCurrentState();
   }
 
@@ -110,30 +88,12 @@ export class CollabBranchingWorkflow {
   }
 
   /**
-   * @param {string} name
-   */
-  #setGlobalCurrentBranchName(name) {
-    const meta = this.#session.doc.getMap(`${this.#rootName}:meta`);
-    this.#session.doc.transact(() => {
-      meta.set("currentBranchName", name);
-    }, this.#session.origin);
-  }
-
-  #syncBranchServiceToGlobalBranch() {
-    const name = this.#getGlobalCurrentBranchName();
-    if (this.#branchService.getCurrentBranchName?.() !== name) {
-      this.#branchService.setCurrentBranchName?.(name);
-    }
-  }
-
-  /**
    * Snapshot the current collaborative workbook state into a new commit.
    *
    * @param {Actor} actor
    * @param {string} [message]
    */
   async commitCurrentState(actor, message) {
-    this.#syncBranchServiceToGlobalBranch();
     const nextState = yjsDocToDocumentState(this.#session.doc);
     return this.#branchService.commit(actor, { nextState, message });
   }
@@ -144,7 +104,6 @@ export class CollabBranchingWorkflow {
    */
   async checkoutBranch(actor, { name }) {
     const state = await this.#branchService.checkoutBranch(actor, { name });
-    this.#setGlobalCurrentBranchName(name);
     applyDocumentStateToYjsDoc(this.#session.doc, state, { origin: this.#session.origin });
     return state;
   }
@@ -154,7 +113,6 @@ export class CollabBranchingWorkflow {
    * @param {{ sourceBranch: string }} input
    */
   async previewMerge(actor, { sourceBranch }) {
-    this.#syncBranchServiceToGlobalBranch();
     return this.#branchService.previewMerge(actor, { sourceBranch });
   }
 
@@ -163,7 +121,6 @@ export class CollabBranchingWorkflow {
    * @param {{ sourceBranch: string, resolutions: ConflictResolution[], message?: string }} input
    */
   async merge(actor, { sourceBranch, resolutions, message }) {
-    this.#syncBranchServiceToGlobalBranch();
     const result = await this.#branchService.merge(actor, { sourceBranch, resolutions, message });
     applyDocumentStateToYjsDoc(this.#session.doc, result.state, { origin: this.#session.origin });
     return result;

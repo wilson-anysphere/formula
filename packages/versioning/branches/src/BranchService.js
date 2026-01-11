@@ -59,6 +59,27 @@ export class BranchService {
     this.#store = store;
   }
 
+  async #getCurrentBranchName() {
+    const store = this.#store;
+    if (store && typeof store.getCurrentBranchName === "function") {
+      const name = await store.getCurrentBranchName(this.#docId);
+      if (typeof name === "string" && name.length > 0) return name;
+    }
+    return this.#currentBranchName;
+  }
+
+  /**
+   * @param {string} name
+   */
+  async #setCurrentBranchName(name) {
+    const store = this.#store;
+    if (store && typeof store.setCurrentBranchName === "function") {
+      await store.setCurrentBranchName(this.#docId, name);
+      return;
+    }
+    this.#currentBranchName = name;
+  }
+
   /**
    * @param {Actor} actor
    * @param {DocumentState} initialState
@@ -80,32 +101,12 @@ export class BranchService {
   }
 
   /**
-   * Set the local "current branch" pointer.
-   *
-   * This does not mutate document history; it only affects which branch future
-   * `commit`/`merge` operations target. This is useful for collaborative
-   * workflows where the checked-out branch is stored externally (e.g. in a Yjs
-   * document meta field).
-   *
-   * @param {string} name
-   */
-  setCurrentBranchName(name) {
-    this.#currentBranchName = name;
-  }
-
-  /**
-   * @returns {string}
-   */
-  getCurrentBranchName() {
-    return this.#currentBranchName;
-  }
-
-  /**
    * @returns {Promise<Branch>}
    */
   async getCurrentBranch() {
-    const branch = await this.#store.getBranch(this.#docId, this.#currentBranchName);
-    if (!branch) throw new Error(`Current branch not found: ${this.#currentBranchName}`);
+    const name = await this.#getCurrentBranchName();
+    const branch = await this.#store.getBranch(this.#docId, name);
+    if (!branch) throw new Error(`Current branch not found: ${name}`);
     return branch;
   }
 
@@ -146,8 +147,9 @@ export class BranchService {
    */
   async renameBranch(actor, { oldName, newName }) {
     assertCanManageBranches(actor, "renameBranch");
-    if (oldName === this.#currentBranchName) this.#currentBranchName = newName;
     await this.#store.renameBranch(this.#docId, oldName, newName);
+    const current = await this.#getCurrentBranchName();
+    if (oldName === current) await this.#setCurrentBranchName(newName);
   }
 
   /**
@@ -157,7 +159,8 @@ export class BranchService {
   async deleteBranch(actor, { name }) {
     assertCanManageBranches(actor, "deleteBranch");
     if (name === "main") throw new Error("Cannot delete main branch");
-    if (name === this.#currentBranchName) {
+    const current = await this.#getCurrentBranchName();
+    if (name === current) {
       throw new Error("Cannot delete the currently checked-out branch");
     }
     await this.#store.deleteBranch(this.#docId, name);
@@ -174,7 +177,7 @@ export class BranchService {
     assertCanManageBranches(actor, "checkoutBranch");
     const branch = await this.#store.getBranch(this.#docId, name);
     if (!branch) throw new Error(`Branch not found: ${name}`);
-    this.#currentBranchName = name;
+    await this.#setCurrentBranchName(name);
     return this.#store.getDocumentStateAtCommit(branch.headCommitId);
   }
 

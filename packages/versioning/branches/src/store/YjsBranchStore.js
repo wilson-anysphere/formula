@@ -149,6 +149,21 @@ export class YjsBranchStore {
     });
   }
 
+  async getCurrentBranchName(_docId) {
+    const name = this.#meta.get("currentBranchName");
+    return typeof name === "string" && name.length > 0 ? name : "main";
+  }
+
+  /**
+   * @param {string} _docId
+   * @param {string} name
+   */
+  async setCurrentBranchName(_docId, name) {
+    this.#ydoc.transact(() => {
+      this.#meta.set("currentBranchName", name);
+    });
+  }
+
   /**
    * @param {Y.Map<any>} branchMap
    * @returns {Branch}
