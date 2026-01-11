@@ -287,6 +287,88 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
     expect(llmClient.chat).not.toHaveBeenCalled();
   });
 
+  it("redacts the selection sample before calling the LLM when DLP requires redaction", async () => {
+    const workbookId = "local-workbook";
+
+    const policyStore = new LocalPolicyStore({ storage: window.localStorage as any });
+    policyStore.setDocumentPolicy(workbookId, {
+      version: 1,
+      allowDocumentOverrides: true,
+      rules: {
+        [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+          maxAllowed: "Confidential",
+          allowRestrictedContent: false,
+          redactDisallowed: true
+        }
+      }
+    });
+
+    const classificationStore = new LocalClassificationStore({ storage: window.localStorage as any });
+    // Mark C1 as Restricted (selection is C1:C3 in the test).
+    classificationStore.upsert(
+      workbookId,
+      { scope: "cell", documentId: workbookId, sheetId: "Sheet1", row: 0, col: 2 },
+      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["test"] }
+    );
+
+    const root = document.createElement("div");
+    root.tabIndex = 0;
+    root.getBoundingClientRect = () =>
+      ({
+        width: 800,
+        height: 600,
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => {}
+      }) as any;
+    document.body.appendChild(root);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div")
+    };
+
+    const llmClient = {
+      chat: vi.fn(async (request: any) => {
+        const messages = Array.isArray(request?.messages) ? request.messages : [];
+        const userMessage = messages.find((m: any) => m?.role === "user")?.content ?? "";
+        // The sample included in the prompt should be redacted before sending to the LLM.
+        expect(userMessage).toContain("[REDACTED]");
+        expect(userMessage).not.toContain("TOP SECRET");
+        return {
+          message: { role: "assistant", content: "done" },
+          usage: { promptTokens: 1, completionTokens: 1 }
+        };
+      })
+    };
+
+    const app = new SpreadsheetApp(root, status, { inlineEdit: { llmClient, model: "unit-test-model" } });
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet1", "C1", "TOP SECRET");
+
+    app.selectRange({ range: { startRow: 0, endRow: 2, startCol: 2, endCol: 2 } }); // C1:C3
+
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+
+    const overlay = await waitFor(() => document.querySelector<HTMLElement>('[data-testid="inline-edit-overlay"]'));
+    const input = overlay.querySelector<HTMLInputElement>('[data-testid="inline-edit-prompt"]')!;
+    input.value = "Do something";
+
+    overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-run"]')!.click();
+
+    await waitFor(() => (llmClient.chat.mock.calls.length > 0 ? overlay : null));
+    expect(llmClient.chat).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => (overlay.style.display === "none" ? overlay : null));
+    // No tool calls were issued; the sheet should remain unchanged.
+    expect(doc.getCell("Sheet1", "C1").value).toBe("TOP SECRET");
+  });
+
   it("uses the OpenAIClient fallback when no inlineEdit llmClient is injected (localStorage key)", async () => {
     const apiKey = "sk-test-inline-edit";
     localStorage.setItem(OPENAI_API_KEY_STORAGE_KEY, apiKey);
