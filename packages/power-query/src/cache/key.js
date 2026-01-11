@@ -5,6 +5,24 @@
  * browser, workers, and Node.
  */
 
+import { PqDateTimeZone, PqDecimal, PqDuration, PqTime } from "../values.js";
+
+/**
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+function bytesToBase64(bytes) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64");
+  }
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  // eslint-disable-next-line no-undef
+  return btoa(binary);
+}
+
 /**
  * @param {unknown} value
  * @param {Map<object, string>} seen
@@ -24,8 +42,28 @@ function canonicalize(value, seen, path) {
   if (type === "symbol") return { $type: "symbol", value: String(value) };
   if (type === "function") return { $type: "function", value: value.name || "<anonymous>" };
 
+  if (value instanceof PqDecimal) {
+    return { $type: "decimal", value: value.value };
+  }
+
+  if (value instanceof PqTime) {
+    return { $type: "time", value: value.toString() };
+  }
+
+  if (value instanceof PqDuration) {
+    return { $type: "duration", value: value.toString() };
+  }
+
+  if (value instanceof PqDateTimeZone) {
+    return { $type: "datetimezone", value: value.toString() };
+  }
+
   if (value instanceof Date) {
     return { $type: "date", value: value.toISOString() };
+  }
+
+  if (value instanceof Uint8Array) {
+    return { $type: "binary", value: bytesToBase64(value) };
   }
 
   if (Array.isArray(value)) {
@@ -106,4 +144,3 @@ export function fnv1a64(input) {
 export function hashValue(value) {
   return fnv1a64(stableStringify(value));
 }
-
