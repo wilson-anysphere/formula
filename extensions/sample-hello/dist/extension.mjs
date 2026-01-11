@@ -57,6 +57,10 @@ var require_extension = __commonJS({
   </body>
 </html>`;
     }
+    async function getSelectionSum() {
+      const selection = await formula.cells.getSelection();
+      return sumValues(selection?.values);
+    }
     async function ensurePanel(context) {
       const html = panelHtml();
       if (panel) {

@@ -21,7 +21,6 @@ function panelHtml() {
 </html>`;
 }
 
-/**
 async function getSelectionSum() {
   const selection = await formula.cells.getSelection();
   return sumValues(selection?.values);
