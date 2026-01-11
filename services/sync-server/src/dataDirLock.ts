@@ -117,7 +117,10 @@ export async function acquireDataDirLock(dataDir: string): Promise<DataDirLockHa
 
     if (isFiniteNumber(existingPid) && sameHost && !isPidRunning(existingPid)) {
       // Stale lock: previous process crashed without cleaning up.
-      await fs.unlink(lockPath);
+      await fs.unlink(lockPath).catch((err) => {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") throw err;
+      });
 
       try {
         const fd = await createLockFile();
