@@ -46,6 +46,7 @@ function EngineDemoApp() {
 
   const gridApiRef = useRef<GridApi | null>(null);
   const gridContainerRef = useRef<HTMLDivElement | null>(null);
+  const internalClipboardRef = useRef<{ tsv: string; html: string } | null>(null);
   const [activeCell, setActiveCell] = useState<{ row: number; col: number } | null>(null);
   const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
   const editingCellOriginalDraftRef = useRef("");
@@ -387,13 +388,19 @@ function EngineDemoApp() {
     const tsv = serializeGridToTsv(grid);
     const html = serializeGridToHtmlTable(grid);
 
+    internalClipboardRef.current = { tsv, html };
+
+    if (!event.clipboardData) return;
     event.clipboardData?.setData("text/plain", tsv);
     event.clipboardData?.setData("text/html", html);
     event.preventDefault();
   };
 
   const handleGridPaste = (event: ClipboardEvent<HTMLDivElement>) => {
-    const text = event.clipboardData?.getData("text/plain") ?? "";
+    const text =
+      event.clipboardData?.getData("text/plain") ||
+      internalClipboardRef.current?.tsv ||
+      "";
     if (!text) return;
 
     const engine = engineRef.current;
