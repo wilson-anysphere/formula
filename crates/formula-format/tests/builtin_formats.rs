@@ -137,11 +137,11 @@ fn builtin_formats_round_trip_through_formatter_under_locales() {
     );
     assert_eq!(
         format_value(Value::Number(61.0), Some(date_de.as_ref()), &de_opts).text,
-        "1.3.1900"
+        "01.03.1900"
     );
     assert_eq!(
         format_value(Value::Number(61.0), Some(date_fr.as_ref()), &fr_opts).text,
-        "1/3/1900"
+        "01/03/1900"
     );
 
     // Time with fractional seconds: decimal separator depends on locale.
@@ -216,7 +216,7 @@ fn builtin_num_fmt_id_placeholders_are_resolved_by_formatter() {
     );
     assert_eq!(
         format_value(Value::Number(61.0), Some("__builtin_numFmtId:14"), &de_opts).text,
-        "1.3.1900"
+        "01.03.1900"
     );
 
     // Reserved date/time built-ins (e.g. 50..=58) are not part of OOXML's 0–49
@@ -228,7 +228,7 @@ fn builtin_num_fmt_id_placeholders_are_resolved_by_formatter() {
     );
     assert_eq!(
         format_value(Value::Number(61.0), Some("__builtin_numFmtId:50"), &de_opts).text,
-        "1.3.1900"
+        "01.03.1900"
     );
 
     // Currency (id 7) should substitute symbol and separators based on locale.

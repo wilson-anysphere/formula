@@ -44,5 +44,5 @@ fn resolves_xf_number_formats_with_locale_overrides() {
 
     let style = styles.get(cell.style).expect("style mapping for XF");
     assert!(style.is_date_time);
-    assert_eq!(style.number_format.as_deref(), Some("d/m/yyyy"));
+    assert_eq!(style.number_format.as_deref(), Some("dd/mm/yyyy"));
 }

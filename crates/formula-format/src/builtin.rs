@@ -132,8 +132,8 @@ pub fn builtin_format_code_with_locale(id: u16, locale: Locale) -> Option<Cow<'s
 
     match id {
         // Short date formats: flip m/d ordering for day-first locales.
-        14 | 27 | 28 | 29 | 30 | 31 if day_first_dates => Some(Cow::Borrowed("d/m/yyyy")),
-        22 if day_first_dates => Some(Cow::Borrowed("d/m/yyyy h:mm")),
+        14 | 27 | 28 | 29 | 30 | 31 if day_first_dates => Some(Cow::Borrowed("dd/mm/yyyy")),
+        22 if day_first_dates => Some(Cow::Borrowed("dd/mm/yyyy h:mm")),
         // Currency/accounting formats: substitute currency symbol. For now we
         // only special-case the locales represented by [`Locale`] constructors.
         5..=8 | 42 | 44 => {
