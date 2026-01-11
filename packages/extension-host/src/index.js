@@ -212,6 +212,13 @@ class ExtensionHost {
     return this._workbook;
   }
 
+  saveWorkbook() {
+    // Stub implementation: the application will eventually perform real persistence
+    // and may await extensions for edits. For now we just emit a stable event payload.
+    this._broadcastEvent("beforeSave", { workbook: this._workbook });
+    return true;
+  }
+
   async activateView(viewId) {
     const activationEvent = `onView:${viewId}`;
     const targets = [];

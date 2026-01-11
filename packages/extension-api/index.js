@@ -442,6 +442,9 @@ const events = {
   onWorkbookOpened(callback) {
     return addEventHandler("workbookOpened", callback);
   },
+  onBeforeSave(callback) {
+    return addEventHandler("beforeSave", callback);
+  },
   onViewActivated(callback) {
     return addEventHandler("viewActivated", callback);
   }

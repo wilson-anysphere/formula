@@ -139,6 +139,7 @@ export namespace events {
   ): Disposable;
   function onSheetActivated(callback: (e: { sheet: Sheet }) => void): Disposable;
   function onWorkbookOpened(callback: (e: { workbook: Workbook }) => void): Disposable;
+  function onBeforeSave(callback: (e: { workbook: Workbook }) => void): Disposable;
   function onViewActivated(callback: (e: { viewId: string }) => void): Disposable;
 }
 
