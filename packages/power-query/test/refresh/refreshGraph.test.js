@@ -42,6 +42,7 @@ class ControlledEngine {
   executeQueryWithMeta(query, _context, options) {
     const d = deferred();
     this.calls.push({ queryId: query.id, deferred: d, signal: options?.signal });
+    options?.onProgress?.({ type: "cache:miss", queryId: query.id, cacheKey: "k" });
     options?.signal?.addEventListener("abort", () => {
       const err = new Error("Aborted");
       err.name = "AbortError";
@@ -159,6 +160,35 @@ test("RefreshOrchestrator: events include sessionId + dependency/target phase", 
 
   const byQuery = Object.fromEntries(started.map((e) => [e.queryId, e]));
   assert.equal(byQuery["A"]?.phase, "dependency");
+  assert.equal(byQuery["B"]?.phase, "target");
+  assert.equal(byQuery["A"]?.sessionId, handle.sessionId);
+  assert.equal(byQuery["B"]?.sessionId, handle.sessionId);
+});
+
+test("RefreshOrchestrator: forwards progress events with sessionId and phase", async () => {
+  const engine = new ControlledEngine();
+  const orchestrator = new RefreshOrchestrator({ engine, concurrency: 2 });
+  orchestrator.registerQuery(makeQuery("A", { type: "range", range: { values: [["Value"], [1]], hasHeaders: true } }));
+  orchestrator.registerQuery(makeQuery("B", { type: "query", queryId: "A" }));
+
+  /** @type {{ queryId: string; sessionId: string; phase: string; eventType: string }[]} */
+  const progress = [];
+  orchestrator.onEvent((evt) => {
+    if (evt.type === "progress") {
+      progress.push({ queryId: evt.job.queryId, sessionId: evt.sessionId, phase: evt.phase, eventType: evt.event.type });
+    }
+  });
+
+  const handle = orchestrator.refreshAll(["B"]);
+  engine.calls[0].deferred.resolve(makeResult("A"));
+  await new Promise((r) => setImmediate(r));
+  engine.calls[1].deferred.resolve(makeResult("B"));
+  await handle.promise;
+
+  const byQuery = Object.fromEntries(progress.map((e) => [e.queryId, e]));
+  assert.equal(byQuery["A"]?.eventType, "cache:miss");
+  assert.equal(byQuery["A"]?.phase, "dependency");
+  assert.equal(byQuery["B"]?.eventType, "cache:miss");
   assert.equal(byQuery["B"]?.phase, "target");
   assert.equal(byQuery["A"]?.sessionId, handle.sessionId);
   assert.equal(byQuery["B"]?.sessionId, handle.sessionId);
