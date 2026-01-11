@@ -4,6 +4,9 @@ export class MockCellProvider implements CellProvider {
   private readonly rowCount: number;
   private readonly colCount: number;
 
+  private readonly headerStyle: CellStyle = { fontWeight: "600", textAlign: "center" };
+  private readonly rowHeaderStyle: CellStyle = { fontWeight: "600", textAlign: "end" };
+
   constructor(options: { rowCount: number; colCount: number }) {
     this.rowCount = options.rowCount;
     this.colCount = options.colCount;
@@ -16,20 +19,21 @@ export class MockCellProvider implements CellProvider {
   getCell(row: number, col: number): CellData | null {
     if (row < 0 || col < 0 || row >= this.rowCount || col >= this.colCount) return null;
 
-    const baseStyle: CellStyle | undefined =
-      row === 0
-        ? { fill: "#f5f5f5", fontWeight: "600" }
-        : row % 2 === 0
-          ? { fill: "#ffffff" }
-          : { fill: "#fcfcfc" };
+    let style: CellStyle | undefined;
+    if (row === 0 && col === 0) {
+      style = this.headerStyle;
+    } else if (row === 0) {
+      style = this.headerStyle;
+    } else if (col === 0) {
+      style = this.rowHeaderStyle;
+    }
 
-    let style = baseStyle;
     if (row === 1 && col === 1) {
-      style = { ...baseStyle, wrapMode: "word", textAlign: "start" };
+      style = { ...(style ?? {}), wrapMode: "word", textAlign: "start" };
     } else if (row === 2 && col === 1) {
-      style = { ...baseStyle, wrapMode: "word", textAlign: "start" };
+      style = { ...(style ?? {}), wrapMode: "word", textAlign: "start" };
     } else if (row === 3 && col === 1) {
-      style = { ...baseStyle, wrapMode: "word", textAlign: "start" };
+      style = { ...(style ?? {}), wrapMode: "word", textAlign: "start" };
     }
 
     const value =

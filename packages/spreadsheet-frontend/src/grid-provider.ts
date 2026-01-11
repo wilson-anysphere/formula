@@ -58,7 +58,7 @@ export class EngineGridProvider implements CellProvider {
     if (row < 0 || col < 0 || row >= this.rowCount || col >= this.colCount) return null;
 
     if (this.headers) {
-      const headerStyle: CellStyle = { fill: "#f5f5f5", fontWeight: "600", textAlign: "center" };
+      const headerStyle: CellStyle = { fontWeight: "600", textAlign: "center" };
       const rowHeaderStyle: CellStyle = { ...headerStyle, textAlign: "end" };
       if (row === 0 && col === 0) return { row, col, value: null, style: headerStyle };
       if (row === 0) return { row, col, value: colToName(col - 1), style: headerStyle };
@@ -70,8 +70,7 @@ export class EngineGridProvider implements CellProvider {
     if (row0 < 0 || col0 < 0) return null;
 
     const value = this.cache.getValue(row0, col0, this.sheet);
-    const fill = row % 2 === 0 ? "#ffffff" : "#fcfcfc";
-    return { row, col, value, style: { fill } };
+    return { row, col, value };
   }
 
   prefetch(range: CellRange): void {

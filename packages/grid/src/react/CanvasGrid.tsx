@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CellProvider, CellRange } from "../model/CellProvider";
 import type { GridPresence } from "../presence/types";
 import { CanvasGridRenderer, formatCellDisplayText, type GridPerfStats } from "../rendering/CanvasGridRenderer";
@@ -181,10 +181,10 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     describeCell(null, null, providerRef.current, frozenRowsRef.current, frozenColsRef.current)
   );
 
-  const announceSelection = (selection: { row: number; col: number } | null, range: CellRange | null) => {
+  const announceSelection = useCallback((selection: { row: number; col: number } | null, range: CellRange | null) => {
     const text = describeCell(selection, range, providerRef.current, frozenRowsRef.current, frozenColsRef.current);
     setA11yStatusText((prev) => (prev === text ? prev : text));
-  };
+  }, []);
 
   const rendererFactory = useMemo(
     () =>
@@ -436,6 +436,33 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   useLayoutEffect(() => {
     rendererRef.current?.setTheme(resolvedTheme);
   }, [resolvedTheme]);
+
+  useEffect(() => {
+    const provider = props.provider;
+    if (!provider.subscribe) return;
+
+    return provider.subscribe((update) => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      const selection = renderer.getSelection();
+      if (!selection) return;
+
+      if (update.type === "invalidateAll") {
+        announceSelection(selection, renderer.getSelectionRange());
+        return;
+      }
+
+      const { range } = update;
+      if (
+        selection.row >= range.startRow &&
+        selection.row < range.endRow &&
+        selection.col >= range.startCol &&
+        selection.col < range.endCol
+      ) {
+        announceSelection(selection, renderer.getSelectionRange());
+      }
+    });
+  }, [props.provider, announceSelection]);
 
   useEffect(() => {
     const container = containerRef.current;
