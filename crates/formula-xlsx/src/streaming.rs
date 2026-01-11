@@ -230,8 +230,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         patches_by_part.keys().map(|k| (k.clone(), ())).collect();
 
     let mut zip = ZipWriter::new(output);
-    let options =
-        FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
@@ -248,18 +247,22 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             continue;
         }
 
-        zip.start_file(name.clone(), options)?;
-
         if let Some(patches) = patches_by_part.get(&name) {
+            zip.start_file(name.clone(), options)?;
             missing_parts.remove(&name);
             patch_worksheet_xml_streaming(&mut file, &mut zip, &name, patches)?;
         } else if let Some(bytes) = pre_read_parts.get(&name) {
+            zip.start_file(name.clone(), options)?;
             let bytes = maybe_patch_recalc_part(&name, bytes, recalc_policy)?;
             zip.write_all(&bytes)?;
-        } else if let Some(updated) = patch_recalc_part_from_file(&name, &mut file, recalc_policy)? {
+        } else if let Some(updated) = patch_recalc_part_from_file(&name, &mut file, recalc_policy)?
+        {
+            zip.start_file(name.clone(), options)?;
             zip.write_all(&updated)?;
         } else {
-            std::io::copy(&mut file, &mut zip)?;
+            // Use raw copy to preserve bytes for unchanged parts and avoid a decompression /
+            // recompression pass over large binary assets.
+            zip.raw_copy_file(file)?;
         }
     }
 
