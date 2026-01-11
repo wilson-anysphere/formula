@@ -1686,6 +1686,38 @@ mod tests {
     }
 
     #[test]
+    fn cross_sheet_references_resolve_even_if_target_sheet_loaded_later() {
+        // Ensure the engine can compile a formula that references a sheet that exists
+        // in the workbook but whose cells haven't been loaded into the engine yet.
+        //
+        // This used to "stick" as #REF! because sheet ids were assigned lazily during
+        // compilation; now we pre-create sheets before setting formulas.
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let sheet2_id = workbook.sheets[1].id.clone();
+
+        // Sheet1 contains a formula referencing Sheet2, but Sheet2's value is set later.
+        workbook.sheet_mut(&sheet1_id).unwrap().set_cell(
+            0,
+            1,
+            Cell::from_formula("=Sheet2!A1+1".to_string()),
+        );
+        workbook.sheet_mut(&sheet2_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(41.0))),
+        );
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let b1 = state.get_cell(&sheet1_id, 0, 1).unwrap();
+        assert_eq!(b1.value, CellScalar::Number(42.0));
+    }
+
+    #[test]
     fn quoted_sheet_references_recalculate() {
         let mut workbook = Workbook::new_empty(None);
         workbook.add_sheet("My Sheet".to_string());
