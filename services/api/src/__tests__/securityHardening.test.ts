@@ -88,6 +88,7 @@ describe("security hardening", () => {
   it("sets baseline security headers (and HSTS when cookieSecure=true)", async () => {
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
+    expect(res.headers["server"]).toBeUndefined();
     expect(res.headers["x-content-type-options"]).toBe("nosniff");
     expect(res.headers["x-frame-options"]).toBe("DENY");
     expect(res.headers["referrer-policy"]).toBe("no-referrer");
@@ -97,6 +98,7 @@ describe("security hardening", () => {
 
     const resSecure = await secureApp.inject({ method: "GET", url: "/health" });
     expect(resSecure.statusCode).toBe(200);
+    expect(resSecure.headers["server"]).toBeUndefined();
     expect(resSecure.headers["cache-control"]).toBe("no-store");
     expect(resSecure.headers["strict-transport-security"]).toContain("max-age=");
   });
