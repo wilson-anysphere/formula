@@ -210,6 +210,8 @@ describe("API e2e: audit ingestion + streaming", () => {
       success: true,
       details: { foo: "bar", token: "[REDACTED]" }
     });
+    // Internal storage metadata must never be exposed to API consumers.
+    expect(found.details).not.toHaveProperty("__audit");
     // Server must assign a canonical timestamp/id.
     expect(new Date(found.timestamp).toISOString()).toBe(found.timestamp);
 
@@ -301,6 +303,8 @@ describe("API e2e: audit ingestion + streaming", () => {
           nested: { secret: "[REDACTED]" }
         }
       });
+      // Internal storage metadata must never be exposed over SSE.
+      expect(event.details).not.toHaveProperty("__audit");
 
       res.destroy();
     },
