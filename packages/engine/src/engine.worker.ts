@@ -32,6 +32,8 @@ let wasmBinaryUrl: string | null = null;
 let workbook: WasmWorkbookInstance | null = null;
 
 let cancelledRequests = new Set<number>();
+const cancelledRequestQueue: number[] = [];
+const MAX_CANCELLED_REQUEST_IDS = 4096;
 
 // Cancellation messages can arrive after the worker has already responded (e.g.
 // main thread aborts while a response is in-flight). Track a bounded set of
@@ -56,7 +58,18 @@ function trackCancellation(id: number): void {
   if (completedRequestIds.has(id)) {
     return;
   }
+  if (cancelledRequests.has(id)) {
+    return;
+  }
+
   cancelledRequests.add(id);
+  cancelledRequestQueue.push(id);
+  if (cancelledRequestQueue.length > MAX_CANCELLED_REQUEST_IDS) {
+    const oldest = cancelledRequestQueue.shift();
+    if (oldest != null) {
+      cancelledRequests.delete(oldest);
+    }
+  }
 }
 
 function freeWorkbook(instance: WasmWorkbookInstance | null): void {
@@ -252,6 +265,17 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
   }
 }
 
+function isWorkerInboundMessage(data: unknown): data is WorkerInboundMessage {
+  return (
+    !!data &&
+    typeof data === "object" &&
+    "type" in data &&
+    ((data as any).type === "request" || (data as any).type === "cancel")
+  );
+}
+
+let requestQueue: Promise<void> = Promise.resolve();
+
 self.addEventListener("message", (event: MessageEvent<unknown>) => {
   const data = event.data;
 
@@ -265,7 +289,24 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
   wasmBinaryUrl = msg.wasmBinaryUrl ?? null;
 
   port.addEventListener("message", (inner: MessageEvent<unknown>) => {
-    void handleRequest(inner.data as WorkerInboundMessage);
+    const inbound = inner.data;
+    if (!isWorkerInboundMessage(inbound)) {
+      return;
+    }
+
+    if (inbound.type === "cancel") {
+      // Handle cancels immediately so in-flight requests can observe cancellation.
+      trackCancellation(inbound.id);
+      return;
+    }
+
+    // Serialize request processing to avoid interleaving workbook mutations.
+    requestQueue = requestQueue
+      .then(() => handleRequest(inbound))
+      .catch(() => {
+        // `handleRequest` should catch and respond to all errors, but if something
+        // escapes we don't want to wedge the queue.
+      });
   });
   port.start?.();
 
