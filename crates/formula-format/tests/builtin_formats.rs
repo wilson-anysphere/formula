@@ -167,6 +167,16 @@ fn builtin_formats_round_trip_through_formatter_under_locales() {
         format!("€1\u{00A0}234,50 ")
     );
 
+    // Currency negatives (built-in 7 uses parentheses, no leading '-').
+    assert_eq!(
+        format_value(Value::Number(-1234.5), Some(currency_en.as_ref()), &en_opts).text,
+        "($1,234.50)"
+    );
+    assert_eq!(
+        format_value(Value::Number(-1234.5), Some(currency_de.as_ref()), &de_opts).text,
+        "(€1.234,50)"
+    );
+
     // Text.
     let text = builtin_format_code(49).unwrap();
     assert_eq!(
