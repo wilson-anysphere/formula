@@ -213,6 +213,19 @@ impl TableBackend for Table {
     fn filter_in(&self, idx: usize, values: &[Value]) -> Option<Vec<usize>> {
         self.backend().filter_in(idx, values)
     }
+
+    fn columnar_table(&self) -> Option<&formula_columnar::ColumnarTable> {
+        self.backend().columnar_table()
+    }
+
+    fn hash_join(
+        &self,
+        right: &dyn TableBackend,
+        left_on: usize,
+        right_on: usize,
+    ) -> Option<formula_columnar::JoinResult> {
+        self.backend().hash_join(right, left_on, right_on)
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -106,6 +106,30 @@ pub trait TableBackend: fmt::Debug + Send + Sync {
     fn filter_in(&self, _idx: usize, _values: &[Value]) -> Option<Vec<usize>> {
         None
     }
+
+    /// If this backend is backed by a `formula_columnar::ColumnarTable`, return a reference to it.
+    ///
+    /// This enables optional join/group-by accelerations that require access to the columnar
+    /// encoded representation.
+    fn columnar_table(&self) -> Option<&formula_columnar::ColumnarTable> {
+        None
+    }
+
+    /// If both tables are columnar, perform a hash join on a single key column.
+    ///
+    /// The result is a list of matching row index pairs (left indices refer to `self`, right to
+    /// `right`). This is primarily intended as a building block for relationship lookups and
+    /// filter propagation.
+    fn hash_join(
+        &self,
+        right: &dyn TableBackend,
+        left_on: usize,
+        right_on: usize,
+    ) -> Option<formula_columnar::JoinResult> {
+        let left = self.columnar_table()?;
+        let right = right.columnar_table()?;
+        left.hash_join(right, left_on, right_on).ok()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -874,5 +898,9 @@ impl TableBackend for ColumnarTableBackend {
             start = end;
         }
         Some(out)
+    }
+
+    fn columnar_table(&self) -> Option<&formula_columnar::ColumnarTable> {
+        Some(self.table.as_ref())
     }
 }
