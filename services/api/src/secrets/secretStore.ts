@@ -159,16 +159,15 @@ export async function listSecrets(db: Queryable, prefix?: string): Promise<strin
     return result.rows.map((row: any) => String(row.name));
   }
 
-  // Avoid `LIKE ... ESCAPE` here: pg-mem does not fully support it and we want
-  // prefix matching to treat `%`/`_` as literal characters. Instead, express the
-  // prefix query as a range scan on the primary key.
-  const lower = prefix;
-  // U+10FFFF is the maximum valid Unicode code point; appending it provides an
-  // exclusive upper bound that includes all strings starting with `prefix`.
-  const upper = `${prefix}\u{10FFFF}`;
+  // Use a literal prefix match rather than `LIKE`, so prefixes containing `%` or
+  // `_` are treated as plain characters. This also avoids `LIKE ... ESCAPE`,
+  // which pg-mem does not fully support. We compute the prefix length in
+  // JavaScript to avoid relying on SQL `length()`/`char_length()` (not
+  // implemented by pg-mem).
+  const prefixLength = Array.from(prefix).length;
   const result = await db.query(
-    "SELECT name FROM secrets WHERE name >= $1 AND name < $2 ORDER BY name ASC",
-    [lower, upper]
+    "SELECT name FROM secrets WHERE substring(name, 1, $2) = $1 ORDER BY name ASC",
+    [prefix, prefixLength]
   );
   return result.rows.map((row: any) => String(row.name));
 }
