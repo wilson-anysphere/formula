@@ -1247,6 +1247,13 @@ export class SpreadsheetApp {
       ctx.scale(this.dpr, this.dpr);
     }
 
+    // Charts should scroll with the grid but stay clipped under headers.
+    this.chartLayer.style.left = `${this.rowHeaderWidth}px`;
+    this.chartLayer.style.top = `${this.colHeaderHeight}px`;
+    this.chartLayer.style.right = "0";
+    this.chartLayer.style.bottom = "0";
+    this.chartLayer.style.overflow = "hidden";
+
     this.clampScroll();
     this.syncScrollbars();
 
@@ -1502,8 +1509,8 @@ export class SpreadsheetApp {
     if (width <= 0 || height <= 0) return null;
 
     return {
-      left: this.rowHeaderWidth + left - this.scrollX,
-      top: this.colHeaderHeight + top - this.scrollY,
+      left: left - this.scrollX,
+      top: top - this.scrollY,
       width,
       height
     };
