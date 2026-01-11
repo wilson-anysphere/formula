@@ -24,6 +24,8 @@ const REL_TYPE_STYLES: &str =
 const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 
+const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
 #[derive(Debug, Error)]
 pub enum StreamingPatchError {
     #[error("io error: {0}")]
@@ -606,7 +608,7 @@ fn scan_worksheet_cell_types<R: Read>(
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(ref e) | Event::Empty(ref e) if e.name().as_ref() == b"c" => {
+            Event::Start(ref e) | Event::Empty(ref e) if local_name(e.name().as_ref()) == b"c" => {
                 let mut r: Option<String> = None;
                 let mut t: Option<String> = None;
                 for attr in e.attributes() {
@@ -689,7 +691,7 @@ fn scan_worksheet_shared_string_indices<R: Read>(
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(ref e) if e.name().as_ref() == b"c" => {
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"c" => {
                 let mut r: Option<String> = None;
                 let mut t: Option<String> = None;
                 for attr in e.attributes() {
@@ -708,7 +710,7 @@ fn scan_worksheet_shared_string_indices<R: Read>(
                     }
                 }
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"c" => {
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"c" => {
                 let mut r: Option<String> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -726,10 +728,10 @@ fn scan_worksheet_shared_string_indices<R: Read>(
                     }
                 }
             }
-            Event::Start(ref e) if current_target.is_some() && e.name().as_ref() == b"v" => {
+            Event::Start(ref e) if current_target.is_some() && local_name(e.name().as_ref()) == b"v" => {
                 in_v = true;
             }
-            Event::End(ref e) if current_target.is_some() && e.name().as_ref() == b"v" => {
+            Event::End(ref e) if current_target.is_some() && local_name(e.name().as_ref()) == b"v" => {
                 in_v = false;
             }
             Event::Text(e) if in_v && current_target.is_some() => {
@@ -737,7 +739,7 @@ fn scan_worksheet_shared_string_indices<R: Read>(
                     current_idx = e.unescape()?.trim().parse::<u32>().ok();
                 }
             }
-            Event::End(ref e) if current_target.is_some() && e.name().as_ref() == b"c" => {
+            Event::End(ref e) if current_target.is_some() && local_name(e.name().as_ref()) == b"c" => {
                 let coord = current_target.take().unwrap();
                 out.insert(coord, current_idx);
                 current_t = None;
@@ -941,7 +943,7 @@ fn worksheet_contains_formula_in_cells<R: Read>(
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Eof => break,
-            Event::Start(ref e) if e.name().as_ref() == b"c" => {
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"c" => {
                 if cell_is_in_set(e, target_cells)? {
                     if cell_contains_formula(&mut reader, &mut buf)? {
                         return Ok(true);
@@ -949,7 +951,7 @@ fn worksheet_contains_formula_in_cells<R: Read>(
                 }
             }
             // `<c .../>` cannot contain a formula.
-            Event::Empty(ref e) if e.name().as_ref() == b"c" => {
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"c" => {
                 if cell_is_in_set(e, target_cells)? {
                     // Target cell exists but is empty / non-formula.
                 }
@@ -987,8 +989,8 @@ fn cell_contains_formula<R: BufRead>(
         let event = reader.read_event_into(buf)?;
         match event {
             Event::Eof => break,
-            Event::Start(ref e) if e.name().as_ref() == b"f" => return Ok(true),
-            Event::Empty(ref e) if e.name().as_ref() == b"f" => return Ok(true),
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"f" => return Ok(true),
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"f" => return Ok(true),
             Event::Start(_) => depth += 1,
             Event::End(_) => {
                 depth = depth.saturating_sub(1);
@@ -1103,43 +1105,48 @@ impl SharedStringsState {
     }
 }
 
-fn write_shared_string_t<W: Write>(writer: &mut Writer<W>, text: &str) -> std::io::Result<()> {
-    let mut t = BytesStart::new("t");
+fn write_shared_string_t<W: Write>(
+    writer: &mut Writer<W>,
+    t_tag: &str,
+    text: &str,
+) -> std::io::Result<()> {
+    let mut t = BytesStart::new(t_tag);
     if needs_space_preserve(text) {
         t.push_attribute(("xml:space", "preserve"));
     }
     writer.write_event(Event::Start(t))?;
     writer.write_event(Event::Text(BytesText::new(text)))?;
-    writer.write_event(Event::End(BytesEnd::new("t")))?;
+    writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
     Ok(())
 }
 
 fn write_shared_string_rpr<W: Write>(
     writer: &mut Writer<W>,
+    prefix: Option<&str>,
     style: &formula_model::rich_text::RichTextRunStyle,
 ) -> std::io::Result<()> {
     if let Some(font) = &style.font {
-        let mut rfont = BytesStart::new("rFont");
+        let mut rfont = BytesStart::new(prefixed_tag(prefix, "rFont"));
         rfont.push_attribute(("val", font.as_str()));
         writer.write_event(Event::Empty(rfont))?;
     }
 
     if let Some(size_100pt) = style.size_100pt {
-        let mut sz = BytesStart::new("sz");
+        let mut sz = BytesStart::new(prefixed_tag(prefix, "sz"));
         let value = format_size_100pt(size_100pt);
         sz.push_attribute(("val", value.as_str()));
         writer.write_event(Event::Empty(sz))?;
     }
 
     if let Some(color) = style.color {
-        let mut c = BytesStart::new("color");
+        let mut c = BytesStart::new(prefixed_tag(prefix, "color"));
         let value = format!("{:08X}", color.argb().unwrap_or(0));
         c.push_attribute(("rgb", value.as_str()));
         writer.write_event(Event::Empty(c))?;
     }
 
     if let Some(bold) = style.bold {
-        let mut b = BytesStart::new("b");
+        let mut b = BytesStart::new(prefixed_tag(prefix, "b"));
         if !bold {
             b.push_attribute(("val", "0"));
         }
@@ -1147,7 +1154,7 @@ fn write_shared_string_rpr<W: Write>(
     }
 
     if let Some(italic) = style.italic {
-        let mut i = BytesStart::new("i");
+        let mut i = BytesStart::new(prefixed_tag(prefix, "i"));
         if !italic {
             i.push_attribute(("val", "0"));
         }
@@ -1155,7 +1162,7 @@ fn write_shared_string_rpr<W: Write>(
     }
 
     if let Some(ul) = style.underline {
-        let mut u = BytesStart::new("u");
+        let mut u = BytesStart::new(prefixed_tag(prefix, "u"));
         if let Some(val) = ul.to_ooxml() {
             u.push_attribute(("val", val));
         }
@@ -1193,6 +1200,7 @@ struct RowState {
     row_1: u32,
     pending: Vec<CellPatchInternal>,
     next_idx: usize,
+    cell_prefix: Option<String>,
 }
 
 pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
@@ -1234,6 +1242,9 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     let mut in_sheet_data = false;
     let mut saw_sheet_data = false;
     let mut patched_dimension = false;
+    let mut worksheet_prefix: Option<String> = None;
+    let mut worksheet_has_default_ns = false;
+    let mut sheet_prefix: Option<String> = None;
 
     let mut row_state: Option<RowState> = None;
     let mut in_cell = false;
@@ -1243,40 +1254,67 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
         match event {
             Event::Eof => break,
 
-            Event::Start(ref e) if e.name().as_ref() == b"sheetData" => {
-                saw_sheet_data = true;
-                in_sheet_data = true;
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"worksheet" => {
+                if worksheet_prefix.is_none() {
+                    worksheet_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                    worksheet_has_default_ns = worksheet_has_default_spreadsheetml_ns(e)?;
+                }
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"sheetData" => {
+
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                saw_sheet_data = true;
+                in_sheet_data = true;
+                if sheet_prefix.is_none() {
+                    sheet_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 saw_sheet_data = true;
                 if patches_by_row.is_empty() {
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 } else {
+                    if sheet_prefix.is_none() {
+                        sheet_prefix = element_prefix(e.name().as_ref())
+                            .and_then(|p| std::str::from_utf8(p).ok())
+                            .map(|s| s.to_string());
+                    }
                     in_sheet_data = false;
                     // Expand `<sheetData/>` into `<sheetData>...</sheetData>`.
+                    let sheet_data_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                     writer.write_event(Event::Start(e.to_owned()))?;
-                    write_pending_rows(&mut writer, &mut patches_by_row)?;
-                    writer.write_event(Event::End(BytesEnd::new("sheetData")))?;
+                    write_pending_rows(&mut writer, &mut patches_by_row, sheet_prefix.as_deref())?;
+                    writer.write_event(Event::End(BytesEnd::new(sheet_data_tag.as_str())))?;
                 }
             }
-            Event::End(ref e) if e.name().as_ref() == b"sheetData" => {
+            Event::End(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 // Flush any remaining patch rows at the end of sheetData.
-                write_pending_rows(&mut writer, &mut patches_by_row)?;
+                write_pending_rows(&mut writer, &mut patches_by_row, sheet_prefix.as_deref())?;
                 in_sheet_data = false;
                 writer.write_event(Event::End(e.to_owned()))?;
             }
-            Event::End(ref e) if e.name().as_ref() == b"worksheet" => {
+            Event::End(ref e) if local_name(e.name().as_ref()) == b"worksheet" => {
                 if !saw_sheet_data && !patches_by_row.is_empty() {
                     saw_sheet_data = true;
-                    writer.write_event(Event::Start(BytesStart::new("sheetData")))?;
-                    write_pending_rows(&mut writer, &mut patches_by_row)?;
-                    writer.write_event(Event::End(BytesEnd::new("sheetData")))?;
+                    let sheet_prefix = if worksheet_has_default_ns {
+                        None
+                    } else {
+                        worksheet_prefix.as_deref()
+                    };
+                    let sheet_data_tag = prefixed_tag(sheet_prefix, "sheetData");
+                    writer.write_event(Event::Start(BytesStart::new(sheet_data_tag.as_str())))?;
+                    write_pending_rows(&mut writer, &mut patches_by_row, sheet_prefix)?;
+                    writer.write_event(Event::End(BytesEnd::new(sheet_data_tag.as_str())))?;
                 }
                 writer.write_event(Event::End(e.to_owned()))?;
             }
 
-            Event::Start(ref e) if e.name().as_ref() == b"dimension" => {
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"dimension" => {
                 if !patched_dimension {
                     patched_dimension = true;
                     if let Some(bounds) = patch_bounds {
@@ -1289,7 +1327,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     writer.write_event(Event::Start(e.to_owned()))?;
                 }
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"dimension" => {
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"dimension" => {
                 if !patched_dimension {
                     patched_dimension = true;
                     if let Some(bounds) = patch_bounds {
@@ -1303,7 +1341,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 }
             }
 
-            Event::Start(ref e) if in_sheet_data && e.name().as_ref() == b"row" => {
+            Event::Start(ref e) if in_sheet_data && local_name(e.name().as_ref()) == b"row" => {
                 let row_1 = parse_row_number(e)?;
                 in_cell = false;
 
@@ -1311,7 +1349,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 while let Some((&next_row, _)) = patches_by_row.iter().next() {
                     if next_row < row_1 {
                         let pending = patches_by_row.remove(&next_row).unwrap_or_default();
-                        write_inserted_row(&mut writer, next_row, &pending)?;
+                        write_inserted_row(&mut writer, next_row, &pending, sheet_prefix.as_deref())?;
                     } else {
                         break;
                     }
@@ -1324,11 +1362,12 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                         row_1,
                         pending,
                         next_idx: 0,
+                        cell_prefix: None,
                     });
                 }
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
-            Event::Empty(ref e) if in_sheet_data && e.name().as_ref() == b"row" => {
+            Event::Empty(ref e) if in_sheet_data && local_name(e.name().as_ref()) == b"row" => {
                 let row_1 = parse_row_number(e)?;
                 in_cell = false;
 
@@ -1336,7 +1375,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 while let Some((&next_row, _)) = patches_by_row.iter().next() {
                     if next_row < row_1 {
                         let pending = patches_by_row.remove(&next_row).unwrap_or_default();
-                        write_inserted_row(&mut writer, next_row, &pending)?;
+                        write_inserted_row(&mut writer, next_row, &pending, sheet_prefix.as_deref())?;
                     } else {
                         break;
                     }
@@ -1345,16 +1384,22 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 if let Some(mut pending) = patches_by_row.remove(&row_1) {
                     pending.sort_by_key(|p| p.col_0);
                     // Expand `<row/>` into `<row>...</row>` and insert cells.
+                    let row_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let row_prefix_owned = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                    let row_prefix = row_prefix_owned.as_deref().or(sheet_prefix.as_deref());
                     writer.write_event(Event::Start(e.to_owned()))?;
-                    write_inserted_cells(&mut writer, &pending)?;
-                    writer.write_event(Event::End(BytesEnd::new("row")))?;
+                    write_inserted_cells(&mut writer, &pending, row_prefix)?;
+                    writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
                 } else {
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
             }
-            Event::End(ref e) if in_sheet_data && e.name().as_ref() == b"row" => {
+            Event::End(ref e) if in_sheet_data && local_name(e.name().as_ref()) == b"row" => {
                 if let Some(state) = row_state.take() {
-                    write_remaining_row_cells(&mut writer, &state.pending, state.next_idx)?;
+                    let prefix = state.cell_prefix.as_deref().or(sheet_prefix.as_deref());
+                    write_remaining_row_cells(&mut writer, &state.pending, state.next_idx, prefix)?;
                 }
                 in_cell = false;
                 writer.write_event(Event::End(e.to_owned()))?;
@@ -1362,13 +1407,20 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
 
             // Inside a row that needs patching, intercept cell events.
             Event::Start(ref e)
-                if in_sheet_data && row_state.is_some() && e.name().as_ref() == b"c" =>
+                if in_sheet_data && row_state.is_some() && local_name(e.name().as_ref()) == b"c" =>
             {
                 let state = row_state.as_mut().expect("row_state just checked");
                 let (cell_ref, col_0) = parse_cell_ref_and_col(e)?;
+                let cell_prefix_owned = element_prefix(e.name().as_ref())
+                    .and_then(|p| std::str::from_utf8(p).ok())
+                    .map(|s| s.to_string());
+                if state.cell_prefix.is_none() {
+                    state.cell_prefix = cell_prefix_owned.clone();
+                }
+                let cell_prefix = cell_prefix_owned.as_deref().or(sheet_prefix.as_deref());
 
                 // Insert any pending patches that come before this cell.
-                insert_pending_before_cell(&mut writer, state, col_0)?;
+                insert_pending_before_cell(&mut writer, state, col_0, cell_prefix)?;
 
                 if let Some(patch) = take_patch_for_col(state, col_0) {
                     patch_existing_cell(&mut reader, &mut writer, e, &cell_ref, &patch)?;
@@ -1378,21 +1430,28 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 }
             }
             Event::Empty(ref e)
-                if in_sheet_data && row_state.is_some() && e.name().as_ref() == b"c" =>
+                if in_sheet_data && row_state.is_some() && local_name(e.name().as_ref()) == b"c" =>
             {
                 let state = row_state.as_mut().expect("row_state just checked");
                 let (cell_ref, col_0) = parse_cell_ref_and_col(e)?;
+                let cell_prefix_owned = element_prefix(e.name().as_ref())
+                    .and_then(|p| std::str::from_utf8(p).ok())
+                    .map(|s| s.to_string());
+                if state.cell_prefix.is_none() {
+                    state.cell_prefix = cell_prefix_owned.clone();
+                }
+                let cell_prefix = cell_prefix_owned.as_deref().or(sheet_prefix.as_deref());
 
-                insert_pending_before_cell(&mut writer, state, col_0)?;
+                insert_pending_before_cell(&mut writer, state, col_0, cell_prefix)?;
 
                 if let Some(patch) = take_patch_for_col(state, col_0) {
-                    write_patched_cell(&mut writer, Some(e), &cell_ref, &patch)?;
+                    write_patched_cell(&mut writer, Some(e), &cell_ref, &patch, cell_prefix)?;
                 } else {
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
             }
             Event::End(ref e)
-                if in_sheet_data && row_state.is_some() && in_cell && e.name().as_ref() == b"c" =>
+                if in_sheet_data && row_state.is_some() && in_cell && local_name(e.name().as_ref()) == b"c" =>
             {
                 in_cell = false;
                 writer.write_event(Event::End(e.to_owned()))?;
@@ -1402,20 +1461,24 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 if in_sheet_data
                     && row_state.is_some()
                     && !in_cell
-                    && e.name().as_ref() != b"c" =>
+                    && local_name(e.name().as_ref()) != b"c" =>
             {
                 let state = row_state.as_mut().expect("row_state just checked");
-                insert_pending_before_non_cell(&mut writer, state)?;
+                let prefix = state.cell_prefix.clone();
+                let prefix = prefix.as_deref().or(sheet_prefix.as_deref());
+                insert_pending_before_non_cell(&mut writer, state, prefix)?;
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
             Event::Empty(ref e)
                 if in_sheet_data
                     && row_state.is_some()
                     && !in_cell
-                    && e.name().as_ref() != b"c" =>
+                    && local_name(e.name().as_ref()) != b"c" =>
             {
                 let state = row_state.as_mut().expect("row_state just checked");
-                insert_pending_before_non_cell(&mut writer, state)?;
+                let prefix = state.cell_prefix.clone();
+                let prefix = prefix.as_deref().or(sheet_prefix.as_deref());
+                insert_pending_before_non_cell(&mut writer, state, prefix)?;
                 writer.write_event(Event::Empty(e.to_owned()))?;
             }
 
@@ -1463,10 +1526,11 @@ fn parse_cell_ref_and_col(e: &BytesStart<'_>) -> Result<(CellRef, u32), Streamin
 fn write_pending_rows<W: Write>(
     writer: &mut Writer<W>,
     patches_by_row: &mut BTreeMap<u32, Vec<CellPatchInternal>>,
+    prefix: Option<&str>,
 ) -> Result<(), StreamingPatchError> {
     while let Some((&row_1, _)) = patches_by_row.iter().next() {
         let pending = patches_by_row.remove(&row_1).unwrap_or_default();
-        write_inserted_row(writer, row_1, &pending)?;
+        write_inserted_row(writer, row_1, &pending, prefix)?;
     }
     Ok(())
 }
@@ -1475,23 +1539,26 @@ fn write_inserted_row<W: Write>(
     writer: &mut Writer<W>,
     row_1: u32,
     patches: &[CellPatchInternal],
+    prefix: Option<&str>,
 ) -> Result<(), StreamingPatchError> {
-    let mut row = BytesStart::new("row");
+    let row_tag = prefixed_tag(prefix, "row");
+    let mut row = BytesStart::new(row_tag.as_str());
     let row_num = row_1.to_string();
     row.push_attribute(("r", row_num.as_str()));
     writer.write_event(Event::Start(row))?;
-    write_inserted_cells(writer, patches)?;
-    writer.write_event(Event::End(BytesEnd::new("row")))?;
+    write_inserted_cells(writer, patches, prefix)?;
+    writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
     Ok(())
 }
 
 fn write_inserted_cells<W: Write>(
     writer: &mut Writer<W>,
     patches: &[CellPatchInternal],
+    prefix: Option<&str>,
 ) -> Result<(), StreamingPatchError> {
     for patch in patches {
         let cell_ref = CellRef::new(patch.row_1 - 1, patch.col_0);
-        write_patched_cell::<W>(writer, None, &cell_ref, patch)?;
+        write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
     }
     Ok(())
 }
@@ -1500,13 +1567,14 @@ fn write_remaining_row_cells<W: Write>(
     writer: &mut Writer<W>,
     pending: &[CellPatchInternal],
     next_idx: usize,
+    prefix: Option<&str>,
 ) -> Result<(), StreamingPatchError> {
     if next_idx >= pending.len() {
         return Ok(());
     }
     for patch in &pending[next_idx..] {
         let cell_ref = CellRef::new(patch.row_1 - 1, patch.col_0);
-        write_patched_cell::<W>(writer, None, &cell_ref, patch)?;
+        write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
     }
     Ok(())
 }
@@ -1515,11 +1583,12 @@ fn insert_pending_before_cell<W: Write>(
     writer: &mut Writer<W>,
     state: &mut RowState,
     col_0: u32,
+    prefix: Option<&str>,
 ) -> Result<(), StreamingPatchError> {
     while let Some(patch) = state.pending.get(state.next_idx) {
         if patch.col_0 < col_0 {
             let cell_ref = CellRef::new(state.row_1 - 1, patch.col_0);
-            write_patched_cell::<W>(writer, None, &cell_ref, patch)?;
+            write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
             state.next_idx += 1;
         } else {
             break;
@@ -1531,13 +1600,14 @@ fn insert_pending_before_cell<W: Write>(
 fn insert_pending_before_non_cell<W: Write>(
     writer: &mut Writer<W>,
     state: &mut RowState,
+    prefix: Option<&str>,
 ) -> Result<(), StreamingPatchError> {
     if state.next_idx >= state.pending.len() {
         return Ok(());
     }
     for patch in &state.pending[state.next_idx..] {
         let cell_ref = CellRef::new(state.row_1 - 1, patch.col_0);
-        write_patched_cell::<W>(writer, None, &cell_ref, patch)?;
+        write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
     }
     state.next_idx = state.pending.len();
     Ok(())
@@ -1568,7 +1638,14 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     let mut existing_t: Option<String> = None;
     let style_override = patch.xf_index;
 
-    let mut c = BytesStart::new("c");
+    let cell_tag = String::from_utf8_lossy(cell_start.name().as_ref()).into_owned();
+    let prefix = cell_tag.rsplit_once(':').map(|(p, _)| p);
+    let f_tag = prefixed_tag(prefix, "f");
+    let v_tag = prefixed_tag(prefix, "v");
+    let is_tag = prefixed_tag(prefix, "is");
+    let t_tag = prefixed_tag(prefix, "t");
+
+    let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;
     for attr in cell_start.attributes() {
         let attr = attr?;
@@ -1614,15 +1691,24 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     loop {
         let ev = reader.read_event_into(&mut inner_buf)?;
         match ev {
-            Event::End(ref e) if e.name().as_ref() == b"c" => break,
+            Event::End(ref e) if local_name(e.name().as_ref()) == b"c" => break,
             Event::Eof => break,
             ev => inner_events.push(ev.into_owned()),
         }
         inner_buf.clear();
     }
 
-    write_patched_cell_children(writer, &inner_events, patch_formula, &body_kind)?;
-    writer.write_event(Event::End(BytesEnd::new("c")))?;
+    write_patched_cell_children(
+        writer,
+        &inner_events,
+        patch_formula,
+        &body_kind,
+        &f_tag,
+        &v_tag,
+        &is_tag,
+        &t_tag,
+    )?;
+    writer.write_event(Event::End(BytesEnd::new(cell_tag.as_str())))?;
     Ok(())
 }
 
@@ -1631,6 +1717,10 @@ fn write_patched_cell_children<W: Write>(
     inner_events: &[Event<'static>],
     patch_formula: Option<&str>,
     body_kind: &CellBodyKind,
+    f_tag: &str,
+    v_tag: &str,
+    is_tag: &str,
+    t_tag: &str,
 ) -> Result<(), StreamingPatchError> {
     let mut formula_written = patch_formula.is_none();
     let mut value_written = matches!(body_kind, CellBodyKind::None);
@@ -1640,59 +1730,65 @@ fn write_patched_cell_children<W: Write>(
     let mut idx = 0usize;
     while idx < inner_events.len() {
         match &inner_events[idx] {
-            Event::Start(e) if e.name().as_ref() == b"f" => {
+            Event::Start(e) if local_name(e.name().as_ref()) == b"f" => {
                 saw_formula = true;
                 if !formula_written {
                     if let Some(formula) = patch_formula {
                         let detach_shared = should_detach_shared_formula(e, formula);
-                        write_formula_element(writer, Some(e), formula, detach_shared)?;
+                        let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                        write_formula_element(writer, Some(e), formula, detach_shared, tag.as_str())?;
                         formula_written = true;
                     }
                 }
                 idx = skip_owned_subtree(inner_events, idx);
                 continue;
             }
-            Event::Empty(e) if e.name().as_ref() == b"f" => {
+            Event::Empty(e) if local_name(e.name().as_ref()) == b"f" => {
                 saw_formula = true;
                 if !formula_written {
                     if let Some(formula) = patch_formula {
                         let detach_shared = should_detach_shared_formula(e, formula);
-                        write_formula_element(writer, Some(e), formula, detach_shared)?;
+                        let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                        write_formula_element(writer, Some(e), formula, detach_shared, tag.as_str())?;
                         formula_written = true;
                     }
                 }
                 idx += 1;
                 continue;
             }
-            Event::Start(e) if e.name().as_ref() == b"v" || e.name().as_ref() == b"is" => {
+            Event::Start(e)
+                if local_name(e.name().as_ref()) == b"v" || local_name(e.name().as_ref()) == b"is" =>
+            {
                 saw_value = true;
 
                 if !formula_written {
                     if let Some(formula) = patch_formula {
                         // Original cell has no <f> before the value; insert one.
-                        write_formula_element(writer, None, formula, false)?;
+                        write_formula_element(writer, None, formula, false, f_tag)?;
                         formula_written = true;
                     }
                 }
                 if !value_written {
-                    write_value_element(writer, body_kind)?;
+                    write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
                     value_written = true;
                 }
 
                 idx = skip_owned_subtree(inner_events, idx);
                 continue;
             }
-            Event::Empty(e) if e.name().as_ref() == b"v" || e.name().as_ref() == b"is" => {
+            Event::Empty(e)
+                if local_name(e.name().as_ref()) == b"v" || local_name(e.name().as_ref()) == b"is" =>
+            {
                 saw_value = true;
 
                 if !formula_written {
                     if let Some(formula) = patch_formula {
-                        write_formula_element(writer, None, formula, false)?;
+                        write_formula_element(writer, None, formula, false, f_tag)?;
                         formula_written = true;
                     }
                 }
                 if !value_written {
-                    write_value_element(writer, body_kind)?;
+                    write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
                     value_written = true;
                 }
 
@@ -1702,12 +1798,12 @@ fn write_patched_cell_children<W: Write>(
             ev => {
                 if !formula_written && !saw_formula {
                     if let Some(formula) = patch_formula {
-                        write_formula_element(writer, None, formula, false)?;
+                        write_formula_element(writer, None, formula, false, f_tag)?;
                         formula_written = true;
                     }
                 }
                 if !value_written && !saw_value {
-                    write_value_element(writer, body_kind)?;
+                    write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
                     value_written = true;
                 }
                 writer.write_event(ev.clone())?;
@@ -1718,11 +1814,11 @@ fn write_patched_cell_children<W: Write>(
 
     if !formula_written {
         if let Some(formula) = patch_formula {
-            write_formula_element(writer, None, formula, false)?;
+            write_formula_element(writer, None, formula, false, f_tag)?;
         }
     }
     if !value_written {
-        write_value_element(writer, body_kind)?;
+        write_value_element(writer, body_kind, v_tag, is_tag, t_tag)?;
     }
 
     Ok(())
@@ -1759,11 +1855,12 @@ fn write_formula_element<W: Write>(
     original: Option<&BytesStart<'_>>,
     formula: &str,
     detach_shared: bool,
+    tag_name: &str,
 ) -> Result<(), StreamingPatchError> {
     let formula_display = crate::formula_text::normalize_display_formula(formula);
     let file_formula = crate::formula_text::add_xlfn_prefixes(&formula_display);
 
-    let mut f = BytesStart::new("f");
+    let mut f = BytesStart::new(tag_name);
     if let Some(orig) = original {
         for attr in orig.attributes() {
             let attr = attr?;
@@ -1779,7 +1876,7 @@ fn write_formula_element<W: Write>(
     } else {
         writer.write_event(Event::Start(f))?;
         writer.write_event(Event::Text(BytesText::new(&file_formula)))?;
-        writer.write_event(Event::End(BytesEnd::new("f")))?;
+        writer.write_event(Event::End(BytesEnd::new(tag_name)))?;
     }
     Ok(())
 }
@@ -1787,45 +1884,46 @@ fn write_formula_element<W: Write>(
 fn write_value_element<W: Write>(
     writer: &mut Writer<W>,
     body_kind: &CellBodyKind,
+    v_tag: &str,
+    is_tag: &str,
+    t_tag: &str,
 ) -> Result<(), StreamingPatchError> {
     match body_kind {
         CellBodyKind::V(text) => {
-            writer.write_event(Event::Start(BytesStart::new("v")))?;
+            writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
             writer.write_event(Event::Text(BytesText::new(text)))?;
-            writer.write_event(Event::End(BytesEnd::new("v")))?;
+            writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
         }
         CellBodyKind::InlineStr(text) => {
-            writer.write_event(Event::Start(BytesStart::new("is")))?;
-            let mut t = BytesStart::new("t");
-            if needs_space_preserve(text) {
-                t.push_attribute(("xml:space", "preserve"));
-            }
-            writer.write_event(Event::Start(t))?;
-            writer.write_event(Event::Text(BytesText::new(text)))?;
-            writer.write_event(Event::End(BytesEnd::new("t")))?;
-            writer.write_event(Event::End(BytesEnd::new("is")))?;
+            writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
+            write_shared_string_t(writer, t_tag, text)?;
+            writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
         }
         CellBodyKind::InlineRich(rich) => {
-            writer.write_event(Event::Start(BytesStart::new("is")))?;
+            let prefix = t_tag.rsplit_once(':').map(|(p, _)| p);
+            let r_tag = prefixed_tag(prefix, "r");
+            let rpr_tag = prefixed_tag(prefix, "rPr");
+
+            writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
             if rich.runs.is_empty() {
-                write_shared_string_t(writer, &rich.text)?;
+                write_shared_string_t(writer, t_tag, &rich.text)?;
             } else {
                 for run in &rich.runs {
-                    writer.write_event(Event::Start(BytesStart::new("r")))?;
+                    writer.write_event(Event::Start(BytesStart::new(r_tag.as_str())))?;
 
                     if !run.style.is_empty() {
-                        writer.write_event(Event::Start(BytesStart::new("rPr")))?;
-                        write_shared_string_rpr(writer, &run.style)?;
-                        writer.write_event(Event::End(BytesEnd::new("rPr")))?;
+                        writer.write_event(Event::Start(BytesStart::new(rpr_tag.as_str())))?;
+                        write_shared_string_rpr(writer, prefix, &run.style)?;
+                        writer.write_event(Event::End(BytesEnd::new(rpr_tag.as_str())))?;
                     }
 
                     let segment = rich.slice_run_text(run);
-                    write_shared_string_t(writer, segment)?;
+                    write_shared_string_t(writer, t_tag, segment)?;
 
-                    writer.write_event(Event::End(BytesEnd::new("r")))?;
+                    writer.write_event(Event::End(BytesEnd::new(r_tag.as_str())))?;
                 }
             }
-            writer.write_event(Event::End(BytesEnd::new("is")))?;
+            writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
         }
         CellBodyKind::None => {}
     }
@@ -1858,13 +1956,24 @@ fn write_patched_cell<W: Write>(
     original: Option<&BytesStart<'_>>,
     cell_ref: &CellRef,
     patch: &CellPatchInternal,
+    prefix: Option<&str>,
 ) -> Result<(), StreamingPatchError> {
     let patch_formula = patch.formula.as_deref();
     let mut existing_t: Option<String> = None;
     let shared_string_idx = patch.shared_string_idx;
 
-    let mut c = BytesStart::new("c");
-    let inserted_a1 = original.is_none().then(|| cell_ref.to_a1());
+    let cell_tag_owned = match original {
+        Some(orig) => String::from_utf8_lossy(orig.name().as_ref()).into_owned(),
+        None => prefixed_tag(prefix, "c"),
+    };
+    let cell_prefix = cell_tag_owned.rsplit_once(':').map(|(p, _)| p);
+    let formula_tag = prefixed_tag(cell_prefix, "f");
+    let v_tag = prefixed_tag(cell_prefix, "v");
+    let is_tag = prefixed_tag(cell_prefix, "is");
+    let t_tag = prefixed_tag(cell_prefix, "t");
+
+    let mut c = BytesStart::new(cell_tag_owned.as_str());
+    let mut has_r = false;
     let style_override = patch.xf_index;
 
     if let Some(orig) = original {
@@ -1877,10 +1986,18 @@ fn write_patched_cell<W: Write>(
             if attr.key.as_ref() == b"s" && style_override.is_some() {
                 continue;
             }
+            if attr.key.as_ref() == b"r" {
+                has_r = true;
+            }
             c.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
         }
     } else {
-        let a1 = inserted_a1.as_ref().expect("just set");
+        let a1 = cell_ref.to_a1();
+        c.push_attribute(("r", a1.as_str()));
+        has_r = true;
+    }
+    if !has_r {
+        let a1 = cell_ref.to_a1();
         c.push_attribute(("r", a1.as_str()));
     }
 
@@ -1905,12 +2022,12 @@ fn write_patched_cell<W: Write>(
     writer.write_event(Event::Start(c))?;
 
     if let Some(formula) = patch_formula {
-        write_formula_element(writer, None, formula, false)?;
+        write_formula_element(writer, None, formula, false, &formula_tag)?;
     }
 
-    write_value_element(writer, &body_kind)?;
+    write_value_element(writer, &body_kind, &v_tag, &is_tag, &t_tag)?;
 
-    writer.write_event(Event::End(BytesEnd::new("c")))?;
+    writer.write_event(Event::End(BytesEnd::new(cell_tag_owned.as_str())))?;
     Ok(())
 }
 
@@ -2002,6 +2119,34 @@ fn needs_space_preserve(s: &str) -> bool {
     s.starts_with(char::is_whitespace) || s.ends_with(char::is_whitespace)
 }
 
+fn local_name(name: &[u8]) -> &[u8] {
+    match name.iter().rposition(|b| *b == b':') {
+        Some(idx) => &name[idx + 1..],
+        None => name,
+    }
+}
+
+fn element_prefix(name: &[u8]) -> Option<&[u8]> {
+    name.iter().rposition(|b| *b == b':').map(|idx| &name[..idx])
+}
+
+fn prefixed_tag(prefix: Option<&str>, local: &str) -> String {
+    match prefix {
+        Some(prefix) => format!("{prefix}:{local}"),
+        None => local.to_string(),
+    }
+}
+
+fn worksheet_has_default_spreadsheetml_ns(e: &BytesStart<'_>) -> Result<bool, StreamingPatchError> {
+    for attr in e.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"xmlns" && attr.value.as_ref() == SPREADSHEETML_NS.as_bytes() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[derive(Debug, Clone, Copy)]
 struct PatchBounds {
     min_row_0: u32,
@@ -2067,7 +2212,8 @@ fn updated_dimension_element(
     };
 
     // Preserve attribute ordering where possible by rewriting `ref` in-place.
-    let mut out = BytesStart::new("dimension");
+    let tag = String::from_utf8_lossy(original.name().as_ref()).into_owned();
+    let mut out = BytesStart::new(tag.as_str());
     for attr in original.attributes() {
         let attr = attr?;
         if attr.key.as_ref() == b"ref" {

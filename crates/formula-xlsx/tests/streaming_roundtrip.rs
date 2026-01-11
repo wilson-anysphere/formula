@@ -11,6 +11,38 @@ use formula_xlsx::{
 };
 use zip::ZipArchive;
 
+fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .unwrap();
+    zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.write_all(sheet_xml.as_bytes()).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
 #[test]
 fn streaming_noop_roundtrip_has_no_critical_diffs() -> Result<(), Box<dyn std::error::Error>> {
     let fixtures = [
@@ -229,6 +261,91 @@ fn streaming_patch_detaches_textless_shared_formula() -> Result<(), Box<dyn std:
         "patched textless shared formula should become a standalone formula"
     );
     assert_eq!(f.attribute("si"), None);
+
+    Ok(())
+}
+
+#[test]
+fn streaming_patch_preserves_prefixes_when_expanding_empty_sheetdata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:dimension ref="A1"/>
+  <x:sheetData/>
+</x:worksheet>"#;
+
+    let bytes = build_minimal_xlsx(worksheet_xml);
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("A1")?,
+        CellValue::Number(2.0),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.into_inner()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    roxmltree::Document::parse(&sheet_xml)?;
+    assert!(
+        sheet_xml.contains("<x:sheetData>") && sheet_xml.contains("</x:sheetData>"),
+        "expected prefixed sheetData expansion, got: {sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("<x:row") && sheet_xml.contains("<x:c r=\"A1\""),
+        "expected prefixed row/cell insertion, got: {sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("<x:v>2</x:v>"),
+        "expected prefixed value element insertion, got: {sheet_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn streaming_patch_preserves_prefixes_when_inserting_missing_sheetdata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:dimension ref="A1"/>
+</x:worksheet>"#;
+
+    let bytes = build_minimal_xlsx(worksheet_xml);
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("A1")?,
+        CellValue::Number(2.0),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.into_inner()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    roxmltree::Document::parse(&sheet_xml)?;
+    assert!(
+        sheet_xml.contains("<x:sheetData>") && sheet_xml.contains("</x:sheetData>"),
+        "expected prefixed sheetData insertion, got: {sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("<x:row") && sheet_xml.contains("<x:c r=\"A1\""),
+        "expected prefixed row/cell insertion, got: {sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("<x:v>2</x:v>"),
+        "expected prefixed value element insertion, got: {sheet_xml}"
+    );
 
     Ok(())
 }
