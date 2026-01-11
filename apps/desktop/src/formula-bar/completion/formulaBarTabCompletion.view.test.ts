@@ -143,4 +143,37 @@ describe("FormulaBarView tab completion (integration)", () => {
 
     host.remove();
   });
+
+  it("ignores stale suggestions when the active sheet changes mid-request", async () => {
+    const doc = new DocumentController();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    let sheetId = "Sheet1";
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => sheetId,
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    // Simulate a sheet switch happening before the async completion resolves.
+    sheetId = "Sheet2";
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBeNull();
+    expect(view.model.aiGhostText()).toBe("");
+
+    completion.destroy();
+    host.remove();
+  });
 });
