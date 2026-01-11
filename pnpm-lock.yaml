@@ -21,6 +21,9 @@ importers:
       '@types/node':
         specifier: ^22.13.4
         version: 22.19.5
+      esbuild:
+        specifier: ^0.27.2
+        version: 0.27.2
       fake-indexeddb:
         specifier: ^6.2.5
         version: 6.2.5
@@ -175,7 +178,6 @@ importers:
         version: 0.7.1
 
   packages/engine: {}
-
   packages/extension-api: {}
 
   packages/extension-host:

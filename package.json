@@ -36,6 +36,7 @@
   "devDependencies": {
     "@formula/scripting": "workspace:*",
     "@types/node": "^22.13.4",
+    "esbuild": "^0.27.2",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^24.0.0",
     "typescript": "^5.8.2",
