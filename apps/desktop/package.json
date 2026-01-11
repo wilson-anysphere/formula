@@ -24,6 +24,7 @@
     "@formula/scripting": "workspace:*",
     "@formula/spreadsheet-frontend": "workspace:*",
     "@formula/text-layout": "workspace:*",
+    "@formula/workbook-backend": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "yjs": "^13.6.27"

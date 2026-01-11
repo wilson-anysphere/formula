@@ -15,7 +15,7 @@ export type {
   RangeCellEdit,
   RangeData,
   CellValue,
-} from "./backend/workbookBackend";
+} from "@formula/workbook-backend";
 
 export { isFormulaInput, normalizeFormulaText, normalizeFormulaTextOpt } from "./backend/formula";
 

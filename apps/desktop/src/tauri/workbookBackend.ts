@@ -1,68 +1,26 @@
-export type SheetInfo = {
-  id: string;
-  name: string;
-};
+import type {
+  DefinedNameInfo,
+  RangeCellEdit,
+  RangeData,
+  SheetUsedRange,
+  TableInfo,
+  WorkbookBackend,
+  WorkbookInfo,
+  WorkbookThemePalette,
+} from "@formula/workbook-backend";
 
-export type WorkbookInfo = {
-  path: string | null;
-  origin_path: string | null;
-  sheets: SheetInfo[];
-};
-
-export type CellValue = {
-  value: unknown | null;
-  formula: string | null;
-  display_value: string;
-};
-
-export type RangeData = {
-  values: CellValue[][];
-  start_row: number;
-  start_col: number;
-};
-
-export type RangeCellEdit = {
-  value: unknown | null;
-  formula: string | null;
-};
-
-export type SheetUsedRange = {
-  start_row: number;
-  end_row: number;
-  start_col: number;
-  end_col: number;
-};
-
-export type WorkbookThemePalette = {
-  dk1: string;
-  lt1: string;
-  dk2: string;
-  lt2: string;
-  accent1: string;
-  accent2: string;
-  accent3: string;
-  accent4: string;
-  accent5: string;
-  accent6: string;
-  hlink: string;
-  followedHlink: string;
-};
-
-export type DefinedNameInfo = {
-  name: string;
-  refers_to: string;
-  sheet_id: string | null;
-};
-
-export type TableInfo = {
-  name: string;
-  sheet_id: string;
-  start_row: number;
-  start_col: number;
-  end_row: number;
-  end_col: number;
-  columns: string[];
-};
+export type {
+  CellValue,
+  DefinedNameInfo,
+  RangeCellEdit,
+  RangeData,
+  SheetInfo,
+  SheetUsedRange,
+  TableInfo,
+  WorkbookBackend,
+  WorkbookInfo,
+  WorkbookThemePalette,
+} from "@formula/workbook-backend";
 
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -74,7 +32,7 @@ function getTauriInvoke(): TauriInvoke {
   return invoke;
 }
 
-export class TauriWorkbookBackend {
+export class TauriWorkbookBackend implements WorkbookBackend {
   private readonly invoke: TauriInvoke;
 
   constructor() {

@@ -1,17 +1,6 @@
-export type WorkbookThemePalette = {
-  dk1: string;
-  lt1: string;
-  dk2: string;
-  lt2: string;
-  accent1: string;
-  accent2: string;
-  accent3: string;
-  accent4: string;
-  accent5: string;
-  accent6: string;
-  hlink: string;
-  followedHlink: string;
-};
+import type { WorkbookThemePalette } from "@formula/workbook-backend";
+
+export type { WorkbookThemePalette };
 
 export type ChartTheme = {
   /**
@@ -48,4 +37,3 @@ export function chartThemeFromWorkbookPalette(
   if (seriesColors.length === 0) return FALLBACK_CHART_THEME;
   return { seriesColors };
 }
-

@@ -25,7 +25,8 @@ import { DocumentControllerWorkbookAdapter } from "./scripting/documentControlle
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { startWorkbookSync } from "./tauri/workbookSync";
-import { TauriWorkbookBackend, type WorkbookInfo } from "./tauri/workbookBackend";
+import { TauriWorkbookBackend } from "./tauri/workbookBackend";
+import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
 import { refreshDefinedNameSignaturesFromBackend, refreshTableSignaturesFromBackend } from "./power-query/tableSignatures";

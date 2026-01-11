@@ -2,7 +2,7 @@ import type { EngineClient } from "../client";
 import type { CellScalar } from "../protocol";
 import { fromA1, toA1, toA1Range } from "./a1";
 import { isFormulaInput, normalizeFormulaTextOpt } from "./formula";
-import type { RangeCellEdit, RangeData, SheetInfo, SheetUsedRange, WorkbookBackend, WorkbookInfo } from "./workbookBackend";
+import type { RangeCellEdit, RangeData, SheetInfo, SheetUsedRange, WorkbookBackend, WorkbookInfo } from "@formula/workbook-backend";
 
 type UsedRangeState = {
   start_row: number;
