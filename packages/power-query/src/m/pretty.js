@@ -9,6 +9,7 @@
  */
 
 import { parseFormula } from "../expr/index.js";
+import { hasUtcTimeComponent } from "../values.js";
 
 /**
  * @param {string} name
@@ -64,7 +65,11 @@ function valueToM(value) {
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "null";
   if (typeof value === "string") return escapeMString(value);
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return `#date(${value.getUTCFullYear()}, ${value.getUTCMonth() + 1}, ${value.getUTCDate()})`;
+    if (!hasUtcTimeComponent(value)) {
+      return `#date(${value.getUTCFullYear()}, ${value.getUTCMonth() + 1}, ${value.getUTCDate()})`;
+    }
+    const seconds = value.getUTCSeconds() + value.getUTCMilliseconds() / 1000;
+    return `#datetime(${value.getUTCFullYear()}, ${value.getUTCMonth() + 1}, ${value.getUTCDate()}, ${value.getUTCHours()}, ${value.getUTCMinutes()}, ${seconds})`;
   }
   if (Array.isArray(value)) return `{${value.map(valueToM).join(", ")}}`;
   if (typeof value === "object") {
@@ -228,10 +233,22 @@ function dataTypeToMTypeExpr(type) {
       return "type text";
     case "number":
       return "type number";
+    case "decimal":
+      return "Decimal.Type";
     case "boolean":
       return "type logical";
     case "date":
       return "type date";
+    case "datetime":
+      return "type datetime";
+    case "datetimezone":
+      return "type datetimezone";
+    case "time":
+      return "type time";
+    case "duration":
+      return "type duration";
+    case "binary":
+      return "type binary";
     case "any":
     default:
       return "type any";

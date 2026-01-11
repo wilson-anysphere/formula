@@ -127,3 +127,26 @@ in
   const query2 = compileMToQuery(printed);
   assert.deepEqual(toJson(query2), toJson(query));
 });
+
+test("m_language round-trip: prettyPrintQueryToM (expanded scalar types)", () => {
+  const script = `
+let
+  Source = Range.FromValues({
+    {"When", "Zone", "Time", "Dur", "Dec", "Bin"},
+    {"2024-01-01T01:02:03.004Z", "2024-01-01T01:02:03.004Z", "06:00:00", "P1DT12H", "123.450", "AQID"}
+  }),
+  #"Changed Type" = Table.TransformColumnTypes(Source, {{"When", type datetime}}),
+  #"Changed Type 2" = Table.TransformColumnTypes(#"Changed Type", {{"Zone", type datetimezone}}),
+  #"Changed Type 3" = Table.TransformColumnTypes(#"Changed Type 2", {{"Time", type time}}),
+  #"Changed Type 4" = Table.TransformColumnTypes(#"Changed Type 3", {{"Dur", type duration}}),
+  #"Changed Type 5" = Table.TransformColumnTypes(#"Changed Type 4", {{"Dec", Decimal.Type}}),
+  #"Changed Type 6" = Table.TransformColumnTypes(#"Changed Type 5", {{"Bin", type binary}})
+in
+  #"Changed Type 6"
+`;
+
+  const query = compileMToQuery(script);
+  const printed = prettyPrintQueryToM(query);
+  const query2 = compileMToQuery(printed);
+  assert.deepEqual(toJson(query2), toJson(query));
+});

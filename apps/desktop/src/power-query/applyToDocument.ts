@@ -5,7 +5,7 @@ import { DataTable } from "../../../../packages/power-query/src/table.js";
 
 import type { DocumentController } from "../document/documentController.js";
 import { dateToExcelSerial } from "../shared/valueParsing.js";
-import { MS_PER_DAY, PqDateTimeZone, PqDuration, PqTime } from "../../../../packages/power-query/src/values.js";
+import { MS_PER_DAY, PqDateTimeZone, PqDecimal, PqDuration, PqTime } from "../../../../packages/power-query/src/values.js";
 
 export type QuerySheetDestination = {
   sheetId: string;
@@ -63,6 +63,11 @@ type GridBatch = { rowOffset: number; values: unknown[][] };
 function cellValueToDocumentInput(value: unknown): unknown {
   if (value instanceof PqDateTimeZone) {
     return dateToExcelSerial(value.toDate());
+  }
+
+  if (value instanceof PqDecimal) {
+    const num = Number(value.value);
+    return Number.isFinite(num) ? num : value.toString();
   }
 
   if (value instanceof PqTime) {

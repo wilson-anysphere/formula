@@ -9,7 +9,7 @@ import { MockEngine } from "../../document/engine.js";
 
 import { applyQueryToDocument } from "../applyToDocument.ts";
 import { dateToExcelSerial } from "../../shared/valueParsing.js";
-import { MS_PER_DAY, PqDuration, PqTime } from "../../../../../packages/power-query/src/values.js";
+import { MS_PER_DAY, PqDecimal, PqDuration, PqTime } from "../../../../../packages/power-query/src/values.js";
 
 test("applyQueryToDocument requests non-materializing streaming execution", async () => {
   const engine = {
@@ -159,6 +159,29 @@ test("applyQueryToDocument converts datetime/time/duration values into Excel ser
   assert.equal(doc.getCell("Sheet1", { row: 1, col: 0 }).value, dateToExcelSerial(when));
   assert.equal(doc.getCell("Sheet1", { row: 1, col: 1 }).value, time.milliseconds / MS_PER_DAY);
   assert.equal(doc.getCell("Sheet1", { row: 1, col: 2 }).value, duration.milliseconds / MS_PER_DAY);
+});
+
+test("applyQueryToDocument converts decimal wrapper values into numbers", async () => {
+  const engine = new QueryEngine();
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const query = {
+    id: "q_decimal",
+    name: "Decimal",
+    source: {
+      type: "range",
+      range: {
+        values: [["Dec"], [new PqDecimal("123.450")]],
+        hasHeaders: true,
+      },
+    },
+    steps: [],
+  };
+
+  const destination = { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true };
+  await applyQueryToDocument(doc, query, destination, { engine, batchSize: 2 });
+
+  assert.equal(doc.getCell("Sheet1", { row: 1, col: 0 }).value, 123.45);
 });
 
 test("applyQueryToDocument supports HTTP sources via injected HttpConnector", async () => {
