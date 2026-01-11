@@ -1,0 +1,69 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { DocumentController } from "../apps/desktop/src/document/documentController.js";
+import { DocumentBranchingWorkflow } from "../apps/desktop/src/versioning/branching/documentBranchingWorkflow.js";
+import { BranchService } from "../packages/versioning/branches/src/BranchService.js";
+import { InMemoryBranchStore } from "../packages/versioning/branches/src/store/InMemoryBranchStore.js";
+
+test("DocumentController + BranchService: checkout/merge mutate the live workbook", async () => {
+  const actor = { userId: "u1", role: "owner" };
+
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setCellFormula("Sheet1", "B1", "=A1*2");
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true }, meta: { foo: "bar", nested: { n: 1 } } });
+  doc.setCellValue("Sheet2", "A1", "s2");
+
+  const store = new InMemoryBranchStore();
+  const branchService = new BranchService({ docId: "doc1", store });
+  // Start with explicit sheet ids (including an empty sheet) to exercise empty-sheet handling.
+  await branchService.init(actor, { sheets: { Sheet1: {}, Sheet2: {}, EmptySheet: {} } });
+
+  const workflow = new DocumentBranchingWorkflow({ doc, branchService });
+  await workflow.commitCurrentState(actor, "initial");
+
+  await branchService.createBranch(actor, { name: "feature" });
+
+  await workflow.checkoutIntoDoc(actor, "feature");
+  assert.deepEqual(new Set(doc.getSheetIds()), new Set(["Sheet1", "Sheet2", "EmptySheet"]));
+
+  doc.setCellValue("Sheet1", "A1", 10);
+  doc.setCellValue("Sheet1", "C1", 99);
+  await workflow.commitCurrentState(actor, "feature edits");
+
+  await workflow.checkoutIntoDoc(actor, "main");
+  // C1 only existed on the feature branch, so checkout must delete it locally.
+  assert.equal(doc.getCell("Sheet1", "C1").value, null);
+
+  doc.setCellValue("Sheet1", "A1", 5);
+  doc.setCellValue("Sheet1", "D1", 123);
+  await workflow.commitCurrentState(actor, "main edits");
+
+  const preview = await branchService.previewMerge(actor, { sourceBranch: "feature" });
+  assert.equal(preview.conflicts.length, 1);
+  assert.deepEqual(preview.conflicts[0], {
+    type: "cell",
+    sheetId: "Sheet1",
+    cell: "A1",
+    reason: "content",
+    base: { value: 1, format: { font: { bold: true }, meta: { foo: "bar", nested: { n: 1 } } } },
+    ours: { value: 5, format: { font: { bold: true }, meta: { foo: "bar", nested: { n: 1 } } } },
+    theirs: { value: 10, format: { font: { bold: true }, meta: { foo: "bar", nested: { n: 1 } } } },
+  });
+
+  await workflow.mergeIntoDoc(actor, "feature", [{ conflictIndex: 0, choice: "theirs" }]);
+
+  assert.equal(doc.getCell("Sheet1", "A1").value, 10);
+  assert.equal(doc.getCell("Sheet1", "B1").formula, "=A1*2");
+  assert.equal(doc.getCell("Sheet1", "C1").value, 99);
+  assert.equal(doc.getCell("Sheet1", "D1").value, 123);
+  assert.equal(doc.getCell("Sheet2", "A1").value, "s2");
+
+  const a1 = doc.getCell("Sheet1", "A1");
+  assert.deepEqual(doc.styleTable.get(a1.styleId), {
+    font: { bold: true },
+    meta: { foo: "bar", nested: { n: 1 } },
+  });
+});
+
