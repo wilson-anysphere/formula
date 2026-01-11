@@ -147,3 +147,21 @@ fn bytecode_backend_respects_external_value_provider() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(6.0));
     assert!(engine.bytecode_program_count() > 0);
 }
+
+#[test]
+fn sumproduct_coerces_bools_in_ranges() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", true).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUMPRODUCT(A1:A3, A1:A3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // [1, TRUE, 3] is coerced to [1, 1, 3] for SUMPRODUCT.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(11.0));
+    assert!(engine.bytecode_program_count() > 0);
+}

@@ -1202,10 +1202,12 @@ impl Engine {
                                             .by_sheet
                                             .get(k.sheet)
                                             .unwrap_or(&empty_cols);
+                                        let slice_mode = slice_mode_for_program(&bc.program);
                                         let grid = EngineBytecodeGrid {
                                             snapshot: &snapshot,
                                             sheet: k.sheet,
                                             cols,
+                                            slice_mode,
                                         };
                                         let base = bytecode::CellCoord {
                                             row: k.addr.row as i32,
@@ -1238,10 +1240,12 @@ impl Engine {
                         }
                         CompiledFormula::Bytecode(bc) => {
                             let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
+                            let slice_mode = slice_mode_for_program(&bc.program);
                             let grid = EngineBytecodeGrid {
                                 snapshot: &snapshot,
                                 sheet: k.sheet,
                                 cols,
+                                slice_mode,
                             };
                             let base = bytecode::CellCoord {
                                 row: k.addr.row as i32,
@@ -1274,10 +1278,12 @@ impl Engine {
                     }
                     CompiledFormula::Bytecode(bc) => {
                         let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
+                        let slice_mode = slice_mode_for_program(&bc.program);
                         let grid = EngineBytecodeGrid {
                             snapshot: &snapshot,
                             sheet: k.sheet,
                             cols,
+                            slice_mode,
                         };
                         let base = bytecode::CellCoord {
                             row: k.addr.row as i32,
@@ -3277,10 +3283,37 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ColumnSliceMode {
+    /// Use column slices only when the column range contains numbers/blanks.
+    ///
+    /// This is required for functions like `SUMPRODUCT` that coerce logical/text values.
+    StrictNumeric,
+    /// Allow column slices even when the column contains logical/text values.
+    ///
+    /// For SUM/AVERAGE/MIN/MAX/COUNT/COUNTIF range args, Excel ignores logical/text values, so
+    /// representing them as NaN (ignored by the SIMD kernels) is correct and enables SIMD even
+    /// for common "header + data" columns.
+    IgnoreNonNumeric,
+}
+
+fn slice_mode_for_program(program: &bytecode::Program) -> ColumnSliceMode {
+    if program
+        .funcs
+        .iter()
+        .any(|f| matches!(f, bytecode::ast::Function::SumProduct))
+    {
+        ColumnSliceMode::StrictNumeric
+    } else {
+        ColumnSliceMode::IgnoreNonNumeric
+    }
+}
+
 #[derive(Debug, Clone)]
 struct BytecodeColumn {
     values: Vec<f64>,
-    blocked_rows: Vec<i32>,
+    blocked_rows_strict: Vec<i32>,
+    blocked_rows_ignore_nonnumeric: Vec<i32>,
 }
 
 #[derive(Debug)]
@@ -3327,10 +3360,21 @@ impl BytecodeColumnCache {
                 }
                 let len = (*max_row as usize).saturating_add(1);
                 let mut values: Vec<f64> = vec![f64::NAN; len];
-                let mut blocked_rows: Vec<i32> = Vec::new();
+                let mut blocked_rows_strict: Vec<i32> = Vec::new();
+                let mut blocked_rows_ignore_nonnumeric: Vec<i32> = Vec::new();
 
                 let sheet_name = snapshot.sheet_names_by_id.get(sheet_id).map(String::as_str);
                 let provider = snapshot.external_value_provider.as_ref();
+
+                let mut apply_value = |value: &Value, row: i32| match value {
+                    Value::Number(n) => values[row as usize] = *n,
+                    Value::Blank => {}
+                    Value::Error(_) | Value::Array(_) | Value::Spill { .. } => {
+                        blocked_rows_strict.push(row);
+                        blocked_rows_ignore_nonnumeric.push(row);
+                    }
+                    Value::Bool(_) | Value::Text(_) => blocked_rows_strict.push(row),
+                };
 
                 for row in 0..=*max_row {
                     let addr = CellAddr {
@@ -3338,35 +3382,29 @@ impl BytecodeColumnCache {
                         col: (*col) as u32,
                     };
                     if let Some(v) = snapshot.values.get(&CellKey { sheet: sheet_id, addr }) {
-                        match v {
-                            Value::Number(n) => values[row as usize] = *n,
-                            Value::Blank => {}
-                            // Conservative: only expose SIMD slices for dense numeric columns
-                            // (numbers + blanks). Errors/text/bools require per-cell semantics.
-                            _ => blocked_rows.push(row),
-                        }
+                        apply_value(v, row);
                         continue;
                     }
 
                     if let (Some(provider), Some(sheet_name)) = (provider, sheet_name) {
                         if let Some(v) = provider.get(sheet_name, addr) {
-                            match v {
-                                Value::Number(n) => values[row as usize] = n,
-                                Value::Blank => {}
-                                _ => blocked_rows.push(row),
-                            }
+                            apply_value(&v, row);
                         }
                     }
                 }
 
-                blocked_rows.sort_unstable();
-                blocked_rows.dedup();
+                blocked_rows_strict.sort_unstable();
+                blocked_rows_strict.dedup();
+
+                blocked_rows_ignore_nonnumeric.sort_unstable();
+                blocked_rows_ignore_nonnumeric.dedup();
 
                 cols.insert(
                     *col,
                     BytecodeColumn {
                         values,
-                        blocked_rows,
+                        blocked_rows_strict,
+                        blocked_rows_ignore_nonnumeric,
                     },
                 );
             }
@@ -3389,6 +3427,7 @@ struct EngineBytecodeGrid<'a> {
     snapshot: &'a Snapshot,
     sheet: SheetId,
     cols: &'a HashMap<i32, BytecodeColumn>,
+    slice_mode: ColumnSliceMode,
 }
 
 impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
@@ -3427,7 +3466,11 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         if row_start < 0 || row_end < 0 || row_start > row_end {
             return None;
         }
-        if has_blocked_row(&data.blocked_rows, row_start, row_end) {
+        let blocked_rows = match self.slice_mode {
+            ColumnSliceMode::StrictNumeric => &data.blocked_rows_strict,
+            ColumnSliceMode::IgnoreNonNumeric => &data.blocked_rows_ignore_nonnumeric,
+        };
+        if has_blocked_row(blocked_rows, row_start, row_end) {
             return None;
         }
         let start = row_start as usize;
