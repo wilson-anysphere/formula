@@ -1101,6 +1101,14 @@ export class KernelEngine {
       try {
         const gpu = await this._gpu.hashJoin(leftKeys, rightKeys, opts);
         if (this._shouldValidate("hashJoin", workloadSize)) {
+          // Hash joins can produce O(n^2) outputs even for small inputs (e.g. all
+          // keys identical). Avoid re-running the join on CPU for validation if
+          // the output is already larger than the validation budget.
+          if (gpu.leftIndex.length > this._validation.maxElements) {
+            this._lastKernelBackend.hashJoin = "webgpu";
+            this._lastKernelPrecision.hashJoin = "u32";
+            return gpu;
+          }
           const cpu = await this._cpu.hashJoin(leftKeys, rightKeys, opts);
           let ok = cpu.leftIndex.length === gpu.leftIndex.length && cpu.rightIndex.length === gpu.rightIndex.length;
           if (ok) {

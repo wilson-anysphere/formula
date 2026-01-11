@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { KernelEngine } from "../src/index.js";
+import { CpuBackend } from "../src/index.js";
 
 class FakeGpuBackend {
   kind = "webgpu";
@@ -394,4 +395,33 @@ test("groupBySum: fast mode uses f32 on GPU for Float64Array inputs", async () =
   assert.equal(fakeGpu.calls.groupBySum, 1);
   assert.equal(engine.lastKernelBackend().groupBySum, "webgpu");
   assert.equal(engine.diagnostics().lastKernelPrecision.groupBySum, "f32");
+});
+
+test("hashJoin: excel validation skips CPU re-run when GPU output exceeds validation budget", async () => {
+  class HugeJoinGpuBackend extends FakeGpuBackend {
+    async hashJoin() {
+      // Create a large output to exceed validation.maxElements.
+      const leftIndex = new Uint32Array(100);
+      const rightIndex = new Uint32Array(100);
+      return { leftIndex, rightIndex };
+    }
+  }
+
+  class ThrowingCpuBackend extends CpuBackend {
+    async hashJoin() {
+      throw new Error("CPU join should not be called");
+    }
+  }
+
+  const engine = new KernelEngine({
+    precision: "excel",
+    gpuBackend: new HugeJoinGpuBackend(true),
+    cpuBackend: new ThrowingCpuBackend(),
+    thresholds: { hashJoin: 0 },
+    validation: { enabled: true, maxElements: 10 }
+  });
+
+  const out = await engine.hashJoin(new Uint32Array([1]), new Uint32Array([1]));
+  assert.equal(out.leftIndex.length, 100);
+  assert.equal(engine.lastKernelBackend().hashJoin, "webgpu");
 });
