@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use roxmltree::Document;
 
@@ -32,19 +33,21 @@ impl XlsxPackage {
         let mut needed_overrides: Vec<(String, String)> = Vec::new();
 
         for part in inserted_parts {
+            let part = part.strip_prefix('/').unwrap_or(part);
             if part.ends_with(".rels") {
                 continue;
-            }
-
-            if let Some((_, ext)) = part.rsplit_once('.') {
-                if source_defaults.contains_key(ext) {
-                    needed_defaults.insert(ext);
-                }
             }
 
             let part_name = format!("/{part}");
             if let Some(content_type) = source_overrides.get(part_name.as_str()) {
                 needed_overrides.push((part_name, content_type.clone()));
+                continue;
+            }
+
+            if let Some(ext) = Path::new(part).extension().and_then(|ext| ext.to_str()) {
+                if source_defaults.contains_key(ext) {
+                    needed_defaults.insert(ext);
+                }
             }
         }
 
@@ -114,4 +117,82 @@ fn parse_content_types(
     }
 
     Ok((defaults, overrides))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Cursor, Write};
+
+    use super::*;
+
+    fn package_with_content_types(ct_xml: &str) -> XlsxPackage {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("[Content_Types].xml", options)
+            .expect("start [Content_Types].xml");
+        zip.write_all(ct_xml.as_bytes())
+            .expect("write [Content_Types].xml");
+
+        let bytes = zip.finish().expect("finish zip").into_inner();
+        XlsxPackage::from_bytes(&bytes).expect("read package")
+    }
+
+    #[test]
+    fn merges_defaults_for_non_media_parts() {
+        let destination_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"#;
+
+        let source_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.oleObject"/>
+</Types>"#;
+
+        let mut pkg = package_with_content_types(destination_xml);
+        let inserted = vec!["xl/embeddings/oleObject1.bin".to_string()];
+        pkg.merge_content_types(source_xml.as_bytes(), inserted.iter())
+            .expect("merge content types");
+
+        let updated =
+            std::str::from_utf8(pkg.part("[Content_Types].xml").expect("content types part"))
+                .expect("utf8 content types");
+        assert!(updated.contains(
+            r#"<Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.oleObject"/>"#
+        ));
+    }
+
+    #[test]
+    fn preserves_overrides_for_inserted_parts() {
+        let destination_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"#;
+
+        let source_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>
+</Types>"#;
+
+        let mut pkg = package_with_content_types(destination_xml);
+        let inserted = vec!["xl/charts/chart1.xml".to_string()];
+        pkg.merge_content_types(source_xml.as_bytes(), inserted.iter())
+            .expect("merge content types");
+
+        let updated =
+            std::str::from_utf8(pkg.part("[Content_Types].xml").expect("content types part"))
+                .expect("utf8 content types");
+        assert!(updated.contains(
+            r#"<Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>"#
+        ));
+    }
 }
