@@ -43,3 +43,24 @@ These modules use `node:fs` and `worker_threads` and are **not wired into the Vi
 used by Node integration tests and are intended to be bridged into the real desktop app via IPC/Tauri plumbing.
 
 See `docs/10-extensibility.md` for the end-to-end flow and hot-reload behavior.
+
+## Formula bar AI tab-completion (local model)
+
+The formula bar has an “AI-native” tab completion layer that combines:
+
+- fast rule-based suggestions (function names, ranges, named ranges, sheet-qualified ranges, tables/structured refs)
+- **optional** local-model suggestions via [Ollama](https://ollama.com/)
+- optional inline preview values (when the lightweight evaluator supports the suggested formula)
+
+### Enabling the local model
+
+Local model completions are controlled via `localStorage` flags (use DevTools in the WebView):
+
+- `formula:aiCompletion:localModelEnabled` = `true`
+- `formula:aiCompletion:localModelName` = model name (default: `formula-completion`)
+- `formula:aiCompletion:localModelBaseUrl` = Ollama base URL (default: `http://localhost:11434`)
+
+Notes:
+
+- Completions are time-bounded (defaults to a ~200ms budget) so the formula bar stays responsive even if Ollama is slow/unavailable.
+- Structured-reference preview is currently not evaluated (the UI will show `(preview unavailable)` for those suggestions).
