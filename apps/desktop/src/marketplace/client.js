@@ -33,10 +33,16 @@ async function atomicWriteJson(filePath, value) {
     await fs.rename(tmp, filePath);
   } catch (error) {
     if (error?.code === "EEXIST" || error?.code === "EPERM") {
-      await fs.rm(filePath, { force: true });
-      await fs.rename(tmp, filePath);
-      return;
+      try {
+        await fs.rm(filePath, { force: true });
+        await fs.rename(tmp, filePath);
+        return;
+      } catch (renameError) {
+        await fs.rm(tmp, { force: true }).catch(() => {});
+        throw renameError;
+      }
     }
+    await fs.rm(tmp, { force: true }).catch(() => {});
     throw error;
   }
 }
@@ -49,10 +55,16 @@ async function atomicWriteFile(filePath, bytes) {
     await fs.rename(tmp, filePath);
   } catch (error) {
     if (error?.code === "EEXIST" || error?.code === "EPERM") {
-      await fs.rm(filePath, { force: true });
-      await fs.rename(tmp, filePath);
-      return;
+      try {
+        await fs.rm(filePath, { force: true });
+        await fs.rename(tmp, filePath);
+        return;
+      } catch (renameError) {
+        await fs.rm(tmp, { force: true }).catch(() => {});
+        throw renameError;
+      }
     }
+    await fs.rm(tmp, { force: true }).catch(() => {});
     throw error;
   }
 }
