@@ -34,6 +34,7 @@ export class EngineCellCache {
   private readonly values = new Map<string, string | number | null>();
   private readonly inflight = new Map<string, Promise<void>>();
   private readonly maxEntries: number;
+  private generation = 0;
 
   constructor(engine: EngineClient, options?: EngineCellCacheOptions) {
     this.engine = engine;
@@ -42,6 +43,12 @@ export class EngineCellCache {
       throw new Error(`EngineCellCache: maxEntries must be a positive safe integer, got ${maxEntries}`);
     }
     this.maxEntries = maxEntries;
+  }
+
+  clear(): void {
+    this.generation += 1;
+    this.values.clear();
+    this.inflight.clear();
   }
 
   getValue(row0: number, col0: number, sheet?: string): string | number | null {
@@ -83,8 +90,12 @@ export class EngineCellCache {
     const existing = this.inflight.get(key);
     if (existing) return existing;
 
+    const generation = this.generation;
     const task = (async () => {
       const rows = await this.engine.getRange(rangeA1, sheetName);
+      if (generation !== this.generation) {
+        return;
+      }
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r] ?? [];
         for (let c = 0; c < row.length; c++) {

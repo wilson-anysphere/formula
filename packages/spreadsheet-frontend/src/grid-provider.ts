@@ -20,7 +20,7 @@ export class EngineGridProvider implements CellProvider {
   private readonly cache: EngineCellCache;
   private readonly rowCount: number;
   private readonly colCount: number;
-  private readonly sheet: string;
+  private sheet: string;
   private readonly headers: boolean;
 
   private readonly listeners = new Set<(update: CellProviderUpdate) => void>();
@@ -38,6 +38,20 @@ export class EngineGridProvider implements CellProvider {
     this.colCount = options.colCount;
     this.sheet = defaultSheetName(options.sheet);
     this.headers = options.headers ?? false;
+  }
+
+  setSheet(sheet: string): void {
+    const nextSheet = defaultSheetName(sheet);
+    if (nextSheet === this.sheet) return;
+
+    this.sheet = nextSheet;
+    // Drop any cached values so we don't briefly show stale cells while the
+    // renderer prefetches the new sheet's visible range.
+    this.cache.clear();
+
+    if (this.listeners.size === 0) return;
+    const update: CellProviderUpdate = { type: "invalidateAll" };
+    for (const listener of this.listeners) listener(update);
   }
 
   getCell(row: number, col: number): CellData | null {

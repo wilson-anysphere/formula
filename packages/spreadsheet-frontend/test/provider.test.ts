@@ -161,6 +161,35 @@ describe("EngineGridProvider", () => {
     expect(updates).toEqual([{ type: "cells", range: { startRow: 1, endRow: 2, startCol: 1, endCol: 3 } }]);
   });
 
+  it("can switch sheets by clearing the cache and invalidating the viewport", async () => {
+    const values = new Map<string, CellScalar>();
+    values.set("Sheet1!A1", 1);
+    values.set("Sheet2!A1", 2);
+
+    const engine = new FakeEngine(values) as any;
+    const cache = new EngineCellCache(engine);
+    const provider = new EngineGridProvider({ cache, rowCount: 10, colCount: 10, sheet: "Sheet1" });
+
+    const updates: CellProviderUpdate[] = [];
+    provider.subscribe((update) => updates.push(update));
+
+    await provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+    await flushMicrotasks();
+    expect(provider.getCell(0, 0)?.value).toBe(1);
+
+    updates.length = 0;
+    provider.setSheet("Sheet2");
+    expect(provider.getCell(0, 0)?.value).toBeNull();
+    expect(updates).toEqual([{ type: "invalidateAll" }]);
+
+    updates.length = 0;
+    await provider.prefetchAsync({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+    await flushMicrotasks();
+    expect(provider.getCell(0, 0)?.value).toBe(2);
+    expect(engine.calls.at(-1)).toEqual({ range: "A1", sheet: "Sheet2" });
+    expect(updates).toEqual([{ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 } }]);
+  });
+
   it("coalesces adjacent invalidations when applying recalc changes", async () => {
     const engine = new FakeEngine(new Map()) as any;
     const cache = new EngineCellCache(engine);

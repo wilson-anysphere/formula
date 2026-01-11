@@ -9,12 +9,10 @@ import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
 
 export function App() {
   const [engineStatus, setEngineStatus] = useState("starting…");
-  const [engineReady, setEngineReady] = useState(false);
   const engineRef = useRef<ReturnType<typeof createEngineClient> | null>(null);
-
-  const [cache, setCache] = useState<EngineCellCache | null>(null);
   const [provider, setProvider] = useState<EngineGridProvider | null>(null);
   const [activeSheet, setActiveSheet] = useState("Sheet1");
+  const previousSheetRef = useRef<string | null>(null);
 
   // +1 for frozen header row/col.
   const rowCount = 1_000_000 + 1;
@@ -127,11 +125,7 @@ export function App() {
     const engine = createEngineClient();
     engineRef.current = engine;
 
-    const nextCache = new EngineCellCache(engine);
-    setCache(nextCache);
-
     setEngineStatus("starting…");
-    setEngineReady(false);
     setProvider(null);
 
     let cancelled = false;
@@ -146,7 +140,8 @@ export function App() {
         const b1 = await engine.getCell("B1");
         if (!cancelled) {
           setEngineStatus(`ready (B1=${b1.value === null ? "" : String(b1.value)})`);
-          setEngineReady(true);
+          const cache = new EngineCellCache(engine);
+          setProvider(new EngineGridProvider({ cache, rowCount, colCount, sheet: "Sheet1", headers: true }));
         }
       } catch (error) {
         if (!cancelled) {
@@ -167,11 +162,16 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!engineReady || !cache) return;
-    const nextProvider = new EngineGridProvider({ cache, rowCount, colCount, sheet: activeSheet, headers: true });
-    setProvider(nextProvider);
-    void nextProvider.recalculate();
-  }, [cache, engineReady, activeSheet, colCount, rowCount]);
+    if (!provider) return;
+
+    provider.setSheet(activeSheet);
+
+    const previousSheet = previousSheetRef.current;
+    previousSheetRef.current = activeSheet;
+    if (previousSheet && previousSheet !== activeSheet) {
+      void provider.recalculate(activeSheet);
+    }
+  }, [provider, activeSheet]);
 
   return (
     <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
@@ -186,7 +186,7 @@ export function App() {
           value={activeSheet}
           onChange={(e) => setActiveSheet(e.target.value)}
           style={{ padding: "4px 6px" }}
-          disabled={!engineReady}
+          disabled={!provider}
         >
           <option value="Sheet1">Sheet1</option>
           <option value="Sheet2">Sheet2</option>
