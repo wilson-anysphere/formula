@@ -11,6 +11,7 @@ export function App() {
   const [provider, setProvider] = useState<EngineGridProvider | null>(null);
   const [activeSheet, setActiveSheet] = useState("Sheet1");
   const [engineReady, setEngineReady] = useState(false);
+  const cache = useMemo(() => new EngineCellCache(engine), [engine]);
 
   // +1 for frozen header row/col.
   const rowCount = 1_000_000 + 1;
@@ -49,11 +50,10 @@ export function App() {
 
   useEffect(() => {
     if (!engineReady) return;
-    const cache = new EngineCellCache(engine);
     const nextProvider = new EngineGridProvider({ cache, rowCount, colCount, sheet: activeSheet, headers: true });
     setProvider(nextProvider);
     void nextProvider.recalculate();
-  }, [engine, engineReady, activeSheet]);
+  }, [cache, engineReady, activeSheet, colCount, rowCount]);
 
   return (
     <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
