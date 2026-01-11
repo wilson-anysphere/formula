@@ -18,7 +18,7 @@ struct RawRecordHeader {
 ///
 /// This streaming patcher supports the same insertion semantics as [`super::patch_sheet_bin`]:
 /// - missing rows/cells inside `BrtSheetData` are inserted in row-major order
-/// - edits that clear a missing cell to blank (`new_value = Blank` + `new_formula = None`) are
+/// - edits that clear a missing cell to blank (`new_value = Blank` + no formula payload) are
 ///   treated as no-ops and do not materialize new records
 /// - the worksheet `BrtWsDim` / `DIMENSION` record is expanded (never shrunk) to include any
 ///   edited non-blank cells
