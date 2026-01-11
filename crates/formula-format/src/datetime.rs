@@ -437,6 +437,13 @@ fn disambiguate_minutes(tokens: &mut [Token]) {
             continue;
         };
 
+        // In Excel formats, `mmm`/`mmmm`/`mmmmm` are always month name variants. Minutes only use
+        // `m` or `mm` (disambiguated by neighboring hour/second tokens).
+        if count >= 3 {
+            tokens[idx] = Token::Month(count);
+            continue;
+        }
+
         let prev = prev_non_literal(tokens, idx);
         let next = next_non_literal(tokens, idx);
         let is_minute = matches!(prev, Some(Token::Hour(_)) | Some(Token::ElapsedHours(_)))

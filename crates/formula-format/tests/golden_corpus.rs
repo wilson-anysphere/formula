@@ -37,6 +37,8 @@ fn golden_corpus_numbers_and_datetime() {
         (Value::Number(1.0), "d-mmm-yy", &en_1900, "1-Jan-00"),
         (Value::Number(1.0), "ddd", &en_1900, "Mon"),
         (Value::Number(1.0), "dddd", &en_1900, "Monday"),
+        // `mmm` is a month abbreviation, even when adjacent to time tokens.
+        (Value::Number(1.5), "h:mmm", &en_1900, "12:Jan"),
         (Value::Number(1.5), "h:mm", &en_1900, "12:00"),
         (Value::Number(1.75), "h:mm:ss", &en_1900, "18:00:00"),
         (Value::Number(1.5), "[h]:mm", &en_1900, "36:00"),
