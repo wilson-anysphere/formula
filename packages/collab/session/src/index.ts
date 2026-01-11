@@ -1,6 +1,8 @@
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { PresenceManager } from "@formula/collab-presence";
+import { createUndoService, type UndoService } from "@formula/collab-undo";
+import { FormulaConflictMonitor, type FormulaConflict } from "@formula/collab-conflicts";
 
 import { assertValidRole, getCellPermissions, maskCellValue } from "../../permissions/index.js";
 
@@ -72,6 +74,20 @@ export interface CollabSessionOptions {
    * Default sheet id used when parsing cell keys that omit a sheet identifier.
    */
   defaultSheetId?: string;
+  /**
+   * When enabled, the session tracks local edits using Yjs' UndoManager so undo/redo
+   * only affects this client's changes (never remote users' edits).
+   */
+  undo?: { captureTimeoutMs?: number; origin?: object };
+  /**
+   * When enabled, the session monitors formula updates for true conflicts
+   * (offline/concurrent same-cell edits) and surfaces them via `onConflict`.
+   */
+  formulaConflicts?: {
+    localUserId: string;
+    onConflict: (conflict: FormulaConflict) => void;
+    concurrencyWindowMs?: number;
+  };
 }
 
 export interface CollabCell {
@@ -143,6 +159,25 @@ export class CollabSession {
   readonly awareness: unknown;
   readonly presence: PresenceManager | null;
 
+  /**
+   * Origin token used for local transactions. Exposed for downstream consumers
+   * (e.g. conflict monitors) that need to distinguish local vs remote writes.
+   */
+  readonly origin: object;
+  /**
+   * Origins that are considered "local" for this session. When undo is enabled,
+   * this includes both `origin` and the underlying Yjs UndoManager instance.
+   */
+  readonly localOrigins: Set<any>;
+  /**
+   * Collaborative undo/redo. Only present when `options.undo` is provided.
+   */
+  readonly undo: UndoService | null;
+  /**
+   * Formula conflict monitor. Only present when `options.formulaConflicts` is provided.
+   */
+  readonly formulaConflictMonitor: FormulaConflictMonitor | null;
+
   private permissions: SessionPermissions | null = null;
   private readonly defaultSheetId: string;
 
@@ -169,6 +204,44 @@ export class CollabSession {
     this.awareness = options.awareness ?? this.provider?.awareness ?? null;
     this.defaultSheetId = options.defaultSheetId ?? "Sheet1";
 
+    // Stable origin token for local edits. This must be unique per-session; if
+    // multiple clients share an origin, collaborative undo would treat all edits
+    // as local and revert other users' changes.
+    this.origin = options.undo?.origin ?? { type: "collab-session-local" };
+    this.localOrigins = new Set([this.origin]);
+    this.undo = null;
+    this.formulaConflictMonitor = null;
+
+    if (options.undo) {
+      const scope = [this.cells] as Array<Y.AbstractType<any>>;
+      // Include comments in the undo scope when present (don't create it eagerly).
+      const comments = this.doc.share.get("comments");
+      if (comments) scope.push(comments as any);
+
+      const undo = createUndoService({
+        mode: "collab",
+        doc: this.doc,
+        scope,
+        captureTimeoutMs: options.undo.captureTimeoutMs,
+        origin: this.origin,
+      });
+
+      this.undo = undo;
+      if (undo.localOrigins) this.localOrigins = undo.localOrigins;
+    }
+
+    if (options.formulaConflicts) {
+      this.formulaConflictMonitor = new FormulaConflictMonitor({
+        doc: this.doc,
+        cells: this.cells,
+        localUserId: options.formulaConflicts.localUserId,
+        origin: this.origin,
+        localOrigins: this.localOrigins,
+        onConflict: options.formulaConflicts.onConflict,
+        concurrencyWindowMs: options.formulaConflicts.concurrencyWindowMs,
+      });
+    }
+
     if (options.presence) {
       if (!this.awareness) {
         throw new Error("CollabSession presence requires an awareness instance (options.awareness or provider.awareness)");
@@ -180,6 +253,7 @@ export class CollabSession {
   }
 
   destroy(): void {
+    this.formulaConflictMonitor?.dispose();
     this.presence?.destroy();
     this.provider?.destroy?.();
   }
@@ -274,10 +348,19 @@ export class CollabSession {
     };
   }
 
+  private transactLocal(fn: () => void): void {
+    const undoTransact = this.undo?.transact;
+    if (typeof undoTransact === "function") {
+      undoTransact(fn);
+      return;
+    }
+    this.doc.transact(fn, this.origin);
+  }
+
   setCellValue(cellKey: string, value: unknown): void {
     const userId = this.permissions?.userId ?? null;
 
-    this.doc.transact(() => {
+    this.transactLocal(() => {
       let cellData = this.cells.get(cellKey);
       let cell = getYMapCell(cellData);
       if (!cell) {
@@ -289,13 +372,30 @@ export class CollabSession {
       cell.delete("formula");
       cell.set("modified", Date.now());
       if (userId) cell.set("modifiedBy", userId);
-    }, "collab-session:setCellValue");
+    });
   }
 
   setCellFormula(cellKey: string, formula: string | null): void {
+    const monitor = this.formulaConflictMonitor;
+    if (monitor) {
+      this.transactLocal(() => {
+        monitor.setLocalFormula(cellKey, formula ?? "");
+        // We don't sync calculated values. Clearing `value` marks the cell dirty
+        // for the local formula engine to recompute.
+        let cellData = this.cells.get(cellKey);
+        let cell = getYMapCell(cellData);
+        if (!cell) {
+          cell = new Y.Map();
+          this.cells.set(cellKey, cell);
+        }
+        cell.set("value", null);
+      });
+      return;
+    }
+
     const userId = this.permissions?.userId ?? null;
 
-    this.doc.transact(() => {
+    this.transactLocal(() => {
       let cellData = this.cells.get(cellKey);
       let cell = getYMapCell(cellData);
       if (!cell) {
@@ -310,7 +410,7 @@ export class CollabSession {
       cell.set("value", null);
       cell.set("modified", Date.now());
       if (userId) cell.set("modifiedBy", userId);
-    }, "collab-session:setCellFormula");
+    });
   }
 
   safeSetCellValue(cellKey: string, value: unknown): boolean {
