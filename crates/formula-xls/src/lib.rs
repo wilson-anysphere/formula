@@ -157,65 +157,145 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     let mut warnings = Vec::new();
     let mut merged_ranges = Vec::new();
 
-    let workbook_globals = match biff::read_workbook_globals_from_xls(path) {
-        Ok(globals) => {
-            out.date_system = globals.date_system;
-            Some(globals)
-        }
+    let workbook_stream = match biff::read_workbook_stream_from_xls(path) {
+        Ok(bytes) => Some(bytes),
         Err(err) => {
             warnings.push(ImportWarning::new(format!(
+                "failed to read `.xls` workbook stream: {err}"
+            )));
+            None
+        }
+    };
+
+    let mut xf_style_ids: Option<Vec<Option<u32>>> = None;
+    let mut xf_has_number_format: Option<Vec<bool>> = None;
+    let mut sheet_offsets: Option<Vec<(String, usize)>> = None;
+    let mut cell_xf_indices: Option<HashMap<String, HashMap<CellRef, u16>>> = None;
+
+    if let Some(workbook_stream) = workbook_stream.as_deref() {
+        let biff_version = biff::detect_biff_version(workbook_stream);
+
+        match biff::parse_biff_workbook_globals(workbook_stream, biff_version) {
+            Ok(globals) => {
+                out.date_system = globals.date_system;
+
+                let mut cache: HashMap<String, u32> = HashMap::new();
+                let mut style_ids = Vec::with_capacity(globals.xf_count());
+                let mut has_number_format = Vec::with_capacity(globals.xf_count());
+                for xf_index in 0..globals.xf_count() as u32 {
+                    let style_id = match globals.resolve_number_format_code(xf_index) {
+                        Some(code) => {
+                            has_number_format.push(true);
+                            if let Some(existing) = cache.get(&code) {
+                                Some(*existing)
+                            } else {
+                                let style_id = out.intern_style(Style {
+                                    number_format: Some(code.clone()),
+                                    ..Default::default()
+                                });
+                                cache.insert(code, style_id);
+                                Some(style_id)
+                            }
+                        }
+                        None => {
+                            has_number_format.push(false);
+                            None
+                        }
+                    };
+                    style_ids.push(style_id);
+                }
+
+                xf_style_ids = Some(style_ids);
+                xf_has_number_format = Some(has_number_format);
+            }
+            Err(err) => warnings.push(ImportWarning::new(format!(
                 "failed to import `.xls` workbook globals: {err}"
-            )));
-            None
+            ))),
         }
-    };
 
-    let cell_xf_indices = match biff::read_cell_xf_indices_from_xls(path) {
-        Ok(xfs) => Some(xfs),
-        Err(err) => {
-            warnings.push(ImportWarning::new(format!(
-                "failed to import `.xls` cell styles: {err}"
-            )));
-            None
+        match biff::parse_biff_bound_sheets(workbook_stream, biff_version) {
+            Ok(offsets) => sheet_offsets = Some(offsets),
+            Err(err) => warnings.push(ImportWarning::new(format!(
+                "failed to import `.xls` sheet metadata: {err}"
+            ))),
         }
-    };
 
-    let xf_style_ids = if let Some(globals) = workbook_globals.as_ref() {
-        let mut cache: HashMap<String, u32> = HashMap::new();
-        let mut style_ids = Vec::with_capacity(globals.xf_count());
-        for xf_index in 0..globals.xf_count() as u32 {
-            let style_id = match globals.resolve_number_format_code(xf_index) {
-                Some(code) => {
-                    if let Some(existing) = cache.get(&code) {
-                        Some(*existing)
-                    } else {
-                        let style_id = out.intern_style(Style {
-                            number_format: Some(code.clone()),
-                            ..Default::default()
-                        });
-                        cache.insert(code, style_id);
-                        Some(style_id)
+        if let (Some(sheet_offsets), Some(mask)) = (sheet_offsets.as_ref(), xf_has_number_format.as_deref()) {
+            if mask.iter().any(|v| *v) {
+                let mut out_map = HashMap::new();
+                let mut err = None;
+
+                for (sheet_name, offset) in sheet_offsets {
+                    if *offset >= workbook_stream.len() {
+                        err = Some(format!(
+                            "sheet `{sheet_name}` has out-of-bounds stream offset {offset}"
+                        ));
+                        break;
+                    }
+
+                    match biff::parse_biff_sheet_cell_xf_indices_filtered(
+                        workbook_stream,
+                        *offset,
+                        Some(mask),
+                    ) {
+                        Ok(xfs) => {
+                            out_map.insert(sheet_name.clone(), xfs);
+                        }
+                        Err(parse_err) => {
+                            err = Some(parse_err);
+                            break;
+                        }
                     }
                 }
-                None => None,
-            };
-            style_ids.push(style_id);
+
+                if let Some(err) = err {
+                    warnings.push(ImportWarning::new(format!(
+                        "failed to import `.xls` cell styles: {err}"
+                    )));
+                } else {
+                    cell_xf_indices = Some(out_map);
+                }
+            }
         }
-        Some(style_ids)
-    } else {
-        None
-    };
+    }
 
     let date_time_styles = DateTimeStyleIds::new(&mut out);
 
-    let row_col_props = match read_row_col_properties_from_xls(path) {
-        Ok(props) => props,
-        Err(err) => {
+    let row_col_props = if let (Some(workbook_stream), Some(sheet_offsets)) =
+        (workbook_stream.as_deref(), sheet_offsets.as_ref())
+    {
+        let mut out_map = HashMap::new();
+        let mut err = None;
+
+        for (sheet_name, offset) in sheet_offsets {
+            if *offset >= workbook_stream.len() {
+                err = Some(format!(
+                    "sheet `{sheet_name}` has out-of-bounds stream offset {offset}"
+                ));
+                break;
+            }
+
+            match biff::parse_biff_sheet_row_col_properties(workbook_stream, *offset) {
+                Ok(props) => {
+                    out_map.insert(sheet_name.clone(), props);
+                }
+                Err(parse_err) => {
+                    err = Some(parse_err);
+                    break;
+                }
+            }
+        }
+
+        if let Some(err) = err {
             warnings.push(ImportWarning::new(format!(
                 "failed to import `.xls` row/column properties: {err}"
             )));
             HashMap::new()
+        } else {
+            out_map
         }
+    } else {
+        HashMap::new()
     };
 
     for sheet_meta in sheets {
@@ -406,12 +486,6 @@ fn cell_error_to_error_value(err: calamine::CellErrorType) -> ErrorValue {
         CellErrorType::Value => ErrorValue::Value,
         CellErrorType::GettingData => ErrorValue::GettingData,
     }
-}
-
-fn read_row_col_properties_from_xls(
-    path: &Path,
-) -> Result<HashMap<String, biff::SheetRowColProperties>, String> {
-    biff::read_row_col_properties_from_xls(path)
 }
 
 fn apply_row_col_properties(

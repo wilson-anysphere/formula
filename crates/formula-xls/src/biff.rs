@@ -77,48 +77,6 @@ pub(crate) fn detect_biff_version(workbook_stream: &[u8]) -> BiffVersion {
     }
 }
 
-pub(crate) fn read_row_col_properties_from_xls(
-    path: &Path,
-) -> Result<HashMap<String, SheetRowColProperties>, String> {
-    let workbook_stream = read_workbook_stream_from_xls(path)?;
-    let biff = detect_biff_version(&workbook_stream);
-    let sheets = parse_biff_bound_sheets(&workbook_stream, biff)?;
-
-    let mut out = HashMap::new();
-    for (sheet_name, offset) in sheets {
-        if offset >= workbook_stream.len() {
-            return Err(format!(
-                "sheet `{sheet_name}` has out-of-bounds stream offset {offset}"
-            ));
-        }
-        let props = parse_biff_sheet_row_col_properties(&workbook_stream, offset)?;
-        out.insert(sheet_name, props);
-    }
-
-    Ok(out)
-}
-
-pub(crate) fn read_cell_xf_indices_from_xls(
-    path: &Path,
-) -> Result<HashMap<String, HashMap<CellRef, u16>>, String> {
-    let workbook_stream = read_workbook_stream_from_xls(path)?;
-    let biff = detect_biff_version(&workbook_stream);
-    let sheets = parse_biff_bound_sheets(&workbook_stream, biff)?;
-
-    let mut out = HashMap::new();
-    for (sheet_name, offset) in sheets {
-        if offset >= workbook_stream.len() {
-            return Err(format!(
-                "sheet `{sheet_name}` has out-of-bounds stream offset {offset}"
-            ));
-        }
-        let xfs = parse_biff_sheet_cell_xf_indices(&workbook_stream, offset)?;
-        out.insert(sheet_name, xfs);
-    }
-
-    Ok(out)
-}
-
 /// Workbook-global BIFF records needed for stable number format and date system import.
 #[derive(Debug, Clone)]
 pub(crate) struct BiffWorkbookGlobals {
@@ -183,12 +141,6 @@ impl BiffWorkbookGlobals {
     pub(crate) fn xf_count(&self) -> usize {
         self.xfs.len()
     }
-}
-
-pub(crate) fn read_workbook_globals_from_xls(path: &Path) -> Result<BiffWorkbookGlobals, String> {
-    let workbook_stream = read_workbook_stream_from_xls(path)?;
-    let biff = detect_biff_version(&workbook_stream);
-    parse_biff_workbook_globals(&workbook_stream, biff)
 }
 
 pub(crate) fn parse_biff_workbook_globals(
@@ -398,12 +350,23 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     Ok(props)
 }
 
-pub(crate) fn parse_biff_sheet_cell_xf_indices(
+pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
     workbook_stream: &[u8],
     start: usize,
+    xf_is_interesting: Option<&[bool]>,
 ) -> Result<HashMap<CellRef, u16>, String> {
     let mut out = HashMap::new();
     let mut offset = start;
+
+    let mut maybe_insert = |row: u32, col: u32, xf: u16| {
+        if let Some(mask) = xf_is_interesting {
+            let idx = xf as usize;
+            if idx >= mask.len() || !mask[idx] {
+                return;
+            }
+        }
+        out.insert(CellRef::new(row, col), xf);
+    };
 
     loop {
         let Some((record_id, data)) = read_biff_record(workbook_stream, offset) else {
@@ -433,7 +396,7 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices(
                 let row = u16::from_le_bytes([data[0], data[1]]) as u32;
                 let col = u16::from_le_bytes([data[2], data[3]]) as u32;
                 let xf = u16::from_le_bytes([data[4], data[5]]);
-                out.insert(CellRef::new(row, col), xf);
+                maybe_insert(row, col, xf);
             }
             // MULRK [MS-XLS 2.4.141]
             0x00BD => {
@@ -454,7 +417,7 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices(
                         break;
                     }
                     let xf = u16::from_le_bytes([chunk[0], chunk[1]]);
-                    out.insert(CellRef::new(row, col), xf);
+                    maybe_insert(row, col, xf);
                 }
             }
             // MULBLANK [MS-XLS 2.4.140]
@@ -476,7 +439,7 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices(
                         break;
                     }
                     let xf = u16::from_le_bytes([chunk[0], chunk[1]]);
-                    out.insert(CellRef::new(row, col), xf);
+                    maybe_insert(row, col, xf);
                 }
             }
             // EOF terminates the sheet substream.
@@ -704,7 +667,7 @@ mod tests {
         ]
         .concat();
 
-        let xfs = parse_biff_sheet_cell_xf_indices(&stream, 0).expect("parse");
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert_eq!(xfs.get(&CellRef::new(0, 0)).copied(), Some(3));
         assert_eq!(xfs.get(&CellRef::new(1, 0)).copied(), Some(10));
         assert_eq!(xfs.get(&CellRef::new(1, 1)).copied(), Some(11));
