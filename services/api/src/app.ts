@@ -12,6 +12,7 @@ import { registerApiKeyRoutes } from "./routes/apiKeys";
 import { registerDocRoutes } from "./routes/docs";
 import { registerInternalRoutes } from "./routes/internal";
 import { registerOrgRoutes } from "./routes/orgs";
+import { registerSiemRoutes } from "./routes/siem";
 
 export interface BuildAppOptions {
   db: Pool;
@@ -49,6 +50,7 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
   registerApiKeyRoutes(app);
   registerDocRoutes(app);
   registerAuditRoutes(app);
+  registerSiemRoutes(app);
   registerInternalRoutes(app);
 
   return app;

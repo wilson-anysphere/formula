@@ -1,34 +1,48 @@
 # SIEM Integration (Audit Logs)
 
-Formula can export audit events to enterprise SIEM tools (Splunk, Elastic, Datadog, Azure Sentinel, or a custom receiver) using a per-organization configuration. Audit events are **batched**, **retried with exponential backoff**, and **redacted** to avoid leaking secrets into downstream logging systems.
+Formula records audit events in Postgres and can export them to enterprise SIEM tools (Splunk, Elastic, Datadog, Azure Sentinel, or a custom HTTP receiver). Exports are **batched**, **retried with exponential backoff**, and **redacted** to avoid leaking secrets into downstream logging systems.
 
-This repository includes:
+The current implementation lives in:
 
-- `packages/security/siem/**` – formatting (JSON/CEF/LEEF), redaction, batching + HTTP delivery, offline queue.
-- `services/api/**` – minimal API wiring for SIEM config management and audit stream delivery.
+- `packages/audit-core/**` – canonical `AuditEvent` schema + redaction + JSON/CEF/LEEF serialization (`serializeBatch`).
+- `services/api/src/routes/audit.ts` – audit query + export endpoints (Fastify).
+- `services/api/src/routes/siem.ts` – SIEM config CRUD endpoints (Fastify).
+- `services/api/src/siem/*` – background SIEM export worker + sender implementation.
 
 ## Supported export formats
 
 ### JSON (default)
 
 - Content-Type: `application/json`
-- Payload: a single JSON array containing redacted audit event objects.
+- Body: a single JSON array containing redacted audit event objects.
 
 This is the best default for HTTP-based collectors (Splunk HEC, Datadog Logs HTTP intake, custom gateways).
 
+### CEF
+
+- Content-Type: `text/plain`
+- Body: newline-delimited CEF records.
+- Header example:
+
+```
+CEF:0|Formula|Spreadsheet|1.0|document.created|document.created|5|...
+```
+
+### LEEF
+
+- Content-Type: `text/plain`
+- Body: newline-delimited LEEF records (tab-delimited variant).
+- Example:
+
+```
+LEEF:2.0|Formula|Spreadsheet|1.0|auth.login_failed|	...
+```
+
+The first delimiter after the header is a **literal tab character** (`\t`). Key/value pairs are separated by the same delimiter.
+
 ## Canonical audit event schema
 
-Formula uses a single canonical `AuditEvent` shape across client libraries and server storage/export.
-
-Key fields:
-
-- `id`, `timestamp` (ISO 8601), `eventType`
-- `actor` (who initiated the action)
-- `context` (org/user/session/ip/userAgent)
-- `resource` (what the action targeted)
-- `success` + optional `error`
-- `details` (arbitrary metadata; **redacted** on export)
-- `correlation` (requestId / traceId)
+Formula uses a canonical `AuditEvent` shape defined in `@formula/audit-core` (`createAuditEvent`). The API stores a flattened subset in Postgres (`audit_log` + `audit_log_archive`) and reconstructs canonical events on export via `auditLogRowToAuditEvent`.
 
 Example:
 
@@ -54,42 +68,25 @@ Example:
 }
 ```
 
-### CEF
+## Per-organization SIEM configuration (Fastify API)
 
-- Content-Type: `text/plain`
-- Payload: newline-delimited CEF records.
-- Header example:
+SIEM delivery is configured per organization and persisted in Postgres (`org_siem_configs`; see `services/api/migrations/0004_siem_configs.sql`). Only org admins can manage this configuration.
 
-```
-CEF:0|Formula|Spreadsheet|1.0|document.created|document.created|5|...
-```
+Endpoints:
 
-Formula maps common fields into CEF extension keys (`src`, `suser`, `rt`, etc.) and includes a JSON-encoded `details` payload in `cs6`.
+- `PUT /orgs/:orgId/siem` – upsert SIEM configuration for an org (enables exports).
+- `GET /orgs/:orgId/siem` – fetch sanitized config (auth secrets are masked as `"***"`).
+- `DELETE /orgs/:orgId/siem` – remove SIEM configuration (disables exports).
 
-### LEEF
-
-- Content-Type: `text/plain`
-- Payload: newline-delimited LEEF records.
-- Formula uses the common tab-delimited variant:
-
-```
-LEEF:2.0|Formula|Spreadsheet|1.0|auth.login_failed|	...
-```
-
-The first delimiter after the header is a **literal tab character** (`\t`). Key/value pairs are separated by the same delimiter.
-
-## Per-organization SIEM configuration
-
-SIEM delivery is configured per organization:
+Example payload:
 
 ```json
 {
-  "provider": "splunk",
   "endpointUrl": "https://example.invalid/services/collector/event",
   "format": "json",
   "batchSize": 250,
-  "flushIntervalMs": 5000,
   "timeoutMs": 10000,
+  "idempotencyKeyHeader": "Idempotency-Key",
   "auth": {
     "type": "header",
     "name": "Authorization",
@@ -104,52 +101,38 @@ SIEM delivery is configured per organization:
 }
 ```
 
-Authentication options supported by the exporter:
+Authentication options:
 
 - `none`
 - `bearer` (sets `Authorization: Bearer …`)
 - `basic` (sets `Authorization: Basic …`)
 - `header` (custom header name/value; useful for Splunk HEC and vendor-specific headers)
 
-## Backend API (services/api)
+## Admin audit query + export API (Fastify)
 
-`services/api/server.js` exposes a minimal set of endpoints for enterprise administration and audit consumption:
+These endpoints are for human/admin audit review and ad-hoc export (not the continuous SIEM feed).
 
-- `PUT /orgs/:orgId/siem` – upsert SIEM configuration for an org.
-- `GET /orgs/:orgId/siem` – fetch sanitized config (secrets are masked).
-- `DELETE /orgs/:orgId/siem` – remove SIEM configuration.
-- `POST /orgs/:orgId/audit` – ingest an audit event (server assigns `schemaVersion` + `id` + `timestamp` and sets `context.orgId`).
-- `GET /orgs/:orgId/audit?limit=100` – pull recent audit events.
-- `GET /orgs/:orgId/audit/stream` – SSE stream of audit events.
+- `GET /orgs/:orgId/audit` – query audit events (redacted).
+- `GET /orgs/:orgId/audit/export` – export audit events (supports `format=json|cef|leef`).
 
-When SIEM is configured for an organization, `POST /orgs/:orgId/audit` also queues the event for webhook-style delivery via `SiemExporter`.
+Both endpoints read from `audit_log` and `audit_log_archive`. The export endpoint uses `@formula/audit-core.serializeBatch`.
 
-## Desktop offline-first delivery
+## Background SIEM export worker
 
-For offline-first environments, use `OfflineAuditQueue`:
+The API process starts a background worker (`SiemExportWorker` in `services/api/src/siem/worker.ts`) from `services/api/src/index.ts`.
 
-- Events are appended to a local JSONL file.
-- When connectivity is restored, call `flushToExporter(exporter)` to forward queued events to the SIEM endpoint using the same batching, redaction, and retry logic.
+High-level flow:
 
-## Security and redaction
+1. Load enabled org configs from Postgres (`DbSiemConfigProvider` in `services/api/src/siem/configProvider.ts`).
+2. Fetch audit events (including archived) in ascending order via `services/api/src/siem/auditSource.ts`.
+3. Send a batch to the org’s configured `endpointUrl` using `services/api/src/siem/sender.ts`.
+4. Persist cursor + backoff state in `org_siem_export_state` (`services/api/migrations/0003_siem_export_state.sql`).
 
-Before formatting and delivery, audit events are scrubbed to avoid leaking credentials into SIEM systems.
+## Not implemented (design notes)
 
-Redaction rules are key-based and recursive. Any key matching patterns like:
+A legacy Node HTTP server previously documented endpoints for audit ingestion and SSE streaming. Those endpoints are **not** part of the current Fastify API.
 
-- `password`, `secret`, `token`
-- `apiKey`, `clientSecret`, `privateKey`
-- `authorization`, `cookie`
+- `POST /orgs/:orgId/audit` ingestion is not implemented; audit events are produced internally in `services/api/src/*` via `createAuditEvent` + `writeAuditEvent`.
+- `GET /orgs/:orgId/audit/stream` SSE streaming is not implemented.
 
-is replaced with `[REDACTED]`. The redaction utility also detects common token string shapes (e.g., JWTs) and redacts them.
-
-## Testing
-
-- Unit tests cover CEF/LEEF formatting and escaping.
-- Integration test uses a mock HTTP server to validate batching + retry behavior.
-
-Run:
-
-```bash
-npm test
-```
+If external ingestion and/or streaming is desired, add it to `services/api/src/routes/audit.ts` and ensure it writes to Postgres (`audit_log`) using `writeAuditEvent`.

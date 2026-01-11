@@ -55,7 +55,8 @@ function parseConfig(raw: unknown): SiemEndpointConfig | null {
 /**
  * Best-effort DB-backed config provider.
  *
- * This intentionally tolerates missing schema while the SIEM config APIs land.
+ * This intentionally tolerates missing schema so the API can run against
+ * databases that have not (yet) applied the SIEM config migrations.
  */
 export class DbSiemConfigProvider implements SiemConfigProvider {
   private resolvedMode: "unknown" | "org_siem_configs" | "none" = "unknown";
