@@ -21,7 +21,17 @@ pub struct VbaDigitalSignature {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VbaSignatureVerification {
-    /// Signature is present but we did not (yet) validate it against the VBA project contents.
+    /// Signature is present and the PKCS#7/CMS blob verifies successfully.
+    ///
+    /// Note: this verifies the CMS structure is internally consistent (the signature matches the
+    /// embedded content / signed attributes). It does **not** currently verify that the signature
+    /// content corresponds to the rest of the VBA project per MS-OVBA.
+    SignedVerified,
+    /// Signature stream exists and parses as CMS/PKCS#7, but verification failed.
+    SignedInvalid,
+    /// Signature stream exists, but does not parse as CMS/PKCS#7.
+    SignedParseError,
+    /// Signature is present but we did not validate it (legacy / reserved for future use).
     SignedButUnverified,
 }
 
@@ -76,6 +86,26 @@ pub fn parse_vba_digital_signature(
     }))
 }
 
+/// Parse and cryptographically verify a VBA digital signature (if present).
+///
+/// Returns `Ok(None)` when the project appears unsigned.
+///
+/// Verification is "internal" CMS/PKCS#7 verification only: we validate that the signature blob
+/// is well-formed and that the signature matches the signed attributes / embedded content. We do
+/// **not** currently validate that the signature is bound to the rest of the VBA project streams
+/// as Excel does per MS-OVBA.
+pub fn verify_vba_digital_signature(
+    vba_project_bin: &[u8],
+) -> Result<Option<VbaDigitalSignature>, SignatureError> {
+    let mut sig = match parse_vba_digital_signature(vba_project_bin)? {
+        Some(sig) => sig,
+        None => return Ok(None),
+    };
+
+    sig.verification = verify_signature_blob(&sig.signature);
+    Ok(Some(sig))
+}
+
 fn is_signature_component(component: &str) -> bool {
     let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
     matches!(
@@ -93,6 +123,51 @@ fn signature_path_rank(path: &str) -> u8 {
         "DigitalSignatureEx" => 1,
         "DigitalSignatureExt" => 2,
         _ => 3,
+    }
+}
+
+fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = signature;
+        // `openssl` isn't available on wasm targets. Keep the signature blob available to callers,
+        // but don't treat it as verified.
+        return VbaSignatureVerification::SignedButUnverified;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use openssl::pkcs7::{Pkcs7, Pkcs7Flags};
+    #[cfg(not(target_arch = "wasm32"))]
+    use openssl::stack::Stack;
+    #[cfg(not(target_arch = "wasm32"))]
+    use openssl::x509::store::X509StoreBuilder;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let pkcs7 = match Pkcs7::from_der(signature) {
+        Ok(pkcs7) => pkcs7,
+        Err(_) => return VbaSignatureVerification::SignedParseError,
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let store = match X509StoreBuilder::new() {
+        Ok(builder) => builder.build(),
+        Err(_) => return VbaSignatureVerification::SignedInvalid,
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let extra_certs = match Stack::new() {
+        Ok(stack) => stack,
+        Err(_) => return VbaSignatureVerification::SignedInvalid,
+    };
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // NOVERIFY skips certificate chain verification. We still validate the signature itself and
+        // any messageDigest attributes over the embedded content.
+        let flags = Pkcs7Flags::NOVERIFY;
+        match pkcs7.verify(&extra_certs, &store, None, None, flags) {
+            Ok(()) => VbaSignatureVerification::SignedVerified,
+            Err(_) => VbaSignatureVerification::SignedInvalid,
+        }
     }
 }
 
@@ -118,4 +193,3 @@ fn extract_first_certificate_subject(bytes: &[u8]) -> Option<String> {
 
     None
 }
-

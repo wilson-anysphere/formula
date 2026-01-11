@@ -992,10 +992,13 @@ pub fn export_sheet_range_pdf(
 
 pub use crate::macros::{MacroInfo, MacroPermission, MacroPermissionRequest};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MacroSignatureStatus {
     Unsigned,
+    SignedVerified,
+    SignedInvalid,
+    SignedParseError,
     SignedUnverified,
 }
 
@@ -1016,11 +1019,29 @@ pub struct MacroSecurityStatus {
     pub trust: MacroTrustDecision,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MacroBlockedReason {
     NotTrusted,
     SignatureRequired,
+}
+
+/// Evaluate whether Trust Center policy allows macro execution.
+///
+/// Note: This is intentionally a pure function so it can be unit-tested without
+/// requiring the full Tauri "desktop" feature.
+pub fn evaluate_macro_trust(
+    trust: MacroTrustDecision,
+    signature_status: MacroSignatureStatus,
+) -> Result<(), MacroBlockedReason> {
+    match trust {
+        MacroTrustDecision::TrustedAlways | MacroTrustDecision::TrustedOnce => Ok(()),
+        MacroTrustDecision::Blocked => Err(MacroBlockedReason::NotTrusted),
+        MacroTrustDecision::TrustedSignedOnly => match signature_status {
+            MacroSignatureStatus::SignedVerified => Ok(()),
+            _ => Err(MacroBlockedReason::SignatureRequired),
+        },
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1090,10 +1111,23 @@ fn build_macro_security_status(
     let signature = if let Some(vba_bin) = workbook.vba_project_bin.as_deref() {
         // Signature parsing is best-effort: failures should not prevent macro listing or
         // execution (trust decisions are still enforced by the fingerprint).
-        let parsed = formula_vba::parse_vba_digital_signature(vba_bin).ok().flatten();
+        let parsed = formula_vba::verify_vba_digital_signature(vba_bin).ok().flatten();
         Some(match parsed {
             Some(sig) => MacroSignatureInfo {
-                status: MacroSignatureStatus::SignedUnverified,
+                status: match sig.verification {
+                    formula_vba::VbaSignatureVerification::SignedVerified => {
+                        MacroSignatureStatus::SignedVerified
+                    }
+                    formula_vba::VbaSignatureVerification::SignedInvalid => {
+                        MacroSignatureStatus::SignedInvalid
+                    }
+                    formula_vba::VbaSignatureVerification::SignedParseError => {
+                        MacroSignatureStatus::SignedParseError
+                    }
+                    formula_vba::VbaSignatureVerification::SignedButUnverified => {
+                        MacroSignatureStatus::SignedUnverified
+                    }
+                },
                 signer_subject: sig.signer_subject,
                 signature_base64: Some(
                     base64::engine::general_purpose::STANDARD.encode(sig.signature),
@@ -1134,26 +1168,16 @@ fn enforce_macro_trust(
         return Ok(None);
     }
 
-    let is_signed = matches!(
-        status.signature.as_ref().map(|s| s.status),
-        Some(MacroSignatureStatus::SignedUnverified)
-    );
-    let allowed = match status.trust {
-        MacroTrustDecision::TrustedAlways | MacroTrustDecision::TrustedOnce => true,
-        MacroTrustDecision::TrustedSignedOnly => is_signed,
-        MacroTrustDecision::Blocked => false,
-    };
+    let signature_status = status
+        .signature
+        .as_ref()
+        .map(|s| s.status)
+        .unwrap_or(MacroSignatureStatus::Unsigned);
 
-    if allowed {
-        return Ok(None);
+    match evaluate_macro_trust(status.trust, signature_status) {
+        Ok(()) => Ok(None),
+        Err(reason) => Ok(Some(MacroBlockedError { reason, status })),
     }
-
-    let reason = match status.trust {
-        MacroTrustDecision::TrustedSignedOnly => MacroBlockedReason::SignatureRequired,
-        _ => MacroBlockedReason::NotTrusted,
-    };
-
-    Ok(Some(MacroBlockedError { reason, status }))
 }
 
 #[cfg(feature = "desktop")]

@@ -18,7 +18,7 @@ pub enum MacroTrustDecision {
     TrustedAlways,
     /// Trust this workbook's macros for the current app session only.
     TrustedOnce,
-    /// Trust only if the workbook is signed (verification is best-effort).
+    /// Trust only if the workbook is signed and the signature verifies (best-effort).
     TrustedSignedOnly,
 }
 
