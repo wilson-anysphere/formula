@@ -96,6 +96,9 @@ export type DesktopPowerQueryRefreshOptions = {
   getContext?: () => QueryExecutionContext;
   concurrency?: number;
   batchSize?: number;
+  timers?: { setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout };
+  now?: () => number;
+  timezone?: "local" | "utc";
   stateStore?: RefreshStateStore;
 };
 
@@ -126,14 +129,18 @@ export class DesktopPowerQueryRefreshManager {
       engine: engine as any,
       getContext: options.getContext,
       concurrency: options.concurrency,
+      timers: options.timers,
+      now: options.now,
+      timezone: options.timezone,
       stateStore: options.stateStore,
     });
-    this.ready = this.manager.ready;
+    this.ready = (this.manager as any).ready ?? Promise.resolve();
 
     this.orchestrator = new RefreshOrchestrator({
       engine: engine as any,
       getContext: options.getContext,
       concurrency: options.concurrency,
+      now: options.now,
     });
 
     this.manager.onEvent((evt: any) => {

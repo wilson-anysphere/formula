@@ -29,6 +29,7 @@ import { TauriWorkbookBackend, type WorkbookInfo } from "./tauri/workbookBackend
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
 import { refreshDefinedNameSignaturesFromBackend, refreshTableSignaturesFromBackend } from "./power-query/tableSignatures";
+import { DesktopPowerQueryService, setDesktopPowerQueryService } from "./power-query/service.js";
 
 const workbookSheetNames = new Map<string, string>();
 
@@ -71,6 +72,36 @@ const app = new SpreadsheetApp(gridRoot, { activeCell, selectionRange, activeVal
 app.getDocument().markSaved();
 app.focus();
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
+let powerQueryService: DesktopPowerQueryService | null = null;
+let powerQueryServiceWorkbookId: string | null = null;
+
+function currentPowerQueryWorkbookId(): string {
+  return activeWorkbook?.path ?? activeWorkbook?.origin_path ?? workbookId;
+}
+
+function startPowerQueryService(): void {
+  stopPowerQueryService();
+  const serviceWorkbookId = currentPowerQueryWorkbookId();
+  powerQueryServiceWorkbookId = serviceWorkbookId;
+  powerQueryService = new DesktopPowerQueryService({
+    workbookId: serviceWorkbookId,
+    document: app.getDocument(),
+    concurrency: 1,
+    batchSize: 1024,
+  });
+  setDesktopPowerQueryService(serviceWorkbookId, powerQueryService);
+}
+
+function stopPowerQueryService(): void {
+  const existingWorkbookId = powerQueryServiceWorkbookId;
+  powerQueryServiceWorkbookId = null;
+  if (existingWorkbookId) setDesktopPowerQueryService(existingWorkbookId, null);
+  powerQueryService?.dispose();
+  powerQueryService = null;
+}
+
+startPowerQueryService();
+window.addEventListener("unload", () => stopPowerQueryService());
 
 let macroEventBridge: MacroEventBridge | null = null;
 
@@ -1345,6 +1376,7 @@ async function openWorkbookFromPath(path: string): Promise<void> {
 
   workbookSync?.stop();
   workbookSync = null;
+  stopPowerQueryService();
 
   suppressSelectionEventMacros = true;
   try {
@@ -1355,6 +1387,7 @@ async function openWorkbookFromPath(path: string): Promise<void> {
 
     activeWorkbook = await tauriBackend.openWorkbook(path);
     await loadWorkbookIntoDocument(activeWorkbook);
+    startPowerQueryService();
     rerenderLayout?.();
 
     workbookSync = startWorkbookSync({
@@ -1378,6 +1411,7 @@ async function openWorkbookFromPath(path: string): Promise<void> {
         engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
       });
     }
+    startPowerQueryService();
     throw err;
   } finally {
     suppressSelectionEventMacros = false;
@@ -1441,6 +1475,7 @@ async function handleNewWorkbook(): Promise<void> {
 
   workbookSync?.stop();
   workbookSync = null;
+  stopPowerQueryService();
 
   suppressSelectionEventMacros = true;
   try {
@@ -1451,6 +1486,7 @@ async function handleNewWorkbook(): Promise<void> {
 
     activeWorkbook = await tauriBackend.newWorkbook();
     await loadWorkbookIntoDocument(activeWorkbook);
+    startPowerQueryService();
     rerenderLayout?.();
 
     workbookSync = startWorkbookSync({
@@ -1470,6 +1506,7 @@ async function handleNewWorkbook(): Promise<void> {
         engineBridge: queuedInvoke ? { invoke: queuedInvoke } : undefined,
       });
     }
+    startPowerQueryService();
     throw err;
   } finally {
     suppressSelectionEventMacros = false;
