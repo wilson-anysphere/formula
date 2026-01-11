@@ -12,7 +12,7 @@ use formula_model::{validate_sheet_name, ErrorValue, SheetNameError};
 use rusqlite::{params, Connection, DatabaseName, OpenFlags, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value as JsonValue};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -1800,12 +1800,84 @@ fn cell_value_fast_path(value: &CellValue) -> (Option<String>, Option<f64>, Opti
 }
 
 fn worksheet_metadata_json(sheet: &formula_model::Worksheet) -> Result<Option<JsonValue>> {
-    let mut value = serde_json::to_value(sheet)?;
-    if let JsonValue::Object(map) = &mut value {
-        map.remove("cells");
-        map.remove("drawings");
+    let mut comments: BTreeMap<formula_model::CellKey, Vec<formula_model::Comment>> =
+        BTreeMap::new();
+    for (cell_ref, comment) in sheet.iter_comments() {
+        comments
+            .entry(formula_model::CellKey::from(cell_ref))
+            .or_default()
+            .push(comment.clone());
     }
-    Ok(Some(value))
+
+    let mut map = serde_json::Map::new();
+    map.insert("id".to_string(), serde_json::to_value(sheet.id)?);
+    map.insert("name".to_string(), serde_json::to_value(&sheet.name)?);
+    map.insert(
+        "xlsx_sheet_id".to_string(),
+        serde_json::to_value(sheet.xlsx_sheet_id)?,
+    );
+    map.insert(
+        "xlsx_rel_id".to_string(),
+        serde_json::to_value(&sheet.xlsx_rel_id)?,
+    );
+    map.insert("visibility".to_string(), serde_json::to_value(sheet.visibility)?);
+    map.insert("tab_color".to_string(), serde_json::to_value(&sheet.tab_color)?);
+    // `drawings` are persisted separately in `sheet_drawings` to avoid duplicating
+    // large drawing payloads in this JSON blob.
+
+    map.insert("tables".to_string(), serde_json::to_value(&sheet.tables)?);
+    map.insert(
+        "auto_filter".to_string(),
+        serde_json::to_value(&sheet.auto_filter)?,
+    );
+    map.insert(
+        "conditional_formatting_rules".to_string(),
+        serde_json::to_value(&sheet.conditional_formatting_rules)?,
+    );
+    map.insert(
+        "conditional_formatting_dxfs".to_string(),
+        serde_json::to_value(&sheet.conditional_formatting_dxfs)?,
+    );
+    map.insert("row_count".to_string(), serde_json::to_value(sheet.row_count)?);
+    map.insert("col_count".to_string(), serde_json::to_value(sheet.col_count)?);
+    map.insert(
+        "merged_regions".to_string(),
+        serde_json::to_value(&sheet.merged_regions)?,
+    );
+    map.insert(
+        "row_properties".to_string(),
+        serde_json::to_value(&sheet.row_properties)?,
+    );
+    map.insert(
+        "col_properties".to_string(),
+        serde_json::to_value(&sheet.col_properties)?,
+    );
+    map.insert("outline".to_string(), serde_json::to_value(&sheet.outline)?);
+    map.insert(
+        "frozen_rows".to_string(),
+        serde_json::to_value(sheet.frozen_rows)?,
+    );
+    map.insert(
+        "frozen_cols".to_string(),
+        serde_json::to_value(sheet.frozen_cols)?,
+    );
+    map.insert("zoom".to_string(), serde_json::to_value(sheet.zoom)?);
+    map.insert("view".to_string(), serde_json::to_value(&sheet.view)?);
+    map.insert(
+        "hyperlinks".to_string(),
+        serde_json::to_value(&sheet.hyperlinks)?,
+    );
+    map.insert(
+        "data_validations".to_string(),
+        serde_json::to_value(&sheet.data_validations)?,
+    );
+    map.insert("comments".to_string(), serde_json::to_value(comments)?);
+    map.insert(
+        "sheet_protection".to_string(),
+        serde_json::to_value(&sheet.sheet_protection)?,
+    );
+
+    Ok(Some(JsonValue::Object(map)))
 }
 
 fn get_or_insert_style_component_tx(
