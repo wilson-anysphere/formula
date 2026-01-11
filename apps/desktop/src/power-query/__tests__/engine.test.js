@@ -261,3 +261,89 @@ test("createDesktopQueryEngine maps DLP classification into workbook privacy lev
     /Formula\.Firewall/,
   );
 });
+
+test("createDesktopQueryEngine applies workbook privacy levels to host queryResults", async () => {
+  const policy = createDefaultOrgPolicy();
+  policy.rules[DLP_ACTION.EXTERNAL_CONNECTOR].maxAllowed = "Restricted";
+
+  const apiUrl = "https://public.example.com/data";
+  const apiSourceId = getHttpSourceId(apiUrl);
+
+  const engine = createDesktopQueryEngine({
+    privacyMode: "enforce",
+    dlp: {
+      documentId: "doc1",
+      classificationStore: {
+        list: () => [
+          {
+            selector: { scope: "document", documentId: "doc1" },
+            classification: { level: "Restricted", labels: [] },
+          },
+        ],
+      },
+      policy,
+    },
+    fileAdapter: {
+      readText: async () => "",
+      readBinary: async () => new Uint8Array(),
+    },
+    fetch: async () =>
+      new Response(JSON.stringify([{ Id: 1, Region: "East" }]), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+
+  const privateTable = await engine.executeQuery(
+    {
+      id: "q_private_source",
+      name: "Private Table Source",
+      source: { type: "range", range: { values: [["Id", "Target"], [1, 10]], hasHeaders: true } },
+      steps: [],
+    },
+    {},
+    {},
+  );
+
+  const now = new Date(0);
+  const privateMeta = {
+    queryId: "q_private",
+    startedAt: now,
+    completedAt: now,
+    refreshedAt: now,
+    sources: [
+      {
+        refreshedAt: now,
+        schema: { columns: privateTable.columns, inferred: true },
+        rowCount: privateTable.rowCount,
+        rowCountEstimate: privateTable.rowCount,
+        provenance: { kind: "table", table: "Sales" },
+      },
+    ],
+    outputSchema: { columns: privateTable.columns, inferred: true },
+    outputRowCount: privateTable.rowCount,
+  };
+
+  const query = {
+    id: "q_api",
+    name: "API",
+    source: { type: "api", url: apiUrl, method: "GET" },
+    steps: [
+      {
+        id: "s_merge",
+        name: "Merge",
+        operation: { type: "merge", rightQuery: "q_private", joinType: "left", leftKey: "Id", rightKey: "Id" },
+      },
+    ],
+  };
+
+  await assert.rejects(
+    engine.executeQuery(
+      query,
+      {
+        // Supply queryResults without the corresponding `queries` definition.
+        queryResults: { q_private: { table: privateTable, meta: privateMeta } },
+        privacy: { levelsBySourceId: { [apiSourceId]: "public" } },
+      },
+      {},
+    ),
+    /Formula\.Firewall/,
+  );
+});

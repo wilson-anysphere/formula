@@ -313,6 +313,35 @@ class DesktopQueryEngine extends QueryEngine {
       const ids = collectWorkbookTableSourceIds(query, context?.queries);
       for (const id of ids) base[id] = this.workbookPrivacyLevel;
       base["workbook:range"] = this.workbookPrivacyLevel;
+
+      // Cover host-provided context objects where the query graph is incomplete
+      // (e.g. refresh orchestration supplies `queryResults` without `queries`).
+      const tables = context?.tables;
+      if (tables && typeof tables === "object") {
+        for (const name of Object.keys(tables)) {
+          if (typeof name === "string" && name.length > 0) {
+            base[`workbook:table:${name}`] = this.workbookPrivacyLevel;
+          }
+        }
+      }
+
+      const queryResults = context?.queryResults;
+      if (queryResults && typeof queryResults === "object") {
+        for (const result of Object.values(queryResults)) {
+          const sources = result && typeof result === "object" ? (result as any).meta?.sources : null;
+          if (!Array.isArray(sources)) continue;
+          for (const source of sources) {
+            const provenance = source?.provenance;
+            if (!provenance || typeof provenance !== "object") continue;
+            const kind = (provenance as any).kind;
+            if (kind === "table" && typeof (provenance as any).table === "string") {
+              base[`workbook:table:${(provenance as any).table}`] = this.workbookPrivacyLevel;
+            } else if (kind === "range") {
+              base["workbook:range"] = this.workbookPrivacyLevel;
+            }
+          }
+        }
+      }
     }
 
     const overrides = context?.privacy?.levelsBySourceId;
