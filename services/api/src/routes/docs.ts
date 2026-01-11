@@ -1275,6 +1275,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "admin")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const parsed = PutDocDlpPolicyBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
@@ -1353,6 +1356,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "edit")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const parsed = UpsertClassificationBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
@@ -1473,6 +1479,9 @@ export function registerDocRoutes(app: FastifyInstance): void {
     const membership = await requireDocRole(request, reply, docId);
     if (!membership) return;
     if (!canDocument(membership.role, "edit")) return reply.code(403).send({ error: "forbidden" });
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const res = await app.db.query(
       "DELETE FROM document_classifications WHERE document_id = $1 AND selector_key = $2",
