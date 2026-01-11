@@ -1,4 +1,8 @@
-import { formatCellAddress, parseRangeAddress } from "../../../../packages/scripting/src/a1.js";
+import {
+  formatCellAddress,
+  formatRangeAddress,
+  parseRangeAddress,
+} from "../../../../packages/scripting/src/a1.js";
 import { TypedEventEmitter } from "../../../../packages/scripting/src/events.js";
 
 function valueEquals(a, b) {
@@ -14,6 +18,19 @@ function valueEquals(a, b) {
   return false;
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stableStringify(value) {
+  if (value === undefined) return "undefined";
+  if (value == null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const keys = Object.keys(value).sort();
+  const entries = keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`);
+  return `{${entries.join(",")}}`;
+}
+
 function cellInputFromState(state) {
   if (state.formula != null) return state.formula;
   return state.value ?? null;
@@ -23,6 +40,71 @@ function isFormulaString(input) {
   if (typeof input !== "string") return false;
   const trimmed = input.trimStart();
   return trimmed.startsWith("=") && trimmed.length > 1;
+}
+
+function denseRectForDeltas(deltas) {
+  if (!deltas || deltas.length === 0) return null;
+
+  let minRow = Number.POSITIVE_INFINITY;
+  let maxRow = Number.NEGATIVE_INFINITY;
+  let minCol = Number.POSITIVE_INFINITY;
+  let maxCol = Number.NEGATIVE_INFINITY;
+  /** @type {Map<string, any>} */
+  const byCell = new Map();
+
+  for (const delta of deltas) {
+    minRow = Math.min(minRow, delta.row);
+    maxRow = Math.max(maxRow, delta.row);
+    minCol = Math.min(minCol, delta.col);
+    maxCol = Math.max(maxCol, delta.col);
+    const key = `${delta.row},${delta.col}`;
+    if (byCell.has(key)) return null;
+    byCell.set(key, delta);
+  }
+
+  const rows = maxRow - minRow + 1;
+  const cols = maxCol - minCol + 1;
+  if (rows * cols !== deltas.length) return null;
+
+  return { minRow, maxRow, minCol, maxCol, rows, cols, byCell };
+}
+
+function diffStylePatch(beforeStyle, afterStyle) {
+  const before = isPlainObject(beforeStyle) ? beforeStyle : {};
+  const after = isPlainObject(afterStyle) ? afterStyle : {};
+
+  const beforeKeys = Object.keys(before);
+  const afterKeys = Object.keys(after);
+  if (afterKeys.length === 0 && beforeKeys.length > 0) {
+    // Clearing formatting is represented by `null` in the DocumentController API.
+    return null;
+  }
+
+  /** @type {Record<string, any>} */
+  const patch = {};
+  for (const key of afterKeys) {
+    const a = after[key];
+    const b = before[key];
+    if (stableStringify(a) === stableStringify(b)) continue;
+
+    if (isPlainObject(a) && isPlainObject(b)) {
+      const nested = diffStylePatch(b, a);
+      // A nested "clear" isn't representable with the current format patch semantics, so
+      // fall back to emitting the full nested object.
+      if (nested != null && Object.keys(nested).length > 0) {
+        patch[key] = nested;
+      } else if (nested == null) {
+        patch[key] = a;
+      } else {
+        patch[key] = a;
+      }
+      continue;
+    }
+
+    patch[key] = a;
+  }
+
+  return patch;
 }
 
 /**
@@ -117,34 +199,117 @@ export class DocumentControllerWorkbookAdapter {
    */
   #handleDocumentChange(payload) {
     const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
+    /** @type {Map<string, { value: any[], format: any[] }>} */
+    const bySheet = new Map();
+
     for (const delta of deltas) {
       if (!delta) continue;
       const sheetName = delta.sheetId;
-      const address = formatCellAddress({ row: delta.row, col: delta.col });
+      let bucket = bySheet.get(sheetName);
+      if (!bucket) {
+        bucket = { value: [], format: [] };
+        bySheet.set(sheetName, bucket);
+      }
 
       const valueChanged =
         !valueEquals(delta.before?.value ?? null, delta.after?.value ?? null) ||
         (delta.before?.formula ?? null) !== (delta.after?.formula ?? null);
-
       const formatChanged = (delta.before?.styleId ?? 0) !== (delta.after?.styleId ?? 0);
 
-      if (valueChanged) {
-        const value = cellInputFromState(delta.after ?? {});
-        this.events.emit("cellChanged", {
-          sheetName,
-          address,
-          values: [[value]],
-        });
+      if (valueChanged) bucket.value.push(delta);
+      if (formatChanged) bucket.format.push(delta);
+    }
+
+    for (const [sheetName, bucket] of bySheet.entries()) {
+      if (bucket.value.length > 0) {
+        const rect = denseRectForDeltas(bucket.value);
+        if (rect && rect.rows * rect.cols > 1) {
+          const values = [];
+          for (let r = 0; r < rect.rows; r++) {
+            const row = [];
+            for (let c = 0; c < rect.cols; c++) {
+              const delta = rect.byCell.get(`${rect.minRow + r},${rect.minCol + c}`);
+              if (!delta) {
+                // Should be unreachable given the dense check, but fall back to per-cell events.
+                row.length = 0;
+                break;
+              }
+              row.push(cellInputFromState(delta.after ?? {}));
+            }
+            if (row.length === 0) break;
+            values.push(row);
+          }
+
+          if (values.length === rect.rows) {
+            this.events.emit("cellChanged", {
+              sheetName,
+              address: formatRangeAddress({
+                startRow: rect.minRow,
+                startCol: rect.minCol,
+                endRow: rect.maxRow,
+                endCol: rect.maxCol,
+              }),
+              values,
+            });
+          } else {
+            for (const delta of bucket.value) {
+              const address = formatCellAddress({ row: delta.row, col: delta.col });
+              this.events.emit("cellChanged", {
+                sheetName,
+                address,
+                values: [[cellInputFromState(delta.after ?? {})]],
+              });
+            }
+          }
+        } else {
+          for (const delta of bucket.value) {
+            const address = formatCellAddress({ row: delta.row, col: delta.col });
+            this.events.emit("cellChanged", {
+              sheetName,
+              address,
+              values: [[cellInputFromState(delta.after ?? {})]],
+            });
+          }
+        }
       }
 
-      if (formatChanged) {
-        const styleId = delta.after?.styleId ?? 0;
-        const format = { ...this.documentController.styleTable.get(styleId) };
-        this.events.emit("formatChanged", {
-          sheetName,
-          address,
-          format,
-        });
+      if (bucket.format.length > 0) {
+        const groups = new Map();
+        for (const delta of bucket.format) {
+          const beforeStyle = this.documentController.styleTable.get(delta.before?.styleId ?? 0);
+          const afterStyle = this.documentController.styleTable.get(delta.after?.styleId ?? 0);
+          const patch = diffStylePatch(beforeStyle, afterStyle);
+          const key = patch === null ? "null" : stableStringify(patch);
+          const entry = groups.get(key) ?? { patch, deltas: [] };
+          entry.deltas.push(delta);
+          groups.set(key, entry);
+        }
+
+        for (const entry of groups.values()) {
+          const rect = denseRectForDeltas(entry.deltas);
+          if (rect && rect.rows * rect.cols > 1) {
+            this.events.emit("formatChanged", {
+              sheetName,
+              address: formatRangeAddress({
+                startRow: rect.minRow,
+                startCol: rect.minCol,
+                endRow: rect.maxRow,
+                endCol: rect.maxCol,
+              }),
+              format: entry.patch,
+            });
+            continue;
+          }
+
+          for (const delta of entry.deltas) {
+            const address = formatCellAddress({ row: delta.row, col: delta.col });
+            this.events.emit("formatChanged", {
+              sheetName,
+              address,
+              format: entry.patch,
+            });
+          }
+        }
       }
     }
   }

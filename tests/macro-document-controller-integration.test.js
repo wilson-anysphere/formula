@@ -15,12 +15,17 @@ test("macro recorder generates runnable TypeScript that replays edits against Do
 
   workbook.setSelection("Sheet1", "A1");
   const sheet = workbook.getActiveSheet();
-  sheet.setCellValue("A1", 10);
-  sheet.setCellValue("B1", 32);
+  sheet.getRange("A1:B1").setValues([[10, 32]]);
   sheet.getRange("A1:B1").setFormat({ bold: true });
   workbook.setSelection("Sheet1", "A2");
 
   const actions = recorder.stop();
+  assert.deepEqual(actions, [
+    { type: "setSelection", sheetName: "Sheet1", address: "A1" },
+    { type: "setRangeValues", sheetName: "Sheet1", address: "A1:B1", values: [[10, 32]] },
+    { type: "setFormat", sheetName: "Sheet1", address: "A1:B1", format: { bold: true } },
+    { type: "setSelection", sheetName: "Sheet1", address: "A2" },
+  ]);
   const script = generateTypeScriptMacro(actions);
 
   const freshController = new DocumentController();
@@ -33,9 +38,9 @@ test("macro recorder generates runnable TypeScript that replays edits against Do
   const freshSheet = freshWorkbook.getActiveSheet();
   assert.deepEqual(freshSheet.getRange("A1:B1").getValues(), [[10, 32]]);
   assert.deepEqual(freshSheet.getRange("A1").getFormat(), { bold: true });
+  assert.deepEqual(freshSheet.getRange("B1").getFormat(), { bold: true });
   assert.deepEqual(freshWorkbook.getSelection(), { sheetName: "Sheet1", address: "A2" });
 
   workbook.dispose();
   freshWorkbook.dispose();
 });
-
