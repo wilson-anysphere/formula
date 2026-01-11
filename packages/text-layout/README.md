@@ -34,8 +34,8 @@ const layout = engine.layout({
 ```js
 import {
   TextLayoutEngine,
-  createHarfBuzzTextMeasurer,
 } from "@formula/text-layout";
+import { createHarfBuzzTextMeasurer } from "@formula/text-layout/harfbuzz";
 
 // Load font bytes however you want (fetch, fs, bundler asset, etc).
 const notoSansBytes = await fetch("/fonts/NotoSans-Regular.ttf").then((r) => r.arrayBuffer());
