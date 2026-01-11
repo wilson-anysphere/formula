@@ -658,6 +658,124 @@ test("supports KeyRing rotation for encrypted file persistence", async (t) => {
   }
 });
 
+test("loads KeyRing from SYNC_SERVER_ENCRYPTION_KEYRING_PATH", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const keyRingPath = path.join(dataDir, "keyring.json");
+  await writeFile(keyRingPath, TEST_KEYRING_JSON);
+
+  const port = await getAvailablePort();
+  const wsUrl = `ws://127.0.0.1:${port}`;
+
+  const server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "keyring",
+      SYNC_SERVER_ENCRYPTION_KEYRING_JSON: undefined,
+      SYNC_SERVER_ENCRYPTION_KEYRING_PATH: keyRingPath,
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const docName = "keyring-path-doc";
+  const secretText = "keyring-path-secret: hello world 0123456789 abcdef";
+
+  const doc = new Y.Doc();
+  const provider = new WebsocketProvider(wsUrl, docName, doc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: "test-token" },
+  });
+  t.after(() => {
+    provider.destroy();
+    doc.destroy();
+  });
+
+  await waitForProviderSync(provider);
+  doc.getText("t").insert(0, secretText);
+
+  provider.destroy();
+  doc.destroy();
+  await new Promise((r) => setTimeout(r, 250));
+
+  const persistedPath = yjsFilePathForDoc(dataDir, docName);
+  const persistedBytes = await readFile(persistedPath);
+  assert.equal(persistedBytes.subarray(0, 8).toString("ascii"), "FMLYJS01");
+  assert.equal(persistedBytes.readUInt8(8) & 0b1, 0b1);
+  assert.equal(persistedBytes.includes(Buffer.from(secretText, "utf8")), false);
+});
+
+test(
+  "refuses to start in production when encryption is enabled but keyring is missing",
+  async (t) => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-keyring-"));
+    t.after(async () => {
+      await rm(dataDir, { recursive: true, force: true });
+    });
+
+    const port = await getAvailablePort();
+
+    const serviceDir = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      ".."
+    );
+    const entry = path.join(serviceDir, "src", "index.ts");
+    const nodeWithTsx = path.join(serviceDir, "scripts", "node-with-tsx.mjs");
+
+    let stdout = "";
+    let stderr = "";
+    const child = spawn(process.execPath, [nodeWithTsx, entry], {
+      cwd: serviceDir,
+      env: {
+        ...process.env,
+        NODE_ENV: "production",
+        LOG_LEVEL: "silent",
+        SYNC_SERVER_HOST: "127.0.0.1",
+        SYNC_SERVER_PORT: String(port),
+        SYNC_SERVER_DATA_DIR: dataDir,
+        SYNC_SERVER_AUTH_TOKEN: "test-token",
+        SYNC_SERVER_JWT_SECRET: "",
+        SYNC_SERVER_JWT_AUDIENCE: "",
+        SYNC_SERVER_JWT_ISSUER: "",
+        SYNC_SERVER_PERSISTENCE_BACKEND: "file",
+        SYNC_SERVER_PERSIST_COMPACT_AFTER_UPDATES: "10",
+        SYNC_SERVER_PERSISTENCE_ENCRYPTION: "keyring",
+        SYNC_SERVER_ENCRYPTION_KEYRING_JSON: undefined,
+        SYNC_SERVER_ENCRYPTION_KEYRING_PATH: undefined,
+        // Ensure unrelated encryption flags don't accidentally fail config parsing.
+        SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64: undefined,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    child.stdout?.on("data", (d) => {
+      stdout += d.toString();
+      stdout = stdout.slice(-10_000);
+    });
+    child.stderr?.on("data", (d) => {
+      stderr += d.toString();
+      stderr = stderr.slice(-10_000);
+    });
+
+    const exit = await waitForProcessExit(child, 10_000);
+    assert.notEqual(exit.code, 0);
+
+    const combinedLogs = `${stdout}\n${stderr}`.toLowerCase();
+    assert.ok(
+      combinedLogs.includes("sync_server_persistence_encryption=keyring") &&
+        combinedLogs.includes("sync_server_encryption_keyring_json"),
+      `expected missing keyring error in logs.\nstdout:\n${stdout}\nstderr:\n${stderr}`
+    );
+  }
+);
+
 test("enforces read-only roles (viewer/commenter) for Yjs updates", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
   t.after(async () => {
