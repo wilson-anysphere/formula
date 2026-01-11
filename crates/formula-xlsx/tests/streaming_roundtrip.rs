@@ -561,3 +561,68 @@ fn streaming_patch_writes_rich_text_via_shared_strings() -> Result<(), Box<dyn s
 
     Ok(())
 }
+
+#[test]
+fn streaming_patch_writes_inline_rich_text_when_shared_strings_missing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use zip::result::ZipError;
+
+    let fixture_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/basic.xlsx");
+    let bytes = fs::read(&fixture_path)?;
+
+    let rich = RichText::from_segments(vec![
+        ("Hello ".to_string(), RichTextRunStyle::default()),
+        (
+            "World".to_string(),
+            RichTextRunStyle {
+                bold: Some(true),
+                ..Default::default()
+            },
+        ),
+    ]);
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("B1")?,
+        CellValue::RichText(rich),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
+    assert!(
+        matches!(archive.by_name("xl/sharedStrings.xml").err(), Some(ZipError::FileNotFound)),
+        "workbook without sharedStrings.xml should not gain one during inline rich text patching"
+    );
+
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let cell = doc
+        .descendants()
+        .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some("B1"))
+        .expect("B1 should exist");
+    assert_eq!(
+        cell.attribute("t"),
+        Some("inlineStr"),
+        "expected rich text to be written as inlineStr when sharedStrings are missing"
+    );
+    let inline = cell
+        .children()
+        .find(|n| n.has_tag_name((ns, "is")))
+        .expect("inline string <is> should exist");
+    assert!(
+        inline
+            .descendants()
+            .any(|n| n.has_tag_name((ns, "r"))),
+        "expected inline rich text to contain <r> runs"
+    );
+
+    Ok(())
+}

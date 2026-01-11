@@ -606,7 +606,13 @@ fn patch_wants_shared_string(
 
             true
         }
-        CellValue::RichText(_) => !existing_t.is_some_and(should_preserve_unknown_t),
+        CellValue::RichText(_) => {
+            if existing_t.is_some_and(should_preserve_unknown_t) {
+                return false;
+            }
+            // Preserve inline strings when the existing cell already uses inline storage.
+            existing_t != Some("inlineStr")
+        }
         _ => false,
     }
 }
@@ -1141,7 +1147,7 @@ fn write_shared_string_si(item: &RichText) -> Result<Vec<u8>, StreamingPatchErro
 
 fn write_shared_string_t<W: Write>(writer: &mut Writer<W>, text: &str) -> std::io::Result<()> {
     let mut t = BytesStart::new("t");
-    if text.starts_with(' ') || text.ends_with(' ') {
+    if needs_space_preserve(text) {
         t.push_attribute(("xml:space", "preserve"));
     }
     writer.write_event(Event::Start(t))?;
@@ -1841,6 +1847,28 @@ fn write_value_element<W: Write>(
             writer.write_event(Event::End(BytesEnd::new("t")))?;
             writer.write_event(Event::End(BytesEnd::new("is")))?;
         }
+        CellBodyKind::InlineRich(rich) => {
+            writer.write_event(Event::Start(BytesStart::new("is")))?;
+            if rich.runs.is_empty() {
+                write_shared_string_t(writer, &rich.text)?;
+            } else {
+                for run in &rich.runs {
+                    writer.write_event(Event::Start(BytesStart::new("r")))?;
+
+                    if !run.style.is_empty() {
+                        writer.write_event(Event::Start(BytesStart::new("rPr")))?;
+                        write_shared_string_rpr(writer, &run.style)?;
+                        writer.write_event(Event::End(BytesEnd::new("rPr")))?;
+                    }
+
+                    let segment = rich.slice_run_text(run);
+                    write_shared_string_t(writer, segment)?;
+
+                    writer.write_event(Event::End(BytesEnd::new("r")))?;
+                }
+            }
+            writer.write_event(Event::End(BytesEnd::new("is")))?;
+        }
         CellBodyKind::None => {}
     }
 
@@ -1875,7 +1903,7 @@ fn write_patched_cell<W: Write>(
 ) -> Result<(), StreamingPatchError> {
     let patch_formula = patch.formula.as_deref();
     let mut existing_t: Option<String> = None;
-    let mut shared_string_idx = patch.shared_string_idx;
+    let shared_string_idx = patch.shared_string_idx;
 
     let mut c = BytesStart::new("c");
     let inserted_a1 = original.is_none().then(|| cell_ref.to_a1());
@@ -1897,12 +1925,6 @@ fn write_patched_cell<W: Write>(
             let a1 = inserted_a1.as_ref().expect("just set");
             c.push_attribute(("r", a1.as_str()));
         }
-
-    if existing_t.as_deref() == Some("inlineStr") && matches!(patch.value, CellValue::String(_)) {
-        // Preserve inline string storage for existing cells even if the pre-scan marked this patch
-        // for shared strings (best-effort).
-        shared_string_idx = None;
-    }
 
     let (cell_t_owned, body_kind) = cell_representation(
         &patch.value,
@@ -1928,25 +1950,7 @@ fn write_patched_cell<W: Write>(
         write_formula_element(writer, None, formula, false)?;
     }
 
-    match body_kind {
-        CellBodyKind::V(text) => {
-            writer.write_event(Event::Start(BytesStart::new("v")))?;
-            writer.write_event(Event::Text(BytesText::new(&text)))?;
-            writer.write_event(Event::End(BytesEnd::new("v")))?;
-        }
-        CellBodyKind::InlineStr(text) => {
-            writer.write_event(Event::Start(BytesStart::new("is")))?;
-            let mut t = BytesStart::new("t");
-            if needs_space_preserve(&text) {
-                t.push_attribute(("xml:space", "preserve"));
-            }
-            writer.write_event(Event::Start(t))?;
-            writer.write_event(Event::Text(BytesText::new(&text)))?;
-            writer.write_event(Event::End(BytesEnd::new("t")))?;
-            writer.write_event(Event::End(BytesEnd::new("is")))?;
-        }
-        CellBodyKind::None => {}
-    }
+    write_value_element(writer, &body_kind)?;
 
     writer.write_event(Event::End(BytesEnd::new("c")))?;
     Ok(())
@@ -1957,6 +1961,7 @@ enum CellBodyKind {
     None,
     V(String),
     InlineStr(String),
+    InlineRich(RichText),
 }
 
 fn cell_representation(
@@ -2007,6 +2012,12 @@ fn cell_representation(
                 if should_preserve_unknown_t(existing_t) {
                     return Ok((Some(existing_t.to_string()), CellBodyKind::V(rich.text.clone())));
                 }
+                if existing_t == "inlineStr" {
+                    return Ok((
+                        Some("inlineStr".to_string()),
+                        CellBodyKind::InlineRich(rich.clone()),
+                    ));
+                }
             }
 
             if let Some(idx) = shared_string_idx {
@@ -2015,7 +2026,7 @@ fn cell_representation(
 
             Ok((
                 Some("inlineStr".to_string()),
-                CellBodyKind::InlineStr(rich.text.clone()),
+                CellBodyKind::InlineRich(rich.clone()),
             ))
         }
         other => Err(StreamingPatchError::UnsupportedCellValue(other.clone())),
