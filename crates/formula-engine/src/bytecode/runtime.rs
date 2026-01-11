@@ -1,8 +1,11 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
 use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, ResolvedRange, Value};
+use crate::error::ExcelError;
 use crate::simd::{self, CmpOp, NumericCriteria};
 use smallvec::SmallVec;
+use std::cmp::Ordering;
+use std::sync::Arc;
 
 pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
     match expr {
@@ -31,7 +34,15 @@ pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
                     | Function::Count => true,
                     Function::CountIf => arg_idx == 0,
                     Function::SumProduct => true,
-                    Function::Unknown(_) => false,
+                    Function::Abs
+                    | Function::Int
+                    | Function::Round
+                    | Function::RoundUp
+                    | Function::RoundDown
+                    | Function::Mod
+                    | Function::Sign
+                    | Function::Concat
+                    | Function::Unknown(_) => false,
                 };
 
                 if treat_cell_as_range {
@@ -148,11 +159,7 @@ pub fn apply_binary(op: BinaryOp, left: Value, right: Value) -> Value {
                 }
             }
         },
-        BinaryOp::Pow => match (coerce_to_number(left), coerce_to_number(right)) {
-            (Ok(a), Ok(b)) => Number(a.powf(b)),
-            (Err(e), _) | (_, Err(e)) => Error(e),
-        },
-        BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+        BinaryOp::Pow => {
             let a = match coerce_to_number(left) {
                 Ok(n) => n,
                 Err(e) => return Error(e),
@@ -161,18 +168,89 @@ pub fn apply_binary(op: BinaryOp, left: Value, right: Value) -> Value {
                 Ok(n) => n,
                 Err(e) => return Error(e),
             };
-            let res = match op {
-                BinaryOp::Eq => a == b,
-                BinaryOp::Ne => a != b,
-                BinaryOp::Lt => a < b,
-                BinaryOp::Le => a <= b,
-                BinaryOp::Gt => a > b,
-                BinaryOp::Ge => a >= b,
-                _ => unreachable!(),
-            };
-            Bool(res)
+            match crate::functions::math::power(a, b) {
+                Ok(n) => Number(n),
+                Err(e) => Error(match e {
+                    ExcelError::Div0 => ErrorKind::Div0,
+                    ExcelError::Value => ErrorKind::Value,
+                    ExcelError::Num => ErrorKind::Num,
+                }),
+            }
+        }
+        BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+            excel_compare(left, right, op)
         }
     }
+}
+
+fn excel_compare(left: Value, right: Value, op: BinaryOp) -> Value {
+    let ord = match excel_order(left, right) {
+        Ok(ord) => ord,
+        Err(e) => return Value::Error(e),
+    };
+
+    let result = match op {
+        BinaryOp::Eq => ord == Ordering::Equal,
+        BinaryOp::Ne => ord != Ordering::Equal,
+        BinaryOp::Lt => ord == Ordering::Less,
+        BinaryOp::Le => ord != Ordering::Greater,
+        BinaryOp::Gt => ord == Ordering::Greater,
+        BinaryOp::Ge => ord != Ordering::Less,
+        _ => return Value::Error(ErrorKind::Value),
+    };
+
+    Value::Bool(result)
+}
+
+fn excel_order(left: Value, right: Value) -> Result<Ordering, ErrorKind> {
+    if let Value::Error(e) = left {
+        return Err(e);
+    }
+    if let Value::Error(e) = right {
+        return Err(e);
+    }
+    if matches!(left, Value::Array(_) | Value::Range(_))
+        || matches!(right, Value::Array(_) | Value::Range(_))
+    {
+        return Err(ErrorKind::Value);
+    }
+
+    // Blank coerces to the other type for comparisons.
+    let (l, r) = match (&left, &right) {
+        (Value::Empty, Value::Number(_)) => (Value::Number(0.0), right),
+        (Value::Number(_), Value::Empty) => (left, Value::Number(0.0)),
+        (Value::Empty, Value::Bool(_)) => (Value::Bool(false), right),
+        (Value::Bool(_), Value::Empty) => (left, Value::Bool(false)),
+        (Value::Empty, Value::Text(_)) => (Value::Text(Arc::from("")), right),
+        (Value::Text(_), Value::Empty) => (left, Value::Text(Arc::from(""))),
+        _ => (left, right),
+    };
+
+    Ok(match (l, r) {
+        (Value::Number(a), Value::Number(b)) => a.partial_cmp(&b).unwrap_or(Ordering::Equal),
+        (Value::Text(a), Value::Text(b)) => {
+            let au = a.to_ascii_uppercase();
+            let bu = b.to_ascii_uppercase();
+            au.cmp(&bu)
+        }
+        (Value::Bool(a), Value::Bool(b)) => a.cmp(&b),
+        // Type precedence (approximate Excel): numbers < text < booleans.
+        (Value::Number(_), Value::Text(_) | Value::Bool(_)) => Ordering::Less,
+        (Value::Text(_), Value::Bool(_)) => Ordering::Less,
+        (Value::Text(_), Value::Number(_)) => Ordering::Greater,
+        (Value::Bool(_), Value::Number(_) | Value::Text(_)) => Ordering::Greater,
+        // Blank should have been coerced above.
+        (Value::Empty, Value::Empty) => Ordering::Equal,
+        (Value::Empty, _) => Ordering::Less,
+        (_, Value::Empty) => Ordering::Greater,
+        // Errors are handled above.
+        (Value::Error(_), _) | (_, Value::Error(_)) => Ordering::Equal,
+        // Arrays/ranges are rejected above.
+        (Value::Array(_), _)
+        | (_, Value::Array(_))
+        | (Value::Range(_), _)
+        | (_, Value::Range(_)) => Ordering::Equal,
+    })
 }
 
 fn numeric_binop(
@@ -230,8 +308,188 @@ pub fn call_function(func: &Function, args: &[Value], grid: &dyn Grid, base: Cel
         Function::Count => fn_count(args, grid, base),
         Function::CountIf => fn_countif(args, grid, base),
         Function::SumProduct => fn_sumproduct(args, grid, base),
+        Function::Abs => fn_abs(args),
+        Function::Int => fn_int(args),
+        Function::Round => fn_round(args),
+        Function::RoundUp => fn_roundup(args),
+        Function::RoundDown => fn_rounddown(args),
+        Function::Mod => fn_mod(args),
+        Function::Sign => fn_sign(args),
+        Function::Concat => fn_concat(args),
         Function::Unknown(_) => Value::Error(ErrorKind::Name),
     }
+}
+
+fn fn_abs(args: &[Value]) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    match coerce_to_number(args[0].clone()) {
+        Ok(n) => Value::Number(n.abs()),
+        Err(e) => Value::Error(e),
+    }
+}
+
+fn fn_int(args: &[Value]) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    match coerce_to_number(args[0].clone()) {
+        Ok(n) => Value::Number(n.floor()),
+        Err(e) => Value::Error(e),
+    }
+}
+
+fn coerce_to_i64(v: Value) -> Result<i64, ErrorKind> {
+    let n = coerce_to_number(v)?;
+    Ok(n.trunc() as i64)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoundMode {
+    Nearest,
+    Down,
+    Up,
+}
+
+fn round_with_mode(n: f64, digits: i32, mode: RoundMode) -> f64 {
+    let factor = 10f64.powi(digits.saturating_abs());
+    if !factor.is_finite() || factor == 0.0 {
+        return n;
+    }
+
+    let scaled = if digits >= 0 { n * factor } else { n / factor };
+    let rounded = match mode {
+        RoundMode::Down => scaled.trunc(),
+        RoundMode::Up => {
+            if scaled.is_sign_negative() {
+                scaled.trunc() - if scaled.fract() == 0.0 { 0.0 } else { 1.0 }
+            } else {
+                scaled.trunc() + if scaled.fract() == 0.0 { 0.0 } else { 1.0 }
+            }
+        }
+        RoundMode::Nearest => {
+            // Excel rounds halves away from zero.
+            let frac = scaled.fract().abs();
+            let base = scaled.trunc();
+            if frac < 0.5 {
+                base
+            } else {
+                base + scaled.signum()
+            }
+        }
+    };
+
+    if digits >= 0 {
+        rounded / factor
+    } else {
+        rounded * factor
+    }
+}
+
+fn fn_round_impl(args: &[Value], mode: RoundMode) -> Value {
+    if args.len() != 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let number = match coerce_to_number(args[0].clone()) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let digits = match coerce_to_i64(args[1].clone()) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    Value::Number(round_with_mode(number, digits as i32, mode))
+}
+
+fn fn_round(args: &[Value]) -> Value {
+    fn_round_impl(args, RoundMode::Nearest)
+}
+
+fn fn_roundup(args: &[Value]) -> Value {
+    fn_round_impl(args, RoundMode::Up)
+}
+
+fn fn_rounddown(args: &[Value]) -> Value {
+    fn_round_impl(args, RoundMode::Down)
+}
+
+fn fn_mod(args: &[Value]) -> Value {
+    if args.len() != 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let n = match coerce_to_number(args[0].clone()) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let d = match coerce_to_number(args[1].clone()) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    if d == 0.0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+    Value::Number(n - d * (n / d).floor())
+}
+
+fn fn_sign(args: &[Value]) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let number = match coerce_to_number(args[0].clone()) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    if !number.is_finite() {
+        return Value::Error(ErrorKind::Num);
+    }
+    if number > 0.0 {
+        Value::Number(1.0)
+    } else if number < 0.0 {
+        Value::Number(-1.0)
+    } else {
+        Value::Number(0.0)
+    }
+}
+
+fn format_number_general(n: f64) -> String {
+    if n == 0.0 {
+        return "0".to_string();
+    }
+    if n.fract() == 0.0 {
+        return format!("{:.0}", n);
+    }
+    let s = n.to_string();
+    if s == "-0" || s == "-0.0" {
+        "0".to_string()
+    } else {
+        s
+    }
+}
+
+fn coerce_to_string(v: Value) -> Result<String, ErrorKind> {
+    match v {
+        Value::Text(s) => Ok(s.to_string()),
+        Value::Number(n) => Ok(format_number_general(n)),
+        Value::Bool(b) => Ok(if b { "TRUE" } else { "FALSE" }.to_string()),
+        Value::Empty => Ok(String::new()),
+        Value::Error(e) => Err(e),
+        Value::Array(_) | Value::Range(_) => Err(ErrorKind::Value),
+    }
+}
+
+fn fn_concat(args: &[Value]) -> Value {
+    if args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    let mut out = String::new();
+    for arg in args {
+        match coerce_to_string(arg.clone()) {
+            Ok(s) => out.push_str(&s),
+            Err(e) => return Value::Error(e),
+        }
+    }
+    Value::Text(out.into())
 }
 
 fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {

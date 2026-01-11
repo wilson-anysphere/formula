@@ -90,7 +90,15 @@ impl Compiler {
             }
             Function::CountIf => arg_idx == 0,
             Function::SumProduct => true,
-            Function::Unknown(_) => false,
+            Function::Abs
+            | Function::Int
+            | Function::Round
+            | Function::RoundUp
+            | Function::RoundDown
+            | Function::Mod
+            | Function::Sign
+            | Function::Concat
+            | Function::Unknown(_) => false,
         };
 
         if treat_cell_as_range {

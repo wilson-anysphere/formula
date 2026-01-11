@@ -695,8 +695,7 @@ impl Engine {
         let deps = CellDeps::new(calc_vec).volatile(volatile);
         self.calc_graph.update_cell_dependencies(cell_id, deps);
 
-        let compiled_formula = match self.try_compile_bytecode(formula, key, volatile, thread_safe)
-        {
+        let compiled_formula = match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe) {
             Some(program) => CompiledFormula::Bytecode(BytecodeFormula {
                 ast: compiled.clone(),
                 program,
@@ -2215,7 +2214,7 @@ impl Engine {
 
     fn try_compile_bytecode(
         &self,
-        formula: &str,
+        expr: &crate::Expr,
         key: CellKey,
         volatile: bool,
         thread_safe: bool,
@@ -2224,11 +2223,13 @@ impl Engine {
             return None;
         }
 
+        let origin_ast = crate::CellAddr::new(key.addr.row, key.addr.col);
         let origin = bytecode::CellCoord {
             row: key.addr.row as i32,
             col: key.addr.col as i32,
         };
-        let expr = bytecode::parse_formula(formula, origin).ok()?;
+        let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
+        let expr = bytecode::lower_canonical_expr(expr, origin_ast, key.sheet, &mut resolve_sheet).ok()?;
         if !bytecode_expr_is_eligible(&expr) {
             return None;
         }
@@ -4093,7 +4094,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
 }
 
 fn bytecode_expr_is_eligible(expr: &bytecode::Expr) -> bool {
-    bytecode_expr_is_eligible_inner(expr, false, false)
+    bytecode_expr_is_eligible_inner(expr, false)
 }
 
 fn bytecode_expr_within_grid_limits(expr: &bytecode::Expr, origin: bytecode::CellCoord) -> bool {
@@ -4132,12 +4133,11 @@ fn bytecode_expr_within_grid_limits(expr: &bytecode::Expr, origin: bytecode::Cel
 fn bytecode_expr_is_eligible_inner(
     expr: &bytecode::Expr,
     allow_range: bool,
-    allow_text: bool,
 ) -> bool {
     match expr {
         bytecode::Expr::Literal(v) => match v {
             bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
-            bytecode::Value::Text(_) => allow_text,
+            bytecode::Value::Text(_) => true,
             bytecode::Value::Empty => true,
             bytecode::Value::Error(_) | bytecode::Value::Array(_) | bytecode::Value::Range(_) => {
                 false
@@ -4145,7 +4145,7 @@ fn bytecode_expr_is_eligible_inner(
         },
         bytecode::Expr::CellRef(_) => true,
         bytecode::Expr::RangeRef(_) => allow_range,
-        bytecode::Expr::Unary { expr, .. } => bytecode_expr_is_eligible_inner(expr, false, false),
+        bytecode::Expr::Unary { expr, .. } => bytecode_expr_is_eligible_inner(expr, false),
         bytecode::Expr::Binary { op, left, right } => {
             matches!(
                 op,
@@ -4153,8 +4153,15 @@ fn bytecode_expr_is_eligible_inner(
                     | bytecode::ast::BinaryOp::Sub
                     | bytecode::ast::BinaryOp::Mul
                     | bytecode::ast::BinaryOp::Div
-            ) && bytecode_expr_is_eligible_inner(left, false, false)
-                && bytecode_expr_is_eligible_inner(right, false, false)
+                    | bytecode::ast::BinaryOp::Pow
+                    | bytecode::ast::BinaryOp::Eq
+                    | bytecode::ast::BinaryOp::Ne
+                    | bytecode::ast::BinaryOp::Lt
+                    | bytecode::ast::BinaryOp::Le
+                    | bytecode::ast::BinaryOp::Gt
+                    | bytecode::ast::BinaryOp::Ge
+            ) && bytecode_expr_is_eligible_inner(left, false)
+                && bytecode_expr_is_eligible_inner(right, false)
         }
         bytecode::Expr::FuncCall { func, args } => match func {
             bytecode::ast::Function::Sum
@@ -4163,21 +4170,31 @@ fn bytecode_expr_is_eligible_inner(
             | bytecode::ast::Function::Max
             | bytecode::ast::Function::Count => args
                 .iter()
-                .all(|arg| bytecode_expr_is_eligible_inner(arg, true, false)),
+                .all(|arg| bytecode_expr_is_eligible_inner(arg, true)),
             bytecode::ast::Function::CountIf => {
                 if args.len() != 2 {
                     return false;
                 }
-                matches!(args[0], bytecode::Expr::RangeRef(_))
-                    && bytecode_expr_is_eligible_inner(&args[1], false, true)
+                (matches!(args[0], bytecode::Expr::RangeRef(_)) || matches!(args[0], bytecode::Expr::CellRef(_)))
+                    && bytecode_expr_is_eligible_inner(&args[1], false)
             }
             bytecode::ast::Function::SumProduct => {
                 if args.len() != 2 {
                     return false;
                 }
-                matches!(args[0], bytecode::Expr::RangeRef(_))
-                    && matches!(args[1], bytecode::Expr::RangeRef(_))
+                (matches!(args[0], bytecode::Expr::RangeRef(_)) || matches!(args[0], bytecode::Expr::CellRef(_)))
+                    && (matches!(args[1], bytecode::Expr::RangeRef(_)) || matches!(args[1], bytecode::Expr::CellRef(_)))
             }
+            bytecode::ast::Function::Abs
+            | bytecode::ast::Function::Int
+            | bytecode::ast::Function::Round
+            | bytecode::ast::Function::RoundUp
+            | bytecode::ast::Function::RoundDown
+            | bytecode::ast::Function::Mod
+            | bytecode::ast::Function::Sign
+            | bytecode::ast::Function::Concat => args
+                .iter()
+                .all(|arg| bytecode_expr_is_eligible_inner(arg, false)),
             bytecode::ast::Function::Unknown(_) => false,
         },
     }

@@ -31,6 +31,14 @@ pub enum Function {
     Count,
     CountIf,
     SumProduct,
+    Abs,
+    Int,
+    Round,
+    RoundUp,
+    RoundDown,
+    Mod,
+    Sign,
+    Concat,
     Unknown(Arc<str>),
 }
 
@@ -44,6 +52,14 @@ impl Function {
             "COUNT" => Function::Count,
             "COUNTIF" => Function::CountIf,
             "SUMPRODUCT" => Function::SumProduct,
+            "ABS" => Function::Abs,
+            "INT" => Function::Int,
+            "ROUND" => Function::Round,
+            "ROUNDUP" => Function::RoundUp,
+            "ROUNDDOWN" => Function::RoundDown,
+            "MOD" => Function::Mod,
+            "SIGN" => Function::Sign,
+            "CONCAT" => Function::Concat,
             other => Function::Unknown(Arc::from(other)),
         }
     }
@@ -57,6 +73,14 @@ impl Function {
             Function::Count => "COUNT",
             Function::CountIf => "COUNTIF",
             Function::SumProduct => "SUMPRODUCT",
+            Function::Abs => "ABS",
+            Function::Int => "INT",
+            Function::Round => "ROUND",
+            Function::RoundUp => "ROUNDUP",
+            Function::RoundDown => "ROUNDDOWN",
+            Function::Mod => "MOD",
+            Function::Sign => "SIGN",
+            Function::Concat => "CONCAT",
             Function::Unknown(s) => s,
         }
     }

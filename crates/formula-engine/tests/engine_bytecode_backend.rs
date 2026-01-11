@@ -2,6 +2,7 @@ use formula_engine::eval::{
     parse_a1, EvalContext, Evaluator, RecalcContext, SheetReference, ValueResolver,
 };
 use formula_engine::{Engine, ExternalValueProvider, Value};
+use proptest::prelude::*;
 use std::sync::Arc;
 
 fn cell_addr_to_a1(addr: formula_engine::eval::CellAddr) -> String {
@@ -18,6 +19,59 @@ fn cell_addr_to_a1(addr: formula_engine::eval::CellAddr) -> String {
     }
 
     format!("{}{}", col_to_name(addr.col), addr.row + 1)
+}
+
+struct EngineResolver<'a> {
+    engine: &'a Engine,
+}
+
+impl ValueResolver for EngineResolver<'_> {
+    fn sheet_exists(&self, sheet_id: usize) -> bool {
+        sheet_id == 0
+    }
+
+    fn get_cell_value(&self, sheet_id: usize, addr: formula_engine::eval::CellAddr) -> Value {
+        let sheet = match sheet_id {
+            0 => "Sheet1",
+            _ => return Value::Blank,
+        };
+        self.engine.get_cell_value(sheet, &cell_addr_to_a1(addr))
+    }
+
+    fn resolve_structured_ref(
+        &self,
+        _ctx: EvalContext,
+        _sref: &formula_engine::structured_refs::StructuredRef,
+    ) -> Option<Vec<(usize, formula_engine::eval::CellAddr, formula_engine::eval::CellAddr)>> {
+        None
+    }
+}
+
+fn eval_via_ast(engine: &Engine, formula: &str, current_cell: &str) -> Value {
+    let resolver = EngineResolver { engine };
+    let recalc_ctx = RecalcContext::new(0);
+
+    let parsed = formula_engine::eval::Parser::parse(formula).unwrap();
+    let compiled = {
+        let mut map = |sref: &SheetReference<String>| match sref {
+            SheetReference::Current => SheetReference::Current,
+            SheetReference::Sheet(_name) => SheetReference::Sheet(0),
+            SheetReference::SheetRange(_start, _end) => SheetReference::SheetRange(0, 0),
+            SheetReference::External(wb) => SheetReference::External(wb.clone()),
+        };
+        parsed.map_sheets(&mut map)
+    };
+
+    let ctx = EvalContext {
+        current_sheet: 0,
+        current_cell: parse_a1(current_cell).unwrap(),
+    };
+    Evaluator::new(&resolver, ctx, &recalc_ctx).eval_formula(&compiled)
+}
+
+fn assert_engine_matches_ast(engine: &Engine, formula: &str, cell: &str) {
+    let expected = eval_via_ast(engine, formula, cell);
+    assert_eq!(engine.get_cell_value("Sheet1", cell), expected);
 }
 
 #[test]
@@ -39,76 +93,8 @@ fn bytecode_backend_matches_ast_for_sum_and_countif() {
 
     engine.recalculate_single_threaded();
 
-    struct EngineResolver<'a> {
-        engine: &'a Engine,
-    }
-
-    impl ValueResolver for EngineResolver<'_> {
-        fn sheet_exists(&self, sheet_id: usize) -> bool {
-            sheet_id == 0
-        }
-
-        fn get_cell_value(&self, sheet_id: usize, addr: formula_engine::eval::CellAddr) -> Value {
-            let sheet = match sheet_id {
-                0 => "Sheet1",
-                _ => return Value::Blank,
-            };
-            self.engine.get_cell_value(sheet, &cell_addr_to_a1(addr))
-        }
-
-        fn resolve_structured_ref(
-            &self,
-            _ctx: EvalContext,
-            _sref: &formula_engine::structured_refs::StructuredRef,
-        ) -> Option<
-            Vec<(
-                usize,
-                formula_engine::eval::CellAddr,
-                formula_engine::eval::CellAddr,
-            )>,
-        > {
-            None
-        }
-    }
-
-    let resolver = EngineResolver { engine: &engine };
-    let recalc_ctx = RecalcContext::new(0);
-
-    let parsed_sum = formula_engine::eval::Parser::parse("=SUM(A1:A1000)").unwrap();
-    let compiled_sum = {
-        let mut map = |sref: &SheetReference<String>| match sref {
-            SheetReference::Current => SheetReference::Current,
-            SheetReference::Sheet(_name) => SheetReference::Sheet(0),
-            SheetReference::SheetRange(_start, _end) => SheetReference::SheetRange(0, 0),
-            SheetReference::External(wb) => SheetReference::External(wb.clone()),
-        };
-        parsed_sum.map_sheets(&mut map)
-    };
-    let ctx_sum = EvalContext {
-        current_sheet: 0,
-        current_cell: parse_a1("B1").unwrap(),
-    };
-    let eval_sum = Evaluator::new(&resolver, ctx_sum, &recalc_ctx).eval_formula(&compiled_sum);
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), eval_sum);
-
-    let parsed_countif =
-        formula_engine::eval::Parser::parse("=COUNTIF(A1:A1000, \">500\")").unwrap();
-    let compiled_countif = {
-        let mut map = |sref: &SheetReference<String>| match sref {
-            SheetReference::Current => SheetReference::Current,
-            SheetReference::Sheet(_name) => SheetReference::Sheet(0),
-            SheetReference::SheetRange(_start, _end) => SheetReference::SheetRange(0, 0),
-            SheetReference::External(wb) => SheetReference::External(wb.clone()),
-        };
-        parsed_countif.map_sheets(&mut map)
-    };
-    let ctx_countif = EvalContext {
-        current_sheet: 0,
-        current_cell: parse_a1("B2").unwrap(),
-    };
-    let eval_countif =
-        Evaluator::new(&resolver, ctx_countif, &recalc_ctx).eval_formula(&compiled_countif);
-    assert_eq!(engine.get_cell_value("Sheet1", "B2"), eval_countif);
+    assert_engine_matches_ast(&engine, "=SUM(A1:A1000)", "B1");
+    assert_engine_matches_ast(&engine, "=COUNTIF(A1:A1000, \">500\")", "B2");
 
     assert!(engine.bytecode_program_count() > 0);
 }
@@ -170,4 +156,91 @@ fn sumproduct_coerces_bools_in_ranges() {
     // [1, TRUE, 3] is coerced to [1, 1, 3] for SUMPRODUCT.
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(11.0));
     assert!(engine.bytecode_program_count() > 0);
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_scalar_math_and_comparisons() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", -1.5).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 1.9).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    // Scalar-only math.
+    engine.set_cell_formula("Sheet1", "B1", "=ABS(A1)").unwrap();
+    engine.set_cell_formula("Sheet1", "B2", "=INT(A2)").unwrap();
+    engine.set_cell_formula("Sheet1", "B3", "=ROUND(A2, 0)").unwrap();
+    engine.set_cell_formula("Sheet1", "B4", "=ROUNDUP(A1, 0)").unwrap();
+    engine.set_cell_formula("Sheet1", "B5", "=ROUNDDOWN(A1, 0)").unwrap();
+    engine.set_cell_formula("Sheet1", "B6", "=MOD(7, 4)").unwrap();
+    engine.set_cell_formula("Sheet1", "B7", "=SIGN(A1)").unwrap();
+
+    // CONCAT (scalar-only fast path).
+    engine
+        .set_cell_formula("Sheet1", "B8", "=CONCAT(\"foo\", A3, TRUE)")
+        .unwrap();
+
+    // Pow + comparisons (new bytecode ops).
+    engine.set_cell_formula("Sheet1", "C1", "=2^3").unwrap();
+    engine.set_cell_formula("Sheet1", "C2", "=\"a\"=\"A\"").unwrap();
+    engine.set_cell_formula("Sheet1", "C3", "=(-1)^0.5").unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 11);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=ABS(A1)", "B1"),
+        ("=INT(A2)", "B2"),
+        ("=ROUND(A2, 0)", "B3"),
+        ("=ROUNDUP(A1, 0)", "B4"),
+        ("=ROUNDDOWN(A1, 0)", "B5"),
+        ("=MOD(7, 4)", "B6"),
+        ("=SIGN(A1)", "B7"),
+        ("=CONCAT(\"foo\", A3, TRUE)", "B8"),
+        ("=2^3", "C1"),
+        ("=\"a\"=\"A\"", "C2"),
+        ("=(-1)^0.5", "C3"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 32, .. ProptestConfig::default() })]
+    #[test]
+    fn bytecode_backend_matches_ast_for_random_supported_formulas(
+        a in -1000f64..1000f64,
+        b in -1000f64..1000f64,
+        digits in -6i32..6i32,
+        choice in 0u8..12u8,
+    ) {
+        let formula = match choice {
+            0 => "=A1+B1".to_string(),
+            1 => "=A1-B1".to_string(),
+            2 => "=A1*B1".to_string(),
+            3 => "=A1/B1".to_string(),
+            4 => "=A1^B1".to_string(),
+            5 => "=A1=B1".to_string(),
+            6 => "=A1<>B1".to_string(),
+            7 => "=A1<B1".to_string(),
+            8 => "=ABS(A1)".to_string(),
+            9 => format!("=ROUND(A1, {digits})"),
+            10 => "=MOD(A1, B1)".to_string(),
+            11 => "=SIGN(A1)".to_string(),
+            _ => unreachable!(),
+        };
+
+        let mut engine = Engine::new();
+        engine.set_cell_value("Sheet1", "A1", a).unwrap();
+        engine.set_cell_value("Sheet1", "B1", b).unwrap();
+        engine.set_cell_formula("Sheet1", "C1", &formula).unwrap();
+
+        // Ensure we're exercising the bytecode path.
+        prop_assert_eq!(engine.bytecode_program_count(), 1);
+
+        engine.recalculate_single_threaded();
+        let expected = eval_via_ast(&engine, &formula, "C1");
+        prop_assert_eq!(engine.get_cell_value("Sheet1", "C1"), expected);
+    }
 }
