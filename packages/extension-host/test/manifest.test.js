@@ -100,6 +100,40 @@ test("manifest validation: invalid permission rejected", () => {
   );
 });
 
+test("manifest validation: permission objects with a single key are allowed", () => {
+  assert.doesNotThrow(() =>
+    validateExtensionManifest(
+      {
+        name: "x",
+        version: "1.0.0",
+        publisher: "p",
+        main: "./dist/extension.js",
+        engines: { formula: "^1.0.0" },
+        permissions: [{ network: { mode: "allowlist", hosts: ["example.com"] } }]
+      },
+      { engineVersion: "1.0.0", enforceEngine: true }
+    )
+  );
+});
+
+test("manifest validation: permission objects must have exactly one key", () => {
+  assert.throws(
+    () =>
+      validateExtensionManifest(
+        {
+          name: "x",
+          version: "1.0.0",
+          publisher: "p",
+          main: "./dist/extension.js",
+          engines: { formula: "^1.0.0" },
+          permissions: [{ network: true, storage: true }]
+        },
+        { engineVersion: "1.0.0", enforceEngine: true }
+      ),
+    /must be a permission string or an object with a single permission key/
+  );
+});
+
 test("manifest validation: configuration must declare typed properties", () => {
   assert.throws(
     () =>
