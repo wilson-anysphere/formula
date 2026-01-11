@@ -33,4 +33,5 @@ test("inserts dragged range into formula bar at cursor", async ({ page }) => {
   await page.mouse.up();
 
   await expect(input).toHaveValue("=SUM(A1:A2");
+  await expect(input).toBeFocused();
 });
