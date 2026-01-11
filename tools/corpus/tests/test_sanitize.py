@@ -234,6 +234,7 @@ def _make_minimal_xlsx_with_protection_and_sharing() -> bytes:
             "xl/worksheets/sheet1.xml",
             """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetPr codeName="MySecretSheetCode"/>
   <sheetProtection password="ABCDEF" sheet="1"/>
   <sheetData>
     <row r="1"><c r="A1"><v>123</v></c></row>
@@ -428,6 +429,7 @@ class SanitizeTests(unittest.TestCase):
             sheet_xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8", errors="ignore")
             self.assertNotIn("sheetProtection", sheet_xml)
             self.assertNotIn("ABCDEF", sheet_xml)
+            self.assertNotIn("MySecretSheetCode", sheet_xml)
 
 
 if __name__ == "__main__":

@@ -211,6 +211,14 @@ def _sanitize_worksheet(xml: bytes, *, options: SanitizeOptions) -> bytes:
             if loc and _looks_like_external_url(loc):
                 hl.attrib["location"] = _sanitize_text(loc, options=options)
 
+    if options.scrub_metadata or options.hash_strings:
+        # Sheet code names can leak business terms (and are exposed to macros, which we drop).
+        for el in root.iter():
+            if el.tag.split("}")[-1] != "sheetPr":
+                continue
+            if "codeName" in el.attrib:
+                el.attrib["codeName"] = _sanitize_text(el.attrib["codeName"], options=options)
+
     if options.remove_secrets:
         # Remove sheet-level protection/password hashes and protected range metadata.
         for parent in list(root.iter()):
