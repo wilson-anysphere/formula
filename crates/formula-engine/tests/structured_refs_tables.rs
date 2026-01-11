@@ -208,6 +208,21 @@ fn this_row_bracketed_column_range_syntax_works() {
 }
 
 #[test]
+fn this_row_structured_refs_do_not_resolve_outside_the_table_sheet() {
+    let mut engine = setup_engine_with_table();
+    // Use a cell address that would otherwise fall within the table's data-range coordinates.
+    engine
+        .set_cell_formula("Sheet2", "D2", "=SUM(Table1[[#This Row],[Col1],[Col3]])")
+        .expect("formula");
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet2", "D2"),
+        Value::Error(formula_engine::ErrorKind::Name)
+    );
+}
+
+#[test]
 fn dependency_graph_tracks_multi_area_structured_refs() {
     let mut engine = setup_engine_with_table();
     engine

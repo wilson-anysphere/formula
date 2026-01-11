@@ -122,7 +122,14 @@ pub fn resolve_structured_ref(
 
     let item = sref.item.clone().unwrap_or(StructuredRefItem::Data);
     let ranges = match item {
-        StructuredRefItem::ThisRow => resolve_this_row(table, origin_cell, &sref.columns)?,
+        StructuredRefItem::ThisRow => {
+            if sheet_id != origin_sheet {
+                return Err(
+                    "this-row structured reference used outside of table data row".to_string(),
+                );
+            }
+            resolve_this_row(table, origin_cell, &sref.columns)?
+        }
         StructuredRefItem::Headers => resolve_area(table, TableArea::Headers, &sref.columns)?,
         StructuredRefItem::Totals => resolve_area(table, TableArea::Totals, &sref.columns)?,
         StructuredRefItem::All => resolve_area(table, TableArea::All, &sref.columns)?,
