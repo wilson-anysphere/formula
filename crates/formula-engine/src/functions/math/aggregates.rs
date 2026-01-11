@@ -1,4 +1,5 @@
 use crate::functions::math::criteria::Criteria;
+use crate::date::ExcelDateSystem;
 use crate::{ErrorKind, Value};
 
 /// SUMIF(range, criteria, [sum_range])
@@ -6,13 +7,17 @@ pub fn sumif(
     criteria_range: &[Value],
     criteria: &Value,
     sum_range: Option<&[Value]>,
+    system: ExcelDateSystem,
 ) -> Result<f64, ErrorKind> {
     let sum_range = sum_range.unwrap_or(criteria_range);
     if criteria_range.len() != sum_range.len() {
         return Err(ErrorKind::Value);
     }
 
-    let criteria = Criteria::parse(criteria)?;
+    if let Value::Error(e) = criteria {
+        return Err(*e);
+    }
+    let criteria = Criteria::parse_with_date_system(criteria, system)?;
     let mut sum = 0.0;
     for (crit_val, sum_val) in criteria_range.iter().zip(sum_range.iter()) {
         if criteria.matches(crit_val) {
@@ -30,6 +35,7 @@ pub fn sumif(
 pub fn sumifs(
     sum_range: &[Value],
     criteria_pairs: &[(&[Value], &Value)],
+    system: ExcelDateSystem,
 ) -> Result<f64, ErrorKind> {
     for (range, _) in criteria_pairs {
         if range.len() != sum_range.len() {
@@ -39,7 +45,12 @@ pub fn sumifs(
 
     let compiled = criteria_pairs
         .iter()
-        .map(|(_, crit)| Criteria::parse(*crit))
+        .map(|(_, crit)| {
+            if let Value::Error(e) = *crit {
+                return Err(*e);
+            }
+            Criteria::parse_with_date_system(*crit, system)
+        })
         .collect::<Result<Vec<_>, ErrorKind>>()?;
 
     let mut sum = 0.0;
@@ -61,7 +72,10 @@ pub fn sumifs(
 }
 
 /// COUNTIFS(criteria_range1, criteria1, ...)
-pub fn countifs(criteria_pairs: &[(&[Value], &Value)]) -> Result<f64, ErrorKind> {
+pub fn countifs(
+    criteria_pairs: &[(&[Value], &Value)],
+    system: ExcelDateSystem,
+) -> Result<f64, ErrorKind> {
     if criteria_pairs.is_empty() {
         return Ok(0.0);
     }
@@ -75,7 +89,12 @@ pub fn countifs(criteria_pairs: &[(&[Value], &Value)]) -> Result<f64, ErrorKind>
 
     let compiled = criteria_pairs
         .iter()
-        .map(|(_, crit)| Criteria::parse(*crit))
+        .map(|(_, crit)| {
+            if let Value::Error(e) = *crit {
+                return Err(*e);
+            }
+            Criteria::parse_with_date_system(*crit, system)
+        })
         .collect::<Result<Vec<_>, ErrorKind>>()?;
 
     let mut count = 0u64;
@@ -96,13 +115,17 @@ pub fn averageif(
     criteria_range: &[Value],
     criteria: &Value,
     average_range: Option<&[Value]>,
+    system: ExcelDateSystem,
 ) -> Result<f64, ErrorKind> {
     let average_range = average_range.unwrap_or(criteria_range);
     if criteria_range.len() != average_range.len() {
         return Err(ErrorKind::Value);
     }
 
-    let criteria = Criteria::parse(criteria)?;
+    if let Value::Error(e) = criteria {
+        return Err(*e);
+    }
+    let criteria = Criteria::parse_with_date_system(criteria, system)?;
     let mut sum = 0.0;
     let mut count = 0u64;
     for (crit_val, avg_val) in criteria_range.iter().zip(average_range.iter()) {
@@ -128,6 +151,7 @@ pub fn averageif(
 pub fn averageifs(
     average_range: &[Value],
     criteria_pairs: &[(&[Value], &Value)],
+    system: ExcelDateSystem,
 ) -> Result<f64, ErrorKind> {
     for (range, _) in criteria_pairs {
         if range.len() != average_range.len() {
@@ -137,7 +161,12 @@ pub fn averageifs(
 
     let compiled = criteria_pairs
         .iter()
-        .map(|(_, crit)| Criteria::parse(*crit))
+        .map(|(_, crit)| {
+            if let Value::Error(e) = *crit {
+                return Err(*e);
+            }
+            Criteria::parse_with_date_system(*crit, system)
+        })
         .collect::<Result<Vec<_>, ErrorKind>>()?;
 
     let mut sum = 0.0;

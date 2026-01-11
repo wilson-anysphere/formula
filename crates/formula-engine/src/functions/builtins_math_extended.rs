@@ -1014,7 +1014,12 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None
     };
 
-    match crate::functions::math::sumif(&criteria_range, &criteria, sum_range.as_deref()) {
+    match crate::functions::math::sumif(
+        &criteria_range,
+        &criteria,
+        sum_range.as_deref(),
+        ctx.date_system(),
+    ) {
         Ok(out) => Value::Number(out),
         Err(e) => Value::Error(e),
     }
@@ -1060,7 +1065,7 @@ fn sumifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         pairs.push((range.as_slice(), crit));
     }
 
-    match crate::functions::math::sumifs(&sum_range, &pairs) {
+    match crate::functions::math::sumifs(&sum_range, &pairs, ctx.date_system()) {
         Ok(out) => Value::Number(out),
         Err(e) => Value::Error(e),
     }
@@ -1101,7 +1106,7 @@ fn countifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         pairs.push((range.as_slice(), crit));
     }
 
-    match crate::functions::math::countifs(&pairs) {
+    match crate::functions::math::countifs(&pairs, ctx.date_system()) {
         Ok(out) => Value::Number(out),
         Err(e) => Value::Error(e),
     }
@@ -1136,7 +1141,12 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None
     };
 
-    match crate::functions::math::averageif(&criteria_range, &criteria, average_range.as_deref()) {
+    match crate::functions::math::averageif(
+        &criteria_range,
+        &criteria,
+        average_range.as_deref(),
+        ctx.date_system(),
+    ) {
         Ok(out) => Value::Number(out),
         Err(e) => Value::Error(e),
     }
@@ -1182,7 +1192,7 @@ fn averageifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         pairs.push((range.as_slice(), crit));
     }
 
-    match crate::functions::math::averageifs(&average_range, &pairs) {
+    match crate::functions::math::averageifs(&average_range, &pairs, ctx.date_system()) {
         Ok(out) => Value::Number(out),
         Err(e) => Value::Error(e),
     }

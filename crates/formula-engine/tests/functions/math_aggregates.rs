@@ -1,4 +1,5 @@
 use formula_engine::functions::math;
+use formula_engine::date::ExcelDateSystem;
 use formula_engine::{ErrorKind, Value};
 
 #[test]
@@ -8,13 +9,25 @@ fn sumif_supports_numeric_criteria() {
 
     let criteria = Value::from(">2");
     assert_eq!(
-        math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(),
+        math::sumif(
+            &criteria_range,
+            &criteria,
+            Some(&sum_range),
+            ExcelDateSystem::EXCEL_1900,
+        )
+        .unwrap(),
         70.0
     );
 
     let criteria = Value::Number(2.0);
     assert_eq!(
-        math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(),
+        math::sumif(
+            &criteria_range,
+            &criteria,
+            Some(&sum_range),
+            ExcelDateSystem::EXCEL_1900,
+        )
+        .unwrap(),
         20.0
     );
 }
@@ -32,13 +45,25 @@ fn sumif_supports_wildcards_and_blanks() {
 
     let criteria = Value::from("ap*");
     assert_eq!(
-        math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(),
+        math::sumif(
+            &criteria_range,
+            &criteria,
+            Some(&sum_range),
+            ExcelDateSystem::EXCEL_1900,
+        )
+        .unwrap(),
         4.0
     );
 
     let criteria = Value::from("");
     assert_eq!(
-        math::sumif(&criteria_range, &criteria, Some(&sum_range)).unwrap(),
+        math::sumif(
+            &criteria_range,
+            &criteria,
+            Some(&sum_range),
+            ExcelDateSystem::EXCEL_1900,
+        )
+        .unwrap(),
         9.0
     );
 }
@@ -57,7 +82,10 @@ fn sumifs_requires_all_criteria_to_match() {
     let crit1 = Value::from("A");
     let crit2 = Value::from(">1");
     let criteria_pairs = [(&range1[..], &crit1), (&range2[..], &crit2)];
-    assert_eq!(math::sumifs(&sum_range, &criteria_pairs).unwrap(), 20.0);
+    assert_eq!(
+        math::sumifs(&sum_range, &criteria_pairs, ExcelDateSystem::EXCEL_1900).unwrap(),
+        20.0
+    );
 }
 
 #[test]
@@ -67,7 +95,7 @@ fn sumifs_length_mismatch_is_value_error() {
     let crit = Value::from("1");
     let criteria_pairs = [(&range[..], &crit)];
     assert_eq!(
-        math::sumifs(&sum_range, &criteria_pairs).unwrap_err(),
+        math::sumifs(&sum_range, &criteria_pairs, ExcelDateSystem::EXCEL_1900).unwrap_err(),
         ErrorKind::Value
     );
 }

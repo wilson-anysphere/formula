@@ -1,3 +1,4 @@
+use formula_engine::date::ExcelDateSystem;
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
@@ -137,6 +138,20 @@ fn criteria_aggregates_support_ranges_and_arrays() {
     assert_number(&sheet.eval("=SUMIF(C1:C5,\"ap*\",D1:D5)"), 4.0);
     assert_number(&sheet.eval("=SUMIF(C1:C5,\"\",D1:D5)"), 9.0);
     assert_number(&sheet.eval("=COUNTIFS(C1:C5,\"ap*\")"), 2.0);
+}
+
+#[test]
+fn criteria_aggregates_respect_workbook_date_system() {
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(ExcelDateSystem::Excel1904);
+    sheet.set("A1", 0.0); // 1904-01-01 in the 1904 system.
+    sheet.set("A2", 1.0);
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 20.0);
+
+    assert_number(&sheet.eval("=COUNTIFS(A1:A2,\"1904-01-01\")"), 1.0);
+    assert_number(&sheet.eval("=SUMIF(A1:A2,\"1904-01-01\",B1:B2)"), 10.0);
+    assert_number(&sheet.eval("=AVERAGEIF(A1:A2,\"1904-01-01\",B1:B2)"), 10.0);
 }
 
 #[test]
