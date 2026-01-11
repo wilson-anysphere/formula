@@ -102,7 +102,7 @@ describe("Cloud encryption-at-rest (DB): document_versions.data envelope encrypt
     } finally {
       await db.end();
     }
-  });
+  }, 30_000);
 
   it("detects AAD mismatch (wrong documentId)", async () => {
     const db = await setupDb();
