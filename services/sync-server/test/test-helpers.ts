@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import http from "node:http";
+import https from "node:https";
 import type { AddressInfo } from "node:net";
 import net from "node:net";
 import path from "node:path";
@@ -33,9 +35,41 @@ export async function getAvailablePort(): Promise<number> {
 
 export async function waitForServerReady(baseUrl: string): Promise<void> {
   await waitForCondition(async () => {
+    const url = new URL("/healthz", baseUrl);
     try {
-      const res = await fetch(`${baseUrl}/healthz`);
-      return res.ok;
+      const ok = await new Promise<boolean>((resolve) => {
+        const cb = (res: http.IncomingMessage) => {
+          res.resume();
+          resolve(Boolean(res.statusCode && res.statusCode >= 200 && res.statusCode < 300));
+        };
+
+        const req =
+          url.protocol === "https:"
+            ? https.request(
+                {
+                  protocol: url.protocol,
+                  hostname: url.hostname,
+                  port: url.port,
+                  path: `${url.pathname}${url.search}`,
+                  method: "GET",
+                  rejectUnauthorized: false,
+                },
+                cb
+              )
+            : http.request(
+                {
+                  protocol: url.protocol,
+                  hostname: url.hostname,
+                  port: url.port,
+                  path: `${url.pathname}${url.search}`,
+                  method: "GET",
+                },
+                cb
+              );
+        req.on("error", () => resolve(false));
+        req.end();
+      });
+      return ok;
     } catch {
       return false;
     }
@@ -89,8 +123,13 @@ export async function startSyncServer(opts: {
   env?: Record<string, string | undefined>;
 }): Promise<StartedSyncServer> {
   const port = opts.port ?? (await getAvailablePort());
-  const httpUrl = `http://127.0.0.1:${port}`;
-  const wsUrl = `ws://127.0.0.1:${port}`;
+  const tlsEnabled = Boolean(
+    opts.env?.SYNC_SERVER_TLS_CERT_PATH && opts.env?.SYNC_SERVER_TLS_KEY_PATH
+  );
+  const httpScheme = tlsEnabled ? "https" : "http";
+  const wsScheme = tlsEnabled ? "wss" : "ws";
+  const httpUrl = `${httpScheme}://127.0.0.1:${port}`;
+  const wsUrl = `${wsScheme}://127.0.0.1:${port}`;
 
   const serviceDir = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -139,6 +178,9 @@ export async function startSyncServer(opts: {
       SYNC_SERVER_DATA_DIR: opts.dataDir,
       SYNC_SERVER_PERSISTENCE_BACKEND: "file",
       SYNC_SERVER_PERSIST_COMPACT_AFTER_UPDATES: "10",
+      // Prevent TLS-related env vars from leaking into unrelated tests.
+      SYNC_SERVER_TLS_CERT_PATH: "",
+      SYNC_SERVER_TLS_KEY_PATH: "",
       ...authEnv,
       ...(opts.env ?? {}),
     },

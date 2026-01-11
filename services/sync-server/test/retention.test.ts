@@ -93,6 +93,7 @@ function createConfig(ttlMs: number): SyncServerConfig {
     port: 0,
     trustProxy: false,
     gc: true,
+    tls: null,
     dataDir: ":memory:",
     disableDataDirLock: true,
     persistence: {
@@ -109,6 +110,7 @@ function createConfig(ttlMs: number): SyncServerConfig {
       maxConnectionsPerIp: 25,
       maxConnAttemptsPerWindow: 100,
       connAttemptWindowMs: 60_000,
+      maxMessageBytes: 4 * 1024 * 1024,
       maxMessagesPerWindow: 2_000,
       messageWindowMs: 10_000,
     },

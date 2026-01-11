@@ -1,0 +1,164 @@
+import assert from "node:assert/strict";
+import https from "node:https";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+import WebSocket from "ws";
+
+import { startSyncServer } from "./test-helpers.ts";
+
+async function httpsRequestText(url: string, opts?: { headers?: Record<string, string> }) {
+  const parsed = new URL(url);
+  assert.equal(parsed.protocol, "https:");
+
+  return await new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = https.request(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: `${parsed.pathname}${parsed.search}`,
+        method: "GET",
+        headers: opts?.headers,
+        rejectUnauthorized: false,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (d) => chunks.push(Buffer.from(d)));
+        res.on("end", () => {
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      }
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+test("exposes Prometheus metrics in text format", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-metrics-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const ws = new WebSocket(`${server.wsUrl}/metrics-doc?token=test-token`);
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", reject);
+  });
+  ws.terminate();
+
+  const res = await fetch(`${server.httpUrl}/metrics`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") ?? "", /text\/plain/);
+  const body = await res.text();
+  assert.match(body, /sync_server_ws_connections_total/);
+  assert.match(body, /sync_server_persistence_info/);
+});
+
+test("closes the connection when the websocket payload exceeds SYNC_SERVER_MAX_MESSAGE_BYTES", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-max-msg-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+      SYNC_SERVER_MAX_MESSAGE_BYTES: "32",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const ws = new WebSocket(`${server.wsUrl}/big-message-doc?token=test-token`);
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", reject);
+  });
+
+  const closed = new Promise<number>((resolve, reject) => {
+    let finished = false;
+    ws.once("close", (code) => {
+      finished = true;
+      resolve(code);
+    });
+    ws.once("error", (err) => {
+      if (finished) return;
+      reject(err);
+    });
+  });
+
+  ws.send(Buffer.alloc(33, 1));
+  const code = await closed;
+  assert.equal(code, 1009);
+});
+
+test("supports HTTPS/WSS when SYNC_SERVER_TLS_CERT_PATH and SYNC_SERVER_TLS_KEY_PATH are set", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-tls-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
+  const certPath = path.join(fixturesDir, "localhost-cert.pem");
+  const keyPath = path.join(fixturesDir, "localhost-key.pem");
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "admin-token",
+      SYNC_SERVER_TLS_CERT_PATH: certPath,
+      SYNC_SERVER_TLS_KEY_PATH: keyPath,
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+
+  assert.match(server.httpUrl, /^https:\/\//);
+  assert.match(server.wsUrl, /^wss:\/\//);
+
+  const health = await httpsRequestText(`${server.httpUrl}/healthz`);
+  assert.equal(health.status, 200);
+  assert.match(health.body, /\"status\":\"ok\"/);
+
+  const stats = await httpsRequestText(`${server.httpUrl}/internal/stats`, {
+    headers: { "x-internal-admin-token": "admin-token" },
+  });
+  assert.equal(stats.status, 200);
+  assert.match(stats.body, /\"ok\":true/);
+
+  const ws = new WebSocket(`${server.wsUrl}/tls-doc?token=test-token`, {
+    rejectUnauthorized: false,
+  });
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", reject);
+  });
+  ws.terminate();
+});
+

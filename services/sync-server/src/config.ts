@@ -20,6 +20,12 @@ export type SyncServerConfig = {
   port: number;
   trustProxy: boolean;
   gc: boolean;
+  tls:
+    | {
+        certPath: string;
+        keyPath: string;
+      }
+    | null;
 
   dataDir: string;
   disableDataDirLock: boolean;
@@ -62,9 +68,9 @@ export type SyncServerConfig = {
     maxConnectionsPerIp: number;
     maxConnAttemptsPerWindow: number;
     connAttemptWindowMs: number;
+    maxMessageBytes: number;
     maxMessagesPerWindow: number;
     messageWindowMs: number;
-    maxMessageBytes: number;
     maxAwarenessStateBytes: number;
     maxAwarenessEntries: number;
     maxMessagesPerDocWindow: number;
@@ -147,6 +153,19 @@ export function loadConfigFromEnv(): SyncServerConfig {
     process.env.SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS,
     enforceRangeRestrictionsDefault
   );
+  const tlsCertPath = process.env.SYNC_SERVER_TLS_CERT_PATH?.trim() ?? "";
+  const tlsKeyPath = process.env.SYNC_SERVER_TLS_KEY_PATH?.trim() ?? "";
+  const tls =
+    tlsCertPath.length > 0 || tlsKeyPath.length > 0
+      ? (() => {
+          if (tlsCertPath.length === 0 || tlsKeyPath.length === 0) {
+            throw new Error(
+              "SYNC_SERVER_TLS_CERT_PATH and SYNC_SERVER_TLS_KEY_PATH must both be set to enable TLS."
+            );
+          }
+           return { certPath: tlsCertPath, keyPath: tlsKeyPath };
+         })()
+       : null;
 
   const dataDir =
     process.env.SYNC_SERVER_DATA_DIR ??
@@ -241,6 +260,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
     port,
     trustProxy,
     gc,
+    tls,
     dataDir,
     disableDataDirLock,
     persistence: {

@@ -1,6 +1,7 @@
 import http from "node:http";
 import type { IncomingMessage } from "node:http";
-import { promises as fs } from "node:fs";
+import https from "node:https";
+import { promises as fs, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
@@ -45,6 +46,7 @@ import { requireLevelForYLeveldb } from "./leveldbLevel.js";
 import { TombstoneStore, docKeyFromDocName } from "./tombstones.js";
 import { Y } from "./yjs.js";
 import { installYwsSecurity } from "./ywsSecurity.js";
+import { createSyncServerMetrics } from "./metrics.js";
 
 const { setupWSConnection, setPersistence, getYDoc } = ywsUtils as {
   setupWSConnection: (
@@ -105,6 +107,16 @@ function sendJson(
 ): void {
   res.writeHead(statusCode, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
+}
+
+function sendText(
+  res: http.ServerResponse,
+  statusCode: number,
+  body: string,
+  contentType: string
+): void {
+  res.writeHead(statusCode, { "content-type": contentType });
+  res.end(body);
 }
 
 async function countPersistedDocBlobsOnDisk(dir: string): Promise<number> {
@@ -186,6 +198,43 @@ export function createSyncServer(
     config.limits.docMessageWindowMs
   );
 
+  const metrics = createSyncServerMetrics();
+
+  const recordUpgradeRejection = (
+    reason: "rate_limit" | "auth_failure" | "tombstone" | "retention_purging"
+  ) => {
+    metrics.wsConnectionsRejectedTotal.inc({ reason });
+  };
+
+  const recordLeveldbRetentionSweep = (result: { purged: number; errors: unknown[] }) => {
+    metrics.retentionSweepsTotal.inc({ sweep: "leveldb" });
+    if (result.purged > 0) {
+      metrics.retentionDocsPurgedTotal.inc({ sweep: "leveldb" }, result.purged);
+    } else {
+      metrics.retentionDocsPurgedTotal.inc({ sweep: "leveldb" }, 0);
+    }
+    metrics.retentionSweepErrorsTotal.inc({ sweep: "leveldb" }, result.errors.length);
+  };
+
+  const recordTombstoneSweep = (result: {
+    docBlobsDeleted: number;
+    errors: unknown[];
+  }) => {
+    metrics.retentionSweepsTotal.inc({ sweep: "tombstone" });
+    if (result.docBlobsDeleted > 0) {
+      metrics.retentionDocsPurgedTotal.inc(
+        { sweep: "tombstone" },
+        result.docBlobsDeleted
+      );
+    } else {
+      metrics.retentionDocsPurgedTotal.inc({ sweep: "tombstone" }, 0);
+    }
+    metrics.retentionSweepErrorsTotal.inc(
+      { sweep: "tombstone" },
+      result.errors.length
+    );
+  };
+
   const activeSocketsByDoc = new Map<string, Set<WebSocket>>();
 
   const tombstones = new TombstoneStore(config.dataDir, logger);
@@ -236,6 +285,7 @@ export function createSyncServer(
       void retentionManager
         ?.sweep()
         .then((result) => {
+          recordLeveldbRetentionSweep(result);
           logger.info(
             {
               ...result,
@@ -245,7 +295,11 @@ export function createSyncServer(
             "retention_sweep_completed"
           );
         })
-        .catch((err) => logger.error({ err }, "retention_sweep_failed"));
+        .catch((err) => {
+          metrics.retentionSweepsTotal.inc({ sweep: "leveldb" });
+          metrics.retentionSweepErrorsTotal.inc({ sweep: "leveldb" }, 1);
+          logger.error({ err }, "retention_sweep_failed");
+        });
     }, config.retention.sweepIntervalMs);
     retentionSweepTimer.unref();
   };
@@ -279,6 +333,10 @@ export function createSyncServer(
       );
       persistenceCleanup = () => persistence.flush();
       setPersistence(persistence);
+      metrics.setPersistenceInfo({
+        backend: "file",
+        encryptionEnabled: config.persistence.encryption.mode !== "off",
+      });
       clearPersistedDocument = (docName: string) => persistence.clearDocument(docName);
       logger.info(
         {
@@ -444,6 +502,10 @@ export function createSyncServer(
         },
       });
 
+      metrics.setPersistenceInfo({
+        backend: "leveldb",
+        encryptionEnabled: config.persistence.encryption.mode !== "off",
+      });
       maybeStartRetentionSweeper();
       logger.info(
         {
@@ -505,6 +567,10 @@ export function createSyncServer(
           shouldPersist
         );
         setPersistence(persistence);
+        metrics.setPersistenceInfo({
+          backend: "file",
+          encryptionEnabled: config.persistence.encryption.mode !== "off",
+        });
         clearPersistedDocument = (docName: string) => persistence.clearDocument(docName);
         return;
       }
@@ -687,6 +753,10 @@ export function createSyncServer(
           },
         });
 
+        metrics.setPersistenceInfo({
+          backend: "leveldb",
+          encryptionEnabled: config.persistence.encryption.mode !== "off",
+        });
         maybeStartRetentionSweeper();
         logger.info(
           {
@@ -823,9 +893,20 @@ export function createSyncServer(
 
   const triggerTombstoneSweep = async (): Promise<TombstoneSweepResult> => {
     if (tombstoneSweepInFlight) return await tombstoneSweepInFlight;
-    tombstoneSweepInFlight = sweepTombstonesOnce().finally(() => {
-      tombstoneSweepInFlight = null;
-    });
+    tombstoneSweepInFlight = sweepTombstonesOnce()
+      .then((result) => {
+        recordTombstoneSweep(result);
+        return result;
+      })
+      .catch((err) => {
+        metrics.retentionSweepsTotal.inc({ sweep: "tombstone" });
+        metrics.retentionDocsPurgedTotal.inc({ sweep: "tombstone" }, 0);
+        metrics.retentionSweepErrorsTotal.inc({ sweep: "tombstone" }, 1);
+        throw err;
+      })
+      .finally(() => {
+        tombstoneSweepInFlight = null;
+      });
     return await tombstoneSweepInFlight;
   };
 
@@ -834,7 +915,7 @@ export function createSyncServer(
     maxPayload: config.limits.maxMessageBytes,
   });
 
-  const server = http.createServer((req, res) => {
+  const handler: http.RequestListener = (req, res) => {
     void (async () => {
       if (!req.url) {
         res.writeHead(400).end();
@@ -842,6 +923,12 @@ export function createSyncServer(
       }
 
       const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+
+      if (req.method === "GET" && url.pathname === "/metrics") {
+        const body = await metrics.metricsText();
+        sendText(res, 200, body, metrics.registry.contentType);
+        return;
+      }
 
       if (req.method === "GET" && url.pathname === "/readyz") {
         if (!dataDirLock) {
@@ -889,6 +976,12 @@ export function createSyncServer(
               : undefined;
         if (provided !== config.internalAdminToken) {
           sendJson(res, 403, { error: "forbidden" });
+          return;
+        }
+
+        if (req.method === "GET" && url.pathname === "/internal/metrics") {
+          const body = await metrics.metricsText();
+          sendText(res, 200, body, metrics.registry.contentType);
           return;
         }
 
@@ -944,6 +1037,7 @@ export function createSyncServer(
             }
 
             const result = await retentionManager.sweep();
+            recordLeveldbRetentionSweep(result);
             sendJson(res, 200, { ok: true, ...result });
             return;
           }
@@ -1006,7 +1100,17 @@ export function createSyncServer(
       }
       sendJson(res, 500, { error: "internal_error" });
     });
-  });
+  };
+
+  const server = config.tls
+    ? https.createServer(
+        {
+          cert: readFileSync(config.tls.certPath),
+          key: readFileSync(config.tls.keyPath),
+        },
+        handler
+      )
+    : http.createServer(handler);
 
   wss.on("connection", (ws, req) => {
     const ip = pickIp(req, config.trustProxy);
@@ -1020,6 +1124,9 @@ export function createSyncServer(
       | AuthContext
       | undefined;
 
+    metrics.wsConnectionsTotal.inc();
+    metrics.wsConnectionsCurrent.set(wss.clients.size);
+
     let messagesInWindow = 0;
     const messageWindow = setInterval(() => {
       messagesInWindow = 0;
@@ -1029,6 +1136,7 @@ export function createSyncServer(
     ws.on("message", (data) => {
       const messageBytes = rawDataByteLength(data);
       if (messageBytes > config.limits.maxMessageBytes) {
+        metrics.wsMessagesTooLargeTotal.inc();
         logger.warn(
           {
             ip,
@@ -1045,6 +1153,7 @@ export function createSyncServer(
 
       messagesInWindow += 1;
       if (messagesInWindow > config.limits.maxMessagesPerWindow) {
+        metrics.wsMessagesRateLimitedTotal.inc();
         logger.warn(
           { ip, docName, userId: authCtx?.userId },
           "ws_message_rate_limited"
@@ -1054,11 +1163,13 @@ export function createSyncServer(
       }
 
       if (!docMessageLimiter.consume(docName)) {
+        metrics.wsMessagesRateLimitedTotal.inc();
         logger.warn(
           { ip, docName, userId: authCtx?.userId },
           "ws_doc_message_rate_limited"
         );
         ws.close(1013, "Rate limit exceeded");
+        return;
       }
     });
 
@@ -1085,6 +1196,7 @@ export function createSyncServer(
           docMessageLimiter.reset(docName);
         }
       }
+      metrics.wsConnectionsCurrent.set(wss.clients.size);
       logger.info({ ip, docName, userId: authCtx?.userId }, "ws_connection_closed");
     });
 
@@ -1108,6 +1220,7 @@ export function createSyncServer(
       (leveldbDocNameHashingEnabled && retentionManager?.isPurging(docName));
     if (purging) {
       logger.warn({ ip, docName }, "ws_connection_rejected_doc_purging");
+      recordUpgradeRejection("retention_purging");
       ws.close(1013, "Document is being purged");
       return;
     }
@@ -1138,6 +1251,7 @@ export function createSyncServer(
       const ip = pickIp(req, config.trustProxy);
 
       if (!connectionAttemptLimiter.consume(ip)) {
+        recordUpgradeRejection("rate_limit");
         sendUpgradeRejection(socket, 429, "Too Many Requests");
         return;
       }
@@ -1160,6 +1274,7 @@ export function createSyncServer(
         retentionManager?.isPurging(persistedName) ||
         (leveldbDocNameHashingEnabled && retentionManager?.isPurging(docName));
       if (purging) {
+        recordUpgradeRejection("retention_purging");
         sendUpgradeRejection(socket, 503, "Document is being purged");
         return;
       }
@@ -1170,6 +1285,7 @@ export function createSyncServer(
         authCtx = authenticateRequest(config.auth, token, docName);
       } catch (err) {
         if (err instanceof AuthError) {
+          recordUpgradeRejection("auth_failure");
           sendUpgradeRejection(socket, err.statusCode, err.message);
           return;
         }
@@ -1178,12 +1294,14 @@ export function createSyncServer(
 
       const docKey = docKeyFromDocName(docName);
       if (tombstones.has(docKey)) {
+        recordUpgradeRejection("tombstone");
         sendUpgradeRejection(socket, 410, "Gone");
         return;
       }
 
       const connResult = connectionTracker.tryRegister(ip);
       if (!connResult.ok) {
+        recordUpgradeRejection("rate_limit");
         sendUpgradeRejection(socket, 429, connResult.reason);
         return;
       }
@@ -1377,13 +1495,15 @@ export function createSyncServer(
     getHttpUrl() {
       const addr = server.address() as AddressInfo | null;
       const port = addr?.port ?? config.port;
-      return `http://${config.host}:${port}`;
+      const scheme = config.tls ? "https" : "http";
+      return `${scheme}://${config.host}:${port}`;
     },
 
     getWsUrl() {
       const addr = server.address() as AddressInfo | null;
       const port = addr?.port ?? config.port;
-      return `ws://${config.host}:${port}`;
+      const scheme = config.tls ? "wss" : "ws";
+      return `${scheme}://${config.host}:${port}`;
     },
   };
 
