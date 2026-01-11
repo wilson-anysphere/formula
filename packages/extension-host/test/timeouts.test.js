@@ -224,3 +224,68 @@ test("timeouts: custom function timeout terminates a hanging handler", async (t)
 
   await assert.rejects(() => host.invokeCustomFunction("TEST_HANG"), /custom function.*timed out/i);
 });
+
+test("timeouts: worker termination clears runtime context menus and can re-register after restart", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-timeout-menus-"));
+  const extDir = path.join(dir, "ext");
+
+  await writeExtension(
+    extDir,
+    {
+      name: "timeout-menus",
+      version: "1.0.0",
+      publisher: "test",
+      main: "extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: ["onCommand:test.quick", "onCommand:test.hangLoop"],
+      contributes: {
+        commands: [
+          { command: "test.quick", title: "Quick" },
+          { command: "test.hangLoop", title: "Hang Loop" }
+        ]
+      },
+      permissions: ["ui.commands", "ui.menus"]
+    },
+    `
+      const formula = require("formula");
+
+      module.exports.activate = async () => {
+        await formula.ui.registerContextMenu("cell/context", [{ command: "test.hangLoop" }]);
+
+        await formula.commands.registerCommand("test.quick", async () => "ok");
+        await formula.commands.registerCommand("test.hangLoop", async () => {
+          // eslint-disable-next-line no-constant-condition
+          while (true) {}
+        });
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true,
+    activationTimeoutMs: 1000,
+    commandTimeoutMs: 100
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  assert.equal(await host.executeCommand("test.quick"), "ok");
+  assert.deepEqual(host.getContributedMenu("cell/context"), [
+    { extensionId: "test.timeout-menus", command: "test.hangLoop", when: null, group: null }
+  ]);
+
+  await assert.rejects(() => host.executeCommand("test.hangLoop"), /timed out/i);
+  assert.deepEqual(host.getContributedMenu("cell/context"), []);
+
+  assert.equal(await host.executeCommand("test.quick"), "ok");
+  assert.deepEqual(host.getContributedMenu("cell/context"), [
+    { extensionId: "test.timeout-menus", command: "test.hangLoop", when: null, group: null }
+  ]);
+});
