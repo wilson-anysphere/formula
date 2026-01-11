@@ -159,10 +159,16 @@ export async function listSecrets(db: Queryable, prefix?: string): Promise<strin
     return result.rows.map((row: any) => String(row.name));
   }
 
-  const escapedPrefix = prefix.replace(/[%_\\]/g, "\\$&");
-  const pattern = `${escapedPrefix}%`;
-  const result = await db.query("SELECT name FROM secrets WHERE name LIKE $1 ESCAPE '\\' ORDER BY name ASC", [
-    pattern
-  ]);
+  // Avoid `LIKE ... ESCAPE` here: pg-mem does not fully support it and we want
+  // prefix matching to treat `%`/`_` as literal characters. Instead, express the
+  // prefix query as a range scan on the primary key.
+  const lower = prefix;
+  // U+10FFFF is the maximum valid Unicode code point; appending it provides an
+  // exclusive upper bound that includes all strings starting with `prefix`.
+  const upper = `${prefix}\u{10FFFF}`;
+  const result = await db.query(
+    "SELECT name FROM secrets WHERE name >= $1 AND name < $2 ORDER BY name ASC",
+    [lower, upper]
+  );
   return result.rows.map((row: any) => String(row.name));
 }
