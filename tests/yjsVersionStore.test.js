@@ -112,3 +112,41 @@ test("YjsVersionStore: rejects unknown schemaVersion", async () => {
 
   await assert.rejects(() => store.getVersion("bad"), /unsupported schemaVersion/i);
 });
+
+test("YjsVersionStore: listVersions is deterministic when timestamps are equal (insertion order tie-breaker)", async () => {
+  const ydoc = new Y.Doc();
+  const store = new YjsVersionStore({ doc: ydoc, compression: "none" });
+
+  await store.saveVersion({
+    id: "v1",
+    kind: "snapshot",
+    timestampMs: 0,
+    userId: null,
+    userName: null,
+    description: "first",
+    checkpointName: null,
+    checkpointLocked: null,
+    checkpointAnnotations: null,
+    snapshot: new Uint8Array([1]),
+  });
+
+  await store.saveVersion({
+    id: "v2",
+    kind: "snapshot",
+    timestampMs: 0,
+    userId: null,
+    userName: null,
+    description: "second",
+    checkpointName: null,
+    checkpointLocked: null,
+    checkpointAnnotations: null,
+    snapshot: new Uint8Array([2]),
+  });
+
+  const versions = await store.listVersions();
+  assert.deepEqual(
+    versions.map((v) => v.id),
+    ["v2", "v1"],
+    "expected last inserted to be listed first when timestamps match",
+  );
+});
