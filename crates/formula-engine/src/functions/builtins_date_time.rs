@@ -461,6 +461,51 @@ fn weeknum_scalar(serial: &Value, return_type: Option<i32>, system: ExcelDateSys
 
 inventory::submit! {
     FunctionSpec {
+        name: "ISOWEEKNUM",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: isoweeknum_fn,
+    }
+}
+
+// Excel stores ISOWEEKNUM with an `_xlfn.` prefix in older file formats.
+// Some spreadsheets also surface it as `ISO.WEEKNUM`; register an alias for compatibility.
+inventory::submit! {
+    FunctionSpec {
+        name: "ISO.WEEKNUM",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: isoweeknum_fn,
+    }
+}
+
+fn isoweeknum_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let serial = eval_scalar_arg(ctx, &args[0]);
+    let system = ctx.date_system();
+    map_unary(serial, |serial| {
+        let serial = match coerce_to_serial_floor(&serial) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        match date_time::weeknum(serial, Some(21), system) {
+            Ok(v) => Value::Number(v as f64),
+            Err(e) => Value::Error(excel_error_kind(e)),
+        }
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "WORKDAY",
         min_args: 2,
         max_args: 3,

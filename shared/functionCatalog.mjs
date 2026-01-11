@@ -578,6 +578,26 @@ export default {
       ]
     },
     {
+      "name": "ISO.WEEKNUM",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "ISOWEEKNUM",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "ISTEXT",
       "min_args": 1,
       "max_args": 1,

@@ -142,6 +142,8 @@ fn weekday_and_weeknum_return_types() {
     assert_number(&sheet.eval("=WEEKNUM(DATE(2020,1,5),2)"), 1.0);
     assert_number(&sheet.eval("=WEEKNUM(DATE(2020,1,6),2)"), 2.0);
     assert_number(&sheet.eval("=WEEKNUM(DATE(2021,1,1),21)"), 53.0);
+    assert_number(&sheet.eval("=ISOWEEKNUM(DATE(2021,1,1))"), 53.0);
+    assert_number(&sheet.eval("=ISO.WEEKNUM(DATE(2021,1,1))"), 53.0);
     assert_eq!(sheet.eval("=WEEKNUM(1,9)"), Value::Error(ErrorKind::Num));
 }
 
