@@ -13,7 +13,6 @@ import type { TokenEstimator } from "../../../../../packages/ai-context/src/toke
 import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 import type { LLMClient, ToolCall } from "../../../../../packages/llm/src/types.js";
-import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js";
 import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
 
 import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
@@ -258,11 +257,6 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     const toolPolicy = decideAllowedTools({ mode: "agent", user_text: goal, has_attachments: false, allow_external_data: false });
 
     const dlp = maybeGetAiCloudDlpOptions({ documentId: params.workbookId, sheetId: defaultSheetId }) ?? undefined;
-    // Preserve the DesktopRagService incremental indexing fast-path when the workbook
-    // has no classifications and cloud processing isn't outright forbidden.
-    const aiRule = (dlp as any)?.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING];
-    const shouldApplyDlpToContext = dlp ? dlp.classificationRecords.length > 0 || aiRule?.maxAllowed == null : false;
-    const dlpForContext = shouldApplyDlpToContext ? dlp : undefined;
 
     const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
       default_sheet: defaultSheetId,
@@ -307,7 +301,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
           spreadsheet,
           workbookId: params.workbookId,
           query: goal,
-          dlp: dlpForContext
+          dlp
         })
       );
       if (!targetMessages.length || targetMessages[0]?.role !== "system") {

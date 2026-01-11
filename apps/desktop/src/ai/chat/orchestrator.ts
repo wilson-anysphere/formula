@@ -22,7 +22,6 @@ import { decideAllowedTools } from "../../../../../packages/ai-tools/src/llm/too
 import type { PreviewEngineOptions, ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 
-import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js";
 import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
 
 import type { DocumentController } from "../../document/documentController.js";
@@ -205,12 +204,6 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     const attachments = params.attachments ?? [];
 
     const dlp = maybeGetAiCloudDlpOptions({ documentId: options.workbookId, sheetId: activeSheetId }) ?? undefined;
-    // DLP context building triggers a full workbook scan for redaction before indexing.
-    // Preserve the desktop RAG service's incremental indexing fast path when there are
-    // no classifications and the policy doesn't outright forbid cloud processing.
-    const aiRule = (dlp as any)?.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING];
-    const shouldApplyDlpToContext = dlp ? dlp.classificationRecords.length > 0 || aiRule?.maxAllowed == null : false;
-    const dlpForContext = shouldApplyDlpToContext ? dlp : undefined;
 
     let workbookContext: any;
     try {
@@ -219,7 +212,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         workbookId: options.workbookId,
         query: text,
         attachments,
-        dlp: dlpForContext
+        dlp
       });
     } catch (error) {
       // Hard stop: DLP says we cannot send any workbook content to a cloud model.
