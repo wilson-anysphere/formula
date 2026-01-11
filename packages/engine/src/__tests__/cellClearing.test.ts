@@ -126,6 +126,10 @@ class WasmBackedWorker implements WorkerLike {
             }
             result = null;
             break;
+          case "setRange":
+            this.workbook?.setRange(params.range, params.values, params.sheet);
+            result = null;
+            break;
           case "recalculate":
             result = this.workbook?.recalculate(params.sheet);
             break;
@@ -223,6 +227,38 @@ describe("EngineWorker null clear semantics", () => {
       const exported = JSON.parse(await engine.toJson());
       expect(exported.sheets.Sheet1.cells).not.toHaveProperty("A1");
       expect(exported.sheets.Sheet1.cells).toHaveProperty("A2");
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("clears null entries passed to setRange and updates dependents", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+      await engine.setRange("A1:B1", [[1, 2]]);
+      await engine.setCell("C1", "=A1+B1");
+      await engine.recalculate();
+      expect((await engine.getCell("C1")).value).toBe(3);
+
+      await engine.setRange("A1", [[null]]);
+      const changes = await engine.recalculate();
+      expect(changes).toEqual(expect.arrayContaining([{ sheet: "Sheet1", address: "C1", value: 2 }]));
+
+      const a1 = await engine.getCell("A1");
+      expect(a1.input).toBeNull();
+      expect(a1.value).toBeNull();
+
+      const exported = JSON.parse(await engine.toJson());
+      expect(exported.sheets.Sheet1.cells).not.toHaveProperty("A1");
     } finally {
       engine.terminate();
     }
