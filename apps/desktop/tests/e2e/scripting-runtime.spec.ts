@@ -43,7 +43,34 @@ ctx.ui.log("status", res.status);
       },
     );
 
-    return { mainRun, computed, format, selection, blockedNetwork, allowlistedNetwork };
+    const allowlistDenied = await runtime.run(
+      `
+await ctx.fetch("https://example.com");
+`,
+      {
+        permissions: { network: "allowlist", networkAllowlist: ["localhost"] },
+      },
+    );
+
+    const allowlistWebSocketDenied = await runtime.run(
+      `
+new WebSocket("wss://example.com");
+`,
+      {
+        permissions: { network: "allowlist", networkAllowlist: ["localhost"] },
+      },
+    );
+
+    return {
+      mainRun,
+      computed,
+      format,
+      selection,
+      blockedNetwork,
+      allowlistedNetwork,
+      allowlistDenied,
+      allowlistWebSocketDenied,
+    };
   };
 
   let result;
@@ -74,4 +101,7 @@ ctx.ui.log("status", res.status);
   expect(result.blockedNetwork.error?.message).toContain("Network access");
   expect(result.allowlistedNetwork.error).toBeUndefined();
   expect(result.allowlistedNetwork.logs.some((entry) => entry.message.includes("status"))).toBe(true);
+
+  expect(result.allowlistDenied.error?.message).toContain("example.com");
+  expect(result.allowlistWebSocketDenied.error?.message).toContain("example.com");
 });
