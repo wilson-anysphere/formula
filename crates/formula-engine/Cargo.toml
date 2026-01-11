@@ -37,6 +37,8 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
 proptest = "1"
 rand = "0.8"

@@ -1,10 +1,20 @@
+// Criterion + rand rely on OS functionality that is not available on `wasm32-unknown-unknown`.
+// Provide a no-op main so `cargo check -p formula-engine --target wasm32-unknown-unknown --benches`
+// succeeds (useful for CI sanity checks), while keeping the native benchmark intact.
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+#[cfg(not(target_arch = "wasm32"))]
 use formula_engine::bytecode::{
     eval_ast, parse_formula, BytecodeCache, CalcGraph, CellCoord, ColumnarGrid, FormulaCell,
     RecalcEngine, Vm,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
+#[cfg(not(target_arch = "wasm32"))]
 fn bench_parse(c: &mut Criterion) {
     let mut group = c.benchmark_group("parse");
     let origin = CellCoord::new(10, 3);
@@ -15,6 +25,7 @@ fn bench_parse(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn bench_compile(c: &mut Criterion) {
     let origin = CellCoord::new(10, 3);
     let formula = "=SUM(A1:A100)+B1*C1-42/7";
@@ -30,9 +41,12 @@ fn bench_compile(c: &mut Criterion) {
     });
     let cache = BytecodeCache::new();
     cache.get_or_compile(&expr);
-    c.bench_function("compile_cache_hit", |b| b.iter(|| cache.get_or_compile(&expr)));
+    c.bench_function("compile_cache_hit", |b| {
+        b.iter(|| cache.get_or_compile(&expr))
+    });
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn bench_eval_single(c: &mut Criterion) {
     let mut grid = ColumnarGrid::new(200, 10);
     for row in 0..100 {
@@ -50,9 +64,12 @@ fn bench_eval_single(c: &mut Criterion) {
     c.bench_function("eval_bytecode_single", |b| {
         b.iter(|| vm.eval(&program, &grid, origin))
     });
-    c.bench_function("eval_ast_single", |b| b.iter(|| eval_ast(&expr, &grid, origin)));
+    c.bench_function("eval_ast_single", |b| {
+        b.iter(|| eval_ast(&expr, &grid, origin))
+    });
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn bench_recalc(c: &mut Criterion) {
     let mut group = c.benchmark_group("recalc");
 
@@ -71,6 +88,7 @@ fn bench_recalc(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn build_independent_workbook(n: usize) -> (RecalcEngine, CalcGraph, ColumnarGrid) {
     let engine = RecalcEngine::new();
     let rows = n as i32;
@@ -99,5 +117,13 @@ fn build_independent_workbook(n: usize) -> (RecalcEngine, CalcGraph, ColumnarGri
     (engine, graph, grid)
 }
 
-criterion_group!(benches, bench_parse, bench_compile, bench_eval_single, bench_recalc);
+#[cfg(not(target_arch = "wasm32"))]
+criterion_group!(
+    benches,
+    bench_parse,
+    bench_compile,
+    bench_eval_single,
+    bench_recalc
+);
+#[cfg(not(target_arch = "wasm32"))]
 criterion_main!(benches);

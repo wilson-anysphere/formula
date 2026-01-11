@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use formula_engine::bytecode::{
     ast::{BinaryOp, Function, UnaryOp},
     eval_ast, parse_formula, BytecodeCache, CellCoord, ColumnarGrid, Expr, RangeRef, Ref, Value,
@@ -47,28 +49,19 @@ fn arb_sumproduct_ranges(
     (1i32..=3, 1i32..=3).prop_flat_map(move |(h, w)| {
         let max_r = (rows - h).max(0);
         let max_c = (cols - w).max(0);
-        (
-            0..=max_r,
-            0..=max_c,
-            0..=max_r,
-            0..=max_c,
-        )
-            .prop_map(move |(r0a, c0a, r0b, c0b)| {
-                let a0 = CellCoord::new(r0a, c0a);
-                let a1 = CellCoord::new(r0a + h - 1, c0a + w - 1);
-                let b0 = CellCoord::new(r0b, c0b);
-                let b1 = CellCoord::new(r0b + h - 1, c0b + w - 1);
+        (0..=max_r, 0..=max_c, 0..=max_r, 0..=max_c).prop_map(move |(r0a, c0a, r0b, c0b)| {
+            let a0 = CellCoord::new(r0a, c0a);
+            let a1 = CellCoord::new(r0a + h - 1, c0a + w - 1);
+            let b0 = CellCoord::new(r0b, c0b);
+            let b1 = CellCoord::new(r0b + h - 1, c0b + w - 1);
 
-                let ra0 = Ref::new(a0.row - base.row, a0.col - base.col, false, false);
-                let ra1 = Ref::new(a1.row - base.row, a1.col - base.col, false, false);
-                let rb0 = Ref::new(b0.row - base.row, b0.col - base.col, false, false);
-                let rb1 = Ref::new(b1.row - base.row, b1.col - base.col, false, false);
+            let ra0 = Ref::new(a0.row - base.row, a0.col - base.col, false, false);
+            let ra1 = Ref::new(a1.row - base.row, a1.col - base.col, false, false);
+            let rb0 = Ref::new(b0.row - base.row, b0.col - base.col, false, false);
+            let rb1 = Ref::new(b1.row - base.row, b1.col - base.col, false, false);
 
-                (
-                    RangeRef::new(ra0, ra1),
-                    RangeRef::new(rb0, rb1),
-                )
-            })
+            (RangeRef::new(ra0, ra1), RangeRef::new(rb0, rb1))
+        })
     })
 }
 
@@ -132,9 +125,11 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
                     args: vec![Expr::RangeRef(r)],
                 }),
                 // COUNTIF(range, number)
-                (arb_rect_range_ref(base, rows, cols), -10i32..=10).prop_map(|(r, n)| Expr::FuncCall {
-                    func: Function::CountIf,
-                    args: vec![Expr::RangeRef(r), Expr::Literal(Value::Number(n as f64))],
+                (arb_rect_range_ref(base, rows, cols), -10i32..=10).prop_map(|(r, n)| {
+                    Expr::FuncCall {
+                        func: Function::CountIf,
+                        args: vec![Expr::RangeRef(r), Expr::Literal(Value::Number(n as f64))],
+                    }
                 }),
                 // SUMPRODUCT(range_a, range_b)
                 arb_sumproduct_ranges(base, rows, cols).prop_map(|(a, b)| Expr::FuncCall {
