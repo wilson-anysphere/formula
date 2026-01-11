@@ -42,3 +42,11 @@ test("resolveFormulaConflict: surfaces true conflicts", () => {
   assert.equal(decision.kind, "conflict");
 });
 
+test("resolveFormulaConflict: empty vs non-empty formulas surface a conflict", () => {
+  const decision = resolveFormulaConflict({
+    localFormula: "",
+    remoteFormula: "=A1"
+  });
+
+  assert.equal(decision.kind, "conflict");
+});

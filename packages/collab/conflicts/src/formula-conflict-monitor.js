@@ -108,13 +108,16 @@ export class FormulaConflictMonitor {
     const ts = Date.now();
     const localClientId = this.doc.clientID;
     const startClock = Y.getState(this.doc.store, localClientId);
-    const deletedItemId = nextFormula ? null : getItemId(cell, "formula");
 
     this.doc.transact(() => {
       if (nextFormula) {
         cell.set("formula", nextFormula);
       } else {
-        cell.delete("formula");
+        // Store a null marker rather than deleting the key so subsequent writes
+        // can causally reference this deletion via Item.origin. Yjs map deletes
+        // do not create a new Item, which makes delete-vs-overwrite concurrency
+        // ambiguous without an explicit marker.
+        cell.set("formula", null);
       }
       cell.set("modified", ts);
       cell.set("modifiedBy", this.localUserId);
@@ -123,7 +126,7 @@ export class FormulaConflictMonitor {
     // Track locally so we can detect "remote overwrote my just-written formula".
     this._lastLocalFormulaEditByCellKey.set(cellKey, {
       formula: nextFormula,
-      itemId: nextFormula ? { client: localClientId, clock: startClock } : deletedItemId
+      itemId: { client: localClientId, clock: startClock }
     });
   }
 

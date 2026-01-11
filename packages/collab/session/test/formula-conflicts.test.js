@@ -203,6 +203,60 @@ test("CollabSession formula conflict monitor does not resurrect formulas on sequ
   docB.destroy();
 });
 
+test("CollabSession formula conflict monitor detects concurrent delete vs overwrite", async () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+  /** @type {Array<any>} */
+  const conflictsB = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      concurrencyWindowMs: 1,
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    formulaConflicts: {
+      localUserId: "user-b",
+      concurrencyWindowMs: 1,
+      onConflict: (c) => conflictsB.push(c),
+    },
+  });
+
+  await sessionA.setCellFormula("Sheet1:0:0", "=1");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, "=1");
+
+  // Offline concurrent edits: A clears, B overwrites.
+  disconnect();
+  await sessionA.setCellFormula("Sheet1:0:0", null);
+  await sessionB.setCellFormula("Sheet1:0:0", "=2");
+
+  disconnect = connectDocs(docA, docB);
+
+  const allConflicts = [...conflictsA, ...conflictsB];
+  assert.ok(allConflicts.length >= 1, "expected at least one conflict to be detected");
+
+  const conflict = allConflicts[0];
+  assert.equal(conflict.kind, "formula");
+  assert.ok(
+    [conflict.localFormula.trim(), conflict.remoteFormula.trim()].includes(""),
+    "expected one side of conflict to be empty"
+  );
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession value conflicts surface when enabled (formula+value mode)", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();

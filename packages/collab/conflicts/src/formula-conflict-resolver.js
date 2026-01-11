@@ -30,6 +30,14 @@ export function resolveFormulaConflict(input) {
     return { kind: "equivalent", chosenFormula: remoteFormula, reason: "ast-equivalent" };
   }
 
+  // Treat empty-vs-non-empty changes as a true conflict. An empty formula is not
+  // an AST subtree/extension of a non-empty formula, and the fallback substring
+  // heuristic would otherwise incorrectly auto-resolve because every string
+  // contains the empty string.
+  if (!localFormula || !remoteFormula) {
+    return { kind: "conflict", reason: "empty-vs-non-empty" };
+  }
+
   const parsedLocal = tryParse(localFormula);
   const parsedRemote = tryParse(remoteFormula);
 

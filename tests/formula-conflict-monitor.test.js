@@ -141,3 +141,31 @@ test("sequential deletes do not resurrect formulas or surface conflicts", () => 
   assert.equal(getFormula(a.cells, "s:0:0"), "");
   assert.equal(getFormula(b.cells, "s:0:0"), "");
 });
+
+test("concurrent delete vs overwrite surfaces a conflict", () => {
+  const a = createClient("alice");
+  const b = createClient("bob");
+
+  // Establish a common base formula.
+  a.monitor.setLocalFormula("s:0:0", "=1");
+  syncDocs(a.doc, b.doc);
+
+  // Offline concurrent edits: alice deletes, bob overwrites.
+  a.monitor.setLocalFormula("s:0:0", "");
+  b.monitor.setLocalFormula("s:0:0", "=2");
+
+  syncDocs(a.doc, b.doc);
+
+  const allConflicts = [...a.conflicts, ...b.conflicts];
+  assert.ok(allConflicts.length >= 1, "expected at least one conflict to be detected");
+
+  const conflictSide = a.conflicts.length > 0 ? a : b;
+  const conflict = conflictSide.conflicts[0];
+
+  assert.equal(conflict.kind, "formula");
+  assert.ok([conflict.localFormula.trim(), conflict.remoteFormula.trim()].includes(""), "expected one side of conflict to be empty");
+  assert.ok(
+    [conflict.localFormula.trim(), conflict.remoteFormula.trim()].some((f) => f.startsWith("=2") || f === "=2"),
+    "expected one side of conflict to be the overwrite"
+  );
+});
