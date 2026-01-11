@@ -3,8 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "smoke:wasm": "node scripts/smoke-wasm.mjs"
+  },
   "exports": {
     ".": "./src/index.ts"
   }
 }
-

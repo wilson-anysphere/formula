@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "pnpm -w build:wasm",
     "dev": "vite --port 4174 --strictPort",
+    "prebuild": "pnpm -w build:wasm",
     "build": "vite build",
     "preview": "vite preview --port 4174 --strictPort",
     "test:node": "node --test",

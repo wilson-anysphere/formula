@@ -10,6 +10,8 @@
   "scripts": {
     "dev": "pnpm --dir packages/grid dev",
     "dev:web": "pnpm --filter @formula/web dev",
+    "build:wasm": "pnpm -C packages/engine build:wasm",
+    "smoke:wasm": "pnpm -C packages/engine smoke:wasm",
     "build:web": "pnpm --filter @formula/web build",
     "dev:desktop": "pnpm -C apps/desktop dev",
     "dev:sync": "pnpm -C services/sync-server dev",

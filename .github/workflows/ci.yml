@@ -46,6 +46,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      
+      - name: Setup Rust toolchain (wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

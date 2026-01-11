@@ -23,6 +23,22 @@ For details, see:
 
 ## Development
 
+### Rust/WASM engine (formula-wasm)
+
+The JS `@formula/engine` package loads the Rust engine via `wasm-bindgen` artifacts generated from `crates/formula-wasm`.
+
+Build the WASM artifacts (requires `wasm-pack` on your `PATH`):
+
+```bash
+pnpm build:wasm
+```
+
+Smoke-check that the generated wrapper (`packages/engine/pkg/formula_wasm.js`) exists:
+
+```bash
+pnpm smoke:wasm
+```
+
 ### Web (preview target)
 
 ```bash
