@@ -215,3 +215,75 @@ test("schemaVersion=1 commits with metadata=undefined preserve existing metadata
   assert.equal(state.cells.Sheet1.A1.value, 2);
   assert.equal(state.metadata.scenario, "base");
 });
+
+test("schemaVersion=1 commits missing namedRanges preserve existing namedRanges", async () => {
+  const actor = { userId: "u1", role: "owner" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc-schema-v1-no-namedRanges", store });
+
+  await service.init(actor, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+    },
+    cells: { Sheet1: { A1: { value: 1 } } },
+    metadata: {},
+    namedRanges: { NR1: { sheetId: "Sheet1", rect: { r0: 0, c0: 0, r1: 0, c1: 0 } } },
+    comments: {},
+  });
+
+  await service.commit(actor, {
+    nextState: {
+      schemaVersion: 1,
+      sheets: {
+        order: ["Sheet1"],
+        metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+      },
+      cells: { Sheet1: { A1: { value: 2 } } },
+      metadata: {},
+      // namedRanges intentionally omitted
+      comments: {},
+    },
+  });
+
+  const state = await service.getCurrentState();
+  assert.equal(state.cells.Sheet1.A1.value, 2);
+  assert.ok(state.namedRanges.NR1);
+});
+
+test("schemaVersion=1 commits missing comments preserve existing comments", async () => {
+  const actor = { userId: "u1", role: "owner" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc-schema-v1-no-comments", store });
+
+  await service.init(actor, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+    },
+    cells: { Sheet1: { A1: { value: 1 } } },
+    metadata: {},
+    namedRanges: {},
+    comments: { c1: { id: "c1", cellRef: "A1", content: "hello", resolved: false, replies: [] } },
+  });
+
+  await service.commit(actor, {
+    nextState: {
+      schemaVersion: 1,
+      sheets: {
+        order: ["Sheet1"],
+        metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+      },
+      cells: { Sheet1: { A1: { value: 2 } } },
+      metadata: {},
+      namedRanges: {},
+      // comments intentionally omitted
+    },
+  });
+
+  const state = await service.getCurrentState();
+  assert.equal(state.cells.Sheet1.A1.value, 2);
+  assert.equal(state.comments.c1?.content, "hello");
+});

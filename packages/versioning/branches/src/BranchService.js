@@ -66,21 +66,21 @@ function isLegacyCellsOnlyState(value) {
 
 /**
  * Backwards-compatible detection for older schemaVersion=1 clients that existed
- * before BranchService started tracking workbook `metadata`.
+ * before BranchService started tracking some workbook-level maps (metadata,
+ * namedRanges, comments).
  *
- * Those clients will send a schemaVersion=1 state missing the `metadata` field.
- * Treat this as an overlay on the current branch head to avoid accidentally
- * deleting metadata keys they don't know about.
+ * Those clients will send a schemaVersion=1 state missing those fields (or with
+ * `null`/`undefined`/invalid values). Treat that as an overlay on the current
+ * branch head so older callers cannot accidentally delete keys they don't know
+ * about.
  *
  * @param {any} value
+ * @param {"metadata" | "namedRanges" | "comments"} field
  */
-function isLegacySchemaV1WithoutMetadata(value) {
+function shouldPreserveSchemaV1WorkbookMap(value, field) {
   if (!isRecord(value) || value.schemaVersion !== 1) return false;
-  if (!("metadata" in value)) return true;
-  // Some older/malformed callers may include the key but set it to null/undefined.
-  // Treat that as "metadata not supported" and preserve the current branch head.
-  const metadata = value.metadata;
-  return metadata === null || metadata === undefined;
+  if (!(field in value)) return true;
+  return !isRecord(value[field]);
 }
 
 /**
@@ -279,12 +279,27 @@ export class BranchService {
         if (!merged.sheets.order.includes(sheetId)) merged.sheets.order.push(sheetId);
       }
       effectiveNextState = merged;
-    } else if (isLegacySchemaV1WithoutMetadata(nextState)) {
-      // Migrate older schemaVersion=1 callers that pre-date workbook `metadata`.
-      // Preserve the current branch head metadata unless explicitly provided.
+    } else if (isRecord(nextState) && nextState.schemaVersion === 1) {
+      // Legacy/partial schemaVersion=1 callers: preserve any workbook-level maps
+      // they omit to avoid unintentionally deleting unknown keys.
       const merged = normalizeDocumentState(nextState);
-      merged.metadata = structuredClone(currentState.metadata ?? {});
-      effectiveNextState = merged;
+
+      let didOverlay = false;
+
+      if (shouldPreserveSchemaV1WorkbookMap(nextState, "metadata")) {
+        merged.metadata = structuredClone(currentState.metadata ?? {});
+        didOverlay = true;
+      }
+      if (shouldPreserveSchemaV1WorkbookMap(nextState, "namedRanges")) {
+        merged.namedRanges = structuredClone(currentState.namedRanges ?? {});
+        didOverlay = true;
+      }
+      if (shouldPreserveSchemaV1WorkbookMap(nextState, "comments")) {
+        merged.comments = structuredClone(currentState.comments ?? {});
+        didOverlay = true;
+      }
+
+      if (didOverlay) effectiveNextState = merged;
     }
 
     const patch = diffDocumentStates(currentState, effectiveNextState);
