@@ -15,7 +15,7 @@ type DlpContext = {
   sheetId?: string;
   range?: unknown;
   classificationStore: { list: (documentId: string) => Array<{ selector: unknown; classification: unknown }> };
-  policy: unknown;
+  policy: unknown | (() => unknown | Promise<unknown>);
 };
 
 export type DesktopQueryEngineOptions = {
@@ -419,8 +419,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
       onPermissionRequest: async (kind, details) => {
         const dlpAction = PERMISSION_KIND_TO_DLP_ACTION[kind];
         if (dlpAction === DLP_ACTION.EXTERNAL_CONNECTOR && options.dlp) {
-          const policy =
-            typeof (options.dlp as any).policy === "function" ? await (options.dlp as any).policy() : options.dlp.policy;
+          const policy = typeof options.dlp.policy === "function" ? await options.dlp.policy() : options.dlp.policy;
           enforceExternalConnector({
             documentId: options.dlp.documentId,
             sheetId: options.dlp.sheetId,
