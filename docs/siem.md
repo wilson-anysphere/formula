@@ -115,6 +115,10 @@ Example payload:
 }
 ```
 
+Notes:
+
+- `endpointUrl` must be `https:` in `NODE_ENV=production` (the API rejects plaintext HTTP in production).
+
 Authentication options:
 
 - `none`
