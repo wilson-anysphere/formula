@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{Cursor, Read};
 
 use formula_biff::encode_rgce;
+use formula_xlsb::rgce::{encode_rgce_with_context, CellCoord};
 use formula_xlsb::{patch_sheet_bin, CellEdit, CellValue, XlsbWorkbook};
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
@@ -266,6 +267,54 @@ fn patch_sheet_bin_can_update_formula_from_text() {
     assert_eq!(formula_cell.value, CellValue::Number(1.0));
     let formula = formula_cell.formula.as_ref().expect("formula metadata preserved");
     assert_eq!(formula.text.as_deref(), Some("IF(B1>0,B1*3,0)"));
+}
+
+#[test]
+fn patch_sheet_bin_can_update_udf_formula_using_workbook_context() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/udf.xlsb");
+    let wb = XlsbWorkbook::open(fixture).expect("open xlsb");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+
+    let ctx = wb.workbook_context();
+    let encoded = encode_rgce_with_context("=MyAddinFunc(1,2,3)", ctx, CellCoord::new(0, 3))
+        .expect("encode UDF via NameX");
+    assert!(
+        encoded.rgcb.is_empty(),
+        "UDF encoding should not require rgcb"
+    );
+
+    let sheet_bin = read_zip_part(fixture, &sheet_part);
+    let patched_sheet_bin = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 3,
+            new_value: CellValue::Number(0.0),
+            new_formula: Some(encoded.rgce),
+        }],
+    )
+    .expect("patch sheet bin");
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let out_path = tmpdir.path().join("patched-udf.xlsb");
+
+    wb.save_with_part_overrides(
+        &out_path,
+        &HashMap::from([(sheet_part.clone(), patched_sheet_bin)]),
+    )
+    .expect("write patched workbook");
+
+    let patched = XlsbWorkbook::open(&out_path).expect("open patched workbook");
+    let patched_sheet = patched.read_sheet(0).expect("read patched sheet");
+
+    let udf_cell = patched_sheet
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 3))
+        .expect("D1 cell");
+    assert_eq!(udf_cell.value, CellValue::Number(0.0));
+    let formula = udf_cell.formula.as_ref().expect("formula metadata preserved");
+    assert_eq!(formula.text.as_deref(), Some("MyAddinFunc(1,2,3)"));
 }
 
 #[test]
