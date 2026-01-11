@@ -21,14 +21,14 @@
  */
 
 /**
- * @typedef {{
- *   select?: string[];
- *   filter?: string;
- *   orderby?: string;
- *   skip?: number;
- *   top?: number;
- * }} ODataQueryOptions
- */
+  * @typedef {{
+  *   select?: string[];
+  *   filter?: string;
+  *   orderby?: string;
+  *   skip?: number;
+  *   top?: number;
+  * }} ODataQueryOptions
+  */
 
 /**
  * @typedef {{
@@ -407,6 +407,24 @@ function applyODataStep(current, operation) {
       }
       return { ...current, select: operation.columns.slice() };
     }
+    case "removeColumns": {
+      if (!Array.isArray(operation.columns)) return null;
+      if (operation.columns.length === 0) return { ...current };
+
+      // We can only express "remove columns" via `$select` when we already have an
+      // explicit projection.
+      if (!Array.isArray(current.select) || current.select.length === 0) return null;
+
+      const remove = new Set(operation.columns);
+      for (const col of operation.columns) {
+        if (!current.select.includes(col)) return null;
+      }
+
+      const remaining = current.select.filter((col) => !remove.has(col));
+      // `$select` cannot represent an empty table (0 columns), so keep this step local.
+      if (remaining.length === 0) return null;
+      return { ...current, select: remaining };
+    }
     case "filterRows": {
       // OData query options apply `$filter` *before* `$top`. If a `$top` limit is
       // already in play (either from a previous `take` or embedded in the source
@@ -478,6 +496,8 @@ function explainODataStepFailure(operation) {
   switch (operation.type) {
     case "selectColumns":
       return "invalid_select";
+    case "removeColumns":
+      return "unsupported_removeColumns";
     case "filterRows":
       return "unsupported_predicate";
     case "sortRows":
@@ -494,7 +514,7 @@ function explainODataStepFailure(operation) {
 export class ODataFoldingEngine {
   constructor() {
     /** @type {Set<QueryOperation["type"]>} */
-    this.foldable = new Set(["selectColumns", "filterRows", "sortRows", "skip", "take"]);
+    this.foldable = new Set(["selectColumns", "removeColumns", "filterRows", "sortRows", "skip", "take"]);
   }
 
   /**

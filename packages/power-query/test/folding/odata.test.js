@@ -61,6 +61,42 @@ test("OData folding: falls back to local when an operation is unsupported", () =
   assert.equal(explained.steps[2].reason, "folding_stopped");
 });
 
+test("OData folding: folds removeColumns when a projection is known", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_remove_cols",
+    name: "OData remove cols",
+    source: { type: "odata", url: "https://example.com/odata/Products" },
+    steps: [
+      { id: "s1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Name", "Price"] } },
+      { id: "s2", name: "Remove", operation: { type: "removeColumns", columns: ["Price"] } },
+      { id: "s3", name: "Take", operation: { type: "take", count: 5 } },
+    ],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "odata");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$select=Id,Name&$top=5");
+  assert.deepEqual(
+    explained.steps.map((s) => s.status),
+    ["folded", "folded", "folded"],
+  );
+});
+
+test("OData folding: removeColumns can fold against source URL $select", () => {
+  const folding = new ODataFoldingEngine();
+  const query = {
+    id: "q_odata_remove_cols_base",
+    name: "OData remove cols base",
+    source: { type: "odata", url: "https://example.com/odata/Products?$select=Id,Name,Price" },
+    steps: [{ id: "s1", name: "Remove", operation: { type: "removeColumns", columns: ["Price"] } }],
+  };
+
+  const explained = folding.explain(/** @type {any} */ (query));
+  assert.equal(explained.plan.type, "odata");
+  assert.equal(explained.plan.url, "https://example.com/odata/Products?$select=Id,Name");
+});
+
 test("OData folding: contains defaults to case-insensitive and casts values to text", () => {
   const folding = new ODataFoldingEngine();
   const query = {
