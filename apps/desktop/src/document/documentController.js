@@ -62,9 +62,11 @@ function encodeUtf8(text) {
  */
 function normalizeFormula(formula) {
   if (formula == null) return null;
-  const trimmed = String(formula).trimStart();
-  if (trimmed === "") return null;
-  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+  const trimmed = String(formula).trim();
+  const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+  const stripped = strippedLeading.trim();
+  if (stripped === "") return null;
+  return `=${stripped}`;
 }
 
 /**

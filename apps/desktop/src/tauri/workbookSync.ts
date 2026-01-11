@@ -1,3 +1,5 @@
+import { normalizeFormulaTextOpt } from "@formula/engine";
+
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
 type CellState = {
@@ -39,12 +41,6 @@ function resolveInvoke(engineBridge: unknown): TauriInvoke | null {
   return getTauriInvoke();
 }
 
-function normalizeFormulaText(formula: string): string {
-  const trimmed = formula.trimStart();
-  if (trimmed.startsWith("=")) return formula;
-  return `=${formula}`;
-}
-
 function valuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a == null || b == null) return false;
@@ -64,7 +60,10 @@ type PendingEdit = { sheetId: string; row: number; col: number; edit: RangeCellE
 
 function toRangeCellEdit(state: CellState): RangeCellEdit {
   if (state.formula != null) {
-    return { value: null, formula: normalizeFormulaText(state.formula) };
+    const normalized = normalizeFormulaTextOpt(state.formula);
+    if (normalized != null) {
+      return { value: null, formula: normalized };
+    }
   }
   return { value: (state.value ?? null) as unknown | null, formula: null };
 }

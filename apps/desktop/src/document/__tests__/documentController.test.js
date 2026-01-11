@@ -91,6 +91,25 @@ test("setCellFormula is undoable", () => {
   assert.equal(doc.getCell("Sheet1", "A1").formula, null);
 });
 
+test("formula normalization trims and treats bare '=' as empty", () => {
+  const doc = new DocumentController();
+
+  doc.setCellFormula("Sheet1", "A1", "  =  SUM(A1:A3)  ");
+  assert.equal(doc.getCell("Sheet1", "A1").formula, "=SUM(A1:A3)");
+
+  doc.setCellFormula("Sheet1", "A2", "==1+1");
+  assert.equal(doc.getCell("Sheet1", "A2").formula, "==1+1");
+
+  // Empty formulas (including a bare "=") clear the cell's formula.
+  doc.setCellFormula("Sheet1", "A3", "=");
+  assert.equal(doc.getCell("Sheet1", "A3").formula, null);
+  assert.equal(doc.getCell("Sheet1", "A3").value, null);
+
+  doc.setCellInput("Sheet1", "A4", "   =   ");
+  assert.equal(doc.getCell("Sheet1", "A4").formula, null);
+  assert.equal(doc.getCell("Sheet1", "A4").value, null);
+});
+
 test("setRangeFormat is undoable (formatting changes)", () => {
   const doc = new DocumentController();
 

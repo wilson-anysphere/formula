@@ -17,6 +17,8 @@ export type {
   CellValue,
 } from "./backend/workbookBackend";
 
+export { isFormulaInput, normalizeFormulaText, normalizeFormulaTextOpt } from "./backend/formula";
+
 export {
   engineApplyDeltas,
   engineHydrateFromDocument,
