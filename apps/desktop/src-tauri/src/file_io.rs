@@ -1204,4 +1204,42 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(unexpected.is_empty(), "unexpected diffs: {unexpected:?}");
     }
+
+    #[test]
+    fn saving_xlsm_as_xlsx_drops_vba_project() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("converted.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let written_bytes = std::fs::read(&out_path).expect("read written xlsx");
+        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+
+        assert!(
+            written_pkg.vba_project_bin().is_none(),
+            "expected vbaProject.bin to be removed when saving as .xlsx"
+        );
+
+        let ct = std::str::from_utf8(written_pkg.part("[Content_Types].xml").unwrap()).unwrap();
+        assert!(
+            !ct.contains("vbaProject.bin"),
+            "expected [Content_Types].xml to drop vbaProject.bin override"
+        );
+        assert!(
+            !ct.contains("macroEnabled.main+xml"),
+            "expected workbook content type to be converted back to .xlsx"
+        );
+
+        let rels = std::str::from_utf8(written_pkg.part("xl/_rels/workbook.xml.rels").unwrap())
+            .unwrap();
+        assert!(
+            !rels.contains("relationships/vbaProject"),
+            "expected workbook.xml.rels to drop the vbaProject relationship"
+        );
+    }
 }
