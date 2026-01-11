@@ -103,6 +103,25 @@ fn bytecode_backend_matches_ast_for_sum_and_countif() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_countif_grouped_numeric_criteria() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_value("Sheet1", "A1", 1000.0)
+        .expect("set A1");
+    engine
+        .set_cell_value("Sheet1", "A2", 999.0)
+        .expect("set A2");
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COUNTIF(A1:A2, \"1,000\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=COUNTIF(A1:A2, \"1,000\")", "B1");
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
 fn bytecode_cache_reuses_filled_formula_patterns_in_engine() {
     let mut engine = Engine::new();
 
