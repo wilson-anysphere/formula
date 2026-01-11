@@ -302,7 +302,12 @@ pub(crate) fn parse_biff_workbook_globals(
     }
 
     if !saw_eof {
-        return Err("unexpected end of workbook globals stream (missing EOF)".to_string());
+        // Some `.xls` files in the wild appear to be truncated or missing the
+        // workbook-global EOF record. Treat this as a warning and return any
+        // partial data we managed to parse so importers can still recover number
+        // formats/date system where possible.
+        out.warnings
+            .push("unexpected end of workbook globals stream (missing EOF)".to_string());
     }
 
     Ok(out)
@@ -1398,6 +1403,31 @@ mod tests {
         assert_eq!(globals.date_system, DateSystem::Excel1900);
         assert_eq!(globals.xf_count(), 1);
         assert_eq!(globals.resolve_number_format_code(0).as_deref(), Some("Ђ"));
+    }
+
+    #[test]
+    fn globals_missing_eof_returns_partial_with_warning() {
+        let r_bof_globals = record(0x0809, &[0u8; 16]);
+        let r_1904 = record(0x0022, &[1, 0]);
+
+        let mut xf_payload = vec![0u8; 20];
+        xf_payload[2..4].copy_from_slice(&14u16.to_le_bytes()); // built-in date format
+        let r_xf = record(0x00E0, &xf_payload);
+
+        // No EOF record and no subsequent BOF; parser should return partial globals with a warning.
+        let stream = [r_bof_globals, r_1904, r_xf].concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
+        assert_eq!(globals.date_system, DateSystem::Excel1904);
+        assert_eq!(globals.xf_count(), 1);
+        assert!(
+            globals.warnings.iter().any(|w| w.contains("missing EOF")),
+            "expected missing-EOF warning, got {:?}",
+            globals.warnings
+        );
+        assert_eq!(
+            globals.resolve_number_format_code(0).as_deref(),
+            Some("m/d/yyyy")
+        );
     }
 
     #[test]
