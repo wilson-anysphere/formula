@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 use crate::parser::{Biff12Reader, Error};
+use formula_format::Locale;
 
 /// Resolved style information for a single XF record referenced by cell `style` indices.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +31,16 @@ impl Styles {
     /// - custom number formats (`BrtFmt` within the `BrtBeginFmts` section)
     /// - XF records in the `BrtBeginCellXfs` section (the indices referenced by cells)
     pub fn parse(styles_bin: &[u8]) -> Result<Self, Error> {
+        Self::parse_with_locale(styles_bin, Locale::en_us())
+    }
+
+    /// Parse `xl/styles.bin` using locale-aware built-in number formats.
+    ///
+    /// XLSB/XLSX styles often reference built-in number formats by id without an
+    /// explicit format code. Excel's built-in table is locale-dependent, so
+    /// callers that know the workbook locale can pass it here to resolve
+    /// built-ins more accurately.
+    pub fn parse_with_locale(styles_bin: &[u8], locale: Locale) -> Result<Self, Error> {
         // Record ids (BIFF12 / MS-XLSB).
         const BEGIN_FMTS: u32 = 0x0298;
         const END_FMTS: u32 = 0x0299;
@@ -69,7 +80,8 @@ impl Styles {
             .into_iter()
             .map(|num_fmt_id| {
                 let number_format = custom_fmts.get(&num_fmt_id).cloned().or_else(|| {
-                    formula_format::builtin_format_code(num_fmt_id).map(|s| s.to_string())
+                    formula_format::builtin_format_code_with_locale(num_fmt_id, locale)
+                        .map(|s| s.into_owned())
                 });
 
                 // If we have a format string, run a light heuristic. If we don't, fall back
