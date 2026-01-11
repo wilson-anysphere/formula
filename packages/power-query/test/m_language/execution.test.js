@@ -194,6 +194,45 @@ in
   ]);
 });
 
+test("m_language execution: OData.Feed + select/remove/take/skip (folded)", async () => {
+  /** @type {string[]} */
+  const urls = [];
+  const connector = new ODataConnector({
+    fetch: async (url) => {
+      urls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: () => "application/json",
+        },
+        async json() {
+          return { value: [] };
+        },
+      };
+    },
+  });
+
+  const script = `
+let
+  Source = OData.Feed("https://example.com/odata/Products"),
+  #"Selected Columns" = Table.SelectColumns(Source, {"Id", "Name", "Price"}),
+  #"Removed Columns" = Table.RemoveColumns(#"Selected Columns", {"Price"}),
+  #"Kept First Rows" = Table.FirstN(#"Removed Columns", 10),
+  #"Removed Top Rows" = Table.Skip(#"Kept First Rows", 3)
+in
+  #"Removed Top Rows"
+`;
+
+  const query = compileMToQuery(script);
+  const engine = new QueryEngine({ connectors: { odata: connector } });
+  const result = await engine.executeQuery(query, {}, {});
+
+  assert.equal(urls.length, 1);
+  assert.equal(urls[0], "https://example.com/odata/Products?$select=Id,Name&$skip=3&$top=7");
+  assert.deepEqual(result.toGrid(), [["Id", "Name"]]);
+});
+
 test("m_language execution: Odbc.Query + Table.SelectColumns", async () => {
   const script = `
 let
