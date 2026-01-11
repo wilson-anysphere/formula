@@ -2,16 +2,136 @@ function cellKey(row, col) {
   return `${row},${col}`;
 }
 
+function columnLettersToIndex(letters) {
+  const cleaned = String(letters ?? "").trim().toUpperCase();
+  if (!/^[A-Z]+$/.test(cleaned)) {
+    throw new Error(`Invalid column letters: ${letters}`);
+  }
+
+  let index = 0;
+  for (const ch of cleaned) {
+    index = index * 26 + (ch.charCodeAt(0) - 64); // A=1
+  }
+  return index - 1; // 0-based
+}
+
+function parseA1CellRef(ref) {
+  const match = /^\s*\$?([A-Za-z]+)\$?(\d+)\s*$/.exec(String(ref ?? ""));
+  if (!match) throw new Error(`Invalid A1 cell reference: ${ref}`);
+  const [, colLetters, rowDigits] = match;
+  const row = Number.parseInt(rowDigits, 10) - 1; // 0-based
+  const col = columnLettersToIndex(colLetters);
+  if (!Number.isFinite(row) || row < 0) throw new Error(`Invalid row in A1 reference: ${ref}`);
+  return { row, col };
+}
+
+function parseA1RangeRef(ref) {
+  const raw = String(ref ?? "");
+  const parts = raw.split(":");
+  if (parts.length > 2) throw new Error(`Invalid A1 range reference: ${ref}`);
+  const start = parseA1CellRef(parts[0]);
+  const end = parts.length === 2 ? parseA1CellRef(parts[1]) : start;
+  return {
+    startRow: Math.min(start.row, end.row),
+    startCol: Math.min(start.col, end.col),
+    endRow: Math.max(start.row, end.row),
+    endCol: Math.max(start.col, end.col)
+  };
+}
+
 class InMemorySpreadsheet {
   constructor() {
-    this._cells = new Map();
-    this._selection = { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+    this._sheets = [
+      {
+        id: "sheet1",
+        name: "Sheet1",
+        cells: new Map(),
+        selection: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 }
+      }
+    ];
+    this._nextSheetId = 2;
+    this._activeSheetId = "sheet1";
     this._selectionListeners = new Set();
     this._cellListeners = new Set();
+    this._sheetListeners = new Set();
+  }
+
+  _getActiveSheetRecord() {
+    const sheet = this._sheets.find((s) => s.id === this._activeSheetId);
+    if (!sheet) {
+      // Should never happen, but keep behavior predictable for tests.
+      throw new Error(`Active sheet not found: ${this._activeSheetId}`);
+    }
+    return sheet;
+  }
+
+  getActiveSheet() {
+    const sheet = this._getActiveSheetRecord();
+    return { id: sheet.id, name: sheet.name };
+  }
+
+  getSheet(name) {
+    const sheet = this._sheets.find((s) => s.name === String(name));
+    if (!sheet) return undefined;
+    return { id: sheet.id, name: sheet.name };
+  }
+
+  createSheet(name) {
+    const sheetName = String(name);
+    if (sheetName.trim().length === 0) throw new Error("Sheet name must be a non-empty string");
+    if (this._sheets.some((s) => s.name === sheetName)) {
+      throw new Error(`Sheet already exists: ${sheetName}`);
+    }
+
+    const sheet = {
+      id: `sheet${this._nextSheetId++}`,
+      name: sheetName,
+      cells: new Map(),
+      selection: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 }
+    };
+    this._sheets.push(sheet);
+    this._activeSheetId = sheet.id;
+
+    const payload = { sheet: this.getActiveSheet() };
+    for (const listener of this._sheetListeners) listener(payload);
+
+    return { id: sheet.id, name: sheet.name };
+  }
+
+  renameSheet(oldName, newName) {
+    const from = String(oldName);
+    const to = String(newName);
+    if (to.trim().length === 0) throw new Error("New sheet name must be a non-empty string");
+    if (this._sheets.some((s) => s.name === to)) {
+      throw new Error(`Sheet already exists: ${to}`);
+    }
+
+    const sheet = this._sheets.find((s) => s.name === from);
+    if (!sheet) throw new Error(`Unknown sheet: ${from}`);
+    sheet.name = to;
+    return { id: sheet.id, name: sheet.name };
+  }
+
+  activateSheet(name) {
+    const sheetName = String(name);
+    const sheet = this._sheets.find((s) => s.name === sheetName);
+    if (!sheet) throw new Error(`Unknown sheet: ${sheetName}`);
+    if (sheet.id === this._activeSheetId) return this.getActiveSheet();
+
+    this._activeSheetId = sheet.id;
+    const payload = { sheet: this.getActiveSheet() };
+    for (const listener of this._sheetListeners) listener(payload);
+    return this.getActiveSheet();
+  }
+
+  onSheetActivated(callback) {
+    this._sheetListeners.add(callback);
+    return { dispose: () => this._sheetListeners.delete(callback) };
   }
 
   setSelection(range) {
-    this._selection = {
+    const sheet = this._getActiveSheetRecord();
+    sheet.selection = {
       startRow: range.startRow,
       startCol: range.startCol,
       endRow: range.endRow,
@@ -23,7 +143,7 @@ class InMemorySpreadsheet {
   }
 
   getSelection() {
-    const { startRow, startCol, endRow, endCol } = this._selection;
+    const { startRow, startCol, endRow, endCol } = this._getActiveSheetRecord().selection;
     return {
       startRow,
       startCol,
@@ -39,12 +159,14 @@ class InMemorySpreadsheet {
   }
 
   getCell(row, col) {
+    const sheet = this._getActiveSheetRecord();
     const key = cellKey(row, col);
-    return this._cells.has(key) ? this._cells.get(key) : null;
+    return sheet.cells.has(key) ? sheet.cells.get(key) : null;
   }
 
   setCell(row, col, value) {
-    this._cells.set(cellKey(row, col), value);
+    const sheet = this._getActiveSheetRecord();
+    sheet.cells.set(cellKey(row, col), value);
     const payload = { row, col, value };
     for (const listener of this._cellListeners) listener(payload);
   }
@@ -52,6 +174,41 @@ class InMemorySpreadsheet {
   onCellChanged(callback) {
     this._cellListeners.add(callback);
     return { dispose: () => this._cellListeners.delete(callback) };
+  }
+
+  getRange(ref) {
+    const { startRow, startCol, endRow, endCol } = parseA1RangeRef(ref);
+    return {
+      startRow,
+      startCol,
+      endRow,
+      endCol,
+      values: this.getRangeValues(startRow, startCol, endRow, endCol)
+    };
+  }
+
+  setRange(ref, values) {
+    const { startRow, startCol, endRow, endCol } = parseA1RangeRef(ref);
+    const expectedRows = endRow - startRow + 1;
+    const expectedCols = endCol - startCol + 1;
+
+    if (!Array.isArray(values) || values.length !== expectedRows) {
+      throw new Error(
+        `Range values must be a ${expectedRows}x${expectedCols} array (got ${Array.isArray(values) ? values.length : 0} rows)`
+      );
+    }
+
+    for (let r = 0; r < expectedRows; r++) {
+      const rowValues = values[r];
+      if (!Array.isArray(rowValues) || rowValues.length !== expectedCols) {
+        throw new Error(
+          `Range values must be a ${expectedRows}x${expectedCols} array (row ${r} has ${Array.isArray(rowValues) ? rowValues.length : 0} cols)`
+        );
+      }
+      for (let c = 0; c < expectedCols; c++) {
+        this.setCell(startRow + r, startCol + c, rowValues[c]);
+      }
+    }
   }
 
   getRangeValues(startRow, startCol, endRow, endCol) {

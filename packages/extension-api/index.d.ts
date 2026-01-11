@@ -46,12 +46,17 @@ export namespace workbook {
 
 export namespace sheets {
   function getActiveSheet(): Promise<Sheet>;
+  function getSheet(name: string): Promise<Sheet | undefined>;
+  function createSheet(name: string): Promise<Sheet>;
+  function renameSheet(oldName: string, newName: string): Promise<void>;
 }
 
 export namespace cells {
   function getSelection(): Promise<Range>;
+  function getRange(ref: string): Promise<Range>;
   function getCell(row: number, col: number): Promise<CellValue>;
   function setCell(row: number, col: number, value: CellValue): Promise<void>;
+  function setRange(ref: string, values: CellValue[][]): Promise<void>;
 }
 
 export namespace commands {
@@ -129,6 +134,8 @@ export namespace events {
   function onCellChanged(
     callback: (e: { row: number; col: number; value: CellValue }) => void
   ): Disposable;
+  function onSheetActivated(callback: (e: { sheet: Sheet }) => void): Disposable;
+  function onWorkbookOpened(callback: (e: { workbook: Workbook }) => void): Disposable;
   function onViewActivated(callback: (e: { viewId: string }) => void): Disposable;
 }
 

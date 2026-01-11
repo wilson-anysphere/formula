@@ -240,12 +240,20 @@ const cells = {
     return rpcCall("cells", "getSelection", []);
   },
 
+  async getRange(ref) {
+    return rpcCall("cells", "getRange", [String(ref)]);
+  },
+
   async getCell(row, col) {
     return rpcCall("cells", "getCell", [row, col]);
   },
 
   async setCell(row, col, value) {
     await rpcCall("cells", "setCell", [row, col, value]);
+  },
+
+  async setRange(ref, values) {
+    await rpcCall("cells", "setRange", [String(ref), values]);
   }
 };
 
@@ -258,6 +266,18 @@ const workbook = {
 const sheets = {
   async getActiveSheet() {
     return rpcCall("sheets", "getActiveSheet", []);
+  },
+
+  async getSheet(name) {
+    return rpcCall("sheets", "getSheet", [String(name)]);
+  },
+
+  async createSheet(name) {
+    return rpcCall("sheets", "createSheet", [String(name)]);
+  },
+
+  async renameSheet(oldName, newName) {
+    await rpcCall("sheets", "renameSheet", [String(oldName), String(newName)]);
   }
 };
 
@@ -397,6 +417,12 @@ const events = {
   },
   onCellChanged(callback) {
     return addEventHandler("cellChanged", callback);
+  },
+  onSheetActivated(callback) {
+    return addEventHandler("sheetActivated", callback);
+  },
+  onWorkbookOpened(callback) {
+    return addEventHandler("workbookOpened", callback);
   },
   onViewActivated(callback) {
     return addEventHandler("viewActivated", callback);

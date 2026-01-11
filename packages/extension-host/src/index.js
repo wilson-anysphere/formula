@@ -14,8 +14,14 @@ const API_PERMISSIONS = {
   "sheets.getActiveSheet": [],
 
   "cells.getSelection": ["cells.read"],
+  "cells.getRange": ["cells.read"],
   "cells.getCell": ["cells.read"],
   "cells.setCell": ["cells.write"],
+  "cells.setRange": ["cells.write"],
+
+  "sheets.getSheet": ["sheets.manage"],
+  "sheets.createSheet": ["sheets.manage"],
+  "sheets.renameSheet": ["sheets.manage"],
 
   "commands.registerCommand": ["ui.commands"],
   "commands.unregisterCommand": ["ui.commands"],
@@ -105,6 +111,7 @@ class ExtensionHost {
     this._memoryMb = Number.isFinite(memoryMb) ? Math.max(0, memoryMb) : 0;
     this._extensionStoragePath = extensionStoragePath;
     this._spreadsheet = spreadsheet;
+    this._workbook = { name: "MockWorkbook", path: null };
 
     // Security baseline: host-level permissions and audit logging for extension runtime.
     // The security package is ESM; extension-host is CJS, so we load it lazily.
@@ -125,6 +132,7 @@ class ExtensionHost {
 
     this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e));
     this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e));
+    this._spreadsheet.onSheetActivated?.((e) => this._broadcastEvent("sheetActivated", e));
   }
 
   get spreadsheet() {
@@ -184,6 +192,20 @@ class ExtensionHost {
       }
     }
     await Promise.all(tasks);
+
+    // Extensions that activate on startup should receive an initial workbook event.
+    this._broadcastEvent("workbookOpened", { workbook: this._workbook });
+  }
+
+  openWorkbook(workbookPath) {
+    const workbookPathStr = workbookPath == null ? null : String(workbookPath);
+    const name =
+      workbookPathStr == null || workbookPathStr.trim().length === 0
+        ? "MockWorkbook"
+        : path.basename(workbookPathStr);
+    this._workbook = { name, path: workbookPathStr };
+    this._broadcastEvent("workbookOpened", { workbook: this._workbook });
+    return this._workbook;
   }
 
   async activateView(viewId) {
@@ -578,16 +600,16 @@ class ExtensionHost {
       this._securityModulePromise = import("@formula/security")
         .catch(() => import(fallbackPath))
         .then((security) => {
-        const { AuditLogger, PermissionManager, SqliteAuditLogStore } = security;
-        const store = new SqliteAuditLogStore({ path: this._securityAuditDbPath });
-        const auditLogger = new AuditLogger({ store });
-        const permissionManager = new PermissionManager({ auditLogger });
+          const { AuditLogger, PermissionManager, SqliteAuditLogStore } = security;
+          const store = new SqliteAuditLogStore({ path: this._securityAuditDbPath });
+          const auditLogger = new AuditLogger({ store });
+          const permissionManager = new PermissionManager({ auditLogger });
 
-        this._securityModule = security;
-        this._securityAuditLogger = auditLogger;
-        this._securityPermissionManager = permissionManager;
-        return security;
-      });
+          this._securityModule = security;
+          this._securityAuditLogger = auditLogger;
+          this._securityPermissionManager = permissionManager;
+          return security;
+        });
     }
 
     await this._securityModulePromise;
@@ -667,16 +689,28 @@ class ExtensionHost {
   async _executeApi(namespace, method, args, extension) {
     switch (`${namespace}.${method}`) {
       case "workbook.getActiveWorkbook":
-        return { name: "MockWorkbook", path: null };
+        return this._workbook;
       case "sheets.getActiveSheet":
-        return { id: "sheet1", name: "Sheet1" };
+        return this._spreadsheet.getActiveSheet?.() ?? { id: "sheet1", name: "Sheet1" };
+      case "sheets.getSheet":
+        return this._spreadsheet.getSheet(args[0]);
+      case "sheets.createSheet":
+        return this._spreadsheet.createSheet(args[0]);
+      case "sheets.renameSheet":
+        this._spreadsheet.renameSheet(args[0], args[1]);
+        return null;
 
       case "cells.getSelection":
         return this._spreadsheet.getSelection();
+      case "cells.getRange":
+        return this._spreadsheet.getRange(args[0]);
       case "cells.getCell":
         return this._spreadsheet.getCell(args[0], args[1]);
       case "cells.setCell":
         this._spreadsheet.setCell(args[0], args[1], args[2]);
+        return null;
+      case "cells.setRange":
+        this._spreadsheet.setRange(args[0], args[1]);
         return null;
 
       case "commands.registerCommand":
