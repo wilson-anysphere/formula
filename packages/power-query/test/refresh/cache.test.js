@@ -137,6 +137,90 @@ test("QueryEngine: cache failures do not fail query execution", async () => {
   assert.equal(readCount, 2, "cache failures should not prevent query execution but also won't cache");
 });
 
+test("QueryEngine: cache mode bypass does not read or write cache entries", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store });
+
+  let readCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readText: async () => {
+        readCount += 1;
+        return ["Value", String(readCount)].join("\n");
+      },
+    },
+  });
+
+  const query = {
+    id: "q_bypass",
+    name: "Bypass",
+    source: { type: "csv", path: "/tmp/bypass.csv", options: { hasHeaders: true } },
+    steps: [],
+    refreshPolicy: { type: "manual" },
+  };
+
+  const first = await engine.executeQueryWithMeta(query, {}, { cache: { mode: "bypass" } });
+  assert.equal(first.meta.cache, undefined);
+  assert.equal(readCount, 1);
+
+  const second = await engine.executeQueryWithMeta(query, {}, { cache: { mode: "bypass" } });
+  assert.equal(second.meta.cache, undefined);
+  assert.equal(readCount, 2);
+
+  const third = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(third.meta.cache?.hit, false, "bypass should not have populated the cache");
+  assert.equal(readCount, 3);
+
+  const fourth = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(fourth.meta.cache?.hit, true);
+  assert.equal(readCount, 3);
+});
+
+test("QueryEngine: cache mode refresh recomputes and overwrites cached results", async () => {
+  const store = new MemoryCacheStore();
+  const cache = new CacheManager({ store });
+
+  let readCount = 0;
+  const engine = new QueryEngine({
+    cache,
+    fileAdapter: {
+      readText: async () => {
+        readCount += 1;
+        return ["Value", String(readCount)].join("\n");
+      },
+    },
+  });
+
+  const query = {
+    id: "q_refresh",
+    name: "Refresh",
+    source: { type: "csv", path: "/tmp/refresh.csv", options: { hasHeaders: true } },
+    steps: [],
+    refreshPolicy: { type: "manual" },
+  };
+
+  const first = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(first.meta.cache?.hit, false);
+  assert.equal(readCount, 1);
+  assert.deepEqual(first.table.toGrid(), [["Value"], [1]]);
+
+  const second = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(second.meta.cache?.hit, true);
+  assert.equal(readCount, 1);
+  assert.deepEqual(second.table.toGrid(), [["Value"], [1]]);
+
+  const refreshed = await engine.executeQueryWithMeta(query, {}, { cache: { mode: "refresh" } });
+  assert.equal(refreshed.meta.cache?.hit, false);
+  assert.equal(readCount, 2);
+  assert.deepEqual(refreshed.table.toGrid(), [["Value"], [2]]);
+
+  const after = await engine.executeQueryWithMeta(query, {}, {});
+  assert.equal(after.meta.cache?.hit, true);
+  assert.equal(readCount, 2);
+  assert.deepEqual(after.table.toGrid(), [["Value"], [2]]);
+});
+
 test("QueryEngine: caches by source + query + credentialId and still checks permissions", async () => {
   let now = 0;
   const store = new MemoryCacheStore();
