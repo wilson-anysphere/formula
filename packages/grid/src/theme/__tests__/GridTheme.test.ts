@@ -42,6 +42,28 @@ describe("grid theme resolution", () => {
     expect(resolveCssVarValue("var(--missing, #fff)", style)).toBe("#fff");
   });
 
+  it("uses the nearest available fallback when resolving missing vars or cycles", () => {
+    const styleMissing = {
+      getPropertyValue: (name: string) => {
+        if (name === "--a") return "var(--b)";
+        if (name === "--b") return "";
+        return "";
+      }
+    };
+
+    expect(resolveCssVarValue("var(--a, #fff)", styleMissing)).toBe("#fff");
+
+    const styleCycle = {
+      getPropertyValue: (name: string) => {
+        if (name === "--a") return "var(--b)";
+        if (name === "--b") return "var(--a)";
+        return "";
+      }
+    };
+
+    expect(resolveCssVarValue("var(--a, #fff)", styleCycle)).toBe("#fff");
+  });
+
   it("applies later sources last (prop overrides css)", () => {
     const style = {
       getPropertyValue: (name: string) => {

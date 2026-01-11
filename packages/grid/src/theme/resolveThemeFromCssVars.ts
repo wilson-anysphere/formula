@@ -80,14 +80,16 @@ export function resolveCssVarValue(
   const maxDepth = options?.maxDepth ?? 10;
   let current = value.trim();
   const seen = new Set<string>();
+  let lastFallback: string | null = null;
 
   for (let depth = 0; depth < maxDepth; depth++) {
     const parsed = parseCssVarFunction(current);
     if (!parsed) break;
 
     const { name, fallback } = parsed;
+    if (fallback !== null) lastFallback = fallback;
     if (seen.has(name)) {
-      current = fallback ?? "";
+      current = fallback ?? lastFallback ?? "";
       continue;
     }
     seen.add(name);
@@ -98,7 +100,7 @@ export function resolveCssVarValue(
       continue;
     }
 
-    current = fallback ?? "";
+    current = fallback ?? lastFallback ?? "";
   }
 
   return current;
