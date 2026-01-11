@@ -720,6 +720,8 @@ export class SpreadsheetApp {
       window.removeEventListener("keydown", this.windowKeyDownListener);
       this.windowKeyDownListener = null;
     }
+    this.outlineButtons.clear();
+    this.chartElements.clear();
     this.root.replaceChildren();
   }
 
@@ -2653,11 +2655,17 @@ export class SpreadsheetApp {
       return;
     }
 
-    const target = e.target as HTMLElement | null;
-    if (target) {
-      if (this.vScrollbarTrack.contains(target) || this.hScrollbarTrack.contains(target) || target.closest(".outline-toggle")) {
-        this.hideCommentTooltip();
-        return;
+    if (!this.dragState) {
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        if (
+          this.vScrollbarTrack.contains(target) ||
+          this.hScrollbarTrack.contains(target) ||
+          target.closest(".outline-toggle")
+        ) {
+          this.hideCommentTooltip();
+          return;
+        }
       }
     }
 
