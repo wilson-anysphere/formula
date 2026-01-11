@@ -34,6 +34,10 @@ export interface SendAiChatMessageParams {
    * `sendMessage` call.
    */
   history?: LLMMessage[];
+  /**
+   * Optional hook for UI surfaces that want to display tool calls as they happen.
+   */
+  onToolCall?: (call: LLMToolCall, meta: { requiresApproval: boolean }) => void;
 }
 
 export interface SendAiChatMessageResult {
@@ -197,6 +201,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         },
         messages: llmMessages as any,
         require_approval: requireApproval as any,
+        on_tool_call: params.onToolCall as any,
         audit: {
           audit_store: capturingAuditStore,
           session_id: sessionId,

@@ -7,6 +7,7 @@ import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
 import { getPanelTitle, PANEL_REGISTRY, PanelIds } from "./panels/panelRegistry.js";
+import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
 import { renderMacroRunner, TauriMacroBackend } from "./macros";
 import { DocumentWorkbookAdapter } from "./search/documentWorkbookAdapter.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
@@ -138,16 +139,9 @@ if (
     return getPanelTitle(panelId);
   }
 
-  function renderPanelBody(panelId: string, body: HTMLDivElement) {
-    if (panelId === PanelIds.AI_CHAT) {
-      body.textContent = "Ask a question about your data…";
-      return;
-    }
-    if (panelId === PanelIds.VERSION_HISTORY) {
-      body.textContent = "Version history will appear here.";
-      return;
-    }
-    if (panelId === PanelIds.MACROS) {
+  const panelBodyRenderer = createPanelBodyRenderer({
+    getDocumentController: () => app.getDocument(),
+    renderMacrosPanel: (body) => {
       body.textContent = "Loading macros…";
       queueMicrotask(() => {
         try {
@@ -159,14 +153,17 @@ if (
           body.textContent = `Macros backend not available: ${String(err)}`;
         }
       });
-      return;
-    }
-    if (panelId === PanelIds.VBA_MIGRATE) {
-      body.textContent = "VBA migration tools will appear here.";
-      return;
-    }
+    },
+  });
 
-    body.textContent = `Panel: ${panelId}`;
+  function openPanelIds() {
+    const layout = layoutController.layout;
+    return [
+      ...layout.docks.left.panels,
+      ...layout.docks.right.panels,
+      ...layout.docks.bottom.panels,
+      ...Object.keys(layout.floating),
+    ];
   }
 
   function renderDock(el: HTMLElement, zone: { panels: string[]; active: string | null }, currentSide: "left" | "right" | "bottom") {
@@ -246,7 +243,7 @@ if (
 
     const body = document.createElement("div");
     body.className = "dock-panel__body";
-    renderPanelBody(active, body);
+    panelBodyRenderer.renderPanelBody(active, body);
 
     panel.appendChild(header);
     panel.appendChild(body);
@@ -309,7 +306,7 @@ if (
 
       const body = document.createElement("div");
       body.className = "dock-panel__body";
-      renderPanelBody(panelId, body);
+      panelBodyRenderer.renderPanelBody(panelId, body);
 
       inner.appendChild(header);
       inner.appendChild(body);
@@ -326,6 +323,7 @@ if (
     renderDock(dockRight, layoutController.layout.docks.right, "right");
     renderDock(dockBottom, layoutController.layout.docks.bottom, "bottom");
     renderFloating();
+    panelBodyRenderer.cleanup(openPanelIds());
   }
 
   splitVertical.addEventListener("click", () => layoutController.setSplitDirection("vertical", 0.5));

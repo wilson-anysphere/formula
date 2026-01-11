@@ -22,6 +22,8 @@ export interface AuditedRunParams {
   audit: AuditedRunOptions;
   max_iterations?: number;
   require_approval?: (call: LLMToolCall) => Promise<boolean>;
+  on_tool_call?: (call: LLMToolCall, meta: { requiresApproval: boolean }) => void;
+  on_tool_result?: (call: LLMToolCall, result: unknown) => void;
 }
 
 /**
@@ -64,6 +66,7 @@ export async function runChatWithToolsAudited(params: AuditedRunParams): Promise
           parameters: call.arguments,
           requires_approval: Boolean(meta?.requiresApproval)
         });
+        params.on_tool_call?.(call, meta);
       },
       onToolResult: (call: any, toolResult: any) => {
         recorder.recordToolResult(call.id, {
@@ -72,6 +75,7 @@ export async function runChatWithToolsAudited(params: AuditedRunParams): Promise
           result: toolResult,
           error: toolResult?.error?.message ? String(toolResult.error.message) : undefined
         });
+        params.on_tool_result?.(call, toolResult);
       },
       requireApproval: async (call: any) => {
         const approved = await (params.require_approval ?? (async () => true))(call);

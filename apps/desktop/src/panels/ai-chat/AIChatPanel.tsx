@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 
-import type { Attachment, ChatMessage } from "./types";
-import type { LLMClient, ToolCall, ToolExecutor } from "../../../../../packages/llm/src/types.js";
+import type { Attachment, ChatMessage } from "./types.js";
+import type { LLMClient, LLMMessage, ToolCall, ToolExecutor } from "../../../../../packages/llm/src/types.js";
 import { runChatWithTools } from "../../../../../packages/llm/src/toolCalling.js";
 import { t, tWithVars } from "../../i18n/index.js";
 
@@ -16,7 +16,17 @@ export interface AIChatPanelProps {
   toolExecutor: ToolExecutor;
   systemPrompt?: string;
   onRequestToolApproval?: (call: ToolCall) => Promise<boolean>;
+  sendMessage?: AIChatPanelSendMessage;
 }
+
+export interface AIChatPanelSendMessageArgs {
+  messages: LLMMessage[];
+  userText: string;
+  attachments: Attachment[];
+  onToolCall: (call: ToolCall, meta: { requiresApproval: boolean }) => void;
+}
+
+export type AIChatPanelSendMessage = (args: AIChatPanelSendMessageArgs) => Promise<{ messages: LLMMessage[]; final: string }>;
 
 export function AIChatPanel(props: AIChatPanelProps) {
   const [input, setInput] = useState("");
@@ -61,22 +71,34 @@ export function AIChatPanel(props: AIChatPanelProps) {
         { id: crypto.randomUUID(), role: "assistant", content: "", pending: true },
       ]);
 
-      const result = await runChatWithTools({
-        client: props.client,
-        toolExecutor: props.toolExecutor,
+      const onToolCall = (call: ToolCall, meta: { requiresApproval: boolean }) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "tool",
+            content: `${call.name}(${JSON.stringify(call.arguments)})`,
+            requiresApproval: meta.requiresApproval,
+          },
+        ]);
+      };
+
+      const runner =
+        props.sendMessage ??
+        (async ({ messages, onToolCall }: AIChatPanelSendMessageArgs) =>
+          runChatWithTools({
+            client: props.client,
+            toolExecutor: props.toolExecutor,
+            messages: messages as any,
+            onToolCall,
+            requireApproval: props.onRequestToolApproval ?? (async () => true),
+          }) as any);
+
+      const result = await runner({
         messages: llmMessages as any,
-        onToolCall: (call, meta) => {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: "tool",
-              content: `${call.name}(${JSON.stringify(call.arguments)})`,
-              requiresApproval: meta.requiresApproval,
-            },
-          ]);
-        },
-        requireApproval: props.onRequestToolApproval ?? (async () => true),
+        userText: text,
+        attachments,
+        onToolCall,
       });
 
       setMessages((prev) => {
