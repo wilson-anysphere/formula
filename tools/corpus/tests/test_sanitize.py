@@ -186,6 +186,8 @@ class SanitizeTests(unittest.TestCase):
         self.assertIn("xl/charts/chart1.xml", summary.rewritten_parts)
         self.assertIn("xl/drawings/drawing1.xml", summary.rewritten_parts)
         self.assertIn("xl/tables/table1.xml", summary.rewritten_parts)
+        self.assertIn("xl/pivotCache/pivotCacheDefinition1.xml", summary.rewritten_parts)
+        self.assertIn("xl/pivotCache/pivotCacheRecords1.xml", summary.rewritten_parts)
 
         sensitive_tokens = [
             "alice@example.com",
@@ -194,6 +196,8 @@ class SanitizeTests(unittest.TestCase):
             "ACME_SECRET_TOKEN",
             "ACME_TABLE_SECRET",
             "ACME_COLUMN_SECRET",
+            "PIVOT_TOKEN_SECRET",
+            "PIVOT_FIELD_SECRET",
             "CHART_TOKEN_123",
             "DRAWING_TOKEN",
             "VBASECRET",

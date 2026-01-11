@@ -340,6 +340,63 @@ def _sanitize_vml_drawing(xml: bytes, *, options: SanitizeOptions) -> bytes:
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
+def _sanitize_pivot_cache_definition(
+    xml: bytes, *, options: SanitizeOptions, sheet_rename_map: dict[str, str] | None = None
+) -> bytes:
+    root = ET.fromstring(xml)
+    if root.tag.split("}")[-1] != "pivotCacheDefinition":
+        return xml
+
+    # Pivot caches can embed worksheet names (via cacheSource/worksheetSource) as well as
+    # cached item values (sharedItems). Both are common leakage vectors even when cells are
+    # redacted.
+    if sheet_rename_map:
+        for el in root.iter():
+            sheet = el.attrib.get("sheet")
+            if sheet and sheet in sheet_rename_map:
+                el.attrib["sheet"] = sheet_rename_map[sheet]
+
+    if options.scrub_metadata or options.hash_strings:
+        salt = _require_hash_salt(options)
+        field_idx = 1
+        for el in root.iter():
+            if el.tag.split("}")[-1] == "cacheField":
+                name = el.attrib.get("name")
+                if name:
+                    if options.hash_strings:
+                        el.attrib["name"] = _hash_text(name, salt=salt)
+                    else:
+                        el.attrib["name"] = f"Field{field_idx}"
+                    field_idx += 1
+            caption = el.attrib.get("caption")
+            if caption:
+                el.attrib["caption"] = _sanitize_text(caption, options=options)
+
+    if options.redact_cell_values or options.hash_strings:
+        # Cached unique values are stored under `<sharedItems>` / `<groupItems>` and can
+        # leak source data. Drop them so the workbook doesn't contain plaintext caches.
+        for parent in list(root.iter()):
+            for child in list(parent):
+                if child.tag.split("}")[-1] in {"sharedItems", "groupItems"}:
+                    parent.remove(child)
+
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _sanitize_pivot_cache_records(xml: bytes, *, options: SanitizeOptions) -> bytes:
+    root = ET.fromstring(xml)
+    if root.tag.split("}")[-1] != "pivotCacheRecords":
+        return xml
+
+    if options.redact_cell_values or options.hash_strings:
+        for child in list(root):
+            root.remove(child)
+        if "count" in root.attrib:
+            root.attrib["count"] = "0"
+
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
 def _sanitize_chart(
     xml: bytes,
     *,
@@ -977,6 +1034,18 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                         name.startswith("xl/threadedComments/") or name.startswith("xl/persons/")
                     ) and name.endswith(".xml") and (options.scrub_metadata or options.hash_strings):
                         new = _sanitize_threaded_comments(raw, options=options)
+                        rewritten.append(name)
+                    elif name.startswith("xl/pivotCache/") and name.endswith(".xml") and (
+                        options.redact_cell_values or options.hash_strings or options.scrub_metadata or options.rename_sheets
+                    ):
+                        if "pivotCacheDefinition" in posixpath.basename(name):
+                            new = _sanitize_pivot_cache_definition(
+                                raw,
+                                options=options,
+                                sheet_rename_map=sheet_rename_map or None,
+                            )
+                        elif "pivotCacheRecords" in posixpath.basename(name):
+                            new = _sanitize_pivot_cache_records(raw, options=options)
                         rewritten.append(name)
                     elif name.startswith("xl/tables/") and name.endswith(".xml") and (
                         options.scrub_metadata or options.hash_strings
