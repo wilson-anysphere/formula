@@ -1527,8 +1527,9 @@ impl Storage {
         let mut rows = stmt.query(params![workbook_id.to_string(), name])?;
 
         while let Some(row) = rows.next()? {
-            let raw_workbook_id: String = row.get(1)?;
-            let scope_value: String = row.get(3)?;
+            let Ok(scope_value) = row.get::<_, String>(3) else {
+                continue;
+            };
 
             let scope_matches = if wants_workbook_scope {
                 scope_value.eq_ignore_ascii_case("workbook")
@@ -1540,12 +1541,17 @@ impl Storage {
                 continue;
             }
 
+            let Ok(name) = row.get::<_, String>(2) else {
+                continue;
+            };
+            let Ok(reference) = row.get::<_, String>(4) else {
+                continue;
+            };
             return Ok(Some(NamedRange {
-                workbook_id: Uuid::parse_str(&raw_workbook_id)
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                name: row.get(2)?,
+                workbook_id,
+                name,
                 scope: scope_value,
-                reference: row.get(4)?,
+                reference,
             }));
         }
 
@@ -1571,8 +1577,12 @@ impl Storage {
             )?;
             let mut rows = stmt.query(params![range.workbook_id.to_string(), &range.name])?;
             while let Some(row) = rows.next()? {
-                let rowid: i64 = row.get(0)?;
-                let scope: String = row.get(2)?;
+                let Ok(rowid) = row.get::<_, i64>(0) else {
+                    continue;
+                };
+                let Ok(scope) = row.get::<_, String>(2) else {
+                    continue;
+                };
                 let scope_matches = if wants_workbook_scope {
                     scope.eq_ignore_ascii_case("workbook")
                 } else {
@@ -2221,9 +2231,15 @@ fn merge_named_ranges_into_defined_names(
     // surviving rows into the workbook in a deterministic order (scope/name).
     let mut winners: BTreeMap<(u8, String, String), LegacyNamedRangeRow> = BTreeMap::new();
     while let Some(row) = rows.next()? {
-        let name: String = row.get(1)?;
-        let scope_raw: String = row.get(2)?;
-        let reference: String = row.get(3)?;
+        let Ok(name) = row.get::<_, String>(1) else {
+            continue;
+        };
+        let Ok(scope_raw) = row.get::<_, String>(2) else {
+            continue;
+        };
+        let Ok(reference) = row.get::<_, String>(3) else {
+            continue;
+        };
 
         let (scope, scope_rank, scope_sort_key) = if scope_raw.eq_ignore_ascii_case("workbook") {
             (DefinedNameScope::Workbook, 0u8, String::new())
@@ -2381,9 +2397,15 @@ fn update_named_range_scopes_for_sheet_rename_tx(
 
     let mut to_update: Vec<(i64, String)> = Vec::new();
     while let Some(row) = rows.next()? {
-        let rowid: i64 = row.get(0)?;
-        let name: String = row.get(1)?;
-        let scope: String = row.get(2)?;
+        let Ok(rowid) = row.get::<_, i64>(0) else {
+            continue;
+        };
+        let Ok(name) = row.get::<_, String>(1) else {
+            continue;
+        };
+        let Ok(scope) = row.get::<_, String>(2) else {
+            continue;
+        };
         if scope.eq_ignore_ascii_case("workbook") {
             continue;
         }
@@ -2448,8 +2470,12 @@ fn delete_named_ranges_for_sheet_scope_tx(
 
     let mut to_delete: Vec<(String, String)> = Vec::new();
     while let Some(row) = rows.next()? {
-        let name: String = row.get(0)?;
-        let scope: String = row.get(1)?;
+        let Ok(name) = row.get::<_, String>(0) else {
+            continue;
+        };
+        let Ok(scope) = row.get::<_, String>(1) else {
+            continue;
+        };
         if scope.eq_ignore_ascii_case("workbook") {
             continue;
         }
@@ -2526,10 +2552,18 @@ fn rewrite_sheet_rename_references_tx(
 
         let mut rows = select_stmt.query(params![&workbook_id_str])?;
         while let Some(row) = rows.next()? {
-            let sheet_id: String = row.get(0)?;
-            let row_idx: i64 = row.get(1)?;
-            let col_idx: i64 = row.get(2)?;
-            let formula: String = row.get(3)?;
+            let Ok(sheet_id) = row.get::<_, String>(0) else {
+                continue;
+            };
+            let Ok(row_idx) = row.get::<_, i64>(1) else {
+                continue;
+            };
+            let Ok(col_idx) = row.get::<_, i64>(2) else {
+                continue;
+            };
+            let Ok(formula) = row.get::<_, String>(3) else {
+                continue;
+            };
             let rewritten = rewrite_sheet_names_in_formula(&formula, old_name, new_name);
             if rewritten != formula {
                 update_stmt.execute(params![rewritten, sheet_id, row_idx, col_idx])?;
@@ -2552,9 +2586,15 @@ fn rewrite_sheet_rename_references_tx(
 
         let mut rows = select_stmt.query(params![&workbook_id_str])?;
         while let Some(row) = rows.next()? {
-            let name: String = row.get(0)?;
-            let scope: String = row.get(1)?;
-            let reference: String = row.get(2)?;
+            let Ok(name) = row.get::<_, String>(0) else {
+                continue;
+            };
+            let Ok(scope) = row.get::<_, String>(1) else {
+                continue;
+            };
+            let Ok(reference) = row.get::<_, String>(2) else {
+                continue;
+            };
             let rewritten = rewrite_sheet_names_in_formula(&reference, old_name, new_name);
             if rewritten != reference {
                 update_stmt.execute(params![rewritten, &workbook_id_str, name, scope])?;
@@ -2799,10 +2839,18 @@ fn rewrite_sheet_delete_references_tx(
 
         let mut rows = select_stmt.query(params![&workbook_id_str])?;
         while let Some(row) = rows.next()? {
-            let sheet_id: String = row.get(0)?;
-            let row_idx: i64 = row.get(1)?;
-            let col_idx: i64 = row.get(2)?;
-            let formula: String = row.get(3)?;
+            let Ok(sheet_id) = row.get::<_, String>(0) else {
+                continue;
+            };
+            let Ok(row_idx) = row.get::<_, i64>(1) else {
+                continue;
+            };
+            let Ok(col_idx) = row.get::<_, i64>(2) else {
+                continue;
+            };
+            let Ok(formula) = row.get::<_, String>(3) else {
+                continue;
+            };
             let rewritten =
                 rewrite_deleted_sheet_references_in_formula(&formula, deleted_name, sheet_order);
             if rewritten != formula {
@@ -2826,9 +2874,15 @@ fn rewrite_sheet_delete_references_tx(
 
         let mut rows = select_stmt.query(params![&workbook_id_str])?;
         while let Some(row) = rows.next()? {
-            let name: String = row.get(0)?;
-            let scope: String = row.get(1)?;
-            let reference: String = row.get(2)?;
+            let Ok(name) = row.get::<_, String>(0) else {
+                continue;
+            };
+            let Ok(scope) = row.get::<_, String>(1) else {
+                continue;
+            };
+            let Ok(reference) = row.get::<_, String>(2) else {
+                continue;
+            };
             let rewritten = rewrite_deleted_sheet_references_in_formula(
                 &reference,
                 deleted_name,
