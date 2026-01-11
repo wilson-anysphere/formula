@@ -37,39 +37,39 @@ export default async function main(ctx) {
 }
 `);
 
-    const allowlistedNetwork = await runtime.run(
-      `
+      const allowlistedNetwork = await runtime.run(
+        `
 export default async function main(ctx) {
   const res = await ctx.fetch("/scripting-test.html");
   ctx.ui.log("status", res.status);
 }
 `,
-      {
-        permissions: { network: "allowlist", networkAllowlist: ["localhost"] },
-      },
-    );
+        {
+          permissions: { network: { mode: "allowlist", allowlist: ["localhost"] } },
+        },
+      );
 
-    const allowlistDenied = await runtime.run(
-      `
+      const allowlistDenied = await runtime.run(
+        `
 export default async function main(ctx) {
   await ctx.fetch("https://example.com");
 }
 `,
-      {
-        permissions: { network: "allowlist", networkAllowlist: ["localhost"] },
-      },
-    );
+        {
+          permissions: { network: { mode: "allowlist", allowlist: ["localhost"] } },
+        },
+      );
 
-    const allowlistWebSocketDenied = await runtime.run(
-      `
+      const allowlistWebSocketDenied = await runtime.run(
+        `
 export default async function main(ctx) {
   new WebSocket("wss://example.com");
 }
 `,
-      {
-        permissions: { network: "allowlist", networkAllowlist: ["localhost"] },
-      },
-    );
+        {
+          permissions: { network: { mode: "allowlist", allowlist: ["localhost"] } },
+        },
+      );
 
     const dynamicImportDenied = await runtime.run(`
 // Dynamic import is intentionally unsupported (it could otherwise bypass fetch/WebSocket sandboxing).
@@ -148,7 +148,7 @@ export default async function main(ctx) {
 
   expect(result.allowlistDenied.error?.message).toContain("example.com");
   expect(result.allowlistWebSocketDenied.error?.message).toContain("example.com");
-  expect(result.dynamicImportDenied.error?.message).toContain("dynamic import");
+  expect(result.dynamicImportDenied.error?.message).toMatch(/dynamic import/i);
   expect(result.dynamicImportDenied.error?.message).toContain("example.com");
 
   const workerTypeEntry = result.subworkerDenied.logs.find((entry) => entry.message.includes("WorkerType"));

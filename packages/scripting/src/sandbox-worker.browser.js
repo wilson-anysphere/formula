@@ -51,6 +51,27 @@ function installPermissionGuards(permissions) {
   const mode = permissions?.network?.mode ?? "none";
   const allowlist = permissions?.network?.allowlist ?? [];
 
+  // Prevent sandbox escapes by disabling powerful primitives that can spin up
+  // nested execution contexts or bypass fetch/WebSocket guards. These are
+  // best-effort overrides: in some environments these globals may be missing or
+  // non-writable.
+  for (const [key, value] of [
+    ["Worker", undefined],
+    ["XMLHttpRequest", undefined],
+    ["importScripts", undefined],
+  ]) {
+    try {
+      // eslint-disable-next-line no-param-reassign
+      self[key] = value;
+    } catch {
+      try {
+        Object.defineProperty(self, key, { value, configurable: true });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   const isAllowed = (urlString) => {
     const url = new URL(urlString, self.location?.href ?? "https://localhost");
     const origin = url.origin;
