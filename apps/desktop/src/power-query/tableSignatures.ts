@@ -54,6 +54,7 @@ function containsCell(rectangle: TableRectangle, cell: { row: number; col: numbe
  */
 export class TableSignatureRegistry {
   #tablesByName = new Map<string, TableRegistryEntry>();
+  #tablesByLowerName = new Map<string, TableRegistryEntry>();
   #tablesBySheetId = new Map<string, TableRegistryEntry[]>();
   #unsubscribe: (() => void) | null = null;
   #workbookSignatureHash: string;
@@ -90,6 +91,7 @@ export class TableSignatureRegistry {
         // cache keys can't collide with signatures from a previous workbook.
         this.#workbookSignatureHash = nextHash;
         this.#tablesByName = new Map();
+        this.#tablesByLowerName = new Map();
         this.#tablesBySheetId = new Map();
       }
     }
@@ -130,11 +132,12 @@ export class TableSignatureRegistry {
     }
 
     this.#tablesByName = next;
-    this.rebuildSheetIndex();
+    this.rebuildIndices();
   }
 
   getTableSignature(tableName: string): string | undefined {
-    const entry = this.#tablesByName.get(tableName);
+    const direct = this.#tablesByName.get(tableName);
+    const entry = direct ?? this.#tablesByLowerName.get(tableName.toLowerCase());
     if (!entry) return undefined;
     return `${this.#workbookSignatureHash}:${entry.definitionHash}:${entry.version}`;
   }
@@ -171,22 +174,22 @@ export class TableSignatureRegistry {
     }
 
     if (bumped.size > 0) {
-      // Update sheet index references for bumped entries (version is stored in the
-      // canonical `#tablesByName` map; sheet index entries hold stale references).
-      //
-      // Rebuilds are cheap (tables per workbook are small) and keep lookup fast.
-      this.rebuildSheetIndex();
+      // Rebuild indices so `#tablesBySheetId` and case-insensitive lookup reflect the bumped entries.
+      this.rebuildIndices();
     }
   }
 
-  private rebuildSheetIndex(): void {
+  private rebuildIndices(): void {
     const bySheet = new Map<string, TableRegistryEntry[]>();
+    const byLower = new Map<string, TableRegistryEntry>();
     for (const entry of this.#tablesByName.values()) {
+      byLower.set(entry.name.toLowerCase(), entry);
       const list = bySheet.get(entry.rectangle.sheetId);
       if (list) list.push(entry);
       else bySheet.set(entry.rectangle.sheetId, [entry]);
     }
     this.#tablesBySheetId = bySheet;
+    this.#tablesByLowerName = byLower;
   }
 }
 

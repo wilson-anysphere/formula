@@ -38,6 +38,11 @@ test("table signatures bump version when document edits touch the table rectangl
   const initial = context.getTableSignature?.("Table1");
   const parsedInitial = parseSignature(initial);
   assert.equal(parsedInitial.version, 0);
+  assert.equal(
+    context.getTableSignature?.("table1"),
+    initial,
+    "expected getTableSignature to resolve table names case-insensitively",
+  );
 
   // Outside the rectangle -> no bump.
   doc.setCellValue("Sheet1", "C1", 1);
