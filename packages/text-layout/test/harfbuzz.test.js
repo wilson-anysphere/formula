@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { TextLayoutEngine, createHarfBuzzTextMeasurer } from "../src/index.js";
+import { TextLayoutEngine } from "../src/index.js";
+import { createHarfBuzzTextMeasurer } from "../src/harfbuzz.js";
 
 /**
  * @param {number} value

@@ -10,6 +10,10 @@
     ".": {
       "types": "./index.d.ts",
       "default": "./src/index.js"
+    },
+    "./harfbuzz": {
+      "types": "./harfbuzz.d.ts",
+      "default": "./src/harfbuzz.js"
     }
   },
   "scripts": {
