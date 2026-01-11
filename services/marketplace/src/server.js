@@ -314,7 +314,15 @@ async function createMarketplaceServer({ dataDir, adminToken = null, rateLimits:
           statusCode = 404;
           return sendJson(res, 404, { error: "Not found" });
         }
-        const etag = `"${sha256Hex(`${ext.id}|${ext.updatedAt || ""}|${ext.publisherPublicKeyPem || ""}`)}"`;
+        const publisherKeysTag = Array.isArray(ext.publisherKeys)
+          ? ext.publisherKeys
+              .filter((k) => k && typeof k.id === "string")
+              .map((k) => `${k.id}:${k.revoked ? 1 : 0}`)
+              .join("|")
+          : "";
+        const etag = `"${sha256Hex(
+          `${ext.id}|${ext.updatedAt || ""}|${ext.publisherPublicKeyPem || ""}|${publisherKeysTag}`
+        )}"`;
         if (etagMatches(req.headers["if-none-match"], etag)) {
           statusCode = 304;
           res.writeHead(304, { ETag: etag, "Cache-Control": CACHE_CONTROL_REVALIDATE });

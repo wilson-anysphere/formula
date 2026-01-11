@@ -390,6 +390,7 @@ class MarketplaceStore {
     if (!legacy || typeof legacy !== "object") return;
 
     const now = new Date().toISOString();
+    const publisherKeyByPublisher = new Map();
 
     await this.db.withTransaction(async (tx) => {
       for (const publisherRecord of Object.values(legacy.publishers || {})) {
@@ -418,6 +419,7 @@ class MarketplaceStore {
         );
 
         if (keyId) {
+          publisherKeyByPublisher.set(publisherRecord.publisher, { id: keyId, publicKeyPem: normalizedKeyPem });
           tx.run(
             `INSERT INTO publisher_keys (id, publisher, public_key_pem, created_at, revoked, revoked_at, is_primary)
              VALUES (?, ?, ?, ?, 0, NULL, 1)
@@ -499,10 +501,13 @@ class MarketplaceStore {
             // Keep best-effort; package bytes are stored on disk for downloads.
           }
 
+          const publisherKey = publisherKeyByPublisher.get(String(extRecord.publisher));
+
           tx.run(
             `INSERT INTO extension_versions
-              (extension_id, version, sha256, signature_base64, manifest_json, readme, package_bytes, package_path, uploaded_at, yanked, yanked_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
+              (extension_id, version, sha256, signature_base64, manifest_json, readme, package_bytes, package_path, uploaded_at, yanked, yanked_at,
+               signing_key_id, signing_public_key_pem)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
              ON CONFLICT(extension_id, version) DO NOTHING`,
             [
               extRecord.id,
@@ -514,6 +519,8 @@ class MarketplaceStore {
               Buffer.alloc(0),
               storedPackagePath,
               v.uploadedAt || now,
+              publisherKey ? String(publisherKey.id) : null,
+              publisherKey ? String(publisherKey.publicKeyPem) : null,
             ]
           );
         }
@@ -568,6 +575,16 @@ class MarketplaceStore {
                ON CONFLICT(id) DO UPDATE SET
                  public_key_pem = excluded.public_key_pem`,
               [existingKeyId, publisher, existingPem, existing.created_at ? String(existing.created_at) : now]
+            );
+
+            // Best-effort backfill: versions published before key history existed all used the
+            // then-current publisher key. Capture it so downloads can include X-Publisher-Key-Id.
+            db.run(
+              `UPDATE extension_versions
+               SET signing_key_id = ?, signing_public_key_pem = ?
+               WHERE signing_key_id IS NULL
+                 AND extension_id IN (SELECT id FROM extensions WHERE publisher = ?)`,
+              [existingKeyId, existingPem, publisher]
             );
           } catch {
             // Ignore invalid legacy keys; publishers.public_key_pem is still updated below.
@@ -849,6 +866,14 @@ class MarketplaceStore {
             [keyId, publisher, fallbackPem, now]
           );
           db.run(`UPDATE publisher_keys SET is_primary = 0 WHERE publisher = ? AND id != ?`, [publisher, keyId]);
+
+          db.run(
+            `UPDATE extension_versions
+             SET signing_key_id = ?, signing_public_key_pem = ?
+             WHERE signing_key_id IS NULL
+               AND extension_id IN (SELECT id FROM extensions WHERE publisher = ?)`,
+            [keyId, fallbackPem, publisher]
+          );
         });
         publisherKeys = await this.getPublisherKeys(publisher, { includeRevoked: false });
       }
@@ -1544,7 +1569,6 @@ class MarketplaceStore {
       sha256: meta.sha256,
       formatVersion: meta.formatVersion,
       publisher: meta.publisher,
-      packagePath: includePath ? fullPath : null,
       signingKeyId: meta.signingKeyId,
       packagePath: includePath ? fullPath : null,
     };
