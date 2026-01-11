@@ -177,7 +177,7 @@ describe("VbaMigratePanel", () => {
     expect(host.querySelector('[data-testid="vba-conversion-error"]')).toBeFalsy();
     const output = host.querySelector('[data-testid="vba-converted-code"]') as HTMLTextAreaElement | null;
     expect(output?.value).toContain("export default async function main");
-    expect(output?.value).toContain('sheet.range("A1").value = 1');
+    expect(output?.value).toContain('await sheet.getRange("A1").setValue(1);');
     },
     10_000,
   );

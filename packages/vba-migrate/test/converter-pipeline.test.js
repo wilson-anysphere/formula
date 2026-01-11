@@ -63,7 +63,7 @@ End Sub
 
   assert.match(result.code, /\bexport default async function main\(ctx\)/);
   assert.match(result.code, /const sheet = ctx\.activeSheet/);
-  assert.match(result.code, /sheet\.range\("A1"\)\.value\s*=\s*1;/);
-  assert.match(result.code, /sheet\.cell\(1,\s*2\)\.value\s*=\s*2;/);
-  assert.match(result.code, /sheet\.range\("A3"\)\.formula\s*=\s*"=A1\+B1";/);
+  assert.match(result.code, /await sheet\.getRange\("A1"\)\.setValue\(\s*1\s*\);/);
+  assert.match(result.code, /await sheet\.getRange\("B1"\)\.setValue\(\s*2\s*\);/);
+  assert.match(result.code, /await sheet\.getRange\("A3"\)\.setFormulas\(\s*\[\s*\[\s*"=A1\+B1"\s*\]\s*\]\s*\)\s*;/);
 });

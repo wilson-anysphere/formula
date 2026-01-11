@@ -106,11 +106,77 @@ function ensureTypeScriptWrapper(code) {
 
 function normalizeTypeScriptObjectModel(code) {
   let out = String(code || "");
-  out = out.replace(/\bRange\(/g, "range(");
-  out = out.replace(/\bCells\(/g, "cell(");
-  out = out.replace(/\.Value\b/g, ".value");
-  out = out.replace(/\.Formula\b/g, ".formula");
-  return out;
+
+  // Convert common VBA-ish method casing into the ScriptRuntime API (`getRange` / `getCell`).
+  out = out.replace(/\b([A-Za-z_][A-Za-z0-9_]*)\.(?:Range|range)\(/g, "$1.getRange(");
+
+  // VBA `Cells(row, col)` is 1-indexed. Prefer converting to A1 + getRange(...) so we don't
+  // have to guess whether ScriptRuntime's `getCell(row, col)` is 0- or 1-indexed.
+  out = out.replace(
+    /\b([A-Za-z_][A-Za-z0-9_]*)\.(?:Cells|cells)\(\s*(\d+)\s*,\s*(\d+)\s*\)/g,
+    (_match, ident, row, col) => {
+      try {
+        const addr = rowColToA1(Number(row), Number(col));
+        return `${ident}.getRange("${addr}")`;
+      } catch {
+        return _match;
+      }
+    },
+  );
+
+  // Legacy helper used by early prompts/tests: `sheet.cell(1,2)` (also 1-indexed).
+  out = out.replace(
+    /\b([A-Za-z_][A-Za-z0-9_]*)\.cell\(\s*(\d+)\s*,\s*(\d+)\s*\)/gi,
+    (_match, ident, row, col) => {
+      try {
+        const addr = rowColToA1(Number(row), Number(col));
+        return `${ident}.getRange("${addr}")`;
+      } catch {
+        return _match;
+      }
+    },
+  );
+
+  // Convert property assignment patterns into async ScriptRuntime method calls.
+  // Examples:
+  //   sheet.getRange("A1").Value = 1;
+  //   sheet.getRange("A1").value = 1;
+  //   sheet.getRange("A3").Formula = "=A1+B1";
+  // -> await sheet.getRange("A1").setValue(1);
+  // -> await sheet.getRange("A3").setFormulas([["=A1+B1"]]);
+  const lines = out.split(/\r?\n/);
+  const rewritten = lines.map((line) => {
+    const match = /^(\s*)(.+?)\.(value|Value|formula|Formula)\s*=\s*(.+?)\s*;?\s*$/.exec(line);
+    if (!match) return line;
+    const indent = match[1];
+    const target = match[2];
+    const prop = match[3].toLowerCase();
+    const rhs = match[4];
+
+    const rangeMatch = /\.getRange\(\s*(['"])(?<addr>[^'"]+)\1\s*\)/.exec(target);
+    const addr = rangeMatch?.groups?.addr ?? null;
+    const isMultiCell = typeof addr === "string" ? addr.includes(":") : false;
+
+    if (prop === "value") {
+      const method = isMultiCell ? "setValues" : "setValue";
+      return `${indent}await ${target}.${method}(${rhs});`;
+    }
+
+    if (prop === "formula") {
+      if (isMultiCell) {
+        return `${indent}await ${target}.setFormulas(${rhs});`;
+      }
+      const rhsTrimmed = rhs.trim();
+      if (rhsTrimmed.startsWith("[")) {
+        return `${indent}await ${target}.setFormulas(${rhs});`;
+      }
+      return `${indent}await ${target}.setFormulas([[${rhs}]]);`;
+    }
+
+    return line;
+  });
+
+  return rewritten.join("\n");
 }
 
 export async function postProcessGeneratedCode({ code, target }) {

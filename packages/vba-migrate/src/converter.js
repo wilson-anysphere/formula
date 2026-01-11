@@ -18,10 +18,15 @@ function buildPrompt({ module, analysis, target }) {
           "Use the Formula scripting TypeScript API:",
           "- export default async function main(ctx) { ... }",
           "- const sheet = ctx.activeSheet",
-          '- write values with: sheet.range("A1").value = 123',
-          '- write formulas with: sheet.range("A1").formula = "=A1+A2"',
+          '- read a single cell with: const v = await sheet.getRange("A1").getValue()',
+          '- read a range with: const values = await sheet.getRange("A1:B2").getValues()',
+          '- write values with: await sheet.getRange("A1").setValue(123)',
+          '- write range values with: await sheet.getRange("A1:B2").setValues([[1,2],[3,4]])',
+          '- write formulas with: await sheet.getRange("A1").setFormulas([["=A1+A2"]])',
           "",
-          "Return ONLY code (no markdown commentary)."
+          "Return ONLY code (no markdown commentary).",
+          "",
+          "Important: output must be valid JavaScript (no TypeScript-only type annotations)."
         ].join("\n");
 
   const analysisHints = [

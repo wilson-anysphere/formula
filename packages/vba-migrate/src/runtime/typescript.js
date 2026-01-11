@@ -23,6 +23,68 @@ function stripLineComment(line) {
   return line.slice(0, idx);
 }
 
+function parseJsStringLiteralPrefix(expr) {
+  const trimmed = expr.trimStart();
+  const quote = trimmed[0];
+  if (quote !== '"' && quote !== "'") return null;
+
+  let out = "";
+  let escape = false;
+  for (let i = 1; i < trimmed.length; i += 1) {
+    const ch = trimmed[i];
+    if (escape) {
+      out += ch;
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === quote) {
+      return { value: out, rest: trimmed.slice(i + 1) };
+    }
+    out += ch;
+  }
+  return null;
+}
+
+function parseJsLiteralPrefix(expr) {
+  const trimmed = expr.trimStart();
+  const str = parseJsStringLiteralPrefix(trimmed);
+  if (str) return str;
+  const boolMatch = /^(true|false)\b/i.exec(trimmed);
+  if (boolMatch) {
+    return { value: /^true$/i.test(boolMatch[1]), rest: trimmed.slice(boolMatch[0].length) };
+  }
+  const numMatch = /^[+-]?\d+(?:\.\d+)?\b/.exec(trimmed);
+  if (numMatch) {
+    return { value: Number(numMatch[0]), rest: trimmed.slice(numMatch[0].length) };
+  }
+  return null;
+}
+
+function parseSingletonMatrix(expr) {
+  const trimmed = String(expr || "").trim().replace(/;$/, "");
+  let rest = trimmed;
+  if (!rest.startsWith("[")) return null;
+  rest = rest.slice(1).trimStart();
+  if (!rest.startsWith("[")) return null;
+  rest = rest.slice(1).trimStart();
+
+  const parsed = parseJsLiteralPrefix(rest);
+  if (!parsed) return null;
+  const value = parsed.value;
+  rest = parsed.rest.trimStart();
+  if (!rest.startsWith("]")) return null;
+  rest = rest.slice(1).trimStart();
+  if (!rest.startsWith("]")) return null;
+  rest = rest.slice(1).trimStart();
+  if (rest !== "") return null;
+
+  return value;
+}
+
 export function executeTypeScriptMigrationScript({ workbook, code }) {
   const lines = String(code || "").split(/\r?\n/);
   let currentSheet = workbook.activeSheet;
@@ -41,6 +103,24 @@ export function executeTypeScriptMigrationScript({ workbook, code }) {
       continue;
     }
     if (line === "{" || line === "}") continue;
+
+    const setValueCall = /\.getRange\(\s*(['"])(?<addr>[^'"]+)\1\s*\)\.setValue\(\s*(?<expr>.+)\)\s*;?$/.exec(line);
+    if (setValueCall) {
+      const value = parseJsLiteral(setValueCall.groups.expr);
+      if (value === null) throw new Error(`Unsupported TS literal: ${setValueCall.groups.expr}`);
+      currentSheet.setCellValue(setValueCall.groups.addr, value);
+      continue;
+    }
+
+    const setFormulasCall =
+      /\.getRange\(\s*(['"])(?<addr>[^'"]+)\1\s*\)\.setFormulas\(\s*(?<expr>.+)\)\s*;?$/.exec(line);
+    if (setFormulasCall) {
+      const matrix = parseSingletonMatrix(setFormulasCall.groups.expr);
+      if (matrix === null) throw new Error(`Unsupported TS formulas matrix: ${setFormulasCall.groups.expr}`);
+      if (typeof matrix !== "string") throw new Error(`Expected formula string, got ${typeof matrix}`);
+      currentSheet.setCellFormula(setFormulasCall.groups.addr, matrix);
+      continue;
+    }
 
     const setValueRange = /^sheet\.range\(\s*(['"])(?<addr>[^'"]+)\1\s*\)\.value\s*=\s*(?<expr>.+)$/.exec(line);
     if (setValueRange) {
