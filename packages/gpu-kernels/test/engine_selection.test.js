@@ -35,6 +35,7 @@ class FakeGpuBackend {
 test("engine selects CPU for small workloads, GPU for large workloads", async () => {
   const fakeGpu = new FakeGpuBackend();
   const engine = new KernelEngine({
+    precision: "fast",
     gpuBackend: fakeGpu,
     gpu: { enabled: true },
     thresholds: { sum: 10 }
@@ -50,4 +51,3 @@ test("engine selects CPU for small workloads, GPU for large workloads", async ()
   const last = engine.lastKernelBackend();
   assert.equal(last.sum, "webgpu");
 });
-

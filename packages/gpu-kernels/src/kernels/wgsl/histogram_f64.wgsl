@@ -1,4 +1,6 @@
-alias Scalar = f32;
+enable f64;
+
+alias Scalar = f64;
 
 const WG_SIZE: u32 = 256u;
 
@@ -28,6 +30,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (isNan(v)) {
     return;
   }
+
   var bin_i = i32((v - params.min) * params.inv_bin_width);
   if (bin_i < 0) {
     bin_i = 0;
@@ -38,3 +41,4 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   atomicAdd(&bins[u32(bin_i)], 1u);
 }
+

@@ -30,6 +30,20 @@ function toFloat32(values) {
   return out;
 }
 
+function toFloat64(values) {
+  if (values instanceof Float64Array) return values;
+  const out = new Float64Array(values.length);
+  for (let i = 0; i < values.length; i++) out[i] = values[i];
+  return out;
+}
+
+/**
+ * @param {"f32" | "f64"} dtype
+ */
+function byteSizeOf(dtype) {
+  return dtype === "f32" ? 4 : 8;
+}
+
 export class GpuVector {
   /**
    * @param {WebGpuBackend} backend
@@ -61,12 +75,22 @@ export class WebGpuBackend {
    * @param {GPUDevice} device
    * @param {GPUAdapter} adapter
    * @param {{
+   *  supportsF64: boolean,
    *  pipelines: {
-   *    reduceSum: GPUComputePipeline,
-   *    reduceSumproduct: GPUComputePipeline,
-   *    mmult: GPUComputePipeline,
-   *    histogram: GPUComputePipeline,
-   *    bitonicSort: GPUComputePipeline
+   *    reduceSum_f32: GPUComputePipeline,
+   *    reduceMin_f32: GPUComputePipeline,
+   *    reduceMax_f32: GPUComputePipeline,
+   *    reduceSumproduct_f32: GPUComputePipeline,
+   *    mmult_f32: GPUComputePipeline,
+   *    histogram_f32: GPUComputePipeline,
+   *    bitonicSort_f32: GPUComputePipeline,
+   *    reduceSum_f64?: GPUComputePipeline,
+   *    reduceMin_f64?: GPUComputePipeline,
+   *    reduceMax_f64?: GPUComputePipeline,
+   *    reduceSumproduct_f64?: GPUComputePipeline,
+   *    mmult_f64?: GPUComputePipeline,
+   *    histogram_f64?: GPUComputePipeline,
+   *    bitonicSort_f64?: GPUComputePipeline
    *  }
    * }} resources
    */
@@ -74,8 +98,11 @@ export class WebGpuBackend {
     this.device = device;
     this.adapter = adapter;
     this.queue = device.queue;
+    this.supportsF64 = resources.supportsF64;
     this.pipelines = resources.pipelines;
     this._disposed = false;
+    /** @type {Set<"f32" | "f64">} */
+    this._precisionUsed = new Set();
   }
 
   static async createIfSupported() {
@@ -86,18 +113,46 @@ export class WebGpuBackend {
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
       if (!adapter) return null;
 
-      /** @type {GPUDevice} */
-      const device = await adapter.requestDevice();
+      const supportsF64 = adapter.features?.has?.("shader-f64") ?? false;
+      /** @type {GPUFeatureName[]} */
+      const requiredFeatures = supportsF64 ? ["shader-f64"] : [];
 
-      const [reduceSumSrc, reduceSumproductSrc, mmultSrc, histogramSrc, bitonicSortSrc] = await Promise.all([
+      /** @type {GPUDevice} */
+      const device = await adapter.requestDevice({ requiredFeatures });
+
+      const [
+        reduceSumSrc,
+        reduceMinSrc,
+        reduceMaxSrc,
+        reduceSumproductSrc,
+        mmultSrc,
+        histogramSrc,
+        bitonicSortSrc,
+        reduceSumF64Src,
+        reduceMinF64Src,
+        reduceMaxF64Src,
+        reduceSumproductF64Src,
+        mmultF64Src,
+        histogramF64Src,
+        bitonicSortF64Src
+      ] = await Promise.all([
         loadTextResource(new URL("./wgsl/reduce_sum.wgsl", import.meta.url)),
+        loadTextResource(new URL("./wgsl/reduce_min.wgsl", import.meta.url)),
+        loadTextResource(new URL("./wgsl/reduce_max.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/reduce_sumproduct.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/mmult.wgsl", import.meta.url)),
         loadTextResource(new URL("./wgsl/histogram.wgsl", import.meta.url)),
-        loadTextResource(new URL("./wgsl/bitonic_sort.wgsl", import.meta.url))
+        loadTextResource(new URL("./wgsl/bitonic_sort.wgsl", import.meta.url)),
+        supportsF64 ? loadTextResource(new URL("./wgsl/reduce_sum_f64.wgsl", import.meta.url)) : null,
+        supportsF64 ? loadTextResource(new URL("./wgsl/reduce_min_f64.wgsl", import.meta.url)) : null,
+        supportsF64 ? loadTextResource(new URL("./wgsl/reduce_max_f64.wgsl", import.meta.url)) : null,
+        supportsF64 ? loadTextResource(new URL("./wgsl/reduce_sumproduct_f64.wgsl", import.meta.url)) : null,
+        supportsF64 ? loadTextResource(new URL("./wgsl/mmult_f64.wgsl", import.meta.url)) : null,
+        supportsF64 ? loadTextResource(new URL("./wgsl/histogram_f64.wgsl", import.meta.url)) : null,
+        supportsF64 ? loadTextResource(new URL("./wgsl/bitonic_sort_f64.wgsl", import.meta.url)) : null
       ]);
 
-      const reduceSum = device.createComputePipeline({
+      const reduceSum_f32 = device.createComputePipeline({
         layout: "auto",
         compute: {
           module: device.createShaderModule({ code: reduceSumSrc }),
@@ -105,7 +160,23 @@ export class WebGpuBackend {
         }
       });
 
-      const reduceSumproduct = device.createComputePipeline({
+      const reduceMin_f32 = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: device.createShaderModule({ code: reduceMinSrc }),
+          entryPoint: "main"
+        }
+      });
+
+      const reduceMax_f32 = device.createComputePipeline({
+        layout: "auto",
+        compute: {
+          module: device.createShaderModule({ code: reduceMaxSrc }),
+          entryPoint: "main"
+        }
+      });
+
+      const reduceSumproduct_f32 = device.createComputePipeline({
         layout: "auto",
         compute: {
           module: device.createShaderModule({ code: reduceSumproductSrc }),
@@ -113,7 +184,7 @@ export class WebGpuBackend {
         }
       });
 
-      const mmult = device.createComputePipeline({
+      const mmult_f32 = device.createComputePipeline({
         layout: "auto",
         compute: {
           module: device.createShaderModule({ code: mmultSrc }),
@@ -121,7 +192,7 @@ export class WebGpuBackend {
         }
       });
 
-      const histogram = device.createComputePipeline({
+      const histogram_f32 = device.createComputePipeline({
         layout: "auto",
         compute: {
           module: device.createShaderModule({ code: histogramSrc }),
@@ -129,7 +200,7 @@ export class WebGpuBackend {
         }
       });
 
-      const bitonicSort = device.createComputePipeline({
+      const bitonicSort_f32 = device.createComputePipeline({
         layout: "auto",
         compute: {
           module: device.createShaderModule({ code: bitonicSortSrc }),
@@ -137,8 +208,74 @@ export class WebGpuBackend {
         }
       });
 
+      /** @type {WebGpuBackend["pipelines"]} */
+      const pipelines = {
+        reduceSum_f32,
+        reduceMin_f32,
+        reduceMax_f32,
+        reduceSumproduct_f32,
+        mmult_f32,
+        histogram_f32,
+        bitonicSort_f32
+      };
+
+      if (supportsF64) {
+        // Create f64 variants. These only compile on devices that expose the
+        // `shader-f64` feature.
+        pipelines.reduceSum_f64 = device.createComputePipeline({
+          layout: "auto",
+          compute: {
+            module: device.createShaderModule({ code: reduceSumF64Src ?? "" }),
+            entryPoint: "main"
+          }
+        });
+        pipelines.reduceMin_f64 = device.createComputePipeline({
+          layout: "auto",
+          compute: {
+            module: device.createShaderModule({ code: reduceMinF64Src ?? "" }),
+            entryPoint: "main"
+          }
+        });
+        pipelines.reduceMax_f64 = device.createComputePipeline({
+          layout: "auto",
+          compute: {
+            module: device.createShaderModule({ code: reduceMaxF64Src ?? "" }),
+            entryPoint: "main"
+          }
+        });
+        pipelines.reduceSumproduct_f64 = device.createComputePipeline({
+          layout: "auto",
+          compute: {
+            module: device.createShaderModule({ code: reduceSumproductF64Src ?? "" }),
+            entryPoint: "main"
+          }
+        });
+        pipelines.mmult_f64 = device.createComputePipeline({
+          layout: "auto",
+          compute: {
+            module: device.createShaderModule({ code: mmultF64Src ?? "" }),
+            entryPoint: "main"
+          }
+        });
+        pipelines.histogram_f64 = device.createComputePipeline({
+          layout: "auto",
+          compute: {
+            module: device.createShaderModule({ code: histogramF64Src ?? "" }),
+            entryPoint: "main"
+          }
+        });
+        pipelines.bitonicSort_f64 = device.createComputePipeline({
+          layout: "auto",
+          compute: {
+            module: device.createShaderModule({ code: bitonicSortF64Src ?? "" }),
+            entryPoint: "main"
+          }
+        });
+      }
+
       return new WebGpuBackend(device, adapter, {
-        pipelines: { reduceSum, reduceSumproduct, mmult, histogram, bitonicSort }
+        supportsF64,
+        pipelines
       });
     } catch {
       // WebGPU exists but the adapter/device/pipelines could not be created.
@@ -157,14 +294,68 @@ export class WebGpuBackend {
       adapterInfo: typeof this.adapter.requestAdapterInfo === "function" ? "available" : "unavailable",
       supportedKernels: {
         sum: true,
+        min: true,
+        max: true,
         sumproduct: true,
+        average: true,
+        count: true,
         mmult: true,
         sort: true,
         histogram: true
       },
-      numericPrecision: "f32",
+      supportedKernelsF64: {
+        sum: Boolean(this.pipelines.reduceSum_f64),
+        min: Boolean(this.pipelines.reduceMin_f64),
+        max: Boolean(this.pipelines.reduceMax_f64),
+        sumproduct: Boolean(this.pipelines.reduceSumproduct_f64),
+        average: Boolean(this.pipelines.reduceSum_f64),
+        count: Boolean(this.pipelines.reduceSum_f64),
+        mmult: Boolean(this.pipelines.mmult_f64),
+        sort: Boolean(this.pipelines.bitonicSort_f64),
+        histogram: Boolean(this.pipelines.histogram_f64)
+      },
+      numericPrecision:
+        this._precisionUsed.size === 0
+          ? this.supportsF64
+            ? "mixed"
+            : "f32"
+          : this._precisionUsed.size === 1
+            ? Array.from(this._precisionUsed)[0]
+            : "mixed",
+      supportsF64: this.supportsF64,
       workgroupSize: WORKGROUP_SIZE
     };
+  }
+
+  /**
+   * @param {"sum" | "min" | "max" | "average" | "count" | "sumproduct" | "mmult" | "sort" | "histogram"} kernel
+   * @param {"f32" | "f64"} dtype
+   */
+  supportsKernelPrecision(kernel, dtype) {
+    if (dtype === "f32") return true;
+    if (!this.supportsF64) return false;
+    switch (kernel) {
+      case "sum":
+        return Boolean(this.pipelines.reduceSum_f64);
+      case "min":
+        return Boolean(this.pipelines.reduceMin_f64);
+      case "max":
+        return Boolean(this.pipelines.reduceMax_f64);
+      case "sumproduct":
+        return Boolean(this.pipelines.reduceSumproduct_f64);
+      case "average":
+      case "count":
+        // `average` and `count` are derived from sum + scalar operations.
+        return Boolean(this.pipelines.reduceSum_f64);
+      case "mmult":
+        return Boolean(this.pipelines.mmult_f64);
+      case "sort":
+        return Boolean(this.pipelines.bitonicSort_f64);
+      case "histogram":
+        return Boolean(this.pipelines.histogram_f64);
+      default:
+        return false;
+    }
   }
 
   _ensureNotDisposed() {
@@ -173,16 +364,44 @@ export class WebGpuBackend {
 
   /**
    * @param {Float32Array | Float64Array} values
-   * @param {{ allowFp32FallbackForF64: boolean }} opts
+   * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} opts
    */
   async sum(values, opts) {
     this._ensureNotDisposed();
-    const dtype = dtypeOf(values);
-    if (dtype === "f64" && !opts.allowFp32FallbackForF64) {
-      throw new Error("WebGPU backend only supports f32 kernels; disallowing f64->f32 fallback");
+    const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
+    const requested = opts.precision ?? "auto";
+    const dtype = requested === "auto" ? dtypeOf(values) : requested;
+
+    if (dtype === "f64") {
+      if (!this.supportsKernelPrecision("sum", "f64")) {
+        if (!allowFp32FallbackForF64) {
+          throw new Error("WebGPU backend does not support f64 kernels; disallowing f64->f32 fallback");
+        }
+        const f32 = toFloat32(values);
+        if (f32.length === 0) return 0;
+        this._precisionUsed.add("f32");
+        const vec = this.uploadVector(f32);
+        try {
+          return await this.sumVector(vec);
+        } finally {
+          vec.destroy();
+        }
+      }
+
+      const f64 = toFloat64(values);
+      if (f64.length === 0) return 0;
+      this._precisionUsed.add("f64");
+      const vec = this.uploadVector(f64);
+      try {
+        return await this.sumVector(vec);
+      } finally {
+        vec.destroy();
+      }
     }
+
     const f32 = toFloat32(values);
     if (f32.length === 0) return 0;
+    this._precisionUsed.add("f32");
     const vec = this.uploadVector(f32);
     try {
       return await this.sumVector(vec);
@@ -192,23 +411,170 @@ export class WebGpuBackend {
   }
 
   /**
+   * @param {Float32Array | Float64Array} values
+   * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} opts
+   */
+  async min(values, opts) {
+    this._ensureNotDisposed();
+    const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
+    const requested = opts.precision ?? "auto";
+    const dtype = requested === "auto" ? dtypeOf(values) : requested;
+
+    if (values.length === 0) return Number.POSITIVE_INFINITY;
+
+    if (dtype === "f64") {
+      if (!this.supportsKernelPrecision("min", "f64")) {
+        if (!allowFp32FallbackForF64) {
+          throw new Error("WebGPU backend does not support f64 kernels; disallowing f64->f32 fallback");
+        }
+        const f32 = toFloat32(values);
+        this._precisionUsed.add("f32");
+        const vec = this.uploadVector(f32);
+        try {
+          return await this.minVector(vec);
+        } finally {
+          vec.destroy();
+        }
+      }
+
+      const f64 = toFloat64(values);
+      this._precisionUsed.add("f64");
+      const vec = this.uploadVector(f64);
+      try {
+        return await this.minVector(vec);
+      } finally {
+        vec.destroy();
+      }
+    }
+
+    const f32 = toFloat32(values);
+    this._precisionUsed.add("f32");
+    const vec = this.uploadVector(f32);
+    try {
+      return await this.minVector(vec);
+    } finally {
+      vec.destroy();
+    }
+  }
+
+  /**
+   * @param {Float32Array | Float64Array} values
+   * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} opts
+   */
+  async max(values, opts) {
+    this._ensureNotDisposed();
+    const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
+    const requested = opts.precision ?? "auto";
+    const dtype = requested === "auto" ? dtypeOf(values) : requested;
+
+    if (values.length === 0) return Number.NEGATIVE_INFINITY;
+
+    if (dtype === "f64") {
+      if (!this.supportsKernelPrecision("max", "f64")) {
+        if (!allowFp32FallbackForF64) {
+          throw new Error("WebGPU backend does not support f64 kernels; disallowing f64->f32 fallback");
+        }
+        const f32 = toFloat32(values);
+        this._precisionUsed.add("f32");
+        const vec = this.uploadVector(f32);
+        try {
+          return await this.maxVector(vec);
+        } finally {
+          vec.destroy();
+        }
+      }
+
+      const f64 = toFloat64(values);
+      this._precisionUsed.add("f64");
+      const vec = this.uploadVector(f64);
+      try {
+        return await this.maxVector(vec);
+      } finally {
+        vec.destroy();
+      }
+    }
+
+    const f32 = toFloat32(values);
+    this._precisionUsed.add("f32");
+    const vec = this.uploadVector(f32);
+    try {
+      return await this.maxVector(vec);
+    } finally {
+      vec.destroy();
+    }
+  }
+
+  /**
+   * @param {Float32Array | Float64Array} values
+   * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} opts
+   */
+  async average(values, opts) {
+    if (values.length === 0) return Number.NaN;
+    const total = await this.sum(values, opts);
+    return total / values.length;
+  }
+
+  /**
+   * Numeric-only count. For typed arrays this is equivalent to the array length.
+   * @param {Float32Array | Float64Array} values
+   */
+  async count(values) {
+    return values.length;
+  }
+
+  /**
    * @param {Float32Array | Float64Array} a
    * @param {Float32Array | Float64Array} b
-   * @param {{ allowFp32FallbackForF64: boolean }} opts
+   * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} opts
    */
   async sumproduct(a, b, opts) {
     this._ensureNotDisposed();
     if (a.length !== b.length) throw new Error(`SUMPRODUCT length mismatch: ${a.length} vs ${b.length}`);
 
+    const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
+    const requested = opts.precision ?? "auto";
     const aDtype = dtypeOf(a);
     const bDtype = dtypeOf(b);
-    if ((aDtype === "f64" || bDtype === "f64") && !opts.allowFp32FallbackForF64) {
-      throw new Error("WebGPU backend only supports f32 kernels; disallowing f64->f32 fallback");
+    const inferred = aDtype === "f64" || bDtype === "f64" ? "f64" : "f32";
+    const dtype = requested === "auto" ? inferred : requested;
+
+    if (dtype === "f64") {
+      if (!this.supportsKernelPrecision("sumproduct", "f64")) {
+        if (!allowFp32FallbackForF64) {
+          throw new Error("WebGPU backend does not support f64 kernels; disallowing f64->f32 fallback");
+        }
+        const a32 = toFloat32(a);
+        const b32 = toFloat32(b);
+        if (a32.length === 0) return 0;
+        this._precisionUsed.add("f32");
+        const ga = this.uploadVector(a32);
+        const gb = this.uploadVector(b32);
+        try {
+          return await this.sumproductVectors(ga, gb);
+        } finally {
+          ga.destroy();
+          gb.destroy();
+        }
+      }
+
+      const a64 = toFloat64(a);
+      const b64 = toFloat64(b);
+      if (a64.length === 0) return 0;
+      this._precisionUsed.add("f64");
+      const ga = this.uploadVector(a64);
+      const gb = this.uploadVector(b64);
+      try {
+        return await this.sumproductVectors(ga, gb);
+      } finally {
+        ga.destroy();
+        gb.destroy();
+      }
     }
 
     const a32 = toFloat32(a);
     const b32 = toFloat32(b);
     if (a32.length === 0) return 0;
+    this._precisionUsed.add("f32");
     const ga = this.uploadVector(a32);
     const gb = this.uploadVector(b32);
     try {
@@ -225,22 +591,30 @@ export class WebGpuBackend {
    * @param {number} aRows
    * @param {number} aCols
    * @param {number} bCols
-   * @param {{ allowFp32FallbackForF64: boolean }} opts
+   * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} opts
    */
   async mmult(a, b, aRows, aCols, bCols, opts) {
     this._ensureNotDisposed();
+    const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
+    const requested = opts.precision ?? "auto";
+
     const aDtype = dtypeOf(a);
     const bDtype = dtypeOf(b);
-    if ((aDtype === "f64" || bDtype === "f64") && !opts.allowFp32FallbackForF64) {
-      throw new Error("WebGPU backend only supports f32 kernels; disallowing f64->f32 fallback");
+    const inferred = aDtype === "f64" || bDtype === "f64" ? "f64" : "f32";
+    const dtype = requested === "auto" ? inferred : requested;
+
+    const canRunF64 = dtype === "f64" && this.supportsKernelPrecision("mmult", "f64");
+    if (dtype === "f64" && !canRunF64 && !allowFp32FallbackForF64) {
+      throw new Error("WebGPU backend does not support f64 kernels; disallowing f64->f32 fallback");
     }
 
-    const a32 = toFloat32(a);
-    const b32 = toFloat32(b);
+    const pipeline = canRunF64 ? this.pipelines.mmult_f64 : this.pipelines.mmult_f32;
+    const aTyped = canRunF64 ? toFloat64(a) : toFloat32(a);
+    const bTyped = canRunF64 ? toFloat64(b) : toFloat32(b);
 
-    const aBuf = this._createStorageBufferFromArray(a32, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-    const bBuf = this._createStorageBufferFromArray(b32, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-    const outBytes = aRows * bCols * 4;
+    const aBuf = this._createStorageBufferFromArray(aTyped, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const bBuf = this._createStorageBufferFromArray(bTyped, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const outBytes = aRows * bCols * byteSizeOf(canRunF64 ? "f64" : "f32");
     const outBuf = this.device.createBuffer({
       size: outBytes,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
@@ -254,7 +628,7 @@ export class WebGpuBackend {
     this.queue.writeBuffer(paramBuf, 0, params);
 
     const bindGroup = this.device.createBindGroup({
-      layout: this.pipelines.mmult.getBindGroupLayout(0),
+      layout: pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: aBuf } },
         { binding: 1, resource: { buffer: bBuf } },
@@ -265,39 +639,44 @@ export class WebGpuBackend {
 
     const encoder = this.device.createCommandEncoder();
     const pass = encoder.beginComputePass();
-    pass.setPipeline(this.pipelines.mmult);
+    pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
     pass.dispatchWorkgroups(Math.ceil(bCols / MMULT_TILE), Math.ceil(aRows / MMULT_TILE), 1);
     pass.end();
     this.queue.submit([encoder.finish()]);
 
-    const out = await this._readbackTypedArray(outBuf, Float32Array);
+    const out = await this._readbackTypedArray(outBuf, canRunF64 ? Float64Array : Float32Array);
 
     aBuf.destroy();
     bBuf.destroy();
     outBuf.destroy();
     paramBuf.destroy();
 
-    // Promote to f64 for API consistency.
-    return Float64Array.from(out);
+    this._precisionUsed.add(canRunF64 ? "f64" : "f32");
+    return canRunF64 ? out : Float64Array.from(out);
   }
 
   /**
    * @param {Float32Array | Float64Array} values
-   * @param {{ allowFp32FallbackForF64: boolean }} opts
+   * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} opts
    */
   async sort(values, opts) {
     this._ensureNotDisposed();
-    const dtype = dtypeOf(values);
-    if (dtype === "f64" && !opts.allowFp32FallbackForF64) {
-      throw new Error("WebGPU backend only supports f32 kernels; disallowing f64->f32 fallback");
+    const allowFp32FallbackForF64 = opts.allowFp32FallbackForF64 ?? true;
+    const requested = opts.precision ?? "auto";
+    const dtype = requested === "auto" ? dtypeOf(values) : requested;
+
+    const canRunF64 = dtype === "f64" && this.supportsKernelPrecision("sort", "f64");
+    if (dtype === "f64" && !canRunF64 && !allowFp32FallbackForF64) {
+      throw new Error("WebGPU backend does not support f64 kernels; disallowing f64->f32 fallback");
     }
-    const f32 = toFloat32(values);
-    const n = f32.length;
+
+    const typed = canRunF64 ? toFloat64(values) : toFloat32(values);
+    const n = typed.length;
     if (n === 0) return new Float64Array();
     const padded = nextPowerOfTwo(n);
-    const data = new Float32Array(padded);
-    data.set(f32);
+    const data = canRunF64 ? new Float64Array(padded) : new Float32Array(padded);
+    data.set(typed);
     if (padded !== n) data.fill(Number.POSITIVE_INFINITY, n);
 
     const dataBuf = this._createStorageBufferFromArray(data, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
@@ -308,7 +687,7 @@ export class WebGpuBackend {
     });
 
     const bindGroup = this.device.createBindGroup({
-      layout: this.pipelines.bitonicSort.getBindGroupLayout(0),
+      layout: (canRunF64 ? this.pipelines.bitonicSort_f64 : this.pipelines.bitonicSort_f32).getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: dataBuf } },
         { binding: 1, resource: { buffer: paramBuf } }
@@ -322,7 +701,7 @@ export class WebGpuBackend {
 
         const encoder = this.device.createCommandEncoder();
         const pass = encoder.beginComputePass();
-        pass.setPipeline(this.pipelines.bitonicSort);
+        pass.setPipeline(canRunF64 ? this.pipelines.bitonicSort_f64 : this.pipelines.bitonicSort_f32);
         pass.setBindGroup(0, bindGroup);
         pass.dispatchWorkgroups(Math.ceil(padded / WORKGROUP_SIZE), 1, 1);
         pass.end();
@@ -330,34 +709,39 @@ export class WebGpuBackend {
       }
     }
 
-    const outPadded = await this._readbackTypedArray(dataBuf, Float32Array);
+    const outPadded = await this._readbackTypedArray(dataBuf, canRunF64 ? Float64Array : Float32Array);
     dataBuf.destroy();
     paramBuf.destroy();
 
-    return Float64Array.from(outPadded.subarray(0, n));
+    this._precisionUsed.add(canRunF64 ? "f64" : "f32");
+    return canRunF64 ? outPadded.subarray(0, n) : Float64Array.from(outPadded.subarray(0, n));
   }
 
   /**
    * @param {Float32Array | Float64Array} values
    * @param {{ min: number, max: number, bins: number }} opts
-   * @param {{ allowFp32FallbackForF64: boolean }} backendOpts
+   * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} backendOpts
    */
   async histogram(values, opts, backendOpts) {
     this._ensureNotDisposed();
-    const dtype = dtypeOf(values);
-    if (dtype === "f64" && !backendOpts.allowFp32FallbackForF64) {
-      throw new Error("WebGPU backend only supports f32 kernels; disallowing f64->f32 fallback");
+    const allowFp32FallbackForF64 = backendOpts.allowFp32FallbackForF64 ?? true;
+    const requested = backendOpts.precision ?? "auto";
+    const dtype = requested === "auto" ? dtypeOf(values) : requested;
+    const canRunF64 = dtype === "f64" && this.supportsKernelPrecision("histogram", "f64");
+    if (dtype === "f64" && !canRunF64 && !allowFp32FallbackForF64) {
+      throw new Error("WebGPU backend does not support f64 kernels; disallowing f64->f32 fallback");
     }
-    const f32 = toFloat32(values);
+
+    const typed = canRunF64 ? toFloat64(values) : toFloat32(values);
     const { min, max, bins } = opts;
     if (!(bins > 0)) throw new Error("histogram bins must be > 0");
     if (!(max > min)) throw new Error("histogram max must be > min");
 
-    if (f32.length === 0) {
+    if (typed.length === 0) {
       return new Uint32Array(bins);
     }
 
-    const inputBuf = this._createStorageBufferFromArray(f32, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    const inputBuf = this._createStorageBufferFromArray(typed, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
 
     const binBuf = this.device.createBuffer({
       size: bins * 4,
@@ -366,20 +750,31 @@ export class WebGpuBackend {
     this.queue.writeBuffer(binBuf, 0, new Uint32Array(bins));
 
     const invBinWidth = bins / (max - min);
-    const params = new Uint32Array(8);
-    new Float32Array(params.buffer, 0, 3).set([min, max, invBinWidth]);
-    params[3] = f32.length;
-    params[4] = bins;
-    // params[5..7] padding
+    const paramBufSize = canRunF64 ? 48 : 32;
+    const params = new ArrayBuffer(paramBufSize);
+    const view = new DataView(params);
+    if (canRunF64) {
+      view.setFloat64(0, min, true);
+      view.setFloat64(8, max, true);
+      view.setFloat64(16, invBinWidth, true);
+      view.setUint32(24, typed.length, true);
+      view.setUint32(28, bins, true);
+    } else {
+      view.setFloat32(0, min, true);
+      view.setFloat32(4, max, true);
+      view.setFloat32(8, invBinWidth, true);
+      view.setUint32(12, typed.length, true);
+      view.setUint32(16, bins, true);
+    }
 
     const paramBuf = this.device.createBuffer({
-      size: 32,
+      size: paramBufSize,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
     this.queue.writeBuffer(paramBuf, 0, params);
 
     const bindGroup = this.device.createBindGroup({
-      layout: this.pipelines.histogram.getBindGroupLayout(0),
+      layout: (canRunF64 ? this.pipelines.histogram_f64 : this.pipelines.histogram_f32).getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: inputBuf } },
         { binding: 1, resource: { buffer: binBuf } },
@@ -389,9 +784,9 @@ export class WebGpuBackend {
 
     const encoder = this.device.createCommandEncoder();
     const pass = encoder.beginComputePass();
-    pass.setPipeline(this.pipelines.histogram);
+    pass.setPipeline(canRunF64 ? this.pipelines.histogram_f64 : this.pipelines.histogram_f32);
     pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(Math.ceil(f32.length / WORKGROUP_SIZE), 1, 1);
+    pass.dispatchWorkgroups(Math.ceil(typed.length / WORKGROUP_SIZE), 1, 1);
     pass.end();
     this.queue.submit([encoder.finish()]);
 
@@ -399,18 +794,19 @@ export class WebGpuBackend {
     inputBuf.destroy();
     binBuf.destroy();
     paramBuf.destroy();
+    this._precisionUsed.add(canRunF64 ? "f64" : "f32");
     return counts;
   }
 
   /**
    * Explicit upload API: lets callers keep vectors resident on GPU to avoid
    * repeated CPU→GPU uploads across multiple kernels.
-   * @param {Float32Array} values
+   * @param {Float32Array | Float64Array} values
    */
   uploadVector(values) {
     this._ensureNotDisposed();
     const buffer = this._createStorageBufferFromArray(values, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC);
-    return new GpuVector(this, buffer, values.length, "f32");
+    return new GpuVector(this, buffer, values.length, dtypeOf(values));
   }
 
   /**
@@ -418,17 +814,37 @@ export class WebGpuBackend {
    */
   async readbackVector(vec) {
     this._ensureNotDisposed();
-    if (vec.dtype !== "f32") throw new Error(`readbackVector only supports f32`);
-    return this._readbackTypedArray(vec.buffer, Float32Array);
+    if (vec.dtype === "f32") return this._readbackTypedArray(vec.buffer, Float32Array);
+    if (vec.dtype === "f64") return this._readbackTypedArray(vec.buffer, Float64Array);
+    throw new Error(`Unsupported vector dtype: ${vec.dtype}`);
   }
 
   /**
    * @param {GpuVector} vec
    */
   async sumVector(vec) {
-    if (vec.dtype !== "f32") throw new Error(`sumVector only supports f32`);
-    const reduced = await this._reduce(vec.buffer, vec.length);
-    const out = await this._readbackTypedArray(reduced, Float32Array);
+    const reduced = await this._reduce(vec.buffer, vec.length, vec.dtype, "sum");
+    const out = await this._readbackTypedArray(reduced, vec.dtype === "f64" ? Float64Array : Float32Array);
+    if (reduced !== vec.buffer) reduced.destroy();
+    return out[0];
+  }
+
+  /**
+   * @param {GpuVector} vec
+   */
+  async minVector(vec) {
+    const reduced = await this._reduce(vec.buffer, vec.length, vec.dtype, "min");
+    const out = await this._readbackTypedArray(reduced, vec.dtype === "f64" ? Float64Array : Float32Array);
+    if (reduced !== vec.buffer) reduced.destroy();
+    return out[0];
+  }
+
+  /**
+   * @param {GpuVector} vec
+   */
+  async maxVector(vec) {
+    const reduced = await this._reduce(vec.buffer, vec.length, vec.dtype, "max");
+    const out = await this._readbackTypedArray(reduced, vec.dtype === "f64" ? Float64Array : Float32Array);
     if (reduced !== vec.buffer) reduced.destroy();
     return out[0];
   }
@@ -438,11 +854,11 @@ export class WebGpuBackend {
    * @param {GpuVector} b
    */
   async sumproductVectors(a, b) {
-    if (a.dtype !== "f32" || b.dtype !== "f32") throw new Error(`sumproductVectors only supports f32`);
+    if (a.dtype !== b.dtype) throw new Error(`SUMPRODUCT dtype mismatch: ${a.dtype} vs ${b.dtype}`);
     if (a.length !== b.length) throw new Error(`SUMPRODUCT length mismatch: ${a.length} vs ${b.length}`);
 
-    const reduced = await this._reduceSumproduct(a.buffer, b.buffer, a.length);
-    const out = await this._readbackTypedArray(reduced, Float32Array);
+    const reduced = await this._reduceSumproduct(a.buffer, b.buffer, a.length, a.dtype);
+    const out = await this._readbackTypedArray(reduced, a.dtype === "f64" ? Float64Array : Float32Array);
     reduced.destroy();
     return out[0];
   }
@@ -450,18 +866,32 @@ export class WebGpuBackend {
   /**
    * @param {GPUBuffer} inputBuf
    * @param {number} length
+   * @param {"f32" | "f64"} dtype
    * @returns {Promise<GPUBuffer>}
    */
-  async _reduce(inputBuf, length) {
+  async _reduce(inputBuf, length, dtype, op) {
     let inBuf = inputBuf;
     let n = length;
     /** @type {GPUBuffer[]} */
     const temporaries = [];
 
+    /** @type {GPUComputePipeline | undefined} */
+    let pipeline;
+    if (op === "sum") {
+      pipeline = dtype === "f64" ? this.pipelines.reduceSum_f64 : this.pipelines.reduceSum_f32;
+    } else if (op === "min") {
+      pipeline = dtype === "f64" ? this.pipelines.reduceMin_f64 : this.pipelines.reduceMin_f32;
+    } else if (op === "max") {
+      pipeline = dtype === "f64" ? this.pipelines.reduceMax_f64 : this.pipelines.reduceMax_f32;
+    }
+    if (!pipeline) {
+      throw new Error(`No ${dtype} reduction pipeline available for op=${op}`);
+    }
+
     while (n > 1) {
       const outLen = Math.ceil(n / (WORKGROUP_SIZE * 2));
       const outBuf = this.device.createBuffer({
-        size: outLen * 4,
+        size: outLen * byteSizeOf(dtype),
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
       });
 
@@ -473,7 +903,7 @@ export class WebGpuBackend {
       this.queue.writeBuffer(paramBuf, 0, params);
 
       const bindGroup = this.device.createBindGroup({
-        layout: this.pipelines.reduceSum.getBindGroupLayout(0),
+        layout: pipeline.getBindGroupLayout(0),
         entries: [
           { binding: 0, resource: { buffer: inBuf } },
           { binding: 1, resource: { buffer: outBuf } },
@@ -483,7 +913,7 @@ export class WebGpuBackend {
 
       const encoder = this.device.createCommandEncoder();
       const pass = encoder.beginComputePass();
-      pass.setPipeline(this.pipelines.reduceSum);
+      pass.setPipeline(pipeline);
       pass.setBindGroup(0, bindGroup);
       pass.dispatchWorkgroups(outLen, 1, 1);
       pass.end();
@@ -507,13 +937,14 @@ export class WebGpuBackend {
    * @param {GPUBuffer} aBuf
    * @param {GPUBuffer} bBuf
    * @param {number} length
+   * @param {"f32" | "f64"} dtype
    * @returns {Promise<GPUBuffer>}
    */
-  async _reduceSumproduct(aBuf, bBuf, length) {
+  async _reduceSumproduct(aBuf, bBuf, length, dtype) {
     let n = length;
     const outLen = Math.ceil(n / (WORKGROUP_SIZE * 2));
     const outBuf = this.device.createBuffer({
-      size: outLen * 4,
+      size: outLen * byteSizeOf(dtype),
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
     });
 
@@ -524,8 +955,13 @@ export class WebGpuBackend {
     });
     this.queue.writeBuffer(paramBuf, 0, params);
 
+    const pipeline = dtype === "f64" ? this.pipelines.reduceSumproduct_f64 : this.pipelines.reduceSumproduct_f32;
+    if (!pipeline) {
+      throw new Error(`No ${dtype} sumproduct pipeline available`);
+    }
+
     const bindGroup = this.device.createBindGroup({
-      layout: this.pipelines.reduceSumproduct.getBindGroupLayout(0),
+      layout: pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: aBuf } },
         { binding: 1, resource: { buffer: bBuf } },
@@ -536,14 +972,14 @@ export class WebGpuBackend {
 
     const encoder = this.device.createCommandEncoder();
     const pass = encoder.beginComputePass();
-    pass.setPipeline(this.pipelines.reduceSumproduct);
+    pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
     pass.dispatchWorkgroups(outLen, 1, 1);
     pass.end();
     this.queue.submit([encoder.finish()]);
 
     n = outLen;
-    const reduced = await this._reduce(outBuf, n);
+    const reduced = await this._reduce(outBuf, n, dtype, "sum");
     paramBuf.destroy();
     if (reduced !== outBuf) outBuf.destroy();
     return reduced;

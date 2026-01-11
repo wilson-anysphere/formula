@@ -19,7 +19,11 @@ export class CpuBackend {
       kind: this.kind,
       supportedKernels: {
         sum: true,
+        min: true,
+        max: true,
         sumproduct: true,
+        average: true,
+        count: true,
         mmult: true,
         sort: true,
         histogram: true
@@ -34,6 +38,44 @@ export class CpuBackend {
     let acc = 0;
     for (let i = 0; i < values.length; i++) acc += values[i];
     return acc;
+  }
+
+  /**
+   * @param {Float32Array | Float64Array} values
+   */
+  async min(values) {
+    if (values.length === 0) return Number.POSITIVE_INFINITY;
+    let acc = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < values.length; i++) acc = Math.min(acc, values[i]);
+    return acc;
+  }
+
+  /**
+   * @param {Float32Array | Float64Array} values
+   */
+  async max(values) {
+    if (values.length === 0) return Number.NEGATIVE_INFINITY;
+    let acc = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < values.length; i++) acc = Math.max(acc, values[i]);
+    return acc;
+  }
+
+  /**
+   * @param {Float32Array | Float64Array} values
+   */
+  async average(values) {
+    if (values.length === 0) return Number.NaN;
+    let acc = 0;
+    for (let i = 0; i < values.length; i++) acc += values[i];
+    return acc / values.length;
+  }
+
+  /**
+   * Numeric-only count. For typed arrays this is equivalent to the array length.
+   * @param {Float32Array | Float64Array} values
+   */
+  async count(values) {
+    return values.length;
   }
 
   /**
@@ -104,6 +146,7 @@ export class CpuBackend {
 
     for (let i = 0; i < values.length; i++) {
       const v = values[i];
+      if (Number.isNaN(v)) continue;
       let bin = Math.floor((v - min) * invWidth);
       if (bin < 0) bin = 0;
       if (bin >= bins) bin = bins - 1;
@@ -113,4 +156,3 @@ export class CpuBackend {
     return counts;
   }
 }
-

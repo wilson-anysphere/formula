@@ -15,6 +15,23 @@ test("cpu: sumproduct", async () => {
   assert.equal(result, 1 * 2 + 2 * 3 + 3 * 4);
 });
 
+test("cpu: min/max/average/count", async () => {
+  const cpu = new CpuBackend();
+  const values = new Float64Array([3, 1, 2, -1]);
+  assert.equal(await cpu.min(values), -1);
+  assert.equal(await cpu.max(values), 3);
+  assert.equal(await cpu.count(values), 4);
+  assert.equal(await cpu.average(values), (3 + 1 + 2 + -1) / 4);
+});
+
+test("cpu: min/max on empty arrays", async () => {
+  const cpu = new CpuBackend();
+  assert.equal(await cpu.min(new Float64Array()), Number.POSITIVE_INFINITY);
+  assert.equal(await cpu.max(new Float64Array()), Number.NEGATIVE_INFINITY);
+  assert.ok(Number.isNaN(await cpu.average(new Float64Array())));
+  assert.equal(await cpu.count(new Float64Array()), 0);
+});
+
 test("cpu: mmult", async () => {
   const cpu = new CpuBackend();
   // 2x3 * 3x2 => 2x2
@@ -32,9 +49,8 @@ test("cpu: sort", async () => {
 
 test("cpu: histogram", async () => {
   const cpu = new CpuBackend();
-  const values = new Float64Array([0, 0.49, 0.5, 0.99, 1.0]);
+  const values = new Float64Array([0, 0.49, 0.5, 0.99, 1.0, Number.NaN]);
   const bins = await cpu.histogram(values, { min: 0, max: 1, bins: 2 });
   // With clamping, 1.0 falls in last bin.
   assert.deepEqual(Array.from(bins), [2, 3]);
 });
-
