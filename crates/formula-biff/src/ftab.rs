@@ -14,8 +14,8 @@
 //! compatibility) are often encoded in BIFF as **user-defined functions** using the
 //! special `iftab` value 255 plus a separate name token. For those,
 //! [`function_id_from_name`] returns 255 when the name is `_xlfn.`-prefixed (even if
-//! it is not present in `FTAB`), and for a small allowlist of unprefixed names used
-//! by `formula-engine` today.
+//! it is not present in `FTAB`), and for a curated allowlist of unprefixed names used
+//! by `formula-engine`.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -555,7 +555,7 @@ pub fn function_name_from_id(id: u16) -> Option<&'static str> {
 /// - Case-insensitive (ASCII)
 /// - Accepts the `_xlfn.` prefix used in files for forward-compatible functions
 /// - Returns [`FTAB_USER_DEFINED`] (255) for unknown `_xlfn.` names, as well as
-///   a small allowlist of unprefixed names implemented by `formula-engine`.
+///   known future-function names not present in `FTAB`.
 pub fn function_id_from_name(name: &str) -> Option<u16> {
     let upper = name.trim().to_ascii_uppercase();
     if upper.is_empty() {
@@ -585,7 +585,9 @@ pub fn function_id_from_name(name: &str) -> Option<u16> {
 //
 // These are typically stored by Excel as `_xlfn.` functions and encoded in BIFF as
 // user-defined function calls (`iftab = 255`) with an accompanying name token.
-const FUTURE_UDF_FUNCTIONS: [&str; 42] = [
+//
+// Keep this list sorted (ASCII) for maintainability.
+const FUTURE_UDF_FUNCTIONS: &[&str] = &[
     "AGGREGATE",
     "BYCOL",
     "BYROW",
@@ -601,9 +603,9 @@ const FUTURE_UDF_FUNCTIONS: [&str; 42] = [
     "FLOOR.PRECISE",
     "HSTACK",
     "IFNA",
-    "ISOMITTED",
     "ISO.CEILING",
     "ISO.WEEKNUM",
+    "ISOMITTED",
     "ISOWEEKNUM",
     "LAMBDA",
     "LET",
@@ -619,6 +621,7 @@ const FUTURE_UDF_FUNCTIONS: [&str; 42] = [
     "SORTBY",
     "TAKE",
     "TEXTJOIN",
+    "TEXTSPLIT",
     "TOCOL",
     "TOROW",
     "UNIQUE",

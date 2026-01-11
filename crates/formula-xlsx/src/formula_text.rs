@@ -1,35 +1,44 @@
 const XL_FN_PREFIX: &str = "_xlfn.";
 
+// Functions that Excel stores in OOXML formulas with an `_xlfn.` prefix for forward
+// compatibility (typically Excel 365 "future functions").
+//
+// Keep this list sorted (ASCII) for maintainability.
 const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "BYCOL",
     "BYROW",
+    "CHOOSECOLS",
+    "CHOOSEROWS",
+    "CONCAT",
+    "DROP",
     "EXPAND",
     "FILTER",
+    "HSTACK",
+    "IFNA",
     "IFS",
     "ISOMITTED",
+    "LAMBDA",
+    "LET",
     "MAKEARRAY",
     "MAP",
+    "NUMBERVALUE",
+    "RANDARRAY",
     "REDUCE",
     "SCAN",
-    "UNIQUE",
+    "SEQUENCE",
     "SORT",
     "SORTBY",
     "TAKE",
-    "DROP",
-    "CHOOSECOLS",
-    "CHOOSEROWS",
-    "HSTACK",
-    "VSTACK",
+    "TEXTJOIN",
+    "TEXTSPLIT",
     "TOCOL",
     "TOROW",
-    "WRAPROWS",
+    "UNIQUE",
+    "VSTACK",
     "WRAPCOLS",
-    "SEQUENCE",
+    "WRAPROWS",
     "XLOOKUP",
     "XMATCH",
-    "LET",
-    "LAMBDA",
-    "RANDARRAY",
 ];
 
 pub(crate) fn normalize_display_formula(input: &str) -> String {
@@ -185,7 +194,7 @@ mod tests {
 
     #[test]
     fn strip_xlfn_prefixes_ignores_string_literals() {
-        let input = r#"CONCAT("_xlfn.",_xlfn.SEQUENCE(1))"#;
+        let input = r#"_xlfn.CONCAT("_xlfn.",_xlfn.SEQUENCE(1))"#;
         assert_eq!(
             strip_xlfn_prefixes(input),
             r#"CONCAT("_xlfn.",SEQUENCE(1))"#
@@ -195,7 +204,14 @@ mod tests {
     #[test]
     fn add_xlfn_prefixes_roundtrips_known_functions() {
         let input = r#"CONCAT("_xlfn.",SEQUENCE(1))"#;
-        let expected = r#"CONCAT("_xlfn.",_xlfn.SEQUENCE(1))"#;
+        let expected = r#"_xlfn.CONCAT("_xlfn.",_xlfn.SEQUENCE(1))"#;
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn add_xlfn_prefixes_prefixes_multiple_modern_functions() {
+        let input = r#"TAKE(SEQUENCE(3),2)+HSTACK({1;2},{3;4})"#;
+        let expected = r#"_xlfn.TAKE(_xlfn.SEQUENCE(3),2)+_xlfn.HSTACK({1;2},{3;4})"#;
         assert_eq!(add_xlfn_prefixes(input), expected);
     }
 
@@ -222,7 +238,7 @@ mod tests {
 
     #[test]
     fn formula_display_roundtrip() {
-        let file = r#"CONCAT("_xlfn.",_xlfn.SEQUENCE(1))"#;
+        let file = r#"_xlfn.CONCAT("_xlfn.",_xlfn.SEQUENCE(1))"#;
         let display = strip_xlfn_prefixes(file);
         assert_eq!(display, r#"CONCAT("_xlfn.",SEQUENCE(1))"#);
         assert_eq!(add_xlfn_prefixes(&display), file);
