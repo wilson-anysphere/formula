@@ -1,4 +1,4 @@
-use formula_format::{format_value, DateSystem, FormatOptions, Locale, Value};
+use formula_format::{builtin_format_code, format_value, DateSystem, FormatOptions, Locale, Value};
 
 #[test]
 fn general_numbers() {
@@ -240,4 +240,36 @@ fn text_at_placeholder_formats_numbers_as_text_and_aligns_left() {
 
     let rendered = format_value(Value::Text("hello"), Some("\"Value: \"@"), &options);
     assert_eq!(rendered.text, "Value: hello");
+}
+
+#[test]
+fn builtin_currency_and_accounting_formats_smoke() {
+    let options = FormatOptions::default();
+
+    // Built-in currency format (2 decimals).
+    let currency = builtin_format_code(7).expect("missing built-in currency id 7");
+    let rendered = format_value(Value::Number(1234.5), Some(currency), &options).text;
+    assert!(
+        rendered.contains("$1,234.50"),
+        "expected currency output, got {rendered:?}"
+    );
+    let rendered_neg = format_value(Value::Number(-1234.5), Some(currency), &options).text;
+    assert!(
+        rendered_neg.contains("($1,234.50)"),
+        "expected currency negative output, got {rendered_neg:?}"
+    );
+
+    // Built-in accounting format (2 decimals).
+    let accounting = builtin_format_code(44).expect("missing built-in accounting id 44");
+    let rendered = format_value(Value::Number(1234.5), Some(accounting), &options).text;
+    assert!(
+        rendered.contains("$") && rendered.contains("1,234.50"),
+        "expected accounting output, got {rendered:?}"
+    );
+
+    let rendered_zero = format_value(Value::Number(0.0), Some(accounting), &options).text;
+    assert!(
+        !rendered_zero.trim().is_empty() && rendered_zero.contains('-'),
+        "expected accounting zero section output, got {rendered_zero:?}"
+    );
 }

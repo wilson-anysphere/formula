@@ -2,10 +2,15 @@ use std::borrow::Cow;
 
 use crate::Locale;
 
-/// Lookup table for Excel's built-in number format codes.
+/// Lookup table for Excel's built-in number format codes (`numFmtId` / `ifmt`).
 ///
-/// The OOXML spec defines format IDs 0-49 as built-ins. Many additional IDs are
-/// reserved by Excel, but 0-49 cover the vast majority of files.
+/// Excel defines a "core" set of built-in number formats with ids 0-49. These ids
+/// are referenced by:
+/// - OOXML (`styles.xml` `<xf numFmtId="…">`)
+/// - BIFF (`.xls`) XF records via the `ifmt` field
+///
+/// This table intentionally covers *all* ids 0-49 so importers can resolve common
+/// formats (especially currency/accounting) without falling back to placeholders.
 ///
 /// ## Locale-variant IDs
 ///
@@ -21,8 +26,8 @@ use crate::Locale;
 /// workbook locale and wants a closer Excel match.
 ///
 /// References:
-/// - ECMA-376 Part 1, 18.8.30 `numFmts`
-/// - Excel "Format Cells" built-in formats
+/// - ECMA-376 Part 1, 18.8.30 `numFmts` (built-in `numFmtId` assignments)
+/// - Excel "Format Cells" UI built-in formats (en-US defaults)
 const BUILTIN_FORMATS_EN_US: [&str; 50] = [
     // 0-4: General/number.
     "General",  // 0

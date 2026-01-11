@@ -33,8 +33,31 @@ fn builtin_format_mappings_include_representative_categories() {
     assert_eq!(builtin_format_code(20), Some("h:mm"));
     assert_eq!(builtin_format_code(47), Some("mm:ss.0"));
 
-    // Currency / accounting.
+    // Currency (built-in ids 5-8).
+    assert_eq!(builtin_format_code(5), Some("$#,##0_);($#,##0)"));
+    assert_eq!(builtin_format_code(6), Some("$#,##0_);[Red]($#,##0)"));
     assert_eq!(builtin_format_code(7), Some("$#,##0.00_);($#,##0.00)"));
+    assert_eq!(builtin_format_code(8), Some("$#,##0.00_);[Red]($#,##0.00)"));
+
+    // Accounting-style negatives (these also appear at 37-40).
+    assert_eq!(builtin_format_code(23), Some("#,##0_);(#,##0)"));
+    assert_eq!(builtin_format_code(24), Some("#,##0_);[Red](#,##0)"));
+    assert_eq!(builtin_format_code(25), Some("#,##0.00_);(#,##0.00)"));
+    assert_eq!(builtin_format_code(26), Some("#,##0.00_);[Red](#,##0.00)"));
+
+    // Accounting formats (built-in ids 41-44).
+    assert_eq!(
+        builtin_format_code(41),
+        Some(r#"_(* #,##0_);_(* (#,##0);_(* "-"_);_(@_)"#)
+    );
+    assert_eq!(
+        builtin_format_code(42),
+        Some(r#"_($* #,##0_);_($* (#,##0);_($* "-"_);_(@_)"#)
+    );
+    assert_eq!(
+        builtin_format_code(43),
+        Some(r#"_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)"#)
+    );
     assert_eq!(
         builtin_format_code(44),
         Some(r#"_($* #,##0.00_);_($* (#,##0.00);_($* "-"??_);_(@_)"#)
