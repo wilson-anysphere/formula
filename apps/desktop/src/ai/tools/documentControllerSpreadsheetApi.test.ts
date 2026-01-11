@@ -176,6 +176,19 @@ describe("DocumentControllerSpreadsheetApi", () => {
 
     // Ensure the preview simulation didn't mutate the live controller.
     expect(controller.getCell("Sheet1", "A1").styleId).toBe(0);
+
+    const previewEngineNoApproval = new PreviewEngine({ approval_cell_threshold: 1 });
+    const previewNoApproval = await previewEngineNoApproval.generatePreview(
+      [
+        {
+          name: "apply_formatting",
+          parameters: { range: "A1", format: { bold: true } }
+        }
+      ],
+      api,
+      { default_sheet: "Sheet1" }
+    );
+    expect(previewNoApproval.requires_approval).toBe(false);
   });
 
   it("normalizes formulas to include leading '=' when reading through the adapter", async () => {

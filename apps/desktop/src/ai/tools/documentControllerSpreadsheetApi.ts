@@ -166,19 +166,24 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
 
   setCell(address: CellAddress, cell: CellData): void {
     const coord = toControllerCoord(address);
-    if (cell.formula) {
-      this.controller.setCellFormula(address.sheet, coord, cell.formula, { label: "AI write_cell" });
-    } else {
-      this.controller.setCellValue(address.sheet, coord, cell.value ?? null, { label: "AI write_cell" });
-    }
-
-    if (cell.format && Object.keys(cell.format).length > 0) {
-      const patch = cellFormatToStylePatch(cell.format);
-      if (patch) {
-        this.controller.setRangeFormat(address.sheet, { start: coord, end: coord }, patch, {
-          label: "AI apply_formatting"
-        });
+    this.controller.beginBatch({ label: "AI write_cell" });
+    try {
+      if (cell.formula) {
+        this.controller.setCellFormula(address.sheet, coord, cell.formula, { label: "AI write_cell" });
+      } else {
+        this.controller.setCellValue(address.sheet, coord, cell.value ?? null, { label: "AI write_cell" });
       }
+
+      if (cell.format && Object.keys(cell.format).length > 0) {
+        const patch = cellFormatToStylePatch(cell.format);
+        if (patch) {
+          this.controller.setRangeFormat(address.sheet, { start: coord, end: coord }, patch, {
+            label: "AI apply_formatting"
+          });
+        }
+      }
+    } finally {
+      this.controller.endBatch();
     }
   }
 
@@ -212,21 +217,26 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
       }
     }
 
-    const values = cells.map((row) =>
-      row.map((cell) => (cell?.formula ? { formula: cell.formula } : cell?.value ?? null))
-    );
-    this.controller.setRangeValues(range.sheet, toControllerRange(range), values, { label: "AI set_range" });
+    this.controller.beginBatch({ label: "AI set_range" });
+    try {
+      const values = cells.map((row) =>
+        row.map((cell) => (cell?.formula ? { formula: cell.formula } : cell?.value ?? null))
+      );
+      this.controller.setRangeValues(range.sheet, toControllerRange(range), values, { label: "AI set_range" });
 
-    for (let r = 0; r < rowCount; r++) {
-      const row = cells[r] ?? [];
-      for (let c = 0; c < colCount; c++) {
-        const format = row[c]?.format;
-        if (!format || Object.keys(format).length === 0) continue;
-        const patch = cellFormatToStylePatch(format);
-        if (!patch) continue;
-        const coord = { row: range.startRow - 1 + r, col: range.startCol - 1 + c };
-        this.controller.setRangeFormat(range.sheet, { start: coord, end: coord }, patch, { label: "AI apply_formatting" });
+      for (let r = 0; r < rowCount; r++) {
+        const row = cells[r] ?? [];
+        for (let c = 0; c < colCount; c++) {
+          const format = row[c]?.format;
+          if (!format || Object.keys(format).length === 0) continue;
+          const patch = cellFormatToStylePatch(format);
+          if (!patch) continue;
+          const coord = { row: range.startRow - 1 + r, col: range.startCol - 1 + c };
+          this.controller.setRangeFormat(range.sheet, { start: coord, end: coord }, patch, { label: "AI apply_formatting" });
+        }
       }
+    } finally {
+      this.controller.endBatch();
     }
   }
 
