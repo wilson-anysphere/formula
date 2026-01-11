@@ -1659,6 +1659,26 @@ impl Engine {
                     }
                 }
 
+                // Dynamic dependency tracing can record both a range and individual cells within
+                // that range (e.g. when a reference-returning function like INDEX yields a
+                // single-cell reference that is then dereferenced as the formula result).
+                //
+                // The cell precedents are redundant once the containing range has been recorded,
+                // so drop them to keep dependency sets stable and Excel-like.
+                let ranges: Vec<SheetRange> = new_precedents
+                    .iter()
+                    .filter_map(|p| match p {
+                        Precedent::Range(r) => Some(*r),
+                        _ => None,
+                    })
+                    .collect();
+                if !ranges.is_empty() {
+                    new_precedents.retain(|p| match p {
+                        Precedent::Cell(cell) => !ranges.iter().any(|r| r.contains(*cell)),
+                        _ => true,
+                    });
+                }
+
                 if new_precedents != old_precedents {
                     let mut vec: Vec<Precedent> = new_precedents.into_iter().collect();
                     vec.sort_by_key(|p| match p {
