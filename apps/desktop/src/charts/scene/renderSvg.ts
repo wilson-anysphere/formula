@@ -37,8 +37,13 @@ function paintAttrs(paint: Paint | undefined, attr: "fill" | "stroke"): string[]
 
   const rgba = paintToRgba(paint);
   if (!rgba) {
-    if (attr === "fill") return ['fill="none"'];
-    return [];
+    const attrs: string[] = [];
+    attrs.push(`${attr}="${escapeXml(paint.color)}"`);
+    if (paint.opacity != null) {
+      const opacity = Math.max(0, Math.min(1, paint.opacity));
+      attrs.push(`${attr}-opacity="${formatNumber(opacity)}"`);
+    }
+    return attrs;
   }
 
   const attrs: string[] = [];
