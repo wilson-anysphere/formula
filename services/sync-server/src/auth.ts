@@ -1,6 +1,8 @@
 import type { IncomingMessage } from "node:http";
 import jwt from "jsonwebtoken";
 
+import { normalizeRestriction } from "../../../packages/collab/permissions/index.js";
+
 import type { AuthMode } from "./config.js";
 
 export type SyncRole = "owner" | "admin" | "editor" | "commenter" | "viewer";
@@ -12,6 +14,7 @@ export type AuthContext = {
   orgId: string | null;
   role: SyncRole;
   sessionId?: string | null;
+  rangeRestrictions?: unknown[];
 };
 
 export class AuthError extends Error {
@@ -122,6 +125,30 @@ function parseOptionalStringClaim(
   throw new AuthError(`JWT "${claim}" claim must be a non-empty string`, 403);
 }
 
+function parseOptionalRangeRestrictionsClaim(
+  payload: Record<string, unknown>
+): unknown[] | undefined {
+  const value = payload.rangeRestrictions;
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new AuthError('JWT "rangeRestrictions" claim must be an array', 403);
+  }
+
+  for (const [index, entry] of value.entries()) {
+    try {
+      normalizeRestriction(entry);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new AuthError(
+        `JWT "rangeRestrictions"[${index}] is invalid: ${message}`,
+        403
+      );
+    }
+  }
+
+  return value as unknown[];
+}
+
 export function authenticateRequest(
   auth: AuthMode,
   token: string | null,
@@ -162,6 +189,7 @@ export function authenticateRequest(
   const orgId = orgIdValue === undefined ? null : orgIdValue;
 
   const sessionId = parseOptionalStringClaim(payload, "sessionId");
+  const rangeRestrictions = parseOptionalRangeRestrictionsClaim(payload);
 
   const ctx: AuthContext = {
     userId,
@@ -173,6 +201,10 @@ export function authenticateRequest(
 
   if (sessionId !== undefined) {
     ctx.sessionId = sessionId;
+  }
+
+  if (rangeRestrictions !== undefined) {
+    ctx.rangeRestrictions = rangeRestrictions;
   }
 
   return ctx;

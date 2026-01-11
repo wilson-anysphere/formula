@@ -1,7 +1,10 @@
 import type { Logger } from "pino";
 import WebSocket from "ws";
 
+import { getCellPermissions } from "../../../packages/collab/permissions/index.js";
+
 import type { AuthContext } from "./auth.js";
+import { Y } from "./yjs.js";
 
 type MessageListener = (data: WebSocket.RawData, isBinary: boolean) => void;
 
@@ -105,6 +108,20 @@ function readVarString(
   return { value, offset: end };
 }
 
+function readVarUint8Array(
+  buf: Uint8Array,
+  offset: number
+): { value: Uint8Array; offset: number } {
+  const lenRes = readVarUint(buf, offset);
+  const length = lenRes.value;
+  const start = lenRes.offset;
+  const end = start + length;
+  if (end > buf.length) {
+    throw new Error("Unexpected end of buffer while reading varUint8Array");
+  }
+  return { value: buf.subarray(start, end), offset: end };
+}
+
 function encodeVarString(value: string): Uint8Array {
   const bytes = textEncoder.encode(value);
   return concatUint8Arrays([encodeVarUint(bytes.length), bytes]);
@@ -122,6 +139,37 @@ function concatUint8Arrays(arrays: Uint8Array[]): Uint8Array {
 }
 
 type AwarenessEntry = { clientID: number; clock: number; stateJSON: string };
+
+type CellAddress = { sheetId: string; row: number; col: number };
+
+function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddress | null {
+  if (typeof key !== "string" || key.length === 0) return null;
+
+  const parts = key.split(":");
+  if (parts.length === 3) {
+    const sheetId = parts[0] || defaultSheetId;
+    const row = Number(parts[1]);
+    const col = Number(parts[2]);
+    if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) return null;
+    return { sheetId, row, col };
+  }
+
+  // Some internal modules use `${sheetId}:${row},${col}`.
+  if (parts.length === 2) {
+    const sheetId = parts[0] || defaultSheetId;
+    const m = parts[1]?.match(/^(\d+),(\d+)$/);
+    if (m) {
+      return { sheetId, row: Number(m[1]), col: Number(m[2]) };
+    }
+  }
+
+  const m = key.match(/^r(\d+)c(\d+)$/);
+  if (m) {
+    return { sheetId: defaultSheetId, row: Number(m[1]), col: Number(m[2]) };
+  }
+
+  return null;
+}
 
 function decodeAwarenessUpdate(
   update: Uint8Array,
@@ -220,19 +268,6 @@ function sanitizeAwarenessStateJson(stateJSON: string, userId: string): string |
   return JSON.stringify(obj);
 }
 
-function guardSyncMessage(data: Uint8Array, readOnly: boolean): boolean {
-  if (!readOnly) return true;
-
-  let offset = 0;
-  const outer = readVarUint(data, offset);
-  offset = outer.offset;
-  if (outer.value !== 0) return true;
-
-  const inner = readVarUint(data, offset);
-  // Allow SyncStep1 (0), drop SyncStep2 (1) and Update (2).
-  return inner.value === 0;
-}
-
 function patchWebSocketMessageHandlers(ws: WebSocket, guard: MessageGuard): void {
   const wrappedListeners = new WeakMap<MessageListener, MessageListener>();
 
@@ -327,12 +362,64 @@ export function installYwsSecurity(
       maxAwarenessStateBytes: number;
       maxAwarenessEntries: number;
     };
+    enforceRangeRestrictions?: boolean;
   }
 ): void {
-  const { docName, auth, logger, limits } = params;
+  const { docName, auth, logger, limits, enforceRangeRestrictions: enforceRangeRestrictionsConfig } =
+    params;
   const role = auth?.role ?? "viewer";
   const userId = auth?.userId ?? "unknown";
   const readOnly = role === "viewer" || role === "commenter";
+
+  const rangeRestrictions =
+    auth?.tokenType === "jwt" && Array.isArray(auth.rangeRestrictions)
+      ? auth.rangeRestrictions
+      : null;
+
+  // Approach B (Shadow-doc apply + diff):
+  // Maintain a per-connection shadow Y.Doc seeded from server->client sync traffic.
+  // Incoming updates are first applied to the shadow doc to observe which cell keys
+  // are touched. This avoids relying on Yjs internal decoding and remains accurate
+  // for edits to existing cells, at the cost of extra CPU/memory for the shadow doc.
+  const enforceRangeRestrictions =
+    Boolean(enforceRangeRestrictionsConfig) &&
+    rangeRestrictions !== null &&
+    rangeRestrictions.length > 0;
+  const shadowDoc = enforceRangeRestrictions ? new Y.Doc() : null;
+  const shadowCells = shadowDoc ? shadowDoc.getMap("cells") : null;
+
+  if (shadowDoc && shadowCells) {
+    const originalSend = ws.send.bind(ws);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ws.send = ((...args: any[]) => {
+      const raw = args[0] as WebSocket.RawData;
+      try {
+        const message = toUint8Array(raw);
+        if (message) {
+          const outer = readVarUint(message, 0);
+          if (outer.value === 0) {
+            const inner = readVarUint(message, outer.offset);
+            if (inner.value === 1 || inner.value === 2) {
+              const updateRes = readVarUint8Array(message, inner.offset);
+              Y.applyUpdate(shadowDoc, updateRes.value);
+            }
+          }
+        }
+      } catch {
+        // Best-effort: ignore malformed outbound messages. Enforcement stays strict
+        // on inbound updates.
+      }
+      return originalSend(...args);
+    }) as typeof ws.send;
+
+    ws.on("close", () => {
+      try {
+        shadowDoc.destroy();
+      } catch {
+        // ignore
+      }
+    });
+  }
 
   let allowedAwarenessClientId: number | null = null;
   let loggedAwarenessSpoofAttempt = false;
@@ -412,12 +499,175 @@ export function installYwsSecurity(
 
     // 0 = sync, 1 = awareness (y-websocket).
     if (outerType === 0) {
+      let innerType: number;
       try {
-        if (!guardSyncMessage(message, readOnly)) return { drop: true };
+        const inner = readVarUint(message, offset);
+        innerType = inner.value;
+        offset = inner.offset;
       } catch {
         ws.close(1003, "malformed sync message");
         return { drop: true };
       }
+
+      if (readOnly && innerType !== 0) {
+        // Allow SyncStep1 (0), drop SyncStep2 (1) and Update (2).
+        return { drop: true };
+      }
+
+      if (
+        enforceRangeRestrictions &&
+        (innerType === 1 || innerType === 2) &&
+        shadowDoc &&
+        shadowCells
+      ) {
+        let updateBytes: Uint8Array;
+        try {
+          const updateRes = readVarUint8Array(message, offset);
+          updateBytes = updateRes.value;
+        } catch {
+          ws.close(1003, "malformed sync update");
+          return { drop: true };
+        }
+
+        const preStateVector = Y.encodeStateVector(shadowDoc);
+        const touchedCellKeys = new Set<string>();
+        const modifiedByTouchedCellKeys = new Set<string>();
+
+        const store = (shadowDoc as any).store as {
+          pendingStructs: unknown;
+          pendingDs: unknown;
+        };
+
+        if (store.pendingStructs || store.pendingDs) {
+          logger.warn({ docName, userId, role }, "range_restriction_shadow_pending");
+          ws.close(1008, "range restrictions validation failed");
+          return { drop: true };
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const observer = (events: any[]) => {
+          for (const event of events) {
+            const path = event?.path;
+            const topCellKey =
+              Array.isArray(path) && typeof path[0] === "string" ? path[0] : null;
+            if (topCellKey) touchedCellKeys.add(topCellKey);
+
+            const keys = event?.changes?.keys;
+            if (!keys) continue;
+
+            // When `observeDeep` is attached to the `cells` map, `event.path` is:
+            // - `[]` for changes on the map itself (keys are cell keys)
+            // - `[cellKey]` for changes inside a cell's Y.Map (keys are cell fields)
+            if (!topCellKey) {
+              if (typeof keys.entries === "function") {
+                for (const [key, change] of keys.entries()) {
+                  if (typeof key !== "string") continue;
+                  touchedCellKeys.add(key);
+                  const action = change?.action;
+                  if (action === "add" || action === "update") {
+                    modifiedByTouchedCellKeys.add(key);
+                  }
+                }
+              } else if (typeof keys.keys === "function") {
+                for (const key of keys.keys()) {
+                  if (typeof key === "string") {
+                    touchedCellKeys.add(key);
+                    modifiedByTouchedCellKeys.add(key);
+                  }
+                }
+              }
+            } else if (typeof keys.has === "function" && keys.has("modifiedBy")) {
+              modifiedByTouchedCellKeys.add(topCellKey);
+            }
+          }
+        };
+
+        shadowCells.observeDeep(observer);
+        try {
+          Y.applyUpdate(shadowDoc, updateBytes);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn({ docName, userId, role, err: message }, "range_restriction_apply_failed");
+          ws.close(1008, "range restrictions validation failed");
+          return { drop: true };
+        } finally {
+          shadowCells.unobserveDeep(observer);
+        }
+
+        if (store.pendingStructs || store.pendingDs) {
+          // The update could not be applied cleanly against our shadow state, so
+          // we cannot confidently determine which cells were affected. Fail closed.
+          logger.warn({ docName, userId, role }, "range_restriction_update_pending");
+          ws.close(1008, "range restrictions validation failed");
+          return { drop: true };
+        }
+
+        for (const cellKey of touchedCellKeys) {
+          const parsed = parseCellKey(cellKey);
+          if (!parsed) {
+            logger.warn({ docName, userId, role, cellKey }, "range_restriction_unparseable_cell");
+            ws.close(1008, "unparseable cell key");
+            return { drop: true };
+          }
+
+          const { canEdit } = getCellPermissions({
+            role,
+            restrictions: rangeRestrictions,
+            userId,
+            cell: {
+              sheetId: parsed.sheetId,
+              row: parsed.row,
+              col: parsed.col,
+            },
+          });
+
+          if (!canEdit) {
+            logger.warn({ docName, userId, role, cellKey }, "permission_violation");
+            ws.close(1008, "permission violation");
+            return { drop: true };
+          }
+        }
+
+        // Best-effort audit sanitization: if a client tries to spoof `modifiedBy`,
+        // rewrite it to the authenticated user. This avoids mutating otherwise
+        // well-formed updates (and avoids generating extra server-side items) for
+        // honest clients that already set `modifiedBy` correctly.
+        let sawSpoofedModifiedBy = false;
+        if (modifiedByTouchedCellKeys.size > 0) {
+          for (const cellKey of modifiedByTouchedCellKeys) {
+            const cell = shadowCells.get(cellKey);
+            if (!(cell instanceof Y.Map)) continue;
+            const value = cell.get("modifiedBy");
+            if (value != null && value !== userId) {
+              sawSpoofedModifiedBy = true;
+              break;
+            }
+          }
+        }
+
+        if (sawSpoofedModifiedBy) {
+          shadowDoc.transact(() => {
+            for (const cellKey of modifiedByTouchedCellKeys) {
+              const cell = shadowCells.get(cellKey);
+              if (!(cell instanceof Y.Map)) continue;
+              const value = cell.get("modifiedBy");
+              if (value != null && value !== userId) {
+                (cell as Y.Map<unknown>).set("modifiedBy", userId);
+              }
+            }
+          });
+
+          const sanitizedUpdate = Y.encodeStateAsUpdate(shadowDoc, preStateVector);
+          const sanitizedMessage = concatUint8Arrays([
+            encodeVarUint(0),
+            encodeVarUint(innerType),
+            encodeVarUint(sanitizedUpdate.length),
+            sanitizedUpdate,
+          ]);
+          return { data: Buffer.from(sanitizedMessage), isBinary };
+        }
+      }
+
       return { data: normalizedRaw, isBinary };
     }
 

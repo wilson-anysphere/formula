@@ -39,6 +39,11 @@ export type SyncServerConfig = {
   };
 
   auth: AuthMode;
+  /**
+   * When enabled, the sync-server will enforce JWT range restrictions (fail-closed)
+   * for incoming Yjs updates that touch spreadsheet cells.
+   */
+  enforceRangeRestrictions: boolean;
 
   /**
    * Optional shared secret for internal admin endpoints (purge, retention ops, etc).
@@ -136,6 +141,12 @@ export function loadConfigFromEnv(): SyncServerConfig {
   const port = envInt(process.env.SYNC_SERVER_PORT, 1234);
   const trustProxy = envBool(process.env.SYNC_SERVER_TRUST_PROXY, false);
   const gc = envBool(process.env.SYNC_SERVER_GC, true);
+
+  const enforceRangeRestrictionsDefault = nodeEnv === "production";
+  const enforceRangeRestrictions = envBool(
+    process.env.SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS,
+    enforceRangeRestrictionsDefault
+  );
 
   const dataDir =
     process.env.SYNC_SERVER_DATA_DIR ??
@@ -239,6 +250,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
       encryption,
     },
     auth,
+    enforceRangeRestrictions,
     internalAdminToken,
     retention: {
       ttlMs: retentionTtlMs,

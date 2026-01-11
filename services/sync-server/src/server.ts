@@ -1123,6 +1123,7 @@ export function createSyncServer(
         maxAwarenessStateBytes: config.limits.maxAwarenessStateBytes,
         maxAwarenessEntries: config.limits.maxAwarenessEntries,
       },
+      enforceRangeRestrictions: config.enforceRangeRestrictions,
     });
     setupWSConnection(ws, req, { gc: config.gc });
   });
