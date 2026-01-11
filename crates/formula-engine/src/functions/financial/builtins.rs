@@ -428,6 +428,60 @@ fn rate_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "EFFECT",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: effect_fn,
+    }
+}
+
+fn effect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let nominal_rate = match eval_number_arg(ctx, &args[0]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let npery = match eval_number_arg(ctx, &args[1]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(super::effect(nominal_rate, npery))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "NOMINAL",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: nominal_fn,
+    }
+}
+
+fn nominal_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let effect_rate = match eval_number_arg(ctx, &args[0]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let npery = match eval_number_arg(ctx, &args[1]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(super::nominal(effect_rate, npery))
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "IPMT",
         min_args: 4,
         max_args: 6,

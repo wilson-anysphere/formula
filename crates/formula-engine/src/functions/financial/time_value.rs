@@ -219,6 +219,56 @@ fn rate_equation_derivative(
     (df.is_finite() && df != 0.0).then_some(df)
 }
 
+/// Effective annual interest rate.
+pub fn effect(nominal_rate: f64, npery: f64) -> ExcelResult<f64> {
+    if !nominal_rate.is_finite() || !npery.is_finite() {
+        return Err(ExcelError::Num);
+    }
+    if nominal_rate <= 0.0 {
+        return Err(ExcelError::Num);
+    }
+
+    let periods = npery.trunc();
+    if periods < 1.0 || periods > (i32::MAX as f64) {
+        return Err(ExcelError::Num);
+    }
+    let periods = periods as i32;
+
+    let rate_per_period = nominal_rate / (periods as f64);
+    let (_g, g_minus_1) = pow1p(rate_per_period, periods as f64).ok_or(ExcelError::Num)?;
+    Ok(g_minus_1)
+}
+
+/// Nominal annual interest rate.
+pub fn nominal(effect_rate: f64, npery: f64) -> ExcelResult<f64> {
+    if !effect_rate.is_finite() || !npery.is_finite() {
+        return Err(ExcelError::Num);
+    }
+    if effect_rate <= 0.0 {
+        return Err(ExcelError::Num);
+    }
+
+    let periods = npery.trunc();
+    if periods < 1.0 {
+        return Err(ExcelError::Num);
+    }
+    let periods = periods as f64;
+
+    let ln1p = effect_rate.ln_1p();
+    if !ln1p.is_finite() || periods == 0.0 {
+        return Err(ExcelError::Num);
+    }
+
+    // (1 + effect_rate)^(1/periods) - 1, computed via expm1 for stability.
+    let per_rate = (ln1p / periods).exp_m1();
+    let result = per_rate * periods;
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(ExcelError::Num)
+    }
+}
+
 /// Interest payment for a given period.
 pub fn ipmt(
     rate: f64,

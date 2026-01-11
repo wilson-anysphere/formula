@@ -1,4 +1,4 @@
-use formula_engine::functions::financial::{fv, ipmt, nper, pmt, ppmt, pv, rate};
+use formula_engine::functions::financial::{effect, fv, ipmt, nominal, nper, pmt, ppmt, pv, rate};
 use formula_engine::ExcelError;
 
 fn assert_close(actual: f64, expected: f64, tol: f64) {
@@ -58,6 +58,22 @@ fn rate_returns_num_when_no_solution_exists() {
     // that makes PV*(1+r)^n + FV == 0.
     let result = rate(10.0, 0.0, 1_000.0, Some(1_000.0), None, None);
     assert_eq!(result, Err(ExcelError::Num));
+}
+
+#[test]
+fn effect_and_nominal_roundtrip() {
+    let nominal_rate = 0.0525;
+    let npery = 4.0;
+
+    let eff = effect(nominal_rate, npery).unwrap();
+    let expected = (1.0 + nominal_rate / 4.0).powi(4) - 1.0;
+    assert_close(eff, expected, 1e-12);
+
+    let back = nominal(eff, npery).unwrap();
+    assert_close(back, nominal_rate, 1e-12);
+
+    assert_eq!(effect(nominal_rate, 0.0), Err(ExcelError::Num));
+    assert_eq!(nominal(eff, 0.0), Err(ExcelError::Num));
 }
 
 #[test]

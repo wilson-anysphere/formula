@@ -334,6 +334,16 @@ export default {
       ]
     },
     {
+      "name": "EFFECT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "EOMONTH",
       "min_args": 2,
       "max_args": 2,
@@ -930,6 +940,16 @@ export default {
         "number",
         "any",
         "any"
+      ]
+    },
+    {
+      "name": "NOMINAL",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
       ]
     },
     {

@@ -27,6 +27,12 @@ fn evaluates_time_value_financial_functions() {
     engine
         .set_cell_formula("Sheet1", "A3", "=RATE(4*12, -200, 8000)")
         .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=EFFECT(0.0525, 4)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", "=NOMINAL(A4, 4)")
+        .unwrap();
 
     engine.recalculate();
 
@@ -43,6 +49,16 @@ fn evaluates_time_value_financial_functions() {
     assert_close(
         assert_number(engine.get_cell_value("Sheet1", "A3")),
         0.00770147248820165,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A4")),
+        (1.0_f64 + 0.0525 / 4.0).powi(4) - 1.0,
+        1e-12,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A5")),
+        0.0525,
         1e-12,
     );
 }
