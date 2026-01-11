@@ -21,6 +21,10 @@ mod sandbox;
 mod value;
 
 pub use crate::ast::{ProcedureKind, VbaProgram};
+pub use crate::ast::{
+    ArrayDim, BinOp, CallArg, CaseComparisonOp, CaseCondition, ConstDecl, Expr, LoopConditionKind,
+    ParamDef, ProcedureDef, SelectCaseArm, Stmt, UnOp, VarDecl, VbaType,
+};
 pub use crate::object_model::{
     a1_to_row_col, row_col_to_a1, InMemoryWorkbook, Spreadsheet, VbaRangeRef,
 };

@@ -12,12 +12,15 @@ pub enum TokenKind {
     Comma,
     Dot,
     Colon,
+    ColonEq,
     Eq,
     Plus,
     Minus,
     Star,
     Slash,
+    Backslash,
     Amp,
+    Caret,
     Lt,
     Gt,
     Le,
@@ -38,6 +41,7 @@ pub struct Token {
     pub col: usize,
 }
 
+#[derive(Clone)]
 pub struct Lexer<'a> {
     chars: std::str::Chars<'a>,
     peeked: Option<char>,
@@ -130,11 +134,20 @@ impl<'a> Lexer<'a> {
                 | "else"
                 | "elseif"
                 | "for"
+                | "each"
+                | "in"
                 | "to"
                 | "step"
                 | "next"
                 | "dim"
+                | "const"
                 | "as"
+                | "integer"
+                | "long"
+                | "string"
+                | "date"
+                | "boolean"
+                | "is"
                 | "byval"
                 | "byref"
                 | "set"
@@ -148,12 +161,16 @@ impl<'a> Lexer<'a> {
                 | "loop"
                 | "until"
                 | "wend"
+                | "select"
+                | "case"
+                | "with"
                 | "call"
                 | "true"
                 | "false"
                 | "nothing"
                 | "and"
                 | "or"
+                | "mod"
                 | "not"
                 | "new"
                 | "rem"
@@ -283,7 +300,12 @@ impl<'a> Lexer<'a> {
                 col,
             }),
             Some(':') => Ok(Token {
-                kind: TokenKind::Colon,
+                kind: if self.peek() == Some('=') {
+                    self.bump();
+                    TokenKind::ColonEq
+                } else {
+                    TokenKind::Colon
+                },
                 line,
                 col,
             }),
@@ -312,8 +334,18 @@ impl<'a> Lexer<'a> {
                 line,
                 col,
             }),
+            Some('\\') => Ok(Token {
+                kind: TokenKind::Backslash,
+                line,
+                col,
+            }),
             Some('&') => Ok(Token {
                 kind: TokenKind::Amp,
+                line,
+                col,
+            }),
+            Some('^') => Ok(Token {
+                kind: TokenKind::Caret,
                 line,
                 col,
             }),

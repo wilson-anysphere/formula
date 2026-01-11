@@ -3,6 +3,37 @@ use std::collections::HashMap;
 use crate::value::VbaValue;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VbaType {
+    Variant,
+    Integer,
+    Long,
+    Double,
+    String,
+    Boolean,
+    Date,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrayDim {
+    pub lower: Option<Expr>,
+    pub upper: Expr,
+}
+
+#[derive(Debug, Clone)]
+pub struct VarDecl {
+    pub name: String,
+    pub ty: VbaType,
+    pub dims: Vec<ArrayDim>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConstDecl {
+    pub name: String,
+    pub ty: Option<VbaType>,
+    pub value: Expr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcedureKind {
     Sub,
     Function,
@@ -10,12 +41,18 @@ pub enum ProcedureKind {
 
 #[derive(Debug, Clone)]
 pub struct VbaProgram {
+    pub option_explicit: bool,
+    pub module_vars: Vec<VarDecl>,
+    pub module_consts: Vec<ConstDecl>,
     pub procedures: HashMap<String, ProcedureDef>,
 }
 
 impl VbaProgram {
     pub fn new() -> Self {
         Self {
+            option_explicit: false,
+            module_vars: Vec::new(),
+            module_consts: Vec::new(),
             procedures: HashMap::new(),
         }
     }
@@ -30,6 +67,7 @@ pub struct ProcedureDef {
     pub name: String,
     pub kind: ProcedureKind,
     pub params: Vec<ParamDef>,
+    pub return_type: Option<VbaType>,
     pub body: Vec<Stmt>,
 }
 
@@ -37,11 +75,13 @@ pub struct ProcedureDef {
 pub struct ParamDef {
     pub name: String,
     pub by_ref: bool,
+    pub ty: Option<VbaType>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Dim(Vec<String>),
+    Dim(Vec<VarDecl>),
+    Const(Vec<ConstDecl>),
     Assign {
         target: Expr,
         value: Expr,
@@ -64,24 +104,78 @@ pub enum Stmt {
         step: Option<Expr>,
         body: Vec<Stmt>,
     },
-    DoWhile {
+    ForEach {
+        var: String,
+        iterable: Expr,
+        body: Vec<Stmt>,
+    },
+    DoLoop {
+        pre_condition: Option<(LoopConditionKind, Expr)>,
+        post_condition: Option<(LoopConditionKind, Expr)>,
+        body: Vec<Stmt>,
+    },
+    While {
         cond: Expr,
+        body: Vec<Stmt>,
+    },
+    SelectCase {
+        expr: Expr,
+        cases: Vec<SelectCaseArm>,
+        else_body: Vec<Stmt>,
+    },
+    With {
+        object: Expr,
         body: Vec<Stmt>,
     },
     ExitSub,
     ExitFunction,
     ExitFor,
+    ExitDo,
     OnErrorResumeNext,
     OnErrorGoto0,
     OnErrorGotoLabel(String),
+    ResumeNext,
+    Resume,
+    ResumeLabel(String),
     Label(String),
     Goto(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoopConditionKind {
+    While,
+    Until,
+}
+
+#[derive(Debug, Clone)]
+pub struct SelectCaseArm {
+    pub conditions: Vec<CaseCondition>,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone)]
+pub enum CaseCondition {
+    Expr(Expr),
+    Range { start: Expr, end: Expr },
+    Is { op: CaseComparisonOp, expr: Expr },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaseComparisonOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
 }
 
 #[derive(Debug, Clone)]
 pub enum Expr {
     Literal(VbaValue),
+    Missing,
     Var(String),
+    With,
     Unary {
         op: UnOp,
         expr: Box<Expr>,
@@ -93,7 +187,7 @@ pub enum Expr {
     },
     Call {
         callee: Box<Expr>,
-        args: Vec<Expr>,
+        args: Vec<CallArg>,
     },
     Member {
         object: Box<Expr>,
@@ -103,6 +197,12 @@ pub enum Expr {
         array: Box<Expr>,
         indices: Vec<Expr>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct CallArg {
+    pub name: Option<String>,
+    pub expr: Expr,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +217,9 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    IntDiv,
+    Mod,
+    Pow,
     Concat,
     Eq,
     Ne,

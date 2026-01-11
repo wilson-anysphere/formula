@@ -981,6 +981,7 @@ impl<'a> AppStateSpreadsheet<'a> {
             formula_vba_runtime::VbaValue::Empty | formula_vba_runtime::VbaValue::Null => None,
             formula_vba_runtime::VbaValue::Boolean(b) => Some(JsonValue::from(*b)),
             formula_vba_runtime::VbaValue::Double(n) => Some(JsonValue::from(*n)),
+            formula_vba_runtime::VbaValue::Date(n) => Some(JsonValue::from(*n)),
             formula_vba_runtime::VbaValue::String(s) => Some(JsonValue::from(s.clone())),
             other => {
                 return Err(formula_vba_runtime::VbaError::Runtime(format!(
@@ -1143,6 +1144,27 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
                 None,
                 Some(formula),
             )
+            .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
+        self.updates.extend(updates);
+        Ok(())
+    }
+
+    fn clear_cell_contents(
+        &mut self,
+        sheet: usize,
+        row: u32,
+        col: u32,
+    ) -> Result<(), formula_vba_runtime::VbaError> {
+        let sheet_id = self.sheet_id(sheet)?;
+        if row == 0 || col == 0 {
+            return Err(formula_vba_runtime::VbaError::Runtime(
+                "Row/col are 1-based".to_string(),
+            ));
+        }
+
+        let updates = self
+            .state
+            .set_cell(&sheet_id, (row - 1) as usize, (col - 1) as usize, None, None)
             .map_err(|e| formula_vba_runtime::VbaError::Runtime(e.to_string()))?;
         self.updates.extend(updates);
         Ok(())

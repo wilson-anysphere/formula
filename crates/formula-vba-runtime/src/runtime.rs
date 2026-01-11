@@ -1,14 +1,20 @@
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
+use chrono::{Datelike, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, Timelike};
 use thiserror::Error;
 
-use crate::ast::{BinOp, Expr, ProcedureDef, ProcedureKind, Stmt, UnOp, VbaProgram};
+use crate::ast::{
+    BinOp, CaseComparisonOp, CaseCondition, Expr, LoopConditionKind, ProcedureDef, ProcedureKind,
+    SelectCaseArm, Stmt, UnOp, VarDecl, VbaProgram, VbaType,
+};
 use crate::object_model::{
-    range_on_active_sheet, Spreadsheet, VbaObject, VbaObjectRef, VbaRangeRef,
+    range_on_active_sheet, row_col_to_a1, Spreadsheet, VbaErrObject, VbaObject, VbaObjectRef,
+    VbaRangeRef,
 };
 use crate::sandbox::{Permission, PermissionChecker, VbaSandboxPolicy};
-use crate::value::VbaValue;
+use crate::value::{VbaArray, VbaValue};
 
 #[derive(Debug, Error)]
 pub enum VbaError {
@@ -29,18 +35,29 @@ pub struct ExecutionResult {
     pub returned: Option<VbaValue>,
 }
 
+#[derive(Debug, Default)]
+struct GlobalState {
+    values: HashMap<String, VbaValue>,
+    types: HashMap<String, VbaType>,
+    consts: HashSet<String>,
+    const_exprs: HashMap<String, Expr>,
+}
+
 pub struct VbaRuntime {
     program: VbaProgram,
     sandbox: VbaSandboxPolicy,
     permission_checker: Option<Box<dyn PermissionChecker>>,
+    globals: RefCell<GlobalState>,
 }
 
 impl VbaRuntime {
     pub fn new(program: VbaProgram) -> Self {
+        let globals = RefCell::new(init_globals(&program));
         Self {
             program,
             sandbox: VbaSandboxPolicy::default(),
             permission_checker: None,
+            globals,
         }
     }
 
@@ -64,8 +81,10 @@ impl VbaRuntime {
             .program
             .get(entry)
             .ok_or_else(|| VbaError::Runtime(format!("Unknown procedure `{entry}`")))?;
+
         let mut exec = Executor::new(
             &self.program,
+            &self.globals,
             spreadsheet,
             &self.sandbox,
             self.permission_checker.as_deref(),
@@ -118,6 +137,149 @@ impl VbaRuntime {
     }
 }
 
+fn init_globals(program: &VbaProgram) -> GlobalState {
+    let mut state = GlobalState::default();
+
+    for decl in &program.module_vars {
+        let name = decl.name.to_ascii_lowercase();
+        state.types.insert(name.clone(), decl.ty);
+        state
+            .values
+            .insert(name, default_value_for_decl(decl).unwrap_or(VbaValue::Empty));
+    }
+
+    for decl in &program.module_consts {
+        let name = decl.name.to_ascii_lowercase();
+        state.consts.insert(name.clone());
+        if let Some(ty) = decl.ty {
+            state.types.insert(name.clone(), ty);
+        }
+        if let Some(v) = eval_const_expr(&decl.value) {
+            let v = if let Some(ty) = decl.ty {
+                coerce_value_to_type(v, ty)
+            } else {
+                v
+            };
+            state.values.insert(name.clone(), v);
+        } else {
+            state.const_exprs.insert(name.clone(), decl.value.clone());
+        }
+    }
+
+    state
+}
+
+fn default_value_for_decl(decl: &VarDecl) -> Result<VbaValue, VbaError> {
+    if decl.dims.is_empty() {
+        return Ok(default_value_for_type(decl.ty));
+    }
+
+    if decl.dims.len() != 1 {
+        return Err(VbaError::Runtime(format!(
+            "Only 1D arrays are supported (got {} dims) for `{}`",
+            decl.dims.len(),
+            decl.name
+        )));
+    }
+
+    let dim = &decl.dims[0];
+    let lower = dim
+        .lower
+        .as_ref()
+        .and_then(eval_const_expr)
+        .and_then(|v| v.to_f64())
+        .unwrap_or(0.0) as i32;
+    let upper = eval_const_expr(&dim.upper)
+        .and_then(|v| v.to_f64())
+        .ok_or_else(|| {
+            VbaError::Runtime(format!(
+                "Array bound must be a constant number for `{}`",
+                decl.name
+            ))
+        })? as i32;
+
+    let len = (upper - lower + 1).max(0) as usize;
+    let mut values = Vec::with_capacity(len);
+    for _ in 0..len {
+        values.push(default_value_for_type(decl.ty));
+    }
+
+    Ok(VbaValue::Array(std::rc::Rc::new(RefCell::new(VbaArray::new(
+        lower, values,
+    )))))
+}
+
+fn default_value_for_type(ty: VbaType) -> VbaValue {
+    match ty {
+        VbaType::Variant => VbaValue::Empty,
+        VbaType::Integer | VbaType::Long | VbaType::Double => VbaValue::Double(0.0),
+        VbaType::String => VbaValue::String(String::new()),
+        VbaType::Boolean => VbaValue::Boolean(false),
+        VbaType::Date => VbaValue::Date(0.0),
+    }
+}
+
+fn eval_const_expr(expr: &Expr) -> Option<VbaValue> {
+    match expr {
+        Expr::Literal(v) => Some(v.clone()),
+        Expr::Missing => Some(VbaValue::Empty),
+        Expr::Unary { op, expr } => {
+            let v = eval_const_expr(expr)?;
+            match op {
+                UnOp::Neg => Some(VbaValue::Double(-v.to_f64()?)),
+                UnOp::Not => Some(VbaValue::Boolean(!v.is_truthy())),
+            }
+        }
+        Expr::Binary { op, left, right } => {
+            let l = eval_const_expr(left)?;
+            let r = eval_const_expr(right)?;
+            match op {
+                BinOp::Add => Some(VbaValue::Double(l.to_f64()? + r.to_f64()?)),
+                BinOp::Sub => Some(VbaValue::Double(l.to_f64()? - r.to_f64()?)),
+                BinOp::Mul => Some(VbaValue::Double(l.to_f64()? * r.to_f64()?)),
+                BinOp::Div => Some(VbaValue::Double(l.to_f64()? / r.to_f64()?)),
+                BinOp::IntDiv => Some(VbaValue::Double((l.to_f64()? / r.to_f64()?).floor())),
+                BinOp::Mod => {
+                    let a = l.to_f64()?;
+                    let b = r.to_f64()?;
+                    Some(VbaValue::Double(a - b * (a / b).floor()))
+                }
+                BinOp::Pow => Some(VbaValue::Double(l.to_f64()?.powf(r.to_f64()?))),
+                BinOp::Concat => Some(VbaValue::String(format!(
+                    "{}{}",
+                    l.to_string_lossy(),
+                    r.to_string_lossy()
+                ))),
+                BinOp::Eq => Some(VbaValue::Boolean(l == r)),
+                BinOp::Ne => Some(VbaValue::Boolean(l != r)),
+                BinOp::Lt => Some(VbaValue::Boolean(l.to_f64()? < r.to_f64()?)),
+                BinOp::Le => Some(VbaValue::Boolean(l.to_f64()? <= r.to_f64()?)),
+                BinOp::Gt => Some(VbaValue::Boolean(l.to_f64()? > r.to_f64()?)),
+                BinOp::Ge => Some(VbaValue::Boolean(l.to_f64()? >= r.to_f64()?)),
+                BinOp::And => Some(VbaValue::Boolean(l.is_truthy() && r.is_truthy())),
+                BinOp::Or => Some(VbaValue::Boolean(l.is_truthy() || r.is_truthy())),
+            }
+        }
+        _ => None,
+    }
+}
+
+fn coerce_value_to_type(value: VbaValue, ty: VbaType) -> VbaValue {
+    match ty {
+        VbaType::Variant => value,
+        VbaType::String => VbaValue::String(value.to_string_lossy()),
+        VbaType::Boolean => VbaValue::Boolean(value.is_truthy()),
+        VbaType::Double => VbaValue::Double(value.to_f64().unwrap_or(0.0)),
+        VbaType::Integer | VbaType::Long => {
+            VbaValue::Double(vba_round_bankers(value.to_f64().unwrap_or(0.0)) as f64)
+        }
+        VbaType::Date => match value {
+            VbaValue::Date(d) => VbaValue::Date(d),
+            other => VbaValue::Date(other.to_f64().unwrap_or(0.0)),
+        },
+    }
+}
+
 #[derive(Debug, Clone)]
 enum ErrorMode {
     Default,
@@ -125,16 +287,37 @@ enum ErrorMode {
     GotoLabel(String),
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+struct ResumeState {
+    pc: Option<usize>,
+    next_pc: Option<usize>,
+}
+
 struct Frame {
     locals: HashMap<String, VbaValue>,
+    types: HashMap<String, VbaType>,
+    consts: HashSet<String>,
     error_mode: ErrorMode,
+    resume: ResumeState,
+}
+
+#[derive(Debug, Clone)]
+struct Clipboard {
+    rows: u32,
+    cols: u32,
+    values: Vec<VbaValue>,
+    formulas: Vec<Option<String>>,
 }
 
 struct Executor<'a> {
     program: &'a VbaProgram,
+    globals: &'a RefCell<GlobalState>,
     sheet: &'a mut dyn Spreadsheet,
     sandbox: &'a VbaSandboxPolicy,
     permission_checker: Option<&'a dyn PermissionChecker>,
+    err_obj: VbaObjectRef,
+    with_stack: Vec<VbaObjectRef>,
+    clipboard: Option<Clipboard>,
     start: Instant,
     steps: u64,
 }
@@ -142,15 +325,20 @@ struct Executor<'a> {
 impl<'a> Executor<'a> {
     fn new(
         program: &'a VbaProgram,
+        globals: &'a RefCell<GlobalState>,
         sheet: &'a mut dyn Spreadsheet,
         sandbox: &'a VbaSandboxPolicy,
         permission_checker: Option<&'a dyn PermissionChecker>,
     ) -> Self {
         Self {
             program,
+            globals,
             sheet,
             sandbox,
             permission_checker,
+            err_obj: VbaObjectRef::new(VbaObject::Err(VbaErrObject::default())),
+            with_stack: Vec::new(),
+            clipboard: None,
             start: Instant::now(),
             steps: 0,
         }
@@ -161,11 +349,32 @@ impl<'a> Executor<'a> {
         if self.steps > self.sandbox.max_steps {
             return Err(VbaError::StepLimit);
         }
-        // Only check wall clock every 256 steps.
         if (self.steps & 0xFF) == 0 && self.start.elapsed() > self.sandbox.max_execution_time {
             return Err(VbaError::Timeout);
         }
         Ok(())
+    }
+
+    fn set_err(&mut self, err: &VbaError) {
+        let (number, description) = match err {
+            VbaError::Runtime(msg) => (1, msg.clone()),
+            VbaError::Sandbox(msg) => (70, msg.clone()),
+            VbaError::Timeout => (1, "Execution timed out".to_string()),
+            VbaError::StepLimit => (1, "Execution exceeded step limit".to_string()),
+            VbaError::Parse(msg) => (1, msg.clone()),
+        };
+
+        if let VbaObject::Err(obj) = &mut *self.err_obj.borrow_mut() {
+            obj.number = number;
+            obj.description = description;
+        }
+    }
+
+    fn clear_err(&mut self) {
+        if let VbaObject::Err(obj) = &mut *self.err_obj.borrow_mut() {
+            obj.number = 0;
+            obj.description.clear();
+        }
     }
 
     fn call_procedure(
@@ -175,19 +384,32 @@ impl<'a> Executor<'a> {
     ) -> Result<ExecutionResult, VbaError> {
         let mut frame = Frame {
             locals: HashMap::new(),
+            types: HashMap::new(),
+            consts: HashSet::new(),
             error_mode: ErrorMode::Default,
+            resume: ResumeState::default(),
         };
 
         // VBA Functions return by assigning to the function name.
         if proc.kind == ProcedureKind::Function {
-            frame
-                .locals
-                .insert(proc.name.to_ascii_lowercase(), VbaValue::Empty);
+            let name = proc.name.to_ascii_lowercase();
+            let default = proc
+                .return_type
+                .map(default_value_for_type)
+                .unwrap_or(VbaValue::Empty);
+            frame.locals.insert(name.clone(), default);
+            if let Some(ty) = proc.return_type {
+                frame.types.insert(name, ty);
+            }
         }
 
         for (idx, param) in proc.params.iter().enumerate() {
             let value = args.get(idx).cloned().unwrap_or(VbaValue::Empty);
-            frame.locals.insert(param.name.to_ascii_lowercase(), value);
+            let name = param.name.to_ascii_lowercase();
+            frame.locals.insert(name.clone(), value);
+            if let Some(ty) = param.ty {
+                frame.types.insert(name, ty);
+            }
         }
 
         // Provide global-ish built-ins via locals for simplicity.
@@ -199,16 +421,27 @@ impl<'a> Executor<'a> {
             "thisworkbook".to_string(),
             VbaValue::Object(VbaObjectRef::new(VbaObject::Workbook)),
         );
+        frame
+            .locals
+            .insert("err".to_string(), VbaValue::Object(self.err_obj.clone()));
 
         let flow = self.exec_block(&mut frame, &proc.body)?;
         let mut result = ExecutionResult::default();
         match flow {
-            ControlFlow::Continue | ControlFlow::ExitSub | ControlFlow::ExitFor => {}
+            ControlFlow::Continue
+            | ControlFlow::ExitSub
+            | ControlFlow::ExitFor
+            | ControlFlow::ExitDo => {}
             ControlFlow::ExitFunction => {}
-            ControlFlow::Goto(label) => {
+            ControlFlow::Goto(label) | ControlFlow::ErrorGoto(label) => {
                 return Err(VbaError::Runtime(format!(
                     "GoTo `{label}` reached outside of its block"
                 )));
+            }
+            ControlFlow::Resume(_) => {
+                return Err(VbaError::Runtime(
+                    "Resume reached outside of error handler".to_string(),
+                ));
             }
         }
 
@@ -225,220 +458,551 @@ impl<'a> Executor<'a> {
     }
 
     fn exec_block(&mut self, frame: &mut Frame, body: &[Stmt]) -> Result<ControlFlow, VbaError> {
-        // Precompute label map for GoTo/On Error GoTo.
         let label_map = collect_labels(body);
         let mut pc: usize = 0;
         while pc < body.len() {
             self.tick()?;
+
             let stmt = &body[pc];
-            match self.exec_stmt(frame, stmt, &label_map)? {
+            let stmt_res = self.exec_stmt(frame, stmt);
+
+            let mut flow = match stmt_res {
+                Ok(flow) => flow,
+                Err(err) => match &frame.error_mode {
+                    ErrorMode::Default => return Err(err),
+                    ErrorMode::ResumeNext => {
+                        self.set_err(&err);
+                        pc += 1;
+                        continue;
+                    }
+                    ErrorMode::GotoLabel(label) => {
+                        self.set_err(&err);
+                        frame.resume.pc = Some(pc);
+                        frame.resume.next_pc = Some(pc.saturating_add(1));
+                        ControlFlow::ErrorGoto(label.clone())
+                    }
+                },
+            };
+
+            match &mut flow {
                 ControlFlow::Continue => pc += 1,
                 ControlFlow::ExitSub => return Ok(ControlFlow::ExitSub),
                 ControlFlow::ExitFunction => return Ok(ControlFlow::ExitFunction),
                 ControlFlow::ExitFor => return Ok(ControlFlow::ExitFor),
+                ControlFlow::ExitDo => return Ok(ControlFlow::ExitDo),
                 ControlFlow::Goto(label) => {
-                    if let Some(dest) = label_map.get(&label) {
+                    if let Some(dest) = label_map.get(label) {
                         pc = *dest;
                     } else {
-                        // The label may live outside of this nested block; propagate upwards so the
-                        // outer block can resolve it.
-                        return Ok(ControlFlow::Goto(label));
+                        return Ok(ControlFlow::Goto(label.clone()));
                     }
+                }
+                ControlFlow::ErrorGoto(label) => {
+                    if let Some(dest) = label_map.get(label) {
+                        pc = *dest;
+                    } else {
+                        // We're unwinding an error handler to an outer block; adjust resume to
+                        // resume after the statement that contains this nested block.
+                        frame.resume.pc = Some(pc);
+                        frame.resume.next_pc = Some(pc.saturating_add(1));
+                        return Ok(ControlFlow::ErrorGoto(label.clone()));
+                    }
+                }
+                ControlFlow::Resume(kind) => {
+                    let (target_pc, clear_resume) = match kind {
+                        ResumeKind::Next => (frame.resume.next_pc, true),
+                        ResumeKind::Same => (frame.resume.pc, true),
+                        ResumeKind::Label(label) => {
+                            if let Some(dest) = label_map.get(label) {
+                                (Some(*dest), true)
+                            } else {
+                                return Ok(ControlFlow::Resume(kind.clone()));
+                            }
+                        }
+                    };
+
+                    let Some(target_pc) = target_pc else {
+                        return Err(VbaError::Runtime("Resume without active error".to_string()));
+                    };
+
+                    self.clear_err();
+                    if clear_resume {
+                        frame.resume = ResumeState::default();
+                    }
+                    pc = target_pc;
                 }
             }
         }
         Ok(ControlFlow::Continue)
     }
 
-    fn exec_stmt(
-        &mut self,
-        frame: &mut Frame,
-        stmt: &Stmt,
-        labels: &HashMap<String, usize>,
-    ) -> Result<ControlFlow, VbaError> {
-        let res = (|| -> Result<ControlFlow, VbaError> {
-            match stmt {
-                Stmt::Dim(vars) => {
-                    for v in vars {
-                        frame.locals.insert(v.to_ascii_lowercase(), VbaValue::Empty);
+    fn exec_stmt(&mut self, frame: &mut Frame, stmt: &Stmt) -> Result<ControlFlow, VbaError> {
+        match stmt {
+            Stmt::Dim(vars) => {
+                for decl in vars {
+                    let name = decl.name.to_ascii_lowercase();
+                    if frame.locals.contains_key(&name) {
+                        continue;
                     }
-                    Ok(ControlFlow::Continue)
+                    frame.types.insert(name.clone(), decl.ty);
+                    frame.locals.insert(name, default_value_for_decl(decl)?);
                 }
-                Stmt::Assign { target, value } => {
-                    let rhs = self.eval_expr(frame, value)?;
-                    self.assign(frame, target, rhs)?;
-                    Ok(ControlFlow::Continue)
+                Ok(ControlFlow::Continue)
+            }
+            Stmt::Const(decls) => {
+                for decl in decls {
+                    let name = decl.name.to_ascii_lowercase();
+                    if frame.locals.contains_key(&name) {
+                        continue;
+                    }
+                    let mut value = self.eval_expr(frame, &decl.value)?;
+                    if let Some(ty) = decl.ty {
+                        value = self.coerce_to_type(frame, value, ty)?;
+                        frame.types.insert(name.clone(), ty);
+                    }
+                    frame.locals.insert(name.clone(), value);
+                    frame.consts.insert(name.clone());
                 }
-                Stmt::Set { target, value } => {
-                    let rhs = self.eval_expr(frame, value)?;
-                    self.assign(frame, target, rhs)?;
-                    Ok(ControlFlow::Continue)
-                }
-                Stmt::ExprStmt(expr) => {
-                    // VBA allows calling Subs/methods without parentheses. We model that by treating a
-                    // bare member access as a zero-arg method invocation when possible, falling back
-                    // to a property read otherwise.
-                    match expr {
-                        Expr::Member { object, member } => {
-                            let obj = self.eval_expr(frame, object)?;
-                            let obj = obj.as_object().ok_or_else(|| {
-                                VbaError::Runtime("Call on non-object".to_string())
-                            })?;
-                            match self.call_object_method(frame, obj.clone(), member, &[]) {
-                                Ok(_) => Ok(ControlFlow::Continue),
-                                Err(VbaError::Runtime(_)) => {
-                                    let _ = self.eval_expr(frame, expr)?;
-                                    Ok(ControlFlow::Continue)
-                                }
-                                Err(e) => Err(e),
-                            }
-                        }
-                        Expr::Var(name) => {
-                            let name_lc = name.to_ascii_lowercase();
-                            let is_callable = matches!(
-                                name_lc.as_str(),
-                                "range"
-                                    | "cells"
-                                    | "msgbox"
-                                    | "debugprint"
-                                    | "array"
-                                    | "worksheets"
-                                    | "createobject"
-                            ) || self.program.get(&name_lc).is_some();
-
-                            if is_callable {
-                                let _ = self.call_global(frame, name, &[])?;
-                            } else {
+                Ok(ControlFlow::Continue)
+            }
+            Stmt::Assign { target, value } => {
+                let rhs = self.eval_expr(frame, value)?;
+                // Default member semantics: `x = Range("A1")` reads `Range("A1").Value`, while
+                // `Set x = Range("A1")` assigns the object reference.
+                let rhs = self.coerce_default_member(frame, rhs)?;
+                self.assign(frame, target, rhs)?;
+                Ok(ControlFlow::Continue)
+            }
+            Stmt::Set { target, value } => {
+                let rhs = self.eval_expr(frame, value)?;
+                self.assign(frame, target, rhs)?;
+                Ok(ControlFlow::Continue)
+            }
+            Stmt::ExprStmt(expr) => {
+                match expr {
+                    Expr::Member { object, member } => {
+                        let obj = self.eval_expr(frame, object)?;
+                        let obj = obj
+                            .as_object()
+                            .ok_or_else(|| VbaError::Runtime("Call on non-object".to_string()))?;
+                        match self.call_object_method(frame, obj.clone(), member, &[]) {
+                            Ok(_) => Ok(ControlFlow::Continue),
+                            Err(VbaError::Runtime(_)) => {
                                 let _ = self.eval_expr(frame, expr)?;
+                                Ok(ControlFlow::Continue)
                             }
-                            Ok(ControlFlow::Continue)
+                            Err(e) => Err(e),
+                        }
+                    }
+                    Expr::Var(name) => {
+                        let name_lc = name.to_ascii_lowercase();
+                        let is_callable = matches!(
+                            name_lc.as_str(),
+                            "range"
+                                | "cells"
+                                | "msgbox"
+                                | "debugprint"
+                                | "array"
+                                | "worksheets"
+                                | "createobject"
+                                | "cstr"
+                                | "clng"
+                                | "cint"
+                                | "cdbl"
+                                | "cbool"
+                                | "cdate"
+                                | "format"
+                                | "dateadd"
+                                | "datediff"
+                                | "now"
+                                | "date"
+                                | "time"
+                                | "ucase"
+                                | "lcase"
+                                | "trim"
+                                | "left"
+                                | "right"
+                                | "mid"
+                                | "len"
+                                | "replace"
+                        ) || self.program.get(&name_lc).is_some();
+
+                        if is_callable {
+                            let _ = self.call_global(frame, name, &[])?;
+                        } else {
+                            let _ = self.eval_expr(frame, expr)?;
+                        }
+                        Ok(ControlFlow::Continue)
+                    }
+                    _ => {
+                        let _ = self.eval_expr(frame, expr)?;
+                        Ok(ControlFlow::Continue)
+                    }
+                }
+            }
+            Stmt::If {
+                cond,
+                then_body,
+                elseifs,
+                else_body,
+            } => {
+                if self.eval_expr(frame, cond)?.is_truthy() {
+                    return self.exec_block(frame, then_body);
+                }
+                for (c, b) in elseifs {
+                    if self.eval_expr(frame, c)?.is_truthy() {
+                        return self.exec_block(frame, b);
+                    }
+                }
+                self.exec_block(frame, else_body)
+            }
+            Stmt::For {
+                var,
+                start,
+                end,
+                step,
+                body,
+            } => {
+                let start_v = self.eval_expr(frame, start)?.to_f64().unwrap_or(0.0);
+                let end_v = self.eval_expr(frame, end)?.to_f64().unwrap_or(0.0);
+                let step_v = if let Some(step) = step {
+                    self.eval_expr(frame, step)?.to_f64().unwrap_or(1.0)
+                } else {
+                    1.0
+                };
+                if step_v == 0.0 {
+                    return Err(VbaError::Runtime("For loop Step cannot be 0".to_string()));
+                }
+
+                let mut i = start_v;
+                let cmp = |i: f64, end: f64, step: f64| -> bool {
+                    if step > 0.0 {
+                        i <= end
+                    } else {
+                        i >= end
+                    }
+                };
+
+                while cmp(i, end_v, step_v) {
+                    self.tick()?;
+                    self.assign_var(frame, var, VbaValue::Double(i))?;
+                    match self.exec_block(frame, body)? {
+                        ControlFlow::Continue => {}
+                        ControlFlow::ExitFor => break,
+                        ControlFlow::ExitDo => break,
+                        ControlFlow::ExitSub => return Ok(ControlFlow::ExitSub),
+                        ControlFlow::ExitFunction => return Ok(ControlFlow::ExitFunction),
+                        ControlFlow::Goto(label) => return Ok(ControlFlow::Goto(label)),
+                        ControlFlow::ErrorGoto(label) => return Ok(ControlFlow::ErrorGoto(label)),
+                        ControlFlow::Resume(kind) => return Ok(ControlFlow::Resume(kind)),
+                    }
+                    i += step_v;
+                }
+                Ok(ControlFlow::Continue)
+            }
+            Stmt::ForEach {
+                var,
+                iterable,
+                body,
+            } => {
+                let iterable = self.eval_expr(frame, iterable)?;
+                let mut items: Vec<VbaValue> = Vec::new();
+                match iterable {
+                    VbaValue::Array(arr) => {
+                        items.extend(arr.borrow().values.iter().cloned());
+                    }
+                    VbaValue::Object(obj) => match &*obj.borrow() {
+                        VbaObject::Collection { items: coll } => items.extend(coll.iter().cloned()),
+                        VbaObject::Dictionary { items: dict } => {
+                            items.extend(dict.keys().map(|k| VbaValue::String(k.clone())));
                         }
                         _ => {
-                            let _ = self.eval_expr(frame, expr)?;
-                            Ok(ControlFlow::Continue)
+                            return Err(VbaError::Runtime(
+                                "For Each requires an array or collection".to_string(),
+                            ))
                         }
+                    },
+                    _ => {
+                        return Err(VbaError::Runtime(
+                            "For Each requires an array or collection".to_string(),
+                        ))
+                    }
+                };
+
+                for item in items {
+                    self.tick()?;
+                    self.assign_var(frame, var, item)?;
+                    match self.exec_block(frame, body)? {
+                        ControlFlow::Continue => {}
+                        ControlFlow::ExitFor => break,
+                        ControlFlow::ExitDo => break,
+                        ControlFlow::ExitSub => return Ok(ControlFlow::ExitSub),
+                        ControlFlow::ExitFunction => return Ok(ControlFlow::ExitFunction),
+                        ControlFlow::Goto(label) => return Ok(ControlFlow::Goto(label)),
+                        ControlFlow::ErrorGoto(label) => return Ok(ControlFlow::ErrorGoto(label)),
+                        ControlFlow::Resume(kind) => return Ok(ControlFlow::Resume(kind)),
                     }
                 }
-                Stmt::If {
-                    cond,
-                    then_body,
-                    elseifs,
-                    else_body,
-                } => {
-                    if self.eval_expr(frame, cond)?.is_truthy() {
-                        return self.exec_block(frame, then_body);
-                    }
-                    for (c, b) in elseifs {
-                        if self.eval_expr(frame, c)?.is_truthy() {
-                            return self.exec_block(frame, b);
+                Ok(ControlFlow::Continue)
+            }
+            Stmt::DoLoop {
+                pre_condition,
+                post_condition,
+                body,
+            } => {
+                if let Some((kind, cond)) = pre_condition {
+                    loop {
+                        if !self.eval_loop_condition(frame, *kind, cond)? {
+                            break;
                         }
-                    }
-                    self.exec_block(frame, else_body)
-                }
-                Stmt::For {
-                    var,
-                    start,
-                    end,
-                    step,
-                    body,
-                } => {
-                    let start_v = self.eval_expr(frame, start)?.to_f64().unwrap_or(0.0);
-                    let end_v = self.eval_expr(frame, end)?.to_f64().unwrap_or(0.0);
-                    let step_v = if let Some(step) = step {
-                        self.eval_expr(frame, step)?.to_f64().unwrap_or(1.0)
-                    } else {
-                        1.0
-                    };
-                    if step_v == 0.0 {
-                        return Err(VbaError::Runtime("For loop Step cannot be 0".to_string()));
-                    }
-
-                    let mut i = start_v;
-                    let cmp = |i: f64, end: f64, step: f64| -> bool {
-                        if step > 0.0 {
-                            i <= end
-                        } else {
-                            i >= end
-                        }
-                    };
-
-                    while cmp(i, end_v, step_v) {
-                        frame
-                            .locals
-                            .insert(var.to_ascii_lowercase(), VbaValue::Double(i));
                         match self.exec_block(frame, body)? {
                             ControlFlow::Continue => {}
+                            ControlFlow::ExitDo => break,
                             ControlFlow::ExitFor => break,
                             ControlFlow::ExitSub => return Ok(ControlFlow::ExitSub),
                             ControlFlow::ExitFunction => return Ok(ControlFlow::ExitFunction),
                             ControlFlow::Goto(label) => return Ok(ControlFlow::Goto(label)),
-                        }
-                        i += step_v;
-                    }
-                    Ok(ControlFlow::Continue)
-                }
-                Stmt::DoWhile { cond, body } => {
-                    while self.eval_expr(frame, cond)?.is_truthy() {
-                        match self.exec_block(frame, body)? {
-                            ControlFlow::Continue => {}
-                            ControlFlow::ExitFor => {
-                                // Treat Exit For inside Do While as error; ignore for now.
-                                break;
-                            }
-                            ControlFlow::ExitSub => return Ok(ControlFlow::ExitSub),
-                            ControlFlow::ExitFunction => return Ok(ControlFlow::ExitFunction),
-                            ControlFlow::Goto(label) => return Ok(ControlFlow::Goto(label)),
+                            ControlFlow::ErrorGoto(label) => return Ok(ControlFlow::ErrorGoto(label)),
+                            ControlFlow::Resume(kind) => return Ok(ControlFlow::Resume(kind)),
                         }
                     }
-                    Ok(ControlFlow::Continue)
+                    return Ok(ControlFlow::Continue);
                 }
-                Stmt::ExitSub => Ok(ControlFlow::ExitSub),
-                Stmt::ExitFunction => Ok(ControlFlow::ExitFunction),
-                Stmt::ExitFor => Ok(ControlFlow::ExitFor),
-                Stmt::OnErrorResumeNext => {
-                    frame.error_mode = ErrorMode::ResumeNext;
-                    Ok(ControlFlow::Continue)
+
+                loop {
+                    match self.exec_block(frame, body)? {
+                        ControlFlow::Continue => {}
+                        ControlFlow::ExitDo => break,
+                        ControlFlow::ExitFor => break,
+                        ControlFlow::ExitSub => return Ok(ControlFlow::ExitSub),
+                        ControlFlow::ExitFunction => return Ok(ControlFlow::ExitFunction),
+                        ControlFlow::Goto(label) => return Ok(ControlFlow::Goto(label)),
+                        ControlFlow::ErrorGoto(label) => return Ok(ControlFlow::ErrorGoto(label)),
+                        ControlFlow::Resume(kind) => return Ok(ControlFlow::Resume(kind)),
+                    }
+                    if let Some((kind, cond)) = post_condition {
+                        if !self.eval_loop_condition(frame, *kind, cond)? {
+                            break;
+                        }
+                    }
                 }
-                Stmt::OnErrorGoto0 => {
-                    frame.error_mode = ErrorMode::Default;
-                    Ok(ControlFlow::Continue)
-                }
-                Stmt::OnErrorGotoLabel(label) => {
-                    frame.error_mode = ErrorMode::GotoLabel(label.to_ascii_lowercase());
-                    Ok(ControlFlow::Continue)
-                }
-                Stmt::Label(_) => Ok(ControlFlow::Continue),
-                Stmt::Goto(label) => Ok(ControlFlow::Goto(label.to_ascii_lowercase())),
+                Ok(ControlFlow::Continue)
             }
-        })();
-
-        res.or_else(|err| self.handle_stmt_error(frame, err, labels))
-    }
-
-    fn handle_stmt_error(
-        &mut self,
-        frame: &mut Frame,
-        err: VbaError,
-        _labels: &HashMap<String, usize>,
-    ) -> Result<ControlFlow, VbaError> {
-        match &frame.error_mode {
-            ErrorMode::Default => Err(err),
-            ErrorMode::ResumeNext => Ok(ControlFlow::Continue),
-            ErrorMode::GotoLabel(label) => Ok(ControlFlow::Goto(label.clone())),
+            Stmt::While { cond, body } => {
+                while self.eval_expr(frame, cond)?.is_truthy() {
+                    match self.exec_block(frame, body)? {
+                        ControlFlow::Continue => {}
+                        ControlFlow::ExitDo => break,
+                        ControlFlow::ExitFor => break,
+                        ControlFlow::ExitSub => return Ok(ControlFlow::ExitSub),
+                        ControlFlow::ExitFunction => return Ok(ControlFlow::ExitFunction),
+                        ControlFlow::Goto(label) => return Ok(ControlFlow::Goto(label)),
+                        ControlFlow::ErrorGoto(label) => return Ok(ControlFlow::ErrorGoto(label)),
+                        ControlFlow::Resume(kind) => return Ok(ControlFlow::Resume(kind)),
+                    }
+                }
+                Ok(ControlFlow::Continue)
+            }
+            Stmt::SelectCase {
+                expr,
+                cases,
+                else_body,
+            } => {
+                let selector = self.eval_expr(frame, expr)?;
+                for arm in cases {
+                    if self.select_case_matches(frame, &selector, arm)? {
+                        return self.exec_block(frame, &arm.body);
+                    }
+                }
+                self.exec_block(frame, else_body)
+            }
+            Stmt::With { object, body } => {
+                let obj = self.eval_expr(frame, object)?;
+                let obj = obj.as_object().ok_or_else(|| {
+                    VbaError::Runtime("With expression must evaluate to an object".to_string())
+                })?;
+                self.with_stack.push(obj);
+                let res = self.exec_block(frame, body);
+                self.with_stack.pop();
+                res
+            }
+            Stmt::ExitSub => Ok(ControlFlow::ExitSub),
+            Stmt::ExitFunction => Ok(ControlFlow::ExitFunction),
+            Stmt::ExitFor => Ok(ControlFlow::ExitFor),
+            Stmt::ExitDo => Ok(ControlFlow::ExitDo),
+            Stmt::OnErrorResumeNext => {
+                frame.error_mode = ErrorMode::ResumeNext;
+                Ok(ControlFlow::Continue)
+            }
+            Stmt::OnErrorGoto0 => {
+                frame.error_mode = ErrorMode::Default;
+                self.clear_err();
+                Ok(ControlFlow::Continue)
+            }
+            Stmt::OnErrorGotoLabel(label) => {
+                frame.error_mode = ErrorMode::GotoLabel(label.to_ascii_lowercase());
+                Ok(ControlFlow::Continue)
+            }
+            Stmt::ResumeNext => Ok(ControlFlow::Resume(ResumeKind::Next)),
+            Stmt::Resume => Ok(ControlFlow::Resume(ResumeKind::Same)),
+            Stmt::ResumeLabel(label) => Ok(ControlFlow::Resume(ResumeKind::Label(
+                label.to_ascii_lowercase(),
+            ))),
+            Stmt::Label(_) => Ok(ControlFlow::Continue),
+            Stmt::Goto(label) => Ok(ControlFlow::Goto(label.to_ascii_lowercase())),
         }
     }
 
-    fn assign(
+    fn eval_loop_condition(
         &mut self,
         frame: &mut Frame,
-        target: &Expr,
-        value: VbaValue,
-    ) -> Result<(), VbaError> {
-        match target {
-            Expr::Var(name) => {
-                frame.locals.insert(name.to_ascii_lowercase(), value);
-                Ok(())
+        kind: LoopConditionKind,
+        cond: &Expr,
+    ) -> Result<bool, VbaError> {
+        let v = self.eval_expr(frame, cond)?.is_truthy();
+        Ok(match kind {
+            LoopConditionKind::While => v,
+            LoopConditionKind::Until => !v,
+        })
+    }
+
+    fn select_case_matches(
+        &mut self,
+        frame: &mut Frame,
+        selector: &VbaValue,
+        arm: &SelectCaseArm,
+    ) -> Result<bool, VbaError> {
+        for cond in &arm.conditions {
+            if self.select_case_condition_matches(frame, selector, cond)? {
+                return Ok(true);
             }
+        }
+        Ok(false)
+    }
+
+    fn select_case_condition_matches(
+        &mut self,
+        frame: &mut Frame,
+        selector: &VbaValue,
+        cond: &CaseCondition,
+    ) -> Result<bool, VbaError> {
+        match cond {
+            CaseCondition::Expr(expr) => {
+                let v = self.eval_expr(frame, expr)?;
+                let eq = self.eval_binop(BinOp::Eq, selector.clone(), v)?;
+                Ok(eq.is_truthy())
+            }
+            CaseCondition::Range { start, end } => {
+                let s = self.eval_expr(frame, start)?.to_f64().unwrap_or(0.0);
+                let e = self.eval_expr(frame, end)?.to_f64().unwrap_or(0.0);
+                let v = selector.to_f64().unwrap_or(0.0);
+                Ok(v >= s.min(e) && v <= s.max(e))
+            }
+            CaseCondition::Is { op, expr } => {
+                let rhs = self.eval_expr(frame, expr)?;
+                let bin = match op {
+                    CaseComparisonOp::Eq => BinOp::Eq,
+                    CaseComparisonOp::Ne => BinOp::Ne,
+                    CaseComparisonOp::Lt => BinOp::Lt,
+                    CaseComparisonOp::Le => BinOp::Le,
+                    CaseComparisonOp::Gt => BinOp::Gt,
+                    CaseComparisonOp::Ge => BinOp::Ge,
+                };
+                let v = self.eval_binop(bin, selector.clone(), rhs)?;
+                Ok(v.is_truthy())
+            }
+        }
+    }
+
+    fn coerce_to_type(
+        &mut self,
+        frame: &mut Frame,
+        value: VbaValue,
+        ty: VbaType,
+    ) -> Result<VbaValue, VbaError> {
+        if matches!(value, VbaValue::Null) {
+            return Err(VbaError::Runtime("Invalid use of Null".to_string()));
+        }
+
+        let v = match ty {
+            VbaType::Variant => value,
+            VbaType::String => VbaValue::String(self.coerce_to_string(frame, value)?),
+            VbaType::Boolean => VbaValue::Boolean(self.coerce_to_bool(frame, value)?),
+            VbaType::Double => VbaValue::Double(self.coerce_to_f64(frame, value)?),
+            VbaType::Integer | VbaType::Long => {
+                let n = self.coerce_to_f64(frame, value)?;
+                VbaValue::Double(vba_round_bankers(n) as f64)
+            }
+            VbaType::Date => VbaValue::Date(self.coerce_to_date_serial(frame, value)?),
+        };
+        Ok(v)
+    }
+
+    fn coerce_to_string(&mut self, frame: &mut Frame, value: VbaValue) -> Result<String, VbaError> {
+        let value = self.coerce_default_member(frame, value)?;
+        match value {
+            VbaValue::Null => Err(VbaError::Runtime("Invalid use of Null".to_string())),
+            other => Ok(other.to_string_lossy()),
+        }
+    }
+
+    fn coerce_to_f64(&mut self, frame: &mut Frame, value: VbaValue) -> Result<f64, VbaError> {
+        let value = self.coerce_default_member(frame, value)?;
+        match value {
+            VbaValue::Null => Err(VbaError::Runtime("Invalid use of Null".to_string())),
+            VbaValue::String(s) => s.parse::<f64>().map_err(|_| {
+                VbaError::Runtime(format!("Type mismatch: cannot coerce `{s}` to number"))
+            }),
+            other => Ok(other.to_f64().unwrap_or(0.0)),
+        }
+    }
+
+    fn coerce_to_bool(&mut self, frame: &mut Frame, value: VbaValue) -> Result<bool, VbaError> {
+        let value = self.coerce_default_member(frame, value)?;
+        match value {
+            VbaValue::Null => Err(VbaError::Runtime("Invalid use of Null".to_string())),
+            VbaValue::Boolean(b) => Ok(b),
+            VbaValue::String(s) => {
+                let s_trim = s.trim();
+                if s_trim.eq_ignore_ascii_case("true") {
+                    return Ok(true);
+                }
+                if s_trim.eq_ignore_ascii_case("false") {
+                    return Ok(false);
+                }
+                if s_trim.is_empty() {
+                    return Ok(false);
+                }
+                let n = s_trim.parse::<f64>().map_err(|_| {
+                    VbaError::Runtime(format!("Type mismatch: cannot coerce `{s}` to Boolean"))
+                })?;
+                Ok(n != 0.0)
+            }
+            other => Ok(other.is_truthy()),
+        }
+    }
+
+    fn coerce_to_date_serial(
+        &mut self,
+        frame: &mut Frame,
+        value: VbaValue,
+    ) -> Result<f64, VbaError> {
+        let value = self.coerce_default_member(frame, value)?;
+        match value {
+            VbaValue::Date(d) => Ok(d),
+            VbaValue::Double(n) => Ok(n),
+            VbaValue::String(s) => parse_vba_date_string(&s).map(datetime_to_ole_date).ok_or_else(|| {
+                VbaError::Runtime(format!("Type mismatch: cannot coerce `{s}` to Date"))
+            }),
+            VbaValue::Empty => Ok(0.0),
+            VbaValue::Null => Err(VbaError::Runtime("Invalid use of Null".to_string())),
+            other => Ok(other.to_f64().unwrap_or(0.0)),
+        }
+    }
+
+    fn assign(&mut self, frame: &mut Frame, target: &Expr, value: VbaValue) -> Result<(), VbaError> {
+        match target {
+            Expr::Var(name) => self.assign_var(frame, name, value),
             Expr::Member { object, member } => {
                 let obj = self.eval_expr(frame, object)?;
                 let obj = obj.as_object().ok_or_else(|| {
@@ -446,10 +1010,83 @@ impl<'a> Executor<'a> {
                 })?;
                 self.set_object_member(obj, member, value)
             }
+            Expr::Call { callee, args } => {
+                // Array element assignment: `arr(i) = v`
+                if let Expr::Var(name) = &**callee {
+                    let name_lc = name.to_ascii_lowercase();
+                    if let Some(VbaValue::Array(arr)) = frame.locals.get(&name_lc).cloned() {
+                        let idx_expr = args
+                            .first()
+                            .ok_or_else(|| VbaError::Runtime("Array index missing".to_string()))?;
+                        let idx = self
+                            .eval_expr(frame, &idx_expr.expr)?
+                            .to_f64()
+                            .unwrap_or(0.0) as i32;
+                        if let Some(slot) = arr.borrow_mut().get_mut(idx) {
+                            *slot = value;
+                            return Ok(());
+                        }
+                        return Err(VbaError::Runtime("Subscript out of range".to_string()));
+                    }
+                }
+
+                // Default property assignment: `Range("A1") = 1`
+                let obj_val = self.eval_expr(frame, target)?;
+                let obj = obj_val.as_object().ok_or_else(|| {
+                    VbaError::Runtime("Unsupported assignment target".to_string())
+                })?;
+                self.set_object_member(obj, "Value", value)
+            }
             _ => Err(VbaError::Runtime(
                 "Unsupported assignment target".to_string(),
             )),
         }
+    }
+
+    fn assign_var(&mut self, frame: &mut Frame, name: &str, value: VbaValue) -> Result<(), VbaError> {
+        let name_lc = name.to_ascii_lowercase();
+
+        if frame.consts.contains(&name_lc) {
+            return Err(VbaError::Runtime(format!(
+                "Cannot assign to constant `{name}`"
+            )));
+        }
+        if self.globals.borrow().consts.contains(&name_lc) {
+            return Err(VbaError::Runtime(format!(
+                "Cannot assign to constant `{name}`"
+            )));
+        }
+
+        let declared_ty = frame
+            .types
+            .get(&name_lc)
+            .copied()
+            .or_else(|| self.globals.borrow().types.get(&name_lc).copied());
+
+        let value = if let Some(ty) = declared_ty {
+            self.coerce_to_type(frame, value, ty)?
+        } else {
+            value
+        };
+
+        if frame.locals.contains_key(&name_lc) {
+            frame.locals.insert(name_lc, value);
+            return Ok(());
+        }
+
+        if self.globals.borrow().values.contains_key(&name_lc) {
+            self.globals.borrow_mut().values.insert(name_lc, value);
+            return Ok(());
+        }
+
+        if self.program.option_explicit {
+            return Err(VbaError::Runtime(format!(
+                "Variable not defined: `{name}`"
+            )));
+        }
+
+        frame.locals.insert(name_lc, value);
+        Ok(())
     }
 
     fn set_object_member(
@@ -462,39 +1099,42 @@ impl<'a> Executor<'a> {
         match &mut *obj.borrow_mut() {
             VbaObject::Range(range) => match member_lc.as_str() {
                 "value" => {
-                    self.sheet.set_cell_value(
-                        range.sheet,
-                        range.start_row,
-                        range.start_col,
-                        value,
-                    )?;
+                    for r in range.start_row..=range.end_row {
+                        for c in range.start_col..=range.end_col {
+                            self.tick()?;
+                            self.sheet.clear_cell_contents(range.sheet, r, c)?;
+                            self.sheet.set_cell_value(range.sheet, r, c, value.clone())?;
+                        }
+                    }
                     Ok(())
                 }
                 "formula" => {
-                    let formula = value.to_string_lossy();
-                    self.sheet.set_cell_formula(
-                        range.sheet,
-                        range.start_row,
-                        range.start_col,
-                        formula,
-                    )?;
+                    let formula = self.coerce_to_string(&mut Frame::dummy(), value)?;
+                    for r in range.start_row..=range.end_row {
+                        for c in range.start_col..=range.end_col {
+                            self.tick()?;
+                            self.sheet.set_cell_formula(range.sheet, r, c, formula.clone())?;
+                        }
+                    }
                     Ok(())
                 }
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Range member `{member}`"
                 ))),
             },
-            VbaObject::Worksheet { .. } => Err(VbaError::Runtime(format!(
-                "Cannot assign to Worksheet member `{member}`"
-            ))),
-            VbaObject::Application => Err(VbaError::Runtime(format!(
-                "Cannot assign to Application member `{member}`"
-            ))),
-            VbaObject::Workbook => Err(VbaError::Runtime(format!(
-                "Cannot assign to Workbook member `{member}`"
-            ))),
-            VbaObject::Collection { .. } => Err(VbaError::Runtime(format!(
-                "Cannot assign to Collection member `{member}`"
+            VbaObject::Err(err) => match member_lc.as_str() {
+                "number" => {
+                    err.number = value.to_f64().unwrap_or(0.0) as i32;
+                    Ok(())
+                }
+                "description" => {
+                    err.description = value.to_string_lossy();
+                    Ok(())
+                }
+                _ => Err(VbaError::Runtime(format!("Unknown Err member `{member}`"))),
+            },
+            _ => Err(VbaError::Runtime(format!(
+                "Cannot assign to member `{member}`"
             ))),
         }
     }
@@ -503,37 +1143,18 @@ impl<'a> Executor<'a> {
         self.tick()?;
         match expr {
             Expr::Literal(v) => Ok(v.clone()),
-            Expr::Var(name) => {
-                let name_lc = name.to_ascii_lowercase();
-                if let Some(v) = frame.locals.get(&name_lc).cloned() {
-                    return Ok(v);
-                }
-                // Built-in global functions/properties without explicit object.
-                match name_lc.as_str() {
-                    "activesheet" => {
-                        Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
-                            sheet: self.sheet.active_sheet(),
-                        })))
-                    }
-                    "activecell" => {
-                        let (r, c) = self.sheet.active_cell();
-                        Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
-                            VbaRangeRef {
-                                sheet: self.sheet.active_sheet(),
-                                start_row: r,
-                                start_col: c,
-                                end_row: r,
-                                end_col: c,
-                            },
-                        ))))
-                    }
-                    _ => Ok(VbaValue::Empty),
-                }
-            }
+            Expr::Missing => Ok(VbaValue::Empty),
+            Expr::With => self
+                .with_stack
+                .last()
+                .cloned()
+                .map(VbaValue::Object)
+                .ok_or_else(|| VbaError::Runtime("`.` used outside of `With`".to_string())),
+            Expr::Var(name) => self.eval_var(frame, name),
             Expr::Unary { op, expr } => {
                 let v = self.eval_expr(frame, expr)?;
                 match op {
-                    UnOp::Neg => Ok(VbaValue::Double(-v.to_f64().unwrap_or(0.0))),
+                    UnOp::Neg => Ok(VbaValue::Double(-self.coerce_to_f64(frame, v)?)),
                     UnOp::Not => Ok(VbaValue::Boolean(!v.is_truthy())),
                 }
             }
@@ -549,131 +1170,250 @@ impl<'a> Executor<'a> {
                     .ok_or_else(|| VbaError::Runtime("Member access on non-object".to_string()))?;
                 self.get_object_member(obj, member)
             }
-            Expr::Call { callee, args } => {
-                // First evaluate callee expression. This could be:
-                // - Var("Range") => built-in Range function.
-                // - Member(obj, "Range") => worksheet method.
-                // - Member(obj, "Cells") => worksheet method.
-                // - Var(procName) => procedure call.
-                //
-                // We evaluate as special cases before generic eval of callee.
-                if let Expr::Var(name) = &**callee {
-                    // `arr(i)` is an index operation when `arr` is an Array value.
-                    let name_lc = name.to_ascii_lowercase();
-                    if let Some(VbaValue::Array(arr)) = frame.locals.get(&name_lc).cloned() {
-                        let idx = self
-                            .eval_expr(
-                                frame,
-                                args.get(0).ok_or_else(|| {
-                                    VbaError::Runtime("Array index missing".to_string())
-                                })?,
-                            )?
-                            .to_f64()
-                            .unwrap_or(0.0) as isize;
-                        if idx < 0 || (idx as usize) >= arr.len() {
-                            return Ok(VbaValue::Empty);
-                        }
-                        return Ok(arr[idx as usize].clone());
-                    }
-                    return self.call_global(frame, name, args);
-                }
-                if let Expr::Member { object, member } = &**callee {
-                    let obj = self.eval_expr(frame, object)?;
-                    let obj = obj
-                        .as_object()
-                        .ok_or_else(|| VbaError::Runtime("Call on non-object".to_string()))?;
-                    return self.call_object_method(frame, obj, member, args);
-                }
-                // Otherwise evaluate callee and attempt to call/index.
-                let callee_val = self.eval_expr(frame, callee)?;
-                if let VbaValue::Array(arr) = callee_val {
-                    let idx = self
-                        .eval_expr(
-                            frame,
-                            args.get(0).ok_or_else(|| {
-                                VbaError::Runtime("Array index missing".to_string())
-                            })?,
-                        )?
-                        .to_f64()
-                        .unwrap_or(0.0) as isize;
-                    if idx < 0 || (idx as usize) >= arr.len() {
-                        return Ok(VbaValue::Empty);
-                    }
-                    return Ok(arr[idx as usize].clone());
-                }
-                Err(VbaError::Runtime("Unsupported call target".to_string()))
-            }
+            Expr::Call { callee, args } => self.eval_call(frame, callee, args),
             Expr::Index { .. } => Err(VbaError::Runtime("Indexing not implemented".to_string())),
         }
     }
 
-    fn eval_binop(&self, op: BinOp, l: VbaValue, r: VbaValue) -> Result<VbaValue, VbaError> {
+    fn eval_var(&mut self, frame: &mut Frame, name: &str) -> Result<VbaValue, VbaError> {
+        let name_lc = name.to_ascii_lowercase();
+
+        if let Some(v) = frame.locals.get(&name_lc).cloned() {
+            return Ok(v);
+        }
+
+        // Lazy constant eval.
+        if self.globals.borrow().const_exprs.contains_key(&name_lc) {
+            let expr = self
+                .globals
+                .borrow_mut()
+                .const_exprs
+                .remove(&name_lc)
+                .unwrap();
+            let value = self.eval_expr(frame, &expr)?;
+            self.globals.borrow_mut().values.insert(name_lc.clone(), value.clone());
+            return Ok(value);
+        }
+
+        if let Some(v) = self.globals.borrow().values.get(&name_lc).cloned() {
+            return Ok(v);
+        }
+
+        // Built-in global properties without explicit object.
+        match name_lc.as_str() {
+            "activesheet" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
+                sheet: self.sheet.active_sheet(),
+            }))),
+            "activecell" => {
+                let (r, c) = self.sheet.active_cell();
+                Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
+                    VbaRangeRef {
+                        sheet: self.sheet.active_sheet(),
+                        start_row: r,
+                        start_col: c,
+                        end_row: r,
+                        end_col: c,
+                    },
+                ))))
+            }
+            _ => {
+                if self.program.option_explicit {
+                    Err(VbaError::Runtime(format!(
+                        "Variable not defined: `{name}`"
+                    )))
+                } else {
+                    Ok(VbaValue::Empty)
+                }
+            }
+        }
+    }
+
+    fn eval_call(
+        &mut self,
+        frame: &mut Frame,
+        callee: &Expr,
+        args: &[crate::ast::CallArg],
+    ) -> Result<VbaValue, VbaError> {
+        if let Expr::Var(name) = callee {
+            let name_lc = name.to_ascii_lowercase();
+            if let Some(VbaValue::Array(arr)) = frame.locals.get(&name_lc).cloned() {
+                let idx_expr = args
+                    .first()
+                    .ok_or_else(|| VbaError::Runtime("Array index missing".to_string()))?;
+                let idx = self
+                    .eval_expr(frame, &idx_expr.expr)?
+                    .to_f64()
+                    .unwrap_or(0.0) as i32;
+                return Ok(arr
+                    .borrow()
+                    .get(idx)
+                    .cloned()
+                    .unwrap_or(VbaValue::Empty));
+            }
+            return self.call_global(frame, name, args);
+        }
+
+        if let Expr::Member { object, member } = callee {
+            let obj = self.eval_expr(frame, object)?;
+            let obj = obj
+                .as_object()
+                .ok_or_else(|| VbaError::Runtime("Call on non-object".to_string()))?;
+            return self.call_object_method(frame, obj, member, args);
+        }
+
+        // Default member call for objects / array indexing.
+        let callee_val = self.eval_expr(frame, callee)?;
+        if let VbaValue::Array(arr) = callee_val {
+            let idx_expr = args
+                .first()
+                .ok_or_else(|| VbaError::Runtime("Array index missing".to_string()))?;
+            let idx = self
+                .eval_expr(frame, &idx_expr.expr)?
+                .to_f64()
+                .unwrap_or(0.0) as i32;
+            return Ok(arr
+                .borrow()
+                .get(idx)
+                .cloned()
+                .unwrap_or(VbaValue::Empty));
+        }
+
+        if let VbaValue::Object(obj) = callee_val {
+            // Collection/Dictionary default member is Item; Worksheet default is Range.
+            let snapshot = obj.borrow().clone();
+            match snapshot {
+                VbaObject::Collection { .. } => {
+                    return self.call_object_method(frame, obj, "Item", args);
+                }
+                VbaObject::Dictionary { .. } => {
+                    return self.call_object_method(frame, obj, "Item", args);
+                }
+                VbaObject::Worksheet { .. } => {
+                    return self.call_object_method(frame, obj, "Range", args);
+                }
+                _ => {}
+            }
+        }
+
+        Err(VbaError::Runtime("Unsupported call target".to_string()))
+    }
+
+    fn coerce_default_member(
+        &mut self,
+        _frame: &mut Frame,
+        value: VbaValue,
+    ) -> Result<VbaValue, VbaError> {
+        match value {
+            VbaValue::Object(obj) => {
+                let is_range = { matches!(&*obj.borrow(), VbaObject::Range(_)) };
+                if is_range {
+                    self.get_object_member(obj, "Value")
+                } else {
+                    Ok(VbaValue::Object(obj))
+                }
+            }
+            other => Ok(other),
+        }
+    }
+
+    fn eval_binop(&mut self, op: BinOp, l: VbaValue, r: VbaValue) -> Result<VbaValue, VbaError> {
+        let l = self.coerce_default_member(&mut Frame::dummy(), l)?;
+        let r = self.coerce_default_member(&mut Frame::dummy(), r)?;
+
+        if matches!(l, VbaValue::Null) || matches!(r, VbaValue::Null) {
+            // Propagate Null (best-effort).
+            return Ok(VbaValue::Null);
+        }
+
         match op {
-            BinOp::Add => Ok(VbaValue::Double(
-                l.to_f64().unwrap_or(0.0) + r.to_f64().unwrap_or(0.0),
-            )),
-            BinOp::Sub => Ok(VbaValue::Double(
-                l.to_f64().unwrap_or(0.0) - r.to_f64().unwrap_or(0.0),
-            )),
-            BinOp::Mul => Ok(VbaValue::Double(
-                l.to_f64().unwrap_or(0.0) * r.to_f64().unwrap_or(0.0),
-            )),
-            BinOp::Div => Ok(VbaValue::Double(
-                l.to_f64().unwrap_or(0.0) / r.to_f64().unwrap_or(0.0),
-            )),
-            BinOp::Concat => Ok(VbaValue::String(format!(
-                "{}{}",
-                l.to_string_lossy(),
-                r.to_string_lossy()
-            ))),
-            BinOp::Eq => Ok(VbaValue::Boolean(l == r)),
-            BinOp::Ne => Ok(VbaValue::Boolean(l != r)),
-            BinOp::Lt => Ok(VbaValue::Boolean(
-                l.to_f64().unwrap_or(0.0) < r.to_f64().unwrap_or(0.0),
-            )),
-            BinOp::Le => Ok(VbaValue::Boolean(
-                l.to_f64().unwrap_or(0.0) <= r.to_f64().unwrap_or(0.0),
-            )),
-            BinOp::Gt => Ok(VbaValue::Boolean(
-                l.to_f64().unwrap_or(0.0) > r.to_f64().unwrap_or(0.0),
-            )),
-            BinOp::Ge => Ok(VbaValue::Boolean(
-                l.to_f64().unwrap_or(0.0) >= r.to_f64().unwrap_or(0.0),
-            )),
+            BinOp::Add => Ok(VbaValue::Double(l.to_f64().unwrap_or(0.0) + r.to_f64().unwrap_or(0.0))),
+            BinOp::Sub => Ok(VbaValue::Double(l.to_f64().unwrap_or(0.0) - r.to_f64().unwrap_or(0.0))),
+            BinOp::Mul => Ok(VbaValue::Double(l.to_f64().unwrap_or(0.0) * r.to_f64().unwrap_or(0.0))),
+            BinOp::Div => Ok(VbaValue::Double(l.to_f64().unwrap_or(0.0) / r.to_f64().unwrap_or(0.0))),
+            BinOp::IntDiv => Ok(VbaValue::Double((l.to_f64().unwrap_or(0.0) / r.to_f64().unwrap_or(0.0)).floor())),
+            BinOp::Mod => {
+                let a = l.to_f64().unwrap_or(0.0);
+                let b = r.to_f64().unwrap_or(0.0);
+                Ok(VbaValue::Double(a - b * (a / b).floor()))
+            }
+            BinOp::Pow => Ok(VbaValue::Double(l.to_f64().unwrap_or(0.0).powf(r.to_f64().unwrap_or(0.0)))),
+            BinOp::Concat => Ok(VbaValue::String(format!("{}{}", l.to_string_lossy(), r.to_string_lossy()))),
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                self.eval_compare(op, l, r)
+            }
             BinOp::And => Ok(VbaValue::Boolean(l.is_truthy() && r.is_truthy())),
             BinOp::Or => Ok(VbaValue::Boolean(l.is_truthy() || r.is_truthy())),
         }
+    }
+
+    fn eval_compare(&self, op: BinOp, l: VbaValue, r: VbaValue) -> Result<VbaValue, VbaError> {
+        // Best-effort VBA-style coercion:
+        // - Prefer numeric compare when both sides can coerce to number.
+        // - Otherwise fall back to case-insensitive string compare.
+        let ln = l.to_f64();
+        let rn = r.to_f64();
+        if ln.is_some() && rn.is_some() {
+            let (a, b) = (ln.unwrap(), rn.unwrap());
+            let res = match op {
+                BinOp::Eq => a == b,
+                BinOp::Ne => a != b,
+                BinOp::Lt => a < b,
+                BinOp::Le => a <= b,
+                BinOp::Gt => a > b,
+                BinOp::Ge => a >= b,
+                _ => unreachable!(),
+            };
+            return Ok(VbaValue::Boolean(res));
+        }
+
+        let a = l.to_string_lossy();
+        let b = r.to_string_lossy();
+        let cmp = a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase());
+        let res = match op {
+            BinOp::Eq => cmp == std::cmp::Ordering::Equal,
+            BinOp::Ne => cmp != std::cmp::Ordering::Equal,
+            BinOp::Lt => cmp == std::cmp::Ordering::Less,
+            BinOp::Le => cmp != std::cmp::Ordering::Greater,
+            BinOp::Gt => cmp == std::cmp::Ordering::Greater,
+            BinOp::Ge => cmp != std::cmp::Ordering::Less,
+            _ => unreachable!(),
+        };
+        Ok(VbaValue::Boolean(res))
     }
 
     fn call_global(
         &mut self,
         frame: &mut Frame,
         name: &str,
-        args: &[Expr],
+        args: &[crate::ast::CallArg],
     ) -> Result<VbaValue, VbaError> {
         let name_lc = name.to_ascii_lowercase();
         match name_lc.as_str() {
             "range" => {
-                let arg0 = args
+                let a1_expr = args
                     .get(0)
                     .ok_or_else(|| VbaError::Runtime("Range() missing argument".to_string()))?;
-                let a1 = self.eval_expr(frame, arg0)?.to_string_lossy();
+                let a1 = self.eval_expr(frame, &a1_expr.expr)?.to_string_lossy();
                 Ok(VbaValue::Object(range_on_active_sheet(self.sheet, &a1)?))
             }
             "cells" => {
                 let row = self
                     .eval_expr(
                         frame,
-                        args.get(0)
-                            .ok_or_else(|| VbaError::Runtime("Cells() missing row".to_string()))?,
+                        &args
+                            .get(0)
+                            .ok_or_else(|| VbaError::Runtime("Cells() missing row".to_string()))?
+                            .expr,
                     )?
                     .to_f64()
                     .unwrap_or(1.0) as u32;
                 let col = self
                     .eval_expr(
                         frame,
-                        args.get(1)
-                            .ok_or_else(|| VbaError::Runtime("Cells() missing col".to_string()))?,
+                        &args
+                            .get(1)
+                            .ok_or_else(|| VbaError::Runtime("Cells() missing col".to_string()))?
+                            .expr,
                     )?
                     .to_f64()
                     .unwrap_or(1.0) as u32;
@@ -691,9 +1431,10 @@ impl<'a> Executor<'a> {
                 let msg = self
                     .eval_expr(
                         frame,
-                        args.get(0).ok_or_else(|| {
-                            VbaError::Runtime("MsgBox() missing prompt".to_string())
-                        })?,
+                        &args
+                            .get(0)
+                            .ok_or_else(|| VbaError::Runtime("MsgBox() missing prompt".to_string()))?
+                            .expr,
                     )?
                     .to_string_lossy();
                 self.sheet.log(format!("MsgBox: {msg}"));
@@ -702,7 +1443,7 @@ impl<'a> Executor<'a> {
             "debugprint" => {
                 let mut parts = Vec::new();
                 for arg in args {
-                    parts.push(self.eval_expr(frame, arg)?.to_string_lossy());
+                    parts.push(self.eval_expr(frame, &arg.expr)?.to_string_lossy());
                 }
                 self.sheet.log(format!("Debug.Print {}", parts.join(" ")));
                 Ok(VbaValue::Empty)
@@ -710,17 +1451,22 @@ impl<'a> Executor<'a> {
             "array" => {
                 let mut values = Vec::new();
                 for arg in args {
-                    values.push(self.eval_expr(frame, arg)?);
+                    values.push(self.eval_expr(frame, &arg.expr)?);
                 }
-                Ok(VbaValue::Array(std::rc::Rc::new(values)))
+                Ok(VbaValue::Array(std::rc::Rc::new(RefCell::new(
+                    VbaArray::new(0, values),
+                ))))
             }
             "worksheets" => {
                 let name = self
                     .eval_expr(
                         frame,
-                        args.get(0).ok_or_else(|| {
-                            VbaError::Runtime("Worksheets() missing name".to_string())
-                        })?,
+                        &args
+                            .get(0)
+                            .ok_or_else(|| {
+                                VbaError::Runtime("Worksheets() missing name".to_string())
+                            })?
+                            .expr,
                     )?
                     .to_string_lossy();
                 let idx = self
@@ -735,37 +1481,204 @@ impl<'a> Executor<'a> {
                 let class = self
                     .eval_expr(
                         frame,
-                        args.get(0).ok_or_else(|| {
-                            VbaError::Runtime("__new() missing class".to_string())
-                        })?,
+                        &args
+                            .get(0)
+                            .ok_or_else(|| VbaError::Runtime("__new() missing class".to_string()))?
+                            .expr,
                     )?
                     .to_string_lossy();
-
                 match class.to_ascii_lowercase().as_str() {
-                    "collection" => {
-                        Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Collection {
-                            items: Vec::new(),
-                        })))
-                    }
+                    "collection" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Collection {
+                        items: Vec::new(),
+                    }))),
                     other => Err(VbaError::Runtime(format!(
                         "Unsupported class in New: {other}"
                     ))),
                 }
             }
             "createobject" => {
-                self.require_permission(Permission::Network, "CreateObject")?;
-                Err(VbaError::Sandbox(
-                    "CreateObject is not supported".to_string(),
-                ))
+                let progid = self
+                    .eval_expr(
+                        frame,
+                        &args
+                            .get(0)
+                            .ok_or_else(|| {
+                                VbaError::Runtime("CreateObject() missing ProgID".to_string())
+                            })?
+                            .expr,
+                    )?
+                    .to_string_lossy();
+
+                if progid.eq_ignore_ascii_case("scripting.dictionary")
+                    || progid.eq_ignore_ascii_case("scripting.dictionary.1")
+                {
+                    self.require_permission(Permission::ObjectCreation, "CreateObject")?;
+                    return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Dictionary {
+                        items: HashMap::new(),
+                    })));
+                }
+
+                self.require_permission(Permission::ObjectCreation, "CreateObject")?;
+                Err(VbaError::Sandbox(format!(
+                    "CreateObject is not supported for `{progid}`"
+                )))
+            }
+            // ---- Conversions / string helpers ----
+            "cstr" => {
+                let v = self.eval_required_arg(frame, args, 0, "CStr")?;
+                if matches!(v, VbaValue::Null) {
+                    return Err(VbaError::Runtime("Invalid use of Null".to_string()));
+                }
+                Ok(VbaValue::String(v.to_string_lossy()))
+            }
+            "clng" | "cint" | "cdbl" => {
+                let v = self.eval_required_arg(frame, args, 0, name)?;
+                if matches!(v, VbaValue::Null) {
+                    return Err(VbaError::Runtime("Invalid use of Null".to_string()));
+                }
+                let n = self.coerce_to_f64(frame, v)?;
+                let out = if name_lc == "cdbl" {
+                    n
+                } else {
+                    vba_round_bankers(n) as f64
+                };
+                Ok(VbaValue::Double(out))
+            }
+            "cbool" => {
+                let v = self.eval_required_arg(frame, args, 0, "CBool")?;
+                Ok(VbaValue::Boolean(self.coerce_to_bool(frame, v)?))
+            }
+            "cdate" => {
+                let v = self.eval_required_arg(frame, args, 0, "CDate")?;
+                Ok(VbaValue::Date(self.coerce_to_date_serial(frame, v)?))
+            }
+            "ucase" => {
+                let s = self.eval_required_arg(frame, args, 0, "UCase")?.to_string_lossy();
+                Ok(VbaValue::String(s.to_uppercase()))
+            }
+            "lcase" => {
+                let s = self.eval_required_arg(frame, args, 0, "LCase")?.to_string_lossy();
+                Ok(VbaValue::String(s.to_lowercase()))
+            }
+            "trim" => {
+                let s = self.eval_required_arg(frame, args, 0, "Trim")?.to_string_lossy();
+                Ok(VbaValue::String(s.trim().to_string()))
+            }
+            "left" => {
+                let s = self.eval_required_arg(frame, args, 0, "Left")?.to_string_lossy();
+                let n = self
+                    .eval_required_arg(frame, args, 1, "Left")?
+                    .to_f64()
+                    .unwrap_or(0.0) as usize;
+                Ok(VbaValue::String(s.chars().take(n).collect()))
+            }
+            "right" => {
+                let s = self.eval_required_arg(frame, args, 0, "Right")?.to_string_lossy();
+                let n = self
+                    .eval_required_arg(frame, args, 1, "Right")?
+                    .to_f64()
+                    .unwrap_or(0.0) as usize;
+                let len = s.chars().count();
+                Ok(VbaValue::String(s.chars().skip(len.saturating_sub(n)).collect()))
+            }
+            "mid" => {
+                let s = self.eval_required_arg(frame, args, 0, "Mid")?.to_string_lossy();
+                let start = self
+                    .eval_required_arg(frame, args, 1, "Mid")?
+                    .to_f64()
+                    .unwrap_or(1.0) as isize;
+                let start = (start - 1).max(0) as usize;
+                let chars: Vec<char> = s.chars().collect();
+                let out = match args.get(2) {
+                    None => chars.into_iter().skip(start).collect::<String>(),
+                    Some(len_arg) if matches!(len_arg.expr, Expr::Missing) => {
+                        chars.into_iter().skip(start).collect::<String>()
+                    }
+                    Some(len_arg) => {
+                        let len =
+                            self.eval_expr(frame, &len_arg.expr)?.to_f64().unwrap_or(0.0) as usize;
+                        chars
+                            .into_iter()
+                            .skip(start)
+                            .take(len)
+                            .collect::<String>()
+                    }
+                };
+                Ok(VbaValue::String(out))
+            }
+            "len" => {
+                let s = self.eval_required_arg(frame, args, 0, "Len")?.to_string_lossy();
+                Ok(VbaValue::Double(s.chars().count() as f64))
+            }
+            "replace" => {
+                let expr = self.eval_required_arg(frame, args, 0, "Replace")?.to_string_lossy();
+                let find = self.eval_required_arg(frame, args, 1, "Replace")?.to_string_lossy();
+                let repl = self.eval_required_arg(frame, args, 2, "Replace")?.to_string_lossy();
+                // Optional start position (1-based).
+                let start = args
+                    .get(3)
+                    .map(|a| self.eval_expr(frame, &a.expr))
+                    .transpose()?
+                    .and_then(|v| v.to_f64())
+                    .unwrap_or(1.0) as isize;
+                let start = (start - 1).max(0) as usize;
+                let chars: Vec<char> = expr.chars().collect();
+                let prefix: String = chars.iter().take(start).collect();
+                let suffix: String = chars.iter().skip(start).collect();
+                Ok(VbaValue::String(format!(
+                    "{}{}",
+                    prefix,
+                    suffix.replace(&find, &repl)
+                )))
+            }
+            // ---- Date/time ----
+            "now" => Ok(VbaValue::Date(datetime_to_ole_date(Local::now().naive_local()))),
+            "date" => {
+                let today = Local::now().date_naive();
+                Ok(VbaValue::Date(datetime_to_ole_date(
+                    today.and_hms_opt(0, 0, 0).unwrap(),
+                )))
+            }
+            "time" => {
+                let now = Local::now().naive_local().time();
+                let secs = now.num_seconds_from_midnight() as f64
+                    + (now.nanosecond() as f64) / 1_000_000_000.0;
+                Ok(VbaValue::Date(secs / 86_400.0))
+            }
+            "dateadd" => {
+                let interval = self.eval_required_arg(frame, args, 0, "DateAdd")?.to_string_lossy();
+                let number = self
+                    .eval_required_arg(frame, args, 1, "DateAdd")?
+                    .to_f64()
+                    .unwrap_or(0.0) as i64;
+                let date = self.eval_required_arg(frame, args, 2, "DateAdd")?;
+                let serial = self.coerce_to_date_serial(frame, date)?;
+                let dt = ole_date_to_datetime(serial);
+                let out = date_add(&interval, number, dt)?;
+                Ok(VbaValue::Date(datetime_to_ole_date(out)))
+            }
+            "datediff" => {
+                let interval = self.eval_required_arg(frame, args, 0, "DateDiff")?.to_string_lossy();
+                let d1 = self.eval_required_arg(frame, args, 1, "DateDiff")?;
+                let d2 = self.eval_required_arg(frame, args, 2, "DateDiff")?;
+                let t1 = ole_date_to_datetime(self.coerce_to_date_serial(frame, d1)?);
+                let t2 = ole_date_to_datetime(self.coerce_to_date_serial(frame, d2)?);
+                Ok(VbaValue::Double(date_diff(&interval, t1, t2)? as f64))
+            }
+            "format" => {
+                let value = self.eval_required_arg(frame, args, 0, "Format")?;
+                let fmt = args
+                    .get(1)
+                    .map(|a| self.eval_expr(frame, &a.expr))
+                    .transpose()?
+                    .map(|v| v.to_string_lossy());
+                Ok(VbaValue::String(format_value(value, fmt.as_deref())))
             }
             _ => {
                 // Procedure call.
                 if let Some(proc) = self.program.get(&name_lc) {
-                    let mut arg_vals = Vec::new();
-                    for arg in args {
-                        arg_vals.push(self.eval_expr(frame, arg)?);
-                    }
-                    let res = self.call_procedure(proc, &arg_vals)?;
+                    let mut arg_vals = build_proc_args(frame, args, proc, self)?;
+                    let res = self.call_procedure(proc, &mut arg_vals)?;
                     Ok(res.returned.unwrap_or(VbaValue::Empty))
                 } else {
                     Err(VbaError::Runtime(format!(
@@ -776,12 +1689,25 @@ impl<'a> Executor<'a> {
         }
     }
 
+    fn eval_required_arg(
+        &mut self,
+        frame: &mut Frame,
+        args: &[crate::ast::CallArg],
+        idx: usize,
+        name: &str,
+    ) -> Result<VbaValue, VbaError> {
+        let expr = args
+            .get(idx)
+            .ok_or_else(|| VbaError::Runtime(format!("{name}() missing argument {idx}")))?;
+        self.eval_expr(frame, &expr.expr)
+    }
+
     fn call_object_method(
         &mut self,
         frame: &mut Frame,
         obj: VbaObjectRef,
         member: &str,
-        args: &[Expr],
+        args: &[crate::ast::CallArg],
     ) -> Result<VbaValue, VbaError> {
         let member_lc = member.to_ascii_lowercase();
         let snapshot = obj.borrow().clone();
@@ -789,12 +1715,7 @@ impl<'a> Executor<'a> {
             VbaObject::Worksheet { sheet } => match member_lc.as_str() {
                 "range" => {
                     let a1 = self
-                        .eval_expr(
-                            frame,
-                            args.get(0).ok_or_else(|| {
-                                VbaError::Runtime("Range() missing argument".to_string())
-                            })?,
-                        )?
+                        .eval_required_arg(frame, args, 0, "Range")?
                         .to_string_lossy();
                     let range_ref = self.sheet_range(sheet, &a1)?;
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
@@ -803,21 +1724,11 @@ impl<'a> Executor<'a> {
                 }
                 "cells" => {
                     let row = self
-                        .eval_expr(
-                            frame,
-                            args.get(0).ok_or_else(|| {
-                                VbaError::Runtime("Cells() missing row".to_string())
-                            })?,
-                        )?
+                        .eval_required_arg(frame, args, 0, "Cells")?
                         .to_f64()
                         .unwrap_or(1.0) as u32;
                     let col = self
-                        .eval_expr(
-                            frame,
-                            args.get(1).ok_or_else(|| {
-                                VbaError::Runtime("Cells() missing col".to_string())
-                            })?,
-                        )?
+                        .eval_required_arg(frame, args, 1, "Cells")?
                         .to_f64()
                         .unwrap_or(1.0) as u32;
                     Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
@@ -841,16 +1752,15 @@ impl<'a> Executor<'a> {
             VbaObject::Range(range) => match member_lc.as_str() {
                 "select" => {
                     self.sheet.set_active_sheet(range.sheet)?;
-                    self.sheet
-                        .set_active_cell(range.start_row, range.start_col)?;
+                    self.sheet.set_active_cell(range.start_row, range.start_col)?;
                     Ok(VbaValue::Empty)
                 }
                 "copy" => {
                     if args.is_empty() {
-                        // Clipboard not modelled; treat as no-op.
+                        self.clipboard = Some(self.snapshot_range(range)?);
                         return Ok(VbaValue::Empty);
                     }
-                    let dest = self.eval_expr(frame, args.get(0).unwrap())?;
+                    let dest = self.eval_expr(frame, &args[0].expr)?;
                     let dest = dest.as_object().ok_or_else(|| {
                         VbaError::Runtime("Copy destination must be a Range".to_string())
                     })?;
@@ -865,12 +1775,22 @@ impl<'a> Executor<'a> {
                     self.copy_range(range, dest_range)?;
                     Ok(VbaValue::Empty)
                 }
+                "pastespecial" => {
+                    // Best-effort:
+                    // - `PasteSpecial` with no args behaves like "paste everything" (values+formulas).
+                    // - `PasteSpecial ...` (typically `Paste:=xlPasteValues`) pastes values only.
+                    let include_formulas = args.is_empty();
+                    if let Some(clip) = self.clipboard.clone() {
+                        self.paste_clipboard(&clip, range, include_formulas)?;
+                    }
+                    Ok(VbaValue::Empty)
+                }
                 "autofill" => {
-                    // `Range.AutoFill Destination, [Type]`
-                    let dest_expr = args.get(0).ok_or_else(|| {
-                        VbaError::Runtime("AutoFill() missing destination".to_string())
-                    })?;
-                    let dest = self.eval_expr(frame, dest_expr)?;
+                    let dest_arg = arg_named_or_pos(args, "destination", 0)
+                        .ok_or_else(|| {
+                            VbaError::Runtime("AutoFill() missing destination".to_string())
+                        })?;
+                    let dest = self.eval_expr(frame, &dest_arg.expr)?;
                     let dest = dest.as_object().ok_or_else(|| {
                         VbaError::Runtime("AutoFill destination must be a Range".to_string())
                     })?;
@@ -885,21 +1805,77 @@ impl<'a> Executor<'a> {
                     self.copy_range(range, dest_range)?;
                     Ok(VbaValue::Empty)
                 }
+                "offset" => {
+                    let row_off = args
+                        .get(0)
+                        .map(|a| self.eval_expr(frame, &a.expr))
+                        .transpose()?
+                        .unwrap_or(VbaValue::Double(0.0))
+                        .to_f64()
+                        .unwrap_or(0.0) as i32;
+                    let col_off = args
+                        .get(1)
+                        .map(|a| self.eval_expr(frame, &a.expr))
+                        .transpose()?
+                        .unwrap_or(VbaValue::Double(0.0))
+                        .to_f64()
+                        .unwrap_or(0.0) as i32;
+                    let new = offset_range(range, row_off, col_off)?;
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
+                        new,
+                    ))))
+                }
+                "resize" => {
+                    let rows = match args.get(0) {
+                        None => None,
+                        Some(arg) if matches!(arg.expr, Expr::Missing) => None,
+                        Some(arg) => self
+                            .eval_expr(frame, &arg.expr)?
+                            .to_f64()
+                            .map(|v| v as i32),
+                    };
+                    let cols = match args.get(1) {
+                        None => None,
+                        Some(arg) if matches!(arg.expr, Expr::Missing) => None,
+                        Some(arg) => self
+                            .eval_expr(frame, &arg.expr)?
+                            .to_f64()
+                            .map(|v| v as i32),
+                    };
+                    let new = resize_range(range, rows, cols)?;
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
+                        new,
+                    ))))
+                }
+                "clearcontents" => {
+                    for r in range.start_row..=range.end_row {
+                        for c in range.start_col..=range.end_col {
+                            self.tick()?;
+                            self.sheet.clear_cell_contents(range.sheet, r, c)?;
+                        }
+                    }
+                    Ok(VbaValue::Empty)
+                }
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Range method `{member}`"
                 ))),
             },
             VbaObject::Application => match member_lc.as_str() {
                 "range" => {
-                    let a1 = self
-                        .eval_expr(
-                            frame,
-                            args.get(0).ok_or_else(|| {
-                                VbaError::Runtime("Range() missing argument".to_string())
-                            })?,
-                        )?
-                        .to_string_lossy();
+                    let a1 = self.eval_required_arg(frame, args, 0, "Range")?.to_string_lossy();
                     Ok(VbaValue::Object(range_on_active_sheet(self.sheet, &a1)?))
+                }
+                "worksheets" => {
+                    let name = self
+                        .eval_required_arg(frame, args, 0, "Worksheets")?
+                        .to_string_lossy();
+                    let idx = self
+                        .sheet
+                        .sheet_index(&name)
+                        .ok_or_else(|| VbaError::Runtime(format!("Unknown worksheet `{name}`")))?;
+                    Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Worksheet {
+                        sheet: idx,
+                    })))
                 }
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Application method `{member}`"
@@ -908,12 +1884,7 @@ impl<'a> Executor<'a> {
             VbaObject::Workbook => match member_lc.as_str() {
                 "worksheets" => {
                     let name = self
-                        .eval_expr(
-                            frame,
-                            args.get(0).ok_or_else(|| {
-                                VbaError::Runtime("Worksheets() missing name".to_string())
-                            })?,
-                        )?
+                        .eval_required_arg(frame, args, 0, "Worksheets")?
                         .to_string_lossy();
                     let idx = self
                         .sheet
@@ -929,11 +1900,7 @@ impl<'a> Executor<'a> {
             },
             VbaObject::Collection { .. } => match member_lc.as_str() {
                 "add" => {
-                    let item = self.eval_expr(
-                        frame,
-                        args.get(0)
-                            .ok_or_else(|| VbaError::Runtime("Add() missing item".to_string()))?,
-                    )?;
+                    let item = self.eval_required_arg(frame, args, 0, "Add")?;
                     if let VbaObject::Collection { items } = &mut *obj.borrow_mut() {
                         items.push(item);
                     }
@@ -941,15 +1908,9 @@ impl<'a> Executor<'a> {
                 }
                 "item" => {
                     let index = self
-                        .eval_expr(
-                            frame,
-                            args.get(0).ok_or_else(|| {
-                                VbaError::Runtime("Item() missing index".to_string())
-                            })?,
-                        )?
+                        .eval_required_arg(frame, args, 0, "Item")?
                         .to_f64()
                         .unwrap_or(0.0) as isize;
-
                     if index <= 0 {
                         return Ok(VbaValue::Empty);
                     }
@@ -964,6 +1925,80 @@ impl<'a> Executor<'a> {
                     "Unknown Collection method `{member}`"
                 ))),
             },
+            VbaObject::Dictionary { .. } => match member_lc.as_str() {
+                "add" => {
+                    let key = self.eval_required_arg(frame, args, 0, "Add")?.to_string_lossy();
+                    let item = self.eval_required_arg(frame, args, 1, "Add")?;
+                    if let VbaObject::Dictionary { items } = &mut *obj.borrow_mut() {
+                        items.insert(key, item);
+                    }
+                    Ok(VbaValue::Empty)
+                }
+                "exists" => {
+                    let key = self
+                        .eval_required_arg(frame, args, 0, "Exists")?
+                        .to_string_lossy();
+                    if let VbaObject::Dictionary { items } = &*obj.borrow() {
+                        Ok(VbaValue::Boolean(items.contains_key(&key)))
+                    } else {
+                        Ok(VbaValue::Boolean(false))
+                    }
+                }
+                "item" => {
+                    let key = self.eval_required_arg(frame, args, 0, "Item")?.to_string_lossy();
+                    if let VbaObject::Dictionary { items } = &*obj.borrow() {
+                        Ok(items.get(&key).cloned().unwrap_or(VbaValue::Empty))
+                    } else {
+                        Ok(VbaValue::Empty)
+                    }
+                }
+                "keys" => {
+                    if let VbaObject::Dictionary { items } = &*obj.borrow() {
+                        Ok(VbaValue::Array(std::rc::Rc::new(RefCell::new(
+                            VbaArray::new(
+                                0,
+                                items
+                                    .keys()
+                                    .cloned()
+                                    .map(VbaValue::String)
+                                    .collect::<Vec<_>>(),
+                            ),
+                        ))))
+                    } else {
+                        Ok(VbaValue::Array(std::rc::Rc::new(RefCell::new(
+                            VbaArray::new(0, Vec::new()),
+                        ))))
+                    }
+                }
+                "remove" => {
+                    let key = self
+                        .eval_required_arg(frame, args, 0, "Remove")?
+                        .to_string_lossy();
+                    if let VbaObject::Dictionary { items } = &mut *obj.borrow_mut() {
+                        items.remove(&key);
+                    }
+                    Ok(VbaValue::Empty)
+                }
+                "removeall" => {
+                    if let VbaObject::Dictionary { items } = &mut *obj.borrow_mut() {
+                        items.clear();
+                    }
+                    Ok(VbaValue::Empty)
+                }
+                _ => Err(VbaError::Runtime(format!(
+                    "Unknown Dictionary method `{member}`"
+                ))),
+            },
+            VbaObject::Err(_) => match member_lc.as_str() {
+                "clear" => {
+                    self.clear_err();
+                    Ok(VbaValue::Empty)
+                }
+                _ => Err(VbaError::Runtime(format!("Unknown Err method `{member}`"))),
+            },
+            VbaObject::RangeRows { .. } | VbaObject::RangeColumns { .. } => Err(VbaError::Runtime(
+                format!("Cannot call `{member}` on range dimension object"),
+            )),
         }
     }
 
@@ -1026,8 +2061,36 @@ impl<'a> Executor<'a> {
                     .get_cell_formula(range.sheet, range.start_row, range.start_col)?
                     .map(VbaValue::String)
                     .unwrap_or(VbaValue::Empty)),
+                "text" => Ok(self
+                    .sheet
+                    .get_cell_value(range.sheet, range.start_row, range.start_col)?
+                    .to_string_lossy()
+                    .into()),
+                "address" => Ok(VbaValue::String(range_address(*range)?)),
+                "row" => Ok(VbaValue::Double(range.start_row as f64)),
+                "column" => Ok(VbaValue::Double(range.start_col as f64)),
+                "rows" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
+                    range: *range,
+                }))),
+                "columns" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
+                    range: *range,
+                }))),
+                _ => Err(VbaError::Runtime(format!("Unknown Range member `{member}`"))),
+            },
+            VbaObject::RangeRows { range } => match member_lc.as_str() {
+                "count" => Ok(VbaValue::Double(
+                    (range.end_row - range.start_row + 1) as f64,
+                )),
                 _ => Err(VbaError::Runtime(format!(
-                    "Unknown Range member `{member}`"
+                    "Unknown Rows member `{member}`"
+                ))),
+            },
+            VbaObject::RangeColumns { range } => match member_lc.as_str() {
+                "count" => Ok(VbaValue::Double(
+                    (range.end_col - range.start_col + 1) as f64,
+                )),
+                _ => Err(VbaError::Runtime(format!(
+                    "Unknown Columns member `{member}`"
                 ))),
             },
             VbaObject::Collection { items } => match member_lc.as_str() {
@@ -1035,6 +2098,17 @@ impl<'a> Executor<'a> {
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Collection member `{member}`"
                 ))),
+            },
+            VbaObject::Dictionary { items } => match member_lc.as_str() {
+                "count" => Ok(VbaValue::Double(items.len() as f64)),
+                _ => Err(VbaError::Runtime(format!(
+                    "Unknown Dictionary member `{member}`"
+                ))),
+            },
+            VbaObject::Err(err) => match member_lc.as_str() {
+                "number" => Ok(VbaValue::Double(err.number as f64)),
+                "description" => Ok(VbaValue::String(err.description.clone())),
+                _ => Err(VbaError::Runtime(format!("Unknown Err member `{member}`"))),
             },
         }
     }
@@ -1047,6 +2121,60 @@ impl<'a> Executor<'a> {
                 "{feature} requires permission: {permission:?}"
             )))
         }
+    }
+
+    fn snapshot_range(&mut self, range: VbaRangeRef) -> Result<Clipboard, VbaError> {
+        let rows = range.end_row - range.start_row + 1;
+        let cols = range.end_col - range.start_col + 1;
+        let mut values = Vec::new();
+        let mut formulas = Vec::new();
+        for r in 0..rows {
+            for c in 0..cols {
+                let row = range.start_row + r;
+                let col = range.start_col + c;
+                values.push(self.sheet.get_cell_value(range.sheet, row, col)?);
+                formulas.push(self.sheet.get_cell_formula(range.sheet, row, col)?);
+            }
+        }
+        Ok(Clipboard {
+            rows,
+            cols,
+            values,
+            formulas,
+        })
+    }
+
+    fn paste_clipboard(
+        &mut self,
+        clip: &Clipboard,
+        dest: VbaRangeRef,
+        include_formulas: bool,
+    ) -> Result<(), VbaError> {
+        let dest_rows = dest.end_row - dest.start_row + 1;
+        let dest_cols = dest.end_col - dest.start_col + 1;
+        for dr in 0..dest_rows {
+            for dc in 0..dest_cols {
+                let sr = (dr % clip.rows) as usize;
+                let sc = (dc % clip.cols) as usize;
+                let idx = sr * (clip.cols as usize) + sc;
+                let value = clip.values.get(idx).cloned().unwrap_or(VbaValue::Empty);
+                let formula = clip.formulas.get(idx).cloned().unwrap_or(None);
+                let tr = dest.start_row + dr;
+                let tc = dest.start_col + dc;
+                self.tick()?;
+                self.sheet.clear_cell_contents(dest.sheet, tr, tc)?;
+                if include_formulas {
+                    if let Some(formula) = formula {
+                        self.sheet.set_cell_formula(dest.sheet, tr, tc, formula)?;
+                    } else {
+                        self.sheet.set_cell_value(dest.sheet, tr, tc, value)?;
+                    }
+                } else {
+                    self.sheet.set_cell_value(dest.sheet, tr, tc, value)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn copy_range(&mut self, src: VbaRangeRef, dest: VbaRangeRef) -> Result<(), VbaError> {
@@ -1064,6 +2192,7 @@ impl<'a> Executor<'a> {
 
                 let tr = dest.start_row + dr;
                 let tc = dest.start_col + dc;
+                self.sheet.clear_cell_contents(dest.sheet, tr, tc)?;
                 self.sheet.set_cell_value(dest.sheet, tr, tc, value)?;
                 if let Some(formula) = formula {
                     self.sheet.set_cell_formula(dest.sheet, tr, tc, formula)?;
@@ -1075,13 +2204,35 @@ impl<'a> Executor<'a> {
     }
 }
 
+impl Frame {
+    fn dummy() -> Self {
+        Self {
+            locals: HashMap::new(),
+            types: HashMap::new(),
+            consts: HashSet::new(),
+            error_mode: ErrorMode::Default,
+            resume: ResumeState::default(),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum ControlFlow {
     Continue,
     ExitSub,
     ExitFunction,
     ExitFor,
+    ExitDo,
     Goto(String),
+    ErrorGoto(String),
+    Resume(ResumeKind),
+}
+
+#[derive(Debug, Clone)]
+enum ResumeKind {
+    Next,
+    Same,
+    Label(String),
 }
 
 fn collect_labels(body: &[Stmt]) -> HashMap<String, usize> {
@@ -1092,4 +2243,314 @@ fn collect_labels(body: &[Stmt]) -> HashMap<String, usize> {
         }
     }
     map
+}
+
+fn vba_round_bankers(n: f64) -> i64 {
+    let frac = n.fract().abs();
+    if (frac - 0.5).abs() < f64::EPSILON {
+        let int = n.trunc() as i64;
+        if int % 2 == 0 {
+            int
+        } else if n.is_sign_negative() {
+            int - 1
+        } else {
+            int + 1
+        }
+    } else {
+        n.round() as i64
+    }
+}
+
+fn arg_named_or_pos<'a>(
+    args: &'a [crate::ast::CallArg],
+    name: &str,
+    pos: usize,
+) -> Option<&'a crate::ast::CallArg> {
+    args.iter()
+        .find(|a| a.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(name)))
+        .or_else(|| args.get(pos))
+}
+
+fn offset_range(range: VbaRangeRef, row_off: i32, col_off: i32) -> Result<VbaRangeRef, VbaError> {
+    let height = range.end_row - range.start_row;
+    let width = range.end_col - range.start_col;
+    let sr = (range.start_row as i32 + row_off).max(1) as u32;
+    let sc = (range.start_col as i32 + col_off).max(1) as u32;
+    Ok(VbaRangeRef {
+        sheet: range.sheet,
+        start_row: sr,
+        start_col: sc,
+        end_row: sr + height,
+        end_col: sc + width,
+    })
+}
+
+fn resize_range(
+    range: VbaRangeRef,
+    rows: Option<i32>,
+    cols: Option<i32>,
+) -> Result<VbaRangeRef, VbaError> {
+    let cur_rows = (range.end_row - range.start_row + 1) as i32;
+    let cur_cols = (range.end_col - range.start_col + 1) as i32;
+    let rows = rows.unwrap_or(cur_rows);
+    let cols = cols.unwrap_or(cur_cols);
+    if rows <= 0 || cols <= 0 {
+        return Err(VbaError::Runtime("Resize rows/cols must be >= 1".to_string()));
+    }
+    Ok(VbaRangeRef {
+        sheet: range.sheet,
+        start_row: range.start_row,
+        start_col: range.start_col,
+        end_row: range.start_row + (rows as u32) - 1,
+        end_col: range.start_col + (cols as u32) - 1,
+    })
+}
+
+fn range_address(range: VbaRangeRef) -> Result<String, VbaError> {
+    let a = absolute_a1(range.start_row, range.start_col)?;
+    if range.start_row == range.end_row && range.start_col == range.end_col {
+        return Ok(a);
+    }
+    let b = absolute_a1(range.end_row, range.end_col)?;
+    Ok(format!("{a}:{b}"))
+}
+
+fn absolute_a1(row: u32, col: u32) -> Result<String, VbaError> {
+    let a1 = row_col_to_a1(row, col)?;
+    let mut out = String::with_capacity(a1.len() + 2);
+    let mut seen_digit = false;
+    for ch in a1.chars() {
+        if !seen_digit && ch.is_ascii_digit() {
+            out.push('$');
+            seen_digit = true;
+        }
+        if out.is_empty() {
+            out.push('$');
+        }
+        out.push(ch);
+    }
+    Ok(out)
+}
+
+fn build_proc_args(
+    frame: &mut Frame,
+    args: &[crate::ast::CallArg],
+    proc: &ProcedureDef,
+    exec: &mut Executor<'_>,
+) -> Result<Vec<VbaValue>, VbaError> {
+    if args.iter().any(|a| a.name.is_some()) {
+        let mut values = vec![VbaValue::Empty; proc.params.len()];
+        let mut next_pos = 0usize;
+        for arg in args {
+            let value = exec.eval_expr(frame, &arg.expr)?;
+            if let Some(name) = &arg.name {
+                if let Some((idx, _)) = proc
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.name.eq_ignore_ascii_case(name))
+                {
+                    values[idx] = value;
+                    continue;
+                }
+            }
+            if next_pos < values.len() {
+                values[next_pos] = value;
+                next_pos += 1;
+            }
+        }
+        return Ok(values);
+    }
+
+    let mut values = Vec::new();
+    for arg in args {
+        values.push(exec.eval_expr(frame, &arg.expr)?);
+    }
+    Ok(values)
+}
+
+fn parse_vba_date_string(s: &str) -> Option<NaiveDateTime> {
+    let s = s.trim();
+    // Common recorded-macro patterns (best-effort).
+    let fmts = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M",
+        "%m/%d/%Y",
+    ];
+    for fmt in fmts {
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, fmt) {
+            return Some(dt);
+        }
+        if let Ok(d) = NaiveDate::parse_from_str(s, fmt) {
+            return Some(d.and_hms_opt(0, 0, 0).unwrap());
+        }
+    }
+    None
+}
+
+fn ole_base_datetime() -> NaiveDateTime {
+    NaiveDate::from_ymd_opt(1899, 12, 30)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+}
+
+fn datetime_to_ole_date(dt: NaiveDateTime) -> f64 {
+    let base = ole_base_datetime();
+    let delta = dt - base;
+    delta.num_seconds() as f64 / 86_400.0
+}
+
+fn ole_date_to_datetime(serial: f64) -> NaiveDateTime {
+    let base = ole_base_datetime();
+    let secs = (serial * 86_400.0).round() as i64;
+    base + ChronoDuration::seconds(secs)
+}
+
+fn date_add(interval: &str, number: i64, dt: NaiveDateTime) -> Result<NaiveDateTime, VbaError> {
+    let interval = interval.to_ascii_lowercase();
+    match interval.as_str() {
+        "d" | "dd" => Ok(dt + ChronoDuration::days(number)),
+        "h" | "hh" => Ok(dt + ChronoDuration::hours(number)),
+        "n" | "nn" => Ok(dt + ChronoDuration::minutes(number)),
+        "s" | "ss" => Ok(dt + ChronoDuration::seconds(number)),
+        "m" | "mm" => Ok(add_months(dt, number)),
+        "yyyy" => Ok(add_months(dt, number * 12)),
+        _ => Err(VbaError::Runtime(format!(
+            "DateAdd unsupported interval `{interval}`"
+        ))),
+    }
+}
+
+fn date_diff(interval: &str, d1: NaiveDateTime, d2: NaiveDateTime) -> Result<i64, VbaError> {
+    let interval = interval.to_ascii_lowercase();
+    let delta = d2 - d1;
+    match interval.as_str() {
+        "d" | "dd" => Ok(delta.num_days()),
+        "h" | "hh" => Ok(delta.num_hours()),
+        "n" | "nn" => Ok(delta.num_minutes()),
+        "s" | "ss" => Ok(delta.num_seconds()),
+        "m" | "mm" => Ok((d2.year() as i64 * 12 + d2.month() as i64)
+            - (d1.year() as i64 * 12 + d1.month() as i64)),
+        "yyyy" => Ok(d2.year() as i64 - d1.year() as i64),
+        _ => Err(VbaError::Runtime(format!(
+            "DateDiff unsupported interval `{interval}`"
+        ))),
+    }
+}
+
+fn add_months(dt: NaiveDateTime, months: i64) -> NaiveDateTime {
+    let date = dt.date();
+    let mut year = date.year() as i64;
+    let mut month0 = date.month0() as i64;
+    let total = month0 + months;
+    year += total.div_euclid(12);
+    month0 = total.rem_euclid(12);
+    let month = (month0 + 1) as u32;
+    let day = date.day();
+
+    let last_day = last_day_of_month(year as i32, month);
+    let day = day.min(last_day);
+
+    NaiveDate::from_ymd_opt(year as i32, month, day)
+        .unwrap()
+        .and_time(dt.time())
+}
+
+fn last_day_of_month(year: i32, month: u32) -> u32 {
+    let (next_year, next_month) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    let first_next =
+        NaiveDate::from_ymd_opt(next_year, next_month, 1).expect("valid date for next month");
+    (first_next - ChronoDuration::days(1)).day()
+}
+
+fn format_value(value: VbaValue, fmt: Option<&str>) -> String {
+    match (value, fmt) {
+        (VbaValue::Date(serial), Some(f)) => {
+            let dt = ole_date_to_datetime(serial);
+            format_datetime_vba(dt, f)
+        }
+        (VbaValue::Double(n), Some(f)) => format_number_vba(n, f),
+        (v, _) => v.to_string_lossy(),
+    }
+}
+
+fn format_number_vba(n: f64, fmt: &str) -> String {
+    // Very small subset: formats like `0`, `0.00`.
+    let fmt = fmt.trim();
+    if let Some((_, frac)) = fmt.split_once('.') {
+        let decimals = frac.chars().take_while(|c| *c == '0').count();
+        return format!("{n:.*}", decimals);
+    }
+    if fmt.contains('0') {
+        return format!("{n:.0}");
+    }
+    n.to_string()
+}
+
+fn format_datetime_vba(dt: NaiveDateTime, fmt: &str) -> String {
+    let fmt_lower = fmt.to_ascii_lowercase();
+    let use_12h = fmt_lower.contains("am/pm");
+
+    // Token replacement (best-effort). We intentionally keep this simple; it is not a full VBA
+    // formatter.
+    let mut out = String::new();
+    let mut i = 0;
+    while i < fmt.len() {
+        let rest = &fmt[i..];
+        let rest_lower = &fmt_lower[i..];
+        if rest_lower.starts_with("yyyy") {
+            out.push_str("%Y");
+            i += 4;
+        } else if rest_lower.starts_with("yy") {
+            out.push_str("%y");
+            i += 2;
+        } else if rest_lower.starts_with("mmmm") {
+            out.push_str("%B");
+            i += 4;
+        } else if rest_lower.starts_with("mmm") {
+            out.push_str("%b");
+            i += 3;
+        } else if rest_lower.starts_with("mm") {
+            out.push_str("%m");
+            i += 2;
+        } else if rest_lower.starts_with("m") {
+            out.push_str("%-m");
+            i += 1;
+        } else if rest_lower.starts_with("dd") {
+            out.push_str("%d");
+            i += 2;
+        } else if rest_lower.starts_with("d") {
+            out.push_str("%-d");
+            i += 1;
+        } else if rest_lower.starts_with("hh") {
+            out.push_str(if use_12h { "%I" } else { "%H" });
+            i += 2;
+        } else if rest_lower.starts_with("h") {
+            out.push_str(if use_12h { "%-I" } else { "%-H" });
+            i += 1;
+        } else if rest_lower.starts_with("nn") {
+            out.push_str("%M");
+            i += 2;
+        } else if rest_lower.starts_with("ss") {
+            out.push_str("%S");
+            i += 2;
+        } else if rest_lower.starts_with("am/pm") {
+            out.push_str("%p");
+            i += 5;
+        } else {
+            let ch = rest.chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+
+    dt.format(&out).to_string()
 }

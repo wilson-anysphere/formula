@@ -6,6 +6,7 @@ pub enum Permission {
     FileSystemRead,
     FileSystemWrite,
     Network,
+    ObjectCreation,
 }
 
 /// A host-provided permission checker (Task 32 integration point).
@@ -19,6 +20,7 @@ pub struct VbaSandboxPolicy {
     pub allow_filesystem_read: bool,
     pub allow_filesystem_write: bool,
     pub allow_network: bool,
+    pub allow_object_creation: bool,
     pub max_execution_time: Duration,
     /// Hard cap on the number of interpreter "steps" (roughly statement/expression
     /// evaluation units) to avoid pathological infinite loops even when the wall
@@ -32,6 +34,7 @@ impl Default for VbaSandboxPolicy {
             allow_filesystem_read: false,
             allow_filesystem_write: false,
             allow_network: false,
+            allow_object_creation: false,
             max_execution_time: Duration::from_millis(250),
             max_steps: 100_000,
         }
@@ -44,6 +47,7 @@ impl VbaSandboxPolicy {
             Permission::FileSystemRead => self.allow_filesystem_read,
             Permission::FileSystemWrite => self.allow_filesystem_write,
             Permission::Network => self.allow_network,
+            Permission::ObjectCreation => self.allow_object_creation,
         };
 
         if !allowed_by_policy {

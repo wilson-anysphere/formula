@@ -50,6 +50,9 @@ pub trait Spreadsheet {
         formula: String,
     ) -> Result<(), VbaError>;
 
+    /// Clear the value and formula for a cell (equivalent to Excel's `ClearContents`).
+    fn clear_cell_contents(&mut self, sheet: usize, row: u32, col: u32) -> Result<(), VbaError>;
+
     fn log(&mut self, message: String);
 }
 
@@ -82,7 +85,17 @@ pub enum VbaObject {
     Workbook,
     Worksheet { sheet: usize },
     Range(VbaRangeRef),
+    RangeRows { range: VbaRangeRef },
+    RangeColumns { range: VbaRangeRef },
     Collection { items: Vec<VbaValue> },
+    Dictionary { items: HashMap<String, VbaValue> },
+    Err(VbaErrObject),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct VbaErrObject {
+    pub number: i32,
+    pub description: String,
 }
 
 pub fn a1_to_row_col(a1: &str) -> Result<(u32, u32), VbaError> {
@@ -329,6 +342,15 @@ impl Spreadsheet for InMemoryWorkbook {
             .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
         let cell = sh.cells.entry((row, col)).or_default();
         cell.formula = Some(formula);
+        Ok(())
+    }
+
+    fn clear_cell_contents(&mut self, sheet: usize, row: u32, col: u32) -> Result<(), VbaError> {
+        let sh = self
+            .sheets
+            .get_mut(sheet)
+            .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
+        sh.cells.remove(&(row, col));
         Ok(())
     }
 

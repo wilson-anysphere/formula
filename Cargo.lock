@@ -1516,6 +1516,7 @@ dependencies = [
 name = "formula-vba-runtime"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "formula-vba",
  "formula-xlsx",
  "pretty_assertions",
