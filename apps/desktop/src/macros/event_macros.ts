@@ -1,5 +1,6 @@
 import { DefaultMacroSecurityController } from "./security";
 import type { MacroCellUpdate, MacroSecurityStatus, MacroTrustDecision } from "./types";
+import { normalizeFormulaTextOpt } from "@formula/engine";
 
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
@@ -102,13 +103,8 @@ function normalizeRect(rect: Rect): Rect {
 }
 
 function normalizeFormulaText(formula: unknown): string | null {
-  if (formula == null) return null;
   if (typeof formula !== "string") return null;
-  const trimmed = formula.trim();
-  const strippedLeading = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
-  const stripped = strippedLeading.trim();
-  if (stripped === "") return null;
-  return `=${stripped}`;
+  return normalizeFormulaTextOpt(formula);
 }
 
 function unionCell(rect: Rect | undefined, row: number, col: number): Rect {
