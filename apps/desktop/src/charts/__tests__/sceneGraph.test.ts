@@ -54,6 +54,26 @@ describe("charts scene graph", () => {
     expect(a).toEqual(b);
   });
 
+  it("applies textLength when maxWidth is provided for SVG", () => {
+    const scene: Scene = {
+      nodes: [
+        {
+          kind: "text",
+          x: 0,
+          y: 10,
+          text: "0123456789",
+          maxWidth: 20,
+          font: { family: "sans-serif", sizePx: 10 },
+          fill: { color: "#000000" },
+        },
+      ],
+    };
+
+    const svg = renderSceneToSvg(scene, { width: 120, height: 40 });
+    expect(svg).toContain('textLength="20"');
+    expect(svg).toContain('lengthAdjust="spacingAndGlyphs"');
+  });
+
   it("renders to Canvas2D without throwing", () => {
     const scene = createDemoScene();
     const { ctx, calls } = createStubCanvasContext();

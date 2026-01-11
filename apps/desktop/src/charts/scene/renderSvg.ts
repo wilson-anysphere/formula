@@ -1,6 +1,7 @@
 import { paintToRgba, rgbaToHex } from "./color.js";
 import { formatNumber } from "./format.js";
 import { pathToSvgD } from "./path.js";
+import { measureTextWidth } from "./text.js";
 import { transformToSvg } from "./transform.js";
 import type {
   ClipNode,
@@ -191,6 +192,14 @@ export function renderSceneToSvg(scene: Scene, options: { width: number; height:
     if (dominant) attrs.push(`dominant-baseline="${dominant}"`);
     attrs.push(...fontAttrs(node.font));
     attrs.push(...paintAttrs(node.fill, "fill"));
+
+    if (node.maxWidth != null && node.maxWidth > 0) {
+      const measured = measureTextWidth(node.text, node.font);
+      if (measured > node.maxWidth + 0.01) {
+        attrs.push(`textLength="${formatNumber(node.maxWidth)}"`, 'lengthAdjust="spacingAndGlyphs"');
+      }
+    }
+
     const t = transformToSvg(node.transform);
     if (t) attrs.push(`transform="${t}"`);
     return `<text ${attrs.join(" ")}>${escapeXml(node.text)}</text>`;
@@ -228,4 +237,3 @@ export function renderSceneToSvg(scene: Scene, options: { width: number; height:
     `</svg>`,
   ].join("");
 }
-
