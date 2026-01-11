@@ -210,6 +210,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
           }
         },
         messages: llmMessages as any,
+        attachments,
         require_approval: requireApproval as any,
         on_tool_call: params.onToolCall as any,
         on_tool_result: params.onToolResult as any,

@@ -47,6 +47,39 @@ function formatLatency(entry: AIAuditEntry): string | null {
   return `Latency: ${rounded}ms`;
 }
 
+function renderVerification(entry: AIAuditEntry): HTMLElement | null {
+  const verification = entry.verification;
+  if (!verification) return null;
+
+  const confidence = Number(verification.confidence ?? 0);
+  const confidencePct = Number.isFinite(confidence) ? Math.round(confidence * 100) : 0;
+  const status = verification.verified ? "Verified" : "Unverified";
+  const warnings =
+    Array.isArray(verification.warnings) && verification.warnings.length > 0 ? ` • ${verification.warnings.join(" ")}` : "";
+  const text = `Verification: ${status} (confidence ${confidencePct}%)${warnings}`;
+
+  if (verification.verified) {
+    return el(
+      "div",
+      {
+        "data-testid": "ai-audit-verification",
+        style: "font-size: 12px; opacity: 0.85; margin-bottom: 6px;",
+      },
+      [text],
+    );
+  }
+
+  return el(
+    "div",
+    {
+      "data-testid": "ai-audit-verification",
+      style:
+        "font-size: 12px; margin-bottom: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--warning-bg);",
+    },
+    [text],
+  );
+}
+
 function formatToolCall(call: AIAuditEntry["tool_calls"][number]): string {
   const approved = call.approved === undefined ? "—" : String(call.approved);
   const ok = call.ok === undefined ? "—" : String(call.ok);
@@ -115,6 +148,7 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       const tokenUsage = formatTokenUsage(entry);
       const latency = formatLatency(entry);
       const stats = [tokenUsage, latency].filter(Boolean).join(" • ");
+      const verificationNode = renderVerification(entry);
 
       const toolsNode =
         toolCalls.length === 0
@@ -136,7 +170,8 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
             `${formatTimestamp(entry.timestamp_ms)} • ${entry.mode} • ${entry.model}`,
           ]),
           el("div", { style: "font-size: 12px; opacity: 0.8; margin-bottom: 6px;" }, [`session_id: ${entry.session_id}`]),
-          stats ? el("div", { style: "font-size: 12px; opacity: 0.85; margin-bottom: 6px;" }, [stats]) : el("div"),
+          ...(stats ? [el("div", { style: "font-size: 12px; opacity: 0.85; margin-bottom: 6px;" }, [stats])] : []),
+          ...(verificationNode ? [verificationNode] : []),
           toolsNode,
         ],
       );

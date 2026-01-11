@@ -17,6 +17,13 @@ describe("AIAuditPanel", () => {
       input: { message: "older" },
       model: "model-older",
       tool_calls: [{ name: "read_range", parameters: { range: "A1:A2" }, approved: true, ok: true }],
+      verification: {
+        needs_tools: true,
+        used_tools: true,
+        verified: true,
+        confidence: 0.9,
+        warnings: []
+      },
       token_usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
       latency_ms: 10,
     };
@@ -29,6 +36,13 @@ describe("AIAuditPanel", () => {
       input: { message: "newer" },
       model: "model-newer",
       tool_calls: [{ name: "write_cell", parameters: { cell: "A1", value: 123 }, approved: true, ok: true }],
+      verification: {
+        needs_tools: true,
+        used_tools: false,
+        verified: false,
+        confidence: 0.2,
+        warnings: ["No data tools were used; answer may be a guess."]
+      },
       token_usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       latency_ms: 123,
     };
@@ -58,5 +72,9 @@ describe("AIAuditPanel", () => {
     // Token usage + latency, if present.
     expect(container.textContent).toContain("Tokens:");
     expect(container.textContent).toContain("Latency:");
+
+    // Verification details should be surfaced.
+    expect(container.querySelectorAll('[data-testid="ai-audit-verification"]')).toHaveLength(2);
+    expect(container.textContent).toContain("Verification:");
   });
 });
