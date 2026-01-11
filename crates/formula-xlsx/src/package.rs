@@ -328,7 +328,11 @@ impl XlsxPackage {
         }
 
         let mut out = Cursor::new(Vec::new());
-        crate::streaming::patch_xlsx_streaming(Cursor::new(input_bytes), &mut out, &streaming_patches)?;
+        crate::streaming::patch_xlsx_streaming(
+            Cursor::new(input_bytes),
+            &mut out,
+            &streaming_patches,
+        )?;
         Ok(out.into_inner())
     }
 

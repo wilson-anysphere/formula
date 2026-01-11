@@ -759,6 +759,89 @@ fn scan_worksheet_shared_string_indices<R: Read>(
     Ok(out)
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct WorksheetXmlMetadata {
+    has_dimension: bool,
+    has_sheet_pr: bool,
+    existing_used_range: Option<PatchBounds>,
+}
+
+fn scan_worksheet_xml_metadata<R: Read>(
+    input: R,
+) -> Result<WorksheetXmlMetadata, StreamingPatchError> {
+    let mut reader = Reader::from_reader(BufReader::new(input));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut in_sheet_data = false;
+    let mut has_dimension = false;
+    let mut has_sheet_pr = false;
+    let mut used_range: Option<PatchBounds> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                in_sheet_data = true;
+            }
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                in_sheet_data = false;
+            }
+            Event::End(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                in_sheet_data = false;
+            }
+            Event::Start(ref e) | Event::Empty(ref e)
+                if local_name(e.name().as_ref()) == b"dimension" =>
+            {
+                has_dimension = true;
+            }
+            Event::Start(ref e) | Event::Empty(ref e)
+                if local_name(e.name().as_ref()) == b"sheetPr" =>
+            {
+                has_sheet_pr = true;
+            }
+            Event::Start(ref e) | Event::Empty(ref e)
+                if in_sheet_data && local_name(e.name().as_ref()) == b"c" =>
+            {
+                let mut r: Option<String> = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"r" {
+                        r = Some(attr.unescape_value()?.into_owned());
+                        break;
+                    }
+                }
+                if let Some(r) = r {
+                    let cell_ref =
+                        CellRef::from_a1(&r).map_err(|_| StreamingPatchError::InvalidCellRef(r))?;
+                    used_range = Some(match used_range {
+                        Some(existing) => PatchBounds {
+                            min_row_0: existing.min_row_0.min(cell_ref.row),
+                            max_row_0: existing.max_row_0.max(cell_ref.row),
+                            min_col_0: existing.min_col_0.min(cell_ref.col),
+                            max_col_0: existing.max_col_0.max(cell_ref.col),
+                        },
+                        None => PatchBounds {
+                            min_row_0: cell_ref.row,
+                            max_row_0: cell_ref.row,
+                            min_col_0: cell_ref.col,
+                            max_col_0: cell_ref.col,
+                        },
+                    });
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(WorksheetXmlMetadata {
+        has_dimension,
+        has_sheet_pr,
+        existing_used_range: used_range,
+    })
+}
+
 fn patch_wants_shared_string(
     patch: &WorksheetCellPatch,
     existing_t: Option<&str>,
@@ -835,6 +918,18 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     let (shared_strings_part, shared_string_indices, shared_strings_updated) =
         plan_shared_strings(archive, patches_by_part, pre_read_parts)?;
 
+    let mut worksheet_metadata_by_part: HashMap<String, WorksheetXmlMetadata> = HashMap::new();
+    for part in patches_by_part.keys() {
+        let mut file = match archive.by_name(part) {
+            Ok(file) => file,
+            Err(zip::result::ZipError::FileNotFound) => {
+                return Err(StreamingPatchError::MissingWorksheetPart(part.clone()));
+            }
+            Err(err) => return Err(err.into()),
+        };
+        worksheet_metadata_by_part.insert(part.clone(), scan_worksheet_xml_metadata(&mut file)?);
+    }
+
     let mut missing_parts: BTreeMap<String, ()> =
         patches_by_part.keys().map(|k| (k.clone(), ())).collect();
 
@@ -858,7 +953,18 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             zip.start_file(name.clone(), options)?;
             missing_parts.remove(&name);
             let indices = shared_string_indices.get(&name);
-            patch_worksheet_xml_streaming(&mut file, &mut zip, &name, patches, indices)?;
+            let worksheet_meta = worksheet_metadata_by_part
+                .get(&name)
+                .copied()
+                .unwrap_or_default();
+            patch_worksheet_xml_streaming(
+                &mut file,
+                &mut zip,
+                &name,
+                patches,
+                indices,
+                worksheet_meta,
+            )?;
         } else if let Some(bytes) = updated_parts.get(&name) {
             zip.start_file(name.clone(), options)?;
             zip.write_all(bytes)?;
@@ -1209,8 +1315,18 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     worksheet_part: &str,
     patches: &[WorksheetCellPatch],
     shared_string_indices: Option<&HashMap<(u32, u32), u32>>,
+    worksheet_meta: WorksheetXmlMetadata,
 ) -> Result<(), StreamingPatchError> {
     let patch_bounds = bounds_for_patches(patches);
+    let dimension_ref_to_insert = if worksheet_meta.has_dimension {
+        None
+    } else {
+        union_bounds(worksheet_meta.existing_used_range, patch_bounds).map(bounds_to_dimension_ref)
+    };
+    let insert_dimension_after_sheet_pr =
+        dimension_ref_to_insert.is_some() && worksheet_meta.has_sheet_pr;
+    let insert_dimension_at_worksheet_start =
+        dimension_ref_to_insert.is_some() && !worksheet_meta.has_sheet_pr;
 
     let mut patches_by_row: BTreeMap<u32, Vec<CellPatchInternal>> = BTreeMap::new();
     for patch in patches {
@@ -1245,6 +1361,8 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     let mut worksheet_prefix: Option<String> = None;
     let mut worksheet_has_default_ns = false;
     let mut sheet_prefix: Option<String> = None;
+    let mut inserted_dimension = false;
+    let mut pending_dimension_after_sheet_pr_end = false;
 
     let mut row_state: Option<RowState> = None;
     let mut in_cell = false;
@@ -1262,6 +1380,53 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     worksheet_has_default_ns = worksheet_has_default_spreadsheetml_ns(e)?;
                 }
                 writer.write_event(Event::Start(e.to_owned()))?;
+                if insert_dimension_at_worksheet_start && !inserted_dimension {
+                    if let Some(ref dimension_ref) = dimension_ref_to_insert {
+                        let prefix = if worksheet_has_default_ns {
+                            None
+                        } else {
+                            worksheet_prefix.as_deref()
+                        };
+                        write_dimension_element(&mut writer, prefix, dimension_ref)?;
+                        inserted_dimension = true;
+                    }
+                }
+            }
+
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"sheetPr" => {
+                writer.write_event(Event::Start(e.to_owned()))?;
+                if insert_dimension_after_sheet_pr && !inserted_dimension {
+                    pending_dimension_after_sheet_pr_end = true;
+                }
+            }
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"sheetPr" => {
+                writer.write_event(Event::Empty(e.to_owned()))?;
+                if insert_dimension_after_sheet_pr && !inserted_dimension {
+                    if let Some(ref dimension_ref) = dimension_ref_to_insert {
+                        let prefix = if worksheet_has_default_ns {
+                            None
+                        } else {
+                            worksheet_prefix.as_deref()
+                        };
+                        write_dimension_element(&mut writer, prefix, dimension_ref)?;
+                        inserted_dimension = true;
+                    }
+                }
+            }
+            Event::End(ref e) if local_name(e.name().as_ref()) == b"sheetPr" => {
+                writer.write_event(Event::End(e.to_owned()))?;
+                if pending_dimension_after_sheet_pr_end && !inserted_dimension {
+                    if let Some(ref dimension_ref) = dimension_ref_to_insert {
+                        let prefix = if worksheet_has_default_ns {
+                            None
+                        } else {
+                            worksheet_prefix.as_deref()
+                        };
+                        write_dimension_element(&mut writer, prefix, dimension_ref)?;
+                        inserted_dimension = true;
+                    }
+                    pending_dimension_after_sheet_pr_end = false;
+                }
             }
 
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
@@ -1358,14 +1523,21 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 let pending = patches_by_row.remove(&row_1);
                 if let Some(mut pending) = pending {
                     pending.sort_by_key(|p| p.col_0);
+                    let updated_row = updated_row_spans_element(e, &pending)?;
                     row_state = Some(RowState {
                         row_1,
                         pending,
                         next_idx: 0,
                         cell_prefix: None,
                     });
+                    if let Some(updated) = updated_row {
+                        writer.write_event(Event::Start(updated))?;
+                    } else {
+                        writer.write_event(Event::Start(e.to_owned()))?;
+                    }
+                } else {
+                    writer.write_event(Event::Start(e.to_owned()))?;
                 }
-                writer.write_event(Event::Start(e.to_owned()))?;
             }
             Event::Empty(ref e) if in_sheet_data && local_name(e.name().as_ref()) == b"row" => {
                 let row_1 = parse_row_number(e)?;
@@ -1383,13 +1555,18 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
 
                 if let Some(mut pending) = patches_by_row.remove(&row_1) {
                     pending.sort_by_key(|p| p.col_0);
+                    let updated_row = updated_row_spans_element(e, &pending)?;
                     // Expand `<row/>` into `<row>...</row>` and insert cells.
                     let row_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                     let row_prefix_owned = element_prefix(e.name().as_ref())
                         .and_then(|p| std::str::from_utf8(p).ok())
                         .map(|s| s.to_string());
                     let row_prefix = row_prefix_owned.as_deref().or(sheet_prefix.as_deref());
-                    writer.write_event(Event::Start(e.to_owned()))?;
+                    if let Some(updated) = updated_row {
+                        writer.write_event(Event::Start(updated))?;
+                    } else {
+                        writer.write_event(Event::Start(e.to_owned()))?;
+                    }
                     write_inserted_cells(&mut writer, &pending, row_prefix)?;
                     writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
                 } else {
@@ -1523,6 +1700,84 @@ fn parse_cell_ref_and_col(e: &BytesStart<'_>) -> Result<(CellRef, u32), Streamin
     Ok((CellRef::new(0, 0), 0))
 }
 
+fn spans_for_patches(patches: &[CellPatchInternal]) -> Option<(u32, u32)> {
+    let mut iter = patches.iter();
+    let first = iter.next()?;
+    let mut min_col_1 = first.col_0 + 1;
+    let mut max_col_1 = first.col_0 + 1;
+    for patch in iter {
+        let col_1 = patch.col_0 + 1;
+        min_col_1 = min_col_1.min(col_1);
+        max_col_1 = max_col_1.max(col_1);
+    }
+    Some((min_col_1, max_col_1))
+}
+
+fn parse_row_spans(spans: &str) -> Option<(u32, u32)> {
+    let (start, end) = spans.split_once(':')?;
+    let start = start.parse::<u32>().ok()?;
+    let end = end.parse::<u32>().ok()?;
+    Some((start, end))
+}
+
+fn format_row_spans(min_col_1: u32, max_col_1: u32) -> String {
+    format!("{min_col_1}:{max_col_1}")
+}
+
+fn updated_row_spans_element(
+    original: &BytesStart<'_>,
+    patches: &[CellPatchInternal],
+) -> Result<Option<BytesStart<'static>>, StreamingPatchError> {
+    let Some((patch_min_col_1, patch_max_col_1)) = spans_for_patches(patches) else {
+        return Ok(None);
+    };
+
+    let spans_attr = original
+        .attributes()
+        .flatten()
+        .find(|a| a.key.as_ref() == b"spans")
+        .and_then(|a| a.unescape_value().ok())
+        .map(|v| v.into_owned());
+    let Some(spans_attr) = spans_attr else {
+        return Ok(None);
+    };
+    let Some((existing_min_col_1, existing_max_col_1)) = parse_row_spans(&spans_attr) else {
+        return Ok(None);
+    };
+
+    let min_col_1 = existing_min_col_1.min(patch_min_col_1);
+    let max_col_1 = existing_max_col_1.max(patch_max_col_1);
+    if min_col_1 == existing_min_col_1 && max_col_1 == existing_max_col_1 {
+        return Ok(None);
+    }
+
+    let spans = format_row_spans(min_col_1, max_col_1);
+    let tag = String::from_utf8_lossy(original.name().as_ref()).into_owned();
+    let mut out = BytesStart::new(tag.as_str());
+    for attr in original.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"spans" {
+            out.push_attribute(("spans", spans.as_str()));
+        } else {
+            out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+        }
+    }
+
+    Ok(Some(out.into_owned()))
+}
+
+fn write_dimension_element<W: Write>(
+    writer: &mut Writer<W>,
+    prefix: Option<&str>,
+    dimension_ref: &str,
+) -> Result<(), StreamingPatchError> {
+    let tag = prefixed_tag(prefix, "dimension");
+    let mut dimension = BytesStart::new(tag.as_str());
+    dimension.push_attribute(("ref", dimension_ref));
+    writer.write_event(Event::Empty(dimension))?;
+    Ok(())
+}
+
 fn write_pending_rows<W: Write>(
     writer: &mut Writer<W>,
     patches_by_row: &mut BTreeMap<u32, Vec<CellPatchInternal>>,
@@ -1545,6 +1800,12 @@ fn write_inserted_row<W: Write>(
     let mut row = BytesStart::new(row_tag.as_str());
     let row_num = row_1.to_string();
     row.push_attribute(("r", row_num.as_str()));
+    let spans = spans_for_patches(patches).map(|(min_col_1, max_col_1)| {
+        format_row_spans(min_col_1, max_col_1)
+    });
+    if let Some(spans) = spans.as_deref() {
+        row.push_attribute(("spans", spans));
+    }
     writer.write_event(Event::Start(row))?;
     write_inserted_cells(writer, patches, prefix)?;
     writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
@@ -2176,6 +2437,29 @@ fn bounds_for_patches(patches: &[WorksheetCellPatch]) -> Option<PatchBounds> {
         min_col_0,
         max_col_0,
     })
+}
+
+fn union_bounds(a: Option<PatchBounds>, b: Option<PatchBounds>) -> Option<PatchBounds> {
+    match (a, b) {
+        (None, None) => None,
+        (Some(a), None) | (None, Some(a)) => Some(a),
+        (Some(a), Some(b)) => Some(PatchBounds {
+            min_row_0: a.min_row_0.min(b.min_row_0),
+            max_row_0: a.max_row_0.max(b.max_row_0),
+            min_col_0: a.min_col_0.min(b.min_col_0),
+            max_col_0: a.max_col_0.max(b.max_col_0),
+        }),
+    }
+}
+
+fn bounds_to_dimension_ref(bounds: PatchBounds) -> String {
+    let start = CellRef::new(bounds.min_row_0, bounds.min_col_0);
+    let end = CellRef::new(bounds.max_row_0, bounds.max_col_0);
+    if start == end {
+        start.to_a1()
+    } else {
+        format!("{}:{}", start.to_a1(), end.to_a1())
+    }
 }
 
 fn updated_dimension_element(
