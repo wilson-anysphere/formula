@@ -935,6 +935,9 @@ export class ToolExecutor {
           redirect: "follow"
         });
         const resolved = response.url ? new URL(response.url) : currentUrl;
+        if (currentUrl.protocol === "https:" && resolved.protocol === "http:") {
+          throw toolError("permission_denied", "Redirect from https to http is not permitted for fetch_external_data.");
+        }
         ensureExternalUrlAllowed(resolved, this.options.allowed_external_hosts);
         currentUrl = resolved;
         break;
@@ -947,6 +950,9 @@ export class ToolExecutor {
         throw toolError("runtime_error", `External fetch failed with HTTP ${response.status} (missing Location header)`);
       }
       const nextUrl = new URL(location, currentUrl);
+      if (currentUrl.protocol === "https:" && nextUrl.protocol === "http:") {
+        throw toolError("permission_denied", "Redirect from https to http is not permitted for fetch_external_data.");
+      }
       // Avoid leaking user-supplied headers (e.g. API keys) across redirect hops to a
       // different host.
       if (nextUrl.host !== currentUrl.host) {

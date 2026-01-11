@@ -550,6 +550,35 @@ describe("ToolExecutor", () => {
     expect(written).toEqual([["foo"], ["bar"]]);
   });
 
+  it("fetch_external_data blocks redirects that downgrade https to http", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com"] });
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "https://api.example.com/start") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "http://api.example.com/insecure" }
+        });
+      }
+      throw new Error("Should not follow https->http redirects");
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const result = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com/start",
+        destination: "Sheet1!A1"
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+  });
+
   it("fetch_external_data drops user-supplied headers when redirecting to a different host", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook, {
