@@ -313,6 +313,17 @@ function joinTypeToM(joinType) {
 }
 
 /**
+ * @param {{ comparer: string; caseSensitive?: boolean } | null | undefined} comparer
+ * @returns {string}
+ */
+function joinComparerToM(comparer) {
+  if (!comparer) return "Comparer.Ordinal";
+  const name = typeof comparer.comparer === "string" ? comparer.comparer.toLowerCase() : "";
+  if (comparer.caseSensitive === false || name === "ordinalignorecase") return "Comparer.OrdinalIgnoreCase";
+  return "Comparer.Ordinal";
+}
+
+/**
  * @param {string} formula
  * @returns {string}
  */
@@ -519,13 +530,15 @@ function operationToM(operation, inputName) {
       const joinMode = operation.joinMode ?? "flat";
       const joinKind = joinTypeToM(operation.joinType);
       const right = `Query.Reference(${escapeMString(operation.rightQuery)})`;
+      const comparerArg =
+        operation.comparer != null ? `, null, ${joinComparerToM(operation.comparer)}` : "";
       if (joinMode === "nested") {
         if (typeof operation.newColumnName !== "string") {
           throw new Error("Nested join requires newColumnName");
         }
-        return `Table.NestedJoin(${inputName}, ${valueToM(leftKeys)}, ${right}, ${valueToM(rightKeys)}, ${escapeMString(operation.newColumnName)}, ${joinKind})`;
+        return `Table.NestedJoin(${inputName}, ${valueToM(leftKeys)}, ${right}, ${valueToM(rightKeys)}, ${escapeMString(operation.newColumnName)}, ${joinKind}${comparerArg})`;
       }
-      return `Table.Join(${inputName}, ${valueToM(leftKeys)}, ${right}, ${valueToM(rightKeys)}, ${joinKind})`;
+      return `Table.Join(${inputName}, ${valueToM(leftKeys)}, ${right}, ${valueToM(rightKeys)}, ${joinKind}${comparerArg})`;
     }
     case "expandTableColumn": {
       const cols = operation.columns == null ? "null" : valueToM(operation.columns);

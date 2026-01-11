@@ -185,3 +185,43 @@ test("explain: nested join + expand folds as a flattened join", () => {
   assert.match(explained.plan.sql, /\bJOIN\b/);
   assert.match(explained.plan.sql, /"Target\.1"/);
 });
+
+test("explain: merge with comparer is not folded (unsupported_comparer)", () => {
+  const folding = new QueryFoldingEngine();
+  const connection = { id: "db1" };
+
+  const right = {
+    id: "q_right_comparer",
+    name: "Scores",
+    source: { type: "database", connection, query: "SELECT * FROM scores", dialect: "postgres", columns: ["Name", "Score"] },
+    steps: [],
+  };
+
+  const left = {
+    id: "q_left_comparer",
+    name: "People",
+    source: { type: "database", connection, query: "SELECT * FROM people", dialect: "postgres", columns: ["Id", "Name"] },
+    steps: [
+      { id: "l1", name: "Select", operation: { type: "selectColumns", columns: ["Id", "Name"] } },
+      {
+        id: "l2",
+        name: "Merge (ignore case)",
+        operation: {
+          type: "merge",
+          rightQuery: "q_right_comparer",
+          joinType: "inner",
+          leftKeys: ["Name"],
+          rightKeys: ["Name"],
+          joinMode: "flat",
+          comparer: { comparer: "ordinalIgnoreCase", caseSensitive: false },
+        },
+      },
+    ],
+  };
+
+  const explained = folding.explain(left, { dialect: "postgres", queries: { q_right_comparer: right } });
+  assert.equal(explained.plan.type, "hybrid");
+  assert.equal(explained.steps[0].status, "folded");
+  assert.equal(explained.steps[1].status, "local");
+  assert.equal(explained.steps[1].reason, "unsupported_comparer");
+});

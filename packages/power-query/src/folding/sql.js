@@ -499,6 +499,16 @@ export class QueryFoldingEngine {
       }
     }
 
+    if (
+      merge.comparer != null &&
+      (typeof merge.comparer !== "object" ||
+        Array.isArray(merge.comparer) ||
+        // @ts-ignore - runtime inspection
+        merge.comparer.caseSensitive !== true)
+    ) {
+      return null;
+    }
+
     const join = joinTypeToSql(dialect, merge.joinType);
     if (!join) return null;
 
@@ -1017,6 +1027,16 @@ export class QueryFoldingEngine {
         const joinMode = operation.joinMode ?? "flat";
         if (joinMode !== "flat") return null;
 
+        if (
+          operation.comparer != null &&
+          (typeof operation.comparer !== "object" ||
+            Array.isArray(operation.comparer) ||
+            // @ts-ignore - runtime inspection
+            operation.comparer.caseSensitive !== true)
+        ) {
+          return null;
+        }
+
         const leftKeys =
           Array.isArray(operation.leftKeys) && operation.leftKeys.length > 0
             ? operation.leftKeys
@@ -1236,6 +1256,16 @@ export class QueryFoldingEngine {
 
         const joinMode = operation.joinMode ?? "flat";
         if (joinMode !== "flat") return "unsupported_join_mode";
+
+        if (
+          operation.comparer != null &&
+          (typeof operation.comparer !== "object" ||
+            Array.isArray(operation.comparer) ||
+            // @ts-ignore - runtime inspection
+            operation.comparer.caseSensitive !== true)
+        ) {
+          return "unsupported_comparer";
+        }
 
         const leftKeys =
           Array.isArray(operation.leftKeys) && operation.leftKeys.length > 0

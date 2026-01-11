@@ -2435,13 +2435,28 @@ export class QueryEngine {
     const leftKeyIdx = leftKeys.map((key) => left.getColumnIndex(key));
     const rightKeyIdx = rightKeys.map((key) => right.getColumnIndex(key));
 
+    const caseInsensitiveComparer =
+      op.comparer &&
+      typeof op.comparer === "object" &&
+      !Array.isArray(op.comparer) &&
+      // @ts-ignore - runtime inspection
+      op.comparer.caseSensitive === false;
+
+    /**
+     * @param {unknown} value
+     */
+    const normalizeJoinKey = (value) => {
+      if (caseInsensitiveComparer && typeof value === "string") return value.toLowerCase();
+      return value;
+    };
+
     /**
      * @param {ITable} table
      * @param {number} rowIndex
      * @param {number[]} keyIndices
      */
     const compositeKeyForRow = (table, rowIndex, keyIndices) => {
-      const parts = keyIndices.map((idx) => valueKey(table.getCell(rowIndex, idx)));
+      const parts = keyIndices.map((idx) => valueKey(normalizeJoinKey(table.getCell(rowIndex, idx))));
       return JSON.stringify(parts);
     };
 

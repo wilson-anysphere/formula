@@ -543,6 +543,59 @@ in
   ]);
 });
 
+test("m_language execution: Table.Join supports Comparer.OrdinalIgnoreCase", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Name"},
+    {1, "Alice"},
+    {2, "Bob"}
+  })
+in
+  Source
+`,
+    { id: "q_left_case", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Name", "Score"},
+    {"alice", 10},
+    {"BOB", 20}
+  })
+in
+  Source
+`,
+    { id: "q_right_case", name: "Right" },
+  );
+
+  const joinQuery = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_case"),
+  Right = Query.Reference("q_right_case"),
+  #"Merged Queries" = Table.Join(Left, {"Name"}, Right, {"Name"}, JoinKind.Inner, null, Comparer.OrdinalIgnoreCase)
+in
+  #"Merged Queries"
+`,
+    { id: "q_join_case", name: "Join Case" },
+  );
+
+  assert.equal(joinQuery.steps[0]?.operation.type, "merge");
+  assert.equal(joinQuery.steps[0]?.operation.comparer?.caseSensitive, false);
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(joinQuery, { queries: { q_left_case: left, q_right_case: right } }, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Name", "Score"],
+    [1, "Alice", 10],
+    [2, "Bob", 20],
+  ]);
+});
+
 test("m_language execution: Table.Join supports multi-key joins (nulls compare equal)", async () => {
   const left = compileMToQuery(
     `

@@ -860,6 +860,19 @@ function compileTableOperation(ctx, fnName, expr, schema) {
       const newColumnName = fnName === "Table.NestedJoin" ? expectText(ctx, expr.args[4]) : null;
       const joinKindExpr = fnName === "Table.Join" ? expr.args[4] ?? null : expr.args[5] ?? null;
       const joinType = compileJoinKind(ctx, joinKindExpr);
+
+      // Power Query's full signature supports optional join algorithm + comparer
+      // arguments. The algorithm does not affect results, so we ignore it. When a
+      // comparer is provided we apply it to the join key equality semantics.
+      const algorithmOrComparerExpr = fnName === "Table.Join" ? expr.args[5] ?? null : expr.args[6] ?? null;
+      const explicitComparerExpr = fnName === "Table.Join" ? expr.args[6] ?? null : expr.args[7] ?? null;
+
+      let comparerExpr = explicitComparerExpr;
+      if (!comparerExpr && algorithmOrComparerExpr && isComparerExpr(ctx, algorithmOrComparerExpr)) {
+        comparerExpr = algorithmOrComparerExpr;
+      }
+      const comparer = comparerExpr ? compileComparer(ctx, comparerExpr) : null;
+
       const rightQuery = expectQueryReferenceId(ctx, rightTableExpr, fnName);
       return {
         operations: [
@@ -871,6 +884,7 @@ function compileTableOperation(ctx, fnName, expr, schema) {
             rightKeys,
             joinMode: fnName === "Table.NestedJoin" ? "nested" : "flat",
             ...(newColumnName != null ? { newColumnName } : null),
+            ...(comparer != null ? { comparer } : null),
           },
         ],
         schema: null,
@@ -1278,6 +1292,7 @@ function compileJoinKind(ctx, expr) {
     }
   }
   const value = evaluateConstant(ctx, expr);
+  if (value == null) return "inner";
   if (typeof value === "string") {
     const lower = value.toLowerCase();
     if (lower === "inner") return "inner";
@@ -1289,6 +1304,66 @@ function compileJoinKind(ctx, expr) {
     if (lower === "fullouter") return "full";
   }
   ctx.error(expr, "Unsupported join kind (expected JoinKind.Inner/LeftOuter/RightOuter/FullOuter)");
+}
+
+/**
+ * @param {CompilerContext} ctx
+ * @param {MExpression} expr
+ * @returns {boolean}
+ */
+function isComparerExpr(ctx, expr) {
+  if (isIdentifier(expr)) {
+    const name = identifierPartsToName(expr.parts);
+    if (name.startsWith("Comparer.")) return true;
+    if (name.startsWith("JoinAlgorithm.")) return false;
+  }
+  try {
+    const value = evaluateConstant(ctx, expr);
+    if (Array.isArray(value)) return value.some((v) => v && typeof v === "object" && !Array.isArray(v) && "caseSensitive" in v);
+    return value && typeof value === "object" && !Array.isArray(value) && "caseSensitive" in value;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {CompilerContext} ctx
+ * @param {MExpression} expr
+ * @returns {{ comparer: string; caseSensitive?: boolean } | null}
+ */
+function compileComparer(ctx, expr) {
+  const raw = evaluateConstant(ctx, expr);
+  if (raw == null) return null;
+
+  let value = raw;
+  if (Array.isArray(raw)) {
+    const first = raw.find((v) => v != null);
+    if (first == null) return null;
+    for (const entry of raw) {
+      if (entry == null) continue;
+      if (
+        typeof entry !== "object" ||
+        Array.isArray(entry) ||
+        typeof first !== "object" ||
+        Array.isArray(first) ||
+        /** @type {any} */ (entry).comparer !== /** @type {any} */ (first).comparer ||
+        Boolean(/** @type {any} */ (entry).caseSensitive) !== Boolean(/** @type {any} */ (first).caseSensitive)
+      ) {
+        ctx.error(expr, "Unsupported join comparer list (all comparers must match in this subset)");
+      }
+    }
+    value = first;
+  }
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    /** @type {any} */
+    const record = value;
+    if (typeof record.comparer === "string") {
+      return { comparer: record.comparer, caseSensitive: Boolean(record.caseSensitive) };
+    }
+  }
+
+  ctx.error(expr, "Unsupported join comparer (expected Comparer.Ordinal or Comparer.OrdinalIgnoreCase)");
 }
 
 /**
