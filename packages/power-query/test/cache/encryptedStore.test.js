@@ -10,6 +10,27 @@ import { EncryptedCacheStore } from "../../src/cache/encryptedStore.js";
 import { FileSystemCacheStore } from "../../src/cache/filesystem.js";
 import { MemoryCacheStore } from "../../src/cache/memory.js";
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object" && value.constructor === Object) {
+    const out = {};
+    for (const key of Object.keys(value).sort()) {
+      // @ts-ignore - runtime
+      out[key] = canonicalJson(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * @param {any} value
+ */
+function aadBytes(value) {
+  const json = JSON.stringify(canonicalJson(value));
+  return new Uint8Array(Buffer.from(json, "utf8"));
+}
+
 /**
  * @param {{ keyBytes?: Uint8Array, keyVersion?: number }} [options]
  * @returns {import("../../src/cache/encryptedStore.js").CacheCryptoProvider}
@@ -94,6 +115,56 @@ test("EncryptedCacheStore: wrong key is treated as a miss and deleted", async ()
   const storeB = new EncryptedCacheStore({ store: underlying, crypto: cryptoB, storeId: "unit-test" });
   assert.equal(await storeB.get("k1"), null);
   assert.equal(underlying.map.has("k1"), false);
+});
+
+test("EncryptedCacheStore: ciphertext cannot be replayed across cache keys", async () => {
+  const underlying = new MemoryCacheStore();
+  const crypto = createTestCryptoProvider();
+  const store = new EncryptedCacheStore({ store: underlying, crypto, storeId: "unit-test" });
+
+  await store.set("k1", { value: { a: 1 }, createdAtMs: 0, expiresAtMs: null });
+  const stored = underlying.map.get("k1");
+  assert.ok(stored);
+
+  // Replay ciphertext under a different cache key (should fail AAD auth).
+  underlying.map.set("k2", stored);
+
+  assert.equal(await store.get("k2"), null);
+  assert.equal(underlying.map.has("k2"), false);
+
+  const stillGood = await store.get("k1");
+  assert.ok(stillGood);
+  assert.deepEqual(stillGood.value, { a: 1 });
+});
+
+test("EncryptedCacheStore: reads v1 envelopes for backwards compatibility", async () => {
+  const underlying = new MemoryCacheStore();
+  const crypto = createTestCryptoProvider();
+  const store = new EncryptedCacheStore({ store: underlying, crypto, storeId: "unit-test" });
+
+  await store.set("k1", { value: { hello: "world" }, createdAtMs: 0, expiresAtMs: null });
+
+  const stored = underlying.map.get("k1");
+  assert.ok(stored);
+  assert.ok(stored.value && typeof stored.value === "object");
+  // @ts-ignore - test access
+  const payloadV2 = stored.value.payload;
+
+  const plaintext = await crypto.decryptBytes(
+    payloadV2,
+    aadBytes({ cacheKey: "k1", schemaVersion: 2, scope: "power-query-cache", storeId: "unit-test" }),
+  );
+  const payloadV1 = await crypto.encryptBytes(
+    plaintext,
+    aadBytes({ schemaVersion: 1, scope: "power-query-cache", storeId: "unit-test" }),
+  );
+
+  // Overwrite the entry with a v1 envelope and ensure the store can still read it.
+  stored.value = { __pq_cache_encrypted: "power-query-cache-encrypted", v: 1, payload: payloadV1 };
+
+  const loaded = await store.get("k1");
+  assert.ok(loaded);
+  assert.deepEqual(loaded.value, { hello: "world" });
 });
 
 test("EncryptedCacheStore: storeId mismatch (AAD) is treated as a miss and deleted", async () => {

@@ -29,7 +29,9 @@
 
 const AAD_SCOPE = "power-query-cache";
 const ENVELOPE_MARKER = "power-query-cache-encrypted";
-const ENVELOPE_VERSION = 1;
+const ENVELOPE_V1 = 1;
+const ENVELOPE_V2 = 2;
+const ENVELOPE_WRITE_VERSION = ENVELOPE_V2;
 
 const VALUE_MAGIC = /** @type {const} */ ([0x50, 0x51, 0x43, 0x56]); // "PQCV"
 const VALUE_VERSION = 1;
@@ -382,8 +384,8 @@ function decodeFromJson(value, bins) {
  * @typedef {{
  *   __pq_cache_encrypted: typeof ENVELOPE_MARKER;
  *   v: number;
-  *   payload: { keyVersion: number; iv: Uint8Array | ArrayBuffer; tag: Uint8Array | ArrayBuffer; ciphertext: Uint8Array | ArrayBuffer };
- * }} EncryptedCacheEnvelopeV1
+ *   payload: { keyVersion: number; iv: Uint8Array | ArrayBuffer; tag: Uint8Array | ArrayBuffer; ciphertext: Uint8Array | ArrayBuffer };
+ * }} EncryptedCacheEnvelope
  */
 
 /**
@@ -401,10 +403,10 @@ function readEnvelopeVersion(value) {
 
 /**
  * @param {unknown} value
- * @returns {value is EncryptedCacheEnvelopeV1}
+ * @returns {value is EncryptedCacheEnvelope}
  */
-function isEncryptedEnvelopeV1(value) {
-  if (readEnvelopeVersion(value) !== ENVELOPE_VERSION) return false;
+function isEncryptedEnvelopePayload(value) {
+  if (readEnvelopeVersion(value) == null) return false;
   // @ts-ignore - runtime access
   const payload = value.payload;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
@@ -421,10 +423,11 @@ function isEncryptedEnvelopeV1(value) {
  * @param {number} schemaVersion
  * @returns {Uint8Array}
  */
-function buildAadBytes(storeId, schemaVersion) {
+function buildAadBytes(storeId, schemaVersion, cacheKey) {
   /** @type {any} */
   const aad = { scope: AAD_SCOPE, schemaVersion };
   if (storeId != null) aad.storeId = storeId;
+  if (cacheKey != null) aad.cacheKey = cacheKey;
   return utf8Encode(canonicalJson(aad));
 }
 
@@ -450,7 +453,7 @@ export class EncryptedCacheStore {
   aad(schemaVersion) {
     const existing = this._aadBytes.get(schemaVersion);
     if (existing) return existing;
-    const bytes = buildAadBytes(this.storeId, schemaVersion);
+    const bytes = buildAadBytes(this.storeId, schemaVersion, null);
     this._aadBytes.set(schemaVersion, bytes);
     return bytes;
   }
@@ -473,16 +476,17 @@ export class EncryptedCacheStore {
 
     // Forward-compat: keep unknown encrypted envelope versions so downgrades do
     // not delete data that newer versions might still understand.
-    if (envelopeVersion !== ENVELOPE_VERSION) {
+    if (envelopeVersion !== ENVELOPE_V1 && envelopeVersion !== ENVELOPE_V2) {
       return null;
     }
 
-    if (!isEncryptedEnvelopeV1(entry.value)) {
+    if (!isEncryptedEnvelopePayload(entry.value)) {
       await this.store.delete(key).catch(() => {});
       return null;
     }
 
-    const envelope = /** @type {EncryptedCacheEnvelopeV1} */ (entry.value);
+    const envelope = /** @type {EncryptedCacheEnvelope} */ (entry.value);
+    const aad = envelopeVersion === ENVELOPE_V1 ? this.aad(ENVELOPE_V1) : buildAadBytes(this.storeId, ENVELOPE_V2, key);
 
     let plaintext;
     try {
@@ -494,7 +498,7 @@ export class EncryptedCacheStore {
           tag: payload.tag instanceof Uint8Array ? payload.tag : new Uint8Array(payload.tag),
           ciphertext: payload.ciphertext instanceof Uint8Array ? payload.ciphertext : new Uint8Array(payload.ciphertext),
         },
-        this.aad(envelope.v),
+        aad,
       );
     } catch {
       await this.store.delete(key).catch(() => {});
@@ -518,7 +522,7 @@ export class EncryptedCacheStore {
    */
   async set(key, entry) {
     const plaintext = encodeValueBytes(entry.value);
-    const aad = this.aad(ENVELOPE_VERSION);
+    const aad = ENVELOPE_WRITE_VERSION === ENVELOPE_V2 ? buildAadBytes(this.storeId, ENVELOPE_V2, key) : this.aad(ENVELOPE_V1);
 
     const payload = await this.crypto.encryptBytes(plaintext, aad);
     const normalizedPayload = {
@@ -530,7 +534,7 @@ export class EncryptedCacheStore {
 
     const envelope = {
       __pq_cache_encrypted: ENVELOPE_MARKER,
-      v: ENVELOPE_VERSION,
+      v: ENVELOPE_WRITE_VERSION,
       payload: normalizedPayload,
     };
 
