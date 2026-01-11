@@ -98,4 +98,39 @@ describe("AnthropicClient.streamChat", () => {
       { type: "done", usage: { promptTokens: 10, completionTokens: 0, totalTokens: 10 } },
     ]);
   });
+
+  it("emits tool call input from content_block_start when no json deltas are streamed", async () => {
+    const chunks = [
+      'data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":10,"output_tokens":0}}}\n\n',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"getData","input":{"range":"A1"}}}\n\n',
+      'data: {"type":"content_block_stop","index":0}\n\n',
+      'data: {"type":"message_stop"}\n\n',
+    ];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(readableStreamFromChunks(chunks), { status: 200 });
+      }) as any,
+    );
+
+    const client = new AnthropicClient({
+      apiKey: "test",
+      baseUrl: "https://example.com",
+      timeoutMs: 1_000,
+      model: "claude-test",
+    });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const event of client.streamChat({ messages: [{ role: "user", content: "hi" }] as any })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "tool_call_start", id: "toolu_1", name: "getData" },
+      { type: "tool_call_delta", id: "toolu_1", delta: '{"range":"A1"}' },
+      { type: "tool_call_end", id: "toolu_1" },
+      { type: "done", usage: { promptTokens: 10, completionTokens: 0, totalTokens: 10 } },
+    ]);
+  });
 });
