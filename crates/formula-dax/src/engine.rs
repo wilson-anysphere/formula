@@ -1656,6 +1656,13 @@ fn propagate_filter(
                 .get(to_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
 
+            // If the one-side table isn't filtered, it should not restrict the many-side table.
+            // This matches Tabular's behavior for unmatched foreign keys (they still contribute
+            // to totals unless the dimension is filtered).
+            if to_set.iter().all(|allowed| *allowed) {
+                return Ok(false);
+            }
+
             let allowed_keys: Vec<&Value> = relationship
                 .to_index
                 .iter()
@@ -1698,6 +1705,13 @@ fn propagate_filter(
             let to_set = sets
                 .get(to_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(to_table_name.to_string()))?;
+
+            // Similarly, if the many-side table isn't filtered, it should not restrict the
+            // one-side table. In particular, bidirectional relationships should not remove
+            // dimension members that simply have no matching fact rows.
+            if from_set.iter().all(|allowed| *allowed) {
+                return Ok(false);
+            }
 
             let mut next = vec![false; to_set.len()];
             for (key, rows) in &relationship.from_index {

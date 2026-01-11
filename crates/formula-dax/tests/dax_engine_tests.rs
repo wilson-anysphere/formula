@@ -923,3 +923,43 @@ fn bidirectional_relationship_propagates_filters_to_dimension() {
 
     assert_eq!(value, 1.into());
 }
+
+#[test]
+fn relationship_does_not_filter_facts_when_dimension_is_unfiltered() {
+    // When referential integrity is not enforced, tabular models include fact rows whose
+    // foreign key has no match in the dimension. Those rows should only be removed when the
+    // dimension is filtered (otherwise they contribute to totals and show up under a blank
+    // dimension member when grouped).
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Id"]);
+    dim.push_row(vec![1.into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Group"]);
+    fact.push_row(vec![1.into(), "A".into()]).unwrap();
+    fact.push_row(vec![999.into(), "A".into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Id".into(),
+            to_table: "Dim".into(),
+            to_column: "Id".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    model.add_measure("Fact Rows", "COUNTROWS(Fact)").unwrap();
+
+    let filter = FilterContext::empty().with_column_equals("Fact", "Group", "A".into());
+    assert_eq!(
+        model.evaluate_measure("Fact Rows", &filter).unwrap(),
+        2.into()
+    );
+}
