@@ -139,7 +139,11 @@ async function postBatch(options: {
         "Content-Type": options.contentType,
         ...options.headers
       },
-      body: options.body.toString("utf8"),
+      // `@formula/audit-core` returns a Buffer already; send it as-is to avoid
+      // re-encoding and to preserve exact newline/byte behavior for CEF/LEEF.
+      // The ambient `fetch` typings reject Node's `Buffer<ArrayBufferLike>` due
+      // to `ArrayBufferLike` variance, but undici supports Buffers at runtime.
+      body: options.body as unknown as BodyInit,
       signal: AbortSignal.timeout(options.timeoutMs)
     },
     { tls: options.tls }
