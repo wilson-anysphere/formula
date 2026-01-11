@@ -27,6 +27,8 @@ export async function getOidcDiscovery(issuerUrl: string): Promise<OidcDiscovery
   if (cached && now - cached.fetchedAt < DISCOVERY_TTL_MS) return cached.doc;
 
   const discoveryUrl = new URL("/.well-known/openid-configuration", normalized).toString();
+  // TODO(data-residency): OIDC discovery/token exchange is an outbound integration.
+  // Enforce org data residency once we have a strategy to map IdP endpoints to regions.
   const res = await fetch(discoveryUrl, { signal: AbortSignal.timeout(5000) });
   if (!res.ok) {
     throw new Error(`OIDC discovery failed (${res.status})`);
@@ -43,4 +45,3 @@ export async function getOidcDiscovery(issuerUrl: string): Promise<OidcDiscovery
   discoveryCache.set(normalized, { fetchedAt: now, doc });
   return doc;
 }
-

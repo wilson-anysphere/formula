@@ -38,6 +38,13 @@ export type SiemBatchFormat = "json" | "cef" | "leef";
 
 export interface SiemEndpointConfig {
   endpointUrl: string;
+  /**
+   * Region where the SIEM endpoint / collector processes data. Used for
+   * org-level data residency enforcement on outbound exports.
+   *
+   * If omitted, defaults to the org's primary residency region at runtime.
+   */
+  dataRegion?: string;
   format?: SiemBatchFormat;
   timeoutMs?: number;
   /**

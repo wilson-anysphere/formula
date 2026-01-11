@@ -402,4 +402,55 @@ describe("SIEM export worker", () => {
       await siem.close();
     }
   });
+
+  it("blocks exports when SIEM dataRegion violates data residency policy", async () => {
+    const orgId = crypto.randomUUID();
+    await insertOrg(db, orgId);
+    await db.query(
+      "UPDATE org_settings SET data_residency_region = 'eu', allow_cross_region_processing = false WHERE org_id = $1",
+      [orgId]
+    );
+
+    const eventId = crypto.randomUUID();
+    await insertAuditEvent({
+      db,
+      table: "audit_log",
+      id: eventId,
+      orgId,
+      createdAt: new Date("2025-01-01T04:00:00.000Z"),
+      eventType: "test.residency_violation"
+    });
+
+    const siem = await startSiemServer();
+    try {
+      const config: SiemEndpointConfig = {
+        endpointUrl: siem.url,
+        dataRegion: "us",
+        format: "json",
+        idempotencyKeyHeader: "Idempotency-Key",
+        retry: { maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 1, jitter: false }
+      };
+
+      const metrics = createMetrics();
+      const worker = new SiemExportWorker({
+        db,
+        configProvider: new StaticConfigProvider([{ orgId, config }]),
+        metrics,
+        logger: { info: () => {}, warn: () => {}, error: () => {} },
+        pollIntervalMs: 0
+      });
+
+      await worker.tick();
+
+      expect(siem.requests).toHaveLength(0);
+
+      const blocked = await db.query(
+        "SELECT 1 FROM audit_log WHERE org_id = $1 AND event_type = 'org.data_residency.blocked'",
+        [orgId]
+      );
+      expect(blocked.rowCount).toBe(1);
+    } finally {
+      await siem.close();
+    }
+  });
 });

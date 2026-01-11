@@ -3,6 +3,11 @@ import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
 import { getClientIp, getUserAgent } from "../http/request-meta";
+import {
+  assertOutboundRegionAllowed,
+  resolvePrimaryStorageRegion,
+  DataResidencyViolationError
+} from "../policies/dataResidency";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { deleteSecret, putSecret, type SecretStoreKeyring } from "../secrets/secretStore";
 import type { MaybeEncryptedSecret, SiemAuthConfig, SiemEndpointConfig } from "../siem/types";
@@ -175,6 +180,7 @@ const SiemRedactionSchema = z
 const SiemEndpointSchema = z
   .object({
     endpointUrl: z.string().min(1),
+    dataRegion: z.string().min(1).optional(),
     format: z.enum(["json", "cef", "leef"]).optional(),
     timeoutMs: z.number().int().positive().optional(),
     idempotencyKeyHeader: z.string().min(1).max(128).nullable().optional(),
@@ -361,12 +367,81 @@ export function registerSiemRoutes(app: FastifyInstance): void {
 
     const enabled = requestedEnabled ?? prevEnabled ?? true;
 
-    const pinningRes = await app.db.query<{ certificate_pinning_enabled: boolean }>(
-      "SELECT certificate_pinning_enabled FROM org_settings WHERE org_id = $1",
+    const settingsRes = await app.db.query<{
+      certificate_pinning_enabled: boolean;
+      data_residency_region: string;
+      data_residency_allowed_regions: unknown;
+      allow_cross_region_processing: boolean;
+    }>(
+      `
+        SELECT
+          certificate_pinning_enabled,
+          data_residency_region,
+          data_residency_allowed_regions,
+          allow_cross_region_processing
+        FROM org_settings
+        WHERE org_id = $1
+      `,
       [orgId]
     );
-    const certificatePinningEnabled =
-      pinningRes.rowCount === 1 ? Boolean(pinningRes.rows[0]?.certificate_pinning_enabled) : false;
+    const settingsRow = settingsRes.rowCount === 1 ? (settingsRes.rows[0] as any) : null;
+    const certificatePinningEnabled = settingsRow ? Boolean(settingsRow.certificate_pinning_enabled) : false;
+    const dataResidencyRegion = settingsRow ? String(settingsRow.data_residency_region ?? "us") : "us";
+    const dataResidencyAllowedRegions = settingsRow ? settingsRow.data_residency_allowed_regions : null;
+    const allowCrossRegionProcessing = settingsRow ? Boolean(settingsRow.allow_cross_region_processing) : true;
+
+    let effectiveDataRegion: string;
+    try {
+      const primaryRegion = resolvePrimaryStorageRegion({
+        region: dataResidencyRegion,
+        allowedRegions: dataResidencyAllowedRegions
+      });
+      effectiveDataRegion = incomingConfig.dataRegion ?? primaryRegion;
+
+      assertOutboundRegionAllowed({
+        orgId,
+        requestedRegion: effectiveDataRegion,
+        operation: "siem.config.upsert",
+        region: dataResidencyRegion,
+        allowedRegions: dataResidencyAllowedRegions,
+        allowCrossRegionProcessing
+      });
+    } catch (err) {
+      if (err instanceof DataResidencyViolationError) {
+        app.metrics.dataResidencyBlockedTotal.inc({ operation: err.operation });
+        try {
+          await writeAuditEvent(
+            app.db,
+            createAuditEvent({
+              eventType: "org.data_residency.blocked",
+              actor: { type: "user", id: request.user!.id },
+              context: {
+                orgId,
+                userId: request.user!.id,
+                userEmail: request.user!.email,
+                sessionId: request.session?.id ?? null,
+                ipAddress: getClientIp(request),
+                userAgent: getUserAgent(request)
+              },
+              resource: { type: "integration", id: "siem", name: "siem" },
+              success: false,
+              error: { code: "data_residency_violation", message: err.message },
+              details: {
+                operation: err.operation,
+                requestedRegion: err.requestedRegion,
+                allowedRegions: err.allowedRegions,
+                dataResidencyRegion,
+                allowCrossRegionProcessing
+              }
+            })
+          );
+        } catch (auditErr) {
+          app.log.warn({ err: auditErr, orgId }, "data_residency_blocked_audit_failed");
+        }
+        return reply.code(400).send({ error: "invalid_request", message: err.message });
+      }
+      throw err;
+    }
 
     let endpointUrl: string;
     try {
@@ -381,6 +456,7 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     const config: SiemEndpointConfig = {
       ...incomingConfig,
       endpointUrl,
+      dataRegion: effectiveDataRegion,
       batchSize:
         typeof incomingConfig.batchSize === "number" ? clampInt(incomingConfig.batchSize, 1, 1000) : undefined,
       timeoutMs:
@@ -497,7 +573,8 @@ export function registerSiemRoutes(app: FastifyInstance): void {
           integration: "siem",
           enabled,
           endpointUrl: config.endpointUrl,
-          format: config.format ?? "json"
+          format: config.format ?? "json",
+          dataRegion: storedConfig.dataRegion ?? null
         }
       })
     );

@@ -178,6 +178,8 @@ async function exchangeCodeForTokens(options: {
     code_verifier: options.codeVerifier
   }).toString();
 
+  // TODO(data-residency): OIDC token exchange is an outbound integration.
+  // Enforce org data residency once we have a strategy to map IdP endpoints to regions.
   const res = await fetch(options.tokenEndpoint, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },

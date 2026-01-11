@@ -11,6 +11,7 @@ export type ApiMetrics = {
   dbQueryDurationSeconds: Histogram<"operation" | "status">;
   authFailuresTotal: Counter<"reason">;
   rateLimitedTotal: Counter<"route" | "reason">;
+  dataResidencyBlockedTotal: Counter<"operation">;
   siemBatchesTotal: Counter<"status">;
   siemEventsTotal: Counter<"status">;
   siemBatchDurationSeconds: Histogram;
@@ -89,6 +90,13 @@ export function createMetrics(): ApiMetrics {
     registers: [registry]
   });
 
+  const dataResidencyBlockedTotal = new Counter({
+    name: "data_residency_blocked_total",
+    help: "Operations blocked by data residency policy",
+    labelNames: ["operation"],
+    registers: [registry]
+  });
+
   const siemBatchesTotal = new Counter({
     name: "siem_batches_total",
     help: "SIEM export batches processed",
@@ -124,6 +132,7 @@ export function createMetrics(): ApiMetrics {
     dbQueryDurationSeconds,
     authFailuresTotal,
     rateLimitedTotal,
+    dataResidencyBlockedTotal,
     siemBatchesTotal,
     siemEventsTotal,
     siemBatchDurationSeconds,

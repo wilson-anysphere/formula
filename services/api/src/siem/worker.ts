@@ -1,24 +1,63 @@
 import type { Pool } from "pg";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
+import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import type { ApiMetrics } from "../observability/metrics";
+import {
+  assertOutboundRegionAllowed,
+  resolvePrimaryStorageRegion,
+  DataResidencyViolationError
+} from "../policies/dataResidency";
 import { fetchNextAuditEvents, type AuditCursor } from "./auditSource";
 import { sendSiemBatch } from "./sender";
 import { OrgSiemExportStateStore } from "./stateStore";
 import type { EnabledSiemOrg, SiemConfigProvider } from "./configProvider";
 import type { OrgTlsPolicy } from "../http/tls";
 
-async function loadOrgTlsPolicy(db: Pool, orgId: string): Promise<OrgTlsPolicy> {
-  const res = await db.query<{ certificate_pinning_enabled: boolean; certificate_pins: unknown }>(
-    "SELECT certificate_pinning_enabled, certificate_pins FROM org_settings WHERE org_id = $1",
+type OrgDataResidencyPolicy = {
+  region: string;
+  allowedRegions: unknown;
+  allowCrossRegionProcessing: boolean;
+};
+
+async function loadOrgSiemPolicies(
+  db: Pool,
+  orgId: string
+): Promise<{ tls: OrgTlsPolicy; residency: OrgDataResidencyPolicy }> {
+  const res = await db.query<{
+    certificate_pinning_enabled: boolean;
+    certificate_pins: unknown;
+    data_residency_region: string;
+    data_residency_allowed_regions: unknown;
+    allow_cross_region_processing: boolean;
+  }>(
+    `
+      SELECT
+        certificate_pinning_enabled,
+        certificate_pins,
+        data_residency_region,
+        data_residency_allowed_regions,
+        allow_cross_region_processing
+      FROM org_settings
+      WHERE org_id = $1
+    `,
     [orgId]
   );
   if (res.rowCount !== 1) {
     throw new Error(`Missing org_settings row for org ${orgId}`);
   }
 
+  const row = res.rows[0] as any;
+
   return {
-    certificatePinningEnabled: Boolean(res.rows[0].certificate_pinning_enabled),
-    certificatePins: res.rows[0].certificate_pins
+    tls: {
+      certificatePinningEnabled: Boolean(row.certificate_pinning_enabled),
+      certificatePins: row.certificate_pins
+    },
+    residency: {
+      region: String(row.data_residency_region ?? "us"),
+      allowedRegions: row.data_residency_allowed_regions,
+      allowCrossRegionProcessing: Boolean(row.allow_cross_region_processing)
+    }
   };
 }
 
@@ -124,6 +163,14 @@ export class SiemExportWorker {
       { attributes: { orgId: org.orgId } },
       async (span) => {
         const now = new Date();
+        let residencyContext:
+          | {
+              dataResidencyRegion: string;
+              allowCrossRegionProcessing: boolean;
+              siemDataRegion: string;
+              siemConfiguredRegion: string | null;
+            }
+          | null = null;
         try {
           const state = await this.stateStore.getOrCreate(org.orgId);
           if (state.disabledUntil && state.disabledUntil.getTime() > now.getTime()) {
@@ -132,7 +179,29 @@ export class SiemExportWorker {
             return null;
           }
 
-          const tlsPolicy = await loadOrgTlsPolicy(this.options.db, org.orgId);
+          const { tls: tlsPolicy, residency } = await loadOrgSiemPolicies(this.options.db, org.orgId);
+
+          const primaryRegion = resolvePrimaryStorageRegion({
+            region: residency.region,
+            allowedRegions: residency.allowedRegions
+          });
+          const dataRegion = org.config.dataRegion ?? primaryRegion;
+
+          residencyContext = {
+            dataResidencyRegion: residency.region,
+            allowCrossRegionProcessing: residency.allowCrossRegionProcessing,
+            siemDataRegion: dataRegion,
+            siemConfiguredRegion: org.config.dataRegion ?? null
+          };
+
+          assertOutboundRegionAllowed({
+            orgId: org.orgId,
+            requestedRegion: dataRegion,
+            operation: "siem.export.send",
+            region: residency.region,
+            allowedRegions: residency.allowedRegions,
+            allowCrossRegionProcessing: residency.allowCrossRegionProcessing
+          });
 
           let cursor: AuditCursor = {
             lastCreatedAt: state.lastCreatedAt,
@@ -211,6 +280,34 @@ export class SiemExportWorker {
           span.setStatus({ code: SpanStatusCode.OK });
           return lastLagSeconds;
         } catch (err) {
+          if (err instanceof DataResidencyViolationError) {
+            this.options.metrics.dataResidencyBlockedTotal.inc({ operation: err.operation });
+            try {
+              await writeAuditEvent(
+                this.options.db,
+                createAuditEvent({
+                  eventType: "org.data_residency.blocked",
+                  actor: { type: "system", id: "siem_export_worker" },
+                  context: { orgId: org.orgId },
+                  resource: { type: "integration", id: "siem", name: "siem" },
+                  success: false,
+                  error: { code: "data_residency_violation", message: err.message },
+                  details: {
+                    operation: err.operation,
+                    requestedRegion: err.requestedRegion,
+                    allowedRegions: err.allowedRegions,
+                    ...(residencyContext ?? {})
+                  }
+                })
+              );
+            } catch (auditErr) {
+              this.options.logger.warn(
+                { err: auditErr, orgId: org.orgId },
+                "data_residency_blocked_audit_failed"
+              );
+            }
+          }
+
           this.options.metrics.siemBatchesTotal.inc({ status: "error" });
           await this.stateStore.markFailure(org.orgId, err);
           this.options.logger.warn({ err, orgId: org.orgId }, "siem_export_org_failed");
