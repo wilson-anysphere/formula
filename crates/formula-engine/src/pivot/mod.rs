@@ -174,7 +174,7 @@ pub enum PivotKeyPart {
 impl PivotKeyPart {
     fn display_string(&self) -> String {
         match self {
-            PivotKeyPart::Blank => String::new(),
+            PivotKeyPart::Blank => "(blank)".to_string(),
             PivotKeyPart::Number(bits) => PivotValue::Number(f64::from_bits(*bits)).display_string(),
             PivotKeyPart::Date(d) => d.to_string(),
             PivotKeyPart::Text(s) => s.clone(),
@@ -1985,6 +1985,52 @@ mod tests {
     }
 
     #[test]
+    fn displays_blank_dimension_items_as_excel_blank_in_row_and_column_labels() {
+        let data = vec![
+            pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
+            pv_row(&[PivotValue::Blank, "A".into(), 10.into()]),
+            pv_row(&["East".into(), PivotValue::Blank, 20.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![PivotField::new("Product")],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Region".into(),
+                    "A - Sum of Sales".into(),
+                    "(blank) - Sum of Sales".into(),
+                ],
+                vec!["East".into(), PivotValue::Blank, 20.into()],
+                vec!["(blank)".into(), 10.into(), PivotValue::Blank],
+            ]
+        );
+    }
+
+    #[test]
     fn show_as_percent_of_grand_total() {
         let data = vec![
             pv_row(&["Region".into(), "Sales".into()]),
@@ -2113,7 +2159,7 @@ mod tests {
                 vec![
                     "Region".into(),
                     "A - Sum of Sales".into(),
-                    "B - Sum of Sales".into()
+                    "B - Sum of Sales".into(),
                 ],
                 vec!["East".into(), 0.25.into(), 0.5.into()],
                 vec!["West".into(), 0.75.into(), 0.5.into()],
