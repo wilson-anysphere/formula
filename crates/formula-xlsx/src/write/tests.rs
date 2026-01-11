@@ -47,7 +47,7 @@ fn worksheet_formula_texts_from_xlsx(bytes: &[u8], part_name: &str) -> Vec<Strin
 #[test]
 fn writes_spreadsheetml_formula_text_without_leading_equals() {
     let mut workbook = formula_model::Workbook::new();
-    let sheet_id = workbook.add_sheet("Sheet1".to_string());
+    let sheet_id = workbook.add_sheet("Sheet1".to_string()).unwrap();
     let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
     let a1 = formula_model::CellRef::from_a1("A1").unwrap();
     sheet.set_formula(a1, Some("1+1".to_string()));
@@ -76,4 +76,3 @@ fn writes_spreadsheetml_formula_text_without_leading_equals() {
         );
     }
 }
-

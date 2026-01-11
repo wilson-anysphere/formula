@@ -139,6 +139,8 @@ pub struct XlsImportResult {
 pub enum ImportError {
     #[error("failed to read `.xls`: {0}")]
     Xls(#[from] calamine::XlsError),
+    #[error("invalid worksheet name: {0}")]
+    InvalidSheetName(#[from] formula_model::SheetNameError),
 }
 
 /// Import a legacy `.xls` workbook from disk.
@@ -166,7 +168,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
     for sheet_meta in sheets {
         let sheet_name = sheet_meta.name.clone();
-        let sheet_id = out.add_sheet(sheet_name.clone());
+        let sheet_id = out.add_sheet(sheet_name.clone())?;
         let sheet = out
             .sheet_mut(sheet_id)
             .expect("sheet id should exist immediately after add");

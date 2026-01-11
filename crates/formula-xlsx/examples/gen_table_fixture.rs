@@ -3,7 +3,7 @@ use formula_model::{Cell, CellRef, CellValue, Range, Workbook};
 
 fn main() {
     let mut workbook = Workbook::new();
-    let sheet_id = workbook.add_sheet("Sheet1");
+    let sheet_id = workbook.add_sheet("Sheet1").unwrap();
     let sheet = workbook.sheet_mut(sheet_id).unwrap();
 
     // Header row.

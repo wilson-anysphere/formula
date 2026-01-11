@@ -41,6 +41,8 @@ pub enum ReadError {
     SharedStrings(#[from] crate::shared_strings::SharedStringsError),
     #[error(transparent)]
     Styles(#[from] crate::styles::StylesPartError),
+    #[error("invalid worksheet name: {0}")]
+    InvalidSheetName(#[from] formula_model::SheetNameError),
     #[error("missing required part: {0}")]
     MissingPart(&'static str),
     #[error("invalid cell reference: {0}")]
@@ -105,7 +107,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let mut cell_meta = std::collections::HashMap::new();
 
     for sheet in sheets {
-        let ws_id = workbook.add_sheet(sheet.name.clone());
+        let ws_id = workbook.add_sheet(sheet.name.clone())?;
         let ws = workbook
             .sheet_mut(ws_id)
             .expect("sheet just inserted must exist");

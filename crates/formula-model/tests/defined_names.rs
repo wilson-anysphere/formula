@@ -54,8 +54,8 @@ fn validate_defined_name_rejects_invalid_names() {
 #[test]
 fn defined_name_uniqueness_is_case_insensitive_and_scoped() {
     let mut wb = Workbook::new();
-    let sheet1 = wb.add_sheet("Sheet1");
-    let sheet2 = wb.add_sheet("Sheet2");
+    let sheet1 = wb.add_sheet("Sheet1").unwrap();
+    let sheet2 = wb.add_sheet("Sheet2").unwrap();
 
     let _workbook_id = wb
         .create_defined_name(
@@ -104,7 +104,7 @@ fn defined_name_uniqueness_is_case_insensitive_and_scoped() {
 #[test]
 fn rename_sheet_rewrites_defined_name_refers_to() {
     let mut wb = Workbook::new();
-    let sheet_id = wb.add_sheet("Sheet1");
+    let sheet_id = wb.add_sheet("Sheet1").unwrap();
 
     wb.create_defined_name(
         DefinedNameScope::Workbook,
@@ -138,4 +138,3 @@ fn rename_sheet_rewrites_defined_name_refers_to() {
         .unwrap();
     assert_eq!(local.refers_to, "'My Sheet'!B2");
 }
-

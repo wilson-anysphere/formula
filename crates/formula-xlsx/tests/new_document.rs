@@ -6,8 +6,8 @@ use quick_xml::Reader;
 #[test]
 fn new_document_saves_and_loads_with_multiple_sheets() {
     let mut workbook = Workbook::new();
-    let sheet1 = workbook.add_sheet("First");
-    let sheet2 = workbook.add_sheet("Second");
+    let sheet1 = workbook.add_sheet("First").unwrap();
+    let sheet2 = workbook.add_sheet("Second").unwrap();
 
     let italic_style_id = workbook.intern_style(Style {
         font: Some(Font {

@@ -93,7 +93,7 @@ fn streaming_patch_expands_dimension_when_writing_out_of_range_cell(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Build a minimal in-memory workbook (via the existing writer) where dimension is `A1:A1`.
     let mut workbook = formula_model::Workbook::new();
-    let sheet_id = workbook.add_sheet("Sheet1");
+    let sheet_id = workbook.add_sheet("Sheet1").unwrap();
     let sheet = workbook.sheet_mut(sheet_id).unwrap();
     sheet.set_cell(CellRef::from_a1("A1")?, formula_model::Cell::new(CellValue::Number(1.0)));
 

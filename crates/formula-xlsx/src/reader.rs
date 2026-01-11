@@ -50,7 +50,9 @@ pub fn read_workbook_from_reader<R: Read + Seek>(reader: R) -> Result<Workbook, 
             HashMap::new()
         };
 
-        let sheet_id = workbook.add_sheet(sheet.name.clone());
+        let sheet_id = workbook
+            .add_sheet(sheet.name.clone())
+            .map_err(|err| XlsxError::Invalid(format!("invalid worksheet name: {err}")))?;
         let sheet_model = workbook
             .sheet_mut(sheet_id)
             .ok_or_else(|| XlsxError::Invalid("failed to create worksheet".into()))?;

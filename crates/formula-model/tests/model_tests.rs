@@ -203,7 +203,7 @@ fn cell_key_encoding_round_trips() {
 #[test]
 fn workbook_sheet_by_name_is_case_insensitive() {
     let mut workbook = Workbook::new();
-    workbook.add_sheet("Sheet1");
+    workbook.add_sheet("Sheet1").unwrap();
     assert!(workbook.sheet_by_name("sheet1").is_some());
     assert!(workbook.sheet_by_name("SHEET1").is_some());
 }
@@ -211,14 +211,14 @@ fn workbook_sheet_by_name_is_case_insensitive() {
 #[test]
 fn workbook_sheet_by_name_is_unicode_case_insensitive() {
     let mut workbook = Workbook::new();
-    workbook.add_sheet("Äbc");
+    workbook.add_sheet("Äbc").unwrap();
     assert!(workbook.sheet_by_name("äbc").is_some());
 }
 
 #[test]
 fn workbook_find_table_is_case_insensitive() {
     let mut workbook = Workbook::new();
-    let sheet_id = workbook.add_sheet("Sheet1");
+    let sheet_id = workbook.add_sheet("Sheet1").unwrap();
     let sheet = workbook.sheet_mut(sheet_id).unwrap();
     sheet.tables.push(Table {
         id: 1,

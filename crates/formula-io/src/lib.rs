@@ -175,7 +175,9 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
     let mut out = ModelWorkbook::new();
 
     for (sheet_index, meta) in wb.sheet_metas().iter().enumerate() {
-        let sheet_id = out.add_sheet(meta.name.clone());
+        let sheet_id = out
+            .add_sheet(meta.name.clone())
+            .map_err(|err| xlsb::Error::InvalidSheetName(format!("{}: {err}", meta.name)))?;
         let sheet = out
             .sheet_mut(sheet_id)
             .expect("sheet id should exist immediately after add");

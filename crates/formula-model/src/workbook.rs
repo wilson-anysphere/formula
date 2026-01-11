@@ -7,6 +7,7 @@ use crate::drawings::ImageStore;
 use crate::names::{
     validate_defined_name, DefinedName, DefinedNameError, DefinedNameId, DefinedNameScope,
 };
+use crate::sheet_name::{validate_sheet_name, SheetNameError};
 use crate::{
     rewrite_sheet_names_in_formula, CalcSettings, DateSystem, SheetVisibility, Style, StyleTable,
     TabColor, Table, ThemePalette, WorkbookProtection, Worksheet, WorksheetId,
@@ -74,21 +75,25 @@ pub struct Workbook {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RenameSheetError {
     SheetNotFound,
-    EmptyName,
-    DuplicateName,
+    InvalidName(SheetNameError),
 }
 
 impl fmt::Display for RenameSheetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RenameSheetError::SheetNotFound => f.write_str("sheet not found"),
-            RenameSheetError::EmptyName => f.write_str("sheet name cannot be empty"),
-            RenameSheetError::DuplicateName => f.write_str("sheet name already exists"),
+            RenameSheetError::InvalidName(err) => err.fmt(f),
         }
     }
 }
 
 impl std::error::Error for RenameSheetError {}
+
+impl From<SheetNameError> for RenameSheetError {
+    fn from(err: SheetNameError) -> Self {
+        RenameSheetError::InvalidName(err)
+    }
+}
 
 impl Default for Workbook {
     fn default() -> Self {
@@ -124,12 +129,30 @@ impl Workbook {
         }
     }
 
+    fn validate_unique_sheet_name(
+        &self,
+        name: &str,
+        exclude_sheet: Option<WorksheetId>,
+    ) -> Result<(), SheetNameError> {
+        if self.sheets.iter().any(|sheet| {
+            exclude_sheet.map_or(true, |exclude| sheet.id != exclude)
+                && crate::formula_rewrite::sheet_name_eq_case_insensitive(&sheet.name, name)
+        }) {
+            return Err(SheetNameError::DuplicateName);
+        }
+        Ok(())
+    }
+
     /// Add a worksheet, returning its id.
-    pub fn add_sheet(&mut self, name: impl Into<String>) -> WorksheetId {
+    pub fn add_sheet(&mut self, name: impl Into<String>) -> Result<WorksheetId, SheetNameError> {
+        let name = name.into();
+        validate_sheet_name(&name)?;
+        self.validate_unique_sheet_name(&name, None)?;
+
         let id = self.next_sheet_id;
         self.next_sheet_id = self.next_sheet_id.wrapping_add(1);
         self.sheets.push(Worksheet::new(id, name));
-        id
+        Ok(id)
     }
 
     fn rewrite_sheet_references(&mut self, old_name: &str, new_name: &str) {
@@ -166,26 +189,19 @@ impl Workbook {
         id: WorksheetId,
         new_name: &str,
     ) -> Result<(), RenameSheetError> {
-        let new_name = new_name.trim();
-        if new_name.is_empty() {
-            return Err(RenameSheetError::EmptyName);
-        }
-
         let sheet_index = self
             .sheets
             .iter()
             .position(|s| s.id == id)
             .ok_or(RenameSheetError::SheetNotFound)?;
 
-        for sheet in &self.sheets {
-            if sheet.id != id
-                && crate::formula_rewrite::sheet_name_eq_case_insensitive(&sheet.name, new_name)
-            {
-                return Err(RenameSheetError::DuplicateName);
-            }
-        }
+        validate_sheet_name(new_name)?;
+        self.validate_unique_sheet_name(new_name, Some(id))?;
 
         let old_name = self.sheets[sheet_index].name.clone();
+        if old_name == new_name {
+            return Ok(());
+        }
 
         self.rewrite_sheet_references(&old_name, new_name);
 

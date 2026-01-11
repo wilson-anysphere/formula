@@ -30,6 +30,8 @@ pub enum WorkbookPackageError {
     },
     #[error(transparent)]
     Styles(#[from] StylesPartError),
+    #[error("invalid worksheet name: {0}")]
+    InvalidSheetName(#[from] formula_model::SheetNameError),
     #[error("invalid cell reference {reference}: {source}")]
     InvalidCellReference {
         reference: String,
@@ -146,7 +148,7 @@ impl WorkbookPackage {
                     source,
                 })?;
 
-            let sheet_id = workbook.add_sheet(name.clone());
+            let sheet_id = workbook.add_sheet(name.clone())?;
             let sheet_model = workbook.sheet_mut(sheet_id).expect("sheet just added");
             sheet_model.xlsx_sheet_id = xlsx_sheet_id;
             sheet_model.xlsx_rel_id = Some(rel_id.to_string());

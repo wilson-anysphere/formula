@@ -46,6 +46,8 @@ pub enum Error {
     UnexpectedEof,
     #[error("invalid UTF-16 string in record")]
     InvalidUtf16,
+    #[error("invalid worksheet name: {0}")]
+    InvalidSheetName(String),
     #[error("sheet index out of bounds: {0}")]
     SheetIndexOutOfBounds(usize),
     #[error("missing relationship target for sheet rId {0}")]

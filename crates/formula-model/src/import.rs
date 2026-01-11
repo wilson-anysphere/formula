@@ -9,7 +9,7 @@ use formula_columnar::{
 };
 use thiserror::Error;
 
-use crate::{CellRef, Workbook, Worksheet, WorksheetId};
+use crate::{CellRef, SheetNameError, Workbook, Worksheet, WorksheetId};
 
 #[derive(Clone, Debug)]
 pub struct CsvOptions {
@@ -84,6 +84,8 @@ pub enum CsvImportError {
     EmptyInput,
     #[error("csv parse error at row {row}, column {column}: {reason}")]
     Parse { row: u64, column: u64, reason: String },
+    #[error(transparent)]
+    SheetName(#[from] SheetNameError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -229,7 +231,7 @@ pub fn import_csv_into_workbook<R: BufRead>(
     options: CsvOptions,
 ) -> Result<WorksheetId, CsvImportError> {
     let name = name.into();
-    let sheet_id = workbook.add_sheet(name.clone());
+    let sheet_id = workbook.add_sheet(name.clone())?;
     let table = import_csv_to_columnar_table(reader, options)?;
     if let Some(sheet) = workbook.sheet_mut(sheet_id) {
         sheet.set_columnar_table(CellRef::new(0, 0), Arc::new(table));

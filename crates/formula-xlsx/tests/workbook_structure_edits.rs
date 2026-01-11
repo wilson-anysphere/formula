@@ -197,7 +197,7 @@ fn add_sheet_creates_part_and_updates_rels_and_content_types() {
     let fixture_path = fixture_path();
 
     let mut doc = load_from_bytes(&fixture).expect("load fixture");
-    doc.workbook.add_sheet("Added");
+    doc.workbook.add_sheet("Added").unwrap();
 
     let saved = doc.save_to_vec().expect("save");
 
@@ -279,7 +279,7 @@ fn add_sheet_preserves_macro_relationships_and_content_types() {
     const FIXTURE: &[u8] = include_bytes!("fixtures/rt_macro.xlsm");
 
     let mut doc = load_from_bytes(FIXTURE).expect("load fixture");
-    doc.workbook.add_sheet("Added");
+    doc.workbook.add_sheet("Added").unwrap();
 
     let saved = doc.save_to_vec().expect("save");
 

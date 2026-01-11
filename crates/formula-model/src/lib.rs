@@ -21,6 +21,7 @@ mod formula_rewrite;
 mod formula_text;
 mod hyperlinks;
 pub mod import;
+mod sheet_name;
 mod merge;
 mod names;
 mod outline;
@@ -48,6 +49,7 @@ pub use error::ErrorValue;
 pub use formula_rewrite::rewrite_sheet_names_in_formula;
 pub use formula_text::{display_formula_text, normalize_formula_text};
 pub use hyperlinks::{Hyperlink, HyperlinkTarget};
+pub use sheet_name::{validate_sheet_name, SheetNameError, EXCEL_MAX_SHEET_NAME_LEN};
 pub use merge::{MergeError, MergedRegion, MergedRegions};
 pub use names::{
     validate_defined_name, DefinedName, DefinedNameError, DefinedNameId, DefinedNameScope,
