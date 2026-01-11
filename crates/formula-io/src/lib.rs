@@ -307,4 +307,28 @@ mod tests {
         let model = xlsb_to_model_workbook(&wb).expect("convert to model");
         assert_eq!(model.date_system, DateSystem::Excel1904);
     }
+
+    #[test]
+    fn xlsb_to_model_preserves_number_formats_from_styles() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../formula-xlsb/tests/fixtures_styles/date.xlsb"
+        ));
+
+        let wb = crate::xlsb::XlsbWorkbook::open(fixture_path).expect("open xlsb fixture");
+        let model = xlsb_to_model_workbook(&wb).expect("convert to model");
+
+        let sheet_name = &wb.sheet_metas()[0].name;
+        let sheet = model.sheet_by_name(sheet_name).expect("sheet missing");
+
+        let a1 = CellRef::from_a1("A1").expect("valid ref");
+        let cell = sheet.cell(a1).expect("A1 missing");
+        assert_ne!(cell.style_id, 0, "expected XLSB style to be preserved");
+
+        let style = model
+            .styles
+            .get(cell.style_id)
+            .expect("style id should exist");
+        assert_eq!(style.number_format.as_deref(), Some("m/d/yyyy"));
+    }
 }
