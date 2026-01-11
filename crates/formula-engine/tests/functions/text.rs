@@ -1,3 +1,4 @@
+use formula_engine::eval::parse_a1;
 use formula_engine::functions::text;
 use formula_engine::{Engine, ErrorKind, ExcelError, Value};
 
@@ -288,4 +289,32 @@ fn value_spills_arrays_elementwise() {
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(2.0));
+}
+
+#[test]
+fn value_on_scalar_reference_returns_scalar() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "1").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=VALUE(A1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert!(engine.spill_range("Sheet1", "B1").is_none());
+}
+
+#[test]
+fn value_spills_singleton_array_literal() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=VALUE({"1"})"#)
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(
+        engine.spill_range("Sheet1", "A1"),
+        Some((parse_a1("A1").unwrap(), parse_a1("A1").unwrap()))
+    );
 }

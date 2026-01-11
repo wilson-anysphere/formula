@@ -1010,6 +1010,9 @@ fn eval_matrix_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Mat
         },
         ArgValue::Reference(r) => {
             let r = r.normalized();
+            if r.is_single_cell() {
+                return Ok(MatrixArg::Scalar(ctx.get_cell_value(r.sheet_id, r.start)));
+            }
             let rows = (r.end.row - r.start.row + 1) as usize;
             let cols = (r.end.col - r.start.col + 1) as usize;
             let mut values = Vec::with_capacity(rows.saturating_mul(cols));
@@ -1046,9 +1049,6 @@ fn elementwise_unary(arg: MatrixArg, f: impl Fn(&Value) -> Value) -> Value {
     match arg {
         MatrixArg::Scalar(v) => f(&v),
         MatrixArg::Array(arr) => {
-            if arr.rows == 1 && arr.cols == 1 {
-                return f(arr.get(0, 0).unwrap_or(&Value::Blank));
-            }
             Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect()))
         }
     }
@@ -1063,8 +1063,15 @@ fn elementwise_binary(
         Ok(shape) => shape,
         Err(e) => return Value::Error(e),
     };
+
+    let returns_array = matches!(left, MatrixArg::Array(_)) || matches!(right, MatrixArg::Array(_));
     if rows == 1 && cols == 1 {
-        return f(left.get(0, 0), right.get(0, 0));
+        let scalar = f(left.get(0, 0), right.get(0, 0));
+        return if returns_array {
+            Value::Array(Array::new(1, 1, vec![scalar]))
+        } else {
+            scalar
+        };
     }
     let mut values = Vec::with_capacity(rows.saturating_mul(cols));
     for r in 0..rows {
@@ -1085,8 +1092,17 @@ fn elementwise_ternary(
         Ok(shape) => shape,
         Err(e) => return Value::Error(e),
     };
+
+    let returns_array = matches!(first, MatrixArg::Array(_))
+        || matches!(second, MatrixArg::Array(_))
+        || matches!(third, MatrixArg::Array(_));
     if rows == 1 && cols == 1 {
-        return f(first.get(0, 0), second.get(0, 0), third.get(0, 0));
+        let scalar = f(first.get(0, 0), second.get(0, 0), third.get(0, 0));
+        return if returns_array {
+            Value::Array(Array::new(1, 1, vec![scalar]))
+        } else {
+            scalar
+        };
     }
     let mut values = Vec::with_capacity(rows.saturating_mul(cols));
     for r in 0..rows {
@@ -1108,13 +1124,23 @@ fn elementwise_quaternary(
         Ok(shape) => shape,
         Err(e) => return Value::Error(e),
     };
+
+    let returns_array = matches!(first, MatrixArg::Array(_))
+        || matches!(second, MatrixArg::Array(_))
+        || matches!(third, MatrixArg::Array(_))
+        || matches!(fourth, MatrixArg::Array(_));
     if rows == 1 && cols == 1 {
-        return f(
+        let scalar = f(
             first.get(0, 0),
             second.get(0, 0),
             third.get(0, 0),
             fourth.get(0, 0),
         );
+        return if returns_array {
+            Value::Array(Array::new(1, 1, vec![scalar]))
+        } else {
+            scalar
+        };
     }
     let mut values = Vec::with_capacity(rows.saturating_mul(cols));
     for r in 0..rows {
