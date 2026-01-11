@@ -56,6 +56,8 @@ Example:
 
 Note: `CanvasGrid` resolves nested `var(...)` references (e.g. `--formula-grid-bg: var(--app-bg)`), and normalizes system colors (`Canvas`, `Highlight`, etc.) into computed `rgb(...)` strings before passing them to the canvas renderer.
 
+If you build custom theme plumbing, `@formula/grid` also exports `resolveCssVarValue()` (best-effort resolver for simple `var(--token, fallback)` chains).
+
 ### Non-React usage
 
 You can use the renderer directly:
@@ -81,4 +83,3 @@ The grid is canvas-rendered, but includes baseline accessibility scaffolding:
   - active cell value
   - active selection range
 - Keyboard navigation is supported via arrow keys when the grid container is focused.
-
