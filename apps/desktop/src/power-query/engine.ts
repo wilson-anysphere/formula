@@ -69,6 +69,90 @@ const PERMISSION_KIND_TO_DLP_ACTION: Record<string, string> = {
   "database:query": DLP_ACTION.EXTERNAL_CONNECTOR,
 };
 
+function createEphemeralObjectId(): (value: unknown) => string | null {
+  const ids = new WeakMap<object, string>();
+  let counter = 0;
+  return (value) => {
+    if (!value) return null;
+    const type = typeof value;
+    if (type !== "object" && type !== "function") return null;
+    const obj = value as any as object;
+    const existing = ids.get(obj);
+    if (existing) return existing;
+    const next = `obj:${++counter}`;
+    ids.set(obj, next);
+    return next;
+  };
+}
+
+function permissionPromptCacheKey(
+  kind: string,
+  details: unknown,
+  opts: { getObjectId: (value: unknown) => string | null },
+): string | null {
+  const getObjectId = opts.getObjectId;
+  const record = details && typeof details === "object" && !Array.isArray(details) ? (details as any) : null;
+  const request = record?.request;
+
+  try {
+    if (kind === "database:query") {
+      const req = request && typeof request === "object" && !Array.isArray(request) ? (request as any) : {};
+      const sql = typeof req.sql === "string" ? req.sql : "";
+      const params = "params" in req ? (req.params ?? null) : null;
+
+      const explicitConnectionId = typeof req.connectionId === "string" && req.connectionId ? req.connectionId : null;
+      if (explicitConnectionId) {
+        return `${kind}:${hashValue({ connector: "sql", connectionId: explicitConnectionId, sql, params })}`;
+      }
+
+      const connection = req.connection;
+      if (typeof connection === "string" && connection) {
+        return `${kind}:${hashValue({ connector: "sql", connectionId: connection, sql, params })}`;
+      }
+      if ((typeof connection === "number" && Number.isFinite(connection)) || typeof connection === "boolean") {
+        return `${kind}:${hashValue({ connector: "sql", connectionId: hashValue(connection), sql, params })}`;
+      }
+      if (connection && typeof connection === "object" && !Array.isArray(connection)) {
+        const id = (connection as any).id;
+        if (typeof id === "string" && id) {
+          return `${kind}:${hashValue({ connector: "sql", connectionId: id, sql, params })}`;
+        }
+      }
+
+      const connectionRefId = getObjectId(connection);
+      return `${kind}:${hashValue({
+        connector: "sql",
+        missingConnectionId: true,
+        ...(connectionRefId ? { connectionRefId } : null),
+        sql,
+        params,
+      })}`;
+    }
+
+    if (kind === "file:read") {
+      const req = request && typeof request === "object" && !Array.isArray(request) ? request : {};
+      return `${kind}:${hashValue({ connector: "file", ...(req as any) })}`;
+    }
+
+    if (kind === "http:request") {
+      const req = request && typeof request === "object" && !Array.isArray(request) ? (request as any) : {};
+      const url = typeof req.url === "string" ? req.url : "";
+      const method = (typeof req.method === "string" ? req.method : "GET").toUpperCase();
+      const headers = req.headers && typeof req.headers === "object" ? req.headers : {};
+      const responseType = typeof req.responseType === "string" ? req.responseType : "auto";
+      const jsonPath = typeof req.jsonPath === "string" ? req.jsonPath : "";
+      const key: any = { connector: "http", url, method, headers, responseType, jsonPath };
+      if (req.auth) key.auth = req.auth;
+      return `${kind}:${hashValue(key)}`;
+    }
+
+    // For unknown permission kinds, fall back to hashing the details object.
+    return `${kind}:${hashValue(details)}`;
+  } catch {
+    return null;
+  }
+}
+
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 function getTauriInvoke(): TauriInvoke {
@@ -394,6 +478,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
   // Cache permission prompts across executions so previewing the same query
   // doesn't repeatedly ask the user.
   const permissionPromptCache = new Map<string, Promise<boolean>>();
+  const getPermissionObjectId = createEphemeralObjectId();
 
   const workbookPrivacyLevel = computeWorkbookPrivacyLevel(options.dlp);
   /** @type {Record<string, PrivacyLevel>} */
@@ -429,18 +514,25 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
           });
         }
 
-        const cacheKey = `${kind}:${hashValue(details)}`;
-        const existing = permissionPromptCache.get(cacheKey);
-        if (existing) return await existing;
+        const cacheKey = permissionPromptCacheKey(kind, details, { getObjectId: getPermissionObjectId });
+        if (cacheKey) {
+          const existing = permissionPromptCache.get(cacheKey);
+          if (existing) return await existing;
 
-        const decisionPromise = Promise.resolve().then(async () => {
-          if (options.onPermissionPrompt) {
-            return await options.onPermissionPrompt(kind, details);
-          }
-          return defaultPermissionPrompt(kind, details);
-        });
-        permissionPromptCache.set(cacheKey, decisionPromise);
-        return await decisionPromise;
+          const decisionPromise = Promise.resolve().then(async () => {
+            if (options.onPermissionPrompt) {
+              return await options.onPermissionPrompt(kind, details);
+            }
+            return defaultPermissionPrompt(kind, details);
+          });
+          permissionPromptCache.set(cacheKey, decisionPromise);
+          return await decisionPromise;
+        }
+
+        if (options.onPermissionPrompt) {
+          return await options.onPermissionPrompt(kind, details);
+        }
+        return defaultPermissionPrompt(kind, details);
       },
     },
     { levelsBySourceId: defaultPrivacyLevelsBySourceId, workbookLevel: workbookPrivacyLevel },

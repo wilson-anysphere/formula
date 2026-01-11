@@ -200,6 +200,40 @@ test("createDesktopQueryEngine caches permission prompts across executions", asy
   assert.equal(promptCount, 1);
 });
 
+test("createDesktopQueryEngine permission prompt cache distinguishes opaque database connections", async () => {
+  let promptCount = 0;
+  const engine = createDesktopQueryEngine({
+    fileAdapter: {
+      readText: async () => "",
+      readBinary: async () => new Uint8Array(),
+    },
+    onPermissionPrompt: async () => {
+      promptCount += 1;
+      return true;
+    },
+  });
+
+  const connA = {};
+  const connB = {};
+
+  /** @type {any} */
+  const detailsA = {
+    source: { type: "database", connection: connA, query: "select 1" },
+    request: { connection: connA, sql: "select 1" },
+  };
+  /** @type {any} */
+  const detailsB = {
+    source: { type: "database", connection: connB, query: "select 1" },
+    request: { connection: connB, sql: "select 1" },
+  };
+
+  await engine.onPermissionRequest("database:query", detailsA);
+  await engine.onPermissionRequest("database:query", detailsA);
+  await engine.onPermissionRequest("database:query", detailsB);
+
+  assert.equal(promptCount, 2);
+});
+
 test("createDesktopQueryEngine wires oauth2Manager into HttpConnector", async () => {
   /** @type {any[]} */
   const oauthCalls = [];
