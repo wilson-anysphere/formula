@@ -43,6 +43,22 @@ async function safeUnlink(filePath) {
   }
 }
 
+async function syncDir(dirPath) {
+  try {
+    const handle = await openFile(dirPath, "r");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    // Some platforms/filesystems do not support fsync on directories.
+    if (error?.code === "EINVAL" || error?.code === "EPERM" || error?.code === "EACCES") return;
+    throw error;
+  }
+}
+
 async function safeReadJson(filePath) {
   try {
     const raw = await readFile(filePath, "utf8");
@@ -78,6 +94,7 @@ async function atomicWriteJson(filePath, value) {
   }
 
   await rename(tmpPath, filePath);
+  await syncDir(path.dirname(filePath));
 }
 
 async function readCursor(filePath) {
@@ -267,6 +284,7 @@ export class NodeFsOfflineAuditQueue {
     const pendingPath = path.join(this.segmentsDir, segmentFileName(this.currentSegment.baseName, SEGMENT_STATES.PENDING));
     try {
       await rename(this.currentSegment.openPath, pendingPath);
+      await syncDir(this.segmentsDir);
     } catch (error) {
       if (error?.code === "ENOENT") {
         // Nothing to seal; allow segment to be recreated.
@@ -320,6 +338,7 @@ export class NodeFsOfflineAuditQueue {
         } finally {
           await handle.close();
         }
+        await syncDir(this.segmentsDir);
 
         segment.bytes += lineBytes;
 
@@ -383,12 +402,15 @@ export class NodeFsOfflineAuditQueue {
 
   async _gcAckedSegments() {
     const segments = await this._listSegments();
+    let deleted = false;
     for (const segment of segments) {
       if (segment.state !== SEGMENT_STATES.ACKED) continue;
       await safeUnlink(segment.path);
       await safeUnlink(segment.cursorPath);
       await safeUnlink(segment.lockPath);
+      deleted = true;
     }
+    if (deleted) await syncDir(this.segmentsDir);
   }
 
   async flushToExporter(exporter) {
@@ -419,6 +441,7 @@ export class NodeFsOfflineAuditQueue {
             const inflightPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.INFLIGHT));
             try {
               await rename(segment.path, inflightPath);
+              await syncDir(this.segmentsDir);
               segment.state = SEGMENT_STATES.INFLIGHT;
               segment.path = inflightPath;
             } catch (error) {
@@ -443,6 +466,7 @@ export class NodeFsOfflineAuditQueue {
               const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
               try {
                 await rename(segment.path, ackedPath);
+                await syncDir(this.segmentsDir);
               } catch (error) {
                 if (error?.code !== "ENOENT") throw error;
               }
@@ -453,6 +477,7 @@ export class NodeFsOfflineAuditQueue {
             const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
             try {
               await rename(segment.path, ackedPath);
+              await syncDir(this.segmentsDir);
             } catch (error) {
               if (error?.code !== "ENOENT") throw error;
             }
@@ -480,6 +505,7 @@ export class NodeFsOfflineAuditQueue {
               const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
               try {
                 await rename(segment.path, ackedPath);
+                await syncDir(this.segmentsDir);
               } catch (error) {
                 if (error?.code !== "ENOENT") throw error;
               }
@@ -489,6 +515,7 @@ export class NodeFsOfflineAuditQueue {
             }
             const ackedPath = path.join(this.segmentsDir, segmentFileName(segment.baseName, SEGMENT_STATES.ACKED));
             await rename(segment.path, ackedPath);
+            await syncDir(this.segmentsDir);
             await safeUnlink(segment.cursorPath);
           }
         }
