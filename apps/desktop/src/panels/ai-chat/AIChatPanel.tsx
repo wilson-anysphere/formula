@@ -6,9 +6,18 @@ import { runChatWithTools } from "../../../../../packages/llm/src/toolCalling.js
 import { classifyQueryNeedsTools, verifyToolUsage } from "../../../../../packages/ai-tools/src/llm/verification.js";
 import { t, tWithVars } from "../../i18n/index.js";
 
+function safeStringify(value: unknown, opts: { pretty?: boolean } = {}): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, opts.pretty ? 2 : 0);
+  } catch {
+    return String(value);
+  }
+}
+
 function formatAttachmentsForPrompt(attachments: Attachment[]) {
   return attachments
-    .map((a) => `- ${a.type}: ${a.reference}${a.data ? ` (${JSON.stringify(a.data)})` : ""}`)
+    .map((a) => `- ${a.type}: ${a.reference}${a.data ? ` (${safeStringify(a.data)})` : ""}`)
     .join("\n");
 }
 
@@ -76,17 +85,8 @@ export function AIChatPanel(props: AIChatPanelProps) {
     el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  function safeStringify(value: unknown): string {
-    if (typeof value === "string") return value;
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-
   function formatToolResult(result: unknown): string {
-    const rendered = safeStringify(result);
+    const rendered = safeStringify(result, { pretty: true });
     const limit = 2_000;
     if (rendered.length <= limit) return rendered;
     return `${rendered.slice(0, limit)}\n…(truncated)`;
@@ -128,7 +128,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
           ...insertBeforePendingAssistant(prev, {
             id: messageId(),
             role: "tool",
-            content: `${call.name}(${JSON.stringify(call.arguments)})`,
+            content: `${call.name}(${safeStringify(call.arguments)})`,
             requiresApproval: meta.requiresApproval,
           }),
         ]);
