@@ -286,3 +286,66 @@ fn normalize_key(s: &str) -> String {
 fn display_supbook_name(raw: &str) -> String {
     raw.rsplit(['/', '\\']).next().unwrap_or(raw).to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_namex_adds_external_workbook_prefix_for_names() {
+        let mut ctx = WorkbookContext::default();
+
+        let supbooks = vec![SupBook {
+            raw_name: r"C:\tmp\Book2.xlsb".to_string(),
+            kind: SupBookKind::ExternalWorkbook,
+        }];
+        let extern_names = HashMap::from([(
+            (0u16, 1u16),
+            ExternName {
+                name: "MyName".to_string(),
+                is_function: false,
+                scope_sheet: None,
+            },
+        )]);
+        let ixti_supbooks = HashMap::from([(0u16, 0u16)]);
+
+        ctx.set_namex_tables(supbooks, extern_names, ixti_supbooks);
+
+        assert_eq!(ctx.format_namex(0, 1).as_deref(), Some("[Book2.xlsb]MyName"));
+    }
+
+    #[test]
+    fn namex_function_ref_resolves_ixti_and_index_deterministically() {
+        let mut ctx = WorkbookContext::default();
+
+        let supbooks = vec![SupBook {
+            raw_name: "\u{0001}".to_string(),
+            kind: SupBookKind::AddIn,
+        }];
+        let extern_names = HashMap::from([
+            (
+                (0u16, 2u16),
+                ExternName {
+                    name: "MYFUNC".to_string(),
+                    is_function: true,
+                    scope_sheet: None,
+                },
+            ),
+            (
+                // Lower name index should win.
+                (0u16, 1u16),
+                ExternName {
+                    name: "MyFunc".to_string(),
+                    is_function: true,
+                    scope_sheet: None,
+                },
+            ),
+        ]);
+        let ixti_supbooks = HashMap::from([(5u16, 0u16), (2u16, 0u16)]);
+
+        ctx.set_namex_tables(supbooks, extern_names, ixti_supbooks);
+
+        // Chooses smallest (supbook, name_index) match and smallest ixti pointing at that supbook.
+        assert_eq!(ctx.namex_function_ref("myfunc"), Some((2u16, 1u16)));
+    }
+}
