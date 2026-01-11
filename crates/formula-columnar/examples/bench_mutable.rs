@@ -60,10 +60,9 @@ fn main() {
         view_time
     );
 
-    // Compact benchmark (overlay-free in this example, so this mostly flushes the tail page).
+    // Snapshot benchmark (overlay-free in this example, so this mostly encodes the tail buffer).
     let start_compact = Instant::now();
     let frozen = table.compact();
     let compact_time = start_compact.elapsed();
     println!("compact_time: {:?} (frozen_rows={})", compact_time, frozen.row_count());
 }
-

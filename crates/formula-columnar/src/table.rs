@@ -917,8 +917,15 @@ impl MutableColumnarTable {
         }
     }
 
-    /// Materialize overlays + append buffers into a compact immutable [`ColumnarTable`], and
-    /// remove all overlay/delta state from `self`.
+    /// Produce a compact immutable snapshot of the table.
+    ///
+    /// This merges any overlay updates into the base pages (like [`Self::compact_in_place`]) and
+    /// returns an immutable [`ColumnarTable`] containing all current rows (including the current
+    /// tail append buffer).
+    ///
+    /// The mutable table remains appendable; its tail buffer is intentionally *not* flushed into
+    /// `chunks`, because that would break the fixed `page_size_rows` page alignment used for
+    /// subsequent appends.
     pub fn compact(&mut self) -> ColumnarTable {
         self.compact_in_place();
         self.to_columnar_table()
