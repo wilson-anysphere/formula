@@ -2,6 +2,7 @@ export { DataTable } from "./table.js";
 export { ArrowTableAdapter } from "./arrowTable.js";
 export { QueryEngine } from "./engine.js";
 export { applyOperation, compileRowFormula } from "./steps.js";
+export { valueKey } from "./valueKey.js";
 export { QueryFoldingEngine } from "./folding/sql.js";
 export { RefreshManager, QueryScheduler } from "./refresh.js";
 export { RefreshOrchestrator, computeQueryDependencies } from "./refreshGraph.js";
