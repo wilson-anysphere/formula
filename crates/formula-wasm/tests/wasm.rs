@@ -300,6 +300,34 @@ fn from_xlsx_bytes_loads_basic_fixture() {
 }
 
 #[wasm_bindgen_test]
+fn cross_sheet_formulas_recalculate() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), Some("Sheet1".to_string()))
+        .unwrap();
+    wb.set_cell(
+        "A1".to_string(),
+        JsValue::from_str("=Sheet1!A1*2"),
+        Some("Sheet2".to_string()),
+    )
+    .unwrap();
+
+    let changes_js = wb.recalculate(None).unwrap();
+    let changes: Vec<CellChange> = serde_wasm_bindgen::from_value(changes_js).unwrap();
+    assert_eq!(
+        changes,
+        vec![CellChange {
+            sheet: "Sheet2".to_string(),
+            address: "A1".to_string(),
+            value: json!(2.0),
+        }]
+    );
+
+    let cell_js = wb.get_cell("A1".to_string(), Some("Sheet2".to_string())).unwrap();
+    let cell: formula_core::CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.value, json!(2.0));
+}
+
+#[wasm_bindgen_test]
 fn null_inputs_clear_cells_and_recalculate_dependents() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
