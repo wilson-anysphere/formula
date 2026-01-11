@@ -208,7 +208,7 @@ export function AIChatPanel(props: AIChatPanelProps) {
                   padding: "6px 8px",
                   border: "1px solid var(--border)",
                   borderRadius: 6,
-                  background: "rgba(255, 193, 7, 0.12)",
+                  background: "var(--warning-bg)",
                   fontSize: 12,
                 }}
               >

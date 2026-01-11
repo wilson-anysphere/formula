@@ -32,6 +32,7 @@
   --error: #d32f2f;
   --warning: #ed6c02;
   --success: #2e7d32;
+  --warning-bg: rgba(237, 108, 2, 0.12);
 
   /* Text on strong accent backgrounds (buttons, etc.) */
   --text-on-accent: #ffffff;
@@ -107,6 +108,7 @@
   --error: #f44336;
   --warning: #ff9800;
   --success: #4caf50;
+  --warning-bg: rgba(255, 152, 0, 0.14);
 
   /* Accent backgrounds in dark are typically light, so dark text reads best. */
   --text-on-accent: #1e1e1e;
@@ -138,6 +140,7 @@
   --error: CanvasText;
   --warning: CanvasText;
   --success: CanvasText;
+  --warning-bg: Highlight;
 
   --text-on-accent: HighlightText;
   --selection-text: HighlightText;
