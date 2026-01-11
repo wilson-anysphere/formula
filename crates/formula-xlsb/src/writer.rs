@@ -29,9 +29,12 @@ impl<W: Write> Biff12Writer<W> {
     }
 
     pub(crate) fn write_record_header(&mut self, id: u32, len: u32) -> io::Result<()> {
-        biff12_varint::write_record_id(&mut self.inner, id)?;
-        biff12_varint::write_record_len(&mut self.inner, len)?;
-        Ok(())
+        // Encode into a temporary buffer first so invalid ids/lengths don't leave the output
+        // stream with a partially written header.
+        let mut header = Vec::with_capacity(8);
+        biff12_varint::write_record_id(&mut header, id)?;
+        biff12_varint::write_record_len(&mut header, len)?;
+        self.inner.write_all(&header)
     }
 
     pub(crate) fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
