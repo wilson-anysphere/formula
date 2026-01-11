@@ -8,6 +8,13 @@ export type CellValue = SpreadsheetValue | SpreadsheetValue[] | ProvenanceCellVa
 
 export interface AiFunctionEvaluator {
   evaluateAiFunction(params: { name: string; args: CellValue[]; cellAddress?: string }): SpreadsheetValue;
+  /**
+   * Optional range sampling limit for direct AI() range arguments.
+   *
+   * When provided, `evaluateFormula` will sample referenced ranges to this size when
+   * producing AI function arguments, preventing it from materializing unbounded arrays.
+   */
+  rangeSampleLimit?: number;
 }
 
 export interface EvaluateFormulaOptions {
@@ -392,7 +399,10 @@ function parsePrimary(
       ? {
           preserveReferenceProvenance: true,
           sampleRangeReferences: true,
-          maxRangeCells: clampInt(options.aiRangeSampleLimit ?? DEFAULT_AI_RANGE_SAMPLE_LIMIT, { min: 1, max: 10_000 }),
+          maxRangeCells: clampInt(
+            options.aiRangeSampleLimit ?? options.ai?.rangeSampleLimit ?? DEFAULT_AI_RANGE_SAMPLE_LIMIT,
+            { min: 1, max: 10_000 },
+          ),
         }
       : { ...context, sampleRangeReferences: false };
     if (!parser.match("paren", ")")) {

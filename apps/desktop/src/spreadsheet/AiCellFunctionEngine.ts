@@ -135,6 +135,10 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     this.loadCacheFromStorage();
   }
 
+  get rangeSampleLimit(): number {
+    return this.maxInputCells;
+  }
+
   evaluateAiFunction(params: { name: string; args: CellValue[]; cellAddress?: string }): SpreadsheetValue {
     const fn = params.name.toUpperCase();
     const cellAddress = params.cellAddress;
