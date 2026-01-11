@@ -45,6 +45,7 @@ describe("runAgentTask (agent mode orchestrator)", () => {
 
     const auditStore = new MemoryAIAuditStore();
     const events: Array<{ type: string }> = [];
+    const onApprovalRequired = vi.fn(async () => true);
 
     const result = await runAgentTask({
       goal: "Set A1 to 5 then read it back.",
@@ -53,6 +54,7 @@ describe("runAgentTask (agent mode orchestrator)", () => {
       llmClient: llmClient as any,
       auditStore,
       onProgress: (event) => events.push({ type: event.type }),
+      onApprovalRequired,
       maxIterations: 8,
       maxDurationMs: 10_000,
       model: "unit-test-model"
@@ -79,6 +81,7 @@ describe("runAgentTask (agent mode orchestrator)", () => {
     expect(auditEntries[0]!.mode).toBe("agent");
     expect(auditEntries[0]!.input).toMatchObject({ goal: "Set A1 to 5 then read it back." });
     expect(auditEntries[0]!.tool_calls.map((c) => c.name)).toEqual(["write_cell", "read_range"]);
+    expect(onApprovalRequired).toHaveBeenCalledTimes(1);
   });
 
   it("stops safely when approval is required and denied (no mutation applied)", async () => {
@@ -173,4 +176,3 @@ describe("runAgentTask (agent mode orchestrator)", () => {
     expect(events).toEqual(["planning", "tool_call", "cancelled"]);
   });
 });
-

@@ -3,10 +3,11 @@ import type { DocumentController } from "../../document/documentController.js";
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
 
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
-import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
+import type { PreviewEngineOptions, ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import { PreviewEngine } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import { runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/llm/audited-run.js";
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
+import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
 import { HashEmbedder, InMemoryVectorStore } from "../../../../../packages/ai-rag/src/index.js";
 import type { LLMClient, ToolCall } from "../../../../../packages/llm/src/types.js";
@@ -76,6 +77,22 @@ export interface RunAgentTaskParams {
   documentController: DocumentController;
   llmClient: LLMClient;
   auditStore: AIAuditStore;
+  /**
+   * Default sheet used when tool calls omit a sheet prefix (e.g. "A1" instead of "Sheet2!A1").
+   * Defaults to "Sheet1".
+   */
+  defaultSheetId?: string;
+  /**
+   * Optional host capability for chart creation (enables the `create_chart` tool).
+   */
+  createChart?: SpreadsheetApi["createChart"];
+  /**
+   * Preview engine configuration for approval gating.
+   *
+   * NOTE: Agent mode defaults to `approval_cell_threshold: 0` so any non-noop mutation
+   * requires explicit user approval.
+   */
+  previewOptions?: PreviewEngineOptions;
 
   onProgress?: (event: AgentProgressEvent) => void;
   onApprovalRequired?: (request: AgentApprovalRequest) => Promise<boolean>;
@@ -200,9 +217,13 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
   try {
     throwIfCancelled();
 
-    const spreadsheet = new DocumentControllerSpreadsheetApi(params.documentController);
-    const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, { require_approval_for_mutations: true });
-    const previewEngine = new PreviewEngine();
+    const defaultSheetId = params.defaultSheetId ?? "Sheet1";
+    const spreadsheet = new DocumentControllerSpreadsheetApi(params.documentController, { createChart: params.createChart });
+    const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
+      default_sheet: defaultSheetId,
+      require_approval_for_mutations: true
+    });
+    const previewEngine = new PreviewEngine({ approval_cell_threshold: 0, ...(params.previewOptions ?? {}) });
     const contextManager = createContextManager();
 
     const userMessage = [
@@ -269,7 +290,9 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     const requireApproval = async (call: ToolCall) => {
       throwIfCancelled();
       const preview = await guard(
-        previewEngine.generatePreview([{ name: call.name, parameters: call.arguments }], spreadsheet, {})
+        previewEngine.generatePreview([{ name: call.name, parameters: call.arguments }], spreadsheet, {
+          default_sheet: defaultSheetId
+        })
       );
       if (!preview.requires_approval) return true;
       if (!params.onApprovalRequired) {

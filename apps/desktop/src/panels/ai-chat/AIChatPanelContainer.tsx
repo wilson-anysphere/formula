@@ -221,15 +221,18 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
       .split("\n")
       .map((c) => c.trim())
       .filter(Boolean);
+    const defaultSheetId = props.getActiveSheetId?.() ?? "Sheet1";
 
     try {
       const result = await runAgentTask({
         goal,
         constraints: constraints.length ? constraints : undefined,
         workbookId,
+        defaultSheetId,
         documentController: props.getDocumentController() as any,
         llmClient: client as any,
         auditStore,
+        createChart: props.createChart,
         onProgress: (event) => setAgentEvents((prev) => [...prev, event]),
         onApprovalRequired: onApprovalRequired as any,
         maxIterations: 20,
