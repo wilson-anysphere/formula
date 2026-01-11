@@ -402,7 +402,7 @@ fn from_xlsx_bytes_loads_multi_sheet_fixture() {
 
     let sheet2_a1_js = wb.get_cell("A1".to_string(), Some("Sheet2".to_string())).unwrap();
     let sheet2_a1: formula_core::CellData = serde_wasm_bindgen::from_value(sheet2_a1_js).unwrap();
-    assert_eq!(sheet2_a1.value, json!(2.0));
+    assert_eq!(sheet2_a1.value.as_f64(), Some(2.0));
 }
 
 #[wasm_bindgen_test]
