@@ -1521,4 +1521,21 @@ mod tests {
         assert!(changed);
         assert_eq!(out, "   =A2");
     }
+
+    #[test]
+    fn range_map_splits_ranges_inside_function_args_with_parentheses() {
+        // Simulate `DeleteCellsShiftLeft` of cell B1: delete B1 and shift everything right of it
+        // left by 1. The range `A1:C1` becomes a union of A1 and (moved) B1, which must be
+        // parenthesized inside `SUM(...)` to avoid being parsed as multiple arguments.
+        let edit = RangeMapEdit {
+            sheet: "Sheet1".to_string(),
+            moved_region: GridRange::new(0, 2, 0, u32::MAX), // C1 and beyond shift left
+            delta_row: 0,
+            delta_col: -1,
+            deleted_region: Some(GridRange::new(0, 1, 0, 1)), // delete B1
+        };
+        let (out, changed) = rewrite_formula_for_range_map("=SUM(A1:C1)", "Sheet1", &edit);
+        assert!(changed);
+        assert_eq!(out, "=SUM((A1,B1))");
+    }
 }
