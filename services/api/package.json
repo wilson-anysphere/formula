@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "migrate": "tsx src/scripts/migrate.ts",
+    "mfa:totp:migrate-secrets": "tsx src/scripts/migrateTotpSecrets.ts",
     "retention:sweep": "tsx src/scripts/retention.ts",
     "keys:rotate": "tsx src/scripts/rotateKeys.ts",
     "secrets:rotate": "tsx src/scripts/secretsRotate.ts",

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
+import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { validateDlpPolicy } from "../dlp/dlp";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
@@ -211,6 +212,9 @@ export function registerOrgRoutes(app: FastifyInstance): void {
       const member = await requireOrgMember(request, reply, orgId);
       if (!member) return;
       if (!isOrgAdmin(member.role)) return reply.code(403).send({ error: "forbidden" });
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
       const parsed = PatchSettingsBody.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
@@ -418,6 +422,9 @@ export function registerOrgRoutes(app: FastifyInstance): void {
       const member = await requireOrgMember(request, reply, orgId);
       if (!member) return;
       if (!isOrgAdmin(member.role)) return reply.code(403).send({ error: "forbidden" });
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
       const parsed = PutDlpPolicyBody.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });

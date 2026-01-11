@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { generateApiKeyToken, hashApiKeySecret } from "../auth/apiKeys";
 import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
+import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
@@ -40,6 +41,9 @@ export function registerApiKeyRoutes(app: FastifyInstance): void {
       const orgId = (request.params as { orgId: string }).orgId;
       const member = await requireOrgAdminForKeyManagement(request, reply, orgId);
       if (!member) return;
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
       const parsedBody = CreateBody.safeParse(request.body);
       if (!parsedBody.success) return reply.code(400).send({ error: "invalid_request" });
@@ -102,6 +106,9 @@ export function registerApiKeyRoutes(app: FastifyInstance): void {
       const orgId = (request.params as { orgId: string }).orgId;
       const member = await requireOrgAdminForKeyManagement(request, reply, orgId);
       if (!member) return;
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
       const res = await app.db.query(
         `
@@ -135,6 +142,9 @@ export function registerApiKeyRoutes(app: FastifyInstance): void {
       const apiKeyId = (request.params as { orgId: string; id: string }).id;
       const member = await requireOrgAdminForKeyManagement(request, reply, orgId);
       if (!member) return;
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
       const res = await app.db.query(
         `

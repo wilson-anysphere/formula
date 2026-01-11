@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
+import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
@@ -121,6 +122,9 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgAdmin(request, reply, orgId);
     if (!member) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const providers = await app.db.query<OrgSamlProviderRow>(
       `
@@ -161,6 +165,9 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
 
       const member = await requireOrgAdmin(request, reply, orgId);
       if (!member) return;
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
       const parsed = PutProviderBody.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
@@ -279,6 +286,9 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
 
       const member = await requireOrgAdmin(request, reply, orgId);
       if (!member) return;
+      if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+        return reply.code(403).send({ error: "mfa_required" });
+      }
 
       const deleted = await app.db.query(
         `
@@ -314,4 +324,3 @@ export function registerSamlProviderRoutes(app: FastifyInstance): void {
     }
   );
 }
-

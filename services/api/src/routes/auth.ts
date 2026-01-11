@@ -1,9 +1,18 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import crypto from "node:crypto";
+import type { Pool, PoolClient } from "pg";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { authenticateApiKey } from "../auth/apiKeys";
-import { generateTotpSecret, buildOtpAuthUrl, verifyTotpCode } from "../auth/mfa";
+import {
+  buildOtpAuthUrl,
+  generateRecoveryCode,
+  generateTotpSecret,
+  hashRecoveryCode,
+  totpSecretName,
+  verifyRecoveryCode,
+  verifyTotpCode
+} from "../auth/mfa";
 import { oidcCallback, oidcStart } from "../auth/oidc/oidc";
 import { hashPassword, verifyPassword } from "../auth/password";
 import { samlCallback, samlMetadata, samlStart } from "../auth/saml/saml";
@@ -11,6 +20,7 @@ import { createSession, lookupSessionByToken, revokeSession } from "../auth/sess
 import { withTransaction } from "../db/tx";
 import { TokenBucketRateLimiter, sha256Hex } from "../http/rateLimit";
 import { getClientIp, getUserAgent } from "../http/request-meta";
+import { deleteSecret, getSecret, putSecret, type SecretStoreKeyring } from "../secrets/secretStore";
 
 type AuthCredentials =
   | { kind: "session"; token: string }
@@ -34,6 +44,65 @@ function extractAuthCredentials(request: FastifyRequest): AuthCredentials | null
   if (!token) return null;
   if (token.startsWith("api_")) return { kind: "api_key", token };
   return { kind: "session", token };
+}
+
+type Queryable = Pick<Pool, "query"> | Pick<PoolClient, "query">;
+
+async function getOrMigrateTotpSecret(
+  db: Queryable,
+  keyring: SecretStoreKeyring,
+  userId: string
+): Promise<string | null> {
+  const name = totpSecretName(userId);
+  let existing: string | null = null;
+  try {
+    existing = await getSecret(db, keyring, name);
+  } catch {
+    existing = null;
+  }
+  if (existing) {
+    // Best-effort cleanup: if the legacy column still has data, clear it once we have an encrypted copy.
+    await db.query("UPDATE users SET mfa_totp_secret_legacy = null WHERE id = $1 AND mfa_totp_secret_legacy IS NOT NULL", [
+      userId
+    ]);
+    return existing;
+  }
+
+  // Backwards compatibility: move legacy plaintext secrets into the encrypted secret store on-demand.
+  const legacyRes = await db.query("SELECT mfa_totp_secret_legacy FROM users WHERE id = $1", [userId]);
+  const legacy = (legacyRes.rows[0]?.mfa_totp_secret_legacy ?? null) as string | null;
+  if (!legacy) return null;
+
+  await putSecret(db, keyring, name, legacy);
+  await db.query("UPDATE users SET mfa_totp_secret_legacy = null WHERE id = $1", [userId]);
+  return legacy;
+}
+
+async function deleteUnusedRecoveryCodes(db: Queryable, userId: string): Promise<void> {
+  await db.query("DELETE FROM user_mfa_recovery_codes WHERE user_id = $1 AND used_at IS NULL", [userId]);
+}
+
+async function consumeRecoveryCode(db: Queryable, userId: string, code: string): Promise<string | null> {
+  const res = await db.query(
+    "SELECT id, code_hash FROM user_mfa_recovery_codes WHERE user_id = $1 AND used_at IS NULL",
+    [userId]
+  );
+
+  for (const row of res.rows as Array<{ id: string; code_hash: string }>) {
+    if (!verifyRecoveryCode(code, row.code_hash)) continue;
+    const consumed = await db.query(
+      `
+        UPDATE user_mfa_recovery_codes
+        SET used_at = now()
+        WHERE id = $1 AND user_id = $2 AND used_at IS NULL
+        RETURNING id
+      `,
+      [row.id, userId]
+    );
+    if (consumed.rowCount === 1) return String(consumed.rows[0]!.id);
+  }
+
+  return null;
 }
 
 async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -91,6 +160,11 @@ async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promis
       details: { createdBy: apiKeyResult.value.apiKey.createdBy }
     })
   );
+}
+
+async function requireSessionAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if (request.session) return;
+  reply.code(403).send({ error: "forbidden" });
 }
 
 export function registerAuthRoutes(app: FastifyInstance): void {
@@ -217,7 +291,8 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   const LoginBody = z.object({
     email: z.string().email(),
     password: z.string().min(1),
-    mfaCode: z.string().min(1).optional()
+    mfaCode: z.string().min(1).optional(),
+    mfaRecoveryCode: z.string().min(1).optional()
   });
 
   app.post("/auth/login", async (request, reply) => {
@@ -239,7 +314,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
     const found = await app.db.query(
       `
-        SELECT id, email, name, password_hash, mfa_totp_secret, mfa_totp_enabled
+        SELECT id, email, name, password_hash, mfa_totp_enabled
         FROM users
         WHERE email = $1
         LIMIT 1
@@ -273,7 +348,6 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       email: string;
       name: string;
       password_hash: string | null;
-      mfa_totp_secret: string | null;
       mfa_totp_enabled: boolean;
     };
 
@@ -322,9 +396,44 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       return reply.code(401).send({ error: "invalid_credentials" });
     }
 
-    if (row.mfa_totp_enabled) {
-      const code = body.data.mfaCode;
-      if (!code || !row.mfa_totp_secret || !verifyTotpCode(row.mfa_totp_secret, code)) {
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + app.config.sessionTtlSeconds * 1000);
+    let sessionId: string;
+    let token: string;
+    let usedRecoveryCodeId: string | null = null;
+    try {
+      const result = await withTransaction(app.db, async (client) => {
+        if (row.mfa_totp_enabled) {
+          const totpCode = body.data.mfaCode?.trim();
+          const recoveryCode = body.data.mfaRecoveryCode?.trim();
+          if (totpCode) {
+            const secret = await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, row.id);
+            if (!secret || !verifyTotpCode(secret, totpCode)) {
+              throw new Error("mfa_required");
+            }
+          } else if (recoveryCode) {
+            const consumedId = await consumeRecoveryCode(client, row.id, recoveryCode);
+            if (!consumedId) throw new Error("mfa_required");
+            usedRecoveryCodeId = consumedId;
+            // Best-effort: if we're still carrying a legacy plaintext seed, migrate it to the encrypted store.
+            await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, row.id);
+          } else {
+            throw new Error("mfa_required");
+          }
+        }
+
+        return createSession(client, {
+          userId: row.id,
+          expiresAt,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        });
+      });
+
+      sessionId = result.sessionId;
+      token = result.token;
+    } catch (err) {
+      if (err instanceof Error && err.message === "mfa_required") {
         app.metrics.authFailuresTotal.inc({ reason: "mfa_required" });
         await writeAuditEvent(
           app.db,
@@ -345,18 +454,8 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         );
         return reply.code(401).send({ error: "mfa_required" });
       }
+      throw err;
     }
-
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + app.config.sessionTtlSeconds * 1000);
-    const { sessionId, token } = await withTransaction(app.db, async (client) =>
-      createSession(client, {
-        userId: row.id,
-        expiresAt,
-        ipAddress: getClientIp(request),
-        userAgent: getUserAgent(request)
-      })
-    );
 
     reply.setCookie(app.config.sessionCookieName, token, {
       path: "/",
@@ -364,6 +463,26 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       sameSite: "lax",
       secure: app.config.cookieSecure
     });
+
+    if (usedRecoveryCodeId) {
+      await writeAuditEvent(
+        app.db,
+        createAuditEvent({
+          eventType: "auth.mfa_recovery_code_used",
+          actor: { type: "user", id: row.id },
+          context: {
+            userId: row.id,
+            userEmail: row.email,
+            sessionId,
+            ipAddress: getClientIp(request),
+            userAgent: getUserAgent(request)
+          },
+          resource: { type: "user", id: row.id },
+          success: true,
+          details: { recoveryCodeId: usedRecoveryCodeId }
+        })
+      );
+    }
 
     await writeAuditEvent(
       app.db,
@@ -445,8 +564,8 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     };
   });
 
-  // MFA scaffolding (TOTP). Secrets are stored server-side; production deployments should encrypt at rest.
-  app.post("/auth/mfa/totp/setup", { preHandler: requireAuth }, async (request) => {
+  // MFA (TOTP). TOTP seeds are stored in the encrypted secret store (`secrets` table).
+  app.post("/auth/mfa/totp/setup", { preHandler: [requireAuth, requireSessionAuth] }, async (request) => {
     const secret = generateTotpSecret();
     const otpauthUrl = buildOtpAuthUrl({
       issuer: "Formula",
@@ -454,27 +573,31 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       secret
     });
 
-    await app.db.query("UPDATE users SET mfa_totp_secret = $1, mfa_totp_enabled = false WHERE id = $2", [
-      secret,
-      request.user!.id
-    ]);
+    await withTransaction(app.db, async (client) => {
+      await putSecret(client, app.config.secretStoreKeys, totpSecretName(request.user!.id), secret);
+      await client.query("UPDATE users SET mfa_totp_enabled = false, mfa_totp_secret_legacy = null WHERE id = $1", [
+        request.user!.id
+      ]);
+      await deleteUnusedRecoveryCodes(client, request.user!.id);
+    });
 
     return { secret, otpauthUrl };
   });
 
   const TotpConfirmBody = z.object({ code: z.string().min(1) });
 
-  app.post("/auth/mfa/totp/confirm", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/auth/mfa/totp/confirm", { preHandler: [requireAuth, requireSessionAuth] }, async (request, reply) => {
     const parsed = TotpConfirmBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
 
-    const secretRow = await app.db.query("SELECT mfa_totp_secret FROM users WHERE id = $1", [request.user!.id]);
-    const secret = (secretRow.rows[0]?.mfa_totp_secret ?? null) as string | null;
-    if (!secret || !verifyTotpCode(secret, parsed.data.code)) {
-      return reply.code(400).send({ error: "invalid_code" });
-    }
+    const ok = await withTransaction(app.db, async (client) => {
+      const secret = await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, request.user!.id);
+      if (!secret || !verifyTotpCode(secret, parsed.data.code)) return false;
+      await client.query("UPDATE users SET mfa_totp_enabled = true WHERE id = $1", [request.user!.id]);
+      return true;
+    });
+    if (!ok) return reply.code(400).send({ error: "invalid_code" });
 
-    await app.db.query("UPDATE users SET mfa_totp_enabled = true WHERE id = $1", [request.user!.id]);
     await writeAuditEvent(
       app.db,
       createAuditEvent({
@@ -496,24 +619,26 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return reply.send({ ok: true });
   });
 
-  app.post("/auth/mfa/totp/disable", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/auth/mfa/totp/disable", { preHandler: [requireAuth, requireSessionAuth] }, async (request, reply) => {
     const parsed = TotpConfirmBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
 
-    const secretRow = await app.db.query(
-      "SELECT mfa_totp_secret, mfa_totp_enabled FROM users WHERE id = $1",
-      [request.user!.id]
-    );
-    const secret = (secretRow.rows[0]?.mfa_totp_secret ?? null) as string | null;
-    const enabled = Boolean(secretRow.rows[0]?.mfa_totp_enabled);
+    const ok = await withTransaction(app.db, async (client) => {
+      const status = await client.query("SELECT mfa_totp_enabled FROM users WHERE id = $1", [request.user!.id]);
+      const enabled = Boolean(status.rows[0]?.mfa_totp_enabled);
+      if (enabled) {
+        const secret = await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, request.user!.id);
+        if (!secret || !verifyTotpCode(secret, parsed.data.code)) return false;
+      }
 
-    if (enabled && (!secret || !verifyTotpCode(secret, parsed.data.code))) {
-      return reply.code(400).send({ error: "invalid_code" });
-    }
-
-    await app.db.query("UPDATE users SET mfa_totp_enabled = false, mfa_totp_secret = null WHERE id = $1", [
-      request.user!.id
-    ]);
+      await client.query("UPDATE users SET mfa_totp_enabled = false, mfa_totp_secret_legacy = null WHERE id = $1", [
+        request.user!.id
+      ]);
+      await deleteSecret(client, totpSecretName(request.user!.id));
+      await deleteUnusedRecoveryCodes(client, request.user!.id);
+      return true;
+    });
+    if (!ok) return reply.code(400).send({ error: "invalid_code" });
 
     await writeAuditEvent(
       app.db,
@@ -535,6 +660,47 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
     return reply.send({ ok: true });
   });
+
+  app.post(
+    "/auth/mfa/recovery-codes/regenerate",
+    { preHandler: [requireAuth, requireSessionAuth] },
+    async (request, reply) => {
+      if (!request.user!.mfaTotpEnabled) return reply.code(400).send({ error: "mfa_not_enabled" });
+
+      const codes = Array.from({ length: 10 }, () => generateRecoveryCode());
+      const userId = request.user!.id;
+
+    await withTransaction(app.db, async (client) => {
+      await deleteUnusedRecoveryCodes(client, userId);
+      for (const code of codes) {
+        await client.query(
+          "INSERT INTO user_mfa_recovery_codes (id, user_id, code_hash) VALUES ($1, $2, $3)",
+          [crypto.randomUUID(), userId, hashRecoveryCode(code)]
+        );
+      }
+    });
+
+    await writeAuditEvent(
+      app.db,
+      createAuditEvent({
+        eventType: "auth.mfa_recovery_codes_generated",
+        actor: { type: "user", id: userId },
+        context: {
+          userId,
+          userEmail: request.user!.email,
+          sessionId: request.session?.id,
+          ipAddress: getClientIp(request),
+          userAgent: getUserAgent(request)
+        },
+        resource: { type: "user", id: userId },
+        success: true,
+        details: { count: codes.length }
+      })
+    );
+
+      return reply.send({ codes });
+    }
+  );
 
   // OIDC / SSO: per-organization providers.
   const oidcRateLimitByIp = (route: string) => async (request: FastifyRequest, reply: FastifyReply) => {

@@ -6,7 +6,7 @@ import {
   enforceOrgIpAllowlistForSession,
   enforceOrgIpAllowlistForSessionWithAllowlist
 } from "../auth/orgIpAllowlist";
-import { isMfaEnforcedForOrg } from "../auth/mfa";
+import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { KmsProviderFactory } from "../crypto/kms";
 import { DLP_ACTION, DLP_DECISION, normalizeClassification, selectorKey, validateDlpPolicy } from "../dlp/dlp";
 import { evaluateDocumentDlpPolicy } from "../dlp/effective";
@@ -142,7 +142,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
 
     if (!(await enforceOrgIpAllowlistForSession(request, reply, orgId))) return;
 
-    if ((await isMfaEnforcedForOrg(app.db, orgId)) && !request.user!.mfaTotpEnabled) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 
@@ -609,7 +609,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     if (!membership) return;
 
     if (!canDocument(membership.role, "read")) return reply.code(403).send({ error: "forbidden" });
-    if ((await isMfaEnforcedForOrg(app.db, membership.orgId)) && !request.user!.mfaTotpEnabled) {
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, membership.orgId, request.user!))) {
       return reply.code(403).send({ error: "mfa_required" });
     }
 

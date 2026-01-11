@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
+import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { generateScimToken, hashScimTokenSecret } from "../auth/scimTokens";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { isOrgAdmin, type OrgRole } from "../rbac/roles";
@@ -31,6 +32,9 @@ export function registerScimAdminRoutes(app: FastifyInstance): void {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgAdminForScimToken(request, reply, orgId);
     if (!member) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const existing = await app.db.query("SELECT revoked_at FROM org_scim_tokens WHERE org_id = $1", [orgId]);
     const rotated = existing.rowCount === 1 && !existing.rows[0]!.revoked_at;
@@ -74,6 +78,9 @@ export function registerScimAdminRoutes(app: FastifyInstance): void {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgAdminForScimToken(request, reply, orgId);
     if (!member) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const res = await app.db.query(
       `
@@ -108,4 +115,3 @@ export function registerScimAdminRoutes(app: FastifyInstance): void {
     return reply.send({ ok: true });
   });
 }
-

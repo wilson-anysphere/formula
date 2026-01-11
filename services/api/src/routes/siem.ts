@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createAuditEvent, writeAuditEvent } from "../audit/audit";
+import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { enforceOrgIpAllowlistFromParams } from "../auth/orgIpAllowlist";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import {
@@ -330,6 +331,9 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgAdmin(request, reply, orgId);
     if (!member) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const res = await app.db.query("SELECT enabled, config FROM org_siem_configs WHERE org_id = $1", [orgId]);
     if (res.rowCount !== 1) return reply.code(404).send({ error: "siem_config_not_found" });
@@ -351,6 +355,9 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgAdmin(request, reply, orgId);
     if (!member) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const parsedBody = PutBody.safeParse(request.body);
     if (!parsedBody.success) return reply.code(400).send({ error: "invalid_request" });
@@ -590,6 +597,9 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     const orgId = (request.params as { orgId: string }).orgId;
     const member = await requireOrgAdmin(request, reply, orgId);
     if (!member) return;
+    if (request.session && !(await requireOrgMfaSatisfied(app.db, orgId, request.user!))) {
+      return reply.code(403).send({ error: "mfa_required" });
+    }
 
     const existingRes = await app.db.query("SELECT enabled, config FROM org_siem_configs WHERE org_id = $1", [orgId]);
     if (existingRes.rowCount !== 1) return reply.code(404).send({ error: "siem_config_not_found" });
