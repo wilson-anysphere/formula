@@ -54,6 +54,9 @@ export interface SpreadsheetLLMToolExecutorOptions extends ToolExecutorOptions {
   /**
    * When enabled, tools that mutate the workbook are marked `requiresApproval: true`
    * so higher-level orchestration (e.g. `runChatWithTools`) can gate them.
+   *
+   * Note: `fetch_external_data` is always marked as requiring approval because it performs
+   * external network access.
    */
   require_approval_for_mutations?: boolean;
 }
