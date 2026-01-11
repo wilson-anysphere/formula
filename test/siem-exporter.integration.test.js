@@ -39,18 +39,19 @@ test("SiemExporter batches events and retries failed requests", async () => {
     format: "json",
     batchSize: 2,
     flushIntervalMs: 0,
+    idempotencyKeyHeader: "Idempotency-Key",
     retry: { maxAttempts: 3, baseDelayMs: 5, maxDelayMs: 50, jitter: false }
   });
 
   exporter.enqueue({
-    id: "evt_1",
+    id: "11111111-1111-4111-8111-111111111111",
     timestamp: "2025-01-01T00:00:00.000Z",
     orgId: "org_1",
     eventType: "document.opened",
     details: { token: "supersecret" }
   });
   exporter.enqueue({
-    id: "evt_2",
+    id: "22222222-2222-4222-8222-222222222222",
     timestamp: "2025-01-01T00:00:01.000Z",
     orgId: "org_1",
     eventType: "document.modified",
@@ -61,6 +62,8 @@ test("SiemExporter batches events and retries failed requests", async () => {
 
   assert.equal(received.length, 2);
   assert.equal(received[0].body, received[1].body);
+  assert.equal(received[0].headers["idempotency-key"], received[1].headers["idempotency-key"]);
+  assert.match(received[1].headers["idempotency-key"], /^[0-9a-f]{64}$/i);
   assert.equal(received[0].method, "POST");
   assert.equal(received[0].url, "/ingest");
   assert.match(received[0].headers["content-type"], /application\/json/);

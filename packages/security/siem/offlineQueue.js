@@ -1,52 +1,78 @@
-import { appendFile, mkdir, readFile, unlink } from "node:fs/promises";
-import path from "node:path";
+import { IndexedDbOfflineAuditQueue } from "./queue/indexeddb.js";
 
+function isNodeRuntime() {
+  return typeof process !== "undefined" && Boolean(process.versions?.node);
+}
+
+function isIndexedDbAvailable() {
+  return typeof indexedDB !== "undefined";
+}
+
+async function loadNodeFsQueue() {
+  const mod = await import(/* @vite-ignore */ "./queue/node_fs.js");
+  return mod.NodeFsOfflineAuditQueue;
+}
+
+/**
+ * Offline audit queue with crash-safe, resumable flushing.
+ *
+ * - Node: backed by segment files in `dirPath`
+ * - Browser: backed by IndexedDB (`dbName`/`name`)
+ */
 export class OfflineAuditQueue {
-  constructor(options) {
-    if (!options || !options.dirPath) throw new Error("OfflineAuditQueue requires dirPath");
-    this.dirPath = options.dirPath;
-    this.filePath = options.filePath || path.join(this.dirPath, "audit-events.jsonl");
+  constructor(options = {}) {
+    this.options = options;
+    this.backend = options.backend;
+    this.impl = null;
+    this.implPromise = null;
   }
 
-  async ensureDir() {
-    await mkdir(this.dirPath, { recursive: true });
+  async _getImpl() {
+    if (this.impl) return this.impl;
+    if (this.implPromise) return this.implPromise;
+
+    const backend =
+      this.backend ??
+      (this.options.dirPath ? "fs" : isIndexedDbAvailable() ? "indexeddb" : isNodeRuntime() ? "fs" : null);
+
+    if (!backend) {
+      throw new Error("OfflineAuditQueue requires either dirPath (Node FS) or indexedDB availability (browser)");
+    }
+
+    if (backend === "indexeddb") {
+      this.impl = new IndexedDbOfflineAuditQueue(this.options);
+      return this.impl;
+    }
+
+    this.implPromise = (async () => {
+      if (!this.options.dirPath) throw new Error("OfflineAuditQueue backend=fs requires dirPath");
+      const NodeFsOfflineAuditQueue = await loadNodeFsQueue();
+      return new NodeFsOfflineAuditQueue(this.options);
+    })();
+
+    this.impl = await this.implPromise;
+    this.implPromise = null;
+    return this.impl;
   }
 
   async enqueue(event) {
-    await this.ensureDir();
-    const line = JSON.stringify(event) + "\n";
-    await appendFile(this.filePath, line, "utf8");
+    const impl = await this._getImpl();
+    return impl.enqueue(event);
   }
 
   async readAll() {
-    try {
-      const content = await readFile(this.filePath, "utf8");
-      if (!content.trim()) return [];
-      return content
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
-    } catch (error) {
-      if (error.code === "ENOENT") return [];
-      throw error;
-    }
+    const impl = await this._getImpl();
+    return impl.readAll();
   }
 
   async clear() {
-    try {
-      await unlink(this.filePath);
-    } catch (error) {
-      if (error.code === "ENOENT") return;
-      throw error;
-    }
+    const impl = await this._getImpl();
+    return impl.clear();
   }
 
   async flushToExporter(exporter) {
-    const events = await this.readAll();
-    if (events.length === 0) return { sent: 0 };
-
-    await exporter.sendBatch(events);
-    await this.clear();
-    return { sent: events.length };
+    const impl = await this._getImpl();
+    return impl.flushToExporter(exporter);
   }
 }
+

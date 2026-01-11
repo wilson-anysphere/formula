@@ -1,7 +1,22 @@
 import * as http from "node:http";
 import * as https from "node:https";
+import { createHash } from "node:crypto";
 
 import { serializeBatch } from "./format.js";
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function assertUuid(id) {
+  if (typeof id !== "string" || !UUID_REGEX.test(id)) {
+    throw new Error("audit event id must be a UUID");
+  }
+}
+
+function batchIdempotencyKey(events) {
+  const ids = events.map((event) => event?.id ?? "");
+  for (const id of ids) assertUuid(id);
+  return createHash("sha256").update(ids.join(","), "utf8").digest("hex");
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -126,6 +141,7 @@ export class SiemExporter {
       batchSize: 250,
       flushIntervalMs: 5_000,
       timeoutMs: 10_000,
+      idempotencyKeyHeader: null,
       retry: {
         maxAttempts: 5,
         baseDelayMs: 500,
@@ -148,6 +164,8 @@ export class SiemExporter {
   }
 
   enqueue(event) {
+    if (!event || typeof event !== "object") throw new Error("SIEM audit event must be an object");
+    assertUuid(event.id);
     this.buffer.push(event);
     if (this.buffer.length >= this.config.batchSize) void this.flush();
   }
@@ -179,6 +197,7 @@ export class SiemExporter {
 
   async sendBatch(events) {
     if (!events || events.length === 0) return;
+    for (const event of events) assertUuid(event?.id);
 
     const { body, contentType } = serializeBatch(events, {
       format: this.config.format,
@@ -189,6 +208,10 @@ export class SiemExporter {
       ...buildAuthHeaders(this.config.auth),
       ...(this.config.headers || {})
     };
+
+    if (this.config.idempotencyKeyHeader) {
+      headers[this.config.idempotencyKeyHeader] = batchIdempotencyKey(events);
+    }
 
     await retryWithBackoff(
       () =>

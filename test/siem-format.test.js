@@ -5,7 +5,7 @@ import { toCef, toLeef } from "../packages/security/siem/format.js";
 
 test("toCef formats an audit event and redacts sensitive fields", () => {
   const event = {
-    id: "evt_123",
+    id: "33333333-3333-4333-8333-333333333333",
     timestamp: "2025-01-01T00:00:00.000Z",
     orgId: "org_1",
     eventType: "document.created",
@@ -39,7 +39,7 @@ test("toCef escapes header fields", () => {
 
 test("toLeef formats an audit event with tab-delimited attributes and redaction", () => {
   const event = {
-    id: "evt_456",
+    id: "44444444-4444-4444-8444-444444444444",
     timestamp: "2025-01-02T03:04:05.000Z",
     orgId: "org_2",
     eventType: "auth.login_failed",
