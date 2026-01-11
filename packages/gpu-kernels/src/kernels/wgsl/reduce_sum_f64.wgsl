@@ -20,10 +20,12 @@ var<workgroup> shared: array<Scalar, WG_SIZE>;
 @compute @workgroup_size(WG_SIZE)
 fn main(
   @builtin(local_invocation_id) lid: vec3<u32>,
-  @builtin(workgroup_id) wid: vec3<u32>
+  @builtin(workgroup_id) wid: vec3<u32>,
+  @builtin(num_workgroups) nwg: vec3<u32>
 ) {
   let local = lid.x;
-  let base = wid.x * WG_SIZE * 2u;
+  let wg_index = wid.x + wid.y * nwg.x;
+  let base = wg_index * WG_SIZE * 2u;
 
   var sum: Scalar = 0.0;
   let idx1 = base + local;
@@ -48,7 +50,6 @@ fn main(
   }
 
   if (local == 0u) {
-    output[wid.x] = shared[0];
+    output[wg_index] = shared[0];
   }
 }
-

@@ -15,8 +15,9 @@ struct Params {
 @group(0) @binding(1) var<uniform> params: Params;
 
 @compute @workgroup_size(WG_SIZE)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let i = gid.x;
+fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
+  let stride = nwg.x * WG_SIZE;
+  let i = gid.x + gid.y * stride;
   if (i >= params.n) {
     return;
   }
@@ -42,4 +43,3 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   }
 }
-

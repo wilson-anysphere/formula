@@ -363,6 +363,21 @@ export class WebGpuBackend {
   }
 
   /**
+   * WebGPU limits the number of workgroups per dimension. For very large inputs
+   * we use a 2D dispatch and linearize indices in WGSL using `num_workgroups`.
+   * @param {number} workgroups
+   */
+  _dispatch2D(workgroups) {
+    const max = this.device.limits?.maxComputeWorkgroupsPerDimension ?? 65535;
+    const x = Math.min(workgroups, max);
+    const y = Math.ceil(workgroups / x);
+    if (y > max) {
+      throw new Error(`Dispatch requires ${workgroups} workgroups which exceeds device limits (${max}^2)`);
+    }
+    return { x, y, total: x * y };
+  }
+
+  /**
    * @param {Float32Array | Float64Array} values
    * @param {{ allowFp32FallbackForF64?: boolean, precision?: "auto" | "f32" | "f64" }} opts
    */
@@ -694,6 +709,7 @@ export class WebGpuBackend {
       ]
     });
 
+    const dispatch = this._dispatch2D(Math.ceil(padded / WORKGROUP_SIZE));
     for (let k = 2; k <= padded; k <<= 1) {
       for (let j = k >> 1; j > 0; j >>= 1) {
         const params = new Uint32Array([padded, j, k, 0]);
@@ -703,7 +719,7 @@ export class WebGpuBackend {
         const pass = encoder.beginComputePass();
         pass.setPipeline(canRunF64 ? this.pipelines.bitonicSort_f64 : this.pipelines.bitonicSort_f32);
         pass.setBindGroup(0, bindGroup);
-        pass.dispatchWorkgroups(Math.ceil(padded / WORKGROUP_SIZE), 1, 1);
+        pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
         pass.end();
         this.queue.submit([encoder.finish()]);
       }
@@ -782,11 +798,12 @@ export class WebGpuBackend {
       ]
     });
 
+    const dispatch = this._dispatch2D(Math.ceil(typed.length / WORKGROUP_SIZE));
     const encoder = this.device.createCommandEncoder();
     const pass = encoder.beginComputePass();
     pass.setPipeline(canRunF64 ? this.pipelines.histogram_f64 : this.pipelines.histogram_f32);
     pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(Math.ceil(typed.length / WORKGROUP_SIZE), 1, 1);
+    pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
     pass.end();
     this.queue.submit([encoder.finish()]);
 
@@ -889,7 +906,9 @@ export class WebGpuBackend {
     }
 
     while (n > 1) {
-      const outLen = Math.ceil(n / (WORKGROUP_SIZE * 2));
+      const requiredWorkgroups = Math.ceil(n / (WORKGROUP_SIZE * 2));
+      const dispatch = this._dispatch2D(requiredWorkgroups);
+      const outLen = dispatch.total;
       const outBuf = this.device.createBuffer({
         size: outLen * byteSizeOf(dtype),
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
@@ -915,7 +934,7 @@ export class WebGpuBackend {
       const pass = encoder.beginComputePass();
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, bindGroup);
-      pass.dispatchWorkgroups(outLen, 1, 1);
+      pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
       pass.end();
       this.queue.submit([encoder.finish()]);
 
@@ -942,7 +961,9 @@ export class WebGpuBackend {
    */
   async _reduceSumproduct(aBuf, bBuf, length, dtype) {
     let n = length;
-    const outLen = Math.ceil(n / (WORKGROUP_SIZE * 2));
+    const requiredWorkgroups = Math.ceil(n / (WORKGROUP_SIZE * 2));
+    const dispatch = this._dispatch2D(requiredWorkgroups);
+    const outLen = dispatch.total;
     const outBuf = this.device.createBuffer({
       size: outLen * byteSizeOf(dtype),
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
@@ -974,7 +995,7 @@ export class WebGpuBackend {
     const pass = encoder.beginComputePass();
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(outLen, 1, 1);
+    pass.dispatchWorkgroups(dispatch.x, dispatch.y, 1);
     pass.end();
     this.queue.submit([encoder.finish()]);
 
