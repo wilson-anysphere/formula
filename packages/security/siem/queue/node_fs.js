@@ -356,7 +356,9 @@ export class NodeFsOfflineAuditQueue {
     return this._withMutex(async () => {
       await this.ensureDir();
 
-      await acquireEnqueueLock(this.enqueueLockPath, { staleMs: 60_000, timeoutMs: 5_000 });
+      // Enqueue operations should be fast; if a writer crashes mid-lock (or the lock file is corrupted),
+      // we want to recover quickly without stalling enqueues for minutes.
+      await acquireEnqueueLock(this.enqueueLockPath, { staleMs: 10_000, timeoutMs: 5_000 });
       try {
         const usage = await calculateDirBytes(this.segmentsDir);
         if (usage + lineBytes > this.maxBytes) {
