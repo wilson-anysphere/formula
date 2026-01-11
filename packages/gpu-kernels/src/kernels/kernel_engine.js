@@ -795,6 +795,16 @@ export class KernelEngine {
    * @param {Uint32Array | Int32Array} rightKeys
    */
   async hashJoin(leftKeys, rightKeys) {
+    if (leftKeys.length > 0 && rightKeys.length > 0) {
+      const leftSigned = leftKeys instanceof Int32Array;
+      const rightSigned = rightKeys instanceof Int32Array;
+      if (leftSigned !== rightSigned) {
+        throw new Error(
+          `hashJoin key type mismatch: left=${leftSigned ? "i32" : "u32"} right=${rightSigned ? "i32" : "u32"} (pass matching Int32Array/Uint32Array types)`
+        );
+      }
+    }
+
     const workloadSize = leftKeys.length + rightKeys.length;
     const backend = this._chooseBackend("hashJoin", workloadSize, "u32");
 

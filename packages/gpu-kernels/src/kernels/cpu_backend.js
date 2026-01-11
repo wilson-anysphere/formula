@@ -337,6 +337,17 @@ export class CpuBackend {
    * @returns {Promise<{ leftIndex: Uint32Array, rightIndex: Uint32Array }>}
    */
   async hashJoin(leftKeys, rightKeys) {
+    if (leftKeys.length === 0 || rightKeys.length === 0) {
+      return { leftIndex: new Uint32Array(), rightIndex: new Uint32Array() };
+    }
+    const leftSigned = leftKeys instanceof Int32Array;
+    const rightSigned = rightKeys instanceof Int32Array;
+    if (leftSigned !== rightSigned) {
+      throw new Error(
+        `hashJoin key type mismatch: left=${leftSigned ? "i32" : "u32"} right=${rightSigned ? "i32" : "u32"} (pass matching Int32Array/Uint32Array types)`
+      );
+    }
+
     /** @type {Map<number, number[]>} */
     const rightMap = new Map();
     for (let j = 0; j < rightKeys.length; j++) {

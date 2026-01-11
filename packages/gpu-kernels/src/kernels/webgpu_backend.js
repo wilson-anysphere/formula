@@ -1645,6 +1645,16 @@ export class WebGpuBackend {
   async hashJoin(leftKeys, rightKeys) {
     this._ensureNotDisposed();
 
+    if (leftKeys.length > 0 && rightKeys.length > 0) {
+      const leftSigned = leftKeys instanceof Int32Array;
+      const rightSigned = rightKeys instanceof Int32Array;
+      if (leftSigned !== rightSigned) {
+        throw new Error(
+          `hashJoin key type mismatch: left=${leftSigned ? "i32" : "u32"} right=${rightSigned ? "i32" : "u32"} (pass matching Int32Array/Uint32Array types)`
+        );
+      }
+    }
+
     const leftU32 = toUint32Keys(leftKeys);
     const rightU32 = toUint32Keys(rightKeys);
     const leftLen = leftU32.length;

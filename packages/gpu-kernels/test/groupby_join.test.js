@@ -123,6 +123,19 @@ test("hashJoin: supports signed i32 keys", async () => {
   assert.deepEqual(Array.from(out.rightIndex), [0, 1, 0, 1]);
 });
 
+test("hashJoin: rejects mixed Int32Array/Uint32Array inputs (non-empty)", async () => {
+  const cpu = new CpuBackend();
+  await assert.rejects(
+    () => cpu.hashJoin(new Int32Array([1]), new Uint32Array([1])),
+    /hashJoin key type mismatch/
+  );
+
+  // Empty inputs short-circuit to empty output (no need to match dtypes).
+  const out = await cpu.hashJoin(new Int32Array(), new Uint32Array([1]));
+  assert.equal(out.leftIndex.length, 0);
+  assert.equal(out.rightIndex.length, 0);
+});
+
 test("group-by/hashJoin: supports key 0xFFFF_FFFF (u32 max) in unsigned mode", async () => {
   const cpu = new CpuBackend();
   const k = 0xffff_ffff;

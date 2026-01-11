@@ -62,6 +62,7 @@ await engine.dispose();
   - **Histogram** ignores `NaN` values and clamps `±Infinity` into the first/last bin.
   - **Group-by SUM/MIN/MAX** follow JS numeric semantics (`NaN` propagates, `±Infinity` behaves per IEEE-754). `MIN/MAX` preserve signed zero like `Math.min/Math.max`.
   - **Hash join** returns *all* matching pairs (duplicates produce multiple output rows). Outputs are sorted by `(leftIndex, rightIndex)` ascending.
+  - **Hash join** requires both key arrays to use the same numeric domain (`Int32Array` with `Int32Array`, or `Uint32Array` with `Uint32Array`).
 
 ## Benchmarks
 ```bash
