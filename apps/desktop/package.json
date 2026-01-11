@@ -21,6 +21,7 @@
     "@formula/engine": "workspace:*",
     "@formula/python-runtime": "workspace:*",
     "@formula/scripting": "workspace:*",
+    "@formula/spreadsheet-frontend": "workspace:*",
     "@formula/text-layout": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

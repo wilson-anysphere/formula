@@ -60,6 +60,9 @@ importers:
       '@formula/scripting':
         specifier: workspace:*
         version: link:../../packages/scripting
+      '@formula/spreadsheet-frontend':
+        specifier: workspace:*
+        version: link:../../packages/spreadsheet-frontend
       '@formula/text-layout':
         specifier: workspace:*
         version: link:../../packages/text-layout
