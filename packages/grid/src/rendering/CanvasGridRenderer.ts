@@ -611,7 +611,7 @@ export class CanvasGridRenderer {
    * Returns the fill-handle rectangle for the current selection range, in viewport
    * coordinates (relative to the grid canvases).
    *
-   * The returned rectangle is clipped to the current viewport.
+   * The returned rectangle is clipped to the visible viewport.
    */
   getFillHandleRect(): Rect | null {
     if (this.selectionRanges.length === 0) return null;
@@ -3342,8 +3342,19 @@ export class CanvasGridRenderer {
       width: handleSize,
       height: handleSize
     };
-    const viewportRect: Rect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
-    return intersectRect(handleRect, viewportRect);
+
+    const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
+    const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
+    const quadrantRect: Rect = {
+      x: handleCol >= viewport.frozenCols ? frozenWidthClamped : 0,
+      y: handleRow >= viewport.frozenRows ? frozenHeightClamped : 0,
+      width:
+        handleCol >= viewport.frozenCols ? Math.max(0, viewport.width - frozenWidthClamped) : frozenWidthClamped,
+      height:
+        handleRow >= viewport.frozenRows ? Math.max(0, viewport.height - frozenHeightClamped) : frozenHeightClamped
+    };
+
+    return intersectRect(handleRect, quadrantRect);
   }
 
   private markAllDirtyForThemeChange(): void {

@@ -192,6 +192,29 @@ describe("CanvasGridRenderer zoom", () => {
     expect(handle!.y + handle!.height).toBeLessThanOrEqual(150);
   });
 
+  it("hides the fill handle when the selection corner is clipped by frozen columns", () => {
+    const provider: CellProvider = { getCell: () => null };
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 50, colCount: 50, defaultRowHeight: 10, defaultColWidth: 100 });
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(250, 150, 1);
+
+    renderer.setFrozen(0, 1);
+    renderer.setSelection({ row: 0, col: 1 });
+
+    const visible = renderer.getFillHandleRect();
+    expect(visible).not.toBeNull();
+    expect(visible!.x).toBeGreaterThanOrEqual(100);
+
+    // Scroll far enough that the selection's bottom-right corner is hidden under
+    // the frozen column; the handle should be suppressed.
+    renderer.setScroll(110, 0);
+    expect(renderer.getFillHandleRect()).toBeNull();
+  });
+
   it("scales remote presence badge geometry with zoom", () => {
     const provider: CellProvider = { getCell: () => null };
 

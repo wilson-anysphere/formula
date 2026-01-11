@@ -36,7 +36,7 @@ export interface GridApi {
   setPerfStatsEnabled(enabled: boolean): void;
   scrollToCell(row: number, col: number, opts?: { align?: ScrollToCellAlign; padding?: number }): void;
   getCellRect(row: number, col: number): { x: number; y: number; width: number; height: number } | null;
-  /** Returns the fill-handle rect for the active selection range, in viewport coordinates (clipped to the viewport). */
+  /** Returns the fill-handle rect for the active selection range, in viewport coordinates (clipped to the visible viewport). */
   getFillHandleRect(): { x: number; y: number; width: number; height: number } | null;
   getViewportState(): GridViewportState | null;
   /**
