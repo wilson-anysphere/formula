@@ -235,6 +235,9 @@ impl DaxEngine {
                 let table_ref = model
                     .table(current_table)
                     .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
+                if row >= table_ref.row_count() {
+                    return Ok(Value::Blank);
+                }
                 let value = table_ref.value(row, &normalized).ok_or_else(|| {
                     DaxError::Eval(format!(
                         "unknown measure [{normalized}] and no column {current_table}[{normalized}]"
@@ -249,6 +252,9 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                if row >= table_ref.row_count() {
+                    return Ok(Value::Blank);
+                }
                 let value =
                     table_ref
                         .value(row, column)
@@ -811,7 +817,12 @@ impl DaxEngine {
                     })?;
                 if let Some(distinct) = table_ref.stats_distinct_count(idx) {
                     let mut out = distinct as i64;
-                    if table_ref.stats_has_blank(idx).unwrap_or(false) {
+                    let has_blank = table_ref.stats_has_blank(idx).unwrap_or(false);
+                    if has_blank {
+                        out += 1;
+                    } else if blank_row_allowed(filter, table)
+                        && virtual_blank_row_exists(model, filter, table)?
+                    {
                         out += 1;
                     }
                     return Ok(Value::from(out));
@@ -843,21 +854,35 @@ impl DaxEngine {
                 column: column.clone(),
             })?;
 
+        let include_virtual_blank = blank_row_allowed(filter, table)
+            && virtual_blank_row_exists(model, filter, table)?;
+
         if filter.is_empty() {
             if let Some(values) = table_ref.distinct_values_filtered(idx, None) {
-                return Ok(values.into_iter().collect());
+                let mut out: HashSet<Value> = values.into_iter().collect();
+                if include_virtual_blank {
+                    out.insert(Value::Blank);
+                }
+                return Ok(out);
             }
         }
 
         let rows = resolve_table_rows(model, filter, table)?;
         if let Some(values) = table_ref.distinct_values_filtered(idx, Some(rows.as_slice())) {
-            return Ok(values.into_iter().collect());
+            let mut out: HashSet<Value> = values.into_iter().collect();
+            if include_virtual_blank {
+                out.insert(Value::Blank);
+            }
+            return Ok(out);
         }
 
         let mut out = HashSet::new();
         for row in rows {
             let value = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
             out.insert(value);
+        }
+        if include_virtual_blank {
+            out.insert(Value::Blank);
         }
         Ok(out)
     }
@@ -1163,9 +1188,7 @@ impl DaxEngine {
                 table: current_table.to_string(),
                 column: rel_info.rel.from_column.clone(),
             })?;
-        let key = from_table
-            .value_by_idx(current_row, from_idx)
-            .ok_or_else(|| DaxError::Eval("missing key value".into()))?;
+        let key = from_table.value_by_idx(current_row, from_idx).unwrap_or(Value::Blank);
         if key.is_blank() {
             return Ok(Value::Blank);
         }
@@ -1287,6 +1310,12 @@ impl DaxEngine {
                                 if seen.insert(value) {
                                     rows.push(row);
                                 }
+                            }
+                            if !seen.contains(&Value::Blank)
+                                && blank_row_allowed(filter, table)
+                                && virtual_blank_row_exists(model, filter, table)?
+                            {
+                                rows.push(table_ref.row_count());
                             }
                             Ok(TableResult {
                                 table: table.clone(),
@@ -1585,12 +1614,28 @@ impl DaxEngine {
                     })?;
                     let key = to_table_ref
                         .value_by_idx(current_row, to_idx)
-                        .ok_or_else(|| DaxError::Eval("missing key".into()))?;
+                        .unwrap_or(Value::Blank);
 
                     if key.is_blank() {
+                        let sets = resolve_row_sets(model, filter)?;
+                        let allowed = sets
+                            .get(target_table)
+                            .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
+
+                        let mut rows = Vec::new();
+                        for (fk, candidates) in &rel.from_index {
+                            if fk.is_blank() || !rel.to_index.contains_key(fk) {
+                                for &row in candidates {
+                                    if allowed.get(row).copied().unwrap_or(false) {
+                                        rows.push(row);
+                                    }
+                                }
+                            }
+                        }
+
                         return Ok(TableResult {
                             table: target_table.clone(),
-                            rows: Vec::new(),
+                            rows,
                         });
                     }
 
@@ -1985,4 +2030,46 @@ fn blank_row_allowed(filter: &FilterContext, table: &str) -> bool {
     }
 
     true
+}
+
+fn virtual_blank_row_exists(model: &DataModel, filter: &FilterContext, table: &str) -> DaxResult<bool> {
+    // Tabular models materialize an "unknown" (blank) row on the one-side of relationships when
+    // there are fact-side rows whose foreign key is BLANK or has no match in the dimension. We
+    // model that row virtually (at `row_count()`), so we need to know whether it exists for a
+    // given table under the currently active relationship set (including `USERELATIONSHIP`).
+
+    let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
+    for &idx in &filter.active_relationship_overrides {
+        if let Some(rel) = model.relationships().get(idx) {
+            override_pairs.insert((rel.rel.from_table.as_str(), rel.rel.to_table.as_str()));
+        }
+    }
+
+    for (idx, rel) in model.relationships().iter().enumerate() {
+        if rel.rel.to_table != table {
+            continue;
+        }
+
+        let pair = (rel.rel.from_table.as_str(), rel.rel.to_table.as_str());
+        let is_active = if override_pairs.contains(&pair) {
+            filter.active_relationship_overrides.contains(&idx)
+        } else {
+            rel.rel.is_active
+        };
+        if !is_active {
+            continue;
+        }
+
+        // A virtual blank row exists if the relationship has any fact-side key that does not map
+        // to a real dimension row.
+        if rel
+            .from_index
+            .keys()
+            .any(|key| key.is_blank() || !rel.to_index.contains_key(key))
+        {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
