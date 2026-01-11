@@ -13,7 +13,23 @@ export interface ToolCallLog {
   approved?: boolean;
   ok?: boolean;
   duration_ms?: number;
+  /**
+   * Full tool result payload.
+   *
+   * Note: This may be omitted by higher-level integrations (e.g. `packages/ai-tools`
+   * audited runs) to keep audit storage bounded.
+   */
   result?: unknown;
+  /**
+   * Compact summary of the tool result (bounded).
+   *
+   * Intended for audit stores with strict size limits (e.g. LocalStorage).
+   */
+  audit_result_summary?: unknown;
+  /**
+   * True when the full `result` was omitted or truncated in the audit entry.
+   */
+  result_truncated?: boolean;
   error?: string;
 }
 

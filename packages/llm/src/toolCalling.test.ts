@@ -161,4 +161,71 @@ describe("runChatWithTools", () => {
     expect(result.final).toBe("Okay, I won't make that change.");
     expect(callCount).toBe(2);
   });
+
+  it("summarizes large tool results before appending them to the model context", async () => {
+    const bigValues = Array.from({ length: 100 }, (_, r) => Array.from({ length: 100 }, (_, c) => r * 100 + c));
+
+    const toolExecutor = {
+      tools: [
+        {
+          name: "read_range",
+          description: "Read a range",
+          parameters: {}
+        }
+      ],
+      async execute(call: any) {
+        return {
+          tool: "read_range",
+          ok: true,
+          timing: { started_at_ms: 0, duration_ms: 0 },
+          data: { range: call.arguments.range, values: bigValues }
+        };
+      }
+    };
+
+    let callCount = 0;
+    const client = {
+      async chat(request: any) {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "read_range", arguments: { range: "Sheet1!A1:CV100" } }]
+            }
+          };
+        }
+
+        const last = request.messages.at(-1);
+        expect(last.role).toBe("tool");
+        expect(last.toolCallId).toBe("call-1");
+        expect(typeof last.content).toBe("string");
+        expect(last.content.length).toBeLessThanOrEqual(20_000);
+
+        const payload = JSON.parse(last.content);
+        expect(payload.tool).toBe("read_range");
+        expect(payload.ok).toBe(true);
+        expect(payload.data?.truncated).toBe(true);
+        expect(payload.data?.shape).toEqual({ rows: 100, cols: 100 });
+        expect(payload.data?.values?.length).toBeLessThanOrEqual(20);
+        expect(payload.data?.values?.[0]?.length).toBeLessThanOrEqual(10);
+
+        return {
+          message: {
+            role: "assistant",
+            content: "done"
+          }
+        };
+      }
+    };
+
+    const result = await runChatWithTools({
+      client: client as any,
+      toolExecutor: toolExecutor as any,
+      messages: [{ role: "user", content: "Read the data" }]
+    });
+
+    expect(result.final).toBe("done");
+  });
 });

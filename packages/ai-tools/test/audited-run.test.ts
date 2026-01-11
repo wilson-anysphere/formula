@@ -164,4 +164,68 @@ describe("runChatWithToolsAudited", () => {
     expect(params.url).not.toContain("frag");
     expect(params.headers).toEqual({ Authorization: "REDACTED", Accept: "application/json" });
   });
+
+  it("stores a bounded tool result summary in audit logs by default", async () => {
+    const bigValues = Array.from({ length: 100 }, (_, r) => Array.from({ length: 100 }, (_, c) => r * 100 + c));
+
+    let callCount = 0;
+    const client = {
+      async chat() {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "read_range", arguments: { range: "Sheet1!A1:CV100" } }]
+            },
+            usage: { promptTokens: 10, completionTokens: 5 }
+          };
+        }
+        return {
+          message: { role: "assistant", content: "done" },
+          usage: { promptTokens: 2, completionTokens: 3 }
+        };
+      }
+    };
+
+    const tool_executor = {
+      tools: [{ name: "read_range", description: "read", parameters: {} }],
+      async execute(call: any) {
+        return {
+          tool: "read_range",
+          ok: true,
+          timing: { started_at_ms: 0, duration_ms: 0 },
+          data: { range: call.arguments.range, values: bigValues }
+        };
+      }
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+    await runChatWithToolsAudited({
+      client,
+      tool_executor,
+      messages: [{ role: "user", content: "Read Sheet1!A1:CV100" }],
+      audit: {
+        audit_store: auditStore,
+        session_id: "session-compaction-1",
+        mode: "chat",
+        input: { prompt: "Read Sheet1!A1:CV100" },
+        model: "unit-test-model"
+      }
+    });
+
+    const entries = await auditStore.listEntries({ session_id: "session-compaction-1" });
+    expect(entries.length).toBe(1);
+
+    const toolCall = entries[0]!.tool_calls[0]!;
+    expect(toolCall.result).toBeUndefined();
+    expect(toolCall.result_truncated).toBe(true);
+    expect(toolCall.audit_result_summary).toBeTypeOf("string");
+    expect((toolCall.audit_result_summary as string).length).toBeLessThanOrEqual(20_000);
+
+    const summary = JSON.parse(toolCall.audit_result_summary as string);
+    expect(summary.tool).toBe("read_range");
+    expect(summary.data?.truncated).toBe(true);
+  });
 });

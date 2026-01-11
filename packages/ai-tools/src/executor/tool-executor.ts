@@ -64,6 +64,7 @@ export type ToolResultDataByName = {
     range: string;
     matching_rows: number[];
     count: number;
+    truncated?: boolean;
   };
   apply_formatting: {
     range: string;
@@ -74,16 +75,22 @@ export type ToolResultDataByName = {
         range: string;
         method: "iqr";
         anomalies: Array<{ cell: string; value: number | null }>;
+        truncated?: boolean;
+        total_anomalies?: number;
       }
     | {
         range: string;
         method: "zscore";
         anomalies: Array<{ cell: string; value: number | null; score: number | null }>;
+        truncated?: boolean;
+        total_anomalies?: number;
       }
     | {
         range: string;
         method: "isolation_forest";
         anomalies: Array<{ cell: string; value: number | null; score: number | null }>;
+        truncated?: boolean;
+        total_anomalies?: number;
       };
   compute_statistics: {
     range: string;
@@ -118,6 +125,35 @@ export interface ToolExecutorOptions {
   allow_external_data?: boolean;
   allowed_external_hosts?: string[];
   max_external_bytes?: number;
+  /**
+   * Hard cap on the number of cells `read_range` is allowed to return.
+   *
+   * This prevents accidental/looping tool calls from returning massive matrices
+   * that can overflow LLM context windows and/or audit log storage.
+   *
+   * When exceeded, `read_range` returns `ok:false` with `permission_denied` and
+   * suggests requesting a smaller range (or raising this limit explicitly).
+   */
+  max_read_range_cells?: number;
+  /**
+   * Approximate cap on the size of `read_range` results (in characters).
+   *
+   * This is a safeguard for cases where a "small" range contains very large
+   * strings (e.g. pasted documents in cells). The cap is enforced on the sum of
+   * returned scalar lengths and is intentionally conservative.
+   */
+  max_read_range_chars?: number;
+  /**
+   * Cap the number of matching row indices returned by `filter_range`.
+   *
+   * The tool still reports the full match count via `count`, but truncates the
+   * `matching_rows` list when necessary.
+   */
+  max_filter_range_matching_rows?: number;
+  /**
+   * Cap the number of anomalies returned by `detect_anomalies`.
+   */
+  max_detect_anomalies?: number;
   /**
    * Optional DLP enforcement for tool results.
    *
@@ -154,6 +190,10 @@ export class ToolExecutor {
         .map((host) => String(host).trim().toLowerCase())
         .filter((host) => host.length > 0),
       max_external_bytes: options.max_external_bytes ?? 1_000_000,
+      max_read_range_cells: options.max_read_range_cells ?? 5_000,
+      max_read_range_chars: options.max_read_range_chars ?? 200_000,
+      max_filter_range_matching_rows: options.max_filter_range_matching_rows ?? 1_000,
+      max_detect_anomalies: options.max_detect_anomalies ?? 1_000,
       dlp: options.dlp
     };
   }
@@ -223,6 +263,13 @@ export class ToolExecutor {
 
   private readRange(params: any): ToolResultDataByName["read_range"] {
     const range = parseA1Range(params.range, this.options.default_sheet);
+    const requestedCells = rangeCellCount(range);
+    if (requestedCells > this.options.max_read_range_cells) {
+      throw toolError(
+        "permission_denied",
+        `read_range requested ${requestedCells} cells (${formatA1Range(range)}), which exceeds max_read_range_cells (${this.options.max_read_range_cells}). Request a smaller range or increase max_read_range_cells.`
+      );
+    }
 
     const dlp = this.evaluateDlpForRange("read_range", range);
     if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
@@ -247,6 +294,7 @@ export class ToolExecutor {
       if (dlp) {
         this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount: 0 });
       }
+      enforceReadRangeCharLimit({ range, values, formulas, maxChars: this.options.max_read_range_chars });
       return { range: formatA1Range(range), values, ...(formulas ? { formulas } : {}) };
     }
 
@@ -285,6 +333,7 @@ export class ToolExecutor {
       : undefined;
 
     this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount });
+    enforceReadRangeCharLimit({ range, values, formulas, maxChars: this.options.max_read_range_chars });
     return { range: formatA1Range(range), values, ...(formulas ? { formulas } : {}) };
   }
 
@@ -600,6 +649,7 @@ export class ToolExecutor {
       });
 
     const matchingRows: number[] = [];
+    let matchCount = 0;
     for (let i = bodyOffset; i < rows.length; i++) {
       const row = rows[i]!;
       const matches = criteria.every((criterion) => {
@@ -614,12 +664,16 @@ export class ToolExecutor {
         return matchesCriterion(cell, criterion);
       });
       if (matches) {
-        matchingRows.push(range.startRow + i);
+        matchCount++;
+        if (matchingRows.length < this.options.max_filter_range_matching_rows) {
+          matchingRows.push(range.startRow + i);
+        }
       }
     }
 
     if (dlp) this.logToolDlpDecision({ tool: "filter_range", range, dlp, redactedCellCount: 0 });
-    return { range: formatA1Range(range), matching_rows: matchingRows, count: matchingRows.length };
+    const truncated = matchCount > matchingRows.length;
+    return { range: formatA1Range(range), matching_rows: matchingRows, count: matchCount, ...(truncated ? { truncated } : {}) };
   }
 
   private applyFormatting(params: any): ToolResultDataByName["apply_formatting"] {
@@ -706,7 +760,13 @@ export class ToolExecutor {
           .filter((e) => Math.abs(e.score) >= threshold)
           .map((e) => ({ cell: e.cell, value: e.value, score: e.score }));
         if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
-        return { range: formattedRange, method, anomalies };
+        const capped = capList(anomalies, this.options.max_detect_anomalies);
+        return {
+          range: formattedRange,
+          method,
+          anomalies: capped.items,
+          ...(capped.truncated ? { truncated: true, total_anomalies: capped.total } : {})
+        };
       }
       case "iqr": {
         const multiplier = params.threshold ?? 1.5;
@@ -720,7 +780,13 @@ export class ToolExecutor {
           .filter((e) => e.value < low || e.value > high)
           .map((e) => ({ cell: e.cell, value: e.value }));
         if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
-        return { range: formattedRange, method, anomalies };
+        const capped = capList(anomalies, this.options.max_detect_anomalies);
+        return {
+          range: formattedRange,
+          method,
+          anomalies: capped.items,
+          ...(capped.truncated ? { truncated: true, total_anomalies: capped.total } : {})
+        };
       }
       case "isolation_forest": {
         const values = entries.map((entry) => entry.value);
@@ -743,7 +809,13 @@ export class ToolExecutor {
             .filter((entry) => entry.score >= cutoff)
             .map((entry) => ({ cell: entry.cell, value: entry.value, score: entry.score }));
           if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
-          return { range: formattedRange, method, anomalies };
+          const capped = capList(anomalies, this.options.max_detect_anomalies);
+          return {
+            range: formattedRange,
+            method,
+            anomalies: capped.items,
+            ...(capped.truncated ? { truncated: true, total_anomalies: capped.total } : {})
+          };
         }
 
         const topN = Math.min(scored.length, Math.max(0, Math.round(threshold)));
@@ -751,7 +823,13 @@ export class ToolExecutor {
           .slice(0, topN)
           .map((entry) => ({ cell: entry.cell, value: entry.value, score: entry.score }));
         if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
-        return { range: formattedRange, method, anomalies };
+        const capped = capList(anomalies, this.options.max_detect_anomalies);
+        return {
+          range: formattedRange,
+          method,
+          anomalies: capped.items,
+          ...(capped.truncated ? { truncated: true, total_anomalies: capped.total } : {})
+        };
       }
       default:
         throw new Error(`Unsupported detect_anomalies method: ${method}`);
@@ -1532,6 +1610,66 @@ function buildPivotTableOutput(request: PivotBuildRequest): CellScalar[][] {
 function nowMs(): number {
   if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
   return Date.now();
+}
+
+function rangeCellCount(range: { startRow: number; endRow: number; startCol: number; endCol: number }): number {
+  const rows = range.endRow - range.startRow + 1;
+  const cols = range.endCol - range.startCol + 1;
+  return Math.max(0, rows) * Math.max(0, cols);
+}
+
+function enforceReadRangeCharLimit(params: {
+  range: { sheet: string; startRow: number; endRow: number; startCol: number; endCol: number };
+  values: CellScalar[][];
+  formulas?: Array<Array<string | null>>;
+  maxChars: number;
+}): void {
+  const estimated = estimateReadRangeChars(params.values, params.formulas);
+  if (estimated <= params.maxChars) return;
+  throw toolError(
+    "permission_denied",
+    `read_range result for ${formatA1Range(params.range)} is too large (~${estimated} chars), exceeding max_read_range_chars (${params.maxChars}). Request a smaller range or increase max_read_range_chars.`
+  );
+}
+
+function estimateReadRangeChars(values: CellScalar[][], formulas?: Array<Array<string | null>>): number {
+  let chars = 0;
+  for (const row of values) {
+    if (!Array.isArray(row)) continue;
+    for (const cell of row) {
+      chars += estimateJsonScalarChars(cell) + 2;
+      if (chars > Number.MAX_SAFE_INTEGER) return chars;
+    }
+  }
+  if (formulas) {
+    for (const row of formulas) {
+      if (!Array.isArray(row)) continue;
+      for (const cell of row) {
+        chars += estimateJsonScalarChars(cell) + 2;
+        if (chars > Number.MAX_SAFE_INTEGER) return chars;
+      }
+    }
+  }
+  return chars;
+}
+
+function estimateJsonScalarChars(value: unknown): number {
+  if (value === null || value === undefined) return 4; // "null"
+  if (typeof value === "string") return value.length + 2; // quotes
+  if (typeof value === "number") return String(value).length;
+  if (typeof value === "boolean") return value ? 4 : 5;
+  // Defensive (CellScalar should not include objects).
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    return String(value).length;
+  }
+}
+
+function capList<T>(items: T[], maxItems: number): { items: T[]; truncated: boolean; total: number } {
+  const max = Math.max(0, maxItems);
+  if (items.length <= max) return { items, truncated: false, total: items.length };
+  return { items: items.slice(0, max), truncated: true, total: items.length };
 }
 
 function normalizeToolError(error: unknown): ToolExecutionError {

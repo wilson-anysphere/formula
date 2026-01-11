@@ -86,7 +86,14 @@ export class AIAuditRecorder {
 
   recordToolResult(
     callIdOrIndex: string | number,
-    result: { ok?: boolean; duration_ms?: number; result?: unknown; error?: string }
+    result: {
+      ok?: boolean;
+      duration_ms?: number;
+      result?: unknown;
+      audit_result_summary?: unknown;
+      result_truncated?: boolean;
+      error?: string;
+    }
   ): void {
     const index = this.resolveToolIndex(callIdOrIndex);
     const entry = this.entry.tool_calls[index];
@@ -94,6 +101,8 @@ export class AIAuditRecorder {
     if (result.ok !== undefined) entry.ok = result.ok;
     if (result.duration_ms !== undefined) entry.duration_ms = result.duration_ms;
     if (result.result !== undefined) entry.result = result.result;
+    if (result.audit_result_summary !== undefined) entry.audit_result_summary = result.audit_result_summary;
+    if (result.result_truncated !== undefined) entry.result_truncated = result.result_truncated;
     if (result.error !== undefined) entry.error = result.error;
   }
 

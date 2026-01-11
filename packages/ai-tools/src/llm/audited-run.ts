@@ -2,6 +2,7 @@ import { AIAuditRecorder } from "@formula/ai-audit";
 import type { AIAuditStore, AIMode, TokenUsage } from "@formula/ai-audit";
 
 import { runChatWithTools } from "../../../llm/src/toolCalling.js";
+import { serializeToolResultForModel } from "../../../llm/src/toolResultSerialization.js";
 
 import type { LLMToolCall } from "./integration.js";
 import { classifyQueryNeedsTools, verifyToolUsage, type VerificationResult } from "./verification.js";
@@ -14,6 +15,17 @@ export interface AuditedRunOptions {
   mode: AIMode;
   input: unknown;
   model: string;
+  /**
+   * When true, store the full tool result object in the audit entry.
+   *
+   * Default is false, which stores a bounded `audit_result_summary` instead to
+   * avoid blowing up LocalStorage-backed audit stores.
+   */
+  store_full_tool_results?: boolean;
+  /**
+   * Max size of the stored tool result summary (in characters).
+   */
+  max_audit_result_chars?: number;
 }
 
 export interface AuditedRunParams {
@@ -112,10 +124,15 @@ export async function runChatWithToolsAuditedVerified(
           params.on_tool_call?.(call, meta);
         },
         onToolResult: (call: any, toolResult: any) => {
+          const storeFull = params.audit.store_full_tool_results ?? false;
+          const maxSummaryChars = params.audit.max_audit_result_chars ?? 20_000;
+          const summary = serializeToolResultForModel({ toolCall: call, result: toolResult, maxChars: maxSummaryChars });
           recorder.recordToolResult(call.id, {
             ok: typeof toolResult?.ok === "boolean" ? toolResult.ok : undefined,
             duration_ms: extractToolDuration(toolResult),
-            result: toolResult,
+            ...(storeFull ? { result: toolResult } : {}),
+            audit_result_summary: summary,
+            result_truncated: !storeFull,
             error: toolResult?.error?.message ? String(toolResult.error.message) : undefined
           });
           params.on_tool_result?.(call, toolResult);

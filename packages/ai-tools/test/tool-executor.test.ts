@@ -180,6 +180,22 @@ describe("ToolExecutor", () => {
     ]);
   });
 
+  it("read_range enforces max_read_range_cells to prevent huge matrices", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    // 100x100 = 10,000 cells (default limit is 5,000).
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:CV100" },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+    expect(result.error?.message).toMatch(/max_read_range_cells/i);
+    expect(result.error?.message).toMatch(/10000/);
+  });
+
   it("quotes sheet names with spaces when formatting results", async () => {
     const workbook = new InMemoryWorkbook(["My Sheet"]);
     const executor = new ToolExecutor(workbook, { default_sheet: "My Sheet" });
