@@ -346,6 +346,7 @@ fn array_functions_spill_and_respect_spill_blocking() {
         .unwrap();
     engine.recalculate();
 
+    // D1 is blocked because TRANSPOSE would spill into D2, which contains a formula.
     assert_eq!(
         engine.get_cell_value("Sheet1", "D1"),
         Value::Error(ErrorKind::Spill)
