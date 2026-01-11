@@ -4,6 +4,8 @@ import type { LLMMessage } from "../../../../../packages/llm/src/types.js";
 import { OpenAIClient } from "../../../../../packages/llm/src/openai.js";
 
 import { createAiChatOrchestrator } from "../../ai/chat/orchestrator.js";
+import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
+import { HashEmbedder, InMemoryVectorStore } from "../../../../../packages/ai-rag/src/index.js";
 
 import { AIChatPanel, type AIChatPanelSendMessage } from "./AIChatPanel.js";
 import { confirmPreviewApproval } from "./previewApproval.js";
@@ -33,6 +35,7 @@ function loadApiKeyFromRuntime(): string | null {
 
 export interface AIChatPanelContainerProps {
   getDocumentController: () => unknown;
+  getActiveSheetId?: () => string;
   workbookId?: string;
 }
 
@@ -94,17 +97,32 @@ export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
 
   const client = useMemo(() => new OpenAIClient({ apiKey }), [apiKey]);
 
+  const workbookId = props.workbookId ?? "local-workbook";
+
+  const contextManager = useMemo(() => {
+    // Keep this lightweight + dependency-free for now (deterministic hash embeddings).
+    const dimension = 128;
+    const embedder = new HashEmbedder({ dimension });
+    const vectorStore = new InMemoryVectorStore({ dimension });
+    return new ContextManager({
+      tokenBudgetTokens: 8_000,
+      workbookRag: { vectorStore, embedder, topK: 6 },
+    });
+  }, [workbookId]);
+
   const orchestrator = useMemo(() => {
     return createAiChatOrchestrator({
       documentController: props.getDocumentController() as any,
-      workbookId: props.workbookId ?? "local-workbook",
+      workbookId,
       llmClient: client as any,
       model: (client as any).model ?? "gpt-4o-mini",
+      getActiveSheetId: props.getActiveSheetId,
       onApprovalRequired: confirmPreviewApproval,
       previewOptions: { approval_cell_threshold: 0 },
-      sessionId: `${props.workbookId ?? "local-workbook"}:${sessionId.current}`,
+      sessionId: `${workbookId}:${sessionId.current}`,
+      contextManager,
     });
-  }, [client, props.getDocumentController, props.workbookId]);
+  }, [client, contextManager, props.getActiveSheetId, props.getDocumentController, workbookId]);
 
   const sendMessage: AIChatPanelSendMessage = useMemo(() => {
     return async (args) => {

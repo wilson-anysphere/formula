@@ -6,6 +6,8 @@ import { AIChatPanelContainer } from "./ai-chat/AIChatPanelContainer.js";
 
 export interface PanelBodyRendererOptions {
   getDocumentController: () => unknown;
+  getActiveSheetId?: () => string;
+  workbookId?: string;
   renderMacrosPanel?: (body: HTMLDivElement) => void;
 }
 
@@ -42,7 +44,11 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       renderReactPanel(
         panelId,
         body,
-        <AIChatPanelContainer getDocumentController={options.getDocumentController} />,
+        <AIChatPanelContainer
+          getDocumentController={options.getDocumentController}
+          getActiveSheetId={options.getActiveSheetId}
+          workbookId={options.workbookId}
+        />,
       );
       return;
     }
@@ -78,4 +84,3 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
 
   return { renderPanelBody, cleanup };
 }
-
