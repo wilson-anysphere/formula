@@ -54,6 +54,12 @@ export class DesktopOAuthBroker implements OAuthBroker {
 
   async openAuthUrl(url: string) {
     if (!this.openAuthUrlHandler) {
+      const tauri = (globalThis as any).__TAURI__;
+      const tauriOpen = tauri?.shell?.open ?? tauri?.plugin?.shell?.open;
+      if (typeof tauriOpen === "function") {
+        await tauriOpen(url);
+        return;
+      }
       if (typeof window !== "undefined" && typeof window.open === "function") {
         window.open(url, "_blank", "noopener,noreferrer");
         return;
