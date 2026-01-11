@@ -40,6 +40,8 @@ const API_PERMISSIONS = {
   "ui.disposePanel": ["ui.panels"],
   "ui.registerContextMenu": ["ui.menus"],
   "ui.unregisterContextMenu": ["ui.menus"],
+  "ui.showInputBox": [],
+  "ui.showQuickPick": [],
 
   "functions.register": [],
   "functions.unregister": [],
