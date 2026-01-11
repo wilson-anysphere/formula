@@ -16,5 +16,19 @@ describe("resolveGridThemeFromCssVars (DOM)", () => {
       host.remove();
     }
   });
-});
 
+  it("does not leak a previous token's computed color when a token is invalid", () => {
+    const host = document.createElement("div");
+    host.style.setProperty("--formula-grid-bg", "#111111");
+    host.style.setProperty("--formula-grid-line", "not-a-color");
+    document.body.appendChild(host);
+
+    try {
+      const theme = resolveGridThemeFromCssVars(host);
+      expect(theme.gridBg).toBe("rgb(17, 17, 17)");
+      expect(theme.gridLine).toBe("not-a-color");
+    } finally {
+      host.remove();
+    }
+  });
+});
