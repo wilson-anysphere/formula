@@ -599,9 +599,11 @@ misbehaving extension cannot hang or OOM the main app:
 - **Command/custom function timeouts**: command handlers and custom function invocations are also
   bounded (default: 5s). Timeouts terminate the worker and reject any other in-flight requests for
   that worker to avoid leaks.
+- **Configurable**: hosts may override defaults via `activationTimeoutMs`, `commandTimeoutMs`, and
+  `customFunctionTimeoutMs` when constructing the extension host.
 - **Memory caps (best-effort)**: extension workers are started with `worker_threads` `resourceLimits`
-  based on a per-host `memoryMb` setting (default: 256MB). This caps the V8 heap, but does not cover
-  all native/external allocations.
+  based on a per-host `memoryMb` setting (default: 256MB, Node host only). This caps the V8 heap, but
+  does not cover all native/external allocations.
 - **Crash/restart**: on crash/timeout, the extension is marked inactive and the next activation will
   spawn a fresh worker. Hosts can also explicitly recycle an extension via `reloadExtension(id)`.
 
